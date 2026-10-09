@@ -20,9 +20,10 @@ import { AppTransport, route } from '../app/transport';
 import { HistoryTransport } from '../history-actions/fixture';
 import { LinkOpener } from '../../../src/ui/shared/MarkdownText';
 import { RecoveryPanel } from '../../../src/components/recovery/RecoveryPanel';
+import { notices } from '../../../src/ui/pages/notices';
 
 const stores: NavigationStore[] = [];
-afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); notices.clear(); vi.restoreAllMocks(); vi.useRealTimers(); });
 const none: ReadonlySet<string> = new Set();
 const now = () => Date.parse('2026-10-07T12:00:00Z');
 
@@ -61,8 +62,157 @@ const ids = () => [...document.querySelectorAll('[role="treeitem"][data-item-id]
 const viewOf = (transport: AppTransport) => transport.preferences.sessions.find(value => value.session.session_id === route.session_id)!;
 const patches = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'preferences_patch');
 const chip = (label: string) => within(screen.getByRole('group', { name: 'Filter items' })).getByRole('button', { name: new RegExp(`^${label}`) });
+async function staleTree(value: Awaited<ReturnType<typeof mount>>) {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const invoke = value.transport.invoke.bind(value.transport);
+  const spy = vi.spyOn(value.transport, 'invoke').mockImplementation(async (name, args) => {
+    if (name === 'session_get') await gate;
+    return invoke(name, args);
+  });
+  const session = value.transport.sessions.get(route.session_id)!;
+  ++session.revision;
+  act(() => { value.transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: session.revision }); });
+  expect(value.store.getSnapshot().status).toBe('stale');
+  return { release, spy, session };
+}
 
 describe('session tree rows', () => {
+  it.each(['ready', 'failed'] as const)('waits for a stale session rename refresh that becomes %s, then saves or shows the loading error', async result => {
+    const transport = new HistoryTransport();
+    const { store, actions } = await mount({ transport });
+    const execute = vi.spyOn(actions, 'execute');
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'session_get') {
+        await gate;
+        if (result === 'failed') throw new Error('Read failed');
+      }
+      return invoke(name, args);
+    });
+    ++transport.source.revision;
+    act(() => { transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: transport.source.revision }); });
+    expect(store.getSnapshot().status).toBe('stale');
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Session name' }), { target: { value: 'Fresh session name' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(transport.mutations.filter(value => value.command.command === 'session_label_set')).toHaveLength(0);
+    const revision = transport.source.revision;
+    await act(async () => { release(); await store.refresh(); });
+    const writes = transport.mutations.filter(value => value.command.command === 'session_label_set');
+    if (result === 'failed') {
+      expect(writes).toHaveLength(0);
+      expect(execute).not.toHaveBeenCalled();
+      expect(within(screen.getByRole('group', { name: 'Rename session' })).getByRole('alert').textContent)
+        .toBe("Ariadne is still loading this session's latest changes. Try again.");
+      expect(screen.getAllByRole('alert')).toHaveLength(1);
+      expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
+      return;
+    }
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ command: { params: { name: 'Fresh session name' } } });
+    expect(execute).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ command: 'session_label_set' }), revision);
+    expect(screen.queryByRole('group', { name: 'Rename session' })).toBeNull();
+    expect(document.querySelector('.tree-session-title')?.textContent).toBe('Fresh session name');
+  });
+  it('keeps a rename timeout in the editor and clears it on Cancel without a column banner or late save', async () => {
+    const value = await mount({ transport: new HistoryTransport() });
+    const { release } = await staleTree(value);
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Session name' }), { target: { value: 'Timed out name' } });
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(within(screen.getByRole('group', { name: 'Rename session' })).getByRole('alert').textContent)
+      .toBe("Ariadne is still loading this session's latest changes. Try again.");
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alert')).toBeNull();
+    await act(async () => { release(); await value.store.refresh(); });
+    expect(value.transport.mutations.some(request => request.command.command === 'session_label_set')).toBe(false);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+  it.each([
+    ['not_found', 'Ariadne can’t find that any more. It may have been removed.'],
+    ['invalid_argument', 'Something in that isn’t valid. Check it and try again.'],
+  ] as const)('uses specific plain words for a %s rename refusal', async (code, words) => {
+    const transport = new HistoryTransport(); await mount({ transport });
+    transport.replies.push({ api_version: 1, ok: false, error: { code, message: `Rejected ${code}`, hint: 'Internal details', retryable: false, field_errors: [] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Session name' }), { target: { value: 'Refused name' } });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })); });
+    expect(screen.getByRole('alert').textContent).toBe(words);
+    expect(screen.getByRole('alert').textContent).not.toContain('loading');
+  });
+  it.each(['click', 'Enter'] as const)('waits for a stale session before selecting with %s', async method => {
+    const value = await mount(), { release } = await staleTree(value);
+    expect(row('3').getAttribute('aria-disabled')).toBeNull();
+    if (method === 'click') fireEvent.click(row('3'));
+    else { row('3').focus(); fireEvent.keyDown(row('3'), { key: 'Enter' }); }
+    expect(value.calls.selected).toHaveLength(0);
+    await act(async () => { release(); await value.store.refresh(); });
+    await waitFor(() => expect(value.calls.selected).toHaveLength(1));
+    expect(value.calls.selected[0]).toMatchObject({ kind: 'item', route: { item_id: '3' } });
+    await waitFor(() => expect(viewOf(value.transport).selected_item_id).toBe('3'));
+    expect(notices.getSnapshot()).toHaveLength(0);
+  });
+  it.each(['click', 'a'] as const)('lets a stale tree Ack reach the readiness wait with %s', async method => {
+    const value = await mount({ configure: transport => { transport.sessions.get(route.session_id)!.items['1.1']!.ack_to = 'done'; } });
+    const execute = vi.spyOn(value.actions, 'execute').mockResolvedValue(true);
+    const { release, session } = await staleTree(value);
+    const ack = within(row('1.1')).getByRole('button', { name: 'Ack: mark Done' });
+    expect(ack.hasAttribute('disabled')).toBe(false);
+    if (method === 'click') fireEvent.click(ack);
+    else { row('1.1').focus(); fireEvent.keyDown(row('1.1'), { key: 'a' }); }
+    expect(execute).not.toHaveBeenCalled();
+    expect(ack.hasAttribute('disabled')).toBe(true);
+    await act(async () => { release(); await value.store.refresh(); });
+    await waitFor(() => expect(execute).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ command: 'ack', params: {
+      item_id: '1.1', expected_revision: session.items['1.1']!.revision,
+    } }), session.revision));
+  });
+  it('selects only the latest clicked row after a stale refresh', async () => {
+    const value = await mount(), { release } = await staleTree(value);
+    fireEvent.click(row('3')); fireEvent.click(row('4'));
+    await act(async () => { release(); await value.store.refresh(); });
+    await waitFor(() => expect(value.calls.selected).toHaveLength(1));
+    expect(value.calls.selected[0]).toMatchObject({ kind: 'item', route: { item_id: '4' } });
+  });
+  it('abandons a stale row selection when the tree leaves the workspace', async () => {
+    const value = await mount(), { release } = await staleTree(value);
+    fireEvent.click(row('3'));
+    cleanup();
+    await act(async () => { release(); await value.store.refresh(); });
+    expect(value.calls.selected).toHaveLength(0);
+    expect(value.transport.queries.some(query => query.request.command === 'reveal_item')).toBe(false);
+    expect(notices.getSnapshot()).toHaveLength(0);
+  });
+  it.each(['stale', 'failed'] as const)('reports a plain selection error when the refresh remains %s', async result => {
+    const value = await mount(), { release, spy, session } = await staleTree(value);
+    fireEvent.click(row('3'));
+    if (result === 'stale') --session.revision;
+    else spy.mockRejectedValue(new Error('Read failed'));
+    await act(async () => { release(); await value.store.refresh(); });
+    await waitFor(() => expect(notices.getSnapshot()[0]?.text)
+      .toBe("Item #3 could not be opened. Ariadne is still loading this session's latest changes. Try again."));
+    expect(value.calls.selected).toHaveLength(0);
+    expect(value.transport.queries.some(query => query.request.command === 'reveal_item')).toBe(false);
+  });
+  it('bounds stale selection at five seconds and ignores the late refresh', async () => {
+    const value = await mount(), { release } = await staleTree(value);
+    vi.useFakeTimers();
+    fireEvent.click(row('3'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
+    expect(notices.getSnapshot()).toHaveLength(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(notices.getSnapshot()[0]?.text).toContain("Ariadne is still loading this session's latest changes. Try again.");
+    await act(async () => { release(); await value.store.refresh(); });
+    expect(value.calls.selected).toHaveLength(0);
+    expect(value.transport.queries.some(query => query.request.command === 'reveal_item')).toBe(false);
+  });
   it('renders topic bands and item rows with one roving tab stop and the session bar', async () => {
     await mount();
     expect(screen.getByRole('tree', { name: 'Session items' })).toBeTruthy();
@@ -213,6 +363,14 @@ describe('session tree rows', () => {
     expect(row('1.1').getAttribute('data-highlight')).toBe('strong'); expect(row('1').getAttribute('data-highlight')).toBeNull();
     fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' }));
     await waitFor(() => expect(row('1').getAttribute('data-highlight')).toBe('weak'));
+    const badge = row('1').querySelector('.tree-collapsed')!;
+    expect(badge.hasAttribute('data-weak')).toBe(true);
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    const rule = (selector: string) => [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(([, value]) => value!.trim() === selector)?.[2];
+    expect(rule('.tree-collapsed')).toContain('color: var(--a-acc-text)');
+    expect(rule('.tree-collapsed[data-weak]')).toContain('var(--color-accent) 7%, var(--a-card)');
+    expect(rule('.tree-collapsed[data-weak]')).not.toBe(rule('.tree-collapsed'));
+    expect(rule('.tree-collapsed[data-weak]:hover')).toContain('var(--color-accent) 10%, var(--a-card)');
   });
   it('offers the row actions for the item status and routes them to the workspace', async () => {
     const { calls } = await mount();
@@ -1078,6 +1236,44 @@ describe('scrolling the tree', () => {
     expect(scroller().scrollTop).toBe(150);
   });
 
+  it.each(['fold topic', 'collapse item', 'status chip', 'topic filter', 'Resume filtered view'])(
+  'never scrolls when %s dismisses the active tree reveal', async path => {
+    const view = await opened();
+    fireEvent.click(row('8'));
+    await waitFor(() => expect(viewOf(view.transport).selected_item_id).toBe('8'));
+    const reveal = view.calls.selected[0];
+    view.rerender({ reveal, selectedId: '8', detailOpen: true });
+    if (path === 'Resume filtered view') view.rerender({ reveal, selectedId: '8', detailOpen: true, query: 'missing' });
+    const readingPosition = path === 'collapse item' ? 0 : 150;
+    scroller().scrollTop = readingPosition;
+    fireEvent.scroll(scroller());
+    switch (path) {
+      case 'fold topic':
+        fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Expand or collapse topic' }));
+        break;
+      case 'collapse item':
+        fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' }));
+        break;
+      case 'status chip':
+        fireEvent.click(chip('All'));
+        break;
+      case 'topic filter':
+        fireEvent.change(screen.getByRole('combobox', { name: 'Topic' }), {
+          target: { value: view.transport.sessions.get(route.session_id)!.items['8']!.topic_id },
+        });
+        break;
+      case 'Resume filtered view':
+        fireEvent.click(screen.getByRole('button', { name: 'Resume filtered view' }));
+        break;
+    }
+    await waitFor(() => expect(path === 'Resume filtered view' ? view.calls.resumed : view.calls.dismissed).toBe(1));
+    // Dismissal can reach the workspace before a queued preference write changes selection.
+    view.rerender({ reveal: null, selectedId: '8', detailOpen: true, query: path === 'Resume filtered view' ? 'missing' : '' });
+    expect(scroller().scrollTop).toBe(readingPosition);
+    await waitFor(() => expect(view.navigation.getSnapshot().writing).toBe(false));
+    expect(scroller().scrollTop).toBe(readingPosition);
+  });
+
   it('reveals an external offscreen selection with the least scroll, leaving a visible selection in place', async () => {
     const view = await opened();
     row('3').focus(); fireEvent.keyDown(row('3'), { key: 'ArrowDown' });
@@ -1101,15 +1297,25 @@ describe('scrolling the tree', () => {
     expect(row('8').getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
   });
 
-  it('keeps the tree still when an item link inside a preview opens an offscreen item', async () => {
+  it.each([['4', 150], ['8', 440]] as const)('reveals preview link target %s with nearest scroll only when offscreen', async (target, expectedScroll) => {
     const view = await opened({ configure: transport => {
       const item = transport.sessions.get(route.session_id)!.items['4']!;
-      item.status = 'done'; item.outcome = '[Next item](item:8)';
+      item.status = 'done'; item.outcome = `[Next item](item:${target})`;
     } });
     fireEvent.click(within(row('4')).getByRole('link', { name: 'Next item' }));
     await waitFor(() => expect(view.calls.selected).toHaveLength(1));
+    view.rerender({ reveal: view.calls.selected[0], selectedId: target, detailOpen: true });
+    expect(scroller().scrollTop).toBe(expectedScroll);
+  });
+  it('reveals an offscreen replacement link target with nearest scroll', async () => {
+    const view = await opened({ configure: transport => {
+      const item = transport.sessions.get(route.session_id)!.items['4']!;
+      item.status = 'replaced'; item.replaced_by = '8';
+    } });
+    fireEvent.click(within(row('4')).getByRole('button', { name: view.transport.sessions.get(route.session_id)!.items['8']!.question }));
+    await waitFor(() => expect(view.calls.selected).toHaveLength(1));
     view.rerender({ reveal: view.calls.selected[0], selectedId: '8', detailOpen: true });
-    expect(scroller().scrollTop).toBe(150);
+    expect(scroller().scrollTop).toBe(440);
   });
   it('keeps the tree still when a row action echoes a new detail selection from the workspace', async () => {
     let onReveal: ((result: RevealedItem) => void) | undefined;

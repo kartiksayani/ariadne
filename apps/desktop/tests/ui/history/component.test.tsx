@@ -8,14 +8,61 @@ import { withdrawn } from '../../../src/selectors/waiting/stuck';
 import { immutable } from '../../../src/data';
 import { extraMessage, setup } from './fixtures';
 
+const copy = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
+vi.mock('../../../src/ui/shared/clipboard', () => ({ copyText: (text: string) => copy(text) }));
 const opened: ReturnType<typeof setup>[] = [];
 async function ready(change?: (session: ReturnType<typeof setup>['transport']['session']) => void) {
   const value = setup(); opened.push(value); change?.(value.transport.session); await value.store.refresh(); return value;
 }
-afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.restoreAllMocks(); copy.mockClear(); });
 type FixtureSession = ReturnType<typeof setup>['transport']['session'];
-/** The rail's message count: the owner messages cancelled before they were sent are left out. */
+/** The rail keeps cancellations; only an edited message sent again leaves the history. */
 const shown = (session: FixtureSession) => session.messages.filter(message => !withdrawn(immutable(session), immutable(message))).length;
+
+describe('cancelled owner text in the chat and Messages', () => {
+  it.each([
+    { cause: 'owner' as const, attempted: false }, { cause: 'owner' as const, attempted: true },
+    { cause: undefined, attempted: false }, { cause: undefined, attempted: true },
+    { cause: 'owner_edit' as const, attempted: false }, { cause: 'owner_edit' as const, attempted: true },
+    { cause: 'topic_archived' as const, attempted: false }, { cause: 'topic_archived' as const, attempted: true },
+    { cause: 'session_closed' as const, attempted: false }, { cause: 'session_closed' as const, attempted: true },
+  ])('keeps and labels the complete text for cause $cause, after an attempt: $attempted', async ({ cause, attempted }) => {
+    const body = '  Cancelled owner words\nKeep every line and trailing spaces  ', highlight = vi.fn();
+    const value = await ready(session => {
+      const input = session.inputs['00000000-0000-4000-8000-000000000076']!;
+      input.kind = 'reply'; input.state = 'cancelled'; input.cancel_cause = cause;
+      input.attempts = attempted ? structuredClone(session.inputs['00000000-0000-4000-8000-000000000072']!.attempts) : [];
+      input.payload.text = body;
+      session.messages.find(message => message.id === input.message_id)!.body = body;
+    }), session = value.transport.session, input = session.inputs['00000000-0000-4000-8000-000000000076']!;
+    const warning = attempted ? 'Cancelled — the agent may already have seen it' : 'Cancelled before it reached the agent';
+    const line = cause === 'owner_edit' ? `Taken back to edit. ${warning}`
+      : !attempted && cause === 'topic_archived' ? 'Not sent: cancelled when you archived this topic'
+      : !attempted && cause === 'session_closed' ? 'Not sent: cancelled when you closed this session' : warning;
+    render(<><ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="4" later={false} onOpenItem={vi.fn()} />
+      <MessageRail {...value} onHighlight={highlight} /></>);
+    const chat = await screen.findByRole('region', { name: 'Conversation' });
+    const turn = chat.querySelector<HTMLElement>(`[data-message-id="${input.message_id}"]`)!;
+    expect(turn).not.toBeNull(); expect(turn.classList.contains('detail-turn-cancelled')).toBe(true);
+    expect(turn.textContent).toContain('Cancelled owner words'); expect(turn.textContent).toContain('Keep every line and trailing spaces');
+    expect(turn.textContent).toContain(line); expect(turn.hasAttribute('data-owner-said')).toBe(false);
+    expect(turn.closest('[hidden], [aria-hidden="true"]')).toBeNull();
+    fireEvent.click(within(turn).getByRole('button', { name: 'Copy message' }));
+    expect(copy).toHaveBeenLastCalledWith(body);
+    const log = screen.getByRole('log');
+    const card = await waitFor(() => { const found = log.querySelector<HTMLElement>(`[data-message-id="${input.message_id}"]`); expect(found).not.toBeNull(); return found!; });
+    expect(card.querySelector('.pw-excerpt-text')!.textContent).toBe(body);
+    expect(card.parentElement!.classList.contains('pw-excerpt-cancelled')).toBe(true);
+    expect(card.parentElement!.textContent).toContain(line);
+    expect(card.closest('[hidden], [aria-hidden="true"]')).toBeNull();
+    if (cause === 'owner' || cause === undefined) {
+      fireEvent.click(within(card.parentElement!).getByRole('button', { name: 'Copy message' }));
+      expect(copy).toHaveBeenLastCalledWith(body);
+    }
+    fireEvent.click(card);
+    expect(highlight).toHaveBeenLastCalledWith(new Set([input.target.item_id]), new Set([input.message_id]));
+  });
+});
 
 describe('item detail panel', () => {
   const panel = (value: Awaited<ReturnType<typeof ready>>, itemId = '1', open = vi.fn()) =>
@@ -107,9 +154,9 @@ describe('item detail panel', () => {
     const input = session.inputs['00000000-0000-4000-8000-000000000945']!;
     input.state = 'cancelled'; input.cancel_cause = 'topic_archived'; session.revision++;
     await act(() => value.store.refresh());
-    // Cancelled by archive, it never reached the agent: not "You chose", and Waiting on you again.
+    // Cancelled by archive: keep the choice visible, labelled, and Waiting on you again.
     await waitFor(() => expect(waiting()).toBeTruthy());
-    expect(chat.textContent).not.toContain('You chose');
+    expect(chat.querySelector('.detail-turn-cancelled')!.textContent).toContain('You chose');
     expect(bubble()).toBeNull();
     expect(within(screen.getByRole('region', { name: 'Conversation' })).getByText('Not sent: cancelled when you archived this topic')).toBeTruthy();
     // Restore the topic: the cancelled answer stays cancelled, so it is still the owner's turn and the line stays.
@@ -117,7 +164,7 @@ describe('item detail panel', () => {
     topic.archived_at = '2026-10-04T12:00:00.000Z'; session.revision++; await act(() => value.store.refresh());
     topic.archived_at = null; session.revision++; await act(() => value.store.refresh());
     await waitFor(() => expect(waiting()).toBeTruthy());
-    expect(chat.textContent).not.toContain('You chose');
+    expect(chat.querySelector('.detail-turn-cancelled')!.textContent).toContain('You chose');
     expect(within(screen.getByRole('region', { name: 'Conversation' })).getByText('Not sent: cancelled when you archived this topic')).toBeTruthy();
   });
   it('deduplicates messages shared by creation, updates, and rounds into one chat entry', async () => {
@@ -304,18 +351,18 @@ describe('complete message rail', () => {
     fireEvent.click(within(rail).getByRole('button', { name: 'Hide messages' }));
     expect(close).toHaveBeenCalledOnce();
   });
-  it('leaves out a message deleted before it was sent, and drops one the moment it is deleted', async () => {
+  it('keeps a queued message visible when the owner deletes it, and changes its label immediately', async () => {
     const value = await ready(), session = value.transport.session;
     render(<MessageRail {...value} onHighlight={vi.fn()} />);
     const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(session)));
-    const gone = session.messages.filter(message => withdrawn(immutable(session), immutable(message)));
-    expect(gone.length).toBeGreaterThan(0);
-    for (const message of gone) expect(log.querySelector(`[data-message-id="${message.id}"]`)).toBeNull();
     const queued = Object.values(session.inputs).find(input => input?.state === 'queued' && input.attempts.length === 0 && input.kind !== 'continue')!;
+    const message = session.messages.find(message => message.id === queued.message_id)!;
     expect(log.querySelector(`[data-message-id="${queued.message_id}"]`)).not.toBeNull();
-    queued.state = 'cancelled'; session.revision++;
+    queued.state = 'cancelled'; queued.cancel_cause = 'owner'; session.revision++;
     await act(() => value.store.refresh());
-    await waitFor(() => expect(log.querySelector(`[data-message-id="${queued.message_id}"]`)).toBeNull());
+    await waitFor(() => expect(log.querySelector(`[data-message-id="${queued.message_id}"]`)!.parentElement!.textContent).toContain('Cancelled before it reached the agent'));
+    expect(log.querySelector(`[data-message-id="${queued.message_id}"]`)!.textContent).toContain(message.body);
+    expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(session));
   });
   it('keeps a message that archive or close cancelled, marked as not sent', async () => {
     const value = await ready(), session = value.transport.session;

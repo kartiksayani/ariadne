@@ -708,15 +708,30 @@
   font-size: calc(12.5px * var(--text-scale));
   line-height: calc(18px * var(--text-scale));
   cursor: pointer;
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
-  background: transparent;
-}
-
-.tree-collapsed[data-weak] {
   color: var(--a-acc-text);
+  background: color-mix(in srgb, var(--color-accent) 15%, var(--a-card));
 }
 
 .tree-collapsed:hover {
+  background: color-mix(in srgb, var(--color-accent) 20%, var(--a-card));
+}
+
+.tree-collapsed[data-weak] {
+  /* Keep the AA text token; a lighter tint distinguishes indirect matches. */
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--a-card));
+}
+
+.tree-collapsed[data-weak]:hover {
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--a-card));
+}
+
+.tree-item-hidden .tree-collapsed {
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.tree-item-hidden .tree-collapsed:hover {
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
   background: color-mix(in srgb, var(--color-text) 7%, transparent);
 }
 

@@ -17,9 +17,6 @@ export interface ExcerptView {
   readonly body: string;
 }
 
-/** How a timeline entry relates to the item: where it was raised, updated, or its parent's origin. */
-export type Mark = 'created' | 'updated' | 'origin';
-
 /** A message's number, with the agent's name for an earlier session's message: "#19", "codex #19". */
 export const messageNumber = (message: Immutable<Message>, agent: string | null = null) => agent ? `${agent} #${message.number}` : `#${message.number}`;
 

@@ -23,13 +23,13 @@ const failureEvidence = (label, action, expected = null) => withFailureEvidence(
   } catch (reading) { canonical = { unreadable: String(reading) }; }
   await writeFile(join(evidence(), `history-failure-${label}.json`), JSON.stringify({ failedWait: label, error: String(error?.message ?? error), expected, dom, canonical }, null, 2));
 });
-// The Paperwhite detail names the item by its agent reference and question; a fork's
-// source round shows as the fork link inside that round of its parent (proveRounds).
+// The detail's canonical item ID and complete question identify selection;
+// a fork's source round is proved by its link on the originating message.
 export async function waitForHistoryItem(item, label = 'history-item') {
   await failureEvidence(label, () => wait(() => browser.execute(expected => {
-    const header = document.querySelector('.item-detail .detail-reference code');
-    const question = document.querySelector('.item-detail .detail-question');
-    return header?.textContent === expected.id && question?.textContent === expected.question;
+    const article = document.querySelector('article.item-detail[data-detail-item-id]');
+    const question = article?.querySelector('.detail-question');
+    return article?.dataset.detailItemId === expected.id && question?.textContent === expected.question;
   }, { id: item.id, question: item.question }),
   'Native detail did not reveal the registered item and its complete question'),
   { id: item.id, question: item.question, source_round_id: item.source_round_id });
@@ -41,11 +41,15 @@ const formerOutcome = 'Full native completed outcome\nKeep the former outcome af
 const inputs = session => Object.values(session.inputs).sort((a, b) => a.seq - b.seq);
 const row = id => browser.$(`.tree-rows [data-item-id="${id}"]`);
 let navigationRecovered = false;
-const revisionConflict = 'Preferences revision changed; reload before applying this new patch';
+const revisionConflict = 'This changed while you were working. Look at it as it is now, then try again.';
 const preferencesSnapshot = async () => (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot;
-async function navigationRejection() {
+export async function navigationRejection() {
   const message = await browser.$('.nav-banner[role="alert"] p');
-  return await message.isExisting() && await message.getText() === revisionConflict;
+  if (!(await message.isExisting()) || await message.getText() !== revisionConflict) return false;
+  const banner = await browser.$('.nav-banner[role="alert"]');
+  const refresh = await banner.$('button=Refresh'), uncertain = await banner.$('button=Check again');
+  // Plain copy folds changed-view codes together; Refresh without Check again identifies a definitive rejection.
+  return await refresh.isExisting() && await refresh.isEnabled() && !(await uncertain.isExisting());
 }
 const option = ordinal => ({ id: `history-choice-${ordinal}`, label: `Use round ${ordinal} choice`,
   consequence: `Keep the exact consequence for round ${ordinal}.`, recommended: true });
@@ -72,7 +76,7 @@ export function historyMessageBatch(roundId, first, count) {
 async function apply(history, operations, revisions = {}, frozen = null) {
   const value = frozen ?? { ...request(operations), expected_item_revisions: revisions };
   assert.ok(Buffer.byteLength(JSON.stringify(value)) < 512 * 1024);
-  const result = await cliRequest(history.cli, ['apply', '--binding', history.bindingId, '--generation', history.generation, '--json-stdin'], value);
+  const result = await cliRequest(history.cli, ['apply', '--binding', history.bindingId, '--generation', history.generation, '--json-stdin', '--full'], value);
   assert.equal(result.code, 0); assert.equal(result.value.session_id, history.sessionId);
   return { request: value, receipt: result.value };
 }
@@ -147,6 +151,12 @@ async function reviewCurrentTarget() {
   await review.waitForEnabled(); await review.scrollIntoView(); await review.click();
   return true;
 }
+export async function waitForHistoryControl(control, label) {
+  await control.waitForEnabled();
+  // A refreshing answer control keeps focus with aria-disabled instead of native disabled.
+  await wait(async () => await control.isEnabled() && await control.getAttribute('aria-disabled') !== 'true',
+    `Native ${label} remained unavailable`);
+}
 async function answer(history, ordinal, text) {
   const another = await browser.$(ownerInput('1')).$('button=Write another input');
   if (await another.isExisting()) { await another.waitForEnabled(); await another.scrollIntoView(); await another.click(); }
@@ -158,9 +168,9 @@ async function answer(history, ordinal, text) {
   await wait(async () => await editor.isEnabled() || await reviewCurrentTarget(), 'The answer editor neither enabled nor offered Review current target');
   await editor.waitForEnabled();
   // Odd rounds send the chosen option alone; even rounds send a reply in the owner's own words.
-  if (ordinal % 2) { const choice = await browser.$(ownerInput('1')).$(`button*=${option(ordinal).label}`); await choice.waitForEnabled(); await choice.scrollIntoView(); await choice.click(); }
+  if (ordinal % 2) { const choice = await browser.$(ownerInput('1')).$(`button*=${option(ordinal).label}`); await waitForHistoryControl(choice, `round ${ordinal} choice`); await choice.scrollIntoView(); await choice.click(); }
   else { await editor.scrollIntoView(); await editor.setValue(text); }
-  const send = await browser.$(`${ownerInput('1')} ${ordinal % 2 ? '.answer-send' : '.answer-reply-send'}`); await failureEvidence(`owner-input-send-${ordinal}`, () => send.waitForEnabled()); await send.scrollIntoView(); await send.click();
+  const send = await browser.$(`${ownerInput('1')} ${ordinal % 2 ? '.answer-send' : '.answer-reply-send'}`); await failureEvidence(`owner-input-send-${ordinal}`, () => waitForHistoryControl(send, `round ${ordinal} Send`)); await send.scrollIntoView(); await send.click();
   await wait(async () => inputs(await snapshot(history)).length === ordinal && (await admissions(history)).length === ordinal,
     'A genuine native round answer did not persist and reach its isolated host');
 }
@@ -184,62 +194,77 @@ async function result(history, ordinal, body, extra = []) {
 }
 async function renderedBodies(selector) {
   return browser.execute(selector => [...document.querySelectorAll(selector)].map(card => ({
-    id: card.dataset.messageId, body: card.querySelector('.excerpt-body, .pw-excerpt-text')?.textContent,
+    id: card.dataset.messageId, body: card.querySelector('.detail-bubble-agent .md, .excerpt-body, .pw-excerpt-text')?.textContent,
   })), selector);
 }
-// An exchange of the Conversation shows its ask, the owner's answer and the result's explanation.
-// Exchanges carry no visible number; `data-round` is their ordinal for tests.
-// The explanation shows as soon as the result is applied, while the owner's message is still on its way; that message
-// is a pending bubble at the end of the Conversation (`data-pending`), not yet part of its round. It joins the round only
-// when the host's completion reaches the view, so wait for no pending bubble before reading what the owner said.
-export async function waitForRoundResult(round, explanation) {
+// Ask, owner and correlated reply are separate chronological messages. A full
+// agent reply replaces the duplicate result summary; gate on that exact reply.
+export async function waitForRoundResult(round, owner, reply) {
   await wait(async () => {
-    const section = await browser.$(`.detail-chat-list [data-round="${round.ordinal}"]`);
-    return await section.isExisting() && folded(await section.getText()).includes(folded(explanation))
+    const ask = await browser.$(`.detail-chat-list [data-round="${round.ordinal}"]`);
+    const answer = await browser.$(`.detail-chat-list [data-message-id="${owner.id}"]`);
+    const result = await browser.$(`.detail-chat-list [data-message-id="${reply.id}"] .detail-bubble-agent .md`);
+    return await ask.isExisting() && await answer.isExisting() && await answer.getAttribute('data-owner-said') === 'true'
+      && folded(await answer.getText()).includes(folded(owner.text))
+      && await result.isExisting() && folded(await result.getText()) === folded(reply.body)
       && (await browser.$$('.detail-chat-list [data-pending]')).length === 0;
   }, 'Native detail did not publish the final closed round, its complete correlated result and the settled owner message');
 }
 async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
-  // The Conversation and the Timeline are sections of the detail body, both always shown.
+  // One Conversation contains every complete message, ask and fork.
   const back = await browser.$('.item-detail [aria-label="Conversation"]'); await failureEvidence('history-conversation', () => back.waitForDisplayed()); await back.scrollIntoView();
   // Restoration runs against the final session, whose open sixth round (no result) is also rendered.
   const every = Object.keys(saved.rounds).length;
   await failureEvidence('history-rounds', () => wait(async () => (await browser.$$('.detail-chat-list li[data-round]')).length === every, `Native detail did not load all ${every} real rounds`));
   const rounds = Object.values(saved.rounds).filter(round => round.closed_at).sort((a, b) => a.ordinal - b.ordinal);
   assert.equal(rounds.length, 5); assert.equal(Object.keys(saved.items).length, 3);
-  // Five sections already exist after the fifth answer. The Core completion
+  // Five ask anchors already exist after the fifth answer. The Core completion
   // barrier does not imply that the selected native history has refreshed yet.
-  const finalRound = rounds.at(-1);
-  await failureEvidence('history-final-round-result', () => waitForRoundResult(finalRound, saved.inputs[finalRound.result_input_ids[0]].attempts[0].domain_result.explanation));
+  const expected = rounds.map((round, index) => {
+    const input = saved.inputs[round.result_input_ids[0]]; assert.ok(input);
+    assert.ok(round.owner_message_ids.includes(input.message_id), 'Result input must identify its round owner message');
+    const reply = saved.messages.find(message => round.agent_message_ids.includes(message.id)
+      && message.input_id === input.id && message.body === resultTexts[index]);
+    assert.ok(reply, `Round ${round.ordinal} lost its full canonical correlated reply`);
+    return { owner: { id: input.message_id, text: index % 2 === 0 ? `You chose “${option(index + 1).label}”`
+      : `You replied: “${ownerTexts[index].trim()}”` }, reply };
+  });
+  const finalRound = rounds.at(-1), final = expected.at(-1);
+  await failureEvidence('history-final-round-result', () => waitForRoundResult(finalRound, final.owner, final.reply));
   for (let index = 0; index < 5; index++) {
     const section = await browser.$(`.detail-chat-list [data-round="${index + 1}"]`);
     const text = folded(await section.getText()), round = rounds[index];
-    // Each round shows its full ask, the owner's choice or own words, and the result's full explanation.
+    // The ask anchor retains its full ask; owner and result keep their own IDs.
     assert.ok(text.includes(folded(round.ask_snapshot ?? round.question_snapshot)), `Round ${index + 1} lost its full stored ask`);
-    if (index % 2 === 0) assert.ok(text.includes(`You chose “${option(index + 1).label}”`), `Round ${index + 1} lost the chosen option`);
-    else assert.ok(text.includes(folded(`You replied: “${ownerTexts[index].trim()}”`)), `Round ${index + 1} lost the owner's full reply`);
+    const owner = await browser.$(`.detail-chat-list [data-message-id="${expected[index].owner.id}"]`);
+    assert.ok(folded(await owner.getText()).includes(folded(expected[index].owner.text)), `Round ${index + 1} lost the owner's full choice or reply`);
+    assert.equal(await owner.getAttribute('data-owner-said'), 'true');
     assert.ok(round.closed_at); assert.equal(round.result_input_ids.length, 1);
     const result = saved.inputs[round.result_input_ids[0]].attempts[0].domain_result; assert.ok(result);
-    assert.ok(text.includes(folded(result.explanation)), 'Native round result explanation must retain its complete stored body');
+    const input = saved.inputs[round.result_input_ids[0]];
+    assert.equal(result.explanation, `Explicit native result ${index + 1}\nComplete stored explanation for ${input.kind} #${input.seq}.`, 'Stored round result explanation must retain its complete body');
+    const reply = await browser.$(`.detail-chat-list [data-message-id="${expected[index].reply.id}"] .detail-bubble-agent .md`);
+    assert.equal(folded(await reply.getText()), folded(resultTexts[index]), 'Native correlated reply must retain its complete body');
   }
-  // The round summarises its messages; their bodies are in the Timeline below (checked after the forks).
+  // Paging must include the same complete bodies in the single chat.
   const firstRound = rounds[0].agent_message_ids;
   assert.ok(firstRound.length > 100, 'The actual nested round page must exceed its canonical 100-message boundary');
   assert.equal((await browser.$$('button.detail-fork')).length, 2);
   for (const id of ['1.1', '1.2']) {
-    // The fork sits in the round it came from: its correlated source round.
+    // The fork sits on its creation message, with its canonical source round.
     const source = saved.rounds[saved.items[id].source_round_id]; assert.ok(source);
-    const fork = await browser.$(`.detail-chat-list [data-round="${source.ordinal}"]`).$(`button.detail-fork*=${saved.items[id].question.split('\n')[0]}`);
+    assert.ok(source.fork_item_ids.includes(id));
+    const fork = await browser.$(`.detail-chat-list [data-message-id="${saved.items[id].created_message_id}"]`).$(`button.detail-fork*=${saved.items[id].question.split('\n')[0]}`);
     await fork.scrollIntoView(); await fork.click();
     await waitForHistoryItem(saved.items[id], `after-fork-${id}`);
     await selectParent(saved.items['1']);
   }
-  const timeline = await browser.$('.item-detail [aria-label="Timeline"]'); await timeline.waitForDisplayed(); await timeline.scrollIntoView();
-  await failureEvidence('history-timeline-paging', () => wait(async () => (await renderedBodies('.detail-timeline [data-message-id]')).length > 100, 'Native item conversation paging did not produce complete history'));
-  const visible = await renderedBodies('.detail-timeline [data-message-id]');
-  assert.equal(new Set(visible.map(value => value.id)).size, visible.length, 'Overlapping created/updated/round pages must not duplicate timeline entries');
+  const conversation = await browser.$('.item-detail [aria-label="Conversation"]'); await conversation.waitForDisplayed(); await conversation.scrollIntoView();
+  await failureEvidence('history-conversation-paging', () => wait(async () => (await renderedBodies('.detail-chat-list > li[data-message-id]')).length > 100, 'Native item conversation paging did not produce complete history'));
+  const visible = await renderedBodies('.detail-chat-list > li[data-message-id]');
+  assert.equal(new Set(visible.map(value => value.id)).size, visible.length, 'Overlapping created/updated/round pages must not duplicate chat entries');
   for (const operation of paged) assert.equal(visible.filter(value => value.body === operation.text).length, 1);
-  return { rounds, timelineMessageIds: visible.map(value => value.id), firstRoundMessageIds: firstRound };
+  return { rounds, conversationMessageIds: visible.map(value => value.id), firstRoundMessageIds: firstRound };
 }
 
 async function railState() {
@@ -263,7 +288,7 @@ export async function closeHistoryRailReferences(message) {
   await close.waitForEnabled(); await close.click();
   await wait(async () => browser.execute(id => {
     const item = document.querySelector('[role="treeitem"][data-item-id="1"]');
-    const message = document.querySelector(`.detail-timeline [data-message-id="${id}"]`);
+    const message = document.querySelector(`.detail-chat-list [data-message-id="${id}"]`);
     return !document.querySelector('.pw-rail')
       && item && !item.hasAttribute('data-highlight')
       && message && !message.classList.contains('excerpt-highlighted');
@@ -284,7 +309,7 @@ async function rail(history, saved, paged) {
   await card.click();
   await wait(async () => browser.execute(id => {
     const tree = document.querySelector('[role="treeitem"][data-item-id="1"]');
-    const detail = document.querySelector(`.detail-timeline [data-message-id="${id}"]`);
+    const detail = document.querySelector(`.detail-chat-list [data-message-id="${id}"]`);
     return tree?.getAttribute('data-highlight') === 'strong' && detail?.classList.contains('excerpt-highlighted');
   }, parentMessage.id), 'Native rail pin did not cross-highlight its real tree item and detail message');
   const childMessage = saved.messages.find(message => message.item_id === '1.1' && message.kind === 'reply'); assert.ok(childMessage);
@@ -299,8 +324,8 @@ async function rail(history, saved, paged) {
   await wait(async () => browser.execute(id => document.querySelector(`.pw-rail-list [data-message-id="${id}"]`)?.classList.contains('pw-excerpt-highlight'), childMessage.id), 'Native tree selection did not highlight its canonical rail backlink');
   assert.ok((await card.getAttribute('class')).includes('pw-excerpt-active'));
   await selectParent(saved.items['1']);
-  const timeline = await browser.$('.item-detail [aria-label="Timeline"]'); await timeline.waitForDisplayed(); await timeline.scrollIntoView();
-  await wait(async () => browser.execute(id => document.querySelector(`.detail-timeline [data-message-id="${id}"]`)?.classList.contains('excerpt-highlighted'), parentMessage.id), 'Pinned canonical detail reference was lost after registered child navigation');
+  const conversation = await browser.$('.item-detail [aria-label="Conversation"]'); await conversation.waitForDisplayed(); await conversation.scrollIntoView();
+  await wait(async () => browser.execute(id => document.querySelector(`.detail-chat-list [data-message-id="${id}"]`)?.classList.contains('excerpt-highlighted'), parentMessage.id), 'Pinned canonical detail reference was lost after registered child navigation');
   const preferences = async () => {
     const result = await cliRequest(history.cli, ['preferences', 'get', '--json-stdin'], { session: null, request: { command: 'preferences_get', params: {} } });
     assert.equal(result.code, 0); return result.value.data.data;

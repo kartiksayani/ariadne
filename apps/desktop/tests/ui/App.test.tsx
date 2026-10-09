@@ -370,6 +370,61 @@ describe('ordinary desktop composition', () => {
     expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('1');
     await waitFor(() => expect(transport.preferences.global.text_scale).toBe(100));
   });
+  it.each(['invalid_argument', 'revision_conflict'])('restores the saved text size when its save is refused with %s', async code => {
+    const { transport } = setup();
+    await screen.findByRole('heading', { name: 'All sessions' });
+    let release!: () => void, entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch') {
+        entered = true; await gate;
+        return { api_version: 1, ok: false, error: { code, message: 'Text size was refused.',
+          hint: 'Choose the size again.', retryable: false, field_errors: [], current_revision: transport.preferences.revision } };
+      }
+      return invoke(name, args);
+    });
+    fireEvent.keyDown(document.body, { key: '=', metaKey: true });
+    await waitFor(() => expect(entered).toBe(true));
+    expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('0.9');
+    await act(async () => { release(); await gate; });
+    await waitFor(() => expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('0.8'));
+    expect(transport.preferences.global.text_scale).toBeUndefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Text size' }));
+    expect(screen.getByRole('button', { name: '80% (default)' }).getAttribute('aria-pressed')).toBe('true');
+    // The next shortcut starts from the saved size, rather than the refused target.
+    fireEvent.keyDown(document.body, { key: '=', metaKey: true });
+    expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('0.9');
+    await waitFor(() => expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('0.8'));
+  });
+  it.each(['own size', 'queued size'])('restores the saved text size when a reconciled %s save is definitively refused', async path => {
+    const { transport } = setup();
+    await screen.findByRole('heading', { name: 'All sessions' });
+    transport.failNext = 'preferences_patch';
+    if (path === 'queued size') {
+      fireEvent.click(screen.getByRole('button', { name: 'Switch to light' }));
+      await screen.findByRole('button', { name: 'Check again' });
+    }
+    fireEvent.keyDown(document.body, { key: '=', metaKey: true });
+    const retry = await screen.findByRole('button', { name: 'Check again' });
+    expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('0.9');
+    let release!: () => void, entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch'
+        && args.request.command.params.entries.some(entry => entry.kind === 'set_global' && entry.preferences.text_scale === 90)) {
+        entered = true; await gate;
+        return { api_version: 1, ok: false, error: { code: 'invalid_argument', message: 'Text size was refused.',
+          hint: 'Choose the size again.', retryable: false, field_errors: [], current_revision: transport.preferences.revision } };
+      }
+      return invoke(name, args);
+    });
+    fireEvent.click(retry);
+    await waitFor(() => expect(entered).toBe(true));
+    expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('0.9');
+    await act(async () => { release(); await gate; });
+    await waitFor(() => expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('0.8'));
+    expect(transport.preferences.global.text_scale).toBeUndefined();
+  });
   it.each(['-', '0'])('keeps a same-render text-size increase then %s at the last requested size', async key => {
     const { transport } = setup();
     await screen.findByRole('heading', { name: 'All sessions' });

@@ -145,7 +145,9 @@ export class SessionActions {
           && data.binding_id === command.params.binding_id && data.generation === command.params.expected_generation;
       if (!matches) throw new ServiceFailure('invalid_response');
       this.publish({ pending: null, receipt: immutable(receipt) });
-      await this.session.refresh();
+      // A readiness wait can still be seeding presence after publishing its snapshot.
+      // Read again after that flight so the just-saved change reaches the view.
+      await this.session.refresh(true);
       return true;
     } catch (error: unknown) {
       const failure = error instanceof CoreFailure || error instanceof ServiceFailure ? error : new ServiceFailure('transport');

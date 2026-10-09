@@ -17,7 +17,7 @@ revisions and validation can make the session unreadable.
 
 An unexpected `"replayed":true` files nothing new; use a fresh explicit `op_id` to deliberately file the identical request again.
 
-Read topics/items yourself; no context is pushed. Reuse what fits.
+Read topics/items; no context is pushed. Reuse what fits.
 
 ## Request
 
@@ -39,7 +39,7 @@ provide clickable navigation.
 | `op` | Required | Optional |
 |---|---|---|
 | `topic.add` | `name` | `short`, `ref` |
-| `item.add` | `question`, `type`, `topic` | `short`, `status`, `ack_to`, `owner`, `ask`, `options`, `parent`, `note`, `links`, `outcome`, `why`, `children`, `ref` |
+| `item.add` | `question`, `type` | `topic` (the request's only `topic.add`; nested `children` inherit their parent's topic), `short`, `status`, `ack_to`, `owner`, `ask`, `options`, `parent`, `note`, `links`, `outcome`, `why`, `children`, `ref` |
 | `item.edit` | `item`, `patch` | patch: `question`, `type`, `note`, `links`, `short` |
 | `item.ask` | `item`, `ask` | `options` |
 | `item.status` | `item`, `status` | `ack_to`, `outcome`, `why`, `reason` |
@@ -47,9 +47,10 @@ provide clickable navigation.
 | `reply` | `item`, `text` | `ref`, `round_id` |
 | `round.close` | `round_id` | |
 
+Set `topic` explicitly if neither default applies.
 Read `errors.md` for unfamiliar defaults, children, refs, transitions or limits.
 
-Give every new topic/item a stable `short` label: a 2-4 word tree title,
+Give new topics/items a stable `short` label: a 2-4 word tree title,
 at most 40 characters ("Notes sync review").
 
 Text is markdown; topic names, `short` and option labels are plain text.
@@ -68,8 +69,8 @@ When connected or told "use Ariadne", organise the work there yourself.
   never one per step.
 - **Tree.** Summary first: result and what waits on the owner; then whole-work
   decisions and sections in reading order. Points are children; sub-points nest.
-  Each thing the owner might decide, comment on or track appears once, with its
-  ask on it. Keep this shape for later writes.
+  Each point the owner may decide, comment on or track appears once, with its
+  ask. Keep this shape for later writes.
 - **Type and status** say what the owner has to do. Never create an item
   `decided`, `done`, `dropped` or `replaced`; new results start `open` for Ack.
 
@@ -109,10 +110,9 @@ When connected or told "use Ariadne", organise the work there yourself.
 - **Choice notes.** A choice can carry free text; follow the note even over the
   option's consequence, ask on that item if ambiguous, and reflect it in the
   input result (`inputs.md`).
-- **Ripple updates.** After acting on an owner answer or reply, check the session's
-  other items in the same topic and other topics for outcomes now wrong, questions
-  now moot or follow-ups now needed. Update affected items in the same filing
-  where possible, then name each changed item in the input result as
+- **Ripple updates.** After an owner answer or reply, check other items across
+  topics for wrong outcomes, moot questions or needed follow-ups. Update affected
+  items together where possible, naming each in the input result as
   `[label](item:<id>)`. Never silently reverse an owner decision on another item:
   raise a new ask on that item instead. Leave unrelated items alone.
 - **Spend few tokens.** One request per result, nested `children`. Data nobody

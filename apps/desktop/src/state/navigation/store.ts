@@ -108,6 +108,7 @@ export class NavigationStore {
   // Observe only the already executing write; uncertain operations still need
   // explicit reconciliation. This neither schedules nor retries a mutation.
   readonly getWritingCompletion = () => !this.stopped && this.state.writing ? this.activeMutation : null;
+  readonly hasQueuedTextScale = () => this.textScaleTarget !== null;
   // True only when this exact write operation settled with a definite revision_conflict, which
   // the store has already cleared and refreshed. Uncertain and other rejections are never reported.
   readonly settledAsConflict = (completion: Promise<boolean>) => {
@@ -402,6 +403,13 @@ export class NavigationStore {
   async setHidden(item: ItemRoute, hidden: boolean, expectedPreferencesRevision: number): Promise<boolean> {
     try {
       if (this.stopped || this.pending) return false;
+      const store = this.opened.get(item), state = store?.getSnapshot();
+      // A session_changed hint makes a valid capture stale while its read is
+      // in flight. Wait for a fresh capture before rebuilding the hide set.
+      if (store && (state?.status !== 'ready' || state.snapshot?.freshness !== 'fresh')) {
+        await store.refresh(true);
+        if (this.stopped || this.pending) return false;
+      }
       const preferences = this.preferences();
       if (preferences.revision !== expectedPreferencesRevision) {
         await this.editingPreferences(expectedPreferencesRevision);

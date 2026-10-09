@@ -411,7 +411,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
         {model.chat.map(entry => <li key={entry.id} data-message-id={entry.id} data-pending={entry.pending?.input.id}
           data-round={entry.asks[0]?.ordinal}
           data-owner-said={entry.you && !Object.values(session.inputs).some(input => input?.message_id === entry.id && input.state === 'cancelled') ? 'true' : undefined}
-          className={`detail-turn${entry.asks.some(ask => ask.now) ? ' detail-turn-now' : ''}${entry.pending ? ' detail-turn-pending' : ''}${highlightedMessageIds?.has(entry.id) ? ' excerpt-highlighted' : ''}`}>
+          className={`detail-turn${entry.unsent ? ' detail-turn-cancelled' : ''}${entry.asks.some(ask => ask.now) ? ' detail-turn-now' : ''}${entry.pending ? ' detail-turn-pending' : ''}${highlightedMessageIds?.has(entry.id) ? ' excerpt-highlighted' : ''}`}>
           {entry.marker && <div className="detail-chat-marker">{entry.marker}</div>}
           <div className={`detail-msg${entry.you ? ' detail-msg-you' : ''}`}>
             <div className={`detail-bubble ${entry.you ? 'detail-bubble-you' : 'detail-bubble-agent'}`}>
@@ -452,7 +452,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     {docked && <div className="detail-dock">
     {ackTo && <section className="detail-section detail-ack" aria-label="Acknowledge item">
       <button type="button" className="btn btn-secondary detail-action" title={ackTitle(ackTo)} aria-label={ackTitle(ackTo)}
-        disabled={ack.busy || current.status !== 'ready'} onClick={() => { void ack.run(item.id); }}>
+        disabled={ack.busy} onClick={() => { void ack.run(item.id); }}>
         <i className="ph ph-check" aria-hidden="true" />Ack<span className="detail-key" aria-hidden="true">a</span>
       </button><span className="detail-hint">Mark {STATUS[ackTo].label}</span>
     </section>}
@@ -461,7 +461,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       {sectionLabel(model.open.title)}
       <div className="detail-actions" role="group" aria-label="Item actions">
         {model.open.actions.map(action => <button type="button" key={action.action} className={`btn ${action.primary ? 'btn-primary' : 'btn-secondary'} detail-action`}
-          aria-pressed={action.primary ? undefined : action.pressed} disabled={action.disabled || (!submit.ready && action.action !== 'later')} title={action.title}
+          aria-pressed={action.primary ? undefined : action.pressed} disabled={action.disabled || (!submit.ready && action.action !== 'later' && action.action !== 'reopen') || (action.action === 'reopen' && submit.locked('reopen'))} title={action.title}
           onClick={() => act(action.action)}>
           <i className={action.icon} aria-hidden="true" />{action.label}<span className="detail-key" aria-hidden="true">{action.key}</span>
         </button>)}
@@ -491,8 +491,6 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
 
     {(model.answer || retainedAnswer) && <section className="detail-section detail-answer" aria-label="Your answer">
       {model.answer?.heading && <div className="detail-label detail-label-accent">Your answer</div>}
-      {/* The ask the conversation's last message does not already carry. */}
-      {model.answer?.ask && <Markdown className="detail-ask" text={model.answer.ask} />}
       {model.answer && <PausedNote actions={actions} />}
       {/* While the follow-up box is open, it is the detail's one data-owner-input. */}
       <AnswerSlot drafts={drafts} store={store} itemId={itemId} blocked={model.answer?.blocked} focusRequest={answerFocus}

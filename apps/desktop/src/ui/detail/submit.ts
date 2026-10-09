@@ -6,7 +6,7 @@
 // draft in place, whatever the item's status does meanwhile, and nothing is ever copied from one draft to another. What
 // the words go out as follows the status when they are sent (`send`'s `as`); the draft keeps its own revisions, so an
 // item that changed since still asks for a review first.
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { plainFailure } from '../../data/plain';
 import type { InputKind } from '../../generated/domain/models';
@@ -58,7 +58,9 @@ export interface DetailSubmit {
 
 export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, itemId: string): DetailSubmit {
   const state = useOwnerDrafts(drafts), current = useSession(store), session = current.snapshot?.session;
+  const [sendError, setSendError] = useState<string | null>(null);
   useEffect(() => { void drafts.load(); }, [drafts]);
+  useEffect(() => { setSendError(null); }, [drafts, store, itemId]);
   const route = session ? { project_id: session.project_id, session_id: session.id } : null;
   const find = (intent: DetailIntent): DraftEntry | undefined => route ? drafts.find(route, itemId, intent) : undefined;
   const intentOf = (target: DraftTarget): DetailIntent => typeof target === 'string' ? target : target.kind;
@@ -84,8 +86,8 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
   };
   const lockedEntry = (entry: DraftEntry | undefined) => state.preferenceUncertain || (!!entry && (entry.saving || entry.uncertain));
   const changed = (target: DraftTarget) => changedEntry(entryOf(target));
-  const review = (target: DraftTarget) => { const entry = entryOf(target); if (session && entry) drafts.review(entry.draft.op_id, session); };
-  const ready = state.ready && current.status === 'ready' && !!session;
+  const review = (target: DraftTarget) => { const entry = entryOf(target); if (session && entry) { setSendError(null); drafts.review(entry.draft.op_id, session); } };
+  const ready = state.ready && current.status === 'ready' && !current.error && !!session;
   const mine = Object.values(state.entries).filter(entry => route && entry.draft.session.project_id === route.project_id
     && entry.draft.session.session_id === route.session_id && entry.draft.target.item_id === itemId);
   const failed = mine.find(entry => entry.error);
@@ -99,14 +101,20 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
     edit: (target, text) => { if (!state.ready || !session) return; const id = open(target); if (id) drafts.edit(id, { text }); },
     changed, review,
     send: async (target, text, as) => {
-      if (!ready) return false;
+      setSendError(null);
+      const latest = store.getSnapshot();
+      if (!ready || latest.status !== 'ready' || latest.error || latest.snapshot?.session !== session) {
+        setSendError("Ariadne is still loading this session's latest changes. Try again.");
+        return false;
+      }
       // A stale draft with owner content waits for a review; an empty one follows the current item and binding.
-      if (changed(target)) return false;
+      if (changed(target)) { setSendError('This item changed. Review it before sending. Your text is kept.'); return false; }
+      if (lockedEntry(entryOf(target))) { setSendError('This message is being saved or needs a retry. Your text is kept.'); return false; }
       const stored = entryOf(target), item = session?.items[itemId];
       if (session && item && stored && !stored.receipt && !stored.saving && !stored.uncertain && (item.revision !== stored.draft.target_revision
         || item.question_revision !== stored.draft.question_revision || session.active_binding_id !== stored.draft.binding_id)) review(target);
       const id = open(target);
-      if (!id) return false;
+      if (!id) { setSendError('This action is no longer available for the current item.'); return false; }
       const entry = drafts.getSnapshot().entries[id];
       if (text !== undefined && entry && !entry.uncertain && entry.draft.text !== text) drafts.edit(id, { text });
       return drafts.submit(id, as);
@@ -117,6 +125,6 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
       return { id: live?.draft.op_id ?? null, kind, text: live?.draft.text ?? '', locked: lockedEntry(entry), changed: changedEntry(live) };
     },
     saving: (mine.find(entry => entry.saving)?.draft.intent as InputKind | undefined) ?? null,
-    error: failed?.error ? plainFailure(failed.error) : state.error ? plainFailure(state.error) : null,
+    error: sendError ?? (failed?.error ? plainFailure(failed.error) : state.error ? plainFailure(state.error) : null),
   };
 }

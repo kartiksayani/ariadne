@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DesktopApp } from '../../../src/App';
-import { createDesktopService } from '../../../src/data/service';
+import { createDesktopService, type DesktopTransport } from '../../../src/data/service';
 import { AppTransport, route } from './transport';
 
 afterEach(cleanup);
@@ -23,6 +23,32 @@ async function hide(id: string) {
 }
 
 describe('owner hide and unhide actions', () => {
+  it('hides with x during a session refresh, saving once after the fresh read returns', async () => {
+    class RefreshTransport extends AppTransport {
+      holdSession: Promise<void> | null = null;
+      override async invoke<T>(name: string, args: Parameters<DesktopTransport['invoke']>[1]): Promise<T> {
+        if (name === 'session_get' && this.holdSession) await this.holdSession;
+        return super.invoke<T>(name, args);
+      }
+    }
+    const transport = new RefreshTransport(); await mount(transport);
+    let release!: () => void;
+    transport.holdSession = new Promise<void>(resolve => { release = resolve; });
+    const session = transport.sessions.get(route.session_id)!;
+    ++session.revision;
+    act(() => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    expect(row('4')!.getAttribute('aria-disabled')).toBeNull();
+    row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'x' });
+    expect(saved(transport).hidden_item_ids ?? []).toEqual([]);
+    await act(async () => { transport.holdSession = null; release(); });
+    await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['4']));
+    await ready();
+    expect(row('4')).toBeNull();
+    expect(screen.queryByText('The hidden items preference could not be saved. Try again.')).toBeNull();
+    expect(transport.mutations.filter(request => request.command.command === 'preferences_patch'
+      && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.hidden_item_ids?.includes('4')))).toHaveLength(1);
+  });
+
   it('keeps keyboard focus on the hidden group after x and enters its dimmed rows with Right', async () => {
     const { transport } = await mount(); row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'x' });
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['4'])); await ready();

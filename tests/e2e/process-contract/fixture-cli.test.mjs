@@ -33,35 +33,48 @@ test('native journey seed and result requests reach the real CLI/Core dispatch b
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-for (const scenario of ['delayed-readiness', 'wrong-text', 'disabled-send', 'save-failure']) {
+for (const scenario of ['delayed-readiness', 'wrong-text', 'disabled-send', 'frozen-send', 'save-failure']) {
   test(`detail Reply admits one click only for exact enabled text and retains failure evidence: ${scenario}`, async () => {
     const root = await mkdtemp(join(tmpdir(), 'ariadne-reply-admission-'));
     const prior = { browser: globalThis.browser, home: process.env.ARIADNE_HOME, evidence: process.env.ARIADNE_E2E_EVIDENCE };
     const text = 'Exact fixture owner Reply\nSecond retained line.';
     const configuration = { sessionId: 'fixture-session', itemId: '1', sessionPath: join(root, 'session.json') };
     const saved = { id: configuration.sessionId, revision: 7, items: { 1: { revision: 3 } }, inputs: {} };
-    const calls = []; let value = '', enabled = false, clicks = 0;
+    const calls = []; let value = '', enabled = false, frozen = true, clicks = 0;
     try {
       process.env.ARIADNE_HOME = root; process.env.ARIADNE_E2E_EVIDENCE = root;
       await writeFile(configuration.sessionPath, JSON.stringify(saved));
-      await writeFile(join(root, 'ui.json'), JSON.stringify({ snapshot: { revision: 8, drafts: [] } }));
+      await writeFile(join(root, 'ui.json'), JSON.stringify({ snapshot: { revision: 8, drafts: [{ session: { session_id: configuration.sessionId },
+        target: { item_id: configuration.itemId }, intent: 'answer', op_id: 'answer-draft', target_revision: 3, submission_attempted: true, text }] } }));
       const editor = { waitForDisplayed: async () => calls.push('editor displayed'), waitForEnabled: async () => calls.push('editor enabled'),
         setValue: async input => { assert.equal(input, text); calls.push('type'); }, getValue: async () => value, isEnabled: async () => true };
-      const send = { waitForDisplayed: async () => calls.push('send displayed'), isEnabled: async () => enabled, click: async () => {
-        assert.equal(value, text); assert.equal(enabled, true); clicks++; calls.push('click');
+      const send = { waitForDisplayed: async () => calls.push('send displayed'), isEnabled: async () => enabled,
+        getAttribute: async name => { assert.equal(name, 'aria-disabled'); return frozen ? 'true' : null; }, click: async () => {
+        assert.equal(value, text); assert.equal(enabled, true); assert.equal(frozen, false); clicks++; calls.push('click');
         if (scenario !== 'save-failure') {
           saved.inputs.first = { id: 'fixture-input', seq: 1, kind: 'reply', state: 'queued', payload: { text } };
           await writeFile(configuration.sessionPath, JSON.stringify(saved));
         }
       } };
       globalThis.browser = {
-        $: async selector => selector.endsWith(' textarea') ? editor : { $: async selector => { assert.equal(selector, 'button=Send reply'); return send; } },
+        $: async selector => {
+          assert.equal(selector, '.item-detail [data-owner-input="1"]');
+          return { waitForExist: async () => {}, $: async selector => {
+            assert.equal(selector, '.detail-box, .answer-reply');
+            return { waitForExist: async () => {}, $: async selector => {
+              if (selector === 'textarea') return editor;
+              assert.equal(selector, 'button[aria-label^="Send "], button.answer-reply-send'); return send;
+            } };
+          } };
+        },
         waitUntil: async (condition, options) => {
           assert.equal(options.timeout, 20000); assert.equal(options.interval, 100);
           if (options.timeoutMsg.startsWith('Detail Reply')) {
             assert.equal(await condition(), false); assert.equal(clicks, 0);
             value = text; assert.equal(await condition(), false); assert.equal(clicks, 0);
             enabled = true;
+            assert.equal(await condition(), false, 'Native enabled cannot admit a refreshing aria-disabled Send'); assert.equal(clicks, 0);
+            frozen = scenario === 'frozen-send';
             if (scenario === 'wrong-text') value = 'Incomplete fixture Reply';
             if (scenario === 'disabled-send') enabled = false;
           }
@@ -69,7 +82,7 @@ for (const scenario of ['delayed-readiness', 'wrong-text', 'disabled-send', 'sav
         },
         execute: async (_callback, itemId) => {
           assert.equal(itemId, configuration.itemId);
-          return { value, sendEnabled: enabled, alerts: scenario === 'save-failure' ? ['Fixture save failed'] : [] };
+          return { value, sendEnabled: enabled && !frozen, alerts: scenario === 'save-failure' ? ['Fixture save failed'] : [] };
         },
       };
       if (scenario === 'delayed-readiness') {
@@ -82,9 +95,10 @@ for (const scenario of ['delayed-readiness', 'wrong-text', 'disabled-send', 'sav
         const proof = JSON.parse(await readFile(join(root, 'reply-failure.json'), 'utf8'));
         assert.equal(proof.stage, scenario === 'save-failure' ? 'persistence' : 'readiness');
         assert.equal(proof.clickRequested, scenario === 'save-failure'); assert.equal(proof.expectedText, text);
-        assert.equal(proof.local.value, value); assert.equal(proof.local.sendEnabled, enabled);
+        assert.equal(proof.local.value, value); assert.equal(proof.local.sendEnabled, enabled && !frozen);
         assert.equal(proof.canonical.revision, 7); assert.deepEqual(proof.canonical.inputs, []);
         assert.equal(proof.preferences.revision, 8);
+        assert.deepEqual(proof.preferences.drafts, [{ opId: 'answer-draft', targetRevision: 3, submissionAttempted: true, textMatchesExpected: true }]);
       }
     } finally {
       if (prior.browser === undefined) delete globalThis.browser; else globalThis.browser = prior.browser;

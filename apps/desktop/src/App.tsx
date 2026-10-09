@@ -6,7 +6,7 @@ import type { RevealedItem } from './data/routes';
 import { plainFailure } from './data/plain';
 import type { ItemRoute, SessionPreferences, SessionRef } from './generated/core';
 import { NavigationStore, useNavigation } from './state/navigation/store';
-import { blockedDraft, emptyDraft, OwnerDraftStore } from './state/drafts/store';
+import { OwnerDraftStore } from './state/drafts/store';
 import { WaitingStore } from './selectors/waiting/store';
 import { NavigationWorkspace, type AdapterChoice, type OpenedSessionView } from './components/navigation/NavigationWorkspace';
 import { NavigationGraph } from './ui/graph/NavigationGraph';
@@ -36,7 +36,7 @@ import { useWindowKeys } from './ui/shell/windowKeys';
 import { nextTextSize, textSize, useAppliedTextSize, type TextSize } from './ui/shell/textScale';
 import { ItemHistoryContext, useItemHistory, type HistoryDirection } from './ui/shell/itemHistory';
 import { connectionOf } from './ui/shared/connection';
-import { acknowledge, ackFailure, ackTarget } from './ui/shared/ack';
+import { acknowledge, ackFailure, ackTarget, ackWaiting } from './ui/shared/ack';
 import { displayStatus } from './selectors/waiting/replied';
 import { earlierAgent } from './ui/shared/excerpt';
 import { FileRefs, LinkOpener } from './ui/shared/MarkdownText';
@@ -351,15 +351,19 @@ function Workspace({ application }: { application: Application }) {
     const current = store && route && sameSession(route, target) ? store.getSnapshot() : application.waiting.sessionState(target);
     const session = current?.snapshot?.session, item = session?.items[target.item_id];
     const draftState = application.drafts.getSnapshot(), entry = application.drafts.find(target, target.item_id, 'answer');
-    const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : null;
-    const guard = entry && session ? blockedDraft(entry.draft, session) : null;
+    if (session && item && (current?.status !== 'ready' || current.error)) {
+      notices.push({ id: 'quick-answer-not-ready', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
+        text: "Ariadne is still loading this session's latest changes. Try again." });
+      return true;
+    }
+    notices.dismiss('quick-answer-not-ready');
     if (!session || !item || current?.status !== 'ready' || current.error || session.state !== 'active'
       || session.topics[item.topic_id]?.archived_at !== null || displayStatus(session, item) !== 'waiting_on_me'
       || state.writing || state.pendingOperationId !== null || !draftState.ready || draftState.preferenceUncertain
       || quickRequests.current.has(JSON.stringify(target))
       || Object.values(draftState.entries).some(value => sameSession(value.draft.session, target) && value.draft.target.item_id === item.id && (value.saving || value.uncertain))
-      || entry?.receipt || guard && guard !== emptyDraft
-      || index !== undefined && (!item.options[index] || connectionOf(binding, binding ? current.presence[binding.id] : null) !== 'connected')) return false;
+      || entry?.receipt
+      || index !== undefined && !item.options[index]) return false;
     focusOwner(target, 'answer', index, undefined, index === undefined ? 'words' : 'send', index === undefined ? undefined : {
       optionId: item.options[index]!.id, revision: item.revision, questionRevision: item.question_revision, bindingId: session.active_binding_id,
     });
@@ -412,6 +416,19 @@ function Workspace({ application }: { application: Application }) {
       setTextSizeTarget(null);
     }
   }, [textSizeTarget, preferences?.global.text_scale, state.writing, state.pendingOperationId]);
+  const restoreRefusedTextSize = useCallback((saved: boolean, size: TextSize) => {
+    const latest = navigation.getSnapshot();
+    if (!saved && !latest.writing && latest.pendingOperationId === null && !navigation.hasQueuedTextScale() && textSizeIntent.current === size) {
+      textSizeIntent.current = null;
+      setTextSizeTarget(null);
+    }
+  }, [navigation]);
+  useEffect(() => {
+    if (textSizeTarget === null) return;
+    // Reconciliation can resume a queued size after its original promise has settled.
+    const completion = navigation.getWritingCompletion();
+    if (completion) void completion.then(saved => restoreRefusedTextSize(saved, textSizeTarget));
+  }, [navigation, textSizeTarget, state.writing, state.pendingOperationId, restoreRefusedTextSize]);
   const changeTextSize = (size: TextSize) => {
     const current = navigation.getSnapshot();
     if (!current.preferences) return;
@@ -419,7 +436,7 @@ function Workspace({ application }: { application: Application }) {
     textSizeIntent.current = size;
     setTextSizeTarget(size);
     if (replacingTarget || current.writing || current.pendingOperationId !== null || size !== textSize(current.preferences.global.text_scale)) {
-      void navigation.saveTextScale(size, current.preferences.revision);
+      void navigation.saveTextScale(size, current.preferences.revision).then(saved => restoreRefusedTextSize(saved, size));
     }
   };
   const projectName = (projectId: string) => state.projects?.projects.items.find(project => project.project_id === projectId)?.project?.display_name ?? 'Unavailable project';
@@ -504,12 +521,14 @@ function Workspace({ application }: { application: Application }) {
       if (!session || !item || !ackTarget(session, item)) return false;
       const actions = application.actions.forSession(store);
       const action = actions.getSnapshot();
-      if (repeat || action.writing || action.pending || store.getSnapshot().status !== 'ready') return true;
+      if (repeat || action.writing || action.pending || ackWaiting(actions)) return true;
       const attempted = ++ackRequest.current;
       notices.dismiss('ack-save-failed');
-      void acknowledge(actions, item.id).then(saved => {
+      void acknowledge(actions, item.id, () => attempted !== ackRequest.current).then(saved => {
         const error = actions.getSnapshot().error;
         if (attempted === ackRequest.current && !saved && error) notices.push({ id: 'ack-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: ackFailure(error) });
+      }).catch(error => {
+        if (attempted === ackRequest.current) notices.push({ id: 'ack-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: ackFailure(error) });
       });
       return true;
     }, archiveTopic: topicId => {

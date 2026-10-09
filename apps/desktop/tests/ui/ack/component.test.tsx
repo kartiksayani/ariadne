@@ -102,6 +102,55 @@ describe('local acknowledgement', () => {
     await waitFor(() => expect(within(detail()).getByRole('textbox')).toBeTruthy());
   });
 
+  it('keeps a hidden Ack item hidden and counted, and acknowledges from the dock without unhiding it', async () => {
+    const transport = await mount();
+    fireEvent.click(within(row()).getByRole('button', { name: 'Hide (x)' }));
+    await waitFor(() => expect(row()).toBeNull());
+    expect(screen.getByText('1 to ack')).toBeTruthy();
+    const view = () => transport.preferences.sessions.find(value => value.session.session_id === route.session_id)!;
+    expect(view().hidden_item_ids).toContain('1.1');
+    await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '1.1' }); });
+    await screen.findByLabelText('Detail of #1.1');
+    expect(row().classList.contains('tree-item-hidden')).toBe(true);
+    const button = within(detail()).getByRole('button', { name: 'Ack: mark Done' });
+    expect(button.closest('.detail-dock')).not.toBeNull();
+    expect(detail().querySelectorAll('.detail-chat')).toHaveLength(1);
+    await act(async () => { fireEvent.click(button); });
+    await waitFor(() => expect(detail().getAttribute('data-status')).toBe('done'));
+    expect(view().hidden_item_ids).toContain('1.1');
+    expect(row().classList.contains('tree-item-hidden')).toBe(true);
+    expect(screen.queryByText('1 to ack')).toBeNull();
+  });
+
+  it.each(['tree', 'detail', 'key'] as const)('keeps one %s Ack click through a stale-store wait and uses the refreshed revision', async source => {
+    class RefreshTransport extends AckTransport {
+      hold: Promise<void> | null = null;
+      override async invoke<T>(name: string, args: { request: OwnerQueryRequest | OwnerMutationRequest }): Promise<T> {
+        if (name === 'session_get' && this.hold) await this.hold;
+        return super.invoke<T>(name, args);
+      }
+    }
+    const transport = new RefreshTransport(); await mount(transport);
+    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    let release!: () => void;
+    transport.hold = new Promise<void>(resolve => { release = resolve; });
+    const session = transport.sessions.get(route.session_id)!, item = session.items['1.1']!;
+    ++session.revision; ++item.revision;
+    act(() => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    if (source === 'key') { detail().focus(); fireEvent.keyDown(detail(), { key: 'a' }); }
+    else {
+      const button = within(source === 'detail' ? detail() : row()).getByRole<HTMLButtonElement>('button', { name: 'Ack: mark Done' });
+      expect(button.disabled).toBe(false);
+      fireEvent.click(button);
+    }
+    expect(acks(transport)).toHaveLength(0);
+    const revision = item.revision;
+    await act(async () => { transport.hold = null; release(); });
+    await waitFor(() => expect(acks(transport)).toHaveLength(1));
+    expect(acks(transport)[0].command).toMatchObject({ params: { expected_revision: revision } });
+    await waitFor(() => expect(detail().getAttribute('data-status')).toBe('done'));
+  });
+
   it('shows the proposed outcome and rationale before acknowledging it', async () => {
     const transport = new AckTransport(), item = transport.sessions.get(route.session_id)!.items['1.1']!;
     item.outcome = 'Retry limits are recorded.'; item.why = 'The limits now have an explicit owner.';

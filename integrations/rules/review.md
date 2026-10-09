@@ -6,7 +6,8 @@ For PRs, docs, specs, plans and comparisons. The `SKILL.md` rules still apply.
 
 - The summary is an `explanation`, `open` with `ack_to: "done"`, no ask and
   the PR in `links`. Its Ack stays with the owner; settling children is not Ack.
-- Under it, the verdict is a `decision` with its own `ask` and options "Request changes", "Approve as is" or "Comment only".
+- Under it, the verdict is a `decision` with its own `ask` and options such as "Request
+  changes", "Approve as is" and "Comment only".
 - Each comment you would post is its own `decision` child: `question` is the comment
   text, `ask` "Post it on the PR?", options "Post it", "Skip" and "Edit first", `links`
   the file. The owner decides each.
