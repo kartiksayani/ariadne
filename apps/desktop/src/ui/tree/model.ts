@@ -351,11 +351,12 @@ export function treeModel(input: TreeInput): TreeModel {
     if (!open) continue;
     const walk = (list: readonly Immutable<Item>[], depth: number) => {
       const eligible = list.filter(item => !filtering || include.has(item.id));
+      const visibleSiblings = eligible.filter(item => !explicitHidden.has(item.id));
       const hiddenSiblings = eligible.filter(item => explicitHidden.has(item.id));
       const firstHidden = hiddenSiblings[0];
       const groupKey = hiddenGroupKey(topic.id, list[0]?.parent ?? null);
       const groupOpen = hiddenGroups.has(groupKey);
-      for (const item of eligible) {
+      for (const item of [...visibleSiblings, ...hiddenSiblings]) {
         if (item === firstHidden) {
           const below: Immutable<Item>[] = [];
           const gather = (value: Immutable<Item>) => { below.push(value); kids(value.id).forEach(gather); };
