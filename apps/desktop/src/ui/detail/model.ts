@@ -13,6 +13,8 @@ import { STATUS, statusKey, type StatusKey } from '../shared/status';
 import { deliveryLine as deliveryText, deliveryStage, deliverySteps, type DeliveryStage } from '../answer/delivery';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { counted, heldInput, notSent, stuckInput, withdrawn, type NotSent, type Stuck } from '../../selectors/waiting/stuck';
+import { relatedItems } from '../../selectors/related';
+import { hiddenItems } from '../tree/hidden';
 
 export { statusKey, type StatusKey };
 export const closedStatus: ReadonlySet<StatusKey> = new Set(['decided', 'done', 'dropped', 'replaced']);
@@ -99,6 +101,7 @@ export interface DetailModel {
   readonly replaced: Kid | null;
   readonly kidLabel: string;
   readonly kids: readonly Kid[];
+  readonly related: readonly { readonly id: string; readonly label: string; readonly question: string; readonly status: StatusKey; readonly hidden: boolean }[];
   readonly links: readonly LinkView[];
   readonly prev: { readonly status: StatusKey; readonly outcome: string } | null;
   /** One transcript in saved message order, including pending messages in place. */
@@ -123,6 +126,7 @@ export interface DetailInput {
   readonly earlierAgent?: string | null;
   /** The follow-up box is open or holds a draft: it stays when its hold clears. */
   readonly replyDraft?: boolean;
+  readonly hiddenItemIds?: readonly string[];
 }
 
 const ACTIVE_INPUT = new Set<Input['state']>(['queued', 'in_flight', 'needs_attention']);
@@ -194,7 +198,7 @@ export function detailPath(session: Immutable<Session>, itemId: string): Crumb[]
 }
 
 /** The detail panel for one item, or null when the item is not in the snapshot. */
-export function detailModel({ session, itemId, now, mode, later, saving, presence = null, health = null, earlierAgent = null, replyDraft = false }: DetailInput): DetailModel | null {
+export function detailModel({ session, itemId, now, mode, later, saving, presence = null, health = null, earlierAgent = null, replyDraft = false, hiddenItemIds = [] }: DetailInput): DetailModel | null {
   const item = session.items[itemId];
   if (!item) return null;
   const items = Object.values(session.items).filter((value): value is Immutable<Item> => !!value);
@@ -364,6 +368,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   const reopened = isClosed ? undefined : [...item.status_history].reverse().find(entry => closedStatus.has(statusKey[entry.old_status]) && !closedStatus.has(statusKey[entry.new_status]));
   const replacement = item.replaced_by ? session.items[item.replaced_by] : undefined;
   const kids = items.filter(value => value.parent === item.id).sort((a, b) => a.ordinal - b.ordinal);
+  const hidden = hiddenItems(session, new Set(hiddenItemIds));
 
   return {
     id: item.id, question: item.question, status, display: statusKey[displayStatus(session, item)], badgeLabel: outLabel ?? '',
@@ -384,6 +389,8 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     replaced: replacement ? kid(replacement) : null,
     kidLabel: `Branched into ${kids.length} item${kids.length > 1 ? 's' : ''}`,
     kids: kids.map(kid),
+    related: relatedItems(session, item.id).map(target => ({ id: target.id, label: shortLabel(target), question: target.question,
+      status: statusKey[displayStatus(session, target)], hidden: hidden.has(target.id) })),
     links: item.links.map(link => ({ kind: link.kind, icon: LINKICON[link.kind] ?? 'ph ph-link', target: link.target, label: link.label, meta: (link as typeof link & { meta?: string }).meta ?? '' })),
     prev: reopened ? { status: statusKey[reopened.old_status], outcome: reopened.previous_outcome ?? '' } : null,
     chat,

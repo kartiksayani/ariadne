@@ -146,6 +146,9 @@ pub struct ItemSnapshot {
     pub note: Option<String>,
     pub options: Vec<ItemOption>,
     pub links: Vec<ItemLinkTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub related: Option<Vec<ItemRef>>,
     pub outcome: Option<String>,
     pub why: Option<String>,
     pub replaced_by: Option<ItemRef>,

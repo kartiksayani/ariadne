@@ -140,6 +140,8 @@ export function ItemRow({ row, selected, focused, disabled = false, highlight, n
       {answer && <div className="tree-answer" onClick={event => event.stopPropagation()}>{answer}</div>}
     </div>
     <div className="tree-end">
+      {row.relatedCount > 0 && <span className="tree-related" role="img" aria-label={`${row.relatedCount} related item${row.relatedCount === 1 ? '' : 's'}`}
+        title={`${row.relatedCount} related item${row.relatedCount === 1 ? '' : 's'}`}><i className="ph ph-link" aria-hidden="true" />{row.relatedCount}</span>}
       {row.rounds >= 2 && <span className="tree-round" title="Rounds of back and forth"><i className="ph ph-arrows-clockwise" />Round {row.rounds}</span>}
       {persistent.length > 0 && <span className="tree-ack-slot">{persistent.map(actionButton)}</span>}
       {hover.length > 0 && <span className="tree-actions">{hover.map(actionButton)}</span>}

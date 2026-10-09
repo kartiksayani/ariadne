@@ -346,7 +346,7 @@ export function TreeView(props: TreeViewProps) {
       select(row.item.id); return true;
     }),
     answer: onRow((row, _index, _intent, event) => {
-      if (row.kind === 'item' && session && ackTarget(session, row.item)) { if (!event.repeat && !viewBusy && !ack.busy) void ack.run(row.item.id); return true; }
+      if (row.kind === 'item' && session && ackTarget(session, row.item)) { if (!event.repeat) void ack.run(row.item.id); return true; }
       if (answerable(row)) { if (answering === row.key) setAnswering(null); else openAnswer(row.key); return true; }
       const oldest = session ? oldestWaiting(session) : null, target = oldest ? latest.current.rows.find(value => value.key === oldest.id) : undefined;
       if (!answerable(target)) return false;

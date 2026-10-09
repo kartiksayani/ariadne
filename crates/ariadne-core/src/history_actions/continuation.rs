@@ -404,6 +404,13 @@ fn copy(
         item.id = item_map[&old.id].clone();
         item.topic_id = topic_id.clone();
         item.parent = old.parent.as_ref().map(|id| item_map[id].clone());
+        // Only copied targets have meaning in the destination session.
+        item.related = old.related.as_ref().map(|related| {
+            related
+                .iter()
+                .filter_map(|id| item_map.get(id).cloned())
+                .collect()
+        });
         if item.parent.is_none() {
             item.ordinal =
                 PositiveSafeInteger::new(item.id.as_str().parse().expect("allocated root"))

@@ -114,6 +114,7 @@ async fn apply_preserves_canonical_request_and_checked_saved_receipt() {
             topic_revisions: UniqueMap(Default::default()),
             input_result_state: None,
             queue_join_state: None,
+            pruned_related: None,
         },
     };
     let core = Arc::new(ScriptedCoreService::new([ScriptStep {

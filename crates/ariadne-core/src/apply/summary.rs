@@ -18,6 +18,8 @@ pub struct ApplySummary {
     pub input_result: Option<ResultState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub queue: Option<InputState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pruned_related: Option<UniqueMap<ItemRef, Vec<ItemRef>>>,
 }
 
 /// `number` is the topic's creation order in the session.
@@ -52,6 +54,7 @@ pub fn summarize(session: &Session, receipt: &SavedReceipt) -> Result<ApplySumma
         topic_revisions,
         input_result_state,
         queue_join_state,
+        pruned_related,
         ..
     } = &receipt.data
     else {
@@ -115,6 +118,7 @@ pub fn summarize(session: &Session, receipt: &SavedReceipt) -> Result<ApplySumma
         items,
         input_result: input_result_state.clone(),
         queue: queue_join_state.clone(),
+        pruned_related: pruned_related.clone(),
     })
 }
 

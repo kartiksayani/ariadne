@@ -12,6 +12,12 @@ class AckUnavailable extends Error {}
 const ackRefusal = 'This item can’t be acknowledged now. Check its current status and any question waiting for you.';
 const waiting = new WeakMap<SessionActions, { readonly cancelled: () => boolean }>();
 export const ackWaiting = (actions: SessionActions) => { const attempt = waiting.get(actions); return !!attempt && !attempt.cancelled(); };
+export const ackBlocked = (actions: SessionActions): string | null => {
+  const state = actions.getSnapshot();
+  if (state.writing) return 'Another change is being saved. Wait for it, then try Ack again.';
+  if (state.pending) return 'Ariadne isn’t sure your last change was saved. Check again before trying Ack.';
+  return ackWaiting(actions) ? 'Another change is being saved. Wait for it, then try Ack again.' : null;
+};
 
 export function ackFailure(failure: unknown): string {
   if (failure instanceof AckUnavailable) return failure.message;
@@ -22,7 +28,8 @@ export function ackFailure(failure: unknown): string {
 
 /** The shared action controller keeps uncertain saves available for exact retry. */
 export async function acknowledge(actions: SessionActions, itemId: string, cancelled: () => boolean = () => false): Promise<boolean> {
-  if (ackWaiting(actions) || actions.getSnapshot().writing || actions.getSnapshot().pending) throw new AckUnavailable('Another change is being saved. Wait for it, then try Ack again.');
+  const blocked = ackBlocked(actions);
+  if (blocked) throw new AckUnavailable(blocked);
   const store = actions.session, proposal = store.getSnapshot().snapshot?.session.items[itemId];
   const attempt = { cancelled };
   waiting.set(actions, attempt);
@@ -40,6 +47,9 @@ export async function acknowledge(actions: SessionActions, itemId: string, cance
     if (!item || !ackTarget(session, item)) throw new AckUnavailable(ackRefusal);
     if (!proposal || item.ack_to !== proposal.ack_to || item.question !== proposal.question || item.ask !== proposal.ask
         || item.outcome !== proposal.outcome || item.why !== proposal.why) throw new AckUnavailable('This item changed. Read its current proposal, then try Ack again.');
+    const state = actions.getSnapshot();
+    if (state.writing) throw new AckUnavailable('Another change is being saved. Wait for it, then try Ack again.');
+    if (state.pending) throw new AckUnavailable('Ariadne isn’t sure your last change was saved. Check again before trying Ack.');
     const saved = await actions.execute({ command: 'ack', api_version: 1, op_id: '', params: { item_id: item.id, expected_revision: item.revision } }, session.revision);
     if (!saved && !actions.getSnapshot().error) throw new AckUnavailable('Ack could not be saved. Try again.');
     return saved;
@@ -64,7 +74,8 @@ export function useAck(actions: SessionActions, selectedId: string | null) {
     busy: loading || state.writing || !!state.pending,
     error,
     run: async (itemId: string) => {
-      if (ackWaiting(actions)) { setError('Another change is being saved. Wait for it, then try Ack again.'); return false; }
+      const blocked = ackBlocked(actions);
+      if (blocked) { setError(blocked); return false; }
       const attempted = ++request.current;
       setError(null);
       setLoading(true);

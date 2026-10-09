@@ -1237,3 +1237,19 @@ fn removal_notice_shortens_names_that_would_pass_the_delivery_budget() {
     assert!(name.ends_with('…'));
     assert!(removed.note.len() < 1024);
 }
+
+#[test]
+fn removing_a_related_target_keeps_the_surviving_declaration() {
+    let mut session = seed();
+    session.items.0.get_mut(&r("2")).unwrap().related = Some(vec![r("1")]);
+    let t = Setup::new(&[(1, &[session.clone()])]);
+    t.remove(
+        &owner(1, 2),
+        &item_remove("1", session.items.0[&r("1")].revision, 100),
+    )
+    .unwrap();
+    let saved = t.read(1, 2);
+    assert!(!saved.items.0.contains_key(&r("1")));
+    assert_eq!(saved.items.0[&r("2")].related, Some(vec![r("1")]));
+    ariadne_domain::validation::validate_session_items(&saved).unwrap();
+}

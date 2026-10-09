@@ -464,3 +464,20 @@ fn every_cursor_sort_key_is_typed_and_none_is_an_opaque_token() {
     reject_wire::<QueryCursor>(json!("opaque-token"));
     reject_wire::<CursorPosition>(json!({"kind":"item","ordinals":[0],"id":"1"}));
 }
+
+#[test]
+fn optional_related_preserves_old_item_shapes_and_checks_canonical_refs() {
+    let original = item();
+    let emitted = assert_wire::<Item>(original.clone());
+    assert_eq!(emitted, original);
+    assert!(emitted.get("related").is_none());
+    let mut linked = original.clone();
+    linked["related"] = json!(["2", "3.1"]);
+    assert_eq!(assert_wire::<Item>(linked.clone()), linked);
+    linked["related"] = json!([]);
+    assert_eq!(assert_wire::<Item>(linked.clone()), linked);
+    for target in ["0", "01", "3..1", "other-session:2"] {
+        linked["related"] = json!([target]);
+        reject_wire::<Item>(linked.clone());
+    }
+}

@@ -40,7 +40,7 @@
   left: 0;
   z-index: 5;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px 18px;
   padding: 6px 16px 8px 20px;
@@ -52,8 +52,25 @@
 
 .graph-legend-key {
   display: inline-flex;
+  min-width: 0;
   align-items: center;
   gap: 7px;
+}
+
+.graph-legend-key > :first-child {
+  flex-shrink: 0;
+}
+
+.graph-legend-label,
+.graph-legend-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-legend-note {
+  flex-shrink: 3;
 }
 
 .graph-legend-thread {
@@ -61,6 +78,12 @@
   height: 2px;
   border-radius: 1px;
   background: var(--color-accent);
+}
+
+.graph-legend-related {
+  width: 22px;
+  height: 6px;
+  overflow: visible;
 }
 
 .graph-legend-replaced {
@@ -85,9 +108,11 @@
 }
 
 .graph-reveal {
+  flex-shrink: 0;
   margin-left: auto;
   padding: 3px 10px;
   font-size: calc(12.5px * var(--text-scale));
+  white-space: nowrap;
 }
 
 .graph-reveal > i {
@@ -96,6 +121,7 @@
 
 /* — topic cards — */
 .graph-cards {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -116,6 +142,7 @@
 
 .graph-card-head {
   position: sticky;
+  z-index: 3;
   left: 0;
   display: flex;
   flex-wrap: wrap;
@@ -160,10 +187,28 @@
 /* — edges — */
 .graph-edges {
   position: absolute;
+  z-index: 2;
   top: 0;
   left: 0;
   overflow: visible;
   pointer-events: none;
+}
+
+.graph-cross-related {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.graph-related {
+  fill: none;
+  stroke: color-mix(in srgb, var(--color-text) 36%, transparent);
+  stroke-width: 1.25;
+  stroke-dasharray: 6 5;
 }
 
 .graph-edge {
@@ -197,6 +242,7 @@
 /* — nodes — */
 .graph-node {
   position: absolute;
+  z-index: 3;
   display: flex;
   flex-direction: column;
   gap: 3px;

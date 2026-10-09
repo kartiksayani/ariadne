@@ -75,6 +75,7 @@ describe('ordinary desktop composition', () => {
     await act(async () => { releaseSession(); });
     expect(mutations(transport, 'input_submit')).toHaveLength(0);
     await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Bring it up' }).disabled).toBe(false));
+    expect(screen.queryByText("Ariadne is still loading this session's latest changes. Try again.")).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Bring it up' }));
     await waitFor(() => expect(mutations(transport, 'input_submit')).toHaveLength(1));
     expect(screen.queryByText("Ariadne is still loading this session's latest changes. Try again.")).toBeNull();

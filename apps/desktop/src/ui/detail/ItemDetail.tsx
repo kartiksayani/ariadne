@@ -6,6 +6,7 @@
 // docked under it (quick replies above a reply box that grows as you type).
 import { useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
+import { plainFailure } from '../../data/plain';
 import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
 import { sessionActionsFor } from '../../components/bindings/actions';
 import { PausedNote } from '../../components/bindings/DispatchChip';
@@ -68,6 +69,7 @@ export interface ItemDetailProps {
   readonly earlierAgent?: string | null;
   /** Where a copied item came from (its Source item button): shown with the item's references, not under the composer. */
   readonly provenance?: ReactNode;
+  readonly hiddenItemIds?: readonly string[];
 }
 
 const sectionLabel = (text: string) => <div className="detail-label">{text}</div>;
@@ -181,13 +183,13 @@ function ItemLink({ link }: { readonly link: LinkView }) {
   return <div className="detail-link detail-link-plain">{body}</div>;
 }
 
-export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, highlightedMessageIds, onAgentNotRunning, earlierAgent = null, provenance }: ItemDetailProps) {
+export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, highlightedMessageIds, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds }: ItemDetailProps) {
   const current = useSession(store), session = current.snapshot?.session;
   const submit = useDetailSubmit(drafts, store, itemId);
   const draftState = useOwnerDrafts(drafts);
-  // An attempted answer stays reachable here (Try sending again) after the item stops waiting.
+  // An attempted or failed answer stays reachable here after the item stops waiting.
   const retained = session && draftState.ready ? drafts.find({ project_id: session.project_id, session_id: session.id }, itemId, 'answer') : undefined;
-  const retainedAnswer = !!retained?.uncertain;
+  const retainedAnswer = !!(retained?.uncertain || retained?.error);
   const [mode, setMode] = useState<OpenMode | null>(null);
   const [focusBox, setFocusBox] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -206,7 +208,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : undefined;
   const health = useSupervisorHealth(drafts.service, binding?.id, binding?.generation);
   const model = session ? detailModel({ session, itemId, now: Date.now(), mode, later, saving: submit.saving, presence, health, earlierAgent,
-    replyDraft: mode === 'reply' || submit.written.length > 0 }) : null;
+    replyDraft: mode === 'reply' || submit.written.length > 0, hiddenItemIds }) : null;
   const item = session?.items[itemId];
   const ackTo = session && item ? ackTarget(session, item) : null;
   // An open item is replied to and an in-progress item gets notes: that box is always there, never behind a button. Other
@@ -391,6 +393,15 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       <ChildrenBox kids={model.kids} onOpen={onOpenItem} />
     </section>}
 
+    {model.related.length > 0 && <section className="detail-section detail-related" aria-label="Related items">
+      {sectionLabel('Related items')}
+      {model.related.map(target => <button key={target.id} type="button" className={`detail-related-item${target.hidden ? ' is-hidden' : ''}`}
+        title={target.question} aria-label={`#${target.id} ${target.label}${target.hidden ? ' (hidden)' : ''} · ${STATUS[target.status].label}`} onClick={() => onOpenItem(target.id)}>
+        <span className="detail-related-number">#{target.id}</span><span className="detail-related-label">{target.label}</span>
+        {target.hidden && <span className="detail-related-hidden">Hidden</span>}<StatusBadge status={target.status} variant="text" />
+      </button>)}
+    </section>}
+
     {model.links.length > 0 && <section className="detail-section detail-links" aria-label="Item links">
       {sectionLabel('Links')}
       {model.links.map((link, index) => <ItemLink key={index} link={link} />)}
@@ -457,7 +468,8 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       </button><span className="detail-hint">Mark {STATUS[ackTo].label}</span>
     </section>}
     {ack.error && <p className="detail-error" role="alert">{ack.error}</p>}
-    {submit.error && <p className="detail-error" role="alert">{submit.error}</p>}
+    {submit.error && !((model.answer || retainedAnswer) && draftState.error && submit.error === plainFailure(draftState.error))
+      && <p className="detail-error" role="alert">{submit.error}</p>}
     {model.open && <section className="detail-section detail-open" aria-label={model.open.title}>
       {sectionLabel(model.open.title)}
       <div className="detail-actions" role="group" aria-label="Item actions">

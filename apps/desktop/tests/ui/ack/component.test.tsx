@@ -63,6 +63,49 @@ async function mount(transport = new AckTransport()) {
 }
 
 describe('local acknowledgement', () => {
+  it.each(['tree', 'detail', 'graph'] as const)('explains a keyboard Ack from %s while another change is being saved or awaits confirmation', async source => {
+    const transport = await mount();
+    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    let release!: () => void, saving = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'session_label_set') { saving = true; await gate; throw new Error('Lost save response'); }
+      return invoke(name, args);
+    });
+    if (source === 'graph') { fireEvent.keyDown(row(), { key: 'g' }); await screen.findByText('One graph per topic'); }
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Pending session name' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(saving).toBe(true));
+    const host = () => source === 'detail' ? detail() : row();
+    host().focus(); fireEvent.keyDown(host(), { key: 'a' });
+    expect(await screen.findByText('Another change is being saved. Wait for it, then try Ack again.')).toBeTruthy();
+    expect(acks(transport)).toHaveLength(0);
+    await act(async () => { release(); });
+    await screen.findByText('Ariadne isn’t sure your last change was saved. Check again before renaming this session.');
+    host().focus(); fireEvent.keyDown(host(), { key: 'a' });
+    expect(await screen.findByText('Ariadne isn’t sure your last change was saved. Check again before trying Ack.')).toBeTruthy();
+    expect(acks(transport)).toHaveLength(0);
+  });
+
+  it('opens an Ack proposal from Related and refreshes its listed status after acknowledging', async () => {
+    const transport = new AckTransport(), session = transport.sessions.get(route.session_id)!;
+    session.items['1']!.related = ['1.1'];
+    session.items['1.1']!.short = 'Retry limits';
+    await mount(transport);
+    fireEvent.click(row('1')); await screen.findByLabelText('Detail of #1');
+    const related = screen.getByRole('region', { name: 'Related items' });
+    const linked = within(related).getByRole('button', { name: /#1\.1 Retry limits/ });
+    expect(linked.textContent).toContain('Open');
+    fireEvent.click(linked); await screen.findByLabelText('Detail of #1.1');
+    await act(async () => { fireEvent.click(within(detail()).getByRole('button', { name: 'Ack: mark Done' })); });
+    await waitFor(() => expect(detail().getAttribute('data-status')).toBe('done'));
+    expect(acks(transport)).toHaveLength(1);
+    fireEvent.click(row('1')); await screen.findByLabelText('Detail of #1');
+    expect(within(screen.getByRole('region', { name: 'Related items' })).getByRole('button', { name: /#1\.1 Retry limits/ }).textContent).toContain('Done');
+  });
+
   it('offers a quiet row Ack with a target tooltip and a topic count, while questions keep their answer controls', async () => {
     await mount();
     const button = within(row()).getByRole('button', { name: 'Ack: mark Done' });

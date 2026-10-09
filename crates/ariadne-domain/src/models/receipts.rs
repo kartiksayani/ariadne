@@ -100,6 +100,9 @@ pub enum SavedReceiptData {
         topic_revisions: UniqueMap<UuidV4, PositiveSafeInteger>,
         input_result_state: Option<ResultState>,
         queue_join_state: Option<InputState>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        pruned_related: Option<UniqueMap<ItemRef, Vec<ItemRef>>>,
     },
     Claim {
         input_id: UuidV4,

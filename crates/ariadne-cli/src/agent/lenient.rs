@@ -8,7 +8,7 @@ use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256 as Sha2};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 pub struct Expanded {
@@ -153,7 +153,7 @@ impl Expander {
         for (index, operation) in operations.into_iter().enumerate() {
             self.operation(operation, format!("operations[{index}]"), &mut out)?;
         }
-        Ok((out, self.repairs))
+        Ok((defer_related(out)?, self.repairs))
     }
 
     /// A fresh `r1`, `r2`, ... that no request ref uses.
@@ -206,6 +206,17 @@ impl Expander {
             }
             Some("reply") => {
                 self.ensure_ref(&mut object);
+            }
+            Some("item.edit") => {
+                let source = object
+                    .get("item")
+                    .and_then(|item| item.get("id").or_else(|| item.get("ref")))
+                    .and_then(Value::as_str)
+                    .unwrap_or("?");
+                let context = format!("item.edit, item {source}");
+                if let Some(Value::Object(patch)) = object.get_mut("patch") {
+                    related(patch, &format!("{path}.patch"), &context)?;
+                }
             }
             _ => {}
         }
@@ -329,6 +340,7 @@ impl Expander {
             Some(_) => {}
         }
         options(&mut object);
+        related(&mut object, &path, &format!("item.add, ref '{reference}'"))?;
         let topic = object.get("topic").cloned();
         out.push((path.clone(), Value::Object(object)));
         for (index, child) in children.into_iter().enumerate() {
@@ -347,6 +359,93 @@ impl Expander {
         }
         Ok(())
     }
+}
+
+/// Number strings name existing items; other strings name local batch refs.
+fn related(object: &mut Map<String, Value>, path: &str, context: &str) -> Result<(), CoreError> {
+    if let Some(Value::Array(list)) = object.get_mut("related") {
+        if list.len() > 32 {
+            return Err(bad_request(format!(
+                "{path}.related ({context}): an item can have at most 32 related items; received {}",
+                list.len()
+            )));
+        }
+        for target in list {
+            if let Value::String(value) = target {
+                *target = if ItemRef::new(value.as_str()).is_ok() {
+                    json!({"id": value})
+                } else {
+                    json!({"ref": value})
+                };
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A parent can name a nested child before flattening allocates the child. Move
+/// only that initial link assignment to immediately after its latest allocation.
+/// Later explicit assignments to the same local item supersede the initial one.
+/// Core validates the retained assignments and expanded operation-count limit.
+fn defer_related(mut operations: Vec<(String, Value)>) -> Result<Vec<(String, Value)>, CoreError> {
+    let allocations: BTreeMap<_, _> = operations
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, op))| op.get("op").and_then(Value::as_str) == Some("item.add"))
+        .filter_map(|(index, (_, op))| Some((op.get("ref")?.as_str()?.to_string(), index)))
+        .collect();
+    let mut deferred: BTreeMap<usize, Vec<(String, Value)>> = BTreeMap::new();
+    for index in 0..operations.len() {
+        let (path, op) = &operations[index];
+        if op.get("op").and_then(Value::as_str) != Some("item.add") {
+            continue;
+        }
+        let Some(targets) = op.get("related").and_then(Value::as_array) else {
+            continue;
+        };
+        let last = targets
+            .iter()
+            .filter_map(|target| allocations.get(target.get("ref")?.as_str()?))
+            .copied()
+            .max()
+            .unwrap_or(index);
+        if last <= index {
+            continue;
+        }
+        // Moving or superseding an assignment must never erase a wire type error.
+        serde_json::from_value::<Operation>(op.clone())
+            .map_err(|error| bad_request(format!("{path} (item.add): {error}")))?;
+        let reference = op["ref"].clone();
+        let superseded = operations[index + 1..=last].iter().any(|(_, later)| {
+            later.get("op").and_then(Value::as_str) == Some("item.edit")
+                && later.get("item") == Some(&json!({"ref": reference}))
+                && later
+                    .get("patch")
+                    .and_then(|patch| patch.get("related"))
+                    .is_some_and(|related| !related.is_null())
+        });
+        if !superseded {
+            deferred.entry(last).or_default().push((
+                format!("{path}.related"),
+                json!({"op": "item.edit", "item": {"ref": reference},
+                    "patch": {"related": targets}}),
+            ));
+        }
+        operations[index]
+            .1
+            .as_object_mut()
+            .unwrap()
+            .remove("related");
+    }
+    let mut out =
+        Vec::with_capacity(operations.len() + deferred.values().map(Vec::len).sum::<usize>());
+    for (index, operation) in operations.into_iter().enumerate() {
+        out.push(operation);
+        if let Some(edits) = deferred.remove(&index) {
+            out.extend(edits);
+        }
+    }
+    Ok(out)
 }
 
 /// Option entries may omit `id` (their 1-based position) and `recommended` (false).
