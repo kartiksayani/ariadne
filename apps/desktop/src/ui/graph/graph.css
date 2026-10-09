@@ -40,7 +40,7 @@
   left: 0;
   z-index: 5;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px 18px;
   padding: 6px 16px 8px 20px;
@@ -52,8 +52,25 @@
 
 .graph-legend-key {
   display: inline-flex;
+  min-width: 0;
   align-items: center;
   gap: 7px;
+}
+
+.graph-legend-key > :first-child {
+  flex-shrink: 0;
+}
+
+.graph-legend-label,
+.graph-legend-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-legend-note {
+  flex-shrink: 3;
 }
 
 .graph-legend-thread {
@@ -91,9 +108,11 @@
 }
 
 .graph-reveal {
+  flex-shrink: 0;
   margin-left: auto;
   padding: 3px 10px;
   font-size: calc(12.5px * var(--text-scale));
+  white-space: nowrap;
 }
 
 .graph-reveal > i {

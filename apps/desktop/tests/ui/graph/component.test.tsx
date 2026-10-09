@@ -92,7 +92,8 @@ describe('session graph view', () => {
   it('explains related connections with a matching undirected dashed key distinct from replacement arcs', async () => {
     const session = graphSession(); session.items['1']!.related = ['2'];
     const value = await setup(session, preferences({ selected_item_id: '1' })); render(<value.Composition />);
-    const key = screen.getByText('Related to the selected item');
+    const key = screen.getByTitle('Related to the selected item');
+    expect(key.textContent).toBe('Related');
     const sample = key.querySelector('svg path')!;
     expect(sample.classList.contains('graph-related')).toBe(true);
     expect(document.querySelector('[data-edge="related:1:2"]')!.classList.contains('graph-related')).toBe(true);
@@ -103,7 +104,7 @@ describe('session graph view', () => {
     expect(rule('.graph-replaced')).toMatch(/stroke:\s*var\(--st-replaced\);/);
     expect(rule('.graph-related')).toMatch(/stroke-dasharray:\s*6 5;/);
     expect(rule('.graph-replaced')).toMatch(/stroke-dasharray:\s*4 4;/);
-    expect(screen.getByText('Replaced by').querySelector('.graph-legend-replaced')).toBeTruthy();
+    expect(screen.getByTitle('Replaced by').querySelector('.graph-legend-replaced')).toBeTruthy();
   });
 
   it('finds and observes only cross-topic endpoints and their cards, updating paths after their layout changes', async () => {
@@ -211,7 +212,11 @@ describe('session graph view', () => {
 
   it('renders the legend and one card per topic with its nodes and edges', async () => {
     const value = await setup(); render(<value.Composition />);
-    for (const text of ['Thread to the selected item', 'Related to the selected item', 'Replaced by', 'Waiting on me', 'Closed', 'One graph per topic']) expect(screen.getByText(text)).toBeTruthy();
+    const legend = within(document.querySelector('.graph-legend')! as HTMLElement);
+    for (const [text, title] of [['Thread', 'Thread to the selected item'], ['Related', 'Related to the selected item'], ['Replaced by', 'Replaced by'], ['Waiting on me', 'Waiting on me'], ['Closed', 'Closed']]) {
+      expect(legend.getByText(text!).closest('.graph-legend-key')?.getAttribute('title')).toBe(title);
+    }
+    expect(legend.getByText('One graph per topic').getAttribute('title')).toBe('One graph per topic');
     const card = screen.getByRole('region', { name: 'Delivery decisions' });
     expect(within(card).getByText('1 waiting on you · 2 open · 1 in progress · 2 closed')).toBeTruthy();
     expect(within(card).getByText('codex · yesterday')).toBeTruthy();

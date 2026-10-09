@@ -277,12 +277,12 @@ export function GraphView({ store, routes, view, later, reveal, tight, sessionLa
       if (!(event.target instanceof HTMLButtonElement)) keys(event);
     }}>
       {!!graph?.topics.length && <><div className="graph-legend">
-        <span className="graph-legend-key"><span className="graph-legend-thread" />Thread to the selected item</span>
-        <span className="graph-legend-key"><svg className="graph-legend-related" aria-hidden="true"><path className="graph-related" d="M0 3 H22" /></svg>Related to the selected item</span>
-        <span className="graph-legend-key"><span className="graph-legend-replaced" />Replaced by</span>
-        <span className="graph-legend-key"><span className="graph-legend-waiting" />Waiting on me</span>
-        <span className="graph-legend-key"><span className="graph-legend-closed" />Closed</span>
-        <span>One graph per topic</span>
+        <span className="graph-legend-key" title="Thread to the selected item"><span className="graph-legend-thread" /><span className="graph-legend-label">Thread</span></span>
+        <span className="graph-legend-key" title="Related to the selected item"><svg className="graph-legend-related" aria-hidden="true"><path className="graph-related" d="M0 3 H22" /></svg><span className="graph-legend-label">Related</span></span>
+        <span className="graph-legend-key" title="Replaced by"><span className="graph-legend-replaced" /><span className="graph-legend-label">Replaced by</span></span>
+        <span className="graph-legend-key" title="Waiting on me"><span className="graph-legend-waiting" /><span className="graph-legend-label">Waiting on me</span></span>
+        <span className="graph-legend-key" title="Closed"><span className="graph-legend-closed" /><span className="graph-legend-label">Closed</span></span>
+        <span className="graph-legend-note" title="One graph per topic">One graph per topic</span>
         <button type="button" className="btn btn-secondary graph-reveal" disabled={!selectedId || !graph?.nodes.has(selectedId)} onClick={revealSelected}>
           <i className="ph ph-crosshair-simple" aria-hidden="true" />Reveal selected</button>
       </div>
