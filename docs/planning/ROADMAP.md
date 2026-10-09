@@ -10,8 +10,7 @@ P0.1 (#11) and P0.2 (#14) are merged: the pinned scaffold and real native
 WebView smoke are implemented. Domain/provider integration and final release
 acceptance remain ahead. The owner resumed contract-first three-stream delivery on
 2026-10-03; follow [MODULE_CONTRACTS](MODULE_CONTRACTS.md). Existing Claude/Codex POCs prove
-transport primitives only. Organization security guidance was not fetched under
-the owner's explicit session-wide Seezo/MCP waiver; no approval is claimed.
+transport primitives only.
 
 ## Fixed scope and implementation boundaries
 

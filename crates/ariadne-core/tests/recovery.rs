@@ -240,6 +240,7 @@ impl Setup {
                     })),
                     question: "Review original durable child?".into(),
                     short: None,
+                    ack_to: None,
                     item_type: ItemType::Question,
                     status: ItemStatus::Open,
                     owner: ItemOwner::Agent { binding_id: id(3) },

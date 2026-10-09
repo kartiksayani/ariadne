@@ -1,6 +1,7 @@
 // The one workspace keymap (handoff README, "Keyboard"). Components register
 // handlers for the intents they own; this module decides which key means what
 // and when a key belongs to the workspace rather than a text field or dialog.
+// `a` acknowledges an eligible proposed outcome; otherwise it opens the existing answer flow.
 import { useCallback, useRef, type KeyboardEvent } from 'react';
 
 export type IntentKind =

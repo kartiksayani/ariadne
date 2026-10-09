@@ -46,8 +46,8 @@ describe('what a failure says to the owner', () => {
   });
   it('shows core’s own words only when registering a project, where core writes them for the owner', () => {
     vi.spyOn(console, 'debug').mockImplementation(() => {});
-    const folder = failure('not_found', 'Folder not found: /Users/owner/missing', 'Check the folder path, then register again.');
-    expect(registrationFailure(folder)).toBe('Folder not found: /Users/owner/missing Check the folder path, then register again.');
+    const folder = failure('not_found', 'Folder not found: /home/owner/missing', 'Check the folder path, then register again.');
+    expect(registrationFailure(folder)).toBe('Folder not found: /home/owner/missing Check the folder path, then register again.');
     expect(plainFailure(folder)).toBe('Ariadne can’t find that any more. It may have been removed.');
     expect(registrationFailure(new Error('raw'))).toBe(COULDNT_DO_THAT);
   });

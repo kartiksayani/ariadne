@@ -101,6 +101,9 @@ pickers and confirmations; the agent line becomes the quieter label.
 `--dry-run`, makes the default receipt compact (`--full` for the old one) and gives
 `ariadne read --view items` `--topic` and `--archived`.
 
+[ADR-0093](ADR-0093-owner-acknowledgment.md) keeps new items nonterminal and adds
+the owner's local Ack action for read-only work, with an agent-selected target.
+
 [ADR-0095](ADR-0095-session-archive.md) puts finished sessions in a remembered,
 folded Archived group, closes them safely, and restores them as Closed while
 keeping their history readable.

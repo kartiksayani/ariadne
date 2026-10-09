@@ -1324,6 +1324,7 @@ fn explicit_rebind_issues_only_the_locked_history_snapshot_and_replay_never_wide
         .0
         .insert(item_id.clone(), after_future.items.0[&item_id].revision);
     terminal_change.operations = vec![Operation::ItemStatus {
+        ack_to: None,
         item: EntityRef::Existing(ExistingRef { id: item_id }),
         status: ItemStatus::Done,
         outcome: Some("Read history alone cannot consume future input.".into()),

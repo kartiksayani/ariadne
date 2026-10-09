@@ -660,7 +660,7 @@ describe('source-backed navigation views and explicit registration', () => {
   });
   it('sends a home-relative root as typed and shows a missing folder in plain words', async () => {
     const { transport, store } = setup(); read(transport); await store.start();
-    transport.enqueue('project_register', { api_version: 1, ok: false, error: { code: 'not_found', message: 'Folder not found: /Users/owner/missing',
+    transport.enqueue('project_register', { api_version: 1, ok: false, error: { code: 'not_found', message: 'Folder not found: /home/owner/missing',
       hint: 'Check the folder path, then register again.', retryable: false, field_errors: [] } });
     const close = vi.fn(); render(<RegisterProject store={store} disabled={false} close={close} />);
     expect(screen.getByLabelText('Project root').getAttribute('placeholder')).toBe('~/path/to/project');
@@ -668,7 +668,7 @@ describe('source-backed navigation views and explicit registration', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Register project' })); });
     expect(transport.calls.find(call => call.name === 'project_register')?.request).toMatchObject({ command: { params: { canonical_root: '~/missing' } } });
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toBe('Folder not found: /Users/owner/missing Check the folder path, then register again.');
+    expect(alert.textContent).toBe('Folder not found: /home/owner/missing Check the folder path, then register again.');
     expect(close).not.toHaveBeenCalled();
   });
   it('explicitly attaches a fresh host to a registered unfinished session and displays only saved setup', async () => {

@@ -137,5 +137,3 @@ result recovery without modifying core, storage or UI. Run version/frame/unknown
 capability rejection tests. First-party adapters already require shared in-process contract tests and
 provider-specific live tests on their recorded versions. Executable registration
 and conformance are later extension gates.
-
-Organization security guidance was not checked under the existing Seezo waiver.

@@ -148,6 +148,7 @@ fn quit_preserves_running_external_turn_and_queued_input_with_real_native_runtim
                     short: None,
                     item_type: ItemType::Question,
                     status: ItemStatus::Open,
+                    ack_to: None,
                     owner: ItemOwner::Agent {
                         binding_id: scope.binding_id.clone(),
                     },

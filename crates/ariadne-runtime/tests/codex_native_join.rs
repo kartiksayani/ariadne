@@ -194,6 +194,7 @@ impl Setup {
                 short: None,
                 item_type: ItemType::Question,
                 status: ItemStatus::Open,
+                ack_to: None,
                 owner: ItemOwner::Agent {
                     binding_id: binding.id.clone(),
                 },

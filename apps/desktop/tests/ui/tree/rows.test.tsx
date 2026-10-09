@@ -4,7 +4,7 @@ import type { SessionPreferences } from '../../../src/generated/core';
 import type { Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
 import { initialExpansion, normalizeSearch, sentenceRows } from '../../../src/selectors/tree/rows';
-import { chipsOf, toggleChip } from '../../../src/ui/tree/model';
+import { chipsOf, toggleChip, topicCounts } from '../../../src/ui/tree/model';
 
 function seed() { return structuredClone(demo) as Session; }
 function view(session: Session): SessionPreferences {
@@ -14,6 +14,13 @@ function view(session: Session): SessionPreferences {
 }
 
 describe('saved status filter chips', () => {
+  it('places Ack counts after both waiting counts and before other statuses', () => {
+    const statuses = ['open', 'waiting_on_agent', 'done', 'waiting_on_me', 'in_progress'] as const;
+    expect(topicCounts(statuses, 1).map(count => count.text)).toEqual([
+      '1 waiting on you', '1 waiting on agent', '1 to ack', '1 open', '1 in progress', '1 closed',
+    ]);
+    expect(topicCounts(statuses).map(count => count.text)).not.toContain('0 to ack');
+  });
   it('treats every known saved status as All before toggling, while preserving partial groups', () => {
     const full = ['open', 'waiting_on_me', 'in_progress', 'decided', 'done', 'dropped', 'replaced', 'open'] as const;
     expect([...chipsOf(full)]).toEqual(['all']);

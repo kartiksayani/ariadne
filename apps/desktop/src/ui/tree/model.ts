@@ -17,6 +17,7 @@ import { displayStatus, type DisplayStatus } from '../../selectors/waiting/repli
 import { continuedLabel } from '../shared/continued';
 import { hiddenGroupKey, hiddenGroupsFor, hiddenItems } from './hidden';
 import { agentRunning, connectionOf, type Connection } from '../shared/connection';
+import { ackTarget } from '../../selectors/ack';
 
 export const visual = (status: DisplayStatus): StatusKey => statusKey[status];
 const CLOSED: ReadonlySet<ItemStatus> = new Set(['decided', 'done', 'dropped', 'replaced']);
@@ -259,7 +260,7 @@ function topicChip(session: Immutable<Session>, topic: Immutable<Topic>, summari
   return { label: `${ownerName(session) ?? (binding ? agentName(binding.adapter_id) : 'Session')} · ${day}`, title: 'From an earlier session' };
 }
 
-export function topicCounts(statuses: readonly DisplayStatus[]): Count[] {
+export function topicCounts(statuses: readonly DisplayStatus[], ackCount = 0): Count[] {
   const count = (test: (status: DisplayStatus) => boolean) => statuses.filter(test).length;
   const waiting = count(status => status === 'waiting_on_me'), open = count(status => status === 'open');
   const agent = count(status => status === 'waiting_on_agent');
@@ -267,6 +268,7 @@ export function topicCounts(statuses: readonly DisplayStatus[]): Count[] {
   return [
     waiting ? { icon: STATUS.waiting.icon, color: 'var(--st-waiting)', text: `${waiting} waiting on you` } : null,
     agent ? { icon: STATUS.agent.icon, color: 'var(--st-agent)', text: `${agent} waiting on agent` } : null,
+    ackCount ? { icon: 'ph ph-check', color: 'var(--color-text)', text: `${ackCount} to ack` } : null,
     open ? { icon: STATUS.open.icon, color: 'var(--st-open)', text: `${open} open` } : null,
     progress ? { icon: STATUS.progress.icon, color: 'var(--st-progress)', text: `${progress} in progress` } : null,
     done ? { icon: STATUS.decided.icon, color: 'var(--st-decided)', text: `${done} closed` } : null,
@@ -339,10 +341,10 @@ export function treeModel(input: TreeInput): TreeModel {
     // A session with no items at all shows its empty state instead (frame 1g).
     if (filtering && !roots.some(item => include.has(item.id))) continue;
     const open = filtering || topic.id === revealTopic || !input.collapsedTopics.has(topic.id);
-    const statuses = all.filter(item => item.topic_id === topic.id).map(display);
+    const topicItems = all.filter(item => item.topic_id === topic.id), statuses = topicItems.map(display);
     const chipValue = topicChip(session, topic, input.summaries, input.now);
     const delivery = deliveryLine(session, { topicId: topic.id, itemId: null }, input.presence, input.health);
-    built.push({ kind: 'topic', key: topic.id, topic, depth: 0, expanded: open, first: built.length === 0, counts: topicCounts(statuses),
+    built.push({ kind: 'topic', key: topic.id, topic, depth: 0, expanded: open, first: built.length === 0, counts: topicCounts(statuses, topicItems.filter(item => ackTarget(session, item)).length),
       earlier: !topic.origin && !!chipValue, chip: chipValue, allClosed: !delivery && statuses.length > 0 && statuses.every(status => status !== 'waiting_on_agent' && closed(status)), delivery });
     if (!open) continue;
     const walk = (list: readonly Immutable<Item>[], depth: number) => {

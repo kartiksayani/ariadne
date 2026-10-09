@@ -84,4 +84,3 @@ zero configuration when the app is opened from Finder.
 ## Spec references
 
 - [ADR-0080](ADR-0080-app-bundle-in-applications.md)
-- [Live acceptance plan](../planning/evidence/live-acceptance/PLAN.md)

@@ -10,13 +10,15 @@ pub const HELP: &str = r#"Owner commands (explicit registered routes):
   ariadne binding connect|pause|resume|disconnect --json-stdin [--json]
   ariadne input submit|cancel|resolve --json-stdin [--json]
   ariadne topic archive|restore|continue|continue-preview --json-stdin [--json]
-  ariadne item messages|rounds|reveal --json-stdin [--json]
+  ariadne item messages|rounds|reveal|ack --json-stdin [--json]
   ariadne preferences get|patch [--json-stdin] [--json]
   ariadne remove item|topic|session|project --json-stdin [--json]
 Remove is permanent inside Ariadne; files and the agent's conversation stay.
 Item and topic removal use a session route and queue a `removed` notice for
 the told agent; session and project removal use session:null. Every removal
 first writes a pre-remove backup and its receipt prints the backup path.
+Item Ack finishes an item at its stored ack_to target using its expected revision;
+the canonical owner command tag is ack. Ack is an owner action, not an agent tool.
 Stdin is the complete canonical OwnerQueryRequest or OwnerMutationRequest,
 at most 512KiB. Its command tag must match the CLI noun/verb. Stdin commands
 return one canonical JSON envelope by default. Every mutation requires stdin;

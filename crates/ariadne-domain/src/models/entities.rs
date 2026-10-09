@@ -98,6 +98,9 @@ pub struct Item {
     #[serde(rename = "type")]
     pub item_type: ItemType,
     pub status: ItemStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub ack_to: Option<AckTarget>,
     pub owner: ItemOwner,
     pub revision: PositiveSafeInteger,
     pub question_revision: PositiveSafeInteger,
@@ -141,6 +144,24 @@ pub enum ItemStatus {
     Done,
     Dropped,
     Replaced,
+}
+
+/// Terminal state the agent proposes for an explicit owner acknowledgment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum AckTarget {
+    Decided,
+    Done,
+    Dropped,
+}
+impl AckTarget {
+    pub fn status(self) -> ItemStatus {
+        match self {
+            Self::Decided => ItemStatus::Decided,
+            Self::Done => ItemStatus::Done,
+            Self::Dropped => ItemStatus::Dropped,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]

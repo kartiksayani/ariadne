@@ -6,7 +6,7 @@ import { createServer } from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer as createViteServer } from 'vite';
-import assets from '../../../docs/planning/evidence/design-assets/assets.json';
+import assets from '../../../docs/planning/assets/offline-design-assets.json';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const read = (path: string) => readFileSync(resolve(repo, path));

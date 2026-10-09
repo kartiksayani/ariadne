@@ -135,8 +135,8 @@ fn rename_trims_stores_and_persists_across_reopen() {
             .execute(
                 &owner(),
                 &label(
-                    Some("  Billing fixes  "),
-                    Some(" Sorting out the refund rules "),
+                    Some("  Sync fixes  "),
+                    Some(" Sorting out the undo rules "),
                     100,
                 ),
                 at(),
@@ -146,15 +146,15 @@ fn rename_trims_stores_and_persists_across_reopen() {
     assert_eq!(
         receipt.data,
         SavedReceiptData::SessionLabel {
-            name: Some("Billing fixes".into()),
-            description: Some("Sorting out the refund rules".into()),
+            name: Some("Sync fixes".into()),
+            description: Some("Sorting out the undo rules".into()),
         }
     );
     let live = setup.read();
-    assert_eq!(live.name.as_deref(), Some("Billing fixes"));
+    assert_eq!(live.name.as_deref(), Some("Sync fixes"));
     assert_eq!(
         live.description.as_deref(),
-        Some("Sorting out the refund rules")
+        Some("Sorting out the undo rules")
     );
     // The rename is a saved change, but not session activity.
     assert_eq!(live.revision.value(), before.revision.value() + 1);
@@ -168,11 +168,7 @@ fn blank_or_null_fields_clear_back_to_the_default() {
     let setup = Setup::new(&seed());
     setup
         .service()
-        .execute(
-            &owner(),
-            &label(Some("Billing"), Some("Refunds"), 100),
-            at(),
-        )
+        .execute(&owner(), &label(Some("Sync"), Some("Undo"), 100), at())
         .unwrap();
     let receipt = saved(
         setup
@@ -195,19 +191,15 @@ fn blank_or_null_fields_clear_back_to_the_default() {
     // The name can be cleared while the description stays.
     setup
         .service()
-        .execute(
-            &owner(),
-            &label(Some("Billing"), Some("Refunds"), 102),
-            at(),
-        )
+        .execute(&owner(), &label(Some("Sync"), Some("Undo"), 102), at())
         .unwrap();
     setup
         .service()
-        .execute(&owner(), &label(Some(""), Some("Refunds"), 103), at())
+        .execute(&owner(), &label(Some(""), Some("Undo"), 103), at())
         .unwrap();
     let live = setup.read();
     assert!(live.name.is_none());
-    assert_eq!(live.description.as_deref(), Some("Refunds"));
+    assert_eq!(live.description.as_deref(), Some("Undo"));
 }
 
 #[test]
@@ -267,11 +259,11 @@ fn closed_sessions_can_be_renamed_and_removed_ones_are_refused() {
     assert_eq!(setup.read().state, SessionState::Closed);
     setup
         .service()
-        .execute(&owner(), &label(Some("Old billing work"), None, 101), at())
+        .execute(&owner(), &label(Some("Old sync work"), None, 101), at())
         .unwrap();
     let closed = setup.read();
     assert_eq!(closed.state, SessionState::Closed);
-    assert_eq!(closed.name.as_deref(), Some("Old billing work"));
+    assert_eq!(closed.name.as_deref(), Some("Old sync work"));
     let registry = OwnerContext::from_trusted_entrypoint(OwnerScope::Registry);
     setup
         .service()
@@ -300,22 +292,14 @@ fn an_exact_retry_replays_even_when_typed_with_other_spacing() {
     let first = saved(
         setup
             .service()
-            .execute(
-                &owner(),
-                &label(Some("Billing"), Some("Refunds"), 100),
-                at(),
-            )
+            .execute(&owner(), &label(Some("Sync"), Some("Undo"), 100), at())
             .unwrap(),
     );
     let revision = setup.read().revision;
     let replay = saved(
         setup
             .service()
-            .execute(
-                &owner(),
-                &label(Some(" Billing "), Some("Refunds  "), 100),
-                at(),
-            )
+            .execute(&owner(), &label(Some(" Sync "), Some("Undo  "), 100), at())
             .unwrap(),
     );
     assert_eq!(replay, first);
@@ -323,7 +307,7 @@ fn an_exact_retry_replays_even_when_typed_with_other_spacing() {
     // The same operation with a different name is a reused operation id.
     assert!(setup
         .service()
-        .execute(&owner(), &label(Some("Other"), Some("Refunds"), 100), at())
+        .execute(&owner(), &label(Some("Other"), Some("Undo"), 100), at())
         .is_err());
 }
 
@@ -335,7 +319,7 @@ fn the_registry_scope_and_other_receipt_kinds_do_not_pass() {
         refused(
             setup
                 .service()
-                .execute(&registry, &label(Some("Billing"), None, 100), at())
+                .execute(&registry, &label(Some("Sync"), None, 100), at())
         )
         .code,
         CoreErrorCode::PermissionDenied
@@ -346,7 +330,7 @@ fn the_registry_scope_and_other_receipt_kinds_do_not_pass() {
     };
     let request = OwnerMutationRequest {
         session: Some(route.clone()),
-        command: label(Some("Billing"), None, 101),
+        command: label(Some("Sync"), None, 101),
     };
     request.validate_wire().unwrap();
     let mut no_route = request.clone();

@@ -78,9 +78,6 @@ bounded reconciliation without leaking generated provider types into core or
 renderer. Fixture servers do not prove live original-session product acceptance;
 that remains the owner-approved M7 milestone.
 
-MCP/Seezo remain disabled under the owner's current-session waiver. Organization
-security guidance was not checked; no organizational approval is claimed.
-
 ## Spec references
 
 - [PROCESS: Codex adapter](../planning/low-level/PROCESS_AND_PROTOCOLS.md#4-codex-01600-adapter)

@@ -2,9 +2,9 @@
   "schema_version": 1,
   "source_archive": {
     "path": "designs/Ariadne-UI-mockups-v2.zip",
-    "sha256": "f7ea0f3c88ac5e72834388a4977aebb4ecc614500c47b96807476afc24747aa3",
+    "sha256": "f3985e6ff362e1e846ac1f868388432148449b6ab7aa51c9a5d29196eac1e174",
     "member_count": 15,
-    "uncompressed_bytes": 402409
+    "uncompressed_bytes": 402377
   },
   "members": [
     {
@@ -19,13 +19,13 @@
     },
     {
       "path": "design_handoff_ariadne/Ariadne.dc.html",
-      "uncompressed_bytes": 201947,
-      "sha256": "d9ef8fd96a56dc7e79fce8530e65fb214d453ffd90c967dc12c712279cb6bff9"
+      "uncompressed_bytes": 201898,
+      "sha256": "c21d7289e57baa040038e2d2b8446906f2672421b7bfc2cc81abef9f289c3a24"
     },
     {
       "path": "design_handoff_ariadne/Component Sheet.dc.html",
-      "uncompressed_bytes": 19357,
-      "sha256": "39e3830c4dbf10e46b5c4e0f231e6f0d495f8677954478018c8a500249b72b25"
+      "uncompressed_bytes": 19383,
+      "sha256": "a7305d13a13fab30cc58db71f043fbe56a04d9dcab1cb9a53bd7e89038c828d2"
     },
     {
       "path": "design_handoff_ariadne/Item Row.dc.html",
@@ -54,8 +54,8 @@
     },
     {
       "path": "design_handoff_ariadne/README.md",
-      "uncompressed_bytes": 30721,
-      "sha256": "349a2943311183ea7807018a4382b75cdc2b83b085b9c5f5e6d6ee1b37f666f4"
+      "uncompressed_bytes": 30712,
+      "sha256": "a112bb86454e39f2edde1f05d4b7fa3c6fff7fae3380c70e89dce442ae3b7d7b"
     },
     {
       "path": "design_handoff_ariadne/Status Badge.dc.html",

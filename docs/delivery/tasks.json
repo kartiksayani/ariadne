@@ -7,8 +7,8 @@
       "Alpha.6 released on 2026-10-09 as v0.1.0-alpha.6 at 859c7a6c (#141): lighter skill, easier filing, copy, back/forward, item links, tidier tree and text size.",
       "Alpha.7 work on fix/a8-hide: independently scrolling Waiting on me and Sent sections; Option (⌥) 1–9 quick answers and ⌥0 for own words; one chronological detail chat; dimmed and labelled cancelled bubbles that keep the original choice and note; highlighted +N badges; persisted hide items via x, row actions and detail, with expandable hidden groups and waiting questions retained in Waiting on me. Alpha.7 is not yet released.",
       "Alpha.7 minor review fixes: hide waits for a stale session to refresh; indirect-match +N badges use a quieter accent tint with AA text in both themes; pending Remove hides Sent rows immediately and Undo restores them. Focused regression tests and npm run check are the local checks for this work; native runs are excluded by the owner for this task.",
-      "P7.3 live Codex run on 2026-10-06 proved the core loop (evidence docs/planning/evidence/live-acceptance/CODEX-2026-10-06.md). Codex onboarding defects D1-D6 were fixed and merged in #116 (main 1e8d9e7), and docs/GUIDE.md documents the fixed behaviour; D7 is task P8.3; D8 follow-up: Ariadne should send the setup instruction through codex queue itself instead of the owner pasting it.",
-      "P7.2 live Claude run on 2026-10-06 proved the core loop (evidence docs/planning/evidence/live-acceptance/CLAUDE-2026-10-06.md, ADR-0076, PR #114); remaining coverage rows deferred by owner ruling 2026-10-06. Follow-ups: queued inputs stay bound to a retired binding after rebind; no confirm-completed resolution for committed-result/unknown-turn attempts; a session with a Disconnected binding cannot be closed; delivery format: `recent_context` re-sends every topic message the host already produced; send only messages this binding has not seen (other bindings or pre-connect history), shrink topic/item snapshots to id+status, and move the fixed instruction sentence to the skill; rules source.md should say option consequence is required; Claude Mod uses undocumented $.plugin.root.",
+      "P7.3 live Codex run on 2026-10-06 proved the core loop. Codex onboarding defects D1-D6 were fixed and merged in #116 (main 1e8d9e7), and docs/GUIDE.md documents the fixed behaviour; D7 is task P8.3; D8 follow-up: Ariadne should send the setup instruction through codex queue itself instead of the owner pasting it.",
+      "P7.2 live Claude run on 2026-10-06 proved the core loop (ADR-0076, PR #114); remaining coverage rows deferred by owner ruling 2026-10-06. Follow-ups: queued inputs stay bound to a retired binding after rebind; no confirm-completed resolution for committed-result/unknown-turn attempts; a session with a Disconnected binding cannot be closed; delivery format: `recent_context` re-sends every topic message the host already produced; send only messages this binding has not seen (other bindings or pre-connect history), shrink topic/item snapshots to id+status, and move the fixed instruction sentence to the skill; rules source.md should say option consequence is required; Claude Mod uses undocumented $.plugin.root.",
       "PR #107 (agent rule sheet) merged to main as db352e5. It is not a roadmap item.",
       "PR #106 carried the whole former stack (#94-#103) plus the Codex skill and the preferences-conflict fix; squash-merged as f020bbe at head 87aa6b4.",
       "Superseded stack PRs #94, #93, #97, #101, #104, #99, #105, #98, #103 are closed; their branches are kept.",
@@ -23,7 +23,6 @@
       "phase": "M0",
       "depends_on": [],
       "paths": [
-        "docs/planning/evidence/platform-ledger.md",
         ".node-version",
         "rust-toolchain.toml"
       ],
@@ -229,7 +228,7 @@
         "apps/desktop/public/icons/**",
         "apps/desktop/public/licenses/**",
         "tests/ui/reference/assets.test.ts",
-        "docs/planning/evidence/design-assets/**",
+        "docs/planning/assets/offline-design-assets.json",
         "apps/desktop/vite.config.ts",
         "apps/desktop/tsconfig.json"
       ],
@@ -264,7 +263,7 @@
         "apps/desktop/src/styles/**",
         "apps/desktop/src/components/reference/**",
         "tests/ui/reference/**",
-        "docs/planning/evidence/design-assets/**",
+        "docs/planning/assets/offline-design-assets.json",
         "apps/desktop/vite.config.ts",
         "apps/desktop/tsconfig.json",
         "package.json",
@@ -308,7 +307,7 @@
         "apps/desktop/src/styles/**",
         "apps/desktop/src/components/reference/**",
         "tests/ui/reference/**",
-        "docs/planning/evidence/design-assets/**"
+        "docs/planning/assets/offline-design-assets.json"
       ],
       "spec": [
         "docs/planning/DESIGN.md#screens-and-components",
@@ -1424,8 +1423,7 @@
       "paths": [
         "apps/desktop/src/components/accessibility/**",
         "tests/ui/accessibility/**",
-        "tests/visual/**",
-        "docs/planning/evidence/design-review/**"
+        "tests/visual/**"
       ],
       "spec": [
         "docs/planning/DESIGN_TRACEABILITY.md#board-frame-mapping",
@@ -1505,8 +1503,7 @@
         "apps/desktop/tests/ui/graph-culling/**",
         "apps/desktop/tests/ui/graph-layout/component.test.tsx",
         "tests/e2e/graph/**",
-        "tests/ui/reference/playwright.config.ts",
-        "docs/planning/evidence/graph-performance/**"
+        "tests/ui/reference/playwright.config.ts"
       ],
       "spec": [
         "docs/planning/low-level/UI_AND_NATIVE.md#4-graph",
@@ -1702,8 +1699,7 @@
       "paths": [
         "Makefile",
         "scripts/install/**",
-        "tests/functional/install/**",
-        "docs/planning/evidence/install/**"
+        "tests/functional/install/**"
       ],
       "spec": [
         "docs/planning/low-level/SETUP_AND_DELIVERY.md#7-build-and-personal-install",
@@ -1741,8 +1737,7 @@
       ],
       "paths": [
         "tests/e2e/acceptance/**",
-        "tests/functional/acceptance/**",
-        "docs/planning/evidence/deterministic-acceptance/**"
+        "tests/functional/acceptance/**"
       ],
       "spec": [
         "docs/planning/low-level/VERIFICATION.md#cross-cutting-failure-fixtures",
@@ -1772,7 +1767,6 @@
         "P7.1"
       ],
       "paths": [
-        "docs/planning/evidence/live-claude/**",
         "tests/live/claude/**"
       ],
       "spec": [
@@ -1792,7 +1786,7 @@
       "progress": {
         "state": "done",
         "prs": ["https://github.com/kartiksayani/ariadne/pull/114"],
-        "note": "Core loop proved live on 2026-10-06 (busy queue FIFO, terminal-item message, multi-item replies, CLI status/topic/children, result-before-completion order, missing-evidence skip, Claude quit/relaunch). Deferred: completion-before-result order, result repair, resend, second session in the same project, second project isolation, Ariadne app quit/relaunch during a run, npm run test:live (script does not exist); reason: owner ruling 2026-10-06: no further paid host turns; core loops proven. Evidence: docs/planning/evidence/live-acceptance/CLAUDE-2026-10-06.md."
+        "note": "Core loop proved live on 2026-10-06 (busy queue FIFO, terminal-item message, multi-item replies, CLI status/topic/children, result-before-completion order, missing-evidence skip, Claude quit/relaunch). Deferred: completion-before-result order, result repair, resend, second session in the same project, second project isolation, Ariadne app quit/relaunch during a run, npm run test:live (script does not exist); reason: owner ruling 2026-10-06: no further paid host turns; core loops proven."
       },
       "completion": {
         "pr_url": "https://github.com/kartiksayani/ariadne/pull/114"
@@ -1806,7 +1800,6 @@
         "P7.1"
       ],
       "paths": [
-        "docs/planning/evidence/live-codex/**",
         "tests/live/codex/**"
       ],
       "spec": [
@@ -1826,7 +1819,7 @@
       "progress": {
         "state": "done",
         "prs": ["https://github.com/kartiksayani/ariadne/pull/115"],
-        "note": "Core loop proved live on 2026-10-06 through the Codex native queue (pause, two queued inputs, resume, FIFO delivery via codex queue, turn correlation, explicit results committed, item statuses updated; 5 Codex turns). Deferred: five inputs (two were run), closed-item message, disconnect/relaunch, duplicates, both join orders, missing-result/uncertain recovery, same-project/cross-project isolation, npm run test:live (script does not exist); reason: owner ruling 2026-10-06: no further paid host turns; core loops proven. Onboarding defects D1-D6 were fixed and merged in #116 (main 1e8d9e7); docs/GUIDE.md documents the fixed behaviour. Evidence: docs/planning/evidence/live-acceptance/CODEX-2026-10-06.md."
+        "note": "Core loop proved live on 2026-10-06 through the Codex native queue (pause, two queued inputs, resume, FIFO delivery via codex queue, turn correlation, explicit results committed, item statuses updated; 5 Codex turns). Deferred: five inputs (two were run), closed-item message, disconnect/relaunch, duplicates, both join orders, missing-result/uncertain recovery, same-project/cross-project isolation, npm run test:live (script does not exist); reason: owner ruling 2026-10-06: no further paid host turns; core loops proven. Onboarding defects D1-D6 were fixed and merged in #116 (main 1e8d9e7); docs/GUIDE.md documents the fixed behaviour."
       },
       "completion": {
         "pr_url": "https://github.com/kartiksayani/ariadne/pull/115"
@@ -1843,8 +1836,7 @@
       "paths": [
         "README.md",
         "DECISIONS.md",
-        "docs/planning/low-level/VERIFICATION.md",
-        "docs/planning/evidence/release/**"
+        "docs/planning/low-level/VERIFICATION.md"
       ],
       "spec": [
         "docs/planning/low-level/VERIFICATION.md#milestone-artifacts",
@@ -1853,7 +1845,7 @@
       ],
       "acceptance": [
         "Clean checkout builds/installs recorded source revision; packaged offline demo/history/owner edits, both supported integrations, native routing and owned uninstall pass on recorded Mac.",
-        "Every non-deferred V01–V29 row in docs/planning/evidence/release/MATRIX.md links evidence or a concrete external blocker, with one evidence kind per row (test / CI run / live run / manual check). Release evidence is one link to a passing required CI run on main; seeds, hashes and logs need not be retained per row.",
+        "Every non-deferred V01–V29 row in docs/planning/low-level/VERIFICATION.md has evidence or a concrete external blocker, with one evidence kind per row (test / CI run / live run / manual check). Release evidence is one link to a passing required CI run on main; seeds, hashes and logs need not be retained per row.",
         "README covers install/unsigned Open Anyway/setup/both hosts/60-second tour/rules/recovery/uninstall/limits; record no remote assets, telemetry, updater, host transcript/credential handling or release test service.",
         "Public plugin and exotic recovery remain deferred; reviewed repository changes are publishable under existing authorization, while signed public app distribution is a later decision."
       ],
@@ -1870,7 +1862,7 @@
         "prs": [
           118
         ],
-        "note": "Evidence: MATRIX rows, manual checklist (owner fills date/tester), clean install at 1e8d9e7, visitor README + docs/GUIDE.md."
+        "note": "Release handoff completed in #118: clean install at 1e8d9e7, visitor README and docs/GUIDE.md. Manual checks for V11, V21 and V24 still need owner-recorded date, tester and results."
       }
     },
     {
@@ -2008,8 +2000,7 @@
         "crates/ariadne-cli/tests/setup.rs",
         "crates/ariadne-cli/tests/doctor.rs",
         "docs/GUIDE.md",
-        "docs/adr/ADR-0081-provider-paths-from-setup.md",
-        "docs/planning/evidence/live-acceptance/PLAN.md"
+        "docs/adr/ADR-0081-provider-paths-from-setup.md"
       ],
       "spec": [
         "docs/adr/ADR-0081-provider-paths-from-setup.md"

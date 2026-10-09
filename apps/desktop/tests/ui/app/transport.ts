@@ -37,7 +37,7 @@ export class AppTransport implements DesktopTransport {
   };
   constructor() {
     const first = structuredClone(demo) as Session;
-    first.title = 'Payments review';
+    first.title = 'Notes review';
     const second = structuredClone(first); second.id = secondId; second.title = 'Separate session';
     second.inputs = {}; second.items = {}; second.topics = {}; second.operation_receipts = {}; second.messages = []; second.answers = []; second.rounds = {};
     this.sessions.set(first.id, first); this.sessions.set(second.id, second);

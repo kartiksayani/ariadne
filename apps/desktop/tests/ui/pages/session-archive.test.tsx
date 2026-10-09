@@ -54,6 +54,24 @@ async function unfold() {
 }
 
 describe('Session archive cards', () => {
+  it('keeps session archive confirmation counts unchanged by Open Ack proposals', async () => {
+    const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
+    const before = closeImpact(session);
+    const item = session.items['1.1']!;
+    expect(item.status).toBe('open');
+    item.ack_to = 'done';
+    expect(closeImpact(session)).toEqual(before);
+    await setup(true, false, transport);
+    const impact = closeImpact(session);
+    await archive(false);
+    const warning = screen.getByRole('dialog').textContent;
+    item.ack_to = null;
+    expect(closeImpact(session)).toEqual(impact);
+    expect(screen.getByRole('dialog').textContent).toBe(warning);
+    expect(warning).toContain(`${impact.questions} question`);
+    expect(warning).not.toContain('to ack');
+    expect(commands(transport)).toEqual([]);
+  });
   it.each([false, true])('confirms Active without pending inputs on the %s All sessions view, remembers the fold, restores Closed then reopens', async all => {
     const transport = await setup(false, all);
     await archive();

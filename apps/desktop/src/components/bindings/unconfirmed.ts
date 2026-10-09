@@ -3,6 +3,7 @@
 import type { OwnerCommand } from '../../generated/core';
 
 const subject: Record<OwnerCommand['command'], string> = {
+  ack: 'Acknowledging the item',
   project_register: 'Adding the project',
   binding_connect: 'Connecting the agent',
   binding_pause: 'Pausing sending',

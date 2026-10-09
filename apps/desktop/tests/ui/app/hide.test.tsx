@@ -37,7 +37,7 @@ describe('owner hide and unhide actions', () => {
     const session = transport.sessions.get(route.session_id)!;
     ++session.revision;
     act(() => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
-    expect(row('4')!.getAttribute('aria-disabled')).toBe('true');
+    expect(row('4')!.getAttribute('aria-disabled')).toBeNull();
     row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'x' });
     expect(saved(transport).hidden_item_ids ?? []).toEqual([]);
     await act(async () => { transport.holdSession = null; release(); });

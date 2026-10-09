@@ -194,7 +194,7 @@ export function footerSummary(counts: FooterCounts | null): string {
 }
 
 export const footerKeys: readonly { readonly k: string; readonly t: string }[] = [
-  { k: '↑↓', t: 'move' }, { k: '←→', t: 'fold' }, { k: 'a', t: 'answer' }, { k: '1–9', t: 'select' }, { k: '⌥1–9', t: 'send choice + note' }, { k: '⌥0', t: 'focus own words' }, { k: '⌘↵', t: 'reply only' }, { k: '↵', t: 'send / details' },
+  { k: '↑↓', t: 'move' }, { k: '←→', t: 'fold' }, { k: 'a', t: 'ack / answer' }, { k: '1–9', t: 'select' }, { k: '⌥1–9', t: 'send choice + note' }, { k: '⌥0', t: 'focus own words' }, { k: '⌘↵', t: 'reply only' }, { k: '↵', t: 'send / details' },
   { k: 'b r d z o', t: 'item actions' }, { k: 'x', t: 'hide / unhide' }, { k: '/', t: 'search' }, { k: 'g', t: 'graph' }, { k: 'm', t: 'messages' }, { k: 'w', t: 'waiting' }, { k: 'esc', t: 'close' },
 ];
 

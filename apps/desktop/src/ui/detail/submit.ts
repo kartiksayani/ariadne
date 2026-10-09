@@ -6,7 +6,7 @@
 // draft in place, whatever the item's status does meanwhile, and nothing is ever copied from one draft to another. What
 // the words go out as follows the status when they are sent (`send`'s `as`); the draft keeps its own revisions, so an
 // item that changed since still asks for a review first.
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { plainFailure } from '../../data/plain';
 import type { InputKind } from '../../generated/domain/models';
@@ -58,7 +58,15 @@ export interface DetailSubmit {
 
 export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, itemId: string): DetailSubmit {
   const state = useOwnerDrafts(drafts), current = useSession(store), session = current.snapshot?.session;
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [reopening, setReopening] = useState(false);
+  const request = useRef<{ cancelled: boolean } | null>(null);
   useEffect(() => { void drafts.load(); }, [drafts]);
+  useEffect(() => {
+    setSendError(null);
+    setReopening(false);
+    return () => { if (request.current) request.current.cancelled = true; request.current = null; };
+  }, [drafts, store, itemId]);
   const route = session ? { project_id: session.project_id, session_id: session.id } : null;
   const find = (intent: DetailIntent): DraftEntry | undefined => route ? drafts.find(route, itemId, intent) : undefined;
   const intentOf = (target: DraftTarget): DetailIntent => typeof target === 'string' ? target : target.kind;
@@ -74,18 +82,18 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
   };
   // A saved, unsent draft written against an older item revision or binding. An attempted
   // (uncertain) draft stays frozen for an exact retry instead.
-  const changedEntry = (entry: DraftEntry | undefined): boolean => {
-    const item = session?.items[itemId];
-    if (!session || !item || !entry || entry.receipt || entry.saving || entry.uncertain) return false;
+  const changedEntry = (entry: DraftEntry | undefined, currentSession = session): boolean => {
+    const item = currentSession?.items[itemId];
+    if (!currentSession || !item || !entry || entry.receipt || entry.saving || entry.uncertain) return false;
     // An untouched draft holds no owner content: it follows the current item and binding on send.
     if (!entry.draft.text && entry.draft.selected_option_id === null) return false;
     return item.revision !== entry.draft.target_revision || item.question_revision !== entry.draft.question_revision
-      || session.active_binding_id !== entry.draft.binding_id;
+      || currentSession.active_binding_id !== entry.draft.binding_id;
   };
-  const lockedEntry = (entry: DraftEntry | undefined) => state.preferenceUncertain || (!!entry && (entry.saving || entry.uncertain));
+  const lockedEntry = (entry: DraftEntry | undefined) => !state.ready || state.preferenceUncertain || (!!entry && (entry.saving || entry.uncertain));
   const changed = (target: DraftTarget) => changedEntry(entryOf(target));
-  const review = (target: DraftTarget) => { const entry = entryOf(target); if (session && entry) drafts.review(entry.draft.op_id, session); };
-  const ready = state.ready && current.status === 'ready' && !!session;
+  const review = (target: DraftTarget) => { const entry = entryOf(target); if (session && entry) { setSendError(null); drafts.review(entry.draft.op_id, session); } };
+  const ready = state.ready && current.status === 'ready' && !current.error && !!session;
   const mine = Object.values(state.entries).filter(entry => route && entry.draft.session.project_id === route.project_id
     && entry.draft.session.session_id === route.session_id && entry.draft.target.item_id === itemId);
   const failed = mine.find(entry => entry.error);
@@ -93,23 +101,67 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
     .map((entry): Words => ({ id: entry.draft.op_id, kind: entry.draft.intent as WordsKind, text: entry.draft.text, locked: lockedEntry(entry), changed: changedEntry(entry) }));
   return {
     ready,
-    locked: target => lockedEntry(entryOf(target)),
+    locked: target => target === 'reopen' && reopening || lockedEntry(entryOf(target)),
     // Typing needs only the loaded drafts and a snapshot: a refresh in progress (status 'stale') must not swallow the owner's
     // words. Sending still waits for `ready`, and a draft written against an older snapshot is reviewed before it goes.
     edit: (target, text) => { if (!state.ready || !session) return; const id = open(target); if (id) drafts.edit(id, { text }); },
     changed, review,
     send: async (target, text, as) => {
-      if (!ready) return false;
-      // A stale draft with owner content waits for a review; an empty one follows the current item and binding.
-      if (changed(target)) return false;
-      const stored = entryOf(target), item = session?.items[itemId];
-      if (session && item && stored && !stored.receipt && !stored.saving && !stored.uncertain && (item.revision !== stored.draft.target_revision
-        || item.question_revision !== stored.draft.question_revision || session.active_binding_id !== stored.draft.binding_id)) review(target);
-      const id = open(target);
-      if (!id) return false;
-      const entry = drafts.getSnapshot().entries[id];
-      if (text !== undefined && entry && !entry.uncertain && entry.draft.text !== text) drafts.edit(id, { text });
-      return drafts.submit(id, as);
+      // Reopen is a one-press request. Keep that intent across an in-flight refresh,
+      // but never replay it after navigation, a timeout or a changed target.
+      const attempt = target === 'reopen' ? { cancelled: false } : null;
+      if (attempt && request.current && !request.current.cancelled) return false;
+      if (attempt) { request.current = attempt; setReopening(true); }
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        setSendError(null);
+        if (attempt && (store.getSnapshot().status !== 'ready' || store.getSnapshot().error)) {
+          await Promise.race([
+            store.refresh(true),
+            new Promise<void>(resolve => { timeout = setTimeout(resolve, 5000); }),
+          ]);
+          if (attempt.cancelled) return false;
+        }
+        const latest = store.getSnapshot();
+        const sendingSession = latest.snapshot?.session;
+        if (!drafts.getSnapshot().ready || !sendingSession || latest.status !== 'ready' || latest.error
+            || (!attempt && sendingSession !== session)) {
+          setSendError("Ariadne is still loading this session's latest changes. Try again.");
+          return false;
+        }
+        if (attempt && (sendingSession.items[itemId]?.question !== session?.items[itemId]?.question
+            || sendingSession.active_binding_id !== session?.active_binding_id)) {
+          setSendError('This item changed. Review it before sending. Your text is kept.');
+          return false;
+        }
+        const stored = typeof target !== 'string' && target.id ? drafts.getSnapshot().entries[target.id]
+          : drafts.find(latest.route, itemId, intentOf(target));
+        // A stale draft with owner content waits for a review; an empty one follows the current item and binding.
+        if (changedEntry(stored, sendingSession)) { setSendError('This item changed. Review it before sending. Your text is kept.'); return false; }
+        if (drafts.getSnapshot().preferenceUncertain || stored?.saving || stored?.uncertain) { setSendError('This message is being saved or needs a retry. Your text is kept.'); return false; }
+        const item = sendingSession.items[itemId];
+        if (item && stored && !stored.receipt && (item.revision !== stored.draft.target_revision
+          || item.question_revision !== stored.draft.question_revision || sendingSession.active_binding_id !== stored.draft.binding_id)) drafts.review(stored.draft.op_id, sendingSession);
+        if (stored?.receipt) drafts.another(stored.draft.op_id, sendingSession);
+        const id = drafts.find(latest.route, itemId, intentOf(target))?.draft.op_id ?? drafts.begin(sendingSession, itemId, intentOf(target));
+        // A specific words draft must keep its identity even if a newer one exists.
+        const sendingId = typeof target !== 'string' && target.id && !stored?.receipt ? target.id : id;
+        if (!sendingId) { setSendError('This action is no longer available for the current item.'); return false; }
+        const entry = drafts.getSnapshot().entries[sendingId];
+        if (text !== undefined && entry && !entry.uncertain && entry.draft.text !== text) drafts.edit(sendingId, { text });
+        const sent = await drafts.submit(sendingId, as);
+        if (attempt?.cancelled) return false;
+        if (!sent && !drafts.getSnapshot().entries[sendingId]?.error && !drafts.getSnapshot().error) {
+          setSendError('This message could not be saved. Try again.');
+        }
+        return sent;
+      } catch (error: unknown) {
+        if (!attempt?.cancelled) setSendError(plainFailure(error, 'This message could not be saved. Try again.'));
+        return false;
+      } finally {
+        clearTimeout(timeout);
+        if (attempt && request.current === attempt) { request.current = null; setReopening(false); }
+      }
     },
     written,
     blank: kind => {
@@ -117,6 +169,6 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
       return { id: live?.draft.op_id ?? null, kind, text: live?.draft.text ?? '', locked: lockedEntry(entry), changed: changedEntry(live) };
     },
     saving: (mine.find(entry => entry.saving)?.draft.intent as InputKind | undefined) ?? null,
-    error: failed?.error ? plainFailure(failed.error) : state.error ? plainFailure(state.error) : null,
+    error: sendError ?? (failed?.error ? plainFailure(failed.error) : state.error ? plainFailure(state.error) : null),
   };
 }

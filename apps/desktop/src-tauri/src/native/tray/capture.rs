@@ -420,10 +420,10 @@ mod label_tests {
     fn session_label_prefers_the_name_the_owner_set() {
         let binding = binding();
         assert_eq!(
-            session_label(Some("  Billing fix "), Some(&binding)),
-            "Billing fix"
+            session_label(Some("  Notes sync "), Some(&binding)),
+            "Notes sync"
         );
-        assert_eq!(session_label(Some("Billing fix"), None), "Billing fix");
+        assert_eq!(session_label(Some("Notes sync"), None), "Notes sync");
         // A blank name counts as none.
         assert_eq!(session_label(Some("   "), None), "No agent");
         assert_eq!(

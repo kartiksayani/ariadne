@@ -301,8 +301,17 @@
       "op_id": "00000000-0000-4000-8000-000000000400",
       "command": "session_label_set",
       "params": {
-        "name": "Billing fixes",
-        "description": "Sorting out the refund rules"
+        "name": "Sync fixes",
+        "description": "Sorting out the undo rules"
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "ack",
+      "params": {
+        "item_id": "1",
+        "expected_revision": 2
       }
     }
   ],

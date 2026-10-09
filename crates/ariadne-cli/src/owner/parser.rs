@@ -85,6 +85,7 @@ pub(super) fn command(noun: &str, verb: &str) -> Option<&'static str> {
         ("item", "messages") => "item_messages",
         ("item", "rounds") => "item_rounds",
         ("item", "reveal") => "reveal_item",
+        ("item", "ack") => "ack",
         ("binding", "connect") => "binding_connect",
         ("binding", "pause") => "binding_pause",
         ("binding", "resume") => "binding_resume",
@@ -155,6 +156,7 @@ fn mutation_name(command: &OwnerCommand) -> &'static str {
         OwnerCommand::SessionRemove { .. } => "session_remove",
         OwnerCommand::ProjectRemove { .. } => "project_remove",
         OwnerCommand::SessionLabelSet { .. } => "session_label_set",
+        OwnerCommand::Ack { .. } => "ack",
     }
 }
 fn read_stdin(input: &mut dyn Read) -> Result<Vec<u8>, CoreError> {

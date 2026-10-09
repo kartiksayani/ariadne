@@ -76,6 +76,12 @@ pub enum SavedReceiptData {
         name: Option<String>,
         description: Option<String>,
     },
+    ItemAck {
+        item_id: ItemRef,
+        item_revision: PositiveSafeInteger,
+        status: ItemStatus,
+        message_id: UuidV4,
+    },
     BindingConnect {
         binding_id: UuidV4,
         generation: UuidV4,

@@ -127,12 +127,25 @@ Topic and Item also carry optional `short` (ADR-0084): an agent-written 2-4 word
 label, trimmed, one line, at most 40 characters; omitted from JSON when absent, so
 stores written before it load and re-serialize unchanged.
 
-Item: `{id,ordinal,topic_id,parent,question,type,status,owner,revision,
+Item: `{id,ordinal,topic_id,parent,question,type,status,ack_to?,owner,revision,
 question_revision,next_child,ask,note,options,links,outcome,why,replaced_by,
 created_at,updated_at,created_message_id,updated_message_ids,status_history,
 waiting_since,recipient_binding_id,current_round_id,source_round_id,origin}`.
 `type=question|decision|finding|task|explanation`;
 `status=open|waiting_on_me|in_progress|decided|done|dropped|replaced`.
+`ack_to`, when present, is `decided|done|dropped` (ADR-0093). It is omitted when
+absent, so old items load without adding a field or rewriting their stored bytes.
+New agent items cannot have a terminal status. Strict core rejects such creation;
+the lenient CLI repairs Decided/Done/Dropped to Open with the requested target,
+including nested children, and reports the repair. Open or InProgress items
+with a target may retain intended outcome/why text. item.status open/in_progress
+can set a target; omission keeps it and its existing text. Strict core refuses an
+agent terminal transition or replacement while the item has a target. The lenient
+CLI repairs terminal status requests to Open with the requested target and full
+completion text, independent of live state so exact retries remain stable. Owner
+Ack clears the target. An unanswered ask must keep its owner answer route: new asks
+start Waiting on me with a round; lenient filing repairs explicit Open/InProgress
+asks accordingly, preserving the proposal.
 `owner={kind:me}|{kind:agent,binding_id}|{kind:other,name}`.
 `ask` is the agent's current concrete request (nullable); `note` is a progress
 sentence, not the reply thread. Links: `{kind:pr|file|doc,label,target}`.
@@ -156,8 +169,13 @@ fields, cause message ID, time, acting binding, and handled owner-message number
 previous_replaced_by,cause_message_id,at,binding_id,
 handled_through_message_number,reason}`; previous terminal fields, binding and
 reason are nullable. The handled watermark is a nonnegative safe integer.
-Only the agent's validated domain operation changes an item status. Owner input
-save, transport acknowledgement and host completion never do so.
+The agent's validated domain operation changes an item status. The owner can
+also `ack` an Open/InProgress item at its expected revision, moving it to its
+recorded target and clearing that target. An unanswered ask, absent target or
+terminal state refuses Ack with a plain message. An archived session also refuses
+Ack with instructions to restore and reopen it. Ack records an owner Activity
+and status history without creating an Input or delivery. Owner input save,
+transport acknowledgement and host completion never change status.
 
 ### Full messages, answers and rounds
 
@@ -793,9 +811,12 @@ Continue is a **copy**, not shared mutable topic membership. Read a validated
 source snapshot and include source revision/hash in preview. Owner chooses an
 existing bound target session and confirms. Under target lock allocate new topic,
 items, messages and rounds; remap all internal refs in two passes; preserve full
-bodies and origin references. External replacement links remain provenance links,
-not invalid live replacement edges (copy terminal replaced items as dropped with
-explicit imported outcome if target is outside copied topic; show preview).
+bodies and origin references. Continue is the owner's action, so terminal copies
+stay terminal and within-topic replacements retain their live remapped links
+(ADR-0093). External replacements become Dropped with their original link and
+completion preserved in source-qualified history; preview explains that import.
+Unanswered Open/InProgress asks without a current round become Waiting on me with
+a fresh owner answer round. Answered episodes and pending Ack proposals stay intact.
 Atomically add continuation receipt and a topic-targeted input containing the
 approved summary. Source remains untouched; no two-session transaction or hidden
 retargeting. Duplicate operation returns the original mapping. Source changed
