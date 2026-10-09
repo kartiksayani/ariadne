@@ -1,4 +1,5 @@
 //! Deliberate owner lifecycle controls and copied topic handoffs.
+mod ack;
 mod continuation;
 mod error;
 mod label;
@@ -30,6 +31,39 @@ impl<'a> HistoryActionService<'a> {
         command: &OwnerCommand,
         at: UtcMillis,
     ) -> Result<MutationReceipt, HistoryActionError> {
+        if matches!(command, OwnerCommand::Ack { .. }) {
+            return Err(core(
+                CoreErrorCode::InvalidArgument,
+                "Ack requires its owner message allocator",
+            )
+            .into());
+        }
+        self.execute_with_allocator(context, command, at, || {
+            unreachable!("Only Ack requires a message allocator")
+        })
+    }
+
+    /// Ack allocates a durable owner Activity message in the same transaction.
+    pub fn acknowledge(
+        &self,
+        context: &OwnerContext,
+        command: &OwnerCommand,
+        at: UtcMillis,
+        allocate: impl FnMut() -> UuidV4,
+    ) -> Result<MutationReceipt, HistoryActionError> {
+        if !matches!(command, OwnerCommand::Ack { .. }) {
+            return Err(core(CoreErrorCode::InvalidArgument, "Expected an Ack command").into());
+        }
+        self.execute_with_allocator(context, command, at, allocate)
+    }
+
+    fn execute_with_allocator(
+        &self,
+        context: &OwnerContext,
+        command: &OwnerCommand,
+        at: UtcMillis,
+        mut allocate: impl FnMut() -> UuidV4,
+    ) -> Result<MutationReceipt, HistoryActionError> {
         let OwnerScope::Session(route) = context.scope() else {
             return Err(core(
                 CoreErrorCode::PermissionDenied,
@@ -42,7 +76,8 @@ impl<'a> HistoryActionService<'a> {
             | OwnerCommand::TopicRestore { api_version, .. }
             | OwnerCommand::SessionClose { api_version, .. }
             | OwnerCommand::SessionReopen { api_version, .. }
-            | OwnerCommand::SessionLabelSet { api_version, .. } => api_version,
+            | OwnerCommand::SessionLabelSet { api_version, .. }
+            | OwnerCommand::Ack { api_version, .. } => api_version,
             _ => {
                 return Err(core(
                     CoreErrorCode::InvalidArgument,
@@ -56,6 +91,7 @@ impl<'a> HistoryActionService<'a> {
         }
         command.validate_wire()?;
         let normalized = match command {
+            OwnerCommand::Ack { params, .. } => crate::receipts::normalized("ack", params)?,
             OwnerCommand::TopicArchive { params, .. } => {
                 crate::receipts::normalized("topic_archive", params)?
             }
@@ -96,7 +132,11 @@ impl<'a> HistoryActionService<'a> {
                 if matches!(command, OwnerCommand::SessionLabelSet { .. }) {
                     return label::apply(session, command);
                 }
-                let data = lifecycle::apply(session, command, &at)?;
+                let data = if matches!(command, OwnerCommand::Ack { .. }) {
+                    ack::apply(session, command, &at, &mut allocate)?
+                } else {
+                    lifecycle::apply(session, command, &at)?
+                };
                 session.updated_at = at;
                 Ok::<_, CoreError>(data)
             },

@@ -9,6 +9,7 @@ import { normalizeSearch, sentenceRows, type SentenceRow } from '../../selectors
 import { shortLabel } from '../shared/short';
 import { displayStatus, type DisplayStatus } from '../../selectors/waiting/replied';
 import { hiddenItems } from '../tree/hidden';
+import { ackTarget } from '../../selectors/ack';
 
 export type GraphStatus = 'open' | 'waiting' | 'agent' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
 
@@ -54,6 +55,7 @@ export interface GraphNode {
   readonly dimmed: boolean;
   /** Hidden by the owner, directly or through a parent. Still opens in detail. */
   readonly hidden: boolean;
+  readonly ack: NonNullable<Item['ack_to']> | null;
 }
 export interface GraphEdge { readonly id: string; readonly d: string; readonly on: boolean }
 export interface GraphReplacement { readonly id: string; readonly d: string; readonly labelX: number; readonly labelY: number }
@@ -105,8 +107,9 @@ export function topicCounts(items: readonly Immutable<Item>[], session?: Immutab
   const shown = (item: Immutable<Item>): DisplayStatus => session ? displayStatus(session, item) : item.status;
   const count = (status: DisplayStatus) => items.filter(item => shown(item) === status).length;
   const closed = items.filter(item => isClosed(item.status)).length;
-  return [[count('waiting_on_me'), 'waiting on you'], [count('waiting_on_agent'), 'waiting on agent'], [count('open'), 'open'],
-    [count('in_progress'), 'in progress'], [closed, 'closed']]
+  const ack = session ? items.filter(item => ackTarget(session, item)).length : 0;
+  return [[count('waiting_on_me'), 'waiting on you'], [count('waiting_on_agent'), 'waiting on agent'], [ack, 'to ack'],
+    [count('open'), 'open'], [count('in_progress'), 'in progress'], [closed, 'closed']]
     .filter(([n]) => n).map(([n, words]) => `${n} ${words}`).join(' · ');
 }
 
@@ -176,7 +179,7 @@ export function sessionGraph(input: GraphInput): SessionGraph {
       const node: GraphNode = { item, status: graphStatus(displayStatus(session, item)), short: shortLabel(item), x: at.x, y: at.y, below,
         collapsed: collapsed && below > 0, canCollapse: !filtering && !collapsed && below > 0, selected,
         onThread: thread.has(item.id) && !selected, closed: isClosed(item.status), dimmed: filtering && row.context && !selected,
-        hidden: hidden.has(item.id) };
+        hidden: hidden.has(item.id), ack: ackTarget(session, item) };
       nodes.set(item.id, node);
       return node;
     });

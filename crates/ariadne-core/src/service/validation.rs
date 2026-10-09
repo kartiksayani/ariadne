@@ -204,6 +204,18 @@ impl ApplyRequest {
                         why,
                         ..
                     } = &**value;
+                    if matches!(
+                        value.status,
+                        ItemStatus::Decided
+                            | ItemStatus::Done
+                            | ItemStatus::Dropped
+                            | ItemStatus::Replaced
+                    ) {
+                        return Err(invalid("New items must start open, waiting_on_me, or in_progress; propose decided, done, or dropped with ack_to"));
+                    }
+                    if ask.is_some() && value.status != ItemStatus::WaitingOnMe {
+                        return Err(invalid("A new item with an ask must be waiting_on_me so the owner can answer it"));
+                    }
                     text(question, 4096, true)?;
                     short_label(short.as_deref())?;
                     for value in [ask, outcome, why].into_iter().flatten() {
@@ -242,11 +254,20 @@ impl ApplyRequest {
                     options(values)?;
                 }
                 Operation::ItemStatus {
+                    status,
+                    ack_to,
                     outcome,
                     why,
                     reason,
                     ..
                 } => {
+                    if ack_to.is_some()
+                        && !matches!(status, ItemStatus::Open | ItemStatus::InProgress)
+                    {
+                        return Err(invalid(
+                            "item.status ack_to is allowed only with open or in_progress",
+                        ));
+                    }
                     for value in [outcome, why, reason].into_iter().flatten() {
                         text(value, 4096, true)?;
                     }
@@ -295,7 +316,8 @@ impl OwnerCommand {
             | Self::TopicRemove { op_id, .. }
             | Self::SessionRemove { op_id, .. }
             | Self::ProjectRemove { op_id, .. }
-            | Self::SessionLabelSet { op_id, .. } => op_id,
+            | Self::SessionLabelSet { op_id, .. }
+            | Self::Ack { op_id, .. } => op_id,
         }
     }
     pub fn validate_wire(&self) -> Result<(), CoreError> {
@@ -1037,6 +1059,26 @@ pub fn validate_owner_receipt(
                         .is_none_or(|id| id == &receipt.session_id),
                     _ => false,
                 }
+                && match (&request.command, &receipt.data) {
+                    (
+                        OwnerCommand::Ack { params, .. },
+                        SavedReceiptData::ItemAck {
+                            item_id,
+                            item_revision,
+                            status,
+                            ..
+                        },
+                    ) => {
+                        item_id == &params.item_id
+                            && item_revision.value()
+                                == params.expected_revision.value().saturating_add(1)
+                            && matches!(
+                                status,
+                                ItemStatus::Decided | ItemStatus::Done | ItemStatus::Dropped
+                            )
+                    }
+                    _ => true,
+                }
                 && matches!(
                     (&request.command, &receipt.data),
                     (
@@ -1057,21 +1099,25 @@ pub fn validate_owner_receipt(
                     ) | (
                         OwnerCommand::SessionClose { .. } | OwnerCommand::SessionReopen { .. },
                         SavedReceiptData::SessionLifecycle { .. }
-                    ) | (
-                        OwnerCommand::SessionLabelSet { .. },
-                        SavedReceiptData::SessionLabel { .. }
-                    ) | (
-                        OwnerCommand::BindingPause { .. }
-                            | OwnerCommand::BindingResume { .. }
-                            | OwnerCommand::BindingDisconnect { .. },
-                        SavedReceiptData::BindingState { .. }
-                    ) | (
-                        OwnerCommand::TopicContinue { .. },
-                        SavedReceiptData::Continuation { .. }
-                    ) | (
-                        OwnerCommand::ItemRemove { .. } | OwnerCommand::TopicRemove { .. },
-                        SavedReceiptData::Removal { .. }
-                    )
+                    ) | (OwnerCommand::Ack { .. }, SavedReceiptData::ItemAck { .. })
+                        | (
+                            OwnerCommand::SessionLabelSet { .. },
+                            SavedReceiptData::SessionLabel { .. }
+                        )
+                        | (
+                            OwnerCommand::BindingPause { .. }
+                                | OwnerCommand::BindingResume { .. }
+                                | OwnerCommand::BindingDisconnect { .. },
+                            SavedReceiptData::BindingState { .. }
+                        )
+                        | (
+                            OwnerCommand::TopicContinue { .. },
+                            SavedReceiptData::Continuation { .. }
+                        )
+                        | (
+                            OwnerCommand::ItemRemove { .. } | OwnerCommand::TopicRemove { .. },
+                            SavedReceiptData::Removal { .. }
+                        )
                 )
         }
         MutationReceipt::Removed(receipt) => {

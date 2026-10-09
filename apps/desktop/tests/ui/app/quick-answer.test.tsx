@@ -150,27 +150,56 @@ describe('quick owner answers from the desktop', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('does not send or replay a shortcut pressed while the session view is refreshing', async () => {
+  it('reports a queued shortcut that reaches the detail while refreshing, then sends only on a new press', async () => {
     const transport = setup(); await openQuestion();
     const invoke = transport.invoke.bind(transport);
-    let release!: () => void, entered = false;
+    let release!: () => void, reveal!: () => void, entered = false, revealing = false, holdingRefresh = false;
     const gate = new Promise<void>(resolve => { release = resolve; });
+    const revealGate = new Promise<void>(resolve => { reveal = resolve; });
     vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
-      if ('request' in args.request && args.request.request.command === 'session_get' && args.request.session?.session_id === route.session_id) {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch') { revealing = true; await revealGate; }
+      if (holdingRefresh && 'request' in args.request && args.request.request.command === 'session_get' && args.request.session?.session_id === route.session_id) {
         entered = true; await gate;
       }
+      return invoke(name, args);
+    });
+    row().focus(); alt(row(), 1);
+    await waitFor(() => expect(revealing).toBe(true));
+    holdingRefresh = true;
+    const session = transport.sessions.get(route.session_id)!;
+    ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: session.revision }); });
+    await waitFor(() => expect(entered).toBe(true));
+    await act(async () => { reveal(); });
+    expect(await within(detail()).findByRole('alert')).toHaveProperty('textContent', "Ariadne is still loading this session's latest changes. Try again.");
+    expect(sends(transport)).toHaveLength(0);
+    await act(async () => { release(); });
+    await waitFor(() => expect(within(detail()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').disabled).toBe(false));
+    expect(sends(transport)).toHaveLength(0);
+    row().focus(); alt(row(), 1);
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+  });
+
+  it('explains an initially stale numeric shortcut and never replays it after refresh', async () => {
+    const transport = setup(); await openQuestion();
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('request' in args.request && args.request.request.command === 'session_get') await gate;
       return invoke(name, args);
     });
     const session = transport.sessions.get(route.session_id)!;
     ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: session.revision }); });
-    await waitFor(() => expect(entered).toBe(true));
     row().focus(); alt(row(), 1);
-    await act(async () => { await Promise.resolve(); });
+    expect(await screen.findByText("Ariadne is still loading this session's latest changes. Try again.")).toBeTruthy();
     expect(sends(transport)).toHaveLength(0);
     await act(async () => { release(); });
     await waitFor(() => expect(within(detail()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').disabled).toBe(false));
     expect(sends(transport)).toHaveLength(0);
+    row().focus(); alt(row(), 1);
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
   });
 
   it('shows feedback for a question changed before the shortcut, then sends once after review', async () => {
@@ -215,7 +244,7 @@ describe('quick owner answers from the desktop', () => {
     else await waitFor(() => expect(within(detail()).getByText('This item changed. Review the current question and options; your text is retained.')).toBeTruthy());
     await act(async () => { release(); });
     await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Close session' }).disabled).toBe(false));
-    expect(await within(detail()).findByRole('status')).toHaveProperty('textContent', 'This item changed. Review it before sending. Your note is kept.');
+    expect((await within(detail()).findByText('This item changed. Review it before sending. Your note is kept.')).getAttribute('role')).toBe('alert');
     expect(sends(transport)).toHaveLength(0);
     expect(within(detail()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe(note);
     if (change === 'question revision') {

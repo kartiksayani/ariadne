@@ -15,6 +15,15 @@
   color: var(--a-warn);
 }
 
+.graph-node-ack {
+  flex: none;
+  padding: 1px 4px;
+  border: 1px solid var(--color-divider);
+  border-radius: 4px;
+  font-size: calc(10px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+
 .graph-scroll {
   position: relative;
   flex: 1;

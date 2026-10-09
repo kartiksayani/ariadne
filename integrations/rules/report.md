@@ -11,8 +11,8 @@ Split the result into points: a claim, a check, a choice, a step, a risk. For ea
 ask:
 
 1. Does the owner need to act? Only they can decide it: an ask. It matters to them
-   later but does not block you: `open`. It is settled: `done`, `decided` or
-   `dropped`.
+   later but does not block you: `open`. It is settled: `open` with `ack_to`
+   targeting `done`, `decided` or `dropped`.
 2. Is it the same as another point? Merge them; a scenario listed under "what we
    tested" and again under "outcomes" is one item.
 3. Would the owner comment on it alone? Then it is its own item; otherwise a table
@@ -22,12 +22,12 @@ ask:
 
 ## Tree
 
-- The summary item is a `finding`, `done`: `question` states the result and what
-  waits on the owner ("11 of 11 checks pass; 1 choice waits on you"), `outcome`
+- The summary is a `finding`, `open` with `ack_to: "done"`: `question` states
+  the result and what waits on the owner ("11 of 11 checks pass; 1 choice waits on you"), `outcome`
   what it proves, `why` how you know.
-- Sections are `explanation` or `finding` items, `done`, each with a one-line
-  `outcome`; each point is a child: a `finding`, a `decided` decision, a `task`
-  for someone, or an ask.
+- Sections are `explanation` or `finding` items, `open` with `ack_to: "done"`,
+  each with an `outcome`. Points are children: a `finding`, a recorded decision
+  (`ack_to: "decided"`), a `task` for someone, or an ask.
 - Open choices, things left running and offers become asks, never a closing
   paragraph. Commands, logs and numbers go in the `why`; keep long logs in files
   and link them.
@@ -35,5 +35,5 @@ ask:
 ## Example
 
 ```json
-{"summary":"Filed the load test report","operations":[{"op":"topic.add","name":"Load test round 1: sync-service on staging-2","short":"Load test round 1"},{"op":"item.add","question":"11 of 11 checks pass; 1 choice waits on you","short":"Result summary","type":"finding","status":"done","outcome":"The service holds 500 rps with p99 under 200 ms","why":"Ran 11 scenarios for 30 minutes each; none breached the thresholds.","children":[{"question":"Test setup","short":"Setup","type":"explanation","status":"done","outcome":"| Item | Value |\n|---|---|\n| Host | staging-2 |\n| Build | #412 |","why":"Read from the run log."},{"question":"Ran with 50 virtual users","short":"Virtual users","type":"decision","status":"decided","outcome":"50 users","why":"The staging database saturates above 80."},{"question":"Delete the staging fixtures?","short":"Fixture cleanup","type":"decision","ask":"Delete the staging fixtures now?","options":[{"label":"Delete","consequence":"Cannot be undone"},{"label":"Keep","consequence":"Round 2 reuses them","recommended":true}]}]}]}
+{"summary":"Filed the load test report","operations":[{"op":"topic.add","name":"Load test round 1: sync-service on staging-2","short":"Load test round 1"},{"op":"item.add","question":"11 of 11 checks pass; 1 choice waits on you","short":"Result summary","type":"finding","status":"open","ack_to":"done","outcome":"The service holds 500 rps with p99 under 200 ms","why":"Ran 11 scenarios for 30 minutes each; none breached the thresholds.","children":[{"question":"Test setup","short":"Setup","type":"explanation","status":"open","ack_to":"done","outcome":"| Item | Value |\n|---|---|\n| Host | staging-2 |\n| Build | #412 |","why":"Read from the run log."},{"question":"Ran with 50 virtual users","short":"Virtual users","type":"decision","status":"open","ack_to":"decided","outcome":"50 users","why":"The staging database saturates above 80."},{"question":"Investigate cache contention","short":"Cache contention","type":"finding","status":"open","ack_to":"dropped","outcome":"No cache bottleneck","why":"Traces show no wait on the cache."},{"question":"Delete the staging fixtures?","short":"Fixture cleanup","type":"decision","ask":"Delete the staging fixtures now?","options":[{"label":"Delete","consequence":"Cannot be undone"},{"label":"Keep","consequence":"Round 2 reuses them","recommended":true}]}]}]}
 ```

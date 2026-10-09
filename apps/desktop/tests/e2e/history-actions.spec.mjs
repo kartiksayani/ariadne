@@ -110,15 +110,25 @@ export async function runHistoryActionsAcceptance(configuration) {
   const topicName = `Guarded native terminal history ${process.env.ARIADNE_E2E_NONCE}`;
   const seeded = await cliRequest(configuration.cli, ['apply', '--binding', bindingId, '--generation', generation, '--json-stdin'], {
     op_id: randomUUID(), source_input_id: null, attempt_id: null, expected_item_revisions: {}, expected_topic_revisions: {},
-    summary: 'Seed one terminal topic through real agent Apply for lifecycle acceptance.', input_result: null,
+    summary: 'Create one Open root through real agent Apply for lifecycle acceptance.', input_result: null,
     operations: [{ op: 'topic.add', ref: 'guarded_topic', name: topicName }, { op: 'item.add', ref: 'guarded_item', topic: { ref: 'guarded_topic' },
-      parent: null, question: 'Retain guarded native history', type: 'task', status: 'done', owner: { kind: 'me' }, ask: null,
-      options: null, note: null, links: null, outcome: 'Complete saved outcome', why: 'Explicit terminal fixture', replaced_by: null, source_round_id: null }],
+      parent: null, question: 'Retain guarded native history', type: 'task', status: 'open', owner: { kind: 'me' }, ask: null,
+      options: null, note: null, links: null, outcome: null, why: null, replaced_by: null, source_round_id: null }],
   });
   assert.equal(seeded.code, 0);
   target = await readJson(targetPath);
   const terminalTopic = Object.values(target.topics).find(topic => topic.name === topicName);
   assert.ok(terminalTopic);
+  const created = Object.values(target.items).find(item => item.topic_id === terminalTopic.id);
+  assert.equal(created.status, 'open'); assert.equal(created.ack_to ?? null, null);
+  const completed = await cliRequest(configuration.cli, ['apply', '--binding', bindingId, '--generation', generation, '--json-stdin'], {
+    op_id: randomUUID(), source_input_id: null, attempt_id: null, expected_item_revisions: { [created.id]: created.revision }, expected_topic_revisions: {},
+    summary: 'Finish the existing fixture root for guarded terminal history.', input_result: null,
+    operations: [{ op: 'item.status', item: { id: created.id }, status: 'done', outcome: 'Complete saved outcome', why: 'Explicit terminal fixture', reason: null }],
+  });
+  assert.equal(completed.code, 0);
+  target = await readJson(targetPath);
+  assert.equal(target.items[created.id].status, 'done'); assert.equal(target.items[created.id].ack_to ?? null, null);
   await wait(async () => await topicBand(topicName).isExisting(), 'Agent-created terminal topic did not refresh in App');
   const targetHistory = { items: target.items, messages: target.messages, rounds: target.rounds, answers: target.answers, bindings: target.bindings };
   // Nothing blocks an all-closed topic, so its prompt archives at once and the

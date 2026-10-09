@@ -34,38 +34,99 @@ fn add(target: &mut NonnegativeSafeInteger, value: u64) -> Result<(), CoreError>
 /// Topic archive eligibility remains the caller's scope filter.
 ///
 /// An item stops waiting on the owner once the owner sent anything to its current
-/// question (answer, reply, note, drop...) that is still on its way (queued or in
-/// flight), or a standing answer. A failed delivery (needs attention), a cancelled
-/// or skipped input does not count, because those need the owner again. Mirrors
-/// the TypeScript `ownerReplied` selector.
+/// question (answer, reply, note, drop...) that is on its way (queued or in
+/// flight), or a standing answer. Handled replies count only for Open/InProgress
+/// items, where Ack can retain the answered episode. Failed delivery (needs
+/// attention), cancelled and skipped inputs need the owner again. Mirrors the
+/// TypeScript `ownerReplied` selector.
 pub fn waiting_unanswered(session: &Session, item: &Item) -> bool {
-    item.status == ItemStatus::WaitingOnMe
-        && !session.inputs.0.values().any(|input| {
-            input.target.item_id.as_ref() == Some(&item.id)
-                && input.payload.target_snapshot.question_revision.as_ref()
-                    == Some(&item.question_revision)
-                && matches!(input.state, InputState::Queued | InputState::InFlight)
-                && !input.answer_id.as_ref().is_some_and(|answer_id| {
-                    session
-                        .answers
-                        .iter()
-                        .any(|newer| newer.supersedes_answer_id.as_ref() == Some(answer_id))
-                })
-        })
-        && !session.answers.iter().any(|answer| {
-            answer.item_id == item.id
-                && answer.question_revision == item.question_revision
-                && !session
+    item.status == ItemStatus::WaitingOnMe && question_unanswered(session, item)
+}
+
+/// Unanswered current question episode, independent of queue/status eligibility.
+pub(crate) fn question_unanswered(session: &Session, item: &Item) -> bool {
+    question_unanswered_with_handled_input(session, item, None)
+}
+
+/// Evaluate an agent batch's source as Handled before its result is committed.
+pub(crate) fn question_unanswered_with_handled_input(
+    session: &Session,
+    item: &Item,
+    handled_input_id: Option<&UuidV4>,
+) -> bool {
+    // Leaving WaitingOnMe advances the optimistic question revision, but does
+    // not open a new ask. Keep replies attached to that unchanged round episode.
+    let retained_round = match &item.current_round_id {
+        Some(id) => session.rounds.0.get(id),
+        // Explicit round.close clears the pointer, not the saved episode.
+        // Only the latest item round can supply a retained episode: a new ask
+        // must not reuse replies from an older matching question.
+        None => session
+            .rounds
+            .0
+            .values()
+            .filter(|round| round.item_id == item.id)
+            .max_by_key(|round| round.ordinal),
+    }
+    .filter(|round| {
+        matches!(item.status, ItemStatus::Open | ItemStatus::InProgress)
+            && round.item_id == item.id
+            && round.question_revision.value().checked_add(1)
+                == Some(item.question_revision.value())
+            && round.question_snapshot == item.question
+            && round.ask_snapshot == item.ask
+            && round.options_snapshot == item.options
+    });
+    // New replies use the current optimistic revision even when owner history
+    // attaches their message to the retained round. Accept both identities.
+    let matches_question_revision = |revision: PositiveSafeInteger| {
+        revision == item.question_revision
+            || retained_round.is_some_and(|round| revision == round.question_revision)
+    };
+    !session.inputs.0.values().any(|input| {
+        let state = if handled_input_id == Some(&input.id) {
+            &InputState::Handled
+        } else {
+            &input.state
+        };
+        input.target.item_id.as_ref() == Some(&item.id)
+            && input
+                .payload
+                .target_snapshot
+                .question_revision
+                .is_some_and(matches_question_revision)
+            // Bring/Reopen asks the agent to raise a question, not answers it.
+            && (matches!(state, InputState::Queued | InputState::InFlight)
+                || matches!(item.status, ItemStatus::Open | ItemStatus::InProgress)
+                    && *state == InputState::Handled
+                    && matches!(
+                        input.kind,
+                        InputKind::Answer
+                            | InputKind::Reply
+                            | InputKind::Note
+                            | InputKind::Followup
+                            | InputKind::Drop
+                    ))
+            && !input.answer_id.as_ref().is_some_and(|answer_id| {
+                session
                     .answers
                     .iter()
-                    .any(|newer| newer.supersedes_answer_id.as_ref() == Some(&answer.id))
-                && session.inputs.0.get(&answer.input_id).is_none_or(|input| {
-                    !matches!(
-                        input.state,
-                        InputState::Cancelled | InputState::Skipped | InputState::NeedsAttention
-                    )
-                })
-        })
+                    .any(|newer| newer.supersedes_answer_id.as_ref() == Some(answer_id))
+            })
+    }) && !session.answers.iter().any(|answer| {
+        answer.item_id == item.id
+            && matches_question_revision(answer.question_revision)
+            && !session
+                .answers
+                .iter()
+                .any(|newer| newer.supersedes_answer_id.as_ref() == Some(&answer.id))
+            && session.inputs.0.get(&answer.input_id).is_none_or(|input| {
+                !matches!(
+                    input.state,
+                    InputState::Cancelled | InputState::Skipped | InputState::NeedsAttention
+                )
+            })
+    })
 }
 pub(super) fn session(session: &Session) -> Result<SummaryCounts, CoreError> {
     let mut result = empty();
@@ -180,14 +241,118 @@ mod tests {
     }
 
     #[test]
+    fn handled_requests_to_raise_a_question_do_not_answer_it() {
+        for kind in [InputKind::Bring, InputKind::Reopen] {
+            let mut session = seed();
+            send(&mut session, kind, InputState::Handled, 1);
+            assert!(waiting(&session));
+        }
+    }
+
+    #[test]
+    fn a_current_revision_reply_counts_alongside_the_retained_round_revision() {
+        let mut session = seed();
+        let key = ItemRef::new(ITEM).unwrap();
+        let item = session.items.0.get_mut(&key).unwrap();
+        item.status = ItemStatus::Open;
+        item.question_revision = PositiveSafeInteger::new(2).unwrap();
+        assert!(question_unanswered(&session, &session.items.0[&key]));
+        send(&mut session, InputKind::Reply, InputState::Queued, 2);
+        assert!(!question_unanswered(&session, &session.items.0[&key]));
+        session.inputs.0.get_mut(&id("76")).unwrap().state = InputState::NeedsAttention;
+        assert!(question_unanswered(&session, &session.items.0[&key]));
+        answer(&mut session, "89", "76", None);
+        session.answers.last_mut().unwrap().question_revision =
+            PositiveSafeInteger::new(2).unwrap();
+        session.inputs.0.get_mut(&id("76")).unwrap().state = InputState::Handled;
+        assert!(!question_unanswered(&session, &session.items.0[&key]));
+    }
+
+    #[test]
+    fn leaving_waiting_keeps_the_answered_round_episode_until_question_content_changes() {
+        let mut session = seed();
+        send(&mut session, InputKind::Answer, InputState::Queued, 1);
+        answer(&mut session, "89", "76", None);
+        let key = ItemRef::new(ITEM).unwrap();
+        let item = session.items.0.get_mut(&key).unwrap();
+        item.status = ItemStatus::Open;
+        item.question_revision = PositiveSafeInteger::new(2).unwrap();
+        assert!(!question_unanswered(&session, &session.items.0[&key]));
+        assert!(!waiting_unanswered(&session, &session.items.0[&key]));
+        let round_id = session
+            .items
+            .0
+            .get_mut(&key)
+            .unwrap()
+            .current_round_id
+            .take()
+            .unwrap();
+        session.rounds.0.get_mut(&round_id).unwrap().closed_at = Some(session.updated_at.clone());
+        assert!(
+            !question_unanswered(&session, &session.items.0[&key]),
+            "closing the answered round preserves its episode"
+        );
+        for change in ["question", "ask", "options", "revision"] {
+            let mut edited = session.clone();
+            let item = edited.items.0.get_mut(&key).unwrap();
+            match change {
+                "question" => item.question.push('?'),
+                "ask" => item.ask = Some("A different ask.".into()),
+                "options" => item.options.push(ItemOption {
+                    id: "new-option".into(),
+                    label: "A changed choice".into(),
+                    consequence: "Changes the retained question episode".into(),
+                    recommended: false,
+                }),
+                _ => item.question_revision = PositiveSafeInteger::new(3).unwrap(),
+            }
+            assert!(
+                question_unanswered(&edited, &edited.items.0[&key]),
+                "{change}"
+            );
+        }
+        for state in [
+            InputState::Cancelled,
+            InputState::Skipped,
+            InputState::NeedsAttention,
+        ] {
+            session.inputs.0.get_mut(&id("76")).unwrap().state = state;
+            assert!(question_unanswered(&session, &session.items.0[&key]));
+        }
+    }
+
+    #[test]
     fn any_owner_input_kind_on_its_way_moves_the_turn_to_the_agent() {
-        use InputKind::{Answer, Drop, Note, Reply};
-        for kind in [Answer, Reply, Note, Drop] {
+        use InputKind::{Answer, Drop, Followup, Note, Reply};
+        for kind in [Answer, Reply, Note, Followup, Drop] {
             for state in [InputState::Queued, InputState::InFlight] {
                 let mut session = seed();
                 send(&mut session, kind.clone(), state.clone(), 1);
                 assert!(!waiting(&session), "{kind:?} {state:?}");
             }
+        }
+    }
+
+    #[test]
+    fn handled_inputs_leave_a_waiting_question_answerable_but_allow_ack() {
+        for kind in [
+            InputKind::Answer,
+            InputKind::Reply,
+            InputKind::Note,
+            InputKind::Followup,
+            InputKind::Drop,
+        ] {
+            let mut session = seed();
+            send(&mut session, kind.clone(), InputState::Handled, 1);
+            assert!(waiting(&session), "{kind:?}");
+            let key = ItemRef::new(ITEM).unwrap();
+            for status in [ItemStatus::Open, ItemStatus::InProgress] {
+                session.items.0.get_mut(&key).unwrap().status = status;
+                assert!(!question_unanswered(&session, &session.items.0[&key]));
+            }
+            session.items.0.get_mut(&key).unwrap().question_revision =
+                PositiveSafeInteger::new(3).unwrap();
+            assert!(question_unanswered(&session, &session.items.0[&key]));
         }
     }
 
@@ -230,15 +395,29 @@ mod tests {
 
     #[test]
     fn an_input_written_for_an_older_question_does_not_count() {
-        let mut session = seed();
-        send(&mut session, InputKind::Reply, InputState::Queued, 1);
-        let item = session
-            .items
-            .0
-            .get_mut(&ItemRef::new(ITEM).expect("ref"))
-            .expect("item");
-        item.question_revision = PositiveSafeInteger::new(2).expect("revision");
-        assert!(waiting(&session));
+        for state in [
+            InputState::Queued,
+            InputState::InFlight,
+            InputState::Handled,
+        ] {
+            let mut session = seed();
+            send(&mut session, InputKind::Reply, state.clone(), 1);
+            assert_eq!(waiting(&session), state == InputState::Handled);
+            let item = session
+                .items
+                .0
+                .get_mut(&ItemRef::new(ITEM).unwrap())
+                .unwrap();
+            item.question_revision = PositiveSafeInteger::new(2).unwrap();
+            assert!(
+                waiting(&session),
+                "a re-ask must wait even with identical content"
+            );
+            send(&mut session, InputKind::Reply, InputState::Handled, 2);
+            assert!(waiting(&session));
+            send(&mut session, InputKind::Reply, InputState::Queued, 2);
+            assert!(!waiting(&session));
+        }
     }
 
     #[test]

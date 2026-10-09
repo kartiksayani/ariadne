@@ -200,6 +200,7 @@ fn desktop_handler<R: tauri::Runtime>(
         commands::session_close,
         commands::session_reopen,
         commands::session_label_set,
+        commands::ack,
         commands::topic_continue,
         commands::preferences_patch,
         commands::item_remove,

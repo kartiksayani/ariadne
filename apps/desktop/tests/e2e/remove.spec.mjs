@@ -56,12 +56,22 @@ export async function runRemoveAcceptance(configuration) {
   const bindingId = before.active_binding_id, generation = before.bindings[bindingId].generation;
   const kept = await cliRequest(configuration.cli, ['apply', '--binding', bindingId, '--generation', generation, '--json-stdin'], {
     op_id: randomUUID(), source_input_id: null, attempt_id: null, expected_item_revisions: {}, expected_topic_revisions: {},
-    summary: 'Seed a second terminal root so the guarded topic stays listed for its own Remove.', input_result: null,
+    summary: 'Create a second Open root so the guarded topic stays listed for its own Remove.', input_result: null,
     operations: [{ op: 'item.add', ref: 'kept_item', topic: { id: topic.id }, parent: null, question: 'Keep the guarded topic listed', type: 'task',
-      status: 'done', owner: { kind: 'me' }, ask: null, options: null, note: null, links: null, outcome: 'Complete saved outcome',
-      why: 'Explicit terminal fixture', replaced_by: null, source_round_id: null }],
+      status: 'open', owner: { kind: 'me' }, ask: null, options: null, note: null, links: null, outcome: null,
+      why: null, replaced_by: null, source_round_id: null }],
   });
   assert.equal(kept.code, 0);
+  const created = Object.values((await readJson(sessionPath)).items).find(value => value.topic_id === topic.id && value.id !== item.id && value.parent === null);
+  assert.equal(created.status, 'open'); assert.equal(created.ack_to ?? null, null);
+  const completed = await cliRequest(configuration.cli, ['apply', '--binding', bindingId, '--generation', generation, '--json-stdin'], {
+    op_id: randomUUID(), source_input_id: null, attempt_id: null, expected_item_revisions: { [created.id]: created.revision }, expected_topic_revisions: {},
+    summary: 'Finish the existing second fixture root for guarded terminal history.', input_result: null,
+    operations: [{ op: 'item.status', item: { id: created.id }, status: 'done', outcome: 'Complete saved outcome', why: 'Explicit terminal fixture', reason: null }],
+  });
+  assert.equal(completed.code, 0);
+  const finished = (await readJson(sessionPath)).items[created.id];
+  assert.equal(finished.status, 'done'); assert.equal(finished.ack_to ?? null, null);
   await wait(async () => Object.values((await readJson(sessionPath)).items).filter(value => value.topic_id === topic.id).length === 2, 'The second guarded root was not saved');
 
   // Item: ⌫ on the row asks first, the row goes at once, and the command waits out the Undo window.

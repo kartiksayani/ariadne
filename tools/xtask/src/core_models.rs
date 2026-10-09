@@ -102,6 +102,7 @@ pub fn artifacts() -> Result<BTreeMap<PathBuf, String>, String> {
         SessionLabelParams,
         TopicContinueParams,
         ItemRemoveParams,
+        ItemAckParams,
         SessionRemoveParams,
         ProjectRemoveParams,
         MutationReceipt,

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MutationEnvelope } from '../../../src/generated/core';
 import { createDesktopService, CoreFailure } from '../../../src/data/service';
@@ -69,6 +69,31 @@ describe('guarded history controls', () => {
     expect(value.store.getSnapshot().status).toBe('stale');
     return { release, spy };
   }
+  it('says a change is being saved when rename meets the shared write guard', async () => {
+    const value = await setup(true), { result } = renderHook(() => useLifecycle(value.actions));
+    let finish!: () => void;
+    value.transport.replies.push(new Promise(resolve => { finish = () => resolve(failure('invalid_argument')); }));
+    let save!: Promise<boolean>;
+    act(() => { save = value.actions.execute({ command: 'session_close', api_version: 1, op_id: '', params: { expected_revision: value.transport.source.revision } }, value.transport.source.revision); });
+    expect(value.actions.getSnapshot().writing).toBe(true);
+    let refusal!: string | null;
+    await act(async () => { refusal = await result.current.rename('New name', ''); });
+    expect(refusal).toBe('Another change is being saved. Wait for it, then try again.');
+    expect(result.current.error).toBeNull();
+    expect(value.transport.mutations).toHaveLength(1);
+    await act(async () => { finish(); await save; });
+  });
+  it('asks to check an uncertain saved change before renaming instead of blaming loading', async () => {
+    const value = await setup(true), { result } = renderHook(() => useLifecycle(value.actions));
+    value.transport.replies.push(new Error('Lost acknowledgement'));
+    await act(async () => { await value.actions.execute({ command: 'session_close', api_version: 1, op_id: '', params: { expected_revision: value.transport.source.revision } }, value.transport.source.revision); });
+    expect(value.actions.getSnapshot().pending).not.toBeNull();
+    let refusal!: string | null;
+    await act(async () => { refusal = await result.current.rename('New name', ''); });
+    expect(refusal).toBe('Ariadne isn’t sure your last change was saved. Check again before renaming this session.');
+    expect(result.current.error).toBeNull();
+    expect(value.transport.mutations).toHaveLength(1);
+  });
   it('waits for a stale capture and archives once against the latest revisions even after repeated prompt clicks', async () => {
     const value = await setup(true); render(<HistoryActions {...value.props} />);
     const { release } = await staleRefresh(value);
@@ -78,6 +103,22 @@ describe('guarded history controls', () => {
     const revision = value.topic.revision;
     await act(async () => { release(); await value.store.refresh(); });
     await waitFor(() => expect(value.transport.mutations).toHaveLength(1));
+    expect(value.transport.mutations[0]!.command).toMatchObject({ command: 'topic_archive', params: { expected_revision: revision } });
+    expect(value.topic.archived_at).not.toBeNull();
+  });
+  it('archives on the first confirmed click after a stale wait when the impact is unchanged', async () => {
+    const value = await setup(); render(<HistoryActions {...value.props} />);
+    fireEvent.click(screen.getByRole('button', { name: `Archive ${value.topic.name}` }));
+    const warning = dialog().getByText(/You can restore it any time/).textContent;
+    const { release } = await staleRefresh(value);
+    const revision = value.topic.revision;
+    fireEvent.click(dialog().getByRole('button', { name: 'Archive topic' }));
+    fireEvent.click(dialog().getByRole('button', { name: 'Archive topic' }));
+    expect(value.transport.mutations).toHaveLength(0);
+    expect(dialog().getByText(/You can restore it any time/).textContent).toBe(warning);
+    await act(async () => { release(); await value.store.refresh(); });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(value.transport.mutations).toHaveLength(1);
     expect(value.transport.mutations[0]!.command).toMatchObject({ command: 'topic_archive', params: { expected_revision: revision } });
     expect(value.topic.archived_at).not.toBeNull();
   });

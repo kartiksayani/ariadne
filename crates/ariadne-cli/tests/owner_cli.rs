@@ -73,6 +73,55 @@ fn canonical_stdin_preserves_exact_command_and_stale_guards_for_core_replay() {
 }
 
 #[test]
+fn item_ack_preserves_its_canonical_owner_tag_and_revision_guard() {
+    let command = OwnerCommand::Ack {
+        api_version: SchemaVersion::new(1).unwrap(),
+        op_id: id(30),
+        params: ItemAckParams {
+            item_id: ItemRef::new("1").unwrap(),
+            expected_revision: PositiveSafeInteger::new(999).unwrap(),
+        },
+    };
+    let receipt = MutationReceipt::Session(Box::new(SavedReceipt {
+        operation_id: id(30),
+        session_id: id(2),
+        revision: PositiveSafeInteger::new(2).unwrap(),
+        data: SavedReceiptData::ItemAck {
+            item_id: ItemRef::new("1").unwrap(),
+            item_revision: PositiveSafeInteger::new(1000).unwrap(),
+            status: ItemStatus::Done,
+            message_id: id(31),
+        },
+    }));
+    let recorded = RecordedRequest::Owner(
+        OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
+            RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+        )),
+        Box::new(command.clone()),
+    );
+    let core = ScriptedCoreService::new([ScriptStep {
+        request: recorded.clone(),
+        response: ScriptedResponse::Owner(Box::new(Ok(receipt.clone()))),
+    }]);
+    let bytes = serde_json::to_vec(&OwnerMutationRequest {
+        session: Some(SessionRef {
+            project_id: id(1),
+            session_id: id(2),
+        }),
+        command,
+    })
+    .unwrap();
+    let (exit, result) = call(&core, &["item", "ack", "--json-stdin"], &bytes);
+    assert_eq!(exit, 0);
+    assert_eq!(result["data"], serde_json::to_value(receipt).unwrap());
+    assert_eq!(core.history().unwrap(), vec![recorded]);
+    assert_eq!(core.remaining().unwrap(), 0);
+    let (exit, _) = call(&core, &["item", "reveal", "--json-stdin"], &bytes);
+    assert_eq!(exit, 2);
+    assert_eq!(core.history().unwrap().len(), 1);
+}
+
+#[test]
 fn tag_scope_unknown_fields_and_stdin_bounds_reject_before_any_core_call() {
     let core = ScriptedCoreService::new([]);
     let good = json!({"session":null,"request":{"command":"preferences_get","params":{}}});

@@ -8,6 +8,20 @@ const build = (overrides: Partial<GraphInput> = {}) =>
   sessionGraph({ session: graphSession(), view: preferences(), later: new Set(), selectedId: null, tight: false, ...overrides });
 
 describe('graph model', () => {
+  it('places Ack counts after both waiting counts and before other statuses', () => {
+    const session = graphSession(), input = structuredClone(Object.values(session.inputs).find(input => input)!);
+    session.answers = []; session.inputs = {};
+    const ack = session.items['1.1']!, waitingOnAgent = session.items['2']!;
+    ack.ack_to = 'done'; ack.ask = null; ack.options = [];
+    waitingOnAgent.status = 'waiting_on_me';
+    input.target.item_id = waitingOnAgent.id; input.state = 'queued'; input.answer_id = null;
+    input.payload.target_snapshot.question_revision = waitingOnAgent.question_revision;
+    session.inputs[input.id] = input;
+    const counts = build({ session }).topics[0].counts;
+    expect(counts).toBe('1 waiting on you · 1 waiting on agent · 1 to ack · 1 open · 1 in progress · 2 closed');
+    ack.ack_to = null;
+    expect(build({ session }).topics[0].counts).not.toContain('to ack');
+  });
   it('keeps hidden parents and descendants reachable and marks them faded, including the selected node', () => {
     const graph = build({ view: preferences({ hidden_item_ids: ['1'] }), selectedId: '1.1.1' });
     expect(graph.order).toEqual(['1', '1.1', '1.1.1', '1.2', '2', '3', '8']);
