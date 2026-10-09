@@ -68,6 +68,12 @@ pub struct SessionCounters {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct Topic {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub removed_at: Option<UtcMillis>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub removed_by: Option<AgentRemovalSource>,
     pub id: UuidV4,
     pub name: String,
     // Agent-written 2-4 word label (ADR-0084), absent in stores written before it.
@@ -85,6 +91,12 @@ pub struct Topic {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct Item {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub removed_at: Option<UtcMillis>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub removed_by: Option<AgentRemovalSource>,
     pub id: ItemRef,
     pub ordinal: PositiveSafeInteger,
     pub topic_id: UuidV4,
@@ -136,6 +148,12 @@ pub enum ItemType {
     Task,
     Explanation,
 }
+impl ItemType {
+    pub fn is_read_only_material(&self, ask: Option<&str>) -> bool {
+        matches!(self, Self::Finding | Self::Explanation)
+            && ask.is_none_or(|ask| ask.trim().is_empty())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
@@ -149,10 +167,12 @@ pub enum ItemStatus {
     Replaced,
 }
 
-/// Terminal state the agent proposes for an explicit owner acknowledgment.
+/// State the agent proposes for an explicit owner acknowledgment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum AckTarget {
+    Open,
+    InProgress,
     Decided,
     Done,
     Dropped,
@@ -160,6 +180,8 @@ pub enum AckTarget {
 impl AckTarget {
     pub fn status(self) -> ItemStatus {
         match self {
+            Self::Open => ItemStatus::Open,
+            Self::InProgress => ItemStatus::InProgress,
             Self::Decided => ItemStatus::Decided,
             Self::Done => ItemStatus::Done,
             Self::Dropped => ItemStatus::Dropped,
@@ -289,4 +311,12 @@ pub struct Round {
     pub fork_item_ids: Vec<ItemRef>,
     pub closed_at: Option<UtcMillis>,
     pub origin: Option<RoundOrigin>,
+}
+
+/// The agent and activity message that put work in the recoverable bin.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct AgentRemovalSource {
+    pub binding_id: UuidV4,
+    pub message_id: UuidV4,
 }

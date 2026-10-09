@@ -105,7 +105,7 @@ for await (const line of createInterface({input:process.stdin})) {
     }
     // A detached connect lets the SDK session.end overtake a real pending helper.
     if (request.action !== 'connect-detached' && !(request.action === 'event' && request.name === 'session.end' && detachedConnect)) await drain();
-    process.stdout.write(`${JSON.stringify({value,prompts:fixture.prompts,reports,replies,logs:fixture.logs,commands:fixture.commands})}\n`);
+    process.stdout.write(`${JSON.stringify({value,prompts:fixture.prompts,reports,replies,logs:fixture.logs,commands:fixture.commands,appended:fixture.appended})}\n`);
   } catch (error) {
     process.stdout.write(`${JSON.stringify({error:error.message})}\n`);
   }

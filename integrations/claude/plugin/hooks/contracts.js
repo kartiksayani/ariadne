@@ -37,11 +37,11 @@ const HELD_FAILURES = Object.freeze({
   recovery_required: 'A message to this Ariadne session needs your attention in the app. Open Ariadne to sort it out.',
 });
 const HELPER_FAILURES = Object.freeze({
-  host_unreachable: "Ariadne isn't open, so this session's work isn't being recorded. Open Ariadne and it will reconnect.",
+  host_unreachable: 'Open the Ariadne app, then run /ariadne-connect again.',
   stale_generation: GONE_FAILURE,
   binding_mismatch: GONE_FAILURE,
   binding_ambiguous: GONE_FAILURE,
-  binding_conflict: 'This Ariadne session is connected to another conversation. Disconnect that one first, then run /ariadne-connect here.',
+  binding_conflict: 'Check this session in Ariadne and disconnect its current conversation before trying again. If this conversation already follows the Ariadne session you chose earlier, copy that session in Ariadne and run /ariadne-connect followed by what you copied to reconnect here. To use a different Ariadne session, start another Claude conversation, then run /ariadne-connect there.',
   not_found: "Ariadne can't find that session. Open Ariadne to check it still exists, then run /ariadne-connect.",
   invalid_argument: "Ariadne didn't accept that request. Run /ariadne-connect again; if it keeps happening, update the Ariadne app and plugin so they match.",
   permission_denied: "Ariadne isn't allowed to do that. Open the Ariadne app to check what is allowed for this session.",
@@ -56,6 +56,10 @@ const HELPER_FAILURES = Object.freeze({
 // A refusal of the app to take more work: the reason says what to do, not the code.
 export function plainFailure(code, details) {
   const own = (table, key) => typeof key === 'string' && Object.hasOwn(table,key) ? table[key] : undefined;
+  if (code === 'binding_conflict' && bounded(details?.connected_session_name,4096)
+    && !/\p{Cc}/u.test(details.connected_session_name)) {
+    return `This conversation is already connected to ${details.connected_session_name}. Reconnect to that session, or start another Claude conversation to use a different Ariadne session.`;
+  }
   if (code === 'invalid_transition') {
     return own(HELD_FAILURES,details?.reason) ?? 'Ariadne is holding messages for this session right now. Open Ariadne to see why.';
   }

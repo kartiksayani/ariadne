@@ -41,7 +41,8 @@ async fn valid_domain_error_is_identical_structured_and_text_and_core_runs_off_e
             assert_eq!((b, g, source, attempt), (id(3), id(4), None, None));
             Ok(context())
         })
-        .unwrap();
+        .unwrap()
+        .with_read_notices(|_, _, _| panic!("failed query must not inspect a snapshot"));
     let result = service
         .call("session_read", arguments.as_object().cloned())
         .await
@@ -108,6 +109,7 @@ async fn apply_preserves_canonical_request_and_checked_saved_receipt() {
         session_id: id(2),
         revision: PositiveSafeInteger::new(2).unwrap(),
         data: SavedReceiptData::Apply {
+            agent_removals: vec![],
             allocated_refs: UniqueMap(Default::default()),
             messages: vec![],
             item_revisions: UniqueMap(Default::default()),
@@ -206,4 +208,142 @@ fn apply_tool_schema_offers_an_optional_bounded_short_label() {
         .as_array()
         .unwrap()
         .contains(&json!("short")));
+}
+
+#[tokio::test]
+async fn native_session_reads_report_only_authorized_removed_counts_as_text() {
+    use ariadne_store::{registry::Registry, session::Store};
+    let data = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let registry = Registry::open(data.path()).unwrap();
+    registry.register(root.path(), &id(99), || id(1)).unwrap();
+    let store = Store::open_registered(&registry.project_dir(&id(1)), id(1)).unwrap();
+    let seed = include_str!("../../../../../fixtures/domain/history/seed.json");
+    store
+        .create(&serde_json::from_str::<Session>(seed).unwrap())
+        .unwrap();
+    let foreign: Session = serde_json::from_str(
+        &seed
+            .replace(id(2).as_str(), id(12).as_str())
+            .replace(id(3).as_str(), id(13).as_str())
+            .replace(id(4).as_str(), id(14).as_str()),
+    )
+    .unwrap();
+    store.create(&foreign).unwrap();
+    let service = crate::native::service_at(&data.path().join(".ariadne")).unwrap();
+    let apply =
+        |binding: UuidV4, generation: UuidV4, op: u64, revisions: Value, operation: Value| {
+            json!({"binding_id":binding,"generation":generation,"request":{
+                "op_id":id(op),"source_input_id":null,"attempt_id":null,
+                "expected_item_revisions":revisions["items"],
+                "expected_topic_revisions":revisions["topics"],
+                "summary":"","operations":[operation],"input_result":null
+            }})
+        };
+    let result = service
+        .call(
+            "apply",
+            apply(
+                id(13),
+                id(14),
+                100,
+                json!({"items":{},"topics":{id(5).as_str():1}}),
+                json!({"op":"topic.delete","topic":{"id":id(5)}}),
+            )
+            .as_object()
+            .cloned(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.is_error, Some(false), "{result:?}");
+
+    let mut read = args();
+    read["params"]["selection"] = json!({"view":"items","filters":{
+        "topic_id":null,"item_id":null,"parent_item_id":null,"statuses":[],"archived":null
+    }});
+    let live = service
+        .call("session_read", read.as_object().cloned())
+        .await
+        .unwrap();
+    assert_eq!(live.is_error, Some(false), "{live:?}");
+    assert_eq!(
+        live.content.len(),
+        1,
+        "foreign removals must not produce notices"
+    );
+    assert_eq!(
+        live.structured_content.unwrap()["data"]["data"]["page"]["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let result = service
+        .call(
+            "apply",
+            apply(
+                id(3),
+                id(4),
+                101,
+                json!({"items":{"1":1},"topics":{}}),
+                json!({"op":"item.delete","item":{"id":"1"}}),
+            )
+            .as_object()
+            .cloned(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.is_error, Some(false), "{result:?}");
+    let partial = service
+        .call("session_read", read.as_object().cloned())
+        .await
+        .unwrap();
+    let encoded = serde_json::to_value(&partial).unwrap();
+    assert_eq!(encoded["content"][1]["text"], "1 removed items not shown");
+    assert_eq!(partial.content.len(), 2);
+    assert!(encoded["structuredContent"]["data"]
+        .get("notices")
+        .is_none());
+    assert_eq!(
+        serde_json::from_str::<Value>(encoded["content"][0]["text"].as_str().unwrap()).unwrap(),
+        encoded["structuredContent"]
+    );
+    assert!(!encoded.to_string().contains("Which release approach?"));
+
+    let result = service
+        .call(
+            "apply",
+            apply(
+                id(3),
+                id(4),
+                102,
+                json!({"items":{},"topics":{id(5).as_str():1}}),
+                json!({"op":"topic.delete","topic":{"id":id(5)}}),
+            )
+            .as_object()
+            .cloned(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.is_error, Some(false), "{result:?}");
+    let empty = service
+        .call("session_read", read.as_object().cloned())
+        .await
+        .unwrap();
+    let encoded = serde_json::to_value(empty).unwrap();
+    assert_eq!(encoded["content"][1]["text"], "2 removed items not shown");
+    assert_eq!(encoded["content"][2]["text"], "1 removed topics not shown");
+    assert_eq!(
+        encoded["structuredContent"]["data"]["data"]["page"]["items"],
+        json!([])
+    );
+
+    let topics = service
+        .call("session_read", args().as_object().cloned())
+        .await
+        .unwrap();
+    let encoded = serde_json::to_value(topics).unwrap();
+    assert_eq!(encoded["content"][1]["text"], "1 removed topics not shown");
+    assert_eq!(encoded["content"].as_array().unwrap().len(), 2);
 }

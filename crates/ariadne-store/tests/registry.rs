@@ -477,6 +477,40 @@ fn rebuild_uses_only_registered_selected_bindings_and_preserves_unavailable_know
 }
 
 #[test]
+fn selected_conversation_uniqueness_ignores_only_claude_fingerprint_changes() {
+    for adapter in ["claude_code_mod", "fake.local"] {
+        let home = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let registry = Registry::open(home.path()).unwrap();
+        registration(&registry, root.path(), 1);
+        let store = Store::open_registered(&registry.project_dir(&id(1)), id(1)).unwrap();
+        let mut first = blank(1, 2, 3, "same conversation");
+        first.bindings.0.get_mut(&id(3)).unwrap().adapter_id = adapter.into();
+        store.create(&first).unwrap();
+        registry.rebuild().unwrap();
+        let index = home.path().join(".ariadne/bindings.json");
+        let before = fs::read(&index).unwrap();
+        let mut second = blank(1, 20, 30, "same conversation");
+        let binding = second.bindings.0.get_mut(&id(30)).unwrap();
+        binding.adapter_id = adapter.into();
+        binding.endpoint_fingerprint = EndpointFingerprint("updated-helper".into());
+        store.create(&second).unwrap();
+        if adapter == "claude_code_mod" {
+            assert!(
+                matches!(registry.rebuild(), Err(RegistryError::Conflict { paths }) if paths.len() == 2)
+            );
+            assert!(matches!(
+                registry.resolve_binding(&id(3)),
+                Err(RegistryError::Conflict { .. })
+            ));
+            assert_eq!(fs::read(&index).unwrap(), before);
+        } else {
+            assert_eq!(registry.rebuild().unwrap().len(), 2);
+        }
+    }
+}
+
+#[test]
 fn duplicate_selected_identity_stops_with_both_paths_and_opaque_tuple_delimiters_do_not_collide() {
     let home = tempfile::tempdir().unwrap();
     let root = tempfile::tempdir().unwrap();

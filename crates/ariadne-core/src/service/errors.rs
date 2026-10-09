@@ -70,6 +70,9 @@ pub struct FieldError {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct ErrorDetails {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub connected_session_name: Option<String>,
     pub reason: Option<BarrierReason>,
     pub binding_id: Option<UuidV4>,
     pub input_id: Option<UuidV4>,

@@ -140,9 +140,11 @@
       ]
     },
     "AckTarget": {
-      "description": "Terminal state the agent proposes for an explicit owner acknowledgment.",
+      "description": "State the agent proposes for an explicit owner acknowledgment.",
       "type": "string",
       "enum": [
+        "open",
+        "in_progress",
         "decided",
         "done",
         "dropped"
@@ -162,6 +164,69 @@
       "required": [
         "namespace",
         "values"
+      ]
+    },
+    "AgentRemoval": {
+      "description": "One recoverable removal, including owner questions and messages it took away.",
+      "type": "object",
+      "properties": {
+        "cancelled_input_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        },
+        "item_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "message_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "waiting_questions": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "topic_id",
+        "item_id",
+        "message_id",
+        "item_ids",
+        "waiting_questions",
+        "cancelled_input_ids"
+      ]
+    },
+    "AgentRemovalSource": {
+      "description": "The agent and activity message that put work in the recoverable bin.",
+      "type": "object",
+      "properties": {
+        "binding_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "message_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "binding_id",
+        "message_id"
       ]
     },
     "AllocatedRef": {
@@ -593,6 +658,11 @@
     "CancelCause": {
       "description": "Who or what cancelled an input before it was delivered.",
       "oneOf": [
+        {
+          "description": "An agent moved the work into the recoverable bin.",
+          "type": "string",
+          "const": "agent_removed"
+        },
         {
           "description": "The owner deleted it.",
           "type": "string",
@@ -1286,6 +1356,26 @@
           "items": {
             "$ref": "#/$defs/ItemRef"
           }
+        },
+        "removed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "removed_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentRemovalSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "replaced_by": {
           "anyOf": [
@@ -2558,6 +2648,40 @@
         {
           "type": "object",
           "properties": {
+            "item_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ItemRef"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "const": "bin_restore"
+            },
+            "topic_id": {
+              "$ref": "#/$defs/UuidV4"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "topic_id",
+            "item_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "agent_removals": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentRemoval"
+              }
+            },
             "allocated_refs": {
               "$ref": "#/$defs/UniqueMap8"
             },
@@ -2963,6 +3087,26 @@
           "anyOf": [
             {
               "$ref": "#/$defs/TopicOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "removed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "removed_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentRemovalSource"
             },
             {
               "type": "null"

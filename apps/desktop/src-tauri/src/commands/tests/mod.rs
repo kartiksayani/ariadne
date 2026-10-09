@@ -935,6 +935,7 @@ fn topic_removal_hints_every_other_family_session_at_its_listed_revision() {
     // A partial removal error hints the sessions it already removed from.
     let mut partial = CoreError::new(CoreErrorCode::IoError, "partial removal: down", "retry");
     partial.details = Some(Box::new(ErrorDetails {
+        connected_session_name: None,
         reason: None,
         binding_id: None,
         input_id: None,

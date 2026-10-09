@@ -24,6 +24,52 @@
     "result"
   ],
   "$defs": {
+    "AgentRemoval": {
+      "description": "One recoverable removal, including owner questions and messages it took away.",
+      "type": "object",
+      "properties": {
+        "cancelled_input_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          }
+        },
+        "item_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "message_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "waiting_questions": {
+          "$ref": "#/$defs/NonnegativeSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "topic_id",
+        "item_id",
+        "message_id",
+        "item_ids",
+        "waiting_questions",
+        "cancelled_input_ids"
+      ]
+    },
     "AllocatedRef": {
       "oneOf": [
         {
@@ -298,6 +344,11 @@
         "id",
         "number"
       ]
+    },
+    "NonnegativeSafeInteger": {
+      "type": "integer",
+      "maximum": 9007199254740991,
+      "minimum": 0
     },
     "PauseReason": {
       "type": "string",
@@ -740,6 +791,40 @@
         {
           "type": "object",
           "properties": {
+            "item_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ItemRef"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "const": "bin_restore"
+            },
+            "topic_id": {
+              "$ref": "#/$defs/UuidV4"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "topic_id",
+            "item_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "agent_removals": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentRemoval"
+              }
+            },
             "allocated_refs": {
               "$ref": "#/$defs/UniqueMap"
             },

@@ -16,8 +16,8 @@ const { notices } = await import('../../../src/ui/pages/notices');
 const source = { project_id: 'p', session_id: 'old' }, live = { project_id: 'p', session_id: 'live' };
 const option = (id: string, label: string) => ({ id, label, consequence: null, recommended: false });
 const sessions: Record<string, unknown> = {
-  old: { id: 'old', project_id: 'p', items: { '3.1': { id: '3.1', topic_id: 't1', options: [option('a', 'Keep it'), option('b', 'Drop it')] } } },
-  live: { id: 'live', project_id: 'p', active_binding_id: 'b', bindings: { b: { adapter_id: 'claude_code_mod' } }, items: {
+  old: { id: 'old', project_id: 'p', topics: {}, items: { '3.1': { id: '3.1', topic_id: 't1', options: [option('a', 'Keep it'), option('b', 'Drop it')] } } },
+  live: { id: 'live', project_id: 'p', topics: { t9: { removed_at: null } }, active_binding_id: 'b', bindings: { b: { adapter_id: 'claude_code_mod' } }, items: {
     '1': { id: '1', topic_id: 't9', options: [], origin: null },
     '2.1': { id: '2.1', topic_id: 't9', options: [option('x', 'Keep it'), option('y', 'Drop it')], origin: { project_id: 'p', session_id: 'old', topic_id: 't1', entity_id: '3.1', source_revision: 4 } },
   } },
@@ -86,6 +86,21 @@ describe('Send while the agent is not running', () => {
     const other = { ...submission(), route: { ...source, item_id: '9' } };
     expect(await carryAnswer(navigation as never, fakeDrafts(null).store as never, other, live)).toBeNull();
     expect(notices.getSnapshot()).toEqual([]);
+  });
+
+  it('carries the held answer to an active copy after an earlier copy was removed', async () => {
+    const previous = sessions.live;
+    const liveSession = structuredClone(previous) as { items: Record<string, { id: string; removed_at?: string }> };
+    liveSession.items = { '2.0': { ...liveSession.items['2.1'], id: '2.0', removed_at: '2026-10-09T00:00:00.000Z' }, ...liveSession.items };
+    sessions.live = liveSession;
+    try {
+      const drafts = fakeDrafts({ op_id: 'held', text: 'Keep the new delivery plan', selected_option_id: 'b' });
+      const written = submission(undefined, { text: 'Keep the new delivery plan', selected_option_id: 'b' });
+      expect(await carryAnswer(navigation as never, drafts.store as never, written, live)).toEqual({ ...live, item_id: '2.1' });
+      expect(drafts.begun).toEqual([['live', '2.1']]);
+      expect(drafts.edits[0]).toEqual(['new-op', { text: 'Keep the new delivery plan', selected_option_id: 'y' }]);
+      expect(drafts.submitted).toEqual(['new-op']);
+    } finally { sessions.live = previous; }
   });
 
   it('says so when the copy was made but nothing could be sent', async () => {

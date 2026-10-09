@@ -11,6 +11,7 @@ import type { Immutable } from '../../data/session-store';
 import { plainFailure } from '../../data/plain';
 import type { SessionRef } from '../../generated/core';
 import type { Session } from '../../generated/domain/models';
+import { itemRemoved } from '../../selectors/removed';
 import type { RemoveSubject, RemoveTarget } from '../dialogs/remove';
 import type { NoticeInput, NoticeStore } from '../pages/notices';
 import { Hidden, NOTHING_HIDDEN, removeLabel, targetKey, targetSession } from './model';
@@ -18,7 +19,7 @@ import { Hidden, NOTHING_HIDDEN, removeLabel, targetKey, targetSession } from '.
 export const UNDO_MS = 5000;
 type Mode = 'tell' | 'queued' | 'closed' | 'local';
 type Stage = 'pending' | 'sending' | 'done' | 'failed';
-type Params = { readonly gone: true } | { readonly gone: false; readonly call: () => Promise<unknown> };
+type Params = { readonly gone: true; readonly restored?: true } | { readonly gone: false; readonly call: () => Promise<unknown> };
 
 interface Entry {
   readonly opId: string;
@@ -27,6 +28,7 @@ interface Entry {
   readonly agent: string;
   readonly mode: Mode;
   readonly pronoun: 'it' | 'them';
+  readonly fromBin: boolean;
   readonly restore?: () => void;
   stage: Stage;
   timer: ReturnType<typeof setTimeout> | null;
@@ -67,6 +69,7 @@ export class RemovalQueue {
     const tell = subject.kind === 'item' || subject.kind === 'topic' ? subject.tell : null;
     const entry: Entry = { opId: this.operationId(), target, label: removeLabel(subject), agent: tell?.agent ?? '',
       mode: tell?.mode ?? 'local', pronoun: subject.kind === 'topic' || (subject.kind === 'item' && subject.items > 1) ? 'them' : 'it',
+      fromBin: (subject.kind === 'item' || subject.kind === 'topic') && !!subject.removed,
       restore: options.restore, stage: 'pending', timer: null, params: null, running: null };
     this.entries.set(entry.opId, entry);
     if (entry.mode === 'tell' || entry.mode === 'queued') entry.timer = setTimeout(() => { void this.fire(entry); }, UNDO_MS);
@@ -125,6 +128,11 @@ export class RemovalQueue {
     try {
       const params = entry.params ?? await this.command(entry);
       entry.params = params;
+      if (params.gone && params.restored) {
+        this.deps.notices.dismiss(this.noticeId(entry));
+        this.entries.delete(entry.opId);
+        return;
+      }
       if (!params.gone) await params.call();
       entry.stage = 'done';
       if (entry.mode === 'tell' || entry.mode === 'queued') this.note(entry);
@@ -149,9 +157,11 @@ export class RemovalQueue {
     }
     if (target.kind === 'topic') {
       const topic = session.topics[target.topic_id];
+      if (topic && entry.fromBin && !topic.removed_at) return { gone: true, restored: true };
       return topic ? { gone: false, call: () => service.removeTopic(route, { topic_id: topic.id, expected_revision: topic.revision }, opId) } : { gone: true };
     }
     const item = session.items[target.item.item_id];
+    if (item && entry.fromBin && !itemRemoved(session, item.id)) return { gone: true, restored: true };
     return item ? { gone: false, call: () => service.removeItem(route, { item_id: item.id, expected_revision: item.revision }, opId) } : { gone: true };
   }
 

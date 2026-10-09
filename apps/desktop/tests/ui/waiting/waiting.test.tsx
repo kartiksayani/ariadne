@@ -460,6 +460,20 @@ describe('source-backed Waiting and Sent panel', () => {
     await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation, observation: running }); });
     expect(store.getSnapshot()).toBe(captured);
   });
+  it.each((['open', 'in_progress'] as const).flatMap(status => (['open', 'in_progress', 'done'] as const).map(target => ({ status, target }))))(
+    'keeps a waiting-card reference $status while Ack points to $target', async ({ status, target }) => {
+      const { store, transport, drafts } = setup(), seed = mutableSession(), report = seed.items['1.1']!;
+      report.status = status; report.ack_to = target; report.ask = null;
+      seed.items['2']!.question = 'Read [retry limits](item:1.1).';
+      transport.capture(seed); await store.start();
+      render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
+      const link = await screen.findByRole('link', { name: 'retry limits' });
+      expect(link.title).toContain(status === 'open' ? ' · Open' : ' · In progress');
+      expect(document.querySelector('[data-waiting-item="1.1"]')).toBeNull();
+      expect(document.querySelector('[data-waiting-item="2"]')).not.toBeNull();
+      expect(document.querySelector('.waiting-count')?.textContent).toBe('1');
+    });
+
   it('opens references from the waiting question in that card’s session without opening the card itself', async () => {
     const { store, transport, drafts } = setup(), seed = mutableSession();
     seed.items['2']!.question = 'Read [receipt follow-up](item:1.1) or [missing follow-up](item:99).';

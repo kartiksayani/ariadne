@@ -26,8 +26,15 @@ package stays canonical and holds the helpers. Install swaps the copy after the
 receipt (or it is the old symlink layout), otherwise it refuses; uninstall
 removes the copy only when unedited. The optional existing PATH-directory links
 and the Codex skill link go through `current`. No shell startup or host configuration files are edited. After
-publication the installed helper runs read-only doctor; unknown provider status
-still requires explicit host qualification/setup. Installation alone does not
+publication the installed helper runs read-only `doctor --summary`. Install ends
+with a short plain summary: the installed version, session/project counts, up to
+two actionable problems, connection instructions and `ariadne doctor` for details
+(with a count of any further problems). Disconnected agents are normal after
+installing. The installer does not open the app; its instructions say to open it.
+Default doctor groups sessions by name without raw UUIDs. `doctor --verbose`
+keeps detailed checks and support IDs; `doctor --json` keeps the existing machine
+report and exit codes. Unknown provider status still requires explicit host
+qualification/setup. Installation alone does not
 register, trust or load the Mod in an existing terminal.
 
 Repeat install preserves identical version bytes. An edited/foreign package or

@@ -54,6 +54,10 @@ pub struct ExistingUuidRef {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Operation {
+    #[serde(rename = "item.delete")]
+    ItemDelete { item: EntityRef },
+    #[serde(rename = "topic.delete")]
+    TopicDelete { topic: UuidRef },
     #[serde(rename = "topic.add")]
     TopicAdd {
         r#ref: RequestRef,
@@ -106,6 +110,9 @@ pub enum Operation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct ItemPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub ack_to: Option<AckTarget>,
     pub question: Option<String>,
     #[serde(rename = "type")]
     pub item_type: Option<ItemType>,

@@ -197,6 +197,26 @@ impl Expander {
                 }
             }
             Some("item.add") => return self.item_add(object, path, None, out),
+            Some("item.delete") => {
+                if let Some(Value::String(target)) = object.get("item").cloned() {
+                    *object.get_mut("item").expect("present target") =
+                        if ItemRef::new(target.as_str()).is_ok() {
+                            json!({"id": target})
+                        } else {
+                            json!({"ref": target})
+                        };
+                }
+            }
+            Some("topic.delete") => {
+                if let Some(Value::String(target)) = object.get("topic").cloned() {
+                    *object.get_mut("topic").expect("present target") =
+                        if UuidV4::new(target.as_str()).is_ok() {
+                            json!({"id": target})
+                        } else {
+                            json!({"ref": target})
+                        };
+                }
+            }
             Some("item.ask") => {
                 object
                     .entry("recipient_binding_id")
@@ -308,6 +328,24 @@ impl Expander {
             )));
         }
         self.repair_completion(&mut object, &path)?;
+        let read_only = matches!(
+            object.get("type").and_then(Value::as_str),
+            Some("finding" | "explanation")
+        ) && object
+            .get("ask")
+            .and_then(Value::as_str)
+            .is_none_or(|ask| ask.trim().is_empty());
+        if read_only && object.get("ack_to").is_none_or(Value::is_null) {
+            let status = if object.get("status").and_then(Value::as_str) == Some("in_progress") {
+                "in_progress"
+            } else {
+                "open"
+            };
+            object.insert("ack_to".into(), json!(status));
+            self.repairs.push(format!(
+                "{path}: missing ack_to repaired to `{status}` to keep the current status; choose ack_to: open, in_progress, decided, done or dropped."
+            ));
+        }
         if asking
             && matches!(
                 object.get("status").and_then(Value::as_str),
@@ -544,6 +582,55 @@ impl<'de> Visitor<'de> for StrictVisitor {
 mod tests {
     use super::*;
 
+    #[test]
+    fn delete_strings_expand_to_the_same_strict_refs_and_operation_id() {
+        let binding = UuidV4::new(BINDING).unwrap();
+        for (op, field, target, reference) in [
+            ("item.delete", "item", "3.2", json!({"id":"3.2"})),
+            (
+                "item.delete",
+                "item",
+                "duplicate",
+                json!({"ref":"duplicate"}),
+            ),
+            ("topic.delete", "topic", BINDING, json!({"id":BINDING})),
+            (
+                "topic.delete",
+                "topic",
+                "duplicate",
+                json!({"ref":"duplicate"}),
+            ),
+        ] {
+            let string = json!({"operations":[{"op":op, (field):target}]});
+            let object = json!({"operations":[{"op":op, (field):reference}]});
+            let string = expand(&serde_json::to_vec(&string).unwrap(), &binding).unwrap();
+            let object = expand(&serde_json::to_vec(&object).unwrap(), &binding).unwrap();
+            assert_eq!(string.request, object.request);
+            assert_eq!(string.generated_op_id, object.generated_op_id);
+            assert!(string.repairs.is_empty());
+        }
+    }
+
+    #[test]
+    fn delete_rejects_missing_malformed_and_extra_fields_with_its_position() {
+        let binding = UuidV4::new(BINDING).unwrap();
+        for operation in [
+            json!({"op":"item.delete"}),
+            json!({"op":"item.delete","item":3}),
+            json!({"op":"topic.delete","topic":{"id":"3.2"}}),
+            json!({"op":"topic.delete","topic":{"ref":"duplicate"},"reason":"wrong"}),
+        ] {
+            let error = expand(
+                &serde_json::to_vec(&json!({"operations":[operation]})).unwrap(),
+                &binding,
+            )
+            .err()
+            .unwrap();
+            assert!(error.message.contains("operations[0]"), "{error:?}");
+            assert!(error.message.contains("delete"), "{error:?}");
+        }
+    }
+
     const BINDING: &str = "00000000-0000-4000-8000-000000000003";
     const TOPIC: &str = "00000000-0000-4000-8000-000000000005";
     const GENERATED: &str = "00000000-0000-4000-8000-0000000000aa";
@@ -677,6 +764,88 @@ mod tests {
         assert_eq!(asked["options"][0]["recommended"], false);
         assert_eq!(asked["options"][1]["id"], "z");
         assert_eq!(asked["options"][1]["recommended"], true);
+    }
+
+    #[test]
+    fn missing_read_only_ack_keeps_each_items_current_status() {
+        for item_type in ["finding", "explanation"] {
+            for status in ["open", "in_progress"] {
+                for supplied in [None, Some(Value::Null)] {
+                    let mut item = json!({"op": "item.add", "topic": {"id": TOPIC},
+                        "question": "Read the report.", "type": item_type, "status": status,
+                        "children": [{"type": item_type, "question": "Read the detail.",
+                            "status": if status == "open" { "in_progress" } else { "open" }}]});
+                    if let Some(supplied) = supplied {
+                        item["ack_to"] = supplied;
+                    }
+                    let expanded = run(&json!({"operations": [item]})).unwrap();
+                    let value = wire(&expanded.request);
+                    assert_eq!(value["operations"][0]["status"], status);
+                    for operation in value["operations"].as_array().unwrap() {
+                        assert_eq!(operation["ack_to"], operation["status"]);
+                    }
+                    assert_eq!(expanded.repairs.len(), 2);
+                    assert!(expanded.repairs[0].contains(&format!(
+                        "repaired to `{status}` to keep the current status"
+                    )));
+                    assert!(expanded.repairs[0]
+                        .contains("choose ack_to: open, in_progress, decided, done or dropped"));
+                    let mut explicit = value;
+                    explicit.as_object_mut().unwrap().remove("op_id");
+                    assert_eq!(
+                        run(&explicit).unwrap().generated_op_id,
+                        expanded.generated_op_id
+                    );
+                }
+            }
+        }
+        for item_type in ["task", "decision", "question"] {
+            let expanded = run(&json!({"operations": [{"op": "item.add",
+                "topic": {"id": TOPIC}, "question": "Work remains.", "type": item_type}]}))
+            .unwrap();
+            assert!(wire(&expanded.request)["operations"][0]["ack_to"].is_null());
+            assert!(expanded.repairs.is_empty());
+        }
+    }
+
+    #[test]
+    fn all_five_explicit_ack_choices_are_preserved() {
+        for target in ["open", "in_progress", "decided", "done", "dropped"] {
+            let expanded = run(&json!({"operations": [{"op": "item.add",
+                "topic": {"id": TOPIC}, "question": "Read this.", "type": "finding",
+                "ack_to": target}]}))
+            .unwrap();
+            assert_eq!(wire(&expanded.request)["operations"][0]["ack_to"], target);
+            assert!(expanded.repairs.is_empty());
+        }
+    }
+
+    #[test]
+    fn missing_ack_repairs_keep_nested_statuses_with_deletion_in_the_same_batch() {
+        let expanded = run(&json!({"operations": [
+            {"op": "topic.add", "ref": "duplicate_topic", "name": "Duplicate report"},
+            {"op": "item.add", "ref": "duplicate", "type": "finding",
+                "question": "Duplicate summary", "status": "in_progress",
+                "children": [{"ref": "detail", "type": "explanation",
+                    "question": "Duplicate detail", "status": "open"}]},
+            {"op": "reply", "item": {"ref": "duplicate"}, "text": "Removed this duplicate report."},
+            {"op": "item.delete", "item": "duplicate"},
+            {"op": "topic.delete", "topic": "duplicate_topic"}
+        ]}))
+        .unwrap();
+        let value = wire(&expanded.request);
+        let operations = value["operations"].as_array().unwrap();
+        assert_eq!(operations.len(), 6);
+        assert_eq!(operations[1]["status"], "in_progress");
+        assert_eq!(operations[1]["ack_to"], "in_progress");
+        assert_eq!(operations[2]["status"], "open");
+        assert_eq!(operations[2]["ack_to"], "open");
+        assert_eq!(operations[2]["parent"], json!({"ref": "duplicate"}));
+        assert_eq!(operations[4]["item"], json!({"ref": "duplicate"}));
+        assert_eq!(operations[5]["topic"], json!({"ref": "duplicate_topic"}));
+        assert_eq!(expanded.repairs.len(), 2);
+        assert!(expanded.repairs[0].contains("repaired to `in_progress`"));
+        assert!(expanded.repairs[1].contains("repaired to `open`"));
     }
 
     #[test]

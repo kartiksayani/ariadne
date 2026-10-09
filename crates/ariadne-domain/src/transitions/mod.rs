@@ -8,6 +8,7 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ItemChange {
     Edit {
+        ack_to: Option<AckTarget>,
         question: Option<String>,
         item_type: Option<ItemType>,
         note: Option<Option<String>>,
@@ -92,11 +93,15 @@ pub fn transition_item(
         .get(id)
         .ok_or(TransitionError::MissingItem)?;
     validation::validate_item(session, old)?;
+    if crate::visibility::item_is_removed(session, old) {
+        return Err(TransitionError::InvalidTransition);
+    }
     validate_context(session, old, context)?;
     let mut item = old.clone();
     let mut fresh_round = false;
     match change {
         ItemChange::Edit {
+            ack_to,
             question,
             item_type,
             note,
@@ -104,6 +109,14 @@ pub fn transition_item(
             related,
             short,
         } => {
+            if let Some(target) = ack_to {
+                if old.ack_to.is_none()
+                    || !matches!(old.status, ItemStatus::Open | ItemStatus::InProgress)
+                {
+                    return Err(TransitionError::InvalidTransition);
+                }
+                item.ack_to = Some(*target);
+            }
             if let Some(short) = short {
                 item.short = short
                     .as_deref()
@@ -206,10 +219,17 @@ pub fn transition_item(
             validation::optional_text(reason, "status.reason", true, None)?;
             item.status = status.clone();
             item.ack_to = ack_to.or(old.ack_to);
+            // A nonterminal Ack clears the target, but later progress still
+            // carries the report the owner read.
+            let preserve_prose = item.ack_to.is_some()
+                || (matches!(old.status, ItemStatus::Open | ItemStatus::InProgress)
+                    && matches!(status, ItemStatus::Open | ItemStatus::InProgress));
             item.outcome = outcome
                 .clone()
-                .or_else(|| item.ack_to.and(old.outcome.clone()));
-            item.why = why.clone().or_else(|| item.ack_to.and(old.why.clone()));
+                .or_else(|| preserve_prose.then(|| old.outcome.clone()).flatten());
+            item.why = why
+                .clone()
+                .or_else(|| preserve_prose.then(|| old.why.clone()).flatten());
             item.replaced_by = None;
             leave_waiting(&mut item, old)?;
             history(&mut item, old, context, reason.clone());

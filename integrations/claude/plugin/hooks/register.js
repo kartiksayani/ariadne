@@ -1,7 +1,7 @@
 import installed from './installed.js';
 import { BUSY, claimLoop } from './claims.js';
 import { forget, qualify, recall, remember, setup } from './setup.js';
-import { bounded, descriptorValid, ModError, uuid } from './contracts.js';
+import { bounded, descriptorValid, ModError, plainFailure, uuid } from './contracts.js';
 import { announcements } from './discovery.js';
 
 // Claude's static validator follows `$` only inside this file, so imported
@@ -30,20 +30,22 @@ const TEXT = Object.freeze({
   inProgress:'Ariadne is already connecting or disconnecting this conversation. Try again in a moment.',
   notConnected:'This conversation is not connected to Ariadne.',
   reconnected:'Ariadne: this conversation is connected to its Ariadne session again.',
-  retrying:'Ariadne: could not reconnect this conversation to its Ariadne session yet. It will keep trying while the Ariadne app is open.',
+  retrying:'Ariadne: could not reconnect this conversation to its Ariadne session yet. It will keep trying. Run /ariadne-connect to try again now.',
   elsewhere:'This Ariadne session is connected to another conversation.',
   closed:'Ariadne: the Ariadne session for this conversation is closed. It will reconnect if you reopen it in the app.',
   gone:'Ariadne: the Ariadne session for this conversation no longer exists. Run /ariadne-connect to connect again.',
-  unreachable:'Ariadne: could not reach the Ariadne app. This conversation will show there once the app is running.',
+  unreachable:"Ariadne can't be reached, so this session's work isn't being recorded. Open Ariadne and it will reconnect.",
+  failure:'Ariadne could not finish connecting this conversation. Run /ariadne-connect again; if it keeps happening, update Ariadne and its Claude plugin.',
+  connectAgain:'Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.',
 });
 // Codes with which the app refuses an announcement for a scope it no longer has.
 const STALE_SCOPE = ['stale_generation','binding_mismatch','not_found','invalid_argument'];
 
 function selectedSession(event) {
-  if (typeof event?.args !== 'string' || event.args.length > 64) throw new ModError('Connect requires bounded SDK command arguments; use /ariadne-connect [session-id].');
+  if (typeof event?.args !== 'string' || event.args.length > 64) throw new ModError('Invalid connect arguments.','Copy the session from Ariadne, then run /ariadne-connect followed by what you copied.');
   const argument = event.args.trim();
   if (argument === '') return null;
-  if (!uuid(argument)) throw new ModError('Use /ariadne-connect followed by one canonical Ariadne session UUID.');
+  if (!uuid(argument)) throw new ModError('Invalid session selector.','Copy the session from Ariadne, then run /ariadne-connect followed by what you copied.');
   return argument;
 }
 
@@ -53,13 +55,13 @@ export function createRegister(descriptor, publish) {
 
 // Only our bounded plain sentences are displayed; raw rejected host
 // promises, helper stderr and owner payloads are never reflected.
-function failureText(error) {
-  return error instanceof ModError ? (error.plain ?? error.message)
-    : 'Something went wrong while talking to Ariadne. Open the Ariadne app and try again; if it keeps happening, update Ariadne.';
+function failureText(state, error) {
+  if (state.loopBinding && error instanceof ModError && error.code === 'host_unreachable' && error.plain === plainFailure('host_unreachable')) return TEXT.unreachable;
+  return (error instanceof ModError ? error.plain : undefined) ?? TEXT.failure;
 }
 // Printed once per outage: the 'helper' slot clears when a helper call works again.
 function failure(state, $, error) {
-  notice(state,host($),'helper',failureText(error));
+  notice(state,host($),'helper',failureText(state,error));
 }
 // A command always answers the owner, even when its log line was already shown.
 async function checked(state, $, action) {
@@ -67,7 +69,7 @@ async function checked(state, $, action) {
     const result = await action();
     state.notices.delete('helper');
     return result;
-  } catch (error) { failure(state,$,error); return {text:`That did not complete. ${failureText(error)}`}; }
+  } catch (error) { failure(state,$,error); return {text:`That did not complete. ${failureText(state,error)}`}; }
 }
 // One owner notice per state: a slot prints again only after its text changes
 // or the state clears.
@@ -88,8 +90,8 @@ async function announce(state, h) {
       catch (fallback) { last = fallback; }
     }
     // The closed-app outage shares one slot with hook failures, so it is told once.
-    if (last instanceof ModError && last.code === 'host_unreachable') notice(state,h,'helper',failureText(last));
-    else notice(state,h,'heartbeat',last instanceof ModError && last.code === undefined ? last.message : TEXT.unreachable);
+    if (last instanceof ModError && last.code === 'host_unreachable') notice(state,h,'helper',failureText(state,last));
+    else notice(state,h,'heartbeat',failureText(state,last));
   }
 }
 async function heartbeat(state, $) {
@@ -129,21 +131,34 @@ function busy(state) {
 function reopen(state) {
   if (state.loop && (!state.pending || state.pending.loop === state.loop)) state.loop.reopen();
 }
-async function transition(state, $, action) {
+async function transition(state, $, action, recover = false) {
   if (state.ownerTransition) return {text:TEXT.inProgress};
   if (state.sessionEnded) return {text:TEXT.ended};
   state.ownerTransition = true;
+  let reachable = false;
   try {
     if (state.following) await state.following;
     const h = host($);
     // Finish what is in flight first: save pending reports and retry an
     // unconfirmed claim with its original ID. Refuse only if that fails.
     for (const loop of loops(state)) await loop.settle(h);
+    if (recover) for (const loop of loops(state)) {
+      if (await loop.recover(h)) {
+        reachable = true;
+        if (state.sessionEnded) return {text:TEXT.ended};
+        if (loop.outstanding()) return {text:BUSY[loop.busy()] ?? TEXT.inProgress};
+        if (state.loop === loop) { state.loop = null; state.loopBinding = null; }
+        if (state.pending?.loop === loop) state.pending = null;
+      }
+    }
     if (state.sessionEnded) return {text:TEXT.ended};
     await drainRetired(state,h);
     const reason = busy(state);
     if (reason) return {text:BUSY[reason]};
     return await action();
+  } catch (error) {
+    if (reachable && error instanceof ModError && error.code === 'host_unreachable') error.plain = TEXT.connectAgain;
+    throw error;
   } finally {
     state.ownerTransition = false;
     reopen(state);
@@ -230,9 +245,10 @@ async function followChange(state, $) {
 // Every reconnect rotates the generation. A note in the conversation (a meta
 // row the model reads on its next turn, not a prompt) gives Claude the new
 // routing, so its Ariadne commands keep working without an owner command.
-function routingNote(binding, helperPath) {
+function routingNote(binding, helperPath, explicit = false) {
   const {binding_id,generation,session} = binding;
-  return `Ariadne reconnected this conversation to session ${session.session_id} in project ${session.project_id} by itself. From now on use binding ${binding_id} and generation ${generation} in every ariadne command; any earlier binding or generation in this conversation is no longer current.\n${commandLine(helperPath)}\nIf your context is fresh, read reconnect.md in the ariadne skill first. This note is not a message from the owner; do not reply to it.`;
+  const connected = explicit ? 'Ariadne connected this conversation at the owner’s request' : 'Ariadne reconnected this conversation by itself';
+  return `${connected} to session ${session.session_id} in project ${session.project_id}. From now on use binding ${binding_id} and generation ${generation} in every ariadne command; any earlier binding or generation in this conversation is no longer current.\n${commandLine(helperPath)}\nIf your context is fresh, read reconnect.md in the ariadne skill first. This note is not a message from the owner; do not reply to it.`;
 }
 // The skill tells the agent to run this path verbatim, so a path with a space or
 // another shell-special character is single-quoted here.
@@ -251,7 +267,7 @@ async function deliverNote(state, $) {
   note.sending = true;
   note.tries += 1;
   try {
-    await $.session.append({message:{type:'user',content:[{type:'text',text:routingNote(note.binding,state.descriptor.helperPath)}]}});
+    await $.session.append({message:{type:'user',content:[{type:'text',text:routingNote(note.binding,state.descriptor.helperPath,note.explicit)}]}});
     if (state.note === note) state.note = null;
   } catch {
     if (state.note === note && note.tries >= NOTE_TRIES) state.note = null;
@@ -348,17 +364,18 @@ async function connectTransition(state, $, requestedSessionId) {
   const bound = await bind(state,$,chosen);
   if (!bound.result) return bound;
   state.notices.delete('auto');
-  // The command output below gives Claude the routing itself.
-  state.note = null;
+  // Give Claude its routing through the existing note; keep owner output plain.
   const {binding} = bound.result;
   const guidance = chosen === null ? '' : '\nThis resumes an earlier session: read reconnect.md in the ariadne skill first.';
-  const summary = `Ariadne connected: binding ${binding.binding_id}, generation ${binding.generation}.\n${commandLine(state.descriptor.helperPath)}\nFile your work as you go; the ariadne skill has the rest.`;
+  state.note = {binding,explicit:true,tries:0,sending:false};
+  await deliverNote(state,$);
+  const summary = 'This conversation is connected to Ariadne. File your work as you go; the ariadne skill has the rest.';
   return {text:summary + guidance};
 }
 function connectRun(state, $, event) {
   return checked(state,$,() => {
     const requestedSessionId = selectedSession(event);
-    return transition(state,$,() => connectTransition(state,$,requestedSessionId));
+    return transition(state,$,() => connectTransition(state,$,requestedSessionId),true);
   });
 }
 async function statusAction(state, $) {

@@ -52,6 +52,28 @@ component-checked children, coordination and unchanged removal; Store's
 and the existing Claude/Codex options' bounded `read_host_version`. Ordinary callers
 retain their existing semantics. No session contents are returned in diagnostic reports.
 
+## Human output (alpha.12)
+
+The default doctor view groups observations by the session's owner-set name,
+falling back to its title. It shows counts and current connections without raw
+UUIDs, diagnostic codes or per-connection boilerplate. No connected agent, a
+connection awaiting reconnect, an unopened app and an unchecked optional provider
+are informational. Ordinary messages still running and an unreachable offline
+Codex host also need no repair. A live status response without fresh presence
+is shown as unavailable rather than counted as connected or disconnected.
+Actionable data, installation and provider problems remain
+warnings or errors, with one plain line explaining what to do.
+
+`--verbose` preserves the previous detailed human checks, including support IDs.
+`--json` preserves the existing envelope, fields, codes, facts, statuses and exit
+codes, including its historical unknown-state warnings. Human presentation does
+not change diagnostic observations or establish permission to send messages.
+Session names are collected alongside the report and never added to its JSON.
+`--summary` shares the human classification and prints counts, at most two problem
+lines, connection instructions and a pointer to doctor (including the count of any
+remaining problems). Install prints the installed version followed by this summary;
+it does not launch the app. Every mode remains strictly read-only.
+
 ## Consequences
 
 No installation journal, rollback framework, host configuration crawl, duplicated

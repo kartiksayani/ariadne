@@ -53,6 +53,66 @@ pub(super) fn apply(
     at: &UtcMillis,
 ) -> Result<SavedReceiptData, CoreError> {
     match command {
+        OwnerCommand::ItemRestore { params, .. } => {
+            let old = session
+                .items
+                .0
+                .get(&params.item_id)
+                .ok_or_else(|| core(CoreErrorCode::NotFound, "The item does not exist"))?;
+            revision(params.expected_revision, old.revision)?;
+            if old.removed_at.is_none() {
+                return Err(core(CoreErrorCode::InvalidTransition, "This item has no bin entry of its own. Restore its removed parent or topic instead."));
+            }
+            if session
+                .topics
+                .0
+                .get(&old.topic_id)
+                .is_some_and(|topic| ariadne_domain::visibility::topic_is_removed(session, topic))
+                || old
+                    .parent
+                    .as_ref()
+                    .and_then(|id| session.items.0.get(id))
+                    .is_some_and(|parent| {
+                        ariadne_domain::visibility::item_is_removed(session, parent)
+                    })
+            {
+                return Err(core(
+                    CoreErrorCode::InvalidTransition,
+                    "Restore the parent work or topic from the bin first.",
+                ));
+            }
+            let item = session.items.0.get_mut(&params.item_id).unwrap();
+            item.revision = increment(item.revision)?;
+            item.removed_at = None;
+            item.removed_by = None;
+            item.updated_at = at.clone();
+            Ok(SavedReceiptData::BinRestore {
+                topic_id: item.topic_id.clone(),
+                item_id: Some(item.id.clone()),
+            })
+        }
+        OwnerCommand::TopicRemovedRestore { params, .. } => {
+            let old = session
+                .topics
+                .0
+                .get(&params.topic_id)
+                .ok_or_else(|| core(CoreErrorCode::NotFound, "The topic does not exist"))?;
+            revision(params.expected_revision, old.revision)?;
+            if old.removed_at.is_none() {
+                return Err(core(
+                    CoreErrorCode::InvalidTransition,
+                    "This topic is not in the bin.",
+                ));
+            }
+            let topic = session.topics.0.get_mut(&params.topic_id).unwrap();
+            topic.revision = increment(topic.revision)?;
+            topic.removed_at = None;
+            topic.removed_by = None;
+            Ok(SavedReceiptData::BinRestore {
+                topic_id: topic.id.clone(),
+                item_id: None,
+            })
+        }
         OwnerCommand::TopicArchive { params, .. } | OwnerCommand::TopicRestore { params, .. } => {
             let topic = session
                 .topics
@@ -60,6 +120,12 @@ pub(super) fn apply(
                 .get(&params.topic_id)
                 .ok_or_else(|| core(CoreErrorCode::NotFound, "The topic does not exist"))?;
             revision(params.expected_revision, topic.revision)?;
+            if ariadne_domain::visibility::topic_is_removed(session, topic) {
+                return Err(core(
+                    CoreErrorCode::InvalidTransition,
+                    "Restore this topic from the bin before changing its archive state.",
+                ));
+            }
             let archive = matches!(command, OwnerCommand::TopicArchive { .. });
             if archive == topic.archived_at.is_some() {
                 return Err(core(
@@ -172,6 +238,19 @@ pub(super) fn apply(
         }
         _ => unreachable!("validated lifecycle command"),
     }
+}
+
+fn increment(value: PositiveSafeInteger) -> Result<PositiveSafeInteger, CoreError> {
+    value
+        .value()
+        .checked_add(1)
+        .and_then(|next| PositiveSafeInteger::new(next).ok())
+        .ok_or_else(|| {
+            core(
+                CoreErrorCode::CapacityExceeded,
+                "The lifecycle revision reached its limit",
+            )
+        })
 }
 
 /// Close pauses dispatch and abandons pending inputs exactly once. Reopen lifts

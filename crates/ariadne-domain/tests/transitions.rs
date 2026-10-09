@@ -83,6 +83,8 @@ fn item(id: &str, parent: Option<&str>, ordinal: u64) -> Item {
         current_round_id: None,
         source_round_id: None,
         origin: None,
+        removed_at: None,
+        removed_by: None,
     }
 }
 fn message(id: u64, number: u64, author: MessageAuthor) -> Message {
@@ -157,6 +159,8 @@ fn session() -> Session {
                     revision: positive(1),
                     created_at: time(),
                     archived_at: None,
+                    removed_at: None,
+                    removed_by: None,
                     origin: None,
                 },
             )]
@@ -262,6 +266,7 @@ fn ask(round: u64) -> ItemChange {
 }
 fn edit() -> ItemChange {
     ItemChange::Edit {
+        ack_to: None,
         question: None,
         item_type: None,
         note: Some(Some("Progress".into())),
@@ -770,6 +775,7 @@ fn asks_create_new_question_revisions_while_replies_notes_children_do_not() {
     let edited = apply(
         &mut s,
         &ItemChange::Edit {
+            ack_to: None,
             question: Some("New question?".into()),
             item_type: Some(ItemType::Decision),
             note: Some(None),
@@ -784,6 +790,7 @@ fn asks_create_new_question_revisions_while_replies_notes_children_do_not() {
     let same = apply(
         &mut s,
         &ItemChange::Edit {
+            ack_to: None,
             question: Some(edited.question.clone()),
             item_type: None,
             note: None,
@@ -928,6 +935,7 @@ fn invalid_transition_fields_are_rejected_without_mutation() {
             reason: None,
         },
         ItemChange::Edit {
+            ack_to: None,
             question: Some("x".repeat(4097)),
             item_type: None,
             note: None,
@@ -936,6 +944,7 @@ fn invalid_transition_fields_are_rejected_without_mutation() {
             short: None,
         },
         ItemChange::Edit {
+            ack_to: None,
             question: None,
             item_type: None,
             note: None,
@@ -1260,10 +1269,6 @@ fn full_owner_and_agent_messages_obey_distinct_limits() {
 #[test]
 fn stored_item_status_fields_and_provenance_references_must_be_consistent() {
     let mut s = session();
-    s.items.0.get_mut(&reference("1")).unwrap().outcome =
-        Some("Terminal field on open item".into());
-    invalid(&s, ValidationErrorKind::InvalidState);
-    let mut s = session();
     s.items.0.get_mut(&reference("1")).unwrap().waiting_since = Some(time());
     invalid(&s, ValidationErrorKind::InvalidState);
     let mut s = session();
@@ -1500,6 +1505,7 @@ fn copied_item_history_preserves_source_binding_but_new_transitions_require_targ
 
 fn short_edit(short: Option<Option<&str>>) -> ItemChange {
     ItemChange::Edit {
+        ack_to: None,
         question: None,
         item_type: None,
         note: None,
@@ -1665,6 +1671,7 @@ fn archived_session_requires_closed_state_and_close_timestamp() {
 
 fn related_edit(related: Option<Vec<ItemRef>>) -> ItemChange {
     ItemChange::Edit {
+        ack_to: None,
         question: None,
         item_type: None,
         note: None,
@@ -1771,19 +1778,13 @@ fn ack_target_is_optional_on_old_data_and_restricted_on_wire() {
     assert!(value["items"]["1"].get("ack_to").is_none());
     let loaded: Session = serde_json::from_value(value.clone()).unwrap();
     assert_eq!(serde_json::to_value(loaded).unwrap(), value);
-    for target in ["decided", "done", "dropped"] {
+    for target in ["open", "in_progress", "decided", "done", "dropped"] {
         let mut value = value.clone();
         value["items"]["1"]["ack_to"] = json!(target);
         let stored: Session = serde_json::from_value(value).unwrap();
         validate_session_items(&stored).unwrap();
     }
-    for target in [
-        "open",
-        "waiting_on_me",
-        "in_progress",
-        "replaced",
-        "unknown",
-    ] {
+    for target in ["waiting_on_me", "replaced", "unknown"] {
         let mut value = value.clone();
         value["items"]["1"]["ack_to"] = json!(target);
         assert!(
@@ -1884,7 +1885,38 @@ fn agents_cannot_finish_ack_items_but_can_replace_superseded_work() {
         validate_session_items(&s).is_err(),
         "terminal items cannot retain Ack proposals"
     );
-    let mut s = session();
-    s.items.0.get_mut(&reference("1")).unwrap().outcome = Some("Unproposed".into());
-    assert!(validate_session_items(&s).is_err());
+}
+
+#[test]
+fn stored_post_ack_prose_survives_nonterminal_agent_status_changes() {
+    for item_type in [ItemType::Task, ItemType::Decision, ItemType::Question] {
+        for initial_status in [ItemStatus::Open, ItemStatus::InProgress] {
+            for (outcome, why) in [
+                (Some("Read report."), None),
+                (None, Some("Read reasoning.")),
+                (Some("Read report."), Some("Read reasoning.")),
+            ] {
+                let mut s = session();
+                // Ack has applied its nonterminal target and cleared the proposal.
+                let old = s.items.0.get_mut(&reference("1")).unwrap();
+                old.item_type = item_type.clone();
+                old.status = initial_status.clone();
+                old.outcome = outcome.map(str::to_owned);
+                old.why = why.map(str::to_owned);
+                assert_eq!(old.ack_to, None);
+                validate_session_items(&s).unwrap();
+                for next_status in [ItemStatus::InProgress, ItemStatus::Open] {
+                    let continued = apply(&mut s, &status(next_status.clone()));
+                    assert_eq!(continued.status, next_status);
+                    assert_eq!(continued.ack_to, None);
+                    assert_eq!(continued.outcome.as_deref(), outcome);
+                    assert_eq!(continued.why.as_deref(), why);
+                    let history = continued.status_history.last().unwrap();
+                    assert_eq!(history.previous_outcome.as_deref(), outcome);
+                    assert_eq!(history.previous_why.as_deref(), why);
+                    validate_session_items(&s).unwrap();
+                }
+            }
+        }
+    }
 }

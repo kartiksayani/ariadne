@@ -173,6 +173,17 @@ pub struct HostIdentity {
     pub external_session_id: String,
 }
 impl HostIdentity {
+    /// Claude's external session ID survives endpoint updates. Other adapters
+    /// keep their full identity until they establish the same guarantee.
+    pub fn same_conversation(&self, other: &Self) -> bool {
+        if self.adapter_id == "claude_code_mod" {
+            self.adapter_id == other.adapter_id
+                && self.external_session_id == other.external_session_id
+        } else {
+            self == other
+        }
+    }
+
     pub fn of(binding: &Binding) -> Self {
         Self {
             adapter_id: binding.adapter_id.clone(),
@@ -822,7 +833,10 @@ fn selected_routes(
                 binding_id: binding.id.clone(),
                 generation: binding.generation.clone(),
             };
-            if let Some(prior) = routes.iter().find(|prior| prior.identity == route.identity) {
+            if let Some(prior) = routes
+                .iter()
+                .find(|prior| prior.identity.same_conversation(&route.identity))
+            {
                 let prior_root = sessions
                     .iter()
                     .find(|entry| {

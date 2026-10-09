@@ -173,7 +173,10 @@ Doctor only reads. It repairs nothing, resends nothing and starts no session.
 It uses the Codex path setup recorded, and reports ok when none is recorded
 (Claude-only installs need none), and warns only if the file is unsafe or malformed or
 the recorded Codex path is gone. You can point it at specific programs with `--claude-bin` and `--codex-bin`
-(absolute paths). Add `--json` for machine-readable output.
+(absolute paths). The default view groups sessions by name and shows "not connected"
+when they need reconnecting; that is normal after installing or restarting.
+Warnings and errors explain what to do about problems. Add `--verbose` for detailed
+checks and support IDs, or `--json` for the existing machine-readable report.
 
 ## Connect Claude Code
 

@@ -1,3 +1,4 @@
+import { itemRemoved } from '../../selectors/removed';
 // The item detail panel (handoff README §5 "Item detail"; Ariadne.dc.html
 // lines 324-464), laid out like a chat. The shell's aside holds the header;
 // DetailPath fills the header's breadcrumb and ItemDetail the body: what the
@@ -354,7 +355,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const docked = !!(model.open || model.followUp || showAnswer || savedAnswers.length > 0 || owner || ackTo || ack.error || submit.error);
   return <ItemRefs.Provider value={{ lookup: id => {
     const target = session.items[id];
-    return target ? { label: shortLabel(target), status: displayStatus(session, target) } : null;
+    return target && !itemRemoved(session, target.id) ? { label: shortLabel(target), status: displayStatus(session, target) } : null;
   }, onOpenItem }}><FileRefProject.Provider value={session.project_id}><article className="item-detail" data-detail-item-id={itemId} data-status={model.status} aria-label={`Detail of #${model.id}`}>
     <div className="detail-body" ref={body} onScroll={event => { atEnd.current = nearEnd(event.currentTarget); }}>
     <div className="detail-head">
@@ -467,10 +468,10 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
 
     {docked && <div className="detail-dock">
     {ackTo && <section className="detail-section detail-ack" aria-label="Acknowledge item">
-      <button type="button" className="btn btn-secondary detail-action" title={ackTitle(ackTo)} aria-label={ackTitle(ackTo)}
+      <button type="button" className="btn btn-secondary detail-action" title={ackTitle(ackTo, item.status)} aria-label={ackTitle(ackTo, item.status)}
         disabled={ack.busy} onClick={() => { void ack.run(item.id); }}>
         <i className="ph ph-check" aria-hidden="true" />Ack<span className="detail-key" aria-hidden="true">a</span>
-      </button><span className="detail-hint">Mark {STATUS[ackTo].label}</span>
+      </button><span className="detail-hint">{ackTitle(ackTo, item.status)}</span>
     </section>}
     {ack.error && <p className="detail-error" role="alert">{ack.error}</p>}
     {submit.error && !(showAnswer && submit.error === answerSlotError(draftState, retained)

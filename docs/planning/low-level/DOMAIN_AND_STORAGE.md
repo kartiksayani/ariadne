@@ -145,12 +145,17 @@ created_at,updated_at,created_message_id,updated_message_ids,status_history,
 waiting_since,recipient_binding_id,current_round_id,source_round_id,origin}`.
 `type=question|decision|finding|task|explanation`;
 `status=open|waiting_on_me|in_progress|decided|done|dropped|replaced`.
-`ack_to`, when present, is `decided|done|dropped` (ADR-0093). It is omitted when
+`ack_to`, when present, is `open|in_progress|decided|done|dropped` (ADR-0093,
+alpha.12). The agent chooses it per item; there is no implicit Done. It is omitted when
 absent, so old items load without adding a field or rewriting their stored bytes.
 New agent items cannot have a terminal status. Strict core rejects such creation;
 the lenient CLI repairs Decided/Done/Dropped to Open with the requested target,
-including nested children, and reports the repair. Open or InProgress items
-with a target may retain intended outcome/why text. item.status open/in_progress
+including nested children, and reports the repair. New Open/InProgress findings
+and explanations without an ask require an explicit `ack_to` in strict filing;
+lenient filing repairs an omitted value to `open` and reports the repair.
+Tasks, decisions and questions without reading material retain their existing
+creation behavior. Open or InProgress items may retain outcome/why text,
+including after acknowledgment. item.status open/in_progress
 can set a target; omission keeps it and its existing text. Strict core refuses an
 agent terminal status while the item has a target, unless an authenticated Answer,
 Reply or Drop input targets that same item and directs completion. Such completion
@@ -159,7 +164,9 @@ transitions. The lenient CLI repairs other terminal status requests on existing
 Ack items to Open with the requested target and full completion text. The repair
 uses live state under the store lock after replay lookup; operation identity and
 digest still follow the original request, so exact retries remain stable after Ack.
-Owner Ack clears the target. An unanswered ask must keep its owner answer route: new asks
+`item.edit` can change an existing Ack choice on an Open/InProgress item;
+it cannot add Ack again after acknowledgment. Owner Ack sets the chosen status
+and clears the target, retaining outcome/why. An unanswered ask must keep its owner answer route: new asks
 start Waiting on me with a round; lenient filing repairs explicit Open/InProgress
 asks accordingly, preserving the proposal.
 `owner={kind:me}|{kind:agent,binding_id}|{kind:other,name}`.
@@ -872,3 +879,31 @@ restoration is required. Keep schema_version and reject unknown future versions
 for writes. Add a concrete migration and its test when the first real stored
 schema changes; no generic migration registry is needed beforehand. Uninstall
 preserves session files and backups.
+
+## Recoverable agent removals (Alpha.12, ADR-0097)
+
+Item and Topic have optional `removed_at` and `removed_by` fields, omitted in old
+and ordinary records. `removed_by` is `{binding_id,message_id}`, pointing to the
+acting agent and the saved lifecycle notice. Only a selected item subtree root
+or topic receives the marker; descendants inherit removal through their parent
+chain and topic. Markers do not change statuses, acknowledgments, owner text,
+questions, answers, rounds, ordering or provenance. Restore clears the marker,
+keeping the entire prior state and leaving cancelled inputs cancelled.
+Queued inputs with earlier accepted attempts remain held while their work is
+removed. The bin retains their text and warns that they send if restored; Restore
+states how many become eligible to send. Recovery refuses resend and retry on
+removed work until it is restored.
+
+Effective removal excludes work from ordinary counts, Waiting, acknowledgments,
+Sent, tree, graph and search. Raw owner session snapshots retain every record for
+the bin and its conversation. A removed topic appears only in the session's
+folded Removed by agent group; removed item subtrees appear in the topic's folded
+group. Each deletion saves an owner notice and receipt with question and cancelled
+message counts. The owner can Restore or use existing permanent Remove.
+
+Saved related/replaced_by references across the bin remain valid. Live projections
+skip removed destinations and expose them again after Restore. Continuation
+refuses a removed source topic and copies only effectively live items. References
+are remapped only within the copied set; external related links are omitted and
+replacement links outside it use the existing imported-drop behavior. Source
+history and removed work stay untouched.

@@ -1,3 +1,4 @@
+import { itemRemoved } from '../../selectors/removed';
 // Close session, archive and restore topics. Archive never refuses (ADR-0090):
 // a topic with open items or unsent messages asks one plain confirmation that
 // says what stays and what is cancelled; one with neither archives at once.
@@ -123,7 +124,7 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
     const topic = current.topics[topicId];
     if (!topic || topic.archived_at !== null) { setError(topic ? 'This topic is already archived.' : 'This topic is no longer available. Reload the session and try again.'); return false; }
     // Only questions still in the Waiting on me panel leave it; replied ones already wait on the agent.
-    const waiting = Object.values(current.items).filter(item => item?.topic_id === topicId && displayStatus(current, item) === 'waiting_on_me').length;
+    const waiting = Object.values(current.items).filter(item => item?.topic_id === topicId && !itemRemoved(current, item.id) && displayStatus(current, item) === 'waiting_on_me').length;
     const saved = await run({ command: 'topic_archive', api_version: 1, op_id: '', params: { topic_id: topicId, expected_revision: topic.revision } }, current);
     if (saved) {
       const receipt = actions.getSnapshot().receipt, data = receipt && 'data' in receipt ? receipt.data : undefined;

@@ -51,6 +51,23 @@ pub(super) fn validate_candidate_indexed(
     validation_index: &ItemValidationIndex<'_>,
 ) -> Result<(), ValidationError> {
     let path = format!("items.{}", item.id.as_str());
+    validate_removal(
+        session,
+        &item.removed_at,
+        &item.removed_by,
+        &format!("{path}.removed_by"),
+    )?;
+    if let Some(source) = &item.removed_by {
+        require(
+            session.messages.iter().any(|message| {
+                message.id == source.message_id
+                    && message.item_id.as_ref() == Some(&item.id)
+                    && message.topic_id.as_ref() == Some(&item.topic_id)
+            }),
+            format!("{path}.removed_by"),
+            ValidationErrorKind::IdentityMismatch,
+        )?;
+    }
     require(
         session.topics.0.contains_key(&item.topic_id),
         format!("{path}.topic_id"),
@@ -165,7 +182,9 @@ pub(super) fn validate_candidate_indexed(
         )?;
     } else {
         require(
-            (item.ack_to.is_some() || (item.outcome.is_none() && item.why.is_none()))
+            (matches!(item.status, ItemStatus::Open | ItemStatus::InProgress)
+                || item.ack_to.is_some()
+                || (item.outcome.is_none() && item.why.is_none()))
                 && item.replaced_by.is_none(),
             format!("{path}.outcome/why/replaced_by"),
             ValidationErrorKind::InvalidState,

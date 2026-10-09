@@ -357,6 +357,176 @@ fn resume(s: &Setup, n: u64) {
         .unwrap();
 }
 
+fn delete_work(s: &Setup, topic: bool, n: u64) {
+    let saved = s.saved();
+    let context = AgentContext::from_trusted_entrypoint(
+        route(),
+        id(3),
+        saved.bindings.0[&id(3)].generation.clone(),
+        AgentReadScope::Terminal {
+            issued_through_message_number: saved.bindings.0[&id(3)].issued_through_message_number,
+        },
+    );
+    let item = ItemRef::new("1").unwrap();
+    let request = ApplyRequest {
+        op_id: id(n),
+        source_input_id: None,
+        attempt_id: None,
+        expected_item_revisions: UniqueMap(if topic {
+            Default::default()
+        } else {
+            std::collections::BTreeMap::from([(item.clone(), saved.items.0[&item].revision)])
+        }),
+        expected_topic_revisions: UniqueMap(if topic {
+            std::collections::BTreeMap::from([(id(5), saved.topics.0[&id(5)].revision)])
+        } else {
+            Default::default()
+        }),
+        summary: String::new(),
+        operations: vec![if topic {
+            Operation::TopicDelete {
+                topic: UuidRef::Existing(ExistingUuidRef { id: id(5) }),
+            }
+        } else {
+            Operation::ItemDelete {
+                item: EntityRef::Existing(ExistingRef { id: item }),
+            }
+        }],
+        input_result: None,
+    };
+    ApplyService::new(&s.registry)
+        .execute(&context, &request, || s.uuid(), at("07"))
+        .unwrap();
+}
+
+fn restore_work(s: &Setup, topic: bool, n: u64) {
+    let saved = s.saved();
+    let item = ItemRef::new("1").unwrap();
+    let command = if topic {
+        OwnerCommand::TopicRemovedRestore {
+            api_version: SchemaVersion::new(1).unwrap(),
+            op_id: id(n),
+            params: TopicLifecycleParams {
+                topic_id: id(5),
+                expected_revision: saved.topics.0[&id(5)].revision,
+            },
+        }
+    } else {
+        OwnerCommand::ItemRestore {
+            api_version: SchemaVersion::new(1).unwrap(),
+            op_id: id(n),
+            params: ItemRemoveParams {
+                expected_revision: saved.items.0[&item].revision,
+                item_id: item,
+            },
+        }
+    };
+    ariadne_core::history_actions::HistoryActionService::new(&s.registry)
+        .execute(&owner(), &command, at("09"))
+        .unwrap();
+}
+
+#[test]
+fn binned_work_refuses_resend_and_retry_without_changes_but_allows_mark_done() {
+    for topic in [false, true] {
+        for decision in [ResolutionKind::Resend, ResolutionKind::RetryUnexecuted] {
+            let s = Setup::new();
+            s.queue(300);
+            let p = s.claim(301);
+            s.report(&s.event(
+                &p,
+                "rejected",
+                EventPayload::Rejected {
+                    reason: "No execution occurred".into(),
+                },
+            ))
+            .unwrap();
+            delete_work(&s, topic, 302);
+            let bytes = s.bytes();
+            for attest in [false, true] {
+                let error =
+                    execute(&s, &command(&s, &p, 303, decision.clone(), attest), None).unwrap_err();
+                let RecoveryError::Core(error) = error else {
+                    panic!("core error expected")
+                };
+                assert_eq!(error.code, CoreErrorCode::InvalidTransition);
+                assert_eq!(
+                    error.message,
+                    "This work is in the bin. Restore it first, or mark the message done."
+                );
+                assert_eq!(s.bytes(), bytes);
+            }
+            execute(&s, &command(&s, &p, 304, ResolutionKind::Skip, true), None).unwrap();
+            assert_eq!(s.saved().inputs.0[&p.input_id].state, InputState::Skipped);
+            restore_work(&s, topic, 305);
+            assert_eq!(s.saved().inputs.0[&p.input_id].state, InputState::Skipped);
+            assert!(DeliveryService::new(&s.registry)
+                .claim(&s.lease(), &s.request(306), || s.uuid(), at("09"))
+                .unwrap()
+                .is_none());
+        }
+    }
+}
+
+#[test]
+fn restoring_binned_work_allows_an_explicit_resend_or_retry() {
+    for decision in [ResolutionKind::Resend, ResolutionKind::RetryUnexecuted] {
+        let s = Setup::new();
+        s.queue(320);
+        let p = s.claim(321);
+        s.report(&s.event(
+            &p,
+            "rejected",
+            EventPayload::Rejected {
+                reason: "No execution occurred".into(),
+            },
+        ))
+        .unwrap();
+        delete_work(&s, false, 322);
+        restore_work(&s, false, 323);
+        execute(&s, &command(&s, &p, 324, decision, true), None).unwrap();
+        assert_eq!(s.claim(325).input_id, p.input_id);
+    }
+}
+
+#[test]
+fn delete_holds_queued_messages_with_a_sealed_accepted_attempt_until_restore() {
+    for topic in [false, true] {
+        let s = Setup::new();
+        let input_id = s.queue(310);
+        let p = s.claim(311);
+        s.report(&s.event(&p, "accepted", EventPayload::Accepted { receipt: None }))
+            .unwrap();
+        execute(
+            &s,
+            &command(&s, &p, 312, ResolutionKind::Resend, true),
+            None,
+        )
+        .unwrap();
+        let before = s.saved();
+        assert_eq!(before.inputs.0[&input_id].state, InputState::Queued);
+        assert!(before.inputs.0[&input_id].attempts[0].sealed_at.is_some());
+        delete_work(&s, topic, 313);
+        let held = s.saved();
+        assert_eq!(held.inputs, before.inputs);
+        assert_eq!(held.inputs.0[&input_id].cancel_cause, None);
+        assert!(DeliveryService::new(&s.registry)
+            .claim(
+                &s.lease(),
+                &s.request(314),
+                || panic!("held input allocated"),
+                at("09")
+            )
+            .unwrap()
+            .is_none());
+        restore_work(&s, topic, 315);
+        assert_eq!(s.saved().inputs, held.inputs);
+        let next = s.claim(316);
+        assert_eq!(next.input_id, input_id);
+        assert_ne!(next.attempt_id, p.attempt_id);
+    }
+}
+
 #[test]
 fn proven_retry_preserves_fifo_history_and_resumes_dispatch_with_exact_old_replay() {
     let s = Setup::new();

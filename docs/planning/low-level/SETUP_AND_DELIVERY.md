@@ -341,9 +341,13 @@ public distribution.
 
 ## 8. `doctor`, diagnostics, and retention
 
-`ariadne doctor [--project PATH] [--json]` is read-only. Each check returns
-`status: ok|warning|error`, stable `code`, concise `message`, and actionable
-`hint`; JSON output also includes app/helper versions and check timestamps.
+`ariadne doctor [--project PATH] [--verbose | --json | --summary]` is read-only.
+The default human view groups sessions by name, omits raw UUIDs, and treats
+not connected or awaiting reconnect as normal. Problems that need action have
+one plain line explaining what to do. `--summary` prints the short install view.
+`--verbose` keeps the previous detailed checks. JSON keeps the existing
+`status: ok|warning|error`, stable `code`, `message`, `hint`, facts, app/helper
+versions, timestamps and exit codes, including unknown-state warnings.
 
 Select trusted provider executables with additive `--claude-bin /absolute/claude`
 and `--codex-bin /absolute/codex` options; without them, provider version/capability
@@ -372,12 +376,11 @@ It reports:
 Example summary:
 
 ```text
-Claude 2.1.287: supported
-Codex 0.160.0: supported
-Project: /work/notes (registered)
-Bindings: Claude connected; Codex stale (last seen 4m ago)
-Recovery: 1 uncertain input requires review; dispatch paused for that binding
-Result: warning — run `ariadne recovery show <binding-id>` to inspect
+2 sessions in 1 project; none connected right now.
+Notes: not connected.
+  Warning: Earlier messages need your review. Open this session in Ariadne and choose "Review recovery".
+Research: not connected.
+For detailed checks, run `ariadne doctor --verbose` or `ariadne doctor --json`.
 ```
 
 Logs retain component, error code, binding/run/operation IDs, sequence, timing,

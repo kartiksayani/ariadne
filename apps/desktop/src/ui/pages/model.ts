@@ -1,3 +1,4 @@
+import { activeItems, activeTopics, itemRemoved } from '../../selectors/removed';
 // Strings and colours of the Projects, Project, All sessions and Archive pages,
 // ported from Ariadne.dc.html (runOf, sessCard, group, projCards: 1605-1680;
 // projectVals: 1727-1775) and built from catalogue summaries and session snapshots.
@@ -113,8 +114,8 @@ export function continuationLinks(sessions: readonly Immutable<Session>[]): { re
   return { movedOn, shared };
 }
 
-const topicItems = (session: Immutable<Session>, topicId: string) => Object.values(session.items).filter((item): item is Immutable<Item> => !!item && item.topic_id === topicId);
-export const sortedTopics = (session: Immutable<Session>) => Object.values(session.topics).filter((topic): topic is Immutable<Topic> => !!topic).sort((a, b) => a.order - b.order);
+const topicItems = (session: Immutable<Session>, topicId: string) => activeItems(session).filter(item => item.topic_id === topicId);
+export const sortedTopics = (session: Immutable<Session>) => [...activeTopics(session)].sort((a, b) => a.order - b.order);
 
 /** `name` is the short label the chip shows; `full` is the topic's whole name, for the tooltip. */
 export interface TopicChip { readonly id: string; readonly name: string; readonly full: string; readonly counts: string; readonly icon: string; readonly color: string }
@@ -222,16 +223,16 @@ export function continueGroups(source: Immutable<Session>, preview: Immutable<Co
 /** Session counts for the Remove dialog of a session (README, Remove). */
 export function sessionRemoval(session: Immutable<Session> | null, shared: ReadonlySet<string>) {
   if (!session) return { topics: 0, items: 0, shared: 0, waiting: 0 };
-  const topics = sortedTopics(session), own = topics.filter(topic => !shared.has(`${session.id}:${topic.id}`));
+  const topics = Object.values(session.topics).filter((topic): topic is Immutable<Topic> => !!topic), own = topics.filter(topic => !shared.has(`${session.id}:${topic.id}`));
   const ownIds = new Set(own.map(topic => topic.id));
-  const items = Object.values(session.items).filter(item => item && ownIds.has(item.topic_id));
-  return { topics: own.length, items: items.length, shared: topics.length - own.length, waiting: items.filter(item => item?.status === 'waiting_on_me').length,
+  const items = Object.values(session.items).filter((item): item is Immutable<Item> => !!item && ownIds.has(item.topic_id));
+  return { topics: own.length, items: items.length, shared: topics.length - own.length, waiting: items.filter(item => item.status === 'waiting_on_me' && !itemRemoved(session, item.id)).length,
     unsent: unsentOf([session]) };
 }
 
 /** Project counts for the Remove dialog of a project. */
 export function projectRemoval(sessions: readonly Immutable<Session>[]) {
-  const items = sessions.flatMap(session => Object.values(session.items).filter(item => !!item));
+  const items = sessions.flatMap(session => Object.values(session.items).filter((item): item is Immutable<Item> => !!item));
   return { topics: sessions.reduce((sum, session) => sum + Object.keys(session.topics).length, 0), items: items.length,
-    waiting: items.filter(item => item?.status === 'waiting_on_me').length, unsent: unsentOf(sessions) };
+    waiting: sessions.reduce((count, session) => count + activeItems(session).filter(item => item.status === 'waiting_on_me').length, 0), unsent: unsentOf(sessions) };
 }

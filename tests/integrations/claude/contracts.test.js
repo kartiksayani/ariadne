@@ -49,7 +49,7 @@ describe('published wire consumers', () => {
   it('carries a plain owner sentence beside the diagnostic message for every helper failure', () => {
     const failed = (code, details) => ({exitCode:4,stdout:JSON.stringify({api_version:1,ok:false,error:{code,message:'m',hint:'h',retryable:false,field_errors:[],...(details ? {details} : {})}})});
     const plain = (code, details) => { try { envelope(failed(code,details)); } catch (error) { return error.plain; } };
-    expect(plain('host_unreachable')).toBe("Ariadne isn't open, so this session's work isn't being recorded. Open Ariadne and it will reconnect.");
+    expect(plain('host_unreachable')).toBe("Open the Ariadne app, then run /ariadne-connect again.");
     for (const code of ['stale_generation','not_found','permission_denied','unsupported','protocol_conflict','binding_conflict','commit_uncertain','something_new']) {
       expect(plain(code)).toMatch(/^[A-Z].*[.]$/);
       expect(plain(code)).not.toMatch(/retain|original IDs|helper|_/);

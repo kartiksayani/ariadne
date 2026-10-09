@@ -1530,8 +1530,10 @@
       "inputSchema": {
         "$defs": {
           "AckTarget": {
-            "description": "Terminal state the agent proposes for an explicit owner acknowledgment.",
+            "description": "State the agent proposes for an explicit owner acknowledgment.",
             "enum": [
+              "open",
+              "in_progress",
               "decided",
               "done",
               "dropped"
@@ -1734,6 +1736,16 @@
           "ItemPatch": {
             "additionalProperties": false,
             "properties": {
+              "ack_to": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/AckTarget"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "links": {
                 "items": {
                   "$ref": "#/$defs/ItemLinkTarget"
@@ -1839,6 +1851,40 @@
           },
           "Operation": {
             "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "item": {
+                    "$ref": "#/$defs/EntityRef"
+                  },
+                  "op": {
+                    "const": "item.delete",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "op",
+                  "item"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "op": {
+                    "const": "topic.delete",
+                    "type": "string"
+                  },
+                  "topic": {
+                    "$ref": "#/$defs/UuidRef"
+                  }
+                },
+                "required": [
+                  "op",
+                  "topic"
+                ],
+                "type": "object"
+              },
               {
                 "additionalProperties": false,
                 "properties": {

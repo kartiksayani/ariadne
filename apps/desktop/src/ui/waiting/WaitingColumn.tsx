@@ -1,3 +1,4 @@
+import { itemRemoved } from '../../selectors/removed';
 // The "Waiting on me" column (handoff Ariadne.dc.html, aside "Waiting on me"):
 // every open question across sessions, oldest first, each with a compact answer
 // control, with Sent inputs in their own scrolling section below.
@@ -160,7 +161,7 @@ function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRu
     : selected ? '0 0 0 1.5px color-mix(in srgb, var(--color-text) 45%, transparent)' : '0 0 0 1px var(--color-divider)';
   return <ItemRefs.Provider value={{ lookup: id => {
     const target = card.session.items[id];
-    return target ? { label: shortLabel(target), status: displayStatus(card.session, target) } : null;
+    return target && !itemRemoved(card.session, target.id) ? { label: shortLabel(target), status: displayStatus(card.session, target) } : null;
   }, onOpenItem: id => revealItem({ ...card.route, item_id: id }) }}><FileRefProject.Provider value={card.route.project_id}><div className="waiting-card" style={{ boxShadow: `${ring}, var(--a-lift)` }} data-waiting-item={item.id} data-project-id={card.route.project_id} data-session-id={card.route.session_id} aria-current={selected || undefined} onClick={open}>
     <div className="waiting-path">{card.path}</div>
     <Markdown className="waiting-question" text={item.question} />

@@ -65,9 +65,11 @@
   ],
   "$defs": {
     "AckTarget": {
-      "description": "Terminal state the agent proposes for an explicit owner acknowledgment.",
+      "description": "State the agent proposes for an explicit owner acknowledgment.",
       "type": "string",
       "enum": [
+        "open",
+        "in_progress",
         "decided",
         "done",
         "dropped"
@@ -205,6 +207,16 @@
     "ItemPatch": {
       "type": "object",
       "properties": {
+        "ack_to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AckTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "links": {
           "type": [
             "array",
@@ -310,6 +322,40 @@
     },
     "Operation": {
       "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "item": {
+              "$ref": "#/$defs/EntityRef"
+            },
+            "op": {
+              "type": "string",
+              "const": "item.delete"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "item"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "topic.delete"
+            },
+            "topic": {
+              "$ref": "#/$defs/UuidRef"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "topic"
+          ]
+        },
         {
           "type": "object",
           "properties": {

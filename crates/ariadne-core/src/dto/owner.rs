@@ -29,6 +29,8 @@ owner_commands!(
     SessionRestore(SessionRestoreParams),
     TopicContinue(TopicContinueParams),
     PreferencesPatch(PreferencesPatch),
+    ItemRestore(ItemRemoveParams),
+    TopicRemovedRestore(TopicLifecycleParams),
     ItemRemove(ItemRemoveParams),
     TopicRemove(TopicLifecycleParams),
     SessionRemove(SessionRemoveParams),

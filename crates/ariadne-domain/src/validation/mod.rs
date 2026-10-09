@@ -14,6 +14,38 @@ use std::fmt;
 pub use items::validate_item;
 pub use session::validate_session_items;
 
+fn validate_removal(
+    session: &Session,
+    at: &Option<UtcMillis>,
+    source: &Option<AgentRemovalSource>,
+    path: &str,
+) -> Result<(), ValidationError> {
+    require(
+        at.is_some() == source.is_some(),
+        path,
+        ValidationErrorKind::InvalidState,
+    )?;
+    if let Some(source) = source {
+        require(
+            session.bindings.0.contains_key(&source.binding_id),
+            path,
+            ValidationErrorKind::MissingReference,
+        )?;
+        require(
+            session.messages.iter().any(|message| {
+                message.id == source.message_id
+                    && message.kind == MessageKind::Lifecycle
+                    && message.author == MessageAuthor::System
+                    && message.binding_id.as_ref() == Some(&source.binding_id)
+                    && Some(&message.created_at) == at.as_ref()
+            }),
+            path,
+            ValidationErrorKind::MissingReference,
+        )?;
+    }
+    Ok(())
+}
+
 /// Whether a record saved under `binding_id` may name `input`. A rebind
 /// carries pending inputs to the new binding; messages and receipts saved
 /// while an input belonged to a retired binding of the session keep that one.

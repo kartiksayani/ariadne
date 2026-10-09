@@ -34,19 +34,20 @@ function tellText(tell: RemoveTell, them: boolean): string {
 }
 
 /** The owner's queued messages in what is removed: they haven't reached `agent` yet, and removing cancels them. */
-export interface RemoveUnsent { readonly count: number; readonly agent: string }
+export interface RemoveUnsent { readonly count: number; readonly agent: string; readonly cancelled?: number }
 
 function warning(waiting: number, unsent: RemoveUnsent | undefined): string {
   const questions = waiting ? `${plural(waiting, 'question')} waiting on you ${waiting === 1 ? 'goes' : 'go'} with it.` : '';
   const messages = !unsent?.count ? '' : unsent.count === 1 ? `1 of your messages hasn’t reached ${unsent.agent} yet; removing cancels it.`
     : `${unsent.count} of your messages haven’t reached ${unsent.agent} yet; removing cancels them.`;
-  return [questions, messages].filter(Boolean).join(' ');
+  const cancelled = unsent?.cancelled ? `Your ${plural(unsent.cancelled, 'cancelled message')} ${unsent.cancelled === 1 ? 'is' : 'are'} deleted forever.` : '';
+  return [questions, messages, cancelled].filter(Boolean).join(' ');
 }
 
 interface Unsent { readonly unsent?: RemoveUnsent }
 export type RemoveSubject = Unsent & (
-  | { readonly kind: 'item'; readonly short: string; readonly items: number; readonly waiting: number; readonly tell: RemoveTell }
-  | { readonly kind: 'topic'; readonly name: string; readonly items: number; readonly waiting: number; readonly tell: RemoveTell }
+  | { readonly kind: 'item'; readonly short: string; readonly items: number; readonly waiting: number; readonly tell: RemoveTell; readonly removed?: boolean }
+  | { readonly kind: 'topic'; readonly name: string; readonly items: number; readonly waiting: number; readonly tell: RemoveTell; readonly removed?: boolean }
   | { readonly kind: 'session'; readonly agent: string; readonly when: string; /** The owner's name for the session, when set. */ readonly name?: string | null;
     readonly topics: number; readonly items: number;
     readonly shared: number; readonly waiting: number }

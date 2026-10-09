@@ -1,4 +1,4 @@
-//! Owner acceptance of an agent's proposed completion; no input is dispatched.
+//! Owner acknowledgment of an agent's material; no input is dispatched.
 use super::core;
 use crate::*;
 use ariadne_domain::models::*;
@@ -24,6 +24,13 @@ pub(super) fn apply(
         .0
         .get(&params.item_id)
         .ok_or_else(|| core(CoreErrorCode::NotFound, "This item no longer exists"))?;
+    if ariadne_domain::visibility::item_is_removed(session, old) {
+        return Err(CoreError::new(
+            CoreErrorCode::InvalidTransition,
+            "Restore this item from the bin before acknowledging it.",
+            "Restore the removed work from the bin, then acknowledge this item.",
+        ));
+    }
     if old.revision != params.expected_revision {
         let mut error = core(
             CoreErrorCode::RevisionConflict,
@@ -41,7 +48,7 @@ pub(super) fn apply(
     let target = old.ack_to.ok_or_else(|| {
         core(
             CoreErrorCode::InvalidTransition,
-            "This item has no proposed completion to acknowledge",
+            "This item does not need acknowledgment",
         )
     })?;
     if old.ask.as_ref().is_some_and(|ask| !ask.trim().is_empty())
@@ -94,12 +101,17 @@ pub(super) fn apply(
     };
     item.status = target.status();
     item.ack_to = None;
-    item.outcome = item
-        .outcome
-        .or_else(|| Some("Acknowledged by the owner.".into()));
-    item.why = item
-        .why
-        .or_else(|| Some("The owner accepted the proposed completion.".into()));
+    if matches!(
+        item.status,
+        ItemStatus::Decided | ItemStatus::Done | ItemStatus::Dropped
+    ) {
+        item.outcome = item
+            .outcome
+            .or_else(|| Some("Acknowledged by the owner.".into()));
+        item.why = item
+            .why
+            .or_else(|| Some("The owner read this item.".into()));
+    }
     item.replaced_by = None;
     item.waiting_since = None;
     item.revision = increment(item.revision)?;
@@ -124,7 +136,7 @@ pub(super) fn apply(
         number,
         author: MessageAuthor::Owner,
         kind: MessageKind::Activity,
-        body: "Acknowledged the proposed completion.".into(),
+        body: "Acknowledged the item.".into(),
         created_at: at.clone(),
         item_id: Some(item.id.clone()),
         topic_id: Some(item.topic_id.clone()),

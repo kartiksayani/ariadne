@@ -119,24 +119,35 @@ impl<'a> BindingService<'a> {
                     .active_binding_id
                     .as_ref()
                     .is_some_and(|id| {
-                        located
-                            .session
-                            .bindings
-                            .0
-                            .get(id)
-                            .is_some_and(|binding| HostIdentity::of(binding) == identity)
+                        located.session.bindings.0.get(id).is_some_and(|binding| {
+                            HostIdentity::of(binding).same_conversation(&identity)
+                        })
                     })
             });
-            if selected.is_some_and(|located| {
+            if let Some(located) = selected.filter(|located| {
                 located.project.project_id != params.project_id
                     || params
                         .existing_session_id
                         .as_ref()
                         .is_some_and(|id| id != &located.session.id)
             }) {
-                return Err(conflict(
-                    "The selected host route belongs to another registered session",
-                ));
+                let mut error = CoreError::new(
+                    CoreErrorCode::BindingConflict,
+                    "This conversation is already connected to another Ariadne session",
+                    "Reconnect to that session, or start another conversation.",
+                );
+                error.details = Some(Box::new(ErrorDetails {
+                    connected_session_name: Some(located.session.title.clone()),
+                    reason: None,
+                    binding_id: None,
+                    input_id: None,
+                    attempt_id: None,
+                    blocking_item_ids: vec![],
+                    blocking_input_ids: vec![],
+                    dispatch_must_pause: false,
+                    partial_removal: None,
+                }));
+                return Err(error.into());
             }
             let target = match &params.existing_session_id {
                 Some(id) => Some(
@@ -641,16 +652,23 @@ fn connect_existing(
                             .any(|attempt| attempt.sealed_at.is_none())))
             })
     });
-    // A rebind replaces a disconnected binding, or one of the same adapter (a
-    // fresh conversation after /clear), whatever its inputs. Only a live
-    // conversation of another adapter is a real conflict; a paused one with
-    // nothing pending may still be replaced.
-    let live_elsewhere = !same
-        && existing.is_some_and(|old| {
-            old.connection_state == ConnectionState::Connected
+    // A different conversation cannot replace a Claude route until disconnected:
+    // native preflight saves Unknown while a live conversation awaits its bound
+    // announcement. /clear disconnects the old route before rebinding.
+    // Other adapters retain their established rule:
+    // same-adapter replacement, or another paused adapter with nothing pending.
+    let same_conversation = existing.is_some_and(|old| {
+        old.adapter_id == host.adapter_id && old.external_session_id == host.external_session_id
+    });
+    let live_elsewhere = existing.is_some_and(|old| {
+        (old.adapter_id == "claude_code_mod"
+            && !same_conversation
+            && old.connection_state != ConnectionState::Disconnected)
+            || (!same
+                && old.connection_state == ConnectionState::Connected
                 && old.adapter_id != host.adapter_id
-                && (has_unresolved || old.dispatch_state != DispatchState::Paused)
-        });
+                && (has_unresolved || old.dispatch_state != DispatchState::Paused))
+    });
     if live_elsewhere {
         return Err(conflict(
             "This session is connected to another live conversation; disconnect it first",

@@ -1,3 +1,4 @@
+import { itemRemoved } from '../selectors/removed';
 import type { ItemRoute, OpenRoute } from '../generated/core';
 import { OpenSessions, type SessionStore } from './session-store';
 import { revealAncestors } from './selectors';
@@ -43,7 +44,7 @@ export class RegisteredRoutes {
     const state = store.getSnapshot();
     if (state.error) throw state.error;
     if (!state.snapshot || state.status === 'closed') throw new ServiceFailure('invalid_response');
-    if (!registered || !state.snapshot.session.items[registered.item_id]) {
+    if (!registered || !state.snapshot.session.items[registered.item_id] || itemRemoved(state.snapshot.session, registered.item_id)) {
       return Object.freeze({ kind: 'missing_item', session: Object.freeze(session), requestedItemId: route.item_id, store,
         banner: missingBanner ?? 'The item is no longer available in this session.' });
     }

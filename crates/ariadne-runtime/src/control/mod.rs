@@ -63,6 +63,7 @@ fn no_lease(binding_id: &ariadne_domain::models::UuidV4) -> CoreError {
         blocking_input_ids: vec![],
         dispatch_must_pause: false,
         partial_removal: None,
+        connected_session_name: None,
     }));
     no_lease
 }

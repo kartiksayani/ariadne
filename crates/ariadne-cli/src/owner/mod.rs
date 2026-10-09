@@ -8,16 +8,21 @@ pub const HELP: &str = r#"Owner commands (explicit registered routes):
   ariadne project list|register [--json-stdin] [--json]
   ariadne session list|read|close|reopen|archive|restore [--json-stdin] [--json]
   ariadne binding connect|pause|resume|disconnect --json-stdin [--json]
+  ariadne binding connect --replay-only --json-stdin [--json]
   ariadne input submit|cancel|resolve --json-stdin [--json]
-  ariadne topic archive|restore|continue|continue-preview --json-stdin [--json]
-  ariadne item messages|rounds|reveal|ack --json-stdin [--json]
+  ariadne topic archive|restore|restore-removed|continue|continue-preview --json-stdin [--json]
+  ariadne item messages|rounds|reveal|ack|restore --json-stdin [--json]
   ariadne preferences get|patch [--json-stdin] [--json]
   ariadne remove item|topic|session|project --json-stdin [--json]
 Remove is permanent inside Ariadne; files and the agent's conversation stay.
+Agent item.delete/topic.delete moves work into Bin. item restore restores a
+binned item subtree (item_restore); topic restore-removed restores a binned
+topic (topic_removed_restore). topic restore unarchives a topic.
 Item and topic removal use a session route and queue a `removed` notice for
 the told agent; session and project removal use session:null. Every removal
 first writes a pre-remove backup and its receipt prints the backup path.
-Item Ack finishes an item at its stored ack_to target using its expected revision;
+Item Ack marks an item read and uses the agent's chosen state: Open, In progress,
+Decided, Done or Dropped. It clears the unread acknowledgment;
 the canonical owner command tag is ack. Ack is an owner action, not an agent tool.
 Stdin is the complete canonical OwnerQueryRequest or OwnerMutationRequest,
 at most 512KiB. Its command tag must match the CLI noun/verb. Stdin commands
@@ -33,8 +38,9 @@ Examples (replace UUIDs and retain original operation IDs for exact retries):
   ariadne project list --json
   printf '%s' '{"session":null,"request":{"command":"preferences_get","params":{}}}' | ariadne preferences get --json-stdin
   printf '%s' '{"session":null,"command":{"command":"project_register","api_version":1,"op_id":"00000000-0000-4000-8000-000000000999","params":{"canonical_root":"/absolute/project"}}}' | ariadne project register --json-stdin
-Binding connect recovers an exact saved operation without a provider check;
-new connections require a qualified candidate in the running desktop. It never
+Binding connect recovers an exact saved operation without a provider check.
+--replay-only returns that receipt or null and never starts a new connection.
+New connections require a qualified candidate in the running desktop. It never
 launches/resumes a provider or changes its configuration. Draft persistence does
 not submit an input. Exits: 0 success, 2 invalid, 3 conflict, 4 I/O, 5 unsupported.
 "#;
@@ -130,6 +136,13 @@ fn execute(
     request: parser::Request,
 ) -> Result<serde_json::Value, CoreError> {
     let value = match request {
+        parser::Request::ReplayConnect(_) => {
+            return Err(CoreError::new(
+                CoreErrorCode::Unsupported,
+                "Saved connect lookup requires the native registry composition.",
+                "Run binding connect --replay-only --json-stdin through the installed CLI.",
+            ));
+        }
         parser::Request::Query(wrapper) => {
             let owner = context(
                 &wrapper.session,

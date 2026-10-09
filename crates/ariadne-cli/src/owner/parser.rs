@@ -4,6 +4,7 @@ use std::io::Read;
 pub(super) enum Request {
     Query(OwnerQueryRequest),
     Mutation(OwnerMutationRequest),
+    ReplayConnect(OwnerMutationRequest),
 }
 
 pub(super) fn invalid(message: &str) -> CoreError {
@@ -21,12 +22,19 @@ pub(super) fn parse(args: &[&str], input: &mut dyn Read) -> Result<Request, Core
     let command = command(noun, verb).ok_or_else(|| invalid("Unknown owner command."))?;
     let mut stdin = false;
     let mut json = false;
+    let mut replay_only = false;
     for flag in rest.iter() {
         match *flag {
             "--json-stdin" if !stdin => stdin = true,
             "--json" if !json => json = true,
+            "--replay-only" if !replay_only => replay_only = true,
             _ => return Err(invalid("Unknown or repeated owner flag.")),
         }
+    }
+    if replay_only && (command != "binding_connect" || !stdin) {
+        return Err(invalid(
+            "--replay-only requires binding connect --json-stdin.",
+        ));
     }
     let request = if stdin {
         let bytes = read_stdin(input)?;
@@ -47,7 +55,11 @@ pub(super) fn parse(args: &[&str], input: &mut dyn Read) -> Result<Request, Core
                     "CLI command differs from the canonical command tag.",
                 ));
             }
-            Request::Mutation(request)
+            if replay_only {
+                Request::ReplayConnect(request)
+            } else {
+                Request::Mutation(request)
+            }
         }
     } else {
         let request = match command {
@@ -86,6 +98,7 @@ pub(super) fn command(noun: &str, verb: &str) -> Option<&'static str> {
         ("item", "rounds") => "item_rounds",
         ("item", "reveal") => "reveal_item",
         ("item", "ack") => "ack",
+        ("item", "restore") => "item_restore",
         ("binding", "connect") => "binding_connect",
         ("binding", "pause") => "binding_pause",
         ("binding", "resume") => "binding_resume",
@@ -95,6 +108,7 @@ pub(super) fn command(noun: &str, verb: &str) -> Option<&'static str> {
         ("input", "resolve") => "input_resolve",
         ("topic", "archive") => "topic_archive",
         ("topic", "restore") => "topic_restore",
+        ("topic", "restore-removed") => "topic_removed_restore",
         ("topic", "continue") => "topic_continue",
         ("topic", "continue-preview") => "topic_continue_preview",
         ("preferences", "get") => "preferences_get",
@@ -152,6 +166,8 @@ fn mutation_name(command: &OwnerCommand) -> &'static str {
         OwnerCommand::TopicContinue { .. } => "topic_continue",
         OwnerCommand::PreferencesPatch { .. } => "preferences_patch",
         OwnerCommand::ItemRemove { .. } => "item_remove",
+        OwnerCommand::ItemRestore { .. } => "item_restore",
+        OwnerCommand::TopicRemovedRestore { .. } => "topic_removed_restore",
         OwnerCommand::TopicRemove { .. } => "topic_remove",
         OwnerCommand::SessionRemove { .. } => "session_remove",
         OwnerCommand::ProjectRemove { .. } => "project_remove",

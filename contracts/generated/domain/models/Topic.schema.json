@@ -35,6 +35,26 @@
         }
       ]
     },
+    "removed_at": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "removed_by": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AgentRemovalSource"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "revision": {
       "$ref": "#/$defs/PositiveSafeInteger"
     },
@@ -56,6 +76,23 @@
     "origin"
   ],
   "$defs": {
+    "AgentRemovalSource": {
+      "description": "The agent and activity message that put work in the recoverable bin.",
+      "type": "object",
+      "properties": {
+        "binding_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "message_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "binding_id",
+        "message_id"
+      ]
+    },
     "PositiveSafeInteger": {
       "type": "integer",
       "maximum": 9007199254740991,

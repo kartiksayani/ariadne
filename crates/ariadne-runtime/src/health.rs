@@ -321,6 +321,7 @@ mod tests {
             blocking_input_ids: vec![],
             dispatch_must_pause: true,
             partial_removal: None,
+            connected_session_name: None,
         }));
         assert_eq!(
             plain_reason(&disconnected),

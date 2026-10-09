@@ -1,3 +1,5 @@
+import { AgentBin } from '../remove/AgentBin';
+import { itemRemoved } from '../../selectors/removed';
 // The session tree column (handoff "Session tree"): session bar, status chips,
 // banners, topic bands and item rows, with the tree keyboard, inline answering
 // and the empty and loading states. Selection, expansion, topic folds and filters
@@ -599,8 +601,8 @@ export function TreeView(props: TreeViewProps) {
   const touchedMessage = highlightedMessages.size && session ? session.messages.find(message => highlightedMessages.has(message.id))?.number ?? null : null;
   const itemActions = (row: ItemRowModel): RowAction[] => {
     const item = row.item, target = { ...route, item_id: item.id }, list: RowAction[] = [];
-    const ackTo = session && ackTarget(session, item);
-    if (ackTo) list.push({ icon: 'ph ph-check', title: ackTitle(ackTo), label: 'Ack', persistent: true, disabled: viewBusy || ack.busy, run: () => { void ack.run(item.id); } });
+    const ackTo = row.ack;
+    if (ackTo) list.push({ icon: 'ph ph-check', title: ackTitle(ackTo, item.status), label: 'Ack', persistent: true, disabled: viewBusy || ack.busy, run: () => { void ack.run(item.id); } });
     const act = (intent: RowIntent) => () => onAct(intent, target, result => { clickedReveal.current = result; });
     if (item.status !== 'waiting_on_me' && (!row.delivery || row.delivery.failed || closed(item.status)) && running && !archivedMode && session?.state === 'active') {
       const bring = { icon: 'ph ph-megaphone-simple', title: 'Bring it up (b)', run: act('bring') };
@@ -646,7 +648,7 @@ export function TreeView(props: TreeViewProps) {
       onEdit={row.kind === 'topic' ? editTopicReply(row.delivery.stuck.input) : undefined} /></div> : null;
   const tree = model && rows.length > 0 && <ItemRefs.Provider value={{ lookup: id => {
     const item = session?.items[id];
-    return item && session ? { label: shortLabel(item), status: displayStatus(session, item) } : null;
+    return item && session && !itemRemoved(session, item.id) ? { label: shortLabel(item), status: displayStatus(session, item) } : null;
   }, onOpenItem: id => select(id, false) }}><div role="tree" aria-label="Session items" aria-busy={state.status === 'loading'} className="tree-rows" onBlur={saveScroll}>
     {sections.map(({ topic: row, items }) => <div key={row.key} className="tree-topic-group" role="presentation">
       <TopicRow row={row} focused={focusKey === row.key} actions={topicActions(row)}
@@ -662,6 +664,7 @@ export function TreeView(props: TreeViewProps) {
         actions={itemActions(row)} answer={answering === row.key ? answerControl : null} fix={fixOf(row)}
         unfolded={isUnfolded(row.key)} onUnfold={unfold}
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onSelect={select} onToggle={toggleItem} onJump={id => select(id, false)} onHover={onHoverItem} />)}
+      {session && <AgentBin session={session} actions={actions} topicId={row.topic.id} onRemove={onRemove} />}
     </div>)}
   </div></ItemRefs.Provider>;
 
@@ -724,6 +727,7 @@ export function TreeView(props: TreeViewProps) {
     <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
     {/* The graph keeps its own scroller so its legend stays sticky (ui/graph/graph.css). */}
     {graph && !loading ? graph : <div ref={scroller} className="tree-scroll" onScroll={remembering}>{body}</div>}
+    {session && <AgentBin session={session} actions={actions} onRemove={onRemove} />}
     {lifecycle.dialog}
     {continuing && <ContinuePicker topicName={session?.topics[continuing]?.name ?? 'this topic'} targets={continueTargets(route, summaries)}
       onCancel={() => setContinuing(null)}

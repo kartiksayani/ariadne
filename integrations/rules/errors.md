@@ -5,66 +5,67 @@
 - Defaults: `topic` is the only `topic.add`; nested `children` inherit parent/topic.
   `status` is `waiting_on_me` with `ask`, else `open`; `owner` is you, or
   `{"kind":"me"}` with `ask`; others use `{"kind":"other","name":"N"}`.
-  Option ids: 1, 2, ...; refs: r1, r2, ... by position. Name refs to use them later.
-  Answers route to you. `children` holds nested `item.add` objects.
+  Option ids: 1, 2, ...; refs: r1, r2, ... by position.
+  Answers go to you.
 - Refs: `{"ref":"a"}` names an earlier request ref (letter first, then letters,
-  digits or `_`, at most 32); `{"id":"1.2"}` names an item, UUID for topic/message.
-  `item.edit` short/note: omit to keep, string to replace, null to clear.
+  digits or `_`, at most 32); `{"id":"1.2"}`: item; UUID: topic/message.
+  `item.edit` short/note: omit keeps, string replaces, null clears.
+- Delete moves a subtree/topic to Bin, preserving history. Guard root item/topic; explain why (`SKILL.md`).
+  Owner text, unanswered asks and Ack items qualify; archived work refuses. `agent_removals`: items, waiting questions, cancelled inputs.
+  Reads omit Bin work/links.
 - Connections: `item.add.related` or `item.edit.patch.related` takes item numbers
   or batch refs: `["3.2","notes"]` or `[{"id":"3.2"},{"ref":"notes"}]`.
-  Adds accept later refs and nested children. Connections cross topics in this
-  session and show at both ends. Omit/null keeps them; `[]` clears them.
-  Self/duplicate/new missing targets fail. Reads omit removed targets;
+  Later/nested refs work; links cross topics and show at both ends.
+  Omit/null keeps them; `[]` clears them.
+  Self/duplicate/new missing refs fail. Reads omit Bin or removed targets;
   resending declared removed targets prunes them (`pruned_related`: source → targets).
-- Limits: `question`, `ask`, `note`, `outcome`, `why` at most 4096 bytes, `reply`
-  64 KiB, 100 expanded operations, 12 options, 32 links and 32 related items per item.
-- `item.add` never creates terminal items. Results start `open` with `ack_to`:
-  `decided`, `done` or `dropped`, never `replaced`; retain outcome/why.
-  Strict creation rejects terminal statuses; lenient creation repairs those three
-  to Open with that target. `ack_to` requires nonterminal status; it can coexist
-  with an ask, but Ack requires Open/InProgress with no unanswered ask.
-  `item.status` Open/InProgress can set a target. Existing Ack items refuse
-  strict terminal status; lenient filing keeps Open with the requested target.
-  An Answer, Reply or Drop input directing completion on that same item permits
-  terminal status with `source_input_id`, clearing `ack_to`. Items without
-  targets retain terminal transitions. Keep unanswered asks `waiting_on_me`;
-  explain withdrawal in a new `ack_to: "dropped"` item, or supersede with
-  `item.replace`, clearing the target.
+- Limits: `question`, `ask`, `note`, `outcome`, `why` 4096 bytes each, `reply`
+  64 KiB, 100 expanded ops, 12 options, 32 links and 32 related items per item.
+- `item.add` is nonterminal. Choose `ack_to` (`SKILL.md`); keep outcome/why.
+  Strict creation rejects terminal status; CLI repairs Decided/Done/Dropped
+  to Open with that explicit choice, never Replaced. New findings/explanations
+  without asks need `ack_to`: strict filing says "choose ack_to ..."; CLI reports
+  repair to the item's own Open/InProgress status.
+  Ack needs Open/InProgress with no unanswered ask. `item.status`
+  Open/InProgress sets `ack_to`; `item.edit.patch.ack_to` changes it on such Ack
+  items, keeping status/prose. Strict terminal writes on Ack items fail; CLI
+  keeps Open with the requested choice. An Answer/Reply/Drop directing completion
+  on that item permits terminal status with `source_input_id`, clearing `ack_to`.
+  Items without `ack_to` close normally. Keep unanswered asks `waiting_on_me`;
+  explain withdrawal in a new `ack_to: "dropped"` item, or use `item.replace`,
+  clearing `ack_to`.
 - Types: question, decision, finding, task, explanation. `item.status` needs
   `reason` for `open`/`in_progress`, outcome/why for `decided`/`done`/`dropped`;
   `replaced` requires `item.replace`, `waiting_on_me` an ask.
 
-Link sync to [cache choice](item:1) and notes.
+Link sync to [cache choice](item:1) and notes; Ack leaves notes Open.
 
 ```json
-{"summary":"Linked sync","operations":[{"op":"topic.add","name":"Notes sync","short":"Notes sync"},{"op":"item.add","ref":"notes","question":"Read notes offline","short":"Offline notes","type":"finding","status":"open","ack_to":"done","outcome":"Notes read offline","why":"Read offline."},{"op":"item.add","question":"Sync notes","short":"Sync local notes","type":"task","owner":{"kind":"other","name":"Sam"},"related":["1","notes"]}]}
+{"operations":[{"op":"topic.add","name":"Notes sync","short":"Notes sync"},{"op":"item.add","ref":"notes","question":"Read notes offline","short":"Offline notes","type":"finding","status":"open","ack_to":"open","outcome":"Notes read offline","why":"Read offline."},{"op":"item.add","question":"Sync notes","short":"Sync local notes","type":"task","owner":{"kind":"other","name":"Sam"},"related":["1","notes"]}]}
 ```
 
 ## Failed commands
 
-Exit 2 (`invalid_argument`, `invalid_ref`): fix the named field, resend without
-`op_id` or with a new one. Exit 3 (`revision_conflict`, `invalid_transition`,
-`binding_mismatch`, `operation_reused`): reread items, rebuild with current
-revisions and no `op_id`, except as below. `ariadne apply --dry-run` validates
-without committing. Never repair failures by editing `.ariadne/` files.
+Exit 2 (`invalid_argument`, `invalid_ref`): fix the field; omit or renew `op_id`. Exit 3 (`revision_conflict`, `invalid_transition`, `binding_mismatch`,
+`operation_reused`): reread; use current revisions and no `op_id`, except below.
+`--dry-run` validates without saving. Never repair by editing `.ariadne/`.
 
 | Code | Exit | Do |
 |---|---|---|
-| `stale_generation` | 3 | Use a newer connection note, setup or `/ariadne-connect` generation from this conversation, rebuilding without `op_id`. Otherwise stop writing and ask for current setup. Never guess. |
+| `stale_generation` | 3 | Use a newer connection note, setup or `/ariadne-connect` generation from this conversation; rebuild without `op_id`. Otherwise stop writing and ask for current setup. Never guess. |
 | `invalid_transition` with `details.reason: "topic_archived"` | 3 | Do not retry. Ask in a live topic to restore it. Read with `--view items --topic <id> --archived`. |
-| `attempt_sealed` | 3 | Closed input/attempt: stop, tell the owner; never invent an attempt. |
-| `result_already_committed` | 3 | Saved result: only exact replay is valid; send nothing new. |
-| `commit_uncertain`, `store_busy`, `io_error` | 4 | Resend the identical request at most 3 times: the CLI derives the same `op_id`, so a saved request replays (`"replayed":true`). With explicit `op_id`, keep identical bytes too. Still no receipt: stop and tell the owner. `store_busy` saved nothing. |
-| no reply (timeout, killed call) | 4 | A retry of the identical request is safe: a replay shows `"replayed":true`. Change nothing; changed requests are new work. |
-| any other exit 4 (e.g. `capacity_exceeded`, `host_unreachable`) | 4 | Stop and tell the owner; do not retry in a loop. |
+| `attempt_sealed` | 3 | Closed input/attempt: stop, tell the owner; invent nothing. |
+| `result_already_committed` | 3 | Saved result: exact replay only; send nothing new. |
+| `commit_uncertain`, `store_busy`, `io_error` | 4 | Resend the identical request at most 3 times: the CLI derives the same `op_id`, so a saved request replays (`"replayed":true`). Explicit `op_id`: keep bytes too. Still no receipt: stop, tell the owner. `store_busy` saved nothing. |
+| no reply (timeout, killed call) | 4 | A retry of the identical request is safe: a replay shows `"replayed":true`. Change nothing; changes are new work. |
+| any other exit 4 (e.g. `capacity_exceeded`, `host_unreachable`) | 4 | Stop, tell the owner; no retry loop. |
 | `unsupported`, `future_schema` | 5 | Stop and tell the owner. |
 
-Replays write once. Never resend owner messages, repeat finished work or scrape
-transcripts. Missing output, presence, timeout or failed receipt do not prove non-delivery.
+Replays write once. Never resend owner messages or repeat finished work.
+A failed receipt does not prove non-delivery; neither do missing output or timeouts.
 
 ## Result-only repair
 
 For `"purpose":"result_repair"`, read `original_message_ids`, `affected_item_ids`
-and `original_domain_result` for `repair_for_attempt_id`. Never repeat mutations;
-publish only the missing `input_result` for the new `attempt_id`, citing verified
-original replies.
+and `original_domain_result` for `repair_for_attempt_id`. Never repeat writes;
+publish only the missing `input_result` for new `attempt_id`, citing verified replies.

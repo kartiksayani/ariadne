@@ -10,10 +10,12 @@ import type { SessionActionControllers } from '../../components/bindings/actions
 import { openContinueTopic } from '../dialogs/ContinueTopicDialog';
 import { RemoveDialog } from '../dialogs/RemoveDialog';
 import type { RemoveHandler, RemoveSubject, RemoveTarget } from '../dialogs/remove';
-import { archivedTopics, ICON, STATUS_LABEL, type ArchivedTopic } from './model';
+import { archivedTopics, ICON, STATUS_LABEL, sessionKey, type ArchivedTopic } from './model';
 import { notices } from './notices';
 import { useHidden } from '../remove/queue';
 import './pages.css';
+import { AgentBin } from '../remove/AgentBin';
+import { removeSubject, visibleSession } from '../remove/model';
 
 export interface ArchivePageProps {
   readonly navigation: NavigationStore;
@@ -51,9 +53,11 @@ export function ArchivePage({ navigation, actions, projectName, sessions, snapsh
       notices.push({ icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: plainFailure(error, 'The topic could not be restored. Try again.') });
     } finally { setBusy(null); }
   };
-  const remove = (topic: ArchivedTopic) => setRemoving({ target: { kind: 'topic', session: topic.source, topic_id: topic.topic.id },
-    subject: { kind: 'topic', name: topic.name, items: topic.items, waiting: topic.waiting,
-      tell: { agent: topic.sourceAgent, mode: topic.sourceClosed ? 'closed' : topic.sourceRunning ? 'tell' : 'queued' } } });
+  const remove = (topic: ArchivedTopic) => {
+    const target = { kind: 'topic', session: topic.source, topic_id: topic.topic.id } as const;
+    const session = snapshots.get(sessionKey(topic.source)), subject = session && removeSubject(session, target);
+    if (subject) setRemoving({ target, subject });
+  };
   const needle = query.trim();
   return <div className="pw-archive">
     <div className="pw-page-title"><h1 className="pw-archive-name">Archived topics</h1>
@@ -79,6 +83,11 @@ export function ArchivePage({ navigation, actions, projectName, sessions, snapsh
             style={{ color: `var(--st-${line.status})` }} /></span><span>{line.text}</span></div>)}
         {topic.more && <div className="pw-archive-more">{topic.more}</div>}
       </div>
+      {snapshots.get(sessionKey(topic.source)) && <AgentBin session={visibleSession(snapshots.get(sessionKey(topic.source))!, topic.source, hidden)}
+        actions={actions.forSession(navigation.opened.open(topic.source))} topicId={topic.topic.id} onRemove={target => {
+          const session = snapshots.get(sessionKey(topic.source)), subject = session && removeSubject(session, target);
+          if (subject) setRemoving({ target, subject });
+        }} />}
     </div>)}
     {removing && <RemoveDialog subject={removing.subject} onCancel={() => setRemoving(null)} onConfirm={() => onRemove(removing.target, removing.subject)} />}
   </div>;

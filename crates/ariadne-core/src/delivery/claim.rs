@@ -135,6 +135,13 @@ impl DeliveryService<'_> {
                                 .0
                                 .get(&i.target.topic_id)
                                 .is_none_or(|topic| topic.archived_at.is_none())
+                            // A result repair settles already completed work;
+                            // it does not send the removed work to execute again.
+                            && (i.kind == InputKind::Removed || queued_result_repair(i) || (
+                                session.topics.0.get(&i.target.topic_id).is_none_or(|topic|
+                                    !ariadne_domain::visibility::topic_is_removed(session, topic))
+                                && i.target.item_id.as_ref().and_then(|id| session.items.0.get(id)).is_none_or(|item|
+                                    !ariadne_domain::visibility::item_is_removed(session, item))))
                     })
                     .min_by_key(|i| i.seq)
                     .cloned()
@@ -150,22 +157,7 @@ impl DeliveryService<'_> {
                     )
                     .into());
                 }
-                let repair = input
-                    .resolution_history
-                    .iter()
-                    .rev()
-                    .find(|entry| {
-                        input
-                            .attempts
-                            .last()
-                            .is_some_and(|a| entry.attempt_id == a.id)
-                            && matches!(
-                                entry.kind,
-                                ResolutionKind::RetryUnexecuted
-                                    | ResolutionKind::Resend
-                                    | ResolutionKind::RequestResultRepair
-                            )
-                    })
+                let repair = queue_resolution(&input)
                     .map(|entry| {
                         let selected = input.attempts.last().expect("matched retained attempt");
                         if entry.kind == ResolutionKind::RequestResultRepair {
@@ -310,6 +302,31 @@ impl DeliveryService<'_> {
     }
 }
 
+fn queue_resolution(input: &Input) -> Option<&ResolutionHistoryEntry> {
+    input.resolution_history.iter().rev().find(|entry| {
+        input
+            .attempts
+            .last()
+            .is_some_and(|attempt| entry.attempt_id == attempt.id)
+            && matches!(
+                entry.kind,
+                ResolutionKind::RetryUnexecuted
+                    | ResolutionKind::Resend
+                    | ResolutionKind::RequestResultRepair
+            )
+    })
+}
+
+fn queued_result_repair(input: &Input) -> bool {
+    queue_resolution(input).is_some_and(|entry| {
+        entry.kind == ResolutionKind::RequestResultRepair
+            || input
+                .attempts
+                .last()
+                .is_some_and(|attempt| attempt.purpose == AttemptPurpose::ResultRepair)
+    })
+}
+
 fn occupied(session: &Session, id: &UuidV4) -> bool {
     &session.id == id
         || &session.project_id == id
@@ -349,6 +366,7 @@ fn barrier(
             .collect(),
         dispatch_must_pause: true,
         partial_removal: None,
+        connected_session_name: None,
     }));
     e
 }

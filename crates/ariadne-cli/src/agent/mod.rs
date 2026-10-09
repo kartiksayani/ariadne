@@ -23,6 +23,8 @@ pub const HELP: &str = r#"Agent tools (explicit routing; no cwd/session default)
 Read source scope: add both --source-input UUID and --attempt UUID, or neither.
 --topic takes a topic id or its number (the `order` shown by --view topics);
 --archived keeps only archived topics (and the items in them).
+Read omits Bin items and topics; notices report "N removed items not shown"
+and "N removed topics not shown" when applicable.
 Stdin is the complete canonical SessionReadRequest, ItemMessagesRequest,
 ItemRoundsRequest or ApplyRequest (not an actor/context envelope), at most 512KiB.
 Apply stdin may leave out defaulted fields (below); creation statuses decided,
@@ -61,20 +63,37 @@ validates it exactly as before):
   New items can link to later additions, including nested children: the CLI
   assigns those links just after their targets are created. Later explicit edits
   win. Item ids are their display numbers; read --view items shows related ids.
+  Delete: item.delete item accepts "3.2", {"id":"3.2"}, or a batch ref
+  "duplicate" / {"ref":"duplicate"}; topic.delete topic accepts a UUID,
+  {"id":"UUID"}, or a batch ref. Delete moves the item subtree or topic to
+  Bin and preserves history. Guard the deleted root item's revision, or the
+  deleted topic's revision; inherited descendant removal needs no extra guards.
+  Delete clearly wrong, duplicate or obsolete filings you created, or work the
+  owner asks you to delete. Prefer Drop/Replace for real work no longer needed.
+  Always reply briefly explaining what you deleted and why. agent_removals in
+  the receipt lists affected items, waiting questions and cancelled input ids.
   Owner Ack: new items stay nonterminal. Creation status decided/done/dropped
   becomes open with ack_to = that status; outcome and why are preserved. An
-  explicit open with ack_to is accepted. Conflicting status and ack_to are refused;
+  explicit open with ack_to is accepted. Choose each target deliberately:
+  open if the owner just reads and work continues, in_progress if underway,
+  decided/done only when truly finished once read, dropped for ruled-out work.
+  There is no implicit done. New finding/explanation items without ask require
+  ack_to: strict filing says "choose ack_to ..." when missing; this CLI repairs
+  omission to open and reports it. Conflicting status and ack_to are refused;
   replaced creation is refused. item.status open/in_progress can set ack_to;
-  finish summaries open with ack_to. Never close or replace an item with ack_to:
-  only the owner can Ack it. An ask can coexist, but Ack waits until no owner
-  question is pending. Legacy terminal status updates stay open for owner Ack.
+  item.edit patch.ack_to can change an open/in_progress Ack item's target, retaining status
+  and prose. Owner Ack clears the target, preserves prose and sets that status;
+  it sends no agent input. An ask can coexist, but Ack waits until no owner
+  question is pending. Existing Ack terminal updates stay open for owner Ack,
+  except owner-directed completion with source_input_id on that same item.
+  Existing work without ack_to can close normally; item.replace clears ack_to.
   An item.add with an ask stays waiting_on_me even if open/in_progress was given;
   it may retain ack_to. item.ask also keeps an existing Ack target.
   Still required: type and question on item.add; outcome and why when changing
   an existing item to done/decided/dropped; expected_item_revisions for every
   existing item you touch.
 Example (a topic, a summary item with one child, one ask with two options):
-  printf '%s' '{"operations":[{"op":"topic.add","name":"Cache PR review","short":"Cache PR"},{"op":"item.add","short":"Review result","type":"finding","question":"Review finished: one race, one choice","status":"open","ack_to":"done","outcome":"Reviewed","why":"Read every changed file","children":[{"short":"Fill race","type":"finding","question":"Two writers race in fill()","status":"open","ack_to":"done","outcome":"Confirmed","why":"Reproduced locally"}]},{"op":"item.add","short":"Fallback merge","type":"decision","question":"Merge the fallback path now?","ask":"Merge now or wait?","options":[{"label":"Merge now","consequence":"Ships today"},{"label":"Wait","consequence":"Ships next week"}]}]}' | ariadne apply --binding "$B" --generation "$G" --json-stdin --json
+  printf '%s' '{"operations":[{"op":"topic.add","name":"Cache PR review","short":"Cache PR"},{"op":"item.add","short":"Review result","type":"finding","question":"Review finished: one race, one choice","status":"open","ack_to":"open","outcome":"Reviewed","why":"Read every changed file","children":[{"short":"Fill race","type":"finding","question":"Two writers race in fill()","status":"open","ack_to":"open","outcome":"Confirmed","why":"Reproduced locally"}]},{"op":"item.add","short":"Fallback merge","type":"decision","question":"Merge the fallback path now?","ask":"Merge now or wait?","options":[{"label":"Merge now","consequence":"Ships today"},{"label":"Wait","consequence":"Ships next week"}]}]}' | ariadne apply --binding "$B" --generation "$G" --json-stdin --json
 Receipt (default, compact; data of the --json envelope):
   {"op_id":"...","session_revision":3,"topics":[{"id":"UUID","number":2,"short":"Cache PR","revision":1,"created":true}],"items":[{"id":"4","short":"Review result","revision":1,"created":true},{"id":"4.1","short":"Fill race","revision":1,"created":true}]}
   An item id is its number (1.2). revision is the value to send as the next
@@ -195,8 +214,9 @@ fn execute(
             &call.request.request.attempt_id,
         ),
     };
-    let context = AgentResolver::resolve(
-        core.registry(),
+    let catalogue = core.registry().catalogue().map_err(CoreError::from)?;
+    let context = AgentResolver::resolve_from_catalogue(
+        &catalogue,
         binding.clone(),
         generation.clone(),
         source.clone(),
@@ -236,11 +256,79 @@ fn execute(
                 Tool::Rounds(request) => QueryRequest::ItemRounds(request.params),
                 Tool::Apply(_) => unreachable!("handled above"),
             };
-            value(serde_json::to_value(
-                core.query(QueryContext::agent(context), request)?,
-            ))
+            let result = core.query(QueryContext::agent(context.clone()), request.clone())?;
+            let mut shown = value(serde_json::to_value(&result))?;
+            if let QueryRequest::SessionRead(params) = request {
+                let notices = catalogue
+                    .projects
+                    .iter()
+                    .filter_map(|project| project.result.as_ref().ok())
+                    .filter_map(|project| project.sessions.as_ref().ok())
+                    .flatten()
+                    .filter_map(|session| session.result.as_ref().ok())
+                    .find(|session| {
+                        session.id == *context.session().session_id()
+                            && session.project_id == *context.session().project_id()
+                    })
+                    .map(|session| read_notices(session, &params.selection, &result))
+                    .unwrap_or_default();
+                if !notices.is_empty() {
+                    if let Some(object) = shown.as_object_mut() {
+                        object.insert("notices".into(), serde_json::json!(notices));
+                    }
+                }
+            }
+            Ok(shown)
         }
     }
+}
+
+/// Only counts are exposed, after Core authorized the requested read. Removed
+/// content never leaves the registered snapshot through this CLI notice.
+fn read_notices(session: &Session, selection: &ReadView, result: &QueryResult) -> Vec<String> {
+    let revision = match result {
+        QueryResult::SessionRead(SessionReadResult::Items(page)) => page.snapshot_revision,
+        QueryResult::SessionRead(SessionReadResult::Topics(page)) => page.snapshot_revision,
+        _ => return vec![],
+    };
+    if revision != session.revision {
+        // Registry routing and query snapshots may race a write. Keep the
+        // omission explicit without claiming counts from another revision.
+        return vec!["Removed work is not shown.".into()];
+    }
+    removed_notices(session, selection)
+}
+
+fn removed_notices(session: &Session, selection: &ReadView) -> Vec<String> {
+    let mut notices = vec![];
+    if let ReadView::Items { topic_id, .. } = selection {
+        let count = session
+            .items
+            .0
+            .values()
+            .filter(|item| {
+                ariadne_domain::visibility::item_is_removed(session, item)
+                    && topic_id
+                        .as_ref()
+                        .is_none_or(|topic| &item.topic_id == topic)
+            })
+            .count();
+        if count > 0 {
+            notices.push(format!("{count} removed items not shown"));
+        }
+    }
+    if matches!(selection, ReadView::Items { .. } | ReadView::Topics { .. }) {
+        let count = session
+            .topics
+            .0
+            .values()
+            .filter(|topic| ariadne_domain::visibility::topic_is_removed(session, topic))
+            .count();
+        if count > 0 {
+            notices.push(format!("{count} removed topics not shown"));
+        }
+    }
+    notices
 }
 
 /// Real apply prints the compact receipt (or the full one); `--dry-run` runs every
@@ -670,6 +758,45 @@ fn invalid(message: &str) -> CoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_notices_never_claim_counts_from_another_revision() {
+        let mut session: Session = serde_json::from_str(include_str!(
+            "../../../../fixtures/domain/history/seed.json"
+        ))
+        .unwrap();
+        session.items.0.values_mut().next().unwrap().removed_at =
+            Some(UtcMillis::new("2026-10-09T00:00:00.000Z").unwrap());
+        let selection = ReadView::Items {
+            topic_id: None,
+            item_id: None,
+            parent_item_id: None,
+            statuses: vec![],
+            archived: None,
+        };
+        let mut page = Page {
+            items: vec![],
+            next_cursor: None,
+            snapshot_revision: session.revision,
+        };
+        assert_eq!(
+            read_notices(
+                &session,
+                &selection,
+                &QueryResult::SessionRead(SessionReadResult::Items(page.clone()))
+            ),
+            vec!["1 removed items not shown"]
+        );
+        page.snapshot_revision = PositiveSafeInteger::new(session.revision.value() + 1).unwrap();
+        assert_eq!(
+            read_notices(
+                &session,
+                &selection,
+                &QueryResult::SessionRead(SessionReadResult::Items(page))
+            ),
+            vec!["Removed work is not shown."]
+        );
+    }
 
     #[test]
     fn uncertain_generated_operations_explain_that_an_identical_resend_is_safe() {

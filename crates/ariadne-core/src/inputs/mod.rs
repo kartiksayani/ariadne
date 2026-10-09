@@ -123,6 +123,12 @@ fn submit(
         .0
         .get(item_id)
         .ok_or_else(|| core(CoreErrorCode::NotFound, "The target item does not exist"))?;
+    if ariadne_domain::visibility::item_is_removed(session, item) {
+        return Err(core(
+            CoreErrorCode::InvalidTransition,
+            "Restore this item from the bin before sending a message.",
+        ));
+    }
     if item.topic_id != params.target.topic_id {
         return Err(core(
             CoreErrorCode::InvalidArgument,
@@ -328,6 +334,12 @@ fn submit_topic_reply(
         ));
     }
     let topic_name = topic.name.clone();
+    if ariadne_domain::visibility::topic_is_removed(session, topic) {
+        return Err(core(
+            CoreErrorCode::InvalidTransition,
+            "Restore this topic from the bin before sending a message.",
+        ));
+    }
     if pending_count(session) >= 100 {
         return Err(core(
             CoreErrorCode::QueueFull,
@@ -533,7 +545,7 @@ fn history_error(error: HistoryError) -> CoreError {
         HistoryError::QuestionChanged => CoreErrorCode::QuestionChanged,
         HistoryError::BindingMismatch => CoreErrorCode::BindingMismatch,
         HistoryError::CounterOverflow => CoreErrorCode::CapacityExceeded,
-        HistoryError::ClosedSession | HistoryError::ArchivedTopic => {
+        HistoryError::ClosedSession | HistoryError::ArchivedTopic | HistoryError::RemovedWork => {
             CoreErrorCode::InvalidTransition
         }
         HistoryError::InvalidCorrection => CoreErrorCode::RevisionConflict,

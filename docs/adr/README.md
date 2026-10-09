@@ -110,3 +110,10 @@ bidirectional detail references and dashed links for the selected graph item.
 [ADR-0095](ADR-0095-session-archive.md) puts finished sessions in a remembered,
 folded Archived group, closes them safely, and restores them as Closed while
 keeping their history readable.
+
+[ADR-0096](ADR-0096-recover-stale-claude-connect.md) recovers obsolete Claude
+connect requests and lost desktop routes while preserving exact timeout retries,
+pending messages and live conversations elsewhere.
+
+[ADR-0097](ADR-0097-agent-delete-bin.md) lets agents remove items, subtrees and
+whole topics into a recoverable bin, with visible owner notices and exact Restore.

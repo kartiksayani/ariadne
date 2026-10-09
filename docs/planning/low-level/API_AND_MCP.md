@@ -527,16 +527,25 @@ input_result: ResultDraft|null
 |---|---|
 | `topic.add` | `ref,name`; optional `short` |
 | `item.add` | `ref,topic,parent?,question,type,status,owner`; optional short/ack_to/ask/options/note/links/related/outcome/why/replaced_by/source_round_id; strict core rejects terminal creation |
-| `item.edit` | `item,patch` restricted to question/type/note/links/related/short; expected revision |
+| `item.edit` | `item,patch` restricted to question/type/note/links/related/short/ack_to; expected revision; ack_to changes an existing Open/InProgress Ack choice only |
 | `item.ask` | `item,ask,options,recipient_binding_id`; opens new round + waiting episode, owner=me |
 | `item.status` | `item,status`; optional `ack_to` for open/in_progress with proposed outcome/why; `outcome,why` required for decided/done/dropped; `reason` required for other transitions; replaced uses item.replace; waiting uses item.ask |
+| `item.delete` | `item`; expected root revision; moves the item and subtree to the recoverable bin, idempotent when already removed |
+| `topic.delete` | `topic`; expected topic revision; moves its contents to the recoverable bin in this session only |
 | `item.replace` | `item,replacement,outcome,why` |
 | `reply` | `ref,item,text,round_id?`; exactly one full item reply |
 | `round.close` | `round_id`; immutable history retained |
 
-`ack_to` is `decided`, `done` or `dropped`, never `replaced`. A read-only item is
-created Open with this target; its intended outcome and why may be supplied and
-are retained until Ack. Under ADR-0092 the CLI repairs Decided/Done/Dropped
+`ack_to` is `open`, `in_progress`, `decided`, `done` or `dropped`, never `replaced`.
+The agent chooses per item; there is no implicit Done. New Open/InProgress
+findings and explanations without an ask require an explicit choice in strict
+filing: "choose ack_to: open, in_progress, decided, done or dropped".
+Under ADR-0092 the lenient CLI repairs a missing choice to the item's current
+nonterminal status (`open` or `in_progress`) and reports it;
+ordinary tasks, decisions and questions retain their existing creation behavior.
+New Open/InProgress items may supply outcome or why only with `ack_to`.
+That prose remains visible after nonterminal Ack and later nonterminal status changes.
+The CLI still repairs Decided/Done/Dropped
 creation to Open with the requested `ack_to`, recursively for nested children,
 and reports the repair. Strict core rejects terminal creation. Replaced is never
 repaired because it requires replacement provenance. An unanswered ask blocks
@@ -550,7 +559,10 @@ other terminal status requests on existing Ack items to open + ack_to under the
 store lock after replay lookup, preserving text and the original request's retry
 identity. Existing items without ack_to retain normal terminal transitions.
 item.replace remains available for superseded work and clears ack_to. Omitting
-the status target keeps an existing proposal. Owner Ack clears the target. Continue
+the status target keeps an existing proposal. `item.edit.patch.ack_to` changes an
+existing Open/InProgress Ack choice only; omitting it or supplying null keeps the
+choice, and it cannot add Ack again after acknowledgment. Owner Ack uses the
+chosen status and clears the target. Continue
 is an owner action and keeps finished copies finished. Both agent item reads and
 owner session snapshots include the field.
 
@@ -898,3 +910,42 @@ pointers null; exact continuation mapping/origin validation is required. Repeate
 continuation preserves that original historical target. Local item conversations
 use direct local item matches, so coincidentally equal foreign ItemRefs and
 `items_touched` backlinks cannot reanchor a Reply.
+
+### Agent delete and owner Restore (Alpha.12, ADR-0097)
+
+`item.delete` takes an item reference; `topic.delete` takes a topic reference.
+Strict references use `{id}` or in-batch `{ref}`; the CLI also accepts the usual
+number/local-ref strings. Existing binding, generation and session authorization
+apply. Any content in the acting session may be removed, including owner-written
+items, unanswered questions and proposed acknowledgments. Archived topics and
+archived/closed sessions remain read-only. Deleting already removed work succeeds
+without a second notice. Other writes to removed work return `invalid_transition`
+with a plain instruction to ask the owner to restore it.
+
+Agent reads omit removed topics and effectively removed items; CLI and MCP reads
+report how many were omitted in plain words. MCP keeps the canonical structured
+result and appends the notice as text content. Owner history retains cancelled
+text. Agent message reads omit messages on binned items/topics and retain the
+existing issued-message visibility rules. Related and replacement declarations
+remain stored, but live projections skip removed destinations until Restore.
+
+The Apply receipt optionally carries `agent_removals`, one record per newly
+removed root or topic: `{topic_id,item_id,message_id,item_ids,waiting_questions,
+cancelled_input_ids}`. `item_id` is null for a whole topic. Only queued,
+undelivered owner inputs cancel. Removed notices and already claimed or received
+inputs, including the source input, remain valid; a missing same-request result
+can still land later. A result supplied by the same batch commits normally.
+Removed content and cancelled message text remain in the session. Restore never
+resends cancelled messages.
+
+Owner `item_restore` uses `{item_id,expected_revision}`; `topic_removed_restore`
+uses `{topic_id,expected_revision}`. Both return a `bin_restore` receipt with
+`topic_id` and nullable `item_id`. Restore clears only the selected removal marker
+and advances its revision. It queues no new agent input, but existing held queued
+messages become eligible to send when their work becomes visible. The desktop
+states that count before Restore. Restoring a nested item refuses until its
+parent work and topic are out of the bin. `input_resolve` refuses `resend` and
+`retry_unexecuted` for removed work with an instruction to restore it first or mark
+the message done. The existing `item_remove`
+and `topic_remove` commands perform Delete forever, retaining backup, integrity
+checks and permanent-removal notification semantics (ADR-0083, ADR-0088).

@@ -1,6 +1,10 @@
+use ariadne_agent_protocol::{EventPayload, NormalizedEvent, TurnFinishedStatus};
 use ariadne_core::{
     apply::{ApplyError, ApplyService},
+    delivery::DeliveryService,
+    history_actions::HistoryActionService,
     inputs::InputService,
+    recovery::RecoveryService,
     *,
 };
 use ariadne_domain::models::*;
@@ -18,6 +22,1256 @@ use tempfile::TempDir;
 /// Project store directory under a data-root home, as `Registry::project_dir` derives it.
 fn store_dir(home: &std::path::Path, project: u64) -> std::path::PathBuf {
     home.join(".ariadne/projects").join(id(project).as_str())
+}
+
+fn agent_removals(receipt: &SavedReceipt) -> &[AgentRemoval] {
+    let SavedReceiptData::Apply { agent_removals, .. } = &receipt.data else {
+        panic!("apply receipt")
+    };
+    agent_removals
+}
+
+fn restore_item(
+    setup: &Setup,
+    target: &str,
+    revision: PositiveSafeInteger,
+    op: u64,
+) -> Result<MutationReceipt, ariadne_core::history_actions::HistoryActionError> {
+    HistoryActionService::new(&setup.registry).execute(
+        &OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
+            RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+        )),
+        &OwnerCommand::ItemRestore {
+            api_version: SchemaVersion::new(1).unwrap(),
+            op_id: id(op),
+            params: ItemRemoveParams {
+                item_id: item(target),
+                expected_revision: revision,
+            },
+        },
+        at(),
+    )
+}
+
+#[test]
+fn agent_bin_preserves_every_ack_choice_until_the_owner_restores_and_acknowledges() {
+    for target in [
+        AckTarget::Open,
+        AckTarget::InProgress,
+        AckTarget::Decided,
+        AckTarget::Done,
+        AckTarget::Dropped,
+    ] {
+        for status in [ItemStatus::Open, ItemStatus::InProgress] {
+            for scope in ["item", "ancestor", "topic"] {
+                let mut source = seed();
+                let root = source.items.0.get_mut(&item("1")).unwrap();
+                root.status = status.clone();
+                root.ask = None;
+                root.waiting_since = None;
+                root.ack_to = Some(target);
+                let setup = Setup::new(&source);
+                let Operation::ItemAdd(mut child) =
+                    add("proposal", uuid(5), Some(existing("1")), false)
+                else {
+                    unreachable!()
+                };
+                child.item_type = ItemType::Finding;
+                child.status = status.clone();
+                child.ack_to = Some(target);
+                child.outcome = Some("Saved report text.".into());
+                child.why = Some("Saved report reason.".into());
+                let mut create = guarded(1700, "1", 1);
+                create.operations.push(Operation::ItemAdd(child));
+                setup.execute(&create).unwrap();
+                let before = setup.saved();
+                let mut delete = request(1701);
+                let selected = if scope == "item" { "1.1" } else { "1" };
+                if scope == "topic" {
+                    delete
+                        .expected_topic_revisions
+                        .0
+                        .insert(id(5), before.topics.0[&id(5)].revision);
+                    delete
+                        .operations
+                        .push(Operation::TopicDelete { topic: uuid(5) });
+                } else {
+                    delete
+                        .expected_item_revisions
+                        .0
+                        .insert(item(selected), before.items.0[&item(selected)].revision);
+                    delete.operations.push(Operation::ItemDelete {
+                        item: existing(selected),
+                    });
+                }
+                setup.execute(&delete).unwrap();
+                let binned = setup.saved();
+                let proposal = &binned.items.0[&item("1.1")];
+                assert_eq!(proposal.ack_to, Some(target));
+                assert_eq!(proposal.status, status);
+                assert_eq!(proposal.outcome, before.items.0[&item("1.1")].outcome);
+                assert_eq!(proposal.why, before.items.0[&item("1.1")].why);
+                assert_eq!(
+                    proposal.status_history,
+                    before.items.0[&item("1.1")].status_history
+                );
+                assert_eq!(binned.items.0[&item("1")].ack_to, Some(target));
+                let counts_context = QueryContext::owner(OwnerContext::from_trusted_entrypoint(
+                    OwnerScope::Registry,
+                ));
+                let QueryResult::SessionList(summary) =
+                    ariadne_core::queries::QueryService::new(&setup.registry)
+                        .query(
+                            &counts_context,
+                            &QueryRequest::SessionList(SessionListRequest {
+                                project_id: Some(id(1)),
+                                state: None,
+                                cursor: None,
+                                limit: PageLimit::new(10).unwrap(),
+                            }),
+                        )
+                        .unwrap()
+                else {
+                    panic!("session counts")
+                };
+                let remaining = u64::from(scope == "item");
+                assert_eq!(
+                    summary.counts.items_by_status.open.value(),
+                    if status == ItemStatus::Open {
+                        remaining
+                    } else {
+                        0
+                    }
+                );
+                assert_eq!(
+                    summary.counts.items_by_status.in_progress.value(),
+                    if status == ItemStatus::InProgress {
+                        remaining
+                    } else {
+                        0
+                    }
+                );
+                assert_eq!(summary.counts.waiting_unanswered.value(), 0);
+                let ack = OwnerCommand::Ack {
+                    api_version: SchemaVersion::new(1).unwrap(),
+                    op_id: id(1702),
+                    params: ItemAckParams {
+                        item_id: item("1.1"),
+                        expected_revision: proposal.revision,
+                    },
+                };
+                let service = HistoryActionService::new(&setup.registry);
+                let bytes = setup.bytes();
+                let error = service
+                    .acknowledge(&owner_route(), &ack, at(), || {
+                        panic!("binned Ack cannot allocate")
+                    })
+                    .unwrap_err();
+                assert!(
+                    matches!(error, ariadne_core::history_actions::HistoryActionError::Core(error)
+                    if error.code == CoreErrorCode::InvalidTransition && error.message.contains("Restore"))
+                );
+                assert_eq!(setup.bytes(), bytes);
+                if scope == "topic" {
+                    service
+                        .execute(
+                            &owner_route(),
+                            &OwnerCommand::TopicRemovedRestore {
+                                api_version: SchemaVersion::new(1).unwrap(),
+                                op_id: id(1703),
+                                params: TopicLifecycleParams {
+                                    topic_id: id(5),
+                                    expected_revision: binned.topics.0[&id(5)].revision,
+                                },
+                            },
+                            at(),
+                        )
+                        .unwrap();
+                } else {
+                    restore_item(
+                        &setup,
+                        selected,
+                        binned.items.0[&item(selected)].revision,
+                        1703,
+                    )
+                    .unwrap();
+                }
+                let restored = setup.saved();
+                assert_eq!(restored.items.0[&item("1.1")].ack_to, Some(target));
+                let ack = OwnerCommand::Ack {
+                    api_version: SchemaVersion::new(1).unwrap(),
+                    op_id: id(1702),
+                    params: ItemAckParams {
+                        item_id: item("1.1"),
+                        expected_revision: restored.items.0[&item("1.1")].revision,
+                    },
+                };
+                service
+                    .acknowledge(&owner_route(), &ack, at(), || id(1704))
+                    .unwrap();
+                let acknowledged = setup.saved();
+                assert_eq!(acknowledged.items.0[&item("1.1")].status, target.status());
+                assert_eq!(acknowledged.items.0[&item("1.1")].ack_to, None);
+                assert_eq!(acknowledged.inputs, restored.inputs);
+            }
+        }
+    }
+}
+
+#[test]
+fn nested_bin_restore_refuses_until_the_parent_work_or_topic_is_restored() {
+    for topic in [false, true] {
+        let setup = Setup::new(&seed());
+        let mut create = guarded(1710, "1", 1);
+        create
+            .operations
+            .push(add("child", uuid(5), Some(existing("1")), false));
+        setup.execute(&create).unwrap();
+        let before = setup.saved();
+        let mut child = guarded(1711, "1.1", before.items.0[&item("1.1")].revision.value());
+        child.operations.push(Operation::ItemDelete {
+            item: existing("1.1"),
+        });
+        setup.execute(&child).unwrap();
+        let before = setup.saved();
+        let mut parent = request(1712);
+        if topic {
+            parent
+                .expected_topic_revisions
+                .0
+                .insert(id(5), before.topics.0[&id(5)].revision);
+            parent
+                .operations
+                .push(Operation::TopicDelete { topic: uuid(5) });
+        } else {
+            parent
+                .expected_item_revisions
+                .0
+                .insert(item("1"), before.items.0[&item("1")].revision);
+            parent.operations.push(Operation::ItemDelete {
+                item: existing("1"),
+            });
+        }
+        setup.execute(&parent).unwrap();
+        let saved = setup.saved();
+        let bytes = setup.bytes();
+        let error =
+            restore_item(&setup, "1.1", saved.items.0[&item("1.1")].revision, 1713).unwrap_err();
+        assert!(matches!(error,
+            ariadne_core::history_actions::HistoryActionError::Core(error)
+            if error.code == CoreErrorCode::InvalidTransition
+                && error.message == "Restore the parent work or topic from the bin first."));
+        assert_eq!(setup.bytes(), bytes);
+        if topic {
+            HistoryActionService::new(&setup.registry)
+                .execute(
+                    &owner_route(),
+                    &OwnerCommand::TopicRemovedRestore {
+                        api_version: SchemaVersion::new(1).unwrap(),
+                        op_id: id(1714),
+                        params: TopicLifecycleParams {
+                            topic_id: id(5),
+                            expected_revision: saved.topics.0[&id(5)].revision,
+                        },
+                    },
+                    at(),
+                )
+                .unwrap();
+        } else {
+            restore_item(&setup, "1", saved.items.0[&item("1")].revision, 1714).unwrap();
+        }
+        assert!(setup.saved().items.0[&item("1.1")].removed_at.is_some());
+        restore_item(&setup, "1.1", saved.items.0[&item("1.1")].revision, 1713).unwrap();
+        assert!(!ariadne_domain::visibility::item_is_removed(
+            &setup.saved(),
+            &setup.saved().items.0[&item("1.1")]
+        ));
+    }
+}
+
+#[test]
+fn agent_delete_preserves_subtree_and_redelete_and_restore_exact_marker() {
+    let setup = Setup::new(&seed());
+    let mut children = guarded(
+        1500,
+        "1",
+        setup.saved().items.0[&item("1")].revision.value(),
+    );
+    children
+        .operations
+        .push(add("child", uuid(5), Some(existing("1")), true));
+    setup.execute(&children).unwrap();
+    let before = setup.saved();
+    let mut delete = guarded(1501, "1", before.items.0[&item("1")].revision.value());
+    delete.operations.push(Operation::ItemDelete {
+        item: existing("1"),
+    });
+    let receipt = setup.execute(&delete).unwrap();
+    let removal = &agent_removals(&receipt)[0];
+    assert_eq!(removal.item_ids, vec![item("1"), item("1.1")]);
+    assert_eq!(removal.waiting_questions.value(), 1);
+    assert!(removal.cancelled_input_ids.is_empty());
+    let deleted = setup.saved();
+    let root = &deleted.items.0[&item("1")];
+    assert!(root.removed_at.is_some());
+    assert_eq!(root.status, before.items.0[&item("1")].status);
+    assert_eq!(root.question, before.items.0[&item("1")].question);
+    assert_eq!(
+        root.status_history,
+        before.items.0[&item("1")].status_history
+    );
+    assert_eq!(deleted.items.0[&item("1.1")], before.items.0[&item("1.1")]);
+    assert!(ariadne_domain::visibility::item_is_removed(
+        &deleted,
+        &deleted.items.0[&item("1.1")]
+    ));
+    let notice = deleted
+        .messages
+        .iter()
+        .find(|m| m.id == removal.message_id)
+        .unwrap();
+    assert!(notice.body.contains(&deleted.topics.0[&id(5)].name));
+    assert!(notice.body.contains("1 waiting question"));
+    assert!(!notice.body.contains(id(3).as_str()));
+    let summary = ApplyService::new(&setup.registry)
+        .summary(&setup.context(None), &receipt)
+        .unwrap();
+    assert_eq!(summary.agent_removals, agent_removals(&receipt));
+    let mut again = guarded(1502, "1.1", deleted.items.0[&item("1.1")].revision.value());
+    again.operations.push(Operation::ItemDelete {
+        item: existing("1.1"),
+    });
+    assert!(agent_removals(&setup.execute(&again).unwrap()).is_empty());
+    let redeleted = setup.saved();
+    assert_eq!(redeleted.items, deleted.items);
+    assert!(restore_item(
+        &setup,
+        "1.1",
+        redeleted.items.0[&item("1.1")].revision,
+        1503
+    )
+    .is_err());
+    assert!(restore_item(&setup, "1", before.items.0[&item("1")].revision, 1504).is_err());
+    let message_count = setup.saved().messages.len();
+    restore_item(&setup, "1", root.revision, 1505).unwrap();
+    let restored = setup.saved();
+    assert_eq!(restored.messages.len(), message_count);
+    assert!(!ariadne_domain::visibility::item_is_removed(
+        &restored,
+        &restored.items.0[&item("1.1")]
+    ));
+    assert!(restored.items.0[&item("1")].removed_by.is_none());
+    assert_eq!(restored.items.0[&item("1.1")], before.items.0[&item("1.1")]);
+}
+
+#[test]
+fn agent_delete_source_with_valid_result_preserves_completion_join_and_full_reply() {
+    for turn in [TurnState::Running, TurnState::Completed] {
+        let setup = Setup::new(&seed());
+        let completed = turn == TurnState::Completed;
+        let source = setup.prepare(turn);
+        let mut request = setup.dispatched(1510, &source);
+        request.operations.push(Operation::ItemDelete {
+            item: existing("1"),
+        });
+        let receipt = setup.execute(&request).unwrap();
+        assert!(agent_removals(&receipt)[0].cancelled_input_ids.is_empty());
+        let saved = setup.saved();
+        let input = &saved.inputs.0[&source];
+        assert_eq!(
+            input.state,
+            if completed {
+                InputState::Handled
+            } else {
+                InputState::InFlight
+            }
+        );
+        assert_eq!(input.attempts[0].sealed_at.is_some(), completed);
+        assert_eq!(input.attempts[0].result_state, ResultState::Committed);
+        assert_eq!(input.cancel_cause, None);
+        assert_eq!(
+            saved.bindings.0[&id(3)].active_input_id,
+            if completed {
+                None
+            } else {
+                Some(source.clone())
+            }
+        );
+        assert!(saved
+            .messages
+            .iter()
+            .any(|message| message.kind == MessageKind::Reply
+                && message.body == "Exact full reply.\nWith trailing spaces.  "));
+        restore_item(&setup, "1", saved.items.0[&item("1")].revision, 1511).unwrap();
+        ariadne_domain::history::validate_session_history(&setup.saved()).unwrap();
+        assert_eq!(setup.execute(&request).unwrap(), receipt);
+    }
+}
+
+#[test]
+fn agent_delete_source_without_result_preserves_attempt_and_accepts_later_result() {
+    for (state, turn) in [
+        (InputState::InFlight, TurnState::Running),
+        (InputState::NeedsAttention, TurnState::Completed),
+        (InputState::Queued, TurnState::Running),
+    ] {
+        let setup = Setup::new(&seed());
+        let source = setup.prepare(turn);
+        if state != InputState::InFlight {
+            setup.write(1519, |session| {
+                session.inputs.0.get_mut(&source).unwrap().state = state.clone();
+                if state == InputState::NeedsAttention {
+                    let binding = session.bindings.0.get_mut(&id(3)).unwrap();
+                    binding.dispatch_state = DispatchState::RecoveryRequired;
+                    binding.pause_reason = Some(PauseReason::ResultMissing);
+                }
+            });
+        }
+        let before = setup.saved();
+        let mut request = setup.dispatched(1520, &source);
+        request.operations.push(Operation::ItemDelete {
+            item: existing("1"),
+        });
+        request.input_result = None;
+        let receipt = setup.execute(&request).unwrap();
+        assert!(agent_removals(&receipt)[0].cancelled_input_ids.is_empty());
+        let saved = setup.saved();
+        let input = &saved.inputs.0[&source];
+        assert_eq!(input, &before.inputs.0[&source]);
+        assert!(input.attempts[0].sealed_at.is_none());
+        assert_eq!(
+            saved.messages.iter().find(|m| m.id == input.message_id),
+            before.messages.iter().find(|m| m.id == input.message_id)
+        );
+        assert_eq!(saved.bindings.0[&id(3)], before.bindings.0[&id(3)]);
+        assert!(matches!(
+            &receipt.data,
+            SavedReceiptData::Apply {
+                queue_join_state: Some(join_state), input_result_state: None, ..
+            } if join_state == &state
+        ));
+        assert_eq!(setup.execute(&request).unwrap(), receipt);
+        let SavedReceiptData::Apply { allocated_refs, .. } = &receipt.data else {
+            panic!("apply")
+        };
+        let AllocatedRef::Message { id: response } =
+            &allocated_refs.0[&RequestRef::new("response").unwrap()]
+        else {
+            panic!("reply")
+        };
+        let mut later = setup.dispatched(1522, &source);
+        later.operations.clear();
+        later.input_result.as_mut().unwrap().reply_refs =
+            vec![UuidRef::Existing(ExistingUuidRef {
+                id: response.clone(),
+            })];
+        setup.execute(&later).unwrap();
+        assert_eq!(
+            setup.saved().inputs.0[&source].attempts[0].result_state,
+            ResultState::Committed
+        );
+        if state != InputState::NeedsAttention {
+            finish_input(&setup, &source, id(800), 1523);
+        }
+        let handled = setup.saved();
+        assert_eq!(handled.inputs.0[&source].state, InputState::Handled);
+        assert!(handled.inputs.0[&source].attempts[0].sealed_at.is_some());
+        assert!(handled.inputs.0[&source].cancel_cause.is_none());
+        assert_eq!(handled.bindings.0[&id(3)].active_input_id, None);
+        assert_eq!(handled.bindings.0[&id(3)].pause_reason, None);
+        restore_item(&setup, "1", saved.items.0[&item("1")].revision, 1521).unwrap();
+        assert_eq!(setup.saved().inputs.0[&source].state, InputState::Handled);
+    }
+}
+
+fn finish_input(setup: &Setup, source: &UuidV4, attempt: UuidV4, op: u64) {
+    DeliveryService::new(&setup.registry)
+        .report(
+            &AdapterContext::from_trusted_entrypoint(
+                RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+                id(3),
+                id(4),
+                None,
+            ),
+            &NormalizedEvent {
+                binding_id: id(3),
+                generation: id(4),
+                event_id: format!("finished-{op}"),
+                input_id: Some(source.clone()),
+                attempt_id: Some(attempt),
+                host_turn_id: Some("actual-host-turn".into()),
+                observed_at: at(),
+                event: EventPayload::TurnFinished {
+                    status: TurnFinishedStatus::Completed,
+                    reason: None,
+                    diagnostic_text: None,
+                    truncated: false,
+                },
+            },
+            || id(op),
+        )
+        .unwrap();
+}
+
+#[test]
+fn agent_delete_invalid_empty_source_result_is_atomic() {
+    let setup = Setup::new(&seed());
+    let source = setup.prepare(TurnState::Running);
+    let mut request = setup.dispatched(1530, &source);
+    request.operations.clear();
+    request.operations.push(Operation::ItemDelete {
+        item: existing("1"),
+    });
+    request.input_result.as_mut().unwrap().reply_refs.clear();
+    setup.rejected(&request, CoreErrorCode::InvalidArgument);
+}
+
+#[test]
+fn agent_delete_guarded_and_archived_redelete_is_refused() {
+    let setup = Setup::new(&seed());
+    let mut unguarded = request(1540);
+    unguarded.operations.push(Operation::ItemDelete {
+        item: existing("1"),
+    });
+    setup.rejected(&unguarded, CoreErrorCode::RevisionConflict);
+    let mut delete = guarded(
+        1541,
+        "1",
+        setup.saved().items.0[&item("1")].revision.value(),
+    );
+    delete.operations = unguarded.operations.clone();
+    setup.execute(&delete).unwrap();
+    let mut edit = guarded(
+        1542,
+        "1",
+        setup.saved().items.0[&item("1")].revision.value(),
+    );
+    edit.operations
+        .push(reply(existing("1"), "hidden", "Reply to removed work"));
+    setup.rejected(&edit, CoreErrorCode::InvalidTransition);
+    setup.write(1543, |session| {
+        session.topics.0.get_mut(&id(5)).unwrap().archived_at = Some(at())
+    });
+    edit.op_id = id(1544);
+    edit.operations = unguarded.operations;
+    setup.rejected(&edit, CoreErrorCode::InvalidTransition);
+}
+
+fn owner_route() -> OwnerContext {
+    OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
+        RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+    ))
+}
+
+fn queued_input(setup: &Setup, topic_id: UuidV4, item_id: Option<ItemRef>, op: u64) -> UuidV4 {
+    let receipt = InputService::new(&setup.registry)
+        .execute(
+            &owner_route(),
+            &OwnerCommand::InputSubmit {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(op),
+                params: InputSubmitParams {
+                    binding_id: id(3),
+                    kind: if item_id.is_some() {
+                        InputKind::Reply
+                    } else {
+                        InputKind::TopicReply
+                    },
+                    target: InputTarget { topic_id, item_id },
+                    text: "Owner's full pending message".into(),
+                    selected_option_id: None,
+                    expected_question_revision: None,
+                    supersedes_answer_id: None,
+                },
+            },
+            || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+            at(),
+        )
+        .unwrap();
+    let MutationReceipt::Session(saved) = receipt else {
+        panic!("session")
+    };
+    let SavedReceiptData::InputSubmit { input_id, .. } = saved.data else {
+        panic!("submit")
+    };
+    input_id
+}
+
+#[test]
+fn agent_delete_preserves_independently_claimed_input_and_its_later_result() {
+    for uncertain in [false, true] {
+        let setup = Setup::new(&seed());
+        let source = queued_input(&setup, id(5), Some(item("1")), 1580);
+        let prepared = DeliveryService::new(&setup.registry)
+            .claim(
+                &ValidatedDispatchContext::from_trusted_current_lease(
+                    RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+                    id(3),
+                    id(4),
+                ),
+                &ClaimRequest {
+                    binding_id: id(3),
+                    generation: id(4),
+                    request_id: id(1581),
+                },
+                || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                at(),
+            )
+            .unwrap()
+            .unwrap();
+        DeliveryService::new(&setup.registry)
+            .report(
+                &AdapterContext::from_trusted_entrypoint(
+                    RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+                    id(3),
+                    id(4),
+                    None,
+                ),
+                &NormalizedEvent {
+                    binding_id: id(3),
+                    generation: id(4),
+                    event_id: "received-input".into(),
+                    input_id: Some(source.clone()),
+                    attempt_id: Some(prepared.attempt_id.clone()),
+                    host_turn_id: None,
+                    observed_at: at(),
+                    event: if uncertain {
+                        EventPayload::Uncertain {
+                            reason: "Receipt unavailable".into(),
+                        }
+                    } else {
+                        EventPayload::Accepted { receipt: None }
+                    },
+                },
+                || id(1582),
+            )
+            .unwrap();
+        let context = AgentContext::from_trusted_entrypoint(
+            RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+            id(3),
+            id(4),
+            AgentReadScope::Dispatched {
+                source_input_id: source.clone(),
+                attempt_id: prepared.attempt_id.clone(),
+                issued_through_message_number: setup.saved().bindings.0[&id(3)]
+                    .issued_through_message_number,
+            },
+        );
+        let mut response = guarded(
+            1586,
+            "1",
+            setup.saved().items.0[&item("1")].revision.value(),
+        );
+        response.source_input_id = Some(source.clone());
+        response.attempt_id = Some(prepared.attempt_id.clone());
+        response.operations.push(reply(
+            existing("1"),
+            "response",
+            "Saved reply before moving the item",
+        ));
+        let response_receipt = ApplyService::new(&setup.registry)
+            .execute(
+                &context,
+                &response,
+                || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                at(),
+            )
+            .unwrap();
+        let before = setup.saved();
+        let mut delete = guarded(1583, "1", before.items.0[&item("1")].revision.value());
+        delete.operations.push(Operation::ItemDelete {
+            item: existing("1"),
+        });
+        let receipt = setup.execute(&delete).unwrap();
+        assert!(agent_removals(&receipt)[0].cancelled_input_ids.is_empty());
+        assert_eq!(setup.saved().inputs.0[&source], before.inputs.0[&source]);
+        assert_eq!(setup.saved().bindings.0[&id(3)], before.bindings.0[&id(3)]);
+        let SavedReceiptData::Apply { allocated_refs, .. } = response_receipt.data else {
+            panic!("apply")
+        };
+        let AllocatedRef::Message { id: response } =
+            &allocated_refs.0[&RequestRef::new("response").unwrap()]
+        else {
+            panic!("reply")
+        };
+        let mut later = request(1584);
+        later.source_input_id = Some(source.clone());
+        later.attempt_id = Some(prepared.attempt_id.clone());
+        later.input_result = Some(ResultDraft {
+            reply_refs: vec![UuidRef::Existing(ExistingUuidRef {
+                id: response.clone(),
+            })],
+            handled_through_message_number: p(before.bindings.0[&id(3)]
+                .issued_through_message_number
+                .value()),
+            ..result()
+        });
+        ApplyService::new(&setup.registry)
+            .execute(
+                &context,
+                &later,
+                || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                at(),
+            )
+            .unwrap();
+        if !uncertain {
+            assert_eq!(setup.saved().inputs.0[&source].state, InputState::InFlight);
+            finish_input(&setup, &source, prepared.attempt_id, 1585);
+        }
+        assert_eq!(setup.saved().inputs.0[&source].state, InputState::Handled);
+        assert!(setup.saved().inputs.0[&source].cancel_cause.is_none());
+    }
+}
+
+#[test]
+fn binned_completed_work_can_deliver_result_repair_and_commit_original_reply() {
+    for topic_delete in [false, true] {
+        for repair_before_delete in [false, true] {
+            let setup = Setup::new(&seed());
+            let source = setup.prepare(TurnState::Completed);
+            let mut response = setup.dispatched(1620, &source);
+            response.input_result = None;
+            let response_receipt = setup.execute(&response).unwrap();
+            let SavedReceiptData::Apply { allocated_refs, .. } = response_receipt.data else {
+                panic!("apply")
+            };
+            let AllocatedRef::Message { id: reply_id } =
+                &allocated_refs.0[&RequestRef::new("response").unwrap()]
+            else {
+                panic!("reply")
+            };
+            let queued = queued_input(&setup, id(5), Some(item("1")), 1621);
+            let repair = || {
+                RecoveryService::new(&setup.registry)
+                    .execute(
+                        &owner_route(),
+                        &OwnerCommand::InputResolve {
+                            api_version: SchemaVersion::new(1).unwrap(),
+                            op_id: id(1622),
+                            params: InputResolveParams {
+                                input_id: source.clone(),
+                                attempt_id: id(800),
+                                decision: ResolutionKind::RequestResultRepair,
+                                reason: "Publish the result for completed work".into(),
+                                expected_revision: setup.saved().revision,
+                                evidence: Some(OwnerResolutionEvidence {
+                                    source: OwnerEvidenceSource::OwnerAttestation,
+                                    turn_state: TurnState::Completed,
+                                    host_turn_id: Some("actual-host-turn".into()),
+                                    owner_attested_idle: true,
+                                    at: at(),
+                                }),
+                            },
+                        },
+                        None,
+                        at(),
+                    )
+                    .unwrap();
+            };
+            if repair_before_delete {
+                repair();
+            }
+            let before = setup.saved();
+            let mut delete = request(1623);
+            if topic_delete {
+                delete
+                    .expected_topic_revisions
+                    .0
+                    .insert(id(5), before.topics.0[&id(5)].revision);
+                delete
+                    .operations
+                    .push(Operation::TopicDelete { topic: uuid(5) });
+            } else {
+                delete
+                    .expected_item_revisions
+                    .0
+                    .insert(item("1"), before.items.0[&item("1")].revision);
+                delete.operations.push(Operation::ItemDelete {
+                    item: existing("1"),
+                });
+            }
+            let receipt = setup.execute(&delete).unwrap();
+            assert_eq!(
+                agent_removals(&receipt)[0].cancelled_input_ids,
+                vec![queued]
+            );
+            assert_eq!(setup.saved().inputs.0[&source], before.inputs.0[&source]);
+            if !repair_before_delete {
+                repair();
+            }
+            let prepared = DeliveryService::new(&setup.registry)
+                .claim(
+                    &ValidatedDispatchContext::from_trusted_current_lease(
+                        RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+                        id(3),
+                        id(4),
+                    ),
+                    &ClaimRequest {
+                        binding_id: id(3),
+                        generation: id(4),
+                        request_id: id(1624),
+                    },
+                    || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                    at(),
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(prepared.input_id, source);
+            let claimed = setup.saved();
+            let attempt = claimed.inputs.0[&source].attempts.last().unwrap();
+            assert_eq!(attempt.purpose, AttemptPurpose::ResultRepair);
+            assert_eq!(attempt.repair_for_attempt_id, Some(id(800)));
+            assert!(prepared.formatted_payload.contains(reply_id.as_str()));
+            assert!(!prepared
+                .formatted_payload
+                .contains("Original immutable owner message."));
+            let mut result_request = request(1625);
+            result_request.source_input_id = Some(source.clone());
+            result_request.attempt_id = Some(prepared.attempt_id.clone());
+            result_request.input_result = Some(ResultDraft {
+                reply_refs: vec![UuidRef::Existing(ExistingUuidRef {
+                    id: reply_id.clone(),
+                })],
+                handled_through_message_number: p(claimed.bindings.0[&id(3)]
+                    .issued_through_message_number
+                    .value()),
+                ..result()
+            });
+            ApplyService::new(&setup.registry)
+                .execute(
+                    &AgentContext::from_trusted_entrypoint(
+                        RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+                        id(3),
+                        id(4),
+                        AgentReadScope::Dispatched {
+                            source_input_id: source.clone(),
+                            attempt_id: prepared.attempt_id.clone(),
+                            issued_through_message_number: claimed.bindings.0[&id(3)]
+                                .issued_through_message_number,
+                        },
+                    ),
+                    &result_request,
+                    || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                    at(),
+                )
+                .unwrap();
+            finish_input(&setup, &source, prepared.attempt_id, 1626);
+            let completed = setup.saved();
+            assert_eq!(completed.inputs.0[&source].state, InputState::Handled);
+            assert!(ariadne_domain::visibility::item_is_removed(
+                &completed,
+                &completed.items.0[&item("1")]
+            ));
+            assert_eq!(
+                completed.inputs.0[&source]
+                    .attempts
+                    .last()
+                    .unwrap()
+                    .domain_result
+                    .as_ref()
+                    .unwrap()
+                    .reply_message_ids,
+                vec![reply_id.clone()]
+            );
+        }
+    }
+}
+
+#[test]
+fn agent_topic_delete_preserves_removed_notice_and_cancels_only_undelivered_owner_messages() {
+    let setup = Setup::new(&seed());
+    let source = setup.prepare(TurnState::Running);
+    // A received input queued for result repair is still received work.
+    setup.write(1590, |session| {
+        let input = session.inputs.0.get_mut(&source).unwrap();
+        input.state = InputState::Queued;
+        input.active_attempt_id = None;
+        input.attempts[0].sealed_at = Some(at());
+        session.bindings.0.get_mut(&id(3)).unwrap().active_input_id = None;
+    });
+    let queued = queued_input(&setup, id(5), Some(item("1")), 1591);
+    let receipt = HistoryActionService::new(&setup.registry)
+        .remove(
+            &owner_route(),
+            &OwnerCommand::ItemRemove {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(1592),
+                params: ItemRemoveParams {
+                    item_id: item("2"),
+                    expected_revision: setup.saved().items.0[&item("2")].revision,
+                },
+            },
+            || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+            at(),
+        )
+        .unwrap();
+    let MutationReceipt::Session(receipt) = receipt else {
+        panic!("session")
+    };
+    let SavedReceiptData::Removal {
+        notice: Some(notice),
+        ..
+    } = receipt.data
+    else {
+        panic!("notice")
+    };
+    let before = setup.saved();
+    assert_eq!(before.inputs.0[&notice.id].kind, InputKind::Removed);
+    let mut delete = request(1593);
+    delete
+        .expected_topic_revisions
+        .0
+        .insert(id(5), before.topics.0[&id(5)].revision);
+    delete
+        .operations
+        .push(Operation::TopicDelete { topic: uuid(5) });
+    let receipt = setup.execute(&delete).unwrap();
+    assert_eq!(
+        agent_removals(&receipt)[0].cancelled_input_ids,
+        vec![queued.clone()]
+    );
+    let after = setup.saved();
+    assert_eq!(after.inputs.0[&source], before.inputs.0[&source]);
+    assert_eq!(after.inputs.0[&notice.id], before.inputs.0[&notice.id]);
+    assert_eq!(
+        after.inputs.0[&queued].cancel_cause,
+        Some(CancelCause::AgentRemoved)
+    );
+    assert_eq!(
+        after.inputs.0[&queued].payload,
+        before.inputs.0[&queued].payload
+    );
+    let prepared = DeliveryService::new(&setup.registry)
+        .claim(
+            &ValidatedDispatchContext::from_trusted_current_lease(
+                RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+                id(3),
+                id(4),
+            ),
+            &ClaimRequest {
+                binding_id: id(3),
+                generation: id(4),
+                request_id: id(1594),
+            },
+            || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+            at(),
+        )
+        .unwrap()
+        .unwrap();
+    // The removed notice remains deliverable; the received input queued without
+    // a result-repair decision and ordinary cancelled message do not dispatch.
+    assert_eq!(prepared.input_id, notice.id);
+    assert_eq!(setup.saved().inputs.0[&source], before.inputs.0[&source]);
+}
+
+#[test]
+fn agent_delete_parent_notice_counts_only_newly_binned_descendants() {
+    let setup = Setup::new(&seed());
+    let mut children = guarded(
+        1600,
+        "1",
+        setup.saved().items.0[&item("1")].revision.value(),
+    );
+    children
+        .operations
+        .push(add("child", uuid(5), Some(existing("1")), true));
+    setup.execute(&children).unwrap();
+    let mut child_delete = guarded(
+        1601,
+        "1.1",
+        setup.saved().items.0[&item("1.1")].revision.value(),
+    );
+    child_delete.operations.push(Operation::ItemDelete {
+        item: existing("1.1"),
+    });
+    setup.execute(&child_delete).unwrap();
+    let before = setup.saved();
+    let mut delete = guarded(1602, "1", before.items.0[&item("1")].revision.value());
+    delete.operations.push(Operation::ItemDelete {
+        item: existing("1"),
+    });
+    let receipt = setup.execute(&delete).unwrap();
+    let removal = &agent_removals(&receipt)[0];
+    assert_eq!(removal.item_ids, vec![item("1")]);
+    assert_eq!(removal.waiting_questions.value(), 0);
+    assert_eq!(
+        setup.saved().items.0[&item("1.1")],
+        before.items.0[&item("1.1")]
+    );
+    assert!(setup
+        .saved()
+        .messages
+        .iter()
+        .find(|message| message.id == removal.message_id)
+        .unwrap()
+        .body
+        .contains("Agent removed 1 item"));
+}
+
+#[test]
+fn item_replace_refuses_a_binned_replacement_atomically() {
+    for same_batch in [false, true] {
+        let setup = Setup::new(&seed());
+        let mut delete = guarded(
+            1610,
+            "2",
+            setup.saved().items.0[&item("2")].revision.value(),
+        );
+        delete.operations.push(Operation::ItemDelete {
+            item: existing("2"),
+        });
+        if !same_batch {
+            setup.execute(&delete).unwrap();
+        }
+        let mut replace = guarded(
+            1611,
+            "1",
+            setup.saved().items.0[&item("1")].revision.value(),
+        );
+        if same_batch {
+            replace
+                .expected_item_revisions
+                .0
+                .extend(delete.expected_item_revisions.0);
+            replace.operations = delete.operations;
+        }
+        replace.operations.push(Operation::ItemReplace {
+            item: existing("1"),
+            replacement: existing("2"),
+            outcome: "Use the replacement".into(),
+            why: "Work was superseded".into(),
+        });
+        setup.rejected(&replace, CoreErrorCode::InvalidTransition);
+    }
+}
+
+#[test]
+fn agent_topic_delete_cancels_targeted_inputs_and_restore_keeps_separate_item_bin() {
+    let setup = Setup::new(&seed());
+    let mut add_work = guarded(
+        1550,
+        "1",
+        setup.saved().items.0[&item("1")].revision.value(),
+    );
+    add_work.operations = vec![
+        add("child", uuid(5), Some(existing("1")), true),
+        Operation::TopicAdd {
+            r#ref: RequestRef::new("other").unwrap(),
+            name: "Other topic".into(),
+            short: None,
+        },
+        add("other_item", uuid_local("other"), None, false),
+    ];
+    let receipt = setup.execute(&add_work).unwrap();
+    let SavedReceiptData::Apply { allocated_refs, .. } = receipt.data else {
+        panic!("apply")
+    };
+    let AllocatedRef::Topic { id: other_topic } =
+        &allocated_refs.0[&RequestRef::new("other").unwrap()]
+    else {
+        panic!("topic")
+    };
+    let AllocatedRef::Item { id: other_item } =
+        &allocated_refs.0[&RequestRef::new("other_item").unwrap()]
+    else {
+        panic!("item")
+    };
+    let unaffected = queued_input(&setup, other_topic.clone(), Some(other_item.clone()), 1551);
+    let item_input = queued_input(&setup, id(5), Some(item("1")), 1552);
+    let topic_input = queued_input(&setup, id(5), None, 1553);
+    let mut child_delete = guarded(
+        1554,
+        "1.1",
+        setup.saved().items.0[&item("1.1")].revision.value(),
+    );
+    child_delete.operations.push(Operation::ItemDelete {
+        item: existing("1.1"),
+    });
+    setup.execute(&child_delete).unwrap();
+    let before = setup.saved();
+    let mut delete = request(1555);
+    delete
+        .expected_topic_revisions
+        .0
+        .insert(id(5), before.topics.0[&id(5)].revision);
+    delete
+        .operations
+        .push(Operation::TopicDelete { topic: uuid(5) });
+    let receipt = setup.execute(&delete).unwrap();
+    let removal = &agent_removals(&receipt)[0];
+    assert_eq!(removal.item_id, None);
+    assert_eq!(removal.item_ids, vec![item("1"), item("2")]);
+    assert_eq!(removal.waiting_questions.value(), 0);
+    assert_eq!(removal.cancelled_input_ids.len(), 2);
+    assert!(removal.cancelled_input_ids.contains(&item_input));
+    assert!(removal.cancelled_input_ids.contains(&topic_input));
+    let deleted = setup.saved();
+    assert!(deleted
+        .messages
+        .iter()
+        .find(|message| message.id == removal.message_id)
+        .unwrap()
+        .body
+        .contains("Agent removed 2 items"));
+    assert_eq!(deleted.inputs.0[&unaffected], before.inputs.0[&unaffected]);
+    assert_eq!(deleted.items, before.items);
+    assert!(ariadne_domain::visibility::item_is_removed(
+        &deleted,
+        &deleted.items.0[&item("1")]
+    ));
+    let mut redelete = request(1556);
+    redelete
+        .expected_topic_revisions
+        .0
+        .insert(id(5), deleted.topics.0[&id(5)].revision);
+    redelete.operations = delete.operations;
+    assert!(agent_removals(&setup.execute(&redelete).unwrap()).is_empty());
+    let restored_receipt = HistoryActionService::new(&setup.registry)
+        .execute(
+            &owner_route(),
+            &OwnerCommand::TopicRemovedRestore {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(1557),
+                params: TopicLifecycleParams {
+                    topic_id: id(5),
+                    expected_revision: deleted.topics.0[&id(5)].revision,
+                },
+            },
+            at(),
+        )
+        .unwrap();
+    let MutationReceipt::Session(restored_receipt) = restored_receipt else {
+        panic!("session")
+    };
+    assert!(matches!(
+        restored_receipt.data,
+        SavedReceiptData::BinRestore { item_id: None, .. }
+    ));
+    let restored = setup.saved();
+    assert!(!ariadne_domain::visibility::item_is_removed(
+        &restored,
+        &restored.items.0[&item("1")]
+    ));
+    assert!(ariadne_domain::visibility::item_is_removed(
+        &restored,
+        &restored.items.0[&item("1.1")]
+    ));
+    assert_eq!(restored.inputs.0[&item_input].state, InputState::Cancelled);
+    assert_eq!(restored.inputs.0[&topic_input].state, InputState::Cancelled);
+}
+
+#[test]
+fn agent_delete_forever_reuses_owner_removal_and_backup() {
+    let setup = Setup::new(&seed());
+    let mut delete = guarded(
+        1560,
+        "1",
+        setup.saved().items.0[&item("1")].revision.value(),
+    );
+    delete.operations.push(Operation::ItemDelete {
+        item: existing("1"),
+    });
+    setup.execute(&delete).unwrap();
+    let receipt = HistoryActionService::new(&setup.registry)
+        .remove(
+            &owner_route(),
+            &OwnerCommand::ItemRemove {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(1561),
+                params: ItemRemoveParams {
+                    item_id: item("1"),
+                    expected_revision: setup.saved().items.0[&item("1")].revision,
+                },
+            },
+            || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+            at(),
+        )
+        .unwrap();
+    let MutationReceipt::Session(receipt) = receipt else {
+        panic!("session")
+    };
+    let SavedReceiptData::Removal { backup, .. } = receipt.data else {
+        panic!("removal")
+    };
+    assert!(std::path::Path::new(&backup).is_file());
+    assert!(!setup.saved().items.0.contains_key(&item("1")));
+    assert!(restore_item(&setup, "1", p(1), 1562).is_err());
+}
+
+#[test]
+fn agent_delete_blocks_new_work_owner_inputs_and_ack_until_restored() {
+    let setup = Setup::new(&seed());
+    let mut delete = guarded(
+        1570,
+        "1",
+        setup.saved().items.0[&item("1")].revision.value(),
+    );
+    delete.operations.push(Operation::ItemDelete {
+        item: existing("1"),
+    });
+    setup.execute(&delete).unwrap();
+    let mut child = guarded(
+        1571,
+        "1",
+        setup.saved().items.0[&item("1")].revision.value(),
+    );
+    child
+        .operations
+        .push(add("hidden_child", uuid(5), Some(existing("1")), false));
+    setup.rejected(&child, CoreErrorCode::InvalidTransition);
+    let before = setup.bytes();
+    let submit = OwnerCommand::InputSubmit {
+        api_version: SchemaVersion::new(1).unwrap(),
+        op_id: id(1572),
+        params: InputSubmitParams {
+            binding_id: id(3),
+            kind: InputKind::Reply,
+            target: InputTarget {
+                topic_id: id(5),
+                item_id: Some(item("1")),
+            },
+            text: "Do more work".into(),
+            selected_option_id: None,
+            expected_question_revision: None,
+            supersedes_answer_id: None,
+        },
+    };
+    let error = InputService::new(&setup.registry)
+        .execute(&owner_route(), &submit, || id(20000), at())
+        .unwrap_err();
+    assert!(
+        matches!(error, ariadne_core::inputs::InputError::Core(error) if error.code == CoreErrorCode::InvalidTransition && error.message.contains("Restore"))
+    );
+    let ack = OwnerCommand::Ack {
+        api_version: SchemaVersion::new(1).unwrap(),
+        op_id: id(1573),
+        params: ItemAckParams {
+            item_id: item("1"),
+            expected_revision: setup.saved().items.0[&item("1")].revision,
+        },
+    };
+    let error = HistoryActionService::new(&setup.registry)
+        .acknowledge(&owner_route(), &ack, at(), || id(20001))
+        .unwrap_err();
+    assert!(
+        matches!(error, ariadne_core::history_actions::HistoryActionError::Core(error) if error.code == CoreErrorCode::InvalidTransition)
+    );
+    assert_eq!(setup.bytes(), before);
+    restore_item(
+        &setup,
+        "1",
+        setup.saved().items.0[&item("1")].revision,
+        1574,
+    )
+    .unwrap();
+    InputService::new(&setup.registry)
+        .execute(
+            &owner_route(),
+            &submit,
+            || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+            at(),
+        )
+        .unwrap();
 }
 fn id(n: u64) -> UuidV4 {
     UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
@@ -356,6 +1610,7 @@ fn original_expected_guard_covers_sequential_edits_and_implicit_parent_allocatio
         Operation::ItemEdit {
             item: existing("1"),
             patch: ItemPatch {
+                ack_to: None,
                 question: None,
                 item_type: None,
                 note: Some(Some("First".into())),
@@ -369,6 +1624,7 @@ fn original_expected_guard_covers_sequential_edits_and_implicit_parent_allocatio
         Operation::ItemEdit {
             item: existing("1"),
             patch: ItemPatch {
+                ack_to: None,
                 question: None,
                 item_type: None,
                 note: Some(None),
@@ -1273,6 +2529,7 @@ fn item_links_are_saved_by_add_and_patch_even_when_targets_are_missing() {
     edit.operations = vec![Operation::ItemEdit {
         item: existing("1"),
         patch: ItemPatch {
+            ack_to: None,
             question: None,
             item_type: None,
             note: None,
@@ -1305,6 +2562,7 @@ fn malformed_item_links_are_rejected_on_add_and_patch_without_saving_anything() 
         edit.operations = vec![Operation::ItemEdit {
             item: existing("1"),
             patch: ItemPatch {
+                ack_to: None,
                 question: None,
                 item_type: None,
                 note: None,
@@ -1329,6 +2587,7 @@ fn short_patch(short: Option<Option<&str>>) -> Operation {
     Operation::ItemEdit {
         item: existing("1"),
         patch: ItemPatch {
+            ack_to: None,
             question: None,
             item_type: None,
             note: None,
@@ -1427,6 +2686,7 @@ fn related_patch(target: EntityRef, related: Option<Vec<EntityRef>>) -> Operatio
     Operation::ItemEdit {
         item: target,
         patch: ItemPatch {
+            ack_to: None,
             question: None,
             item_type: None,
             note: None,
@@ -1775,6 +3035,214 @@ fn open_creation_with_ack_proposal_preserves_completion_prose() {
     assert_eq!(item.ack_to, Some(AckTarget::Done));
     assert_eq!(item.outcome.as_deref(), Some("Exact complete result."));
     assert_eq!(item.why.as_deref(), Some("Exact justification."));
+}
+
+#[test]
+fn strict_nonterminal_creation_prose_requires_ack_for_every_work_type() {
+    for item_type in [ItemType::Task, ItemType::Decision, ItemType::Question] {
+        for status in [ItemStatus::Open, ItemStatus::InProgress] {
+            for (outcome, why) in [
+                (Some("Exact report."), None),
+                (None, Some("Exact reasoning.")),
+                (Some("Exact report."), Some("Exact reasoning.")),
+            ] {
+                let setup = Setup::new(&seed());
+                let mut r = request(990);
+                let mut op = add("work", uuid(5), None, false);
+                let Operation::ItemAdd(draft) = &mut op else {
+                    unreachable!()
+                };
+                draft.item_type = item_type.clone();
+                draft.status = status.clone();
+                draft.outcome = outcome.map(str::to_owned);
+                draft.why = why.map(str::to_owned);
+                r.operations.push(op);
+                let error = r.validate_wire().unwrap_err();
+                assert_eq!(error.code, CoreErrorCode::InvalidArgument);
+                assert_eq!(
+                    error.message,
+                    "item.add outcome and why require an explicit ack_to"
+                );
+                setup.rejected(&r, CoreErrorCode::InvalidArgument);
+                let Operation::ItemAdd(draft) = &mut r.operations[0] else {
+                    unreachable!()
+                };
+                draft.ack_to = Some(AckTarget::Open);
+                r.validate_wire().unwrap();
+                setup.execute(&r).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn nonterminal_ack_keeps_filed_prose_through_later_agent_status_changes() {
+    for item_type in [ItemType::Task, ItemType::Decision, ItemType::Question] {
+        for initial_status in [ItemStatus::Open, ItemStatus::InProgress] {
+            for target in [AckTarget::Open, AckTarget::InProgress] {
+                let setup = Setup::new(&seed());
+                let mut r = request(990);
+                let mut op = add("work", uuid(5), None, false);
+                let Operation::ItemAdd(draft) = &mut op else {
+                    unreachable!()
+                };
+                draft.item_type = item_type.clone();
+                draft.status = initial_status.clone();
+                draft.ack_to = Some(target);
+                draft.outcome = Some("Exact report\nwith all details.".into());
+                draft.why = Some("Exact reasoning.".into());
+                r.operations.push(op);
+                let result = setup.execute(&r).unwrap();
+                let SavedReceiptData::Apply { allocated_refs, .. } = result.data else {
+                    unreachable!()
+                };
+                let AllocatedRef::Item { id: key } =
+                    &allocated_refs.0[&RequestRef::new("work").unwrap()]
+                else {
+                    unreachable!()
+                };
+                let before_ack = setup.saved();
+                ariadne_core::history_actions::HistoryActionService::new(&setup.registry)
+                    .acknowledge(
+                        &OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
+                            RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+                        )),
+                        &OwnerCommand::Ack {
+                            api_version: SchemaVersion::new(1).unwrap(),
+                            op_id: id(991),
+                            params: ItemAckParams {
+                                item_id: key.clone(),
+                                expected_revision: before_ack.items.0[key].revision,
+                            },
+                        },
+                        at(),
+                        || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                    )
+                    .unwrap();
+                let acknowledged = setup.saved();
+                assert_eq!(acknowledged.items.0[key].status, target.status());
+                assert_eq!(acknowledged.items.0[key].ack_to, None);
+                assert_eq!(acknowledged.inputs, before_ack.inputs);
+                for (op_id, next_status) in [(992, ItemStatus::InProgress), (993, ItemStatus::Open)]
+                {
+                    let current = setup.saved();
+                    let mut progress =
+                        guarded(op_id, key.as_str(), current.items.0[key].revision.value());
+                    progress.operations.push(Operation::ItemStatus {
+                        item: existing(key.as_str()),
+                        status: next_status.clone(),
+                        ack_to: None,
+                        outcome: None,
+                        why: None,
+                        reason: Some("Continue the acknowledged work.".into()),
+                    });
+                    setup.execute(&progress).unwrap();
+                    let saved = setup.saved();
+                    let continued = &saved.items.0[key];
+                    assert_eq!(continued.status, next_status);
+                    assert_eq!(continued.ack_to, None);
+                    assert_eq!(continued.outcome, before_ack.items.0[key].outcome);
+                    assert_eq!(continued.why, before_ack.items.0[key].why);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn strict_read_only_creation_requires_an_explicit_ack_choice() {
+    for item_type in [ItemType::Finding, ItemType::Explanation] {
+        for status in [ItemStatus::Open, ItemStatus::InProgress] {
+            let setup = Setup::new(&seed());
+            let mut r = request(990);
+            let mut op = add("report", uuid(5), None, false);
+            let Operation::ItemAdd(draft) = &mut op else {
+                unreachable!()
+            };
+            draft.item_type = item_type.clone();
+            draft.status = status.clone();
+            r.operations.push(op);
+            let before = setup.bytes();
+            let err = core_error(setup.execute(&r).unwrap_err());
+            assert_eq!(
+                err.message,
+                "choose ack_to: open, in_progress, decided, done or dropped"
+            );
+            assert_eq!(setup.bytes(), before);
+            let Operation::ItemAdd(draft) = &mut r.operations[0] else {
+                unreachable!()
+            };
+            draft.ack_to = Some(AckTarget::Open);
+            setup.execute(&r).unwrap();
+        }
+    }
+    for item_type in [ItemType::Question, ItemType::Decision, ItemType::Task] {
+        let setup = Setup::new(&seed());
+        let mut r = request(991);
+        let mut op = add("work", uuid(5), None, false);
+        let Operation::ItemAdd(draft) = &mut op else {
+            unreachable!()
+        };
+        draft.item_type = item_type;
+        r.operations.push(op);
+        setup.execute(&r).unwrap();
+    }
+}
+
+#[test]
+fn editing_an_ack_choice_preserves_state_and_cannot_reinstate_cleared_ack() {
+    for status in [ItemStatus::Open, ItemStatus::InProgress] {
+        for target in [
+            AckTarget::Open,
+            AckTarget::InProgress,
+            AckTarget::Decided,
+            AckTarget::Done,
+            AckTarget::Dropped,
+        ] {
+            let mut source = seed();
+            let proposal = source.items.0.get_mut(&item("1")).unwrap();
+            proposal.status = status.clone();
+            proposal.ask = None;
+            proposal.waiting_since = None;
+            proposal.ack_to = Some(AckTarget::Done);
+            proposal.outcome = Some("Exact report.".into());
+            proposal.why = Some("Verified locally.".into());
+            let setup = Setup::new(&source);
+            let mut r = guarded(992, "1", 1);
+            r.operations.push(Operation::ItemEdit {
+                item: existing("1"),
+                patch: ItemPatch {
+                    ack_to: Some(target),
+                    question: None,
+                    item_type: None,
+                    note: None,
+                    links: None,
+                    related: None,
+                    short: None,
+                },
+            });
+            setup.execute(&r).unwrap();
+            for (op, revision, patch_json) in [(993, 2, "{}"), (994, 3, r#"{"ack_to":null}"#)] {
+                let mut keep = guarded(op, "1", revision);
+                keep.operations.push(Operation::ItemEdit {
+                    item: existing("1"),
+                    patch: serde_json::from_str(patch_json).unwrap(),
+                });
+                setup.execute(&keep).unwrap();
+            }
+            let saved = setup.saved();
+            let kept = &saved.items.0[&item("1")];
+            assert_eq!(kept.status, status);
+            assert_eq!(kept.ack_to, Some(target));
+            assert_eq!(kept.outcome.as_deref(), Some("Exact report."));
+            assert_eq!(kept.why.as_deref(), Some("Verified locally."));
+            source.items.0.get_mut(&item("1")).unwrap().ack_to = None;
+            Setup::new(&source).rejected(&r, CoreErrorCode::InvalidTransition);
+            let terminal = source.items.0.get_mut(&item("1")).unwrap();
+            terminal.status = ItemStatus::Done;
+            Setup::new(&source).rejected(&r, CoreErrorCode::InvalidTransition);
+        }
+    }
 }
 
 #[test]
@@ -2407,6 +3875,7 @@ fn same_turn_bring_or_reopen_cannot_leave_an_open_ask_unanswered() {
                         Operation::ItemEdit {
                             item: existing("1"),
                             patch: ItemPatch {
+                                ack_to: None,
                                 question: None,
                                 item_type: None,
                                 short: None,
@@ -2476,6 +3945,7 @@ fn handled_reply_keeps_a_proposed_completion_ackable_and_new_questions_answerabl
     edit.operations.push(Operation::ItemEdit {
         item: existing("1"),
         patch: ItemPatch {
+            ack_to: None,
             question: Some("A new question?".into()),
             short: None,
             item_type: None,

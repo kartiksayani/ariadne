@@ -35,7 +35,16 @@ pub struct Options {
 
 /// Trusted native caller supplies private roots; tests use private profiles only.
 pub fn collect(data: &Path, version_root: Option<&Path>, options: &Options) -> Value {
+    collect_for_display(data, version_root, options).0
+}
+
+pub(crate) fn collect_for_display(
+    data: &Path,
+    version_root: Option<&Path>,
+    options: &Options,
+) -> (Value, Vec<super::human::Session>) {
     let mut report = Report::new();
+    let mut display_sessions = Vec::new();
     // Flags win; otherwise the paths setup recorded in providers.json are used.
     let recorded = providers::read(data);
     let recorded_codex = match &recorded {
@@ -159,6 +168,7 @@ pub fn collect(data: &Path, version_root: Option<&Path>, options: &Options) -> V
                                 for read in sessions {
                                     match read.result {
                                         Ok(session) => {
+                                            let first_check = report.checks.len();
                                             report.add("ok", "session.valid", "Session is valid.", "Doctor shows only counts and IDs, never message text.", json!({"session_id":session.id,"revision":session.revision}));
                                             backup(&mut report, &store_dir, &session);
                                             for binding in session.bindings.0.values() {
@@ -172,6 +182,36 @@ pub fn collect(data: &Path, version_root: Option<&Path>, options: &Options) -> V
                                                     control_available,
                                                 );
                                             }
+                                            display_sessions.push(super::human::Session {
+                                                name: session
+                                                    .name
+                                                    .as_deref()
+                                                    .filter(|name| !name.trim().is_empty())
+                                                    .unwrap_or(&session.title)
+                                                    .to_owned(),
+                                                checks: first_check..report.checks.len(),
+                                                binding_ids: session
+                                                    .bindings
+                                                    .0
+                                                    .keys()
+                                                    .map(|id| id.as_str().to_owned())
+                                                    .collect(),
+                                                recovery_binding_ids: session
+                                                    .inputs
+                                                    .0
+                                                    .values()
+                                                    .filter(|input| {
+                                                        input.state == InputState::NeedsAttention
+                                                    })
+                                                    .map(|input| {
+                                                        input.binding_id.as_str().to_owned()
+                                                    })
+                                                    .collect(),
+                                                active_binding_id: session
+                                                    .active_binding_id
+                                                    .as_ref()
+                                                    .map(|id| id.as_str().to_owned()),
+                                            });
                                         }
                                         Err(error) => store_error(
                                             &mut report,
@@ -224,7 +264,7 @@ pub fn collect(data: &Path, version_root: Option<&Path>, options: &Options) -> V
     }
     providers_config(&mut report, &recorded);
     providers(&mut report, options);
-    report.value()
+    (report.value(), display_sessions)
 }
 
 /// Reads the health file the desktop rewrites every few seconds. Only Codex

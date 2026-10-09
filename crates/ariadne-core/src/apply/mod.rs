@@ -1,6 +1,7 @@
 //! Atomic ordered agent commands; Store owns replay, session revision and publication.
 mod batch;
 mod error;
+mod removal;
 mod result;
 mod scope;
 mod summary;

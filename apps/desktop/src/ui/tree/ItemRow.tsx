@@ -6,6 +6,7 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { Markdown } from '../shared/MarkdownText';
 import { StatusBadge } from '../shared/StatusBadge';
+import { ackTitle } from '../shared/ack';
 import { closed, visual, type Guide, type ItemRow as Row } from './model';
 
 export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly label?: string; readonly disabled?: boolean; readonly persistent?: boolean }
@@ -34,17 +35,17 @@ function preview(row: Row, jump: () => void, open: boolean): Preview | null {
   const item = row.item;
   if (row.later) return { text: null, node: <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}><i className="ph ph-clock" /><span>Parked for later · still open</span></div> };
   if (item.status === 'waiting_on_me' && item.ask) return { text: item.ask, node: <div className="tree-line tree-ask"><Markdown className="tree-clamp" text={item.ask} compact={!open} /></div> };
-  if (item.status === 'in_progress' && item.note) {
-    return { text: item.note, node: <div className="tree-line tree-line-tight" style={{ color: 'var(--st-progress)' }}><i className="ph ph-robot" /><Markdown className="tree-clamp" text={item.note} compact={!open} /></div> };
-  }
   if (item.status === 'replaced' && row.replacedBy) {
     return { text: null, node: <div className="tree-line" style={{ color: neutral(66) }}><i className="ph ph-arrow-bend-down-right tree-line-small" /><span>Replaced by</span>
       <button type="button" className="tree-jump" onClick={event => { event.stopPropagation(); jump(); }}>{row.replacedBy.question}</button>
       <StatusBadge status={visual(row.replacedBy.status)} variant="text" /></div> };
   }
-  if ((closed(item.status) || ((item.status === 'open' || item.status === 'in_progress') && item.ack_to)) && item.outcome) {
-    return { text: item.outcome, node: <div className="tree-line tree-outcome"><i className="ph ph-arrow-elbow-down-right" style={{ color: `var(--st-${item.ack_to ?? visual(item.status)})` }} />
+  if ((closed(item.status) || item.status === 'open' || item.status === 'in_progress') && item.outcome) {
+    return { text: item.outcome, node: <div className="tree-line tree-outcome"><i className="ph ph-arrow-elbow-down-right" style={{ color: `var(--st-${visual(item.status)})` }} />
       <Markdown className="tree-clamp" text={item.outcome} compact={!open} /></div> };
+  }
+  if (item.status === 'in_progress' && item.note) {
+    return { text: item.note, node: <div className="tree-line tree-line-tight" style={{ color: 'var(--st-progress)' }}><i className="ph ph-robot" /><Markdown className="tree-clamp" text={item.note} compact={!open} /></div> };
   }
   return null;
 }
@@ -134,6 +135,7 @@ export function ItemRow({ row, selected, focused, disabled = false, highlight, n
         {row.segments.map((segment, index) => <span key={index} className={segment.hit ? 'tree-hit' : undefined}>{segment.text}</span>)}
       </div>
       <PreviewBlock row={row} value={details} open={unfolded} onToggle={() => onUnfold(item.id)} />
+      {row.ack && <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}>{ackTitle(row.ack, item.status)}</div>}
       {delivery(row, fix)}
       {note && <button type="button" className="tree-collapsed" tabIndex={-1} data-weak={highlight === 'weak' || undefined}
         onClick={event => { event.stopPropagation(); onToggle(item.id); }}><i className="ph ph-dots-three" />{note}</button>}

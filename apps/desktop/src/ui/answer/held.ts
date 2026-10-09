@@ -1,3 +1,4 @@
+import { itemRemoved } from '../../selectors/removed';
 // Edit for a message that hasn't been sent yet (queued), and "Review and send
 // again" for a held one (written for an older revision of its question): the
 // queued message is taken back first (`input_cancel` with purpose edit), and only
@@ -70,6 +71,7 @@ async function plan(drafts: OwnerDraftStore, session: Immutable<Session> | null 
   const state = drafts.getSnapshot();
   if (!session || !state.ready || state.preferenceUncertain || !editable(input.kind) || session.inputs[input.id]?.state !== from) return unavailable;
   const itemId = input.target.item_id, item = itemId ? session.items[itemId] : undefined;
+  if (session.topics[input.target.topic_id]?.removed_at || itemId && itemRemoved(session, itemId)) return unavailable;
   if (itemId ? !item : input.kind !== TOPIC_REPLY || !session.topics[input.target.topic_id]) return unavailable;
   // The draft of its own kind: an answer while the question waits, a note or follow-up while the item isn't waiting (a
   // waiting item shows only its answer and reply boxes); anything else goes to the reply draft. The detail's box edits any
@@ -145,7 +147,7 @@ export function sendingAgain(state: DraftState, session: Immutable<Session>, inp
  * could be sent from there), or null when it can. The Not sent line shows this instead of the button.
  */
 export function putBackBlocked(session: Immutable<Session>, input: Immutable<Input>): string | null {
-  return session.archived_at != null ? 'Restore the session, then reopen it to put it back in the reply box.' : session.state !== 'active' ? 'Reopen the session to put it back in the reply box.'
+  return session.topics[input.target.topic_id]?.removed_at || input.target.item_id && itemRemoved(session, input.target.item_id) ? 'Restore this work from Removed by agent to put it back in the reply box.' : session.archived_at != null ? 'Restore the session, then reopen it to put it back in the reply box.' : session.state !== 'active' ? 'Reopen the session to put it back in the reply box.'
     : session.topics[input.target.topic_id]?.archived_at ? 'Restore the topic to put it back in the reply box.' : null;
 }
 

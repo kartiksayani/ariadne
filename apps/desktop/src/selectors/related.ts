@@ -1,5 +1,6 @@
 import type { Item, Session } from '../generated/domain/models';
 import type { Immutable } from '../data/session-store';
+import { itemRemoved } from './removed';
 
 const indexes = new WeakMap<Immutable<Session>, ReadonlyMap<string, readonly Immutable<Item>[]>>();
 const empty: readonly Immutable<Item>[] = Object.freeze([]);
@@ -14,9 +15,9 @@ export function relatedItems(session: Immutable<Session>, itemId: string): reado
       targets.add(to); connected.set(from, targets);
     };
     for (const item of Object.values(session.items)) {
-      if (!item) continue;
+      if (!item || itemRemoved(session, item.id)) continue;
       for (const target of item.related ?? []) {
-        if (target === item.id || !session.items[target]) continue;
+        if (target === item.id || !session.items[target] || itemRemoved(session, target)) continue;
         add(item.id, target); add(target, item.id);
       }
     }

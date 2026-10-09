@@ -40,6 +40,10 @@ pub fn record_owner_history(
         .ok_or(HistoryError::MissingReference)?;
     require(topic.archived_at.is_none(), HistoryError::ArchivedTopic)?;
     require(
+        !crate::visibility::item_is_removed(session, item),
+        HistoryError::RemovedWork,
+    )?;
+    require(
         session.bindings.0.contains_key(&input.binding_id)
             && session.active_binding_id.as_ref() == Some(&input.binding_id),
         HistoryError::BindingMismatch,

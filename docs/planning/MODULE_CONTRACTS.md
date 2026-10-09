@@ -204,6 +204,17 @@ exact operation on the owner's next connect attempt. Do not invent Connected,
 enable claims early, or allocate new IDs to recover a lost response. Session-end
 and outstanding original-scope report guards remain in force.
 
+[ADR-0096](../adr/ADR-0096-recover-stale-claude-connect.md) refines explicit
+recovery: inspect the exact saved receipt with `binding connect --replay-only`
+and current desktop status before retiring obsolete connect state. A changed
+session/conversation or removed, obsolete or disconnected route starts a fresh
+connect; an unchanged request keeps its original body/ID when its receipt is
+missing or its route may still be awaiting publication.
+Only an unconfirmed claim request may be retired after a desktop status check;
+captured messages and unsaved reports remain guarded. A different conversation
+cannot replace a Claude binding unless its connection state is Disconnected,
+even using the same adapter. Unknown or Reconnecting may still be live.
+
 An actual Claude SDK `session.end` is terminal for that saved binding generation,
 including when its original native activation is still pending. Reserve the
 normalized event ID `claude:session-ended:<binding UUID>:<generation UUID>` for

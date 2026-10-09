@@ -132,6 +132,24 @@ describe('explicit binding lifecycle', () => {
 
 const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
 describe('plain recovery decisions', () => {
+  it.each(['item', 'ancestor', 'topic'] as const)('keeps Mark as done but suppresses quick and audited resend/retry for %s removal', async removal => {
+    const { actions, transport, store } = await setup(), input = currentInput(transport.session), attempt = input.attempts[0];
+    input.target.item_id = '1.1';
+    if (removal === 'topic') transport.session.topics[input.target.topic_id]!.removed_at = transport.session.updated_at;
+    else transport.session.items[removal === 'ancestor' ? '1' : '1.1']!.removed_at = transport.session.updated_at;
+    attempt.acceptance = 'rejected'; attempt.acceptance_receipt = null; attempt.host_turn_id = null;
+    attempt.turn_state = 'unknown'; attempt.domain_result = null;
+    ++transport.session.revision; await store.refresh(); transport.presence(); render(<RecoveryPanel actions={actions} />);
+    expect(screen.getByText('This work is in the bin. Restore it first, or mark the message done.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Send again' })).toBeNull();
+    chooseRecovery('skip');
+    expect(dialog().queryByRole('option', { name: 'Send again' })).toBeNull();
+    expect(dialog().queryByRole('option', { name: 'Prepare retry' })).toBeNull();
+    transport.replies.push(transport.receipt('input_resolve', 'skip'));
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Save recovery decision' })); });
+    expect(transport.mutations[0].command).toMatchObject({ params: { decision: 'skip' } });
+  });
+
   it('offers one button when the agent saved its answer: accept_result with no reason or evidence', async () => {
     const { actions, transport, store } = await setup(); const input = currentInput(transport.session), attempt = input.attempts[0];
     attempt.acceptance = 'accepted'; attempt.turn_state = 'completed'; attempt.result_state = 'committed'; transport.session.revision += 1; await store.refresh();
@@ -179,6 +197,23 @@ describe('plain recovery decisions', () => {
 });
 
 describe('audited recovery', () => {
+  it('removes an already selected resend when the work enters the bin and permits a fresh Mark as done', async () => {
+    const { actions, transport, store } = await setup(); transport.presence(); render(<RecoveryPanel actions={actions} />); chooseRecovery('resend');
+    fireEvent.click(dialog().getByLabelText('I reviewed the duplicate-work risk.'));
+    const input = currentInput(transport.session);
+    transport.session.items[input.target.item_id!]!.removed_at = transport.session.updated_at;
+    ++transport.session.revision; await act(async () => { await store.refresh(); });
+    expect(dialog().queryByRole('option', { name: 'Send again' })).toBeNull();
+    expect((dialog().getByRole('button', { name: 'Save recovery decision' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(dialog().getByRole('button', { name: 'Review current snapshot' }));
+    expect((dialog().getByRole('button', { name: 'Save recovery decision' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(transport.mutations).toEqual([]);
+    fireEvent.change(dialog().getByLabelText('Recovery choice'), { target: { value: 'skip' } });
+    transport.replies.push(transport.receipt('input_resolve', 'skip'));
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Save recovery decision' })); });
+    expect(transport.mutations[0].command).toMatchObject({ params: { decision: 'skip', expected_revision: transport.session.revision } });
+  });
+
   it('requires duplicate-risk review and current idle attestation, records the exact input without implicit Resume', async () => {
     const { actions, transport } = await setup(); render(<RecoveryPanel actions={actions} />); chooseRecovery('resend');
     const save = dialog().getByRole('button', { name: 'Save recovery decision' }) as HTMLButtonElement;

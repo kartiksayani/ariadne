@@ -1,6 +1,7 @@
 use super::page::capacity;
 use crate::CoreError;
 use ariadne_domain::models::*;
+use ariadne_domain::visibility::{item_is_removed, topic_is_removed};
 
 pub(super) fn empty() -> SummaryCounts {
     let zero = NonnegativeSafeInteger::new(0).expect("zero");
@@ -40,7 +41,9 @@ fn add(target: &mut NonnegativeSafeInteger, value: u64) -> Result<(), CoreError>
 /// attention), cancelled and skipped inputs need the owner again. Mirrors the
 /// TypeScript `ownerReplied` selector.
 pub fn waiting_unanswered(session: &Session, item: &Item) -> bool {
-    item.status == ItemStatus::WaitingOnMe && question_unanswered(session, item)
+    !item_is_removed(session, item)
+        && item.status == ItemStatus::WaitingOnMe
+        && question_unanswered(session, item)
 }
 
 /// Unanswered current question episode, independent of queue/status eligibility.
@@ -130,17 +133,23 @@ pub(crate) fn question_unanswered_with_handled_input(
 }
 pub(super) fn session(session: &Session) -> Result<SummaryCounts, CoreError> {
     let mut result = empty();
-    for topic in session.topics.0.values() {
+    for topic in session
+        .topics
+        .0
+        .values()
+        .filter(|topic| !topic_is_removed(session, topic))
+    {
         if topic.archived_at.is_some() {
             add(&mut result.archived_topics, 1)?;
         }
     }
     for item in session.items.0.values().filter(|item| {
-        session
-            .topics
-            .0
-            .get(&item.topic_id)
-            .is_some_and(|topic| topic.archived_at.is_none())
+        !item_is_removed(session, item)
+            && session
+                .topics
+                .0
+                .get(&item.topic_id)
+                .is_some_and(|topic| topic.archived_at.is_none())
     }) {
         let count = match item.status {
             ItemStatus::Open => &mut result.items_by_status.open,
@@ -156,7 +165,20 @@ pub(super) fn session(session: &Session) -> Result<SummaryCounts, CoreError> {
             add(&mut result.waiting_unanswered, 1)?;
         }
     }
-    for input in session.inputs.0.values() {
+    for input in session.inputs.0.values().filter(|input| {
+        session
+            .topics
+            .0
+            .get(&input.target.topic_id)
+            .is_some_and(|topic| !topic_is_removed(session, topic))
+            && input.target.item_id.as_ref().is_none_or(|id| {
+                session
+                    .items
+                    .0
+                    .get(id)
+                    .is_some_and(|item| !item_is_removed(session, item))
+            })
+    }) {
         match input.state {
             InputState::Queued => add(&mut result.sent_inputs.queued, 1)?,
             InputState::InFlight => add(&mut result.sent_inputs.in_flight, 1)?,
@@ -166,9 +188,17 @@ pub(super) fn session(session: &Session) -> Result<SummaryCounts, CoreError> {
     }
     Ok(result)
 }
-/// Every topic in the session, archived included (`SessionSummary.topic_count`).
+/// Every live topic in the session, archived included (`SessionSummary.topic_count`).
 pub(super) fn topics(session: &Session) -> Result<NonnegativeSafeInteger, CoreError> {
-    let count = u64::try_from(session.topics.0.len()).map_err(|_| capacity())?;
+    let count = u64::try_from(
+        session
+            .topics
+            .0
+            .values()
+            .filter(|topic| !topic_is_removed(session, topic))
+            .count(),
+    )
+    .map_err(|_| capacity())?;
     NonnegativeSafeInteger::new(count).map_err(|_| capacity())
 }
 pub(super) fn merge(target: &mut SummaryCounts, value: &SummaryCounts) -> Result<(), CoreError> {
@@ -478,5 +508,36 @@ mod tests {
         );
         session.topics.0.get_mut(&topic).expect("topic").archived_at = None;
         assert_eq!(super::session(&session).expect("counts"), before);
+    }
+
+    #[test]
+    fn removed_items_leave_waiting_status_and_pending_input_counts_until_restored() {
+        let mut session = seed();
+        send(
+            &mut session,
+            InputKind::Reply,
+            InputState::NeedsAttention,
+            1,
+        );
+        let before = super::session(&session).unwrap();
+        assert!(waiting(&session));
+        let key = ItemRef::new(ITEM).unwrap();
+        session.items.0.get_mut(&key).unwrap().removed_at = Some(session.updated_at.clone());
+        let removed = super::session(&session).unwrap();
+        assert!(!waiting(&session));
+        assert_eq!(
+            removed.waiting_unanswered.value(),
+            before.waiting_unanswered.value() - 1
+        );
+        assert_eq!(
+            removed.items_by_status.waiting_on_me.value(),
+            before.items_by_status.waiting_on_me.value() - 1
+        );
+        assert_eq!(
+            removed.sent_inputs.needs_attention.value(),
+            before.sent_inputs.needs_attention.value() - 1
+        );
+        session.items.0.get_mut(&key).unwrap().removed_at = None;
+        assert_eq!(super::session(&session).unwrap(), before);
     }
 }

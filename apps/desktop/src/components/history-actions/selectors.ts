@@ -1,3 +1,4 @@
+import { itemRemoved } from '../../selectors/removed';
 import type { SessionRef } from '../../generated/core';
 import type { Input, Session } from '../../generated/domain/models';
 import type { Immutable } from '../../data';
@@ -13,7 +14,7 @@ const pending = new Set(['queued', 'in_flight', 'needs_attention']);
 export interface ArchiveImpact { readonly open: number; readonly unsent: number; readonly delivering: number }
 export function archiveImpact(session: Immutable<Session>, topicId: string): ArchiveImpact {
   const inputs = Object.values(session.inputs).filter(input => input?.target.topic_id === topicId && pending.has(input.state));
-  return { open: Object.values(session.items).filter(item => item?.topic_id === topicId && !terminal.has(item.status)).length,
+  return { open: Object.values(session.items).filter(item => item?.topic_id === topicId && !itemRemoved(session, item.id) && !terminal.has(item.status)).length,
     unsent: inputs.filter(input => input?.state !== 'in_flight').length,
     delivering: inputs.filter(input => input?.state === 'in_flight').length };
 }
@@ -44,7 +45,7 @@ export function cancellableInput(input: Immutable<Input>): boolean {
 export interface CloseImpact { readonly questions: number; readonly unsent: number; readonly delivering: number }
 export function closeImpact(session: Immutable<Session>): CloseImpact {
   const inputs = Object.values(session.inputs).filter(input => input && cancellableInput(input));
-  return { questions: Object.values(session.items).filter(item => item?.status === 'waiting_on_me').length,
+  return { questions: Object.values(session.items).filter(item => item?.status === 'waiting_on_me' && !itemRemoved(session, item.id)).length,
     unsent: inputs.filter(input => input && pending.has(input.state) && input.state !== 'in_flight').length,
     delivering: inputs.filter(input => input?.state === 'in_flight').length };
 }

@@ -96,7 +96,14 @@ pub enum SavedReceiptData {
         pause_reason: Option<PauseReason>,
         connection_state: ConnectionState,
     },
+    BinRestore {
+        topic_id: UuidV4,
+        item_id: Option<ItemRef>,
+    },
     Apply {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[ts(as = "Option<Vec<AgentRemoval>>", optional)]
+        agent_removals: Vec<AgentRemoval>,
         allocated_refs: UniqueMap<RequestRef, AllocatedRef>,
         messages: Vec<MessageIdentity>,
         item_revisions: UniqueMap<ItemRef, PositiveSafeInteger>,
@@ -182,4 +189,16 @@ pub struct ContinuationReceipt {
     pub answer_id_map: UniqueMap<UuidV4, UuidV4>,
     pub summary: String,
     pub confirmed_at: UtcMillis,
+}
+
+/// One recoverable removal, including owner questions and messages it took away.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct AgentRemoval {
+    pub topic_id: UuidV4,
+    pub item_id: Option<ItemRef>,
+    pub message_id: UuidV4,
+    pub item_ids: Vec<ItemRef>,
+    pub waiting_questions: NonnegativeSafeInteger,
+    pub cancelled_input_ids: Vec<UuidV4>,
 }

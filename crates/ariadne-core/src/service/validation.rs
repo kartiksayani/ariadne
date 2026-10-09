@@ -216,6 +216,21 @@ impl ApplyRequest {
                     if ask.is_some() && value.status != ItemStatus::WaitingOnMe {
                         return Err(invalid("A new item with an ask must be waiting_on_me so the owner can answer it"));
                     }
+                    if value.item_type.is_read_only_material(ask.as_deref())
+                        && value.ack_to.is_none()
+                    {
+                        return Err(invalid(
+                            "choose ack_to: open, in_progress, decided, done or dropped",
+                        ));
+                    }
+                    if matches!(value.status, ItemStatus::Open | ItemStatus::InProgress)
+                        && value.ack_to.is_none()
+                        && (outcome.is_some() || why.is_some())
+                    {
+                        return Err(invalid(
+                            "item.add outcome and why require an explicit ack_to",
+                        ));
+                    }
                     text(question, 4096, true)?;
                     short_label(short.as_deref())?;
                     for value in [ask, outcome, why].into_iter().flatten() {
@@ -277,7 +292,9 @@ impl ApplyRequest {
                     text(why, 4096, true)?;
                 }
                 Operation::Reply { text: value, .. } => text(value, 64 * 1024, true)?,
-                Operation::RoundClose { .. } => {}
+                Operation::RoundClose { .. }
+                | Operation::ItemDelete { .. }
+                | Operation::TopicDelete { .. } => {}
             }
         }
         if let Some(result) = &self.input_result {
@@ -308,6 +325,8 @@ impl OwnerCommand {
             | Self::InputResolve { op_id, .. }
             | Self::TopicArchive { op_id, .. }
             | Self::TopicRestore { op_id, .. }
+            | Self::TopicRemovedRestore { op_id, .. }
+            | Self::ItemRestore { op_id, .. }
             | Self::SessionClose { op_id, .. }
             | Self::SessionReopen { op_id, .. }
             | Self::SessionArchive { op_id, .. }
@@ -1080,6 +1099,14 @@ pub fn validate_owner_receipt(
                 }
                 && match (&request.command, &receipt.data) {
                     (
+                        OwnerCommand::ItemRestore { params, .. },
+                        SavedReceiptData::BinRestore { item_id, .. },
+                    ) => item_id.as_ref() == Some(&params.item_id),
+                    (
+                        OwnerCommand::TopicRemovedRestore { params, .. },
+                        SavedReceiptData::BinRestore { topic_id, item_id },
+                    ) => topic_id == &params.topic_id && item_id.is_none(),
+                    (
                         OwnerCommand::Ack { params, .. },
                         SavedReceiptData::ItemAck {
                             item_id,
@@ -1093,7 +1120,11 @@ pub fn validate_owner_receipt(
                                 == params.expected_revision.value().saturating_add(1)
                             && matches!(
                                 status,
-                                ItemStatus::Decided | ItemStatus::Done | ItemStatus::Dropped
+                                ItemStatus::Open
+                                    | ItemStatus::InProgress
+                                    | ItemStatus::Decided
+                                    | ItemStatus::Done
+                                    | ItemStatus::Dropped
                             )
                     }
                     _ => true,
@@ -1122,6 +1153,11 @@ pub fn validate_owner_receipt(
                             | OwnerCommand::SessionRestore { .. },
                         SavedReceiptData::SessionLifecycle { .. }
                     ) | (OwnerCommand::Ack { .. }, SavedReceiptData::ItemAck { .. })
+                        | (
+                            OwnerCommand::ItemRestore { .. }
+                                | OwnerCommand::TopicRemovedRestore { .. },
+                            SavedReceiptData::BinRestore { .. }
+                        )
                         | (
                             OwnerCommand::SessionLabelSet { .. },
                             SavedReceiptData::SessionLabel { .. }

@@ -1,6 +1,7 @@
 use super::{core, HistoryActionError, HistoryActionService};
 use crate::*;
 use ariadne_domain::models::*;
+use ariadne_domain::visibility::{item_is_removed, topic_is_removed};
 use ariadne_store::session::Store;
 use sha2::{Digest, Sha256 as Hasher};
 
@@ -18,6 +19,13 @@ impl HistoryActionService<'_> {
             .0
             .get(&request.source_topic_id)
             .ok_or_else(|| core(CoreErrorCode::NotFound, "The source topic does not exist"))?;
+        if topic_is_removed(&source, topic) {
+            return Err(core(
+                CoreErrorCode::InvalidTransition,
+                "Restore the removed source topic before continuing it",
+            )
+            .into());
+        }
         let target = self.snapshot(&request.target)?;
         let mapping = actions(&source, &request.source_topic_id);
         let readiness = if request.source == request.target {
@@ -53,7 +61,7 @@ impl HistoryActionService<'_> {
             .iter()
             .filter(|m| matches!(m.action, ContinueCopyAction::ImportedDrop { .. }))
             .count();
-        let summary = format!("Continue topic {} from project {} / session {} at revision {}. Copy {} items, {} messages, {} rounds and {} answers with full saved bodies and source provenance. Agent ownership and live recipient routing move to the explicitly selected target binding; Me and Other owners otherwise remain unchanged. Finished states and replacement links within the copied topic remain unchanged. {} external replacements become imported Dropped items; original links remain source history. Unanswered copied asks become Waiting on me with an answerable question round. Read the copied topic and its complete history before proceeding; reuse existing copied items rather than recreating them.", topic.id.as_str(), source.project_id.as_str(), source.id.as_str(), source.revision.value(), mapping.len(), messages(&source, &request.source_topic_id).len(), source.rounds.0.values().filter(|r| source.items.0.get(&r.item_id).is_some_and(|i| i.topic_id == topic.id)).count(), source.answers.iter().filter(|a| source.items.0.get(&a.item_id).is_some_and(|i| i.topic_id == topic.id)).count(), external);
+        let summary = format!("Continue topic {} from project {} / session {} at revision {}. Copy {} items, {} messages, {} rounds and {} answers with full saved bodies and source provenance. Agent ownership and live recipient routing move to the explicitly selected target binding; Me and Other owners otherwise remain unchanged. Finished states and replacement links within the copied topic remain unchanged. {} external replacements become imported Dropped items; original links remain source history. Unanswered copied asks become Waiting on me with an answerable question round. Read the copied topic and its complete history before proceeding; reuse existing copied items rather than recreating them.", topic.id.as_str(), source.project_id.as_str(), source.id.as_str(), source.revision.value(), mapping.len(), messages(&source, &request.source_topic_id).len(), source.rounds.0.values().filter(|r| source.items.0.get(&r.item_id).is_some_and(|i| i.topic_id == topic.id && !item_is_removed(&source, i))).count(), source.answers.iter().filter(|a| source.items.0.get(&a.item_id).is_some_and(|i| i.topic_id == topic.id && !item_is_removed(&source, i))).count(), external);
         let preview = ContinuePreview {
             source: request.source.clone(),
             source_topic_id: topic.id.clone(),
@@ -107,9 +115,9 @@ pub(super) fn selected(session: &Session) -> Option<&Binding> {
         .and_then(|id| session.bindings.0.get(id))
 }
 pub(super) fn actions(source: &Session, topic: &UuidV4) -> Vec<ContinueItemPreview> {
-    source.items.0.values().filter(|i| &i.topic_id == topic).map(|item| {
+    source.items.0.values().filter(|i| &i.topic_id == topic && !item_is_removed(source, i)).map(|item| {
         let action = match &item.replaced_by {
-            Some(id) if !source.items.0.get(id).is_some_and(|replacement| &replacement.topic_id == topic) => ContinueCopyAction::ImportedDrop {
+            Some(id) if !source.items.0.get(id).is_some_and(|replacement| &replacement.topic_id == topic && !item_is_removed(source, replacement)) => ContinueCopyAction::ImportedDrop {
                 external_replacement_id: id.clone(),
                 outcome: format!("Imported replacement outside the continued topic: {}", id.as_str()),
                 why: "The original source replacement remains provenance; it is not a live target edge.".into(),
@@ -125,14 +133,14 @@ pub(super) fn messages<'a>(source: &'a Session, topic: &UuidV4) -> Vec<&'a Messa
         .items
         .0
         .values()
-        .filter(|i| &i.topic_id == topic)
+        .filter(|i| &i.topic_id == topic && !item_is_removed(source, i))
         .map(|i| &i.id)
         .collect();
     let required: BTreeSet<_> = source
         .items
         .0
         .values()
-        .filter(|i| &i.topic_id == topic)
+        .filter(|i| items.contains(&i.id))
         .flat_map(|i| {
             std::iter::once(&i.created_message_id)
                 .chain(i.updated_message_ids.iter())
@@ -162,6 +170,26 @@ pub(super) fn messages<'a>(source: &'a Session, topic: &UuidV4) -> Vec<&'a Messa
         .messages
         .iter()
         .filter(|m| {
+            let targets_removed_items = m.item_id.as_ref().is_some_and(|id| {
+                source
+                    .items
+                    .0
+                    .get(id)
+                    .is_some_and(|item| item_is_removed(source, item))
+            }) || !m.items_touched.is_empty()
+                && m.items_touched.iter().all(|id| {
+                    source
+                        .items
+                        .0
+                        .get(id)
+                        .is_some_and(|item| item_is_removed(source, item))
+                });
+            if targets_removed_items
+                && !required.contains(&m.id)
+                && !m.items_touched.iter().any(|id| items.contains(id))
+            {
+                return false;
+            }
             m.topic_id.as_ref() == Some(topic)
                 || m.item_id.as_ref().is_some_and(|id| items.contains(id))
                 || m.items_touched.iter().any(|id| items.contains(id))

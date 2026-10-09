@@ -104,6 +104,7 @@ pub fn reply(
     .map_err(|_| "history")?;
     session.updated_at = UtcMillis::new("2026-10-04T12:00:00.000Z").unwrap();
     Ok(SavedReceiptData::Apply {
+        agent_removals: vec![],
         allocated_refs: UniqueMap(std::collections::BTreeMap::new()),
         messages: vec![MessageIdentity {
             id: message_id,

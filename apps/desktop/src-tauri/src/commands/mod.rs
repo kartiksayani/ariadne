@@ -613,6 +613,7 @@ mutations! {
     session_archive => SessionArchive, session_restore => SessionRestore,
     session_reopen => SessionReopen, topic_continue => TopicContinue, preferences_patch => PreferencesPatch,
     item_remove => ItemRemove, topic_remove => TopicRemove,
+    item_restore => ItemRestore, topic_removed_restore => TopicRemovedRestore,
     session_remove => SessionRemove, project_remove => ProjectRemove,
     session_label_set => SessionLabelSet,
     ack => Ack,

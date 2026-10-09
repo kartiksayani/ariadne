@@ -1,6 +1,6 @@
 #!/bin/bash
 # Installs the Ariadne alpha package this script ships in. It only runs install.py,
-# which writes under $HOME/.local/share/ariadne and the owned links, nothing else.
+# which writes the owned install and ends with a short, read-only doctor summary.
 set -euo pipefail
 cd "$(dirname "$0")"
 
