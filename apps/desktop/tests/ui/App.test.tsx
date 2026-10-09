@@ -172,7 +172,7 @@ describe('ordinary desktop composition', () => {
     expect(transport.preferences).toEqual(before); expect(transport.mutations).toHaveLength(writes);
     fireEvent.click(screen.getByRole('button', { name: 'Hide messages' }));
     await waitFor(() => expect(lit(returned.querySelector('[data-item-id="2"]')!)).toBeNull());
-  });
+  }, 15_000); // Full tree/graph/detail/rail composition needs headroom under CI coverage.
   it('keeps the selected tree and complete rail idle when another session publishes presence', async () => {
     const starts = vi.spyOn(WaitingStore.prototype, 'start');
     const transport = new AppTransport(), second = transport.sessions.get(secondId)!;
