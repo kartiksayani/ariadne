@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import demo from '../../../../../fixtures/domain/demo/session.json';
-import type { InputKind, Session, SessionSummary, ProjectSummary } from '../../../src/generated/domain/models';
+import type { InputKind, OperationReceipt, Session, SessionSummary, ProjectSummary } from '../../../src/generated/domain/models';
 import projectsFixture from '../../../../../fixtures/domain/projections/projects.json';
 import summariesFixture from '../../../../../fixtures/domain/projections/sessions.json';
 import type { OwnerDraft, OwnerMutationRequest, PreferencesSnapshot } from '../../../src/generated/core';
@@ -132,6 +132,178 @@ function KeyedRoot({ children, shortcuts }: { readonly children: ReactNode; read
   return <div ref={root}><section className="tree-column"><div data-row="1" tabIndex={0} onKeyDown={event => { shortcuts.push(event.key); }} /></section>{children}</div>;
 }
 const staleView = (store: object) => act(() => { (store as unknown as { publish: (update: object) => void }).publish({ status: 'stale' }); });
+
+/** An attempted send whose host response was lost, with the owner's exact saved words. */
+function attemptedDraft(target: 'item' | 'topic' = 'item'): OwnerDraft {
+  const session = demo as unknown as Session, item = session.items['2']!;
+  return { op_id: uuid(84), session: route, binding_id: session.active_binding_id!,
+    target: { topic_id: item.topic_id, item_id: target === 'item' ? item.id : null },
+    intent: target === 'item' ? 'answer' : TOPIC_REPLY, text: ' Keep the saved words exactly \n',
+    selected_option_id: target === 'item' ? 'no' : null, target_revision: target === 'item' ? item.revision : session.topics[item.topic_id]!.revision,
+    question_revision: target === 'item' ? item.question_revision : null, supersedes_answer_id: null, submission_attempted: true };
+}
+/** The durable session evidence Core exposes even when the original response did not reach the app. */
+function recordSubmitted(session: Session, draft: OwnerDraft, state: 'queued' | 'handled' = 'queued'): OperationReceipt {
+  const input = structuredClone(Object.values(session.inputs).find(value => value?.target.item_id === '2')!);
+  const message = structuredClone(session.messages.find(value => value.id === input.message_id)!);
+  input.id = uuid(70); input.seq = 20; input.binding_id = draft.binding_id; input.kind = draft.intent;
+  input.target = structuredClone(draft.target); input.message_id = uuid(71); input.answer_id = null;
+  input.expected_question_revision = draft.question_revision; input.payload.text = draft.text;
+  input.payload.intent = draft.intent; input.payload.selected_option_id = draft.selected_option_id; input.state = state;
+  session.inputs[input.id] = input;
+  message.id = input.message_id; message.number = 40; message.body = draft.text; message.input_id = input.id;
+  message.item_id = draft.target.item_id; message.topic_id = draft.target.topic_id; message.binding_id = draft.binding_id;
+  message.items_touched = draft.target.item_id === null ? [] : [draft.target.item_id];
+  session.messages.push(message);
+  session.counters.next_message = Math.max(session.counters.next_message, 41);
+  session.counters.next_input = Math.max(session.counters.next_input, 21);
+  const receipt: OperationReceipt = { operation_id: draft.op_id, actor_scope: { kind: 'owner' }, command_digest: 'a'.repeat(64),
+    result: { operation_id: draft.op_id, session_id: session.id, revision: session.revision,
+      data: { kind: 'input_submit', input_id: input.id, message_id: input.message_id, message_number: 40, answer_id: null, input_seq: input.seq } } };
+  session.operation_receipts[draft.op_id] = [receipt];
+  return receipt;
+}
+
+describe('attempted drafts reconcile from durable owner receipts', () => {
+  it.each(['item', 'topic'] as const)('recovers a %s send across restart once Core recorded it as queued or handled', async target => {
+    for (const state of ['queued', 'handled'] as const) {
+      const saved = attemptedDraft(target), value = await setup([saved]);
+      const receipt = recordSubmitted(value.session, saved, state).result;
+      const restored = await value.restart(), entry = restored.getSnapshot().entries[saved.op_id]!;
+      expect(entry).toMatchObject({ receipt, uncertain: false, error: null,
+        sent: { text: saved.text, selected_option_id: saved.selected_option_id }, draft: { text: '', selected_option_id: null } });
+      expect(value.prefs.drafts).toEqual([]); expect(value.calls).toEqual([]);
+      expect(await restored.submit(saved.op_id)).toBe(false);
+      expect(value.calls).toEqual([]);
+      expect((await value.restart()).getSnapshot().entries).toEqual({});
+    }
+  });
+  it.each(['item', 'topic'] as const)('confirms a %s send from an explicit session reconciliation without sending again', async target => {
+    for (const state of ['queued', 'handled'] as const) {
+      const saved = attemptedDraft(target), value = await setup([saved]);
+      expect(value.drafts.getSnapshot().entries[saved.op_id]).toMatchObject({ uncertain: true, draft: saved });
+      const receipt = recordSubmitted(value.session, saved, state).result;
+      await value.drafts.reconcile(immutable(value.session));
+      expect(value.drafts.getSnapshot().entries[saved.op_id]).toMatchObject({ receipt, uncertain: false,
+        sent: { text: saved.text, selected_option_id: saved.selected_option_id }, draft: { text: '', selected_option_id: null } });
+      expect(value.prefs.drafts).toEqual([]); expect(value.calls).toEqual([]);
+      const writes = value.writes.length;
+      await value.drafts.reconcile(immutable(value.session));
+      expect(value.writes).toHaveLength(writes);
+      expect(await value.drafts.submit(saved.op_id)).toBe(false); expect(value.calls).toEqual([]);
+    }
+  });
+  it.each(['map key', 'outer operation', 'result operation', 'agent actor', 'project', 'session', 'result session', 'missing input', 'other command', 'revision', 'sequence', 'message number', 'message id'] as const)(
+    'keeps exact words and choice when session evidence has the wrong %s', async mismatch => {
+      const saved = attemptedDraft(), value = await setup([saved]), session = structuredClone(value.session);
+      const receipt = recordSubmitted(session, saved);
+      if (mismatch === 'map key') { delete session.operation_receipts[saved.op_id]; session.operation_receipts[uuid(85)] = [receipt]; }
+      if (mismatch === 'outer operation') receipt.operation_id = uuid(85);
+      if (mismatch === 'result operation') receipt.result.operation_id = uuid(85);
+      if (mismatch === 'agent actor') receipt.actor_scope = { kind: 'agent', binding_id: saved.binding_id };
+      if (mismatch === 'project') session.project_id = uuid(85);
+      if (mismatch === 'session') session.id = uuid(85);
+      if (mismatch === 'result session') receipt.result.session_id = uuid(85);
+      if (mismatch === 'missing input' && receipt.result.data.kind === 'input_submit') delete session.inputs[receipt.result.data.input_id];
+      if (mismatch === 'other command') receipt.result.data = { kind: 'input_cancel', input_id: uuid(70), state: 'cancelled' };
+      if (mismatch === 'revision') receipt.result.revision = 0;
+      if (receipt.result.data.kind === 'input_submit') {
+        if (mismatch === 'sequence') receipt.result.data.input_seq = 0;
+        if (mismatch === 'message number') receipt.result.data.message_number = 0;
+        if (mismatch === 'message id') receipt.result.data.message_id = '';
+      }
+      await value.drafts.reconcile(immutable(session));
+      expect(value.drafts.getSnapshot().entries[saved.op_id]).toMatchObject({ draft: saved, uncertain: true, receipt: null });
+      expect(value.prefs.drafts).toEqual([saved]); expect(value.calls).toEqual([]); expect(value.writes).toEqual([]);
+      Object.assign(value.session, session);
+      const restored = await value.restart();
+      expect(restored.getSnapshot().entries[saved.op_id]).toMatchObject({ draft: saved, uncertain: true, receipt: null });
+      expect(value.prefs.drafts).toEqual([saved]); expect(value.calls).toEqual([]); expect(value.writes).toEqual([]);
+    });
+  it('keeps an attempted draft recoverable when its session cannot be read on restart', async () => {
+    const saved = attemptedDraft(), value = await setup([saved]); value.unavailable();
+    const restored = await value.restart();
+    expect(restored.getSnapshot()).toMatchObject({ ready: true, entries: { [saved.op_id]: { draft: saved, uncertain: true, receipt: null } } });
+    expect(value.prefs.drafts).toEqual([saved]); expect(value.calls).toEqual([]);
+    value.available(); recordSubmitted(value.session, saved, 'handled');
+    await restored.reconcile(immutable(value.session));
+    expect(restored.getSnapshot().entries[saved.op_id]?.receipt).toBeTruthy();
+    expect(value.prefs.drafts).toEqual([]); expect(value.calls).toEqual([]);
+  });
+  it('keeps an unattempted draft even if another receipt uses its operation id', async () => {
+    const saved = { ...attemptedDraft(), submission_attempted: false }, value = await setup([saved]);
+    recordSubmitted(value.session, saved);
+    await value.drafts.reconcile(immutable(value.session));
+    expect(value.drafts.getSnapshot().entries[saved.op_id]).toMatchObject({ draft: saved, uncertain: false, receipt: null });
+    expect(value.prefs.drafts).toEqual([saved]); expect(value.calls).toEqual([]);
+  });
+  it('confirms an unknown answer when the open answer slot refresh finds its owner receipt', async () => {
+    const saved = attemptedDraft(), value = await setup([saved]); value.render();
+    await screen.findByRole('button', { name: 'Try sending again' });
+    recordSubmitted(value.session, saved, 'handled'); value.session.items['2']!.status = 'in_progress'; value.session.revision++;
+    await act(async () => { await value.store.refresh(); });
+    await waitFor(() => expect(value.drafts.getSnapshot().entries[saved.op_id]?.receipt).toBeTruthy());
+    expect(screen.queryByRole('button', { name: 'Try sending again' })).toBeNull();
+    expect(screen.getByText('Saved · Queue position #20')).toBeTruthy();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(value.drafts.getSnapshot().entries[saved.op_id]?.draft.text).toBe('');
+    await waitFor(() => expect(value.prefs.drafts).toEqual([])); expect(value.calls).toEqual([]);
+  });
+  it('reconciles an unknown Waiting answer when the session behind its row refreshes', async () => {
+    const saved = attemptedDraft(), value = await setup([saved]), queue = new WaitingStore(value.service, value.sessions);
+    waitingStores.push(queue); await queue.start();
+    render(<WaitingColumn drafts={value.drafts} store={queue} revealItem={() => {}} openSession={() => {}} />);
+    await screen.findByText(/Checking whether/);
+    recordSubmitted(value.session, saved, 'queued'); value.session.revision++;
+    await act(async () => { await value.store.refresh(); });
+    await waitFor(() => expect(value.drafts.getSnapshot().entries[saved.op_id]?.receipt).toBeTruthy());
+    await waitFor(() => expect(value.prefs.drafts).toEqual([]));
+    expect(screen.queryByText(/Checking whether/)).toBeNull(); expect(value.calls).toEqual([]);
+  });
+});
+
+describe('owner draft guard messages', () => {
+  it.each(['item', 'topic'] as const)('explains an unavailable %s target and a changed agent connection', target => {
+    const draft = { ...attemptedDraft(target), submission_attempted: false, selected_option_id: null };
+    const session = structuredClone(demo) as Session;
+    const unavailable = structuredClone(session);
+    if (target === 'item') delete unavailable.items['2']; else delete unavailable.topics[draft.target.topic_id];
+    expect(blockedDraft(immutable(draft), immutable(unavailable))).toBe("This item isn't available any more. Open its session again.");
+    const wrongSession = structuredClone(session); wrongSession.id = uuid(95);
+    expect(blockedDraft(immutable(draft), immutable(wrongSession))).toBe("This item isn't available any more. Open its session again.");
+    const rebound = structuredClone(session); rebound.active_binding_id = uuid(95);
+    expect(blockedDraft(immutable(draft), immutable(rebound))).toBe('The agent connection changed. Check where this reply goes before sending.');
+    const missingBinding = structuredClone(session); delete missingBinding.bindings[draft.binding_id];
+    expect(blockedDraft(immutable(draft), immutable(missingBinding))).toBe('The agent connection changed. Check where this reply goes before sending.');
+  });
+  it('uses the closed-question message before revision, action or round checks', () => {
+    const draft = { ...attemptedDraft(), submission_attempted: false, selected_option_id: null };
+    for (const status of ['in_progress', 'decided', 'replaced'] as const) {
+      const session = structuredClone(demo) as Session, item = session.items['2']!;
+      item.status = status; item.revision++; item.question_revision++; delete session.rounds[item.current_round_id!];
+      expect(blockedDraft(immutable(draft), immutable(session))).toBe("The agent isn't waiting for an answer to this any more.");
+    }
+  });
+  it('explains a revised question, an unavailable action and a question asked by another connection', () => {
+    const draft = { ...attemptedDraft(), submission_attempted: false, selected_option_id: null };
+    const changed = structuredClone(demo) as Session; changed.items['2']!.revision++;
+    expect(blockedDraft(immutable(draft), immutable(changed))).toBe('This question changed. Read it again before sending.');
+    const session = structuredClone(demo) as Session;
+    expect(blockedDraft(immutable({ ...draft, intent: 'reopen' }), immutable(session))).toBe("You can't do that on this item right now.");
+    session.items['2']!.recipient_binding_id = uuid(95);
+    expect(blockedDraft(immutable(draft), immutable(session))).toBe('This question was asked by a different agent connection.');
+  });
+  it('still requires an open round for an answer while the item is waiting on the owner', () => {
+    const draft = { ...attemptedDraft(), submission_attempted: false, selected_option_id: null };
+    for (const roundState of ['missing', 'closed', 'old question'] as const) {
+      const session = structuredClone(demo) as Session, id = session.items['2']!.current_round_id!;
+      if (roundState === 'missing') delete session.rounds[id];
+      if (roundState === 'closed') session.rounds[id]!.closed_at = session.updated_at;
+      if (roundState === 'old question') session.rounds[id]!.question_revision++;
+      expect(blockedDraft(immutable(draft), immutable(session))).toBe("The agent isn't waiting for an answer to this any more.");
+    }
+  });
+});
 
 describe('owner input component and durable draft controller', () => {
   it.each([
@@ -720,16 +892,106 @@ describe('owner input component and durable draft controller', () => {
     value.unavailable(); await act(async () => { await value.store.refresh(); });
     expect(editor().value).toBe('Survives failure'); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' })); expect(value.calls).toHaveLength(0);
   });
-  it('prepares a separate reviewed draft only after definitive question rejection, retaining the old frozen record', async () => {
+  it('replaces a definitively rejected draft with one reviewed copy in the same save', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); value.outcome('question_changed');
     fireEvent.change(editor(), { target: { value: 'Owner explanation remains exact' } }); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
     await screen.findByRole('button', { name: 'Edit and send again' }); const original = structuredClone(value.prefs.drafts[0]);
     fireEvent.click(screen.getByRole('button', { name: 'Edit and send again' }));
     await screen.findByRole('button', { name: 'Review current target' }); expect(value.calls).toHaveLength(1); expect(editor().value).toBe('Owner explanation remains exact');
-    await waitFor(() => expect(value.prefs.drafts).toHaveLength(2)); expect(value.prefs.drafts[0]).toEqual(original);
+    await waitFor(() => expect(value.prefs.drafts).toHaveLength(1));
+    expect(value.prefs.drafts[0]?.text).toBe(original!.text);
+    expect(value.prefs.drafts[0]?.op_id).not.toBe(original!.op_id);
+    expect(value.drafts.getSnapshot().entries[original!.op_id]).toBeUndefined();
+    expect(value.writes.at(-1)).toMatchObject({ command: { params: { entries: [
+      { kind: 'delete_draft', operation_id: original!.op_id }, { kind: 'upsert_draft', draft: { text: original!.text } },
+    ] } } });
     fireEvent.click(screen.getByRole('button', { name: 'Review current target' })); value.outcome('ok');
     fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' })); await screen.findByText('Saved · Queue position #4');
-    expect(value.calls[1]?.command.op_id).not.toBe(value.calls[0]?.command.op_id); expect(value.prefs.drafts).toEqual([original]);
+    expect(value.calls[1]?.command.op_id).not.toBe(value.calls[0]?.command.op_id); expect(value.prefs.drafts).toEqual([]);
+  });
+  it('keeps both copies when replacing a rejected draft is unconfirmed, then removes the old copy on retry', async () => {
+    const value = await setup();
+    const id = value.drafts.begin(immutable(value.session), '2', 'answer')!;
+    await value.drafts.editSaved(id, { text: 'Keep every word on a failed save.' });
+    value.outcome('question_changed'); expect(await value.drafts.submit(id)).toBe(false);
+    value.preferenceOutcome('uncertain'); value.drafts.prepareRevised(id, immutable(value.session));
+    await waitFor(() => expect(value.drafts.getSnapshot().preferenceUncertain).toBe(true));
+    expect(Object.values(value.drafts.getSnapshot().entries).map(entry => entry.draft.text)).toEqual([
+      'Keep every word on a failed save.', 'Keep every word on a failed save.',
+    ]);
+    expect(value.drafts.savedAnswers(route, '2')).toHaveLength(1);
+    expect(value.prefs.drafts.map(draft => draft.op_id)).toEqual([id]);
+    const request = structuredClone(value.writes.at(-1));
+    value.preferenceOutcome('ok'); expect(await value.drafts.retryPreferences()).toBe(true);
+    expect(value.writes.at(-1)).toEqual(request);
+    expect(value.drafts.getSnapshot().entries[id]).toBeUndefined();
+    expect(value.drafts.savedAnswers(route, '2')[0]!.error).toBeNull();
+    expect(value.prefs.drafts).toHaveLength(1); expect(value.calls).toHaveLength(1);
+  });
+  it.each([false, true])('discards a saved answer with attempted=%s only after its save completes', async attempted => {
+    const draft = { ...attemptedDraft(), submission_attempted: attempted }, value = await setup([draft]);
+    const release = value.gatePrefs(), discarded = value.drafts.discard(draft.op_id);
+    await waitFor(() => expect(value.writes).toHaveLength(1));
+    expect(value.drafts.getSnapshot().entries[draft.op_id]!.draft.text).toBe(draft.text);
+    expect(value.drafts.getSnapshot().entries[draft.op_id]!.saving).toBe(true);
+    expect(await value.drafts.discard(draft.op_id)).toBe(false);
+    expect(await value.drafts.submit(draft.op_id)).toBe(false);
+    expect(await value.drafts.editSaved(draft.op_id, { text: 'Overwritten' })).toBe(false);
+    release(); expect(await discarded).toBe(true);
+    expect(value.drafts.getSnapshot().entries[draft.op_id]).toBeUndefined(); expect(value.prefs.drafts).toEqual([]);
+    expect(Object.values((await value.restart()).getSnapshot().entries)).toEqual([]);
+    expect(value.calls).toHaveLength(0);
+  });
+  it('retains discarded words after an uncertain save and removes them only on the exact preference retry', async () => {
+    const draft = attemptedDraft(), value = await setup([draft]); value.preferenceOutcome('uncertain');
+    expect(await value.drafts.discard(draft.op_id)).toBe(false);
+    expect(value.drafts.getSnapshot().entries[draft.op_id]).toMatchObject({ saving: false, draft: { text: draft.text } });
+    expect(value.drafts.getSnapshot().entries[draft.op_id]!.error).toBeTruthy();
+    expect(value.prefs.drafts).toEqual([draft]);
+    expect(await value.drafts.discard(draft.op_id)).toBe(false);
+    const request = structuredClone(value.writes.at(-1));
+    value.preferenceOutcome('ok'); expect(await value.drafts.retryPreferences()).toBe(true);
+    expect(value.writes.at(-1)).toEqual(request);
+    expect(value.drafts.getSnapshot().entries[draft.op_id]).toBeUndefined(); expect(value.prefs.drafts).toEqual([]);
+    expect(value.calls).toHaveLength(0);
+  });
+  it('retries a conflicting discard and leaves words available after definite rejection', async () => {
+    const draft = attemptedDraft(), value = await setup([draft]); value.conflictDeletes(3);
+    expect(await value.drafts.discard(draft.op_id)).toBe(false);
+    expect(value.writes).toHaveLength(3); expect(value.drafts.getSnapshot().preferenceUncertain).toBe(false);
+    expect(value.drafts.getSnapshot().entries[draft.op_id]!.draft.text).toBe(draft.text);
+    expect(value.prefs.drafts).toEqual([draft]);
+    expect(await value.drafts.discard(draft.op_id)).toBe(true);
+    expect(value.writes).toHaveLength(4); expect(value.prefs.drafts).toEqual([]);
+  });
+  it('shows the latest saved copy once and discards every copy without deleting different words', async () => {
+    const old = attemptedDraft(), copy = { ...old, op_id: uuid(85), selected_option_id: null, submission_attempted: false };
+    const other = { ...copy, op_id: uuid(86), text: 'Different words' };
+    const value = await setup([old, copy, other]);
+    expect(value.drafts.savedAnswers(route, '2').map(entry => entry.draft.op_id)).toEqual([copy.op_id, other.op_id]);
+    expect(await value.drafts.discard(copy.op_id)).toBe(true);
+    expect(value.writes.at(-1)).toMatchObject({ command: { params: { entries: [
+      { kind: 'delete_draft', operation_id: old.op_id }, { kind: 'delete_draft', operation_id: copy.op_id },
+    ] } } });
+    expect(value.drafts.savedAnswers(route, '2').map(entry => entry.draft.text)).toEqual([other.text]);
+    expect(value.prefs.drafts).toEqual([other]);
+    expect(Object.values((await value.restart()).getSnapshot().entries).map(entry => entry.draft.op_id)).toEqual([other.op_id]);
+  });
+  it('uses plain wording for a message over the byte limit', async () => {
+    const value = await setup(), id = value.drafts.begin(immutable(value.session), '2', 'answer')!;
+    await value.drafts.editSaved(id, { text: 'é'.repeat(8193) });
+    expect(blockedDraft(value.drafts.getSnapshot().entries[id]!.draft, immutable(value.session))).toBe('This message is too long. Shorten it, then send.');
+    expect(await value.drafts.submit(id)).toBe(false); expect(value.calls).toHaveLength(0);
+  });
+  it('keeps a newer send failure when an earlier draft save finishes', async () => {
+    const value = await setup(), id = value.drafts.begin(immutable(value.session), '2', 'answer')!;
+    const release = value.gatePrefs(), edited = value.drafts.editSaved(id, { text: 'Keep this and the send error.' });
+    await waitFor(() => expect(value.writes).toHaveLength(1));
+    value.unavailable(); expect(await value.drafts.submit(id)).toBe(false);
+    const error = value.drafts.getSnapshot().entries[id]!.error; expect(error).toBeTruthy();
+    release(); expect(await edited).toBe(true);
+    expect(value.drafts.getSnapshot().entries[id]!.error).toBe(error);
+    expect(value.prefs.drafts[0]!.text).toBe('Keep this and the send error.'); expect(value.calls).toHaveLength(0);
   });
   it('never permits changed-payload recovery for operation reuse or restored unknown attempts', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); value.outcome('operation_reused');
@@ -1502,10 +1764,23 @@ describe('the detail explains messages that have not reached the agent', () => {
       expect(queryPutBack()).toBeNull();
     });
   });
+  const askRevisedQuestion = (session: Session) => {
+    const item = session.items['2']!, prior = session.rounds[item.current_round_id!]!, roundId = uuid(96), messageId = uuid(97);
+    item.revision++; item.question_revision++; item.question = 'The revised question'; item.ask = 'Please answer the revised question.';
+    const message = structuredClone(session.messages.find(value => value.id === prior.opened_message_id)!);
+    message.id = messageId; message.number = session.counters.next_message++; message.author = 'agent'; message.kind = 'reply';
+    message.body = item.ask; message.item_id = item.id; message.topic_id = item.topic_id; message.items_touched = [item.id];
+    message.round_id = roundId; message.input_id = null; message.attempt_id = null; message.host_turn_id = null;
+    session.messages.push(message); prior.closed_at = session.updated_at;
+    session.rounds[roundId] = { ...structuredClone(prior), id: roundId, ordinal: prior.ordinal + 1, opened_message_id: messageId,
+      question_snapshot: item.question, ask_snapshot: item.ask, options_snapshot: structuredClone(item.options), question_revision: item.question_revision,
+      owner_message_ids: [], agent_message_ids: [], result_input_ids: [], fork_item_ids: [], closed_at: null };
+    item.current_round_id = roundId; session.revision++;
+  };
   it('lets the newer question win over a held answer; Review and send again prefills the box and cancels the held one', async () => {
-    const value = await setup(), item = value.session.items['2']!, held = value.session.inputs[demoInput('76')]!;
+    const value = await setup(), held = value.session.inputs[demoInput('76')]!;
     held.target = { ...held.target, item_id: '2' }; held.kind = 'answer'; held.payload.text = 'My earlier answer'; held.payload.selected_option_id = 'no';
-    item.question_revision = 2; item.question = 'The revised question'; value.session.revision++;
+    askRevisedQuestion(value.session);
     await act(async () => { await value.store.refresh(); });
     render(<ItemDetail drafts={value.drafts} store={value.store} itemId="2" later={false} onOpenItem={() => {}} />);
     expect(await screen.findByText('The question changed — review and send again')).toBeTruthy();
@@ -1524,9 +1799,9 @@ describe('the detail explains messages that have not reached the agent', () => {
     expect(value.calls.some(call => call.command.command === 'input_submit')).toBe(false);
   });
   const heldAnswer = async () => {
-    const value = await setup(), item = value.session.items['2']!, held = value.session.inputs[demoInput('76')]!;
+    const value = await setup(), held = value.session.inputs[demoInput('76')]!;
     held.target = { ...held.target, item_id: '2' }; held.kind = 'answer'; held.payload.text = 'My earlier answer'; held.payload.selected_option_id = 'no';
-    item.question_revision = 2; item.question = 'The revised question'; value.session.revision++;
+    askRevisedQuestion(value.session);
     await act(async () => { await value.store.refresh(); });
     render(<ItemDetail drafts={value.drafts} store={value.store} itemId="2" later={false} onOpenItem={() => {}} />);
     const review = await screen.findByRole('button', { name: 'Review and send again' });
@@ -1598,7 +1873,7 @@ describe('topic reply drafts', () => {
     expect(blockedDraft(draft(), variant(session => { session.state = 'closed'; }))).toBe('This session is closed. Reopen it to send this reply.');
     expect(blockedDraft(draft(), variant(session => { session.topics[topicId]!.archived_at = session.updated_at; }))).toBe('This topic is archived. Restore it to send this reply.');
     const rebound = variant(session => { session.bindings[uuid(95)] = { ...structuredClone(session.bindings[session.active_binding_id!]!), id: uuid(95) }; session.active_binding_id = uuid(95); });
-    expect(blockedDraft(draft(), rebound)).toBe('The selected binding changed. Review the current target before sending.');
+    expect(blockedDraft(draft(), rebound)).toBe('The agent connection changed. Check where this reply goes before sending.');
     value.drafts.review(id, rebound);
     expect(draft()).toMatchObject({ binding_id: uuid(95), text: 'Hello' });
     expect(blockedDraft(draft(), rebound)).toBeNull();

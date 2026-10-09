@@ -27,6 +27,7 @@ pub use file_ref::{
     __tauri_command_name_file_reference_open, __tauri_command_name_file_references_resolve,
     file_reference_open, file_references_resolve,
 };
+pub(crate) use open_link::checked_link;
 pub use open_link::{__cmd__open_link, __tauri_command_name_open_link, open_link};
 
 type ResolveSession = dyn Fn(&SessionRef) -> Result<RegisteredSession, CoreError> + Send + Sync;

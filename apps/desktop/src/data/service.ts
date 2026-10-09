@@ -34,6 +34,7 @@ export interface HintPayloads {
   'ariadne://presence_changed': PresenceChangedHint;
   'ariadne://supervisor_health': SupervisorHealth;
   'ariadne://route': OpenRoute;
+  'ariadne://open_link_failed': null;
 }
 export interface RendererService {
   discovery(): Promise<DesktopDiscoverySnapshot>;

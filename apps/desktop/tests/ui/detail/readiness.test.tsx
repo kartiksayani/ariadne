@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
+import type { SavedReceipt } from '../../../src/generated/domain/models';
 import { SessionStore } from '../../../src/data/session-store';
 import { createDesktopService } from '../../../src/data/service';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
@@ -9,7 +10,7 @@ import { useDetailSubmit } from '../../../src/ui/detail/submit';
 import { AppTransport, route } from '../app/transport';
 
 const stores: SessionStore[] = [];
-afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.close()); vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.close()); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const loadingError = "Ariadne is still loading this session's latest changes. Try again.";
 const sends = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'input_submit');
 
@@ -259,8 +260,192 @@ describe('detail actions while the owner view is stale', () => {
     session.items['2']!.status = 'done'; ++session.items['2']!.revision; ++session.revision;
     await act(async () => { await store.refresh(); });
     expect(screen.getAllByRole('alert')).toHaveLength(1);
-    expect(screen.getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe('Keep my exact answer.');
+    expect(document.querySelector('.detail-answer')).toBeNull();
+    expect(screen.queryByLabelText('Reply in your own words')).toBeNull();
+    expect(screen.getByLabelText<HTMLTextAreaElement>('Saved answer text').value).toBe('Keep my exact answer.');
+    expect(screen.queryByRole('button', { name: 'Try sending again' })).toBeNull();
+    expect(drafts.find(route, '2', 'answer')!.draft.text).toBe('Keep my exact answer.');
+  });
+
+  it('keeps exact answer recovery while an unrelated note is queued on the still-open question', async () => {
+    const { transport, store, drafts } = await setup();
+    const id = drafts.begin(store.getSnapshot().snapshot!.session, '2', 'answer')!;
+    await drafts.editSaved(id, { text: 'Keep this unconfirmed answer.' });
+    transport.failNext = 'input_submit';
+    expect(await drafts.submit(id)).toBe(false);
+    const note = drafts.begin(store.getSnapshot().snapshot!.session, '2', 'note')!;
+    await drafts.editSaved(note, { text: 'A separate queued note.' });
+    expect(await drafts.submit(note)).toBe(true);
+    await store.refresh();
+    render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    expect(await screen.findByRole('region', { name: 'Your answer' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Try sending again' })).toBeTruthy();
+    expect(screen.getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe('Keep this unconfirmed answer.');
+    expect(screen.queryByRole('region', { name: 'Saved message' })).toBeNull();
+    expect(drafts.getSnapshot().entries[id]!.uncertain).toBe(true);
+    expect(sends(transport)).toHaveLength(2);
+  });
+
+  it.each(['decided', 'done', 'dropped'] as const)('keeps an undelivered answer visible beside the %s outcome and actions', async status => {
+    const { transport, store, drafts } = await setup();
+    const id = drafts.begin(store.getSnapshot().snapshot!.session, '2', 'answer')!;
+    await drafts.editSaved(id, { text: 'Keep these exact words.\nAnd this second paragraph.' });
+    const session = transport.sessions.get(route.session_id)!;
+    session.items['2']!.status = status;
+    session.items['2']!.outcome = 'The agent finished this question.';
+    ++session.items['2']!.revision; ++session.revision;
+    await store.refresh();
+    render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    expect(document.querySelector('.detail-answer')).toBeNull();
+    expect(screen.queryByLabelText('Reply in your own words')).toBeNull();
+    expect(screen.getByRole('region', { name: 'Current outcome' }).textContent).toContain('The agent finished this question.');
+    expect(screen.getByRole('button', { name: 'Back to Open' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Follow up' })).toBeTruthy();
+    const saved = screen.getByRole('region', { name: 'Saved message' });
+    const text = within(saved).getByRole<HTMLTextAreaElement>('textbox', { name: 'Saved answer text' });
+    expect(text.value).toBe('Keep these exact words.\nAnd this second paragraph.');
+    expect(text.readOnly).toBe(true);
+    expect(text.disabled).toBe(false);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    fireEvent.click(within(saved).getByRole('button', { name: 'Copy message' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(text.value));
+    vi.unstubAllGlobals();
+    expect(drafts.getSnapshot().entries[id]!.draft.text).toBe(text.value);
+    expect(transport.preferences.drafts.find(draft => draft.op_id === id)!.text).toBe(text.value);
+    expect(sends(transport)).toHaveLength(0);
+    fireEvent.click(within(saved).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Saved message' })).toBeNull());
+    expect(drafts.getSnapshot().entries[id]).toBeUndefined();
+    expect(transport.preferences.drafts.some(draft => draft.op_id === id)).toBe(false);
+    expect(sends(transport)).toHaveLength(0);
+  });
+
+  it('keeps an attempted saved message visible while Discard is saving and after an unconfirmed save', async () => {
+    const { transport, store, drafts } = await setup();
+    const id = drafts.begin(store.getSnapshot().snapshot!.session, '2', 'answer')!;
+    await drafts.editSaved(id, { text: 'Keep these attempted words.' });
+    transport.failNext = 'input_submit'; expect(await drafts.submit(id)).toBe(false);
+    const session = transport.sessions.get(route.session_id)!;
+    session.items['2']!.status = 'done'; ++session.items['2']!.revision; ++session.revision;
+    await store.refresh();
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let entered = false;
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch') { entered = true; await gate; }
+      return invoke(name, args);
+    });
+    render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    const saved = screen.getByRole('region', { name: 'Saved message' });
+    const discard = within(saved).getByRole<HTMLButtonElement>('button', { name: 'Discard' });
+    transport.failNext = 'preferences_patch'; fireEvent.click(discard);
+    await waitFor(() => expect(entered).toBe(true));
+    expect(discard.disabled).toBe(true);
+    expect(within(saved).getByLabelText<HTMLTextAreaElement>('Saved answer text').value).toBe('Keep these attempted words.');
+    await act(async () => { release(); });
+    await waitFor(() => expect(drafts.getSnapshot().preferenceUncertain).toBe(true));
+    expect(within(saved).getByLabelText<HTMLTextAreaElement>('Saved answer text').value).toBe('Keep these attempted words.');
+    expect(within(saved).getAllByRole('alert')).toHaveLength(1);
+    expect(transport.preferences.drafts.find(draft => draft.op_id === id)!.text).toBe('Keep these attempted words.');
+    fireEvent.click(within(saved).getByRole('button', { name: 'Try saving your draft again' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Saved message' })).toBeNull());
+    expect(sends(transport)).toHaveLength(1);
+  });
+
+  it('shows one saved message for restored copies and Discard removes both', async () => {
+    const { transport, store, drafts } = await setup();
+    const id = drafts.begin(store.getSnapshot().snapshot!.session, '2', 'answer')!;
+    await drafts.editSaved(id, { text: 'One piece of text.' });
+    const copy = structuredClone(transport.preferences.drafts[0]!); copy.op_id = crypto.randomUUID();
+    copy.submission_attempted = true; transport.preferences.drafts.unshift(copy);
+    await drafts.load();
+    const session = transport.sessions.get(route.session_id)!;
+    session.items['2']!.status = 'done'; ++session.items['2']!.revision; ++session.revision;
+    await store.refresh();
+    render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    const saved = screen.getByRole('region', { name: 'Saved message' });
+    expect(within(saved).getAllByRole('textbox')).toHaveLength(1);
+    fireEvent.click(within(saved).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Saved message' })).toBeNull());
+    expect(transport.preferences.drafts).toEqual([]);
+    expect(drafts.getSnapshot().entries[id]).toBeUndefined(); expect(drafts.getSnapshot().entries[copy.op_id]).toBeUndefined();
+    expect(sends(transport)).toHaveLength(0);
+  });
+
+  it('does not repeat an unrelated store error in each saved message', async () => {
+    const { transport, store, drafts } = await setup();
+    const session = store.getSnapshot().snapshot!.session;
+    const first = drafts.begin(session, '2', 'answer')!;
+    await drafts.editSaved(first, { text: 'First saved message.' });
+    const second = drafts.begin(session, '2', 'answer', true)!;
+    await drafts.editSaved(second, { text: 'Second saved message.' });
+    const live = transport.sessions.get(route.session_id)!;
+    live.items['2']!.status = 'done'; ++live.items['2']!.revision; ++live.revision;
+    await store.refresh();
+    const other = drafts.begin(store.getSnapshot().snapshot!.session, '1', 'note')!;
+    transport.failNext = 'preferences_patch'; expect(await drafts.editSaved(other, { text: 'Elsewhere.' })).toBe(false);
+    render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    const saved = screen.getByRole('region', { name: 'Saved message' });
+    expect(within(saved).getAllByRole('textbox')).toHaveLength(2);
+    expect(within(saved).queryAllByRole('alert')).toHaveLength(0);
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(within(saved).getAllByRole<HTMLButtonElement>('button', { name: 'Discard' }).every(button => button.disabled)).toBe(true);
+  });
+
+  it.each(['update', 'restart'] as const)('clears an uncertain delivered answer on %s and removes the answer box', async recovery => {
+    const { transport, store, drafts } = await setup();
+    const before = structuredClone(transport.sessions.get(route.session_id)!);
+    let oldView = true;
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (oldView && 'request' in args.request && args.request.request.command === 'session_get') return {
+        api_version: 1, ok: true, data: { kind: name, data: { session: structuredClone(before), freshness: 'fresh' } },
+      };
+      const response = await invoke(name, args);
+      if ('command' in args.request && args.request.command.command === 'input_submit') {
+        const receipt = (response as { data: SavedReceipt }).data;
+        const session = transport.sessions.get(route.session_id)!;
+        session.operation_receipts[receipt.operation_id] = [{ operation_id: receipt.operation_id, actor_scope: { kind: 'owner' },
+          command_digest: '0'.repeat(64), result: receipt }];
+        session.inputs[receipt.data.kind === 'input_submit' ? receipt.data.input_id : '']!.state = 'handled';
+        throw new Error('Lost the committed receipt');
+      }
+      return response;
+    });
+    const id = drafts.begin(store.getSnapshot().snapshot!.session, '2', 'answer')!;
+    await drafts.editSaved(id, { text: 'The delivered answer.' });
+    expect(await drafts.submit(id)).toBe(false);
+    expect(drafts.getSnapshot().entries[id]!.uncertain).toBe(true);
+    render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    expect(await screen.findByRole('region', { name: 'Your answer' })).toBeTruthy();
+    const session = transport.sessions.get(route.session_id)!;
+    session.items['2']!.status = 'decided';
+    session.items['2']!.question_revision++;
+    session.items['2']!.outcome = 'Use the delivered answer.';
+    ++session.items['2']!.revision; ++session.revision;
+    // Core keeps the answered episode open at the previous question version.
+    expect(session.rounds[session.items['2']!.current_round_id!]!.closed_at).toBeNull();
+    oldView = false;
+    let active = drafts;
+    if (recovery === 'restart') {
+      cleanup();
+      active = new OwnerDraftStore(drafts.service);
+      await active.load();
+    }
+    await act(async () => { await store.refresh(); });
+    if (recovery === 'restart') render(<ItemDetail store={store} drafts={active} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    await waitFor(() => expect(active.getSnapshot().entries[id]!.receipt?.data.kind).toBe('input_submit'));
+    expect(active.getSnapshot().entries[id]).toMatchObject({ uncertain: false, error: null, draft: { text: '', selected_option_id: null }, sent: { text: 'The delivered answer.' } });
+    expect(document.querySelector('.detail-answer')).toBeNull();
+    expect(screen.queryByLabelText('Reply in your own words')).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Saved message' })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Current outcome' }).textContent).toContain('Use the delivered answer.');
+    expect(screen.getByRole('button', { name: 'Back to Open' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Follow up' })).toBeTruthy();
+    await waitFor(() => expect(transport.preferences.drafts.some(draft => draft.op_id === id)).toBe(false));
+    expect(sends(transport)).toHaveLength(1);
   });
 
   it('shows one alert when saving a waiting answer draft fails before submission', async () => {
@@ -306,7 +491,7 @@ describe('detail actions while the owner view is stale', () => {
       'Ariadne couldn’t reach its background service. Try again.',
     ]));
     expect(alerts).toHaveLength(2);
-    expect(screen.getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe('Keep the failed answer.');
+    expect(screen.getByLabelText<HTMLTextAreaElement>(view === 'waiting' ? 'Reply in your own words' : 'Saved answer text').value).toBe('Keep the failed answer.');
     expect(drafts.getSnapshot().entries[note]!.draft.text).toBe('Keep this separate note too.');
   });
 

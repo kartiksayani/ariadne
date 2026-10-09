@@ -1,6 +1,7 @@
 //! Opens a link from agent text in the owner's default browser or mail app.
 //! Only http, https and mailto URLs pass; the URL is one argument to
-//! /usr/bin/open, never shell text, and the webview itself never navigates.
+//! /usr/bin/open, never shell text. The native navigation guard keeps external
+//! links from loading in the webview, including clicks outside React.
 use ariadne_core::{CoreError, CoreErrorCode};
 
 const MAX_URL: usize = 2048;

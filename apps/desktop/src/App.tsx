@@ -40,7 +40,7 @@ import { acknowledge, ackBlocked, ackFailure, ackTarget } from './ui/shared/ack'
 import { displayStatus } from './selectors/waiting/replied';
 import { earlierAgent } from './ui/shared/excerpt';
 import { FileRefs, LinkOpener } from './ui/shared/MarkdownText';
-import { fileOpener, linkOpener } from './ui/shared/openers';
+import { fileOpener, linkOpener, listenForLinkFailures } from './ui/shared/openers';
 import type { ViewTab } from './ui/shell/Header';
 import { useWorkspaceKeys, type WorkspaceHandlers, type WorkspaceIntent } from './ui/keys';
 
@@ -656,9 +656,10 @@ export function DesktopApp({ service }: { service: RendererService }) {
     const next: Application = { service, navigation, waiting, removals,
       drafts: new OwnerDraftStore(service), actions: new SessionActionControllers(service), discovery: new DiscoveryController(service) };
     const detach = removals.attach();
+    const detachLinkFailures = listenForLinkFailures(service);
     setApplication(next);
     // Leaving the app runs the removals still in their window rather than dropping them.
-    return () => { detach(); void removals.flush(); next.discovery.dispose(); next.waiting.stop(); next.navigation.stop(); };
+    return () => { detachLinkFailures(); detach(); void removals.flush(); next.discovery.dispose(); next.waiting.stop(); next.navigation.stop(); };
   }, [service]);
   // Links in agent text open in the system browser; a failure leaves the app where it is and says so.
   const openLink = useMemo(() => linkOpener(service), [service]);

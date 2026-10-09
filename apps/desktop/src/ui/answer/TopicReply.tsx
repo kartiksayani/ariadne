@@ -20,7 +20,7 @@ export interface TopicReplyProps {
 }
 
 export function TopicReply({ drafts, store, actions, topicId, agent, onClose }: TopicReplyProps) {
-  const state = useOwnerDrafts(drafts), current = useSession(store), session = current.snapshot?.session;
+  const current = useSession(store), session = current.snapshot?.session, state = useOwnerDrafts(drafts, session);
   const box = useRef<HTMLTextAreaElement>(null);
   const route = session ? { project_id: session.project_id, session_id: session.id } : null;
   const entry = route && state.ready ? drafts.findTopic(route, topicId) : undefined;

@@ -68,7 +68,12 @@ describe('composed item navigation', () => {
     const detail = screen.getByLabelText('Detail of #2');
     expect(within(detail).getByRole('region', { name: 'Conversation' })).toBeTruthy();
     expect(detail.querySelector('[data-owner-input]')).toBeNull();
-    expect(within(detail).queryByRole('textbox')).toBeNull();
+    if (retained) {
+      const saved = within(detail).getByRole<HTMLTextAreaElement>('textbox', { name: 'Saved answer text' });
+      expect(saved.value).toBe('Keep this attempted answer.');
+      expect(saved.readOnly).toBe(true);
+      expect(saved.disabled).toBe(false);
+    } else expect(within(detail).queryByRole('textbox')).toBeNull();
     expect(within(detail).queryByRole('region', { name: 'Your answer' })).toBeNull();
     await keyDown(document.body, 'a'); await keyDown(document.body, '1', true);
     expect(detail.querySelector('[data-owner-input]')).toBeNull();

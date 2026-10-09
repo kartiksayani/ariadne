@@ -23,6 +23,31 @@ async function hide(id: string) {
 }
 
 describe('owner hide and unhide actions', () => {
+  it.each([null, '1'])('moves Up and Down through visible siblings, the hidden group and its items (parent: %s)', async parent => {
+    const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
+    if (parent) {
+      session.items['1.2'] = { ...session.items['1.1']!, id: '1.2', ordinal: 2 };
+      session.items['1.3'] = { ...session.items['1.1']!, id: '1.3', ordinal: 3 };
+    }
+    saved(transport).hidden_item_ids = parent ? ['1.1', '1.3'] : ['1', '3'];
+    await mount(transport);
+    const lastVisible = row(parent ? '1.2' : '7')!, hidden = group(2);
+    lastVisible.focus(); fireEvent.keyDown(lastVisible, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(hidden);
+    fireEvent.keyDown(hidden, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(parent ? row('2') : screen.getByRole('treeitem', { name: 'Continued context' }));
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(hidden);
+    fireEvent.keyDown(hidden, { key: 'ArrowRight' });
+    const order = parent ? [lastVisible, hidden, row('1.1')!, row('1.3')!, row('2')!]
+      : [lastVisible, hidden, row('1')!, row('1.1')!, row('3')!, screen.getByRole('treeitem', { name: 'Continued context' })];
+    const visible = [...document.querySelectorAll<HTMLElement>('[role="treeitem"]')];
+    expect(visible.slice(visible.indexOf(lastVisible), visible.indexOf(order.at(-1)!) + 1)).toEqual(order);
+    lastVisible.focus();
+    for (const next of order.slice(1)) { fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' }); expect(document.activeElement).toBe(next); }
+    for (const previous of order.slice(0, -1).reverse()) { fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' }); expect(document.activeElement).toBe(previous); }
+  });
+
   it('hides with x during a session refresh, saving once after the fresh read returns', async () => {
     class RefreshTransport extends AppTransport {
       holdSession: Promise<void> | null = null;
