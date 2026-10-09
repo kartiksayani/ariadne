@@ -71,15 +71,16 @@ One JSON object on stdin. Only `operations` is required.
 Reuse receipt revisions for your next request. An item's `id` is its number, used
 in `{"id":...}`. Omit optional operation fields.
 
-Refer to another item only as a markdown link `[short label](item:<item id>)`,
-for example `[cache choice](item:3.2)`; never use a bare item number such as
-"item 3.2" or "#3.2". The app turns `item:` links into clickable navigation.
+Set `related` only when a connection helps the owner: a point depends on,
+duplicates or follows from another. Omit it by default; declare it once on either
+item, across topics in this session. In prose use `[label](item:3.2)`, never bare
+item numbers: clickable prose links do not create `related` connections.
 
 | `op` | Required | Optional |
 |---|---|---|
 | `topic.add` | `name` | `short`, `ref` |
-| `item.add` | `question`, `type` | `topic` (the request's only `topic.add`; nested `children` inherit their parent's topic), `short`, `status`, `owner`, `ask`, `options`, `parent`, `note`, `links`, `outcome`, `why`, `children`, `ref` |
-| `item.edit` | `item`, `patch` | patch: `question`, `type`, `note`, `links`, `short` |
+| `item.add` | `question`, `type` | `topic` (the request's only `topic.add`; nested `children` inherit their parent's topic), `short`, `status`, `owner`, `ask`, `options`, `parent`, `note`, `links`, `related`, `outcome`, `why`, `children`, `ref` |
+| `item.edit` | `item`, `patch` | patch: `question`, `type`, `note`, `links`, `related`, `short` |
 | `item.ask` | `item`, `ask` | `options` |
 | `item.status` | `item`, `status` | `outcome`, `why`, `reason` |
 | `item.replace` | `item`, `replacement`, `outcome`, `why` | |

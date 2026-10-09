@@ -765,6 +765,28 @@
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
+/* Related counts reserve their space before hover, so the question never rewraps. */
+.tree-related {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  min-width: 26px;
+  font-size: calc(11px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  opacity: 0.55;
+}
+
+.tree-related i {
+  font-size: calc(12px * var(--text-scale));
+}
+
+.tree-item:hover .tree-related,
+.tree-item[aria-selected="true"] .tree-related,
+.tree-item:focus-within .tree-related {
+  opacity: 1;
+}
+
 .tree-round i {
   font-size: calc(12px * var(--text-scale));
 }

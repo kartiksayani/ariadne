@@ -521,8 +521,8 @@ input_result: ResultDraft|null
 | Operation | Required fields and optional fields |
 |---|---|
 | `topic.add` | `ref,name`; optional `short` |
-| `item.add` | `ref,topic,parent?,question,type,status,owner`; optional short/ask/options/note/links/outcome/why/replaced_by/source_round_id |
-| `item.edit` | `item,patch` restricted to question/type/note/links/short; expected revision |
+| `item.add` | `ref,topic,parent?,question,type,status,owner`; optional short/ask/options/note/links/related/outcome/why/replaced_by/source_round_id |
+| `item.edit` | `item,patch` restricted to question/type/note/links/related/short; expected revision |
 | `item.ask` | `item,ask,options,recipient_binding_id`; opens new round + waiting episode, owner=me |
 | `item.status` | `item,status`; `outcome,why` required for decided/done/dropped; `reason` required for other transitions; replaced uses item.replace; waiting uses item.ask |
 | `item.replace` | `item,replacement,outcome,why` |
@@ -536,6 +536,22 @@ and must then be nonblank, one line and at most 40 characters. Other optional
 patch fields emit null when absent and update only when present with a value;
 an empty links array clears links. Scope/reference/revision and domain-transition
 checks belong to the real core, after exact operation replay lookup.
+
+`related` is an optional list of at most 32 item reference objects. In a patch,
+omitted/null keeps it and `[]` clears it. Targets must exist in the current session, may cross
+topics, and must be distinct from the declaring item and one another. The CLI
+also accepts number strings (`"3.2"`) and local ref strings (`"decision"`), and
+expands forward in-batch related refs after their allocations, including nested
+children; strict core refs remain
+sequential. The CLI checks the cap before expansion, even for an assignment
+superseded by a later edit. Missing saved targets are tolerated after removal.
+An explicit resend may include a removed target already declared by that item;
+the related-list write prunes it. Its saved receipt and compact summary include
+`pruned_related`, mapping declaring item numbers to removed target numbers,
+only when something was pruned. Newly introduced missing targets are refused
+with the operation and offending id, number or ref. Item read outputs include
+only live related ids, which are also their display numbers
+([ADR-0094](../../adr/ADR-0094-item-links.md)).
 
 `ref` is a request-local name `[A-Za-z][A-Za-z0-9_]{0,31}`. Reference objects are
 `{id:"existing-id"}` or `{ref:"earlier-operation-ref"}`. No forward references;

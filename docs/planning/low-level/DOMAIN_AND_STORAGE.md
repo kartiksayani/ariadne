@@ -123,6 +123,18 @@ Topic and Item also carry optional `short` (ADR-0084): an agent-written 2-4 word
 label, trimmed, one line, at most 40 characters; omitted from JSON when absent, so
 stores written before it load and re-serialize unchanged.
 
+Item also carries optional `related: ItemRef[]`, at most 32 declarations
+([ADR-0094](../../adr/ADR-0094-item-links.md)).
+Declarations mean related in both directions within the same session, including
+across topics. Absent stays absent on serialization. Explicit writes reject self
+and duplicate targets and require existing targets, except a removed target
+already declared by that item may be resent. That related-list write prunes the
+removed targets and records their numbers in the saved receipt's `pruned_related`
+map. Stored dangling targets are tolerated after removal; reads and the UI show
+only live targets. New missing targets are refused with the operation and target.
+Continuation remaps only targets
+in the copied set. Inline Markdown item references do not declare relations.
+
 Item: `{id,ordinal,topic_id,parent,question,type,status,owner,revision,
 question_revision,next_child,ask,note,options,links,outcome,why,replaced_by,
 created_at,updated_at,created_message_id,updated_message_ids,status_history,

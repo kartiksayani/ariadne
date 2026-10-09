@@ -8,6 +8,40 @@ const build = (overrides: Partial<GraphInput> = {}) =>
   sessionGraph({ session: graphSession(), view: preferences(), later: new Set(), selectedId: null, tight: false, ...overrides });
 
 describe('graph model', () => {
+  it('draws only the selection’s deduplicated connections, including backlinks and cross-topic targets', () => {
+    const session = graphSession();
+    session.items['1']!.related = ['2', '2', '8', 'missing'];
+    session.items['2']!.related = ['1'];
+    session.items['1.1']!.related = ['1'];
+    session.items['3']!.related = ['2'];
+    const graph = build({ session, selectedId: '1' });
+    expect(graph.topics[0].related.map(edge => edge.id)).toEqual(['related:1:2', 'related:1:1.1']);
+    expect(graph.topics[0].related.find(edge => edge.id === 'related:1:1.1')!.d).toBe('M236 95 L262 53');
+    expect(graph.crossTopicRelated).toEqual([{ id: 'related:1:8', from: '1', to: '8' }]);
+    expect(graph.topics[0].edges.map(edge => edge.id)).toContain('parent:1:1.1');
+    const reverse = build({ session, selectedId: '8' });
+    expect(reverse.crossTopicRelated).toEqual([{ id: 'related:8:1', from: '8', to: '1' }]);
+    for (const selectedId of [null, 'missing']) {
+      const empty = build({ session, selectedId });
+      expect(empty.topics.every(topic => topic.related.length === 0)).toBe(true);
+      expect(empty.crossTopicRelated).toEqual([]);
+    }
+  });
+
+  it('skips collapsed or filtered endpoints without changing expansion or filters', () => {
+    const session = graphSession();
+    session.items['1']!.related = ['1.1.1', '8'];
+    const view = preferences({ expanded_item_ids: [], filters: { ...preferences().filters, search: 'full reply' } });
+    const graph = build({ session, view, selectedId: '1' });
+    expect(graph.topics[0].related).toEqual([]);
+    expect(graph.crossTopicRelated).toEqual([]);
+    expect(view.expanded_item_ids).toEqual([]);
+    expect(view.filters.search).toBe('full reply');
+    const collapsed = build({ session, view: preferences({ expanded_item_ids: [] }), selectedId: '1' });
+    expect(collapsed.topics[0].related).toEqual([]);
+    expect(collapsed.crossTopicRelated).toHaveLength(1);
+  });
+
   it('keeps hidden parents and descendants reachable and marks them faded, including the selected node', () => {
     const graph = build({ view: preferences({ hidden_item_ids: ['1'] }), selectedId: '1.1.1' });
     expect(graph.order).toEqual(['1', '1.1', '1.1.1', '1.2', '2', '3', '8']);

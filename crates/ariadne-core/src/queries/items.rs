@@ -64,7 +64,7 @@ pub(super) fn item(
     selectors: &[ItemPageRequest],
 ) -> Result<ItemReadProjection, CoreError> {
     let mut result = ItemReadProjection {
-        item: snapshot(item),
+        item: snapshot(session, item),
         updated_messages: empty(session.revision),
         status_history: empty(session.revision),
     };
@@ -340,7 +340,7 @@ pub(super) fn round(
     Ok(result)
 }
 
-fn snapshot(item: &Item) -> ItemSnapshot {
+fn snapshot(session: &Session, item: &Item) -> ItemSnapshot {
     ItemSnapshot {
         id: item.id.clone(),
         ordinal: item.ordinal,
@@ -358,6 +358,13 @@ fn snapshot(item: &Item) -> ItemSnapshot {
         note: item.note.clone(),
         options: item.options.clone(),
         links: item.links.clone(),
+        related: item.related.as_ref().map(|targets| {
+            targets
+                .iter()
+                .filter(|id| session.items.0.contains_key(id))
+                .cloned()
+                .collect()
+        }),
         outcome: item.outcome.clone(),
         why: item.why.clone(),
         replaced_by: item.replaced_by.clone(),

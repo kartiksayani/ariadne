@@ -9,6 +9,7 @@ import { normalizeSearch, sentenceRows, type SentenceRow } from '../../selectors
 import { shortLabel } from '../shared/short';
 import { displayStatus, type DisplayStatus } from '../../selectors/waiting/replied';
 import { hiddenItems } from '../tree/hidden';
+import { relatedItems } from '../../selectors/related';
 
 export type GraphStatus = 'open' | 'waiting' | 'agent' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
 
@@ -57,6 +58,7 @@ export interface GraphNode {
 }
 export interface GraphEdge { readonly id: string; readonly d: string; readonly on: boolean }
 export interface GraphReplacement { readonly id: string; readonly d: string; readonly labelX: number; readonly labelY: number }
+export interface RelatedEdge { readonly id: string; readonly from: string; readonly to: string }
 export interface TopicGraph {
   readonly topic: Immutable<Topic>;
   readonly counts: string;
@@ -65,6 +67,7 @@ export interface TopicGraph {
   readonly nodes: readonly GraphNode[];
   readonly edges: readonly GraphEdge[];
   readonly replacements: readonly GraphReplacement[];
+  readonly related: readonly { readonly id: string; readonly d: string }[];
 }
 export interface SessionGraph {
   readonly topics: readonly TopicGraph[];
@@ -75,6 +78,7 @@ export interface SessionGraph {
   /** Visible children by parent id, in layout order. */
   readonly children: ReadonlyMap<string, readonly string[]>;
   readonly filtering: boolean;
+  readonly crossTopicRelated: readonly RelatedEdge[];
 }
 
 export interface GraphInput {
@@ -118,6 +122,17 @@ export const edgePath = (x1: number, y1: number, x2: number, y2: number): string
   const mx = (x1 + x2) / 2;
   return `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`;
 };
+
+/** Connect the nearest sides without arrowheads: a related connection has no direction. */
+export function relatedEdgePath(a: { readonly x: number; readonly y: number }, b: { readonly x: number; readonly y: number }): string {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const horizontal = Math.abs(dx) / NODE_WIDTH > Math.abs(dy) / NODE_HEIGHT;
+  const x1 = a.x + NODE_WIDTH / 2 + (horizontal ? Math.sign(dx) * NODE_WIDTH / 2 : 0);
+  const y1 = a.y + NODE_HEIGHT / 2 + (horizontal ? 0 : Math.sign(dy) * NODE_HEIGHT / 2);
+  const x2 = b.x + NODE_WIDTH / 2 - (horizontal ? Math.sign(dx) * NODE_WIDTH / 2 : 0);
+  const y2 = b.y + NODE_HEIGHT / 2 - (horizontal ? 0 : Math.sign(dy) * NODE_HEIGHT / 2);
+  return `M${x1} ${y1} L${x2} ${y2}`;
+}
 
 export function sessionGraph(input: GraphInput): SessionGraph {
   const { session, view, later, selectedId, tight } = input;
@@ -181,9 +196,23 @@ export function sessionGraph(input: GraphInput): SessionGraph {
       return node;
     });
     return { topic, counts: topicCounts(allByTopic.get(topic.id) ?? [], session), width: columnX(deepest) + NODE_WIDTH + pad, height: y + 20,
-      nodes: topicNodes, edges, replacements };
+      nodes: topicNodes, edges, replacements, related: [] };
   });
-  return { topics: graphs, order, nodes, children, filtering };
+  const crossTopicRelated: RelatedEdge[] = [];
+  const selected = selectedId ? nodes.get(selectedId) : undefined;
+  const linked = selected ? relatedItems(session, selected.item.id) : [];
+  const relatedByTopic = new Map<string, { id: string; d: string }[]>();
+  for (const item of linked) {
+    const target = nodes.get(item.id);
+    if (!selected || !target) continue;
+    const id = `related:${selected.item.id}:${target.item.id}`;
+    if (selected.item.topic_id !== target.item.topic_id) crossTopicRelated.push({ id, from: selected.item.id, to: target.item.id });
+    else {
+      const edges = relatedByTopic.get(item.topic_id) ?? [];
+      edges.push({ id, d: relatedEdgePath(selected, target) }); relatedByTopic.set(item.topic_id, edges);
+    }
+  }
+  return { topics: graphs.map(topic => ({ ...topic, related: relatedByTopic.get(topic.topic.id) ?? [] })), order, nodes, children, filtering, crossTopicRelated };
 }
 
 export type ExpansionChange = { readonly kind: 'expand' | 'collapse'; readonly id: string };

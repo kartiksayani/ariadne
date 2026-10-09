@@ -17,6 +17,7 @@ import { displayStatus, type DisplayStatus } from '../../selectors/waiting/repli
 import { continuedLabel } from '../shared/continued';
 import { hiddenGroupKey, hiddenGroupsFor, hiddenItems } from './hidden';
 import { agentRunning, connectionOf, type Connection } from '../shared/connection';
+import { relatedItems } from '../../selectors/related';
 
 export const visual = (status: DisplayStatus): StatusKey => statusKey[status];
 const CLOSED: ReadonlySet<ItemStatus> = new Set(['decided', 'done', 'dropped', 'replaced']);
@@ -197,6 +198,7 @@ export interface ItemRow {
   readonly segments: readonly Segment[];
   readonly replacedBy: Immutable<Item> | null;
   readonly rounds: number;
+  readonly relatedCount: number;
   readonly collapsed: { readonly waiting: number; readonly open: number; readonly progress: number; readonly closed: number; readonly ids: readonly string[] } | null;
   readonly delivery: Delivery | null;
   readonly badge: string;
@@ -374,6 +376,7 @@ export function treeModel(input: TreeInput): TreeModel {
         built.push({ kind: 'item', key: item.id, item, status: display(item), depth, hasKids: children.length > 0, expanded: open,
           hidden: hidden.has(item.id), context: filtering && !matched.has(item.id) && !forced.has(item.id), later: parked, segments: segments(item.question, input.search),
           replacedBy: item.replaced_by ? session.items[item.replaced_by] ?? null : null, rounds: indexes.roundsByItem.get(item.id)?.length ?? 0,
+          relatedCount: relatedItems(session, item.id).length,
           collapsed, delivery: deliveryLine(session, { topicId: item.topic_id, itemId: item.id }, input.presence, input.health), badge: badgeLabel(item, parked, display(item)) });
         if (open) walk(children, depth + 1);
       }

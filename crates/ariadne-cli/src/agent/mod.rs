@@ -52,6 +52,14 @@ validates it exactly as before):
   reply_refs and followup_item_refs = [].
   Nesting: item.add may carry "children": [item.add objects, recursively]. Each
   child's parent is its enclosing item, its topic is inherited, order is kept.
+  Related items: item.add.related and item.edit.patch.related accept item numbers
+  ("3.2"), {"id":"3.2"}, or batch references "finding" / {"ref":"finding"}.
+  At most 32 related items. Omission keeps links; [] clears them. Duplicate,
+  self and new missing targets fail. Re-sending a declared missing target prunes
+  it; pruned_related in the receipt lists the source and removed item numbers.
+  New items can link to later additions, including nested children: the CLI
+  assigns those links just after their targets are created. Later explicit edits
+  win. Item ids are their display numbers; read --view items shows related ids.
   Still required: type and question on item.add; outcome and why for done,
   decided and dropped; expected_item_revisions for every existing item you touch.
 Example (a topic, a summary item with one child, one ask with two options):

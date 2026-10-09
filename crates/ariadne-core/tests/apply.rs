@@ -99,6 +99,7 @@ fn add(name: &str, topic: UuidRef, parent: Option<EntityRef>, waiting: bool) -> 
         options: Some(vec![]),
         note: None,
         links: None,
+        related: None,
         outcome: None,
         why: None,
         replaced_by: None,
@@ -346,6 +347,7 @@ fn original_expected_guard_covers_sequential_edits_and_implicit_parent_allocatio
                 item_type: None,
                 note: Some(Some("First".into())),
                 links: None,
+                related: None,
                 short: None,
             },
         },
@@ -358,6 +360,7 @@ fn original_expected_guard_covers_sequential_edits_and_implicit_parent_allocatio
                 item_type: None,
                 note: Some(None),
                 links: Some(vec![]),
+                related: None,
                 short: None,
             },
         },
@@ -1258,6 +1261,7 @@ fn item_links_are_saved_by_add_and_patch_even_when_targets_are_missing() {
             item_type: None,
             note: None,
             links: Some(links.clone()),
+            related: None,
             short: None,
         },
     }];
@@ -1289,6 +1293,7 @@ fn malformed_item_links_are_rejected_on_add_and_patch_without_saving_anything() 
                 item_type: None,
                 note: None,
                 links: Some(links),
+                related: None,
                 short: None,
             },
         }];
@@ -1312,6 +1317,7 @@ fn short_patch(short: Option<Option<&str>>) -> Operation {
             item_type: None,
             note: None,
             links: None,
+            related: None,
             short: short.map(|value| value.map(Into::into)),
         },
     }
@@ -1398,5 +1404,262 @@ fn short_labels_are_stored_trimmed_and_absent_keeps_null_clears() {
             CoreErrorCode::InvalidArgument
         );
         setup.rejected(&r, CoreErrorCode::InvalidArgument);
+    }
+}
+
+fn related_patch(target: EntityRef, related: Option<Vec<EntityRef>>) -> Operation {
+    Operation::ItemEdit {
+        item: target,
+        patch: ItemPatch {
+            question: None,
+            item_type: None,
+            note: None,
+            links: None,
+            related,
+            short: None,
+        },
+    }
+}
+
+#[test]
+fn related_links_resolve_existing_and_earlier_local_items_across_topics() {
+    let setup = Setup::new(&seed());
+    let mut r = guarded(10, "1", 1);
+    let mut linked = add("linked", uuid_local("other_topic"), None, false);
+    if let Operation::ItemAdd(draft) = &mut linked {
+        draft.related = Some(vec![existing("1"), local("earlier")]);
+    }
+    r.operations = vec![
+        Operation::TopicAdd {
+            r#ref: RequestRef::new("other_topic").unwrap(),
+            name: "Cross-topic links".into(),
+            short: None,
+        },
+        add("earlier", uuid(5), None, false),
+        linked,
+        related_patch(existing("1"), Some(vec![local("linked")])),
+    ];
+    setup.execute(&r).unwrap();
+    let saved = setup.saved();
+    assert_eq!(
+        saved.items.0[&item("4")].related,
+        Some(vec![item("1"), item("3")])
+    );
+    assert_eq!(saved.items.0[&item("1")].related, Some(vec![item("4")]));
+    assert_ne!(
+        saved.items.0[&item("1")].topic_id,
+        saved.items.0[&item("4")].topic_id
+    );
+    // A link reads its target without changing or revision-guarding it.
+    assert_eq!(saved.items.0[&item("3")].revision, p(1));
+    assert_eq!(saved.items.0[&item("2")], seed().items.0[&item("2")]);
+}
+
+#[test]
+fn related_patch_omitted_or_null_keeps_and_empty_list_clears() {
+    let mut session = seed();
+    session.items.0.get_mut(&item("1")).unwrap().related = Some(vec![item("99")]);
+    let setup = Setup::new(&session);
+    for (op, patch_json) in [(10, "{}"), (11, r#"{"related":null}"#)] {
+        let patch: ItemPatch = serde_json::from_str(patch_json).unwrap();
+        let mut r = guarded(op, "1", op - 9);
+        r.operations = vec![Operation::ItemEdit {
+            item: existing("1"),
+            patch,
+        }];
+        setup.execute(&r).unwrap();
+        assert_eq!(
+            setup.saved().items.0[&item("1")].related,
+            Some(vec![item("99")])
+        );
+    }
+    let mut r = guarded(12, "1", 3);
+    r.operations = vec![related_patch(existing("1"), Some(vec![]))];
+    setup.execute(&r).unwrap();
+    assert_eq!(setup.saved().items.0[&item("1")].related, Some(vec![]));
+}
+
+#[test]
+fn related_links_reject_self_duplicates_missing_and_forward_refs_atomically() {
+    for references in [
+        vec![existing("3")], // allocated source itself
+        vec![local("linked")],
+        vec![existing("1"), existing("1")],
+        vec![existing("99")],
+        vec![local("later")],
+    ] {
+        let setup = Setup::new(&seed());
+        let mut r = request(10);
+        let mut operation = add("linked", uuid(5), None, false);
+        if let Operation::ItemAdd(draft) = &mut operation {
+            draft.related = Some(references);
+        }
+        r.operations = vec![operation, add("later", uuid(5), None, false)];
+        setup.rejected(&r, CoreErrorCode::InvalidRef);
+    }
+    for references in [
+        vec![existing("1")],
+        vec![existing("2"), existing("2")],
+        vec![existing("99")],
+    ] {
+        let setup = Setup::new(&seed());
+        let mut r = guarded(10, "1", 1);
+        r.operations = vec![related_patch(existing("1"), Some(references))];
+        setup.rejected(&r, CoreErrorCode::InvalidRef);
+    }
+    let setup = Setup::new(&seed());
+    let mut aliases = request(10);
+    let mut linked = add("linked", uuid(5), None, false);
+    if let Operation::ItemAdd(draft) = &mut linked {
+        draft.related = Some(vec![existing("3"), local("earlier")]);
+    }
+    aliases.operations = vec![add("earlier", uuid(5), None, false), linked];
+    setup.rejected(&aliases, CoreErrorCode::InvalidRef);
+}
+
+#[test]
+fn related_targets_in_another_session_do_not_resolve() {
+    let setup = Setup::new(&seed());
+    let mut other = seed();
+    other.id = id(20);
+    let mut third = other.items.0[&item("2")].clone();
+    third.id = item("3");
+    third.ordinal = p(3);
+    other.counters.next_root = p(4);
+    other
+        .messages
+        .iter_mut()
+        .find(|message| message.id == third.created_message_id)
+        .unwrap()
+        .items_touched
+        .push(item("3"));
+    other.items.0.insert(item("3"), third);
+    setup.store().create(&other).unwrap();
+    let mut r = guarded(10, "1", 1);
+    r.operations = vec![related_patch(existing("1"), Some(vec![existing("3")]))];
+    let before = setup.bytes();
+    let error = core_error(setup.execute(&r).unwrap_err());
+    assert_eq!(error.code, CoreErrorCode::InvalidRef);
+    assert_eq!(
+        error.message,
+        "item.edit: related item 3 does not exist in this session; remove that link"
+    );
+    assert_eq!(setup.bytes(), before);
+    assert_eq!(setup.store().read(&id(20)).unwrap(), other);
+}
+
+#[test]
+fn old_session_reads_keep_the_original_bytes_and_omit_related() {
+    let setup = Setup::new(&seed());
+    let path = store_dir(setup._home.path(), 1)
+        .join("sessions")
+        .join(format!("{}.json", id(2).as_str()));
+    let original = include_bytes!("../../../fixtures/domain/history/seed.json");
+    fs::write(path, original).unwrap();
+    let loaded = setup.saved();
+    assert!(loaded.items.0.values().all(|item| item.related.is_none()));
+    assert_eq!(setup.bytes(), original);
+    let emitted = serde_json::to_value(loaded).unwrap();
+    assert!(emitted["items"]
+        .as_object()
+        .unwrap()
+        .values()
+        .all(|item| item.get("related").is_none()));
+}
+
+#[test]
+fn resending_declared_missing_targets_prunes_and_reports_them_in_saved_and_compact_receipts() {
+    let mut session = seed();
+    session.items.0.get_mut(&item("1")).unwrap().related = Some(vec![item("2"), item("99")]);
+    let setup = Setup::new(&session);
+    let mut r = guarded(10, "1", 1);
+    r.operations = vec![related_patch(
+        existing("1"),
+        Some(vec![existing("99"), existing("2")]),
+    )];
+    let receipt = setup.execute(&r).unwrap();
+    let saved = setup.saved();
+    assert_eq!(saved.items.0[&item("1")].related, Some(vec![item("2")]));
+    let expected = Some(UniqueMap(std::collections::BTreeMap::from([(
+        item("1"),
+        vec![item("99")],
+    )])));
+    let SavedReceiptData::Apply { pruned_related, .. } = &receipt.data else {
+        panic!("apply")
+    };
+    assert_eq!(pruned_related, &expected);
+    assert_eq!(
+        ariadne_core::apply::summarize(&saved, &receipt)
+            .unwrap()
+            .pruned_related,
+        expected
+    );
+    // Replays retain the pruning evidence even though the target is no longer declared.
+    assert_eq!(setup.execute(&r).unwrap(), receipt);
+    // A newly introduced missing number still refuses the whole batch without losing data.
+    let mut new_missing = guarded(11, "1", 2);
+    new_missing.operations = vec![related_patch(existing("1"), Some(vec![existing("98")]))];
+    setup.rejected(&new_missing, CoreErrorCode::InvalidRef);
+}
+
+#[test]
+fn related_refusals_identify_operation_and_target_number_or_batch_ref() {
+    for (references, target, reason) in [
+        (vec![existing("1")], "1", "itself"),
+        (vec![existing("2"), existing("2")], "2", "more than once"),
+        (vec![existing("99")], "99", "does not exist"),
+        (vec![local("notes")], "notes", "earlier item"),
+    ] {
+        let setup = Setup::new(&seed());
+        let mut r = guarded(10, "1", 1);
+        r.operations = vec![related_patch(existing("1"), Some(references))];
+        let error = core_error(setup.execute(&r).unwrap_err());
+        assert!(error.message.contains("item.edit"), "{error:?}");
+        assert!(error.message.contains(target), "{error:?}");
+        assert!(error.message.contains(reason), "{error:?}");
+    }
+    for (references, target) in [
+        (vec![existing("3")], "3"),
+        (vec![local("linked")], "linked"),
+        (vec![existing("2"), existing("2")], "2"),
+        (vec![existing("99")], "99"),
+        (vec![local("notes")], "notes"),
+    ] {
+        let setup = Setup::new(&seed());
+        let mut r = request(10);
+        let mut operation = add("linked", uuid(5), None, false);
+        if let Operation::ItemAdd(draft) = &mut operation {
+            draft.related = Some(references);
+        }
+        r.operations = vec![operation];
+        let error = core_error(setup.execute(&r).unwrap_err());
+        assert!(error.message.contains("item.add"), "{error:?}");
+        assert!(error.message.contains(target), "{error:?}");
+    }
+}
+
+#[test]
+fn batch_caps_related_at_32_on_add_and_edit_before_resolving_targets() {
+    for edit in [true, false] {
+        let setup = Setup::new(&seed());
+        let mut r = guarded(10, "1", 1);
+        let references = (10..43).map(|n| existing(&n.to_string())).collect();
+        if edit {
+            r.operations = vec![related_patch(existing("1"), Some(references))];
+        } else {
+            let mut operation = add("linked", uuid(5), None, false);
+            if let Operation::ItemAdd(draft) = &mut operation {
+                draft.related = Some(references);
+            }
+            r.operations = vec![operation];
+        }
+        let before = setup.bytes();
+        let error = core_error(setup.execute(&r).unwrap_err());
+        assert_eq!(error.code, CoreErrorCode::InvalidArgument);
+        assert!(error
+            .message
+            .contains(if edit { "item.edit" } else { "item.add" }));
+        assert!(error.message.contains("at most 32"));
+        assert_eq!(setup.bytes(), before);
     }
 }

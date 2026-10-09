@@ -1746,6 +1746,15 @@
                   "null"
                 ]
               },
+              "related": {
+                "items": {
+                  "$ref": "#/$defs/EntityRef"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
               "short": {
                 "description": "Absent keeps the label, null clears it, a string replaces it (trimmed).",
                 "maxLength": 40,
@@ -1911,6 +1920,15 @@
                   },
                   "ref": {
                     "$ref": "#/$defs/RequestRef"
+                  },
+                  "related": {
+                    "items": {
+                      "$ref": "#/$defs/EntityRef"
+                    },
+                    "type": [
+                      "array",
+                      "null"
+                    ]
                   },
                   "replaced_by": {
                     "anyOf": [

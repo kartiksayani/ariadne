@@ -63,6 +63,38 @@ const patches = (transport: AppTransport) => transport.mutations.filter(request 
 const chip = (label: string) => within(screen.getByRole('group', { name: 'Filter items' })).getByRole('button', { name: new RegExp(`^${label}`) });
 
 describe('session tree rows', () => {
+  it('counts declarations and backlinks once, with a visible muted marker that keeps its reserved room when selected or hovered', async () => {
+    const view = await mount({ configure: transport => {
+      const session = transport.sessions.get(route.session_id)!;
+      session.items['4']!.related = ['2', '2', 'missing'];
+      session.items['8']!.related = ['4'];
+    } });
+    expect(within(row('4')).getByRole('img', { name: '2 related items' }).textContent).toBe('2');
+    expect(within(row('2')).getByRole('img', { name: '1 related item' }).textContent).toBe('1');
+    expect(within(row('8')).getByRole('img', { name: '1 related item' }).textContent).toBe('1');
+    expect(row('1').querySelector('.tree-related')).toBeNull();
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(([, selector]) => selector!.includes('.tree-related'));
+    const rule = rules.find(([, selector]) => selector!.trim().endsWith('.tree-related'))![2];
+    expect(rule).toMatch(/display:\s*inline-flex;/);
+    expect(rule).toMatch(/opacity:\s*0\.55;/);
+    expect(rule).toMatch(/min-width:\s*26px;/);
+    const active = rules.find(([, selector]) => selector!.includes('.tree-item:hover'))!;
+    expect(active[1]).toContain('.tree-item[aria-selected="true"] .tree-related');
+    expect(active[2]!.trim()).toBe('opacity: 1;');
+    const style = document.createElement('style'); style.textContent = css; document.head.append(style);
+    try {
+      const marker = within(row('4')).getByRole('img', { name: '2 related items' });
+      const before = getComputedStyle(marker);
+      expect(before.opacity).toBe('0.55');
+      const reserved = { display: before.display, minWidth: before.minWidth, flex: before.flex, gap: before.gap };
+      view.rerender({ selectedId: '4' });
+      const selectedStyle = getComputedStyle(marker);
+      expect(selectedStyle.opacity).toBe('1');
+      expect({ display: selectedStyle.display, minWidth: selectedStyle.minWidth, flex: selectedStyle.flex, gap: selectedStyle.gap }).toEqual(reserved);
+    } finally { style.remove(); }
+  });
+
   it('renders topic bands and item rows with one roving tab stop and the session bar', async () => {
     await mount();
     expect(screen.getByRole('tree', { name: 'Session items' })).toBeTruthy();

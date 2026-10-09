@@ -1111,6 +1111,15 @@
             }
           ]
         },
+        "related": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
         "replaced_by": {
           "anyOf": [
             {

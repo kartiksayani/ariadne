@@ -54,6 +54,12 @@
   background: var(--color-accent);
 }
 
+.graph-legend-related {
+  width: 22px;
+  height: 6px;
+  overflow: visible;
+}
+
 .graph-legend-replaced {
   width: 18px;
   height: 0;
@@ -87,6 +93,7 @@
 
 /* — topic cards — */
 .graph-cards {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -107,6 +114,7 @@
 
 .graph-card-head {
   position: sticky;
+  z-index: 3;
   left: 0;
   display: flex;
   flex-wrap: wrap;
@@ -151,10 +159,28 @@
 /* — edges — */
 .graph-edges {
   position: absolute;
+  z-index: 2;
   top: 0;
   left: 0;
   overflow: visible;
   pointer-events: none;
+}
+
+.graph-cross-related {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.graph-related {
+  fill: none;
+  stroke: color-mix(in srgb, var(--color-text) 36%, transparent);
+  stroke-width: 1.25;
+  stroke-dasharray: 6 5;
 }
 
 .graph-edge {
@@ -188,6 +214,7 @@
 /* — nodes — */
 .graph-node {
   position: absolute;
+  z-index: 3;
   display: flex;
   flex-direction: column;
   gap: 3px;

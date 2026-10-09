@@ -23,6 +23,7 @@ import { shortLabel } from '../shared/short';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { CopyMessage } from './CopyMessage';
 import { StatusBadge } from '../shared/StatusBadge';
+import { STATUS } from '../shared/status';
 import { actionText, boxText, detailModel, detailPath, type ActionKey, type Kid, type LinkView, type OpenMode, type PendingView, type WordsKind } from './model';
 import { useDetailSubmit, type DraftTarget, type Words } from './submit';
 import './detail.css';
@@ -66,6 +67,7 @@ export interface ItemDetailProps {
   readonly earlierAgent?: string | null;
   /** Where a copied item came from (its Source item button): shown with the item's references, not under the composer. */
   readonly provenance?: ReactNode;
+  readonly hiddenItemIds?: readonly string[];
 }
 
 const sectionLabel = (text: string) => <div className="detail-label">{text}</div>;
@@ -179,7 +181,7 @@ function ItemLink({ link }: { readonly link: LinkView }) {
   return <div className="detail-link detail-link-plain">{body}</div>;
 }
 
-export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, highlightedMessageIds, onAgentNotRunning, earlierAgent = null, provenance }: ItemDetailProps) {
+export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, highlightedMessageIds, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds }: ItemDetailProps) {
   const current = useSession(store), session = current.snapshot?.session;
   const submit = useDetailSubmit(drafts, store, itemId);
   const draftState = useOwnerDrafts(drafts);
@@ -203,7 +205,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : undefined;
   const health = useSupervisorHealth(drafts.service, binding?.id, binding?.generation);
   const model = session ? detailModel({ session, itemId, now: Date.now(), mode, later, saving: submit.saving, presence, health, earlierAgent,
-    replyDraft: mode === 'reply' || submit.written.length > 0 }) : null;
+    replyDraft: mode === 'reply' || submit.written.length > 0, hiddenItemIds }) : null;
   const item = session?.items[itemId];
   // An open item is replied to and an in-progress item gets notes: that box is always there, never behind a button. Other
   // boxes (drop reason, follow-up on a finished item) open on press.
@@ -385,6 +387,15 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     {model.kids.length > 0 && <section className="detail-section detail-kids" aria-label="Child items">
       {sectionLabel(model.kidLabel)}
       <ChildrenBox kids={model.kids} onOpen={onOpenItem} />
+    </section>}
+
+    {model.related.length > 0 && <section className="detail-section detail-related" aria-label="Related items">
+      {sectionLabel('Related items')}
+      {model.related.map(target => <button key={target.id} type="button" className={`detail-related-item${target.hidden ? ' is-hidden' : ''}`}
+        title={target.question} aria-label={`#${target.id} ${target.label}${target.hidden ? ' (hidden)' : ''} · ${STATUS[target.status].label}`} onClick={() => onOpenItem(target.id)}>
+        <span className="detail-related-number">#{target.id}</span><span className="detail-related-label">{target.label}</span>
+        {target.hidden && <span className="detail-related-hidden">Hidden</span>}<StatusBadge status={target.status} variant="text" />
+      </button>)}
     </section>}
 
     {model.links.length > 0 && <section className="detail-section detail-links" aria-label="Item links">

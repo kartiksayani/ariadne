@@ -100,3 +100,6 @@ pickers and confirmations; the agent line becomes the quieter label.
 (generated `op_id`, defaults, nested `children`) while core stays strict, adds
 `--dry-run`, makes the default receipt compact (`--full` for the old one) and gives
 `ariadne read --view items` `--topic` and `--archived`.
+
+[ADR-0094](ADR-0094-item-links.md) adds optional related item declarations,
+bidirectional detail references and dashed links for the selected graph item.

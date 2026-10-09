@@ -247,6 +247,7 @@ impl Setup {
                     options: Some(vec![]),
                     note: None,
                     links: None,
+                    related: None,
                     outcome: None,
                     why: None,
                     replaced_by: None,

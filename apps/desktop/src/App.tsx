@@ -538,6 +538,7 @@ function Workspace({ application }: { application: Application }) {
         onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined}
         onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onBring={() => { void queueBring({ ...route, item_id: selectedId }); }}
         highlightedMessageIds={highlightedMessages} later={later} onAgentNotRunning={onAgentNotRunning} earlierAgent={earlier}
+        hiddenItemIds={view?.hidden_item_ids}
         onLater={value => preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)}
         provenance={<CopiedProvenance store={store} itemId={selectedId}
           projectPath={projectId => state.projects?.projects.items.find(project => project.project_id === projectId)?.canonical_root ?? null} revealItem={async target => {

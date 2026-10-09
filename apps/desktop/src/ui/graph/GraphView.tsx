@@ -10,7 +10,7 @@ import { plainFailure } from '../../data/plain';
 import { useWorkspaceKeys } from '../keys';
 import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
-import { applyChange, mergeChange, sessionGraph, statusVisual, type GraphNode, type TopicGraph, type ViewChange } from './model';
+import { applyChange, mergeChange, relatedEdgePath, sessionGraph, statusVisual, type GraphNode, type RelatedEdge, type TopicGraph, type ViewChange } from './model';
 import './graph.css';
 
 export interface GraphViewProps {
@@ -87,6 +87,7 @@ function TopicCard({ graph, sessionLabel, marker, focusId, onOpen, onCollapse, o
       <svg className="graph-edges" width={graph.width} height={graph.height} aria-hidden="true">
         <defs><marker id={marker} viewBox="0 0 8 8" refX="4" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
           <path d="M0 0 L8 4 L0 8 z" className="graph-arrow" /></marker></defs>
+        {graph.related.map(edge => <path key={edge.id} data-edge={edge.id} d={edge.d} className="graph-related" />)}
         {graph.edges.map(edge => <path key={edge.id} data-edge={edge.id} d={edge.d} className={edge.on ? 'graph-edge is-on' : 'graph-edge'} />)}
         {graph.replacements.map(arc => <g key={arc.id} data-edge={arc.id}>
           <path d={arc.d} className="graph-replaced" markerEnd={`url(#${marker})`} />
@@ -96,6 +97,42 @@ function TopicCard({ graph, sessionLabel, marker, focusId, onOpen, onCollapse, o
       {graph.nodes.map(node => <Node key={node.item.id} node={node} focusable={node.item.id === focusId} onOpen={onOpen} onCollapse={onCollapse} onHover={onHover} />)}
     </div>
   </section>;
+}
+
+/** Topic headers can wrap, so cross-topic connections use the mounted nodes' actual positions. */
+function CrossTopicLinks({ edges }: { readonly edges: readonly RelatedEdge[] }) {
+  const overlay = useRef<SVGSVGElement>(null);
+  const [paths, setPaths] = useState<readonly { id: string; d: string }[]>([]);
+  useLayoutEffect(() => {
+    const cards = overlay.current?.parentElement;
+    if (!cards) return;
+    const nodes = new Map<string, HTMLElement>();
+    const endpointCards = new Set<Element>();
+    for (const id of new Set(edges.flatMap(edge => [edge.from, edge.to]))) {
+      const node = cards.querySelector<HTMLElement>(`.graph-node[data-item-id="${CSS.escape(id)}"]`);
+      if (!node) continue;
+      nodes.set(id, node);
+      const card = node.closest('.graph-card');
+      if (card) endpointCards.add(card);
+    }
+    const measure = () => {
+      const bounds = cards.getBoundingClientRect();
+      const next = edges.flatMap(edge => {
+        const from = nodes.get(edge.from)?.getBoundingClientRect(), to = nodes.get(edge.to)?.getBoundingClientRect();
+        if (!from?.width || !from.height || !to?.width || !to.height) return [];
+        return [{ id: edge.id, d: relatedEdgePath({ x: from.left - bounds.left, y: from.top - bounds.top },
+          { x: to.left - bounds.left, y: to.top - bounds.top }) }];
+      });
+      setPaths(previous => previous.length === next.length && previous.every((path, i) => path.id === next[i].id && path.d === next[i].d) ? previous : next);
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    endpointCards.forEach(card => observer?.observe(card));
+    nodes.forEach(node => observer?.observe(node));
+    window.addEventListener('resize', measure);
+    return () => { observer?.disconnect(); window.removeEventListener('resize', measure); };
+  }, [edges]);
+  return <svg ref={overlay} className="graph-cross-related" aria-hidden="true">{paths.map(path => <path key={path.id} data-edge={path.id} d={path.d} className="graph-related" />)}</svg>;
 }
 
 export function GraphView({ store, routes, view, later, reveal, tight, sessionLabel, continuedFrom, preferencesBusy = false, saveView, onReveal, onHoverItem }: GraphViewProps) {
@@ -239,6 +276,7 @@ export function GraphView({ store, routes, view, later, reveal, tight, sessionLa
     }}>
       {!!graph?.topics.length && <><div className="graph-legend">
         <span className="graph-legend-key"><span className="graph-legend-thread" />Thread to the selected item</span>
+        <span className="graph-legend-key"><svg className="graph-legend-related" aria-hidden="true"><path className="graph-related" d="M0 3 H22" /></svg>Related to the selected item</span>
         <span className="graph-legend-key"><span className="graph-legend-replaced" />Replaced by</span>
         <span className="graph-legend-key"><span className="graph-legend-waiting" />Waiting on me</span>
         <span className="graph-legend-key"><span className="graph-legend-closed" />Closed</span>
@@ -249,6 +287,7 @@ export function GraphView({ store, routes, view, later, reveal, tight, sessionLa
       <div className="graph-cards">
         {graph?.topics.map(topic => <TopicCard key={topic.topic.id} graph={topic} sessionLabel={continuedFrom?.(topic.topic) ?? sessionLabel} marker={`${marker}-${topic.topic.id}`}
           focusId={focusId} onOpen={open} onCollapse={collapse} onHover={onHoverItem} />)}
+        {!!graph?.crossTopicRelated.length && <CrossTopicLinks edges={graph.crossTopicRelated} />}
       </div></>}
     </div>
   </div>;

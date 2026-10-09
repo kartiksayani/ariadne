@@ -14,12 +14,25 @@
   letters, digits or `_`, at most 32); `{"id":"1.2"}` is an existing item, or a
   UUID for a topic or message. In `item.edit`, omit `short` or `note` to keep it,
   send a string to replace it, `null` to clear it.
+- Connections: `item.add.related` or `item.edit.patch.related` takes item numbers
+  or batch refs: `["3.2","notes"]` or `[{"id":"3.2"},{"ref":"notes"}]`.
+  Adds accept later refs and nested children. Connections span this session,
+  across topics, and show at both ends. Omit/null keeps them; `[]` clears them.
+  Self, duplicate and new missing targets fail. Reads omit removed targets.
+  Resent declared removed targets are pruned;
+  receipt `pruned_related` maps source numbers to pruned numbers.
 - Limits: `question`, `ask`, `note`, `outcome`, `why` at most 4096 bytes, `reply`
-  64 KiB, 100 operations, 12 options and 32 links per item.
+  64 KiB, 100 expanded operations, 12 options, 32 links and 32 related items per item.
 - Types: question, decision, finding, task, explanation. Statuses: `open` and
   `in_progress` take a `reason` (only in `item.status`); `decided`, `done` and
   `dropped` need `outcome` and `why`; `replaced` only through `item.replace`;
   `waiting_on_me` only through an `ask`.
+
+Link sync to [cache choice](item:1) and notes.
+
+```json
+{"summary":"Linked sync","operations":[{"op":"topic.add","name":"Notes sync","short":"Notes sync"},{"op":"item.add","ref":"notes","question":"Read notes offline","short":"Offline notes","type":"finding","status":"done","outcome":"Notes read offline","why":"Read offline."},{"op":"item.add","question":"Sync notes","short":"Sync local notes","type":"task","owner":{"kind":"other","name":"Sam"},"related":["1","notes"]}]}
+```
 
 ## Failed commands
 

@@ -138,6 +138,20 @@ pub(super) fn validate_candidate_indexed(
             )?;
         }
     }
+    if let Some(related) = &item.related {
+        require(
+            related.len() <= 32,
+            format!("{path}.related"),
+            ValidationErrorKind::TooMany { maximum: 32 },
+        )?;
+        distinct(related, &format!("{path}.related"))?;
+        require(
+            !related.contains(&item.id),
+            format!("{path}.related"),
+            ValidationErrorKind::InvalidState,
+        )?;
+        // Targets may have been removed; retain the declared relationship.
+    }
     if terminal(&item.status) {
         require(
             item.outcome.is_some() && item.why.is_some(),
