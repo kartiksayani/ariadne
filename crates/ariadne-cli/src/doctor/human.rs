@@ -27,7 +27,10 @@ fn connection(session: &Session, checks: &[Value]) -> Connection {
             continue;
         }
         let facts = &check["facts"];
-        if facts["connection_state"] == "connected" && facts["freshness"] == "fresh" {
+        if check["status"] == "ok"
+            && facts["connection_state"] == "connected"
+            && facts["freshness"] == "fresh"
+        {
             return Connection::Connected;
         }
         if facts["connection_state"] == "disconnected"
@@ -49,6 +52,9 @@ fn connection(session: &Session, checks: &[Value]) -> Connection {
 fn issue(check: &Value, needs_review: bool) -> Option<String> {
     let status = check["status"].as_str()?;
     if status != "warning" && status != "error" {
+        return None;
+    }
+    if note(check).is_some() {
         return None;
     }
     let code = check["code"].as_str()?;
@@ -84,6 +90,22 @@ fn issue(check: &Value, needs_review: bool) -> Option<String> {
         },
         plain(&text)
     ))
+}
+
+fn note(check: &Value) -> Option<String> {
+    if check["status"] != "warning" {
+        return None;
+    }
+    let code = check["code"].as_str()?;
+    let message = check["message"].as_str()?;
+    if matches!(code, "claude.version" | "codex.version")
+        && check["facts"]["host_version_status"] == "untested"
+        || code == "store.legacy" && message.ends_with("identical to the store; safe to delete.")
+    {
+        Some(format!("Note: {}", plain(message)))
+    } else {
+        None
+    }
 }
 
 // Names, paths and diagnostic hints can contain IDs or line breaks too.
@@ -127,17 +149,24 @@ pub(super) fn render(report: &Value, sessions: &[Session], summary: bool) -> Str
             || code.starts_with("session.") && code != "session.valid"
             || code.starts_with("session_catalogue.")
     });
+    let counts = if unreadable && sessions.is_empty() {
+        "Session counts are unavailable".to_owned()
+    } else {
+        format!(
+            "{}{} {} in {} {}",
+            if unreadable { "At least " } else { "" },
+            sessions.len(),
+            if sessions.len() == 1 {
+                "session"
+            } else {
+                "sessions"
+            },
+            projects,
+            if projects == 1 { "project" } else { "projects" }
+        )
+    };
     let mut result = format!(
-        "{}{} {} in {} {}; {}.\n",
-        if unreadable { "At least " } else { "" },
-        sessions.len(),
-        if sessions.len() == 1 {
-            "session"
-        } else {
-            "sessions"
-        },
-        projects,
-        if projects == 1 { "project" } else { "projects" },
+        "{counts}; {}.\n",
         if unknown_count > 0 {
             format!("{connected_count} connections confirmed; live status unavailable for {unknown_count}")
         } else if connected_count == 0 {
@@ -146,9 +175,34 @@ pub(super) fn render(report: &Value, sessions: &[Session], summary: bool) -> Str
             format!("{connected_count} connected right now")
         }
     );
+    let mut names: Vec<String> = sessions
+        .iter()
+        .map(|session| plain(&session.name))
+        .collect();
+    for index in (0..names.len()).rev() {
+        let occurrence = names[..=index]
+            .iter()
+            .filter(|name| **name == names[index])
+            .count();
+        if occurrence > 1 {
+            let mut suffix = occurrence;
+            let mut name = format!("{} ({suffix})", names[index]);
+            while names.contains(&name) {
+                suffix += 1;
+                name = format!("{} ({suffix})", names[index]);
+            }
+            names[index] = name;
+        }
+    }
+    let mut notes = Vec::new();
     let mut global = Vec::new();
     let mut grouped = vec![Vec::new(); sessions.len()];
     for (index, check) in checks.iter().enumerate() {
+        if let Some(note) = note(check) {
+            if !notes.contains(&note) {
+                notes.push(note);
+            }
+        }
         let group = sessions.iter().position(|session| {
             session.checks.contains(&index)
                 || check["facts"]["binding_id"]
@@ -164,6 +218,7 @@ pub(super) fn render(report: &Value, sessions: &[Session], summary: bool) -> Str
             })
         });
         if let Some(issue) = issue(check, needs_review) {
+            let issue = (check["status"] == "error", issue);
             let destination = if let Some(group) = group {
                 &mut grouped[group]
             } else {
@@ -176,37 +231,53 @@ pub(super) fn render(report: &Value, sessions: &[Session], summary: bool) -> Str
     }
     if summary {
         let mut problems = global;
-        for (session, issues) in sessions.iter().zip(grouped) {
+        for (name, issues) in names.iter().zip(grouped) {
             problems.extend(
                 issues
                     .into_iter()
-                    .map(|issue| format!("{}: {issue}", plain(&session.name))),
+                    .map(|(error, issue)| (error, format!("{name}: {issue}"))),
             );
         }
+        problems.sort_by_key(|(error, _)| !error);
         problems.dedup();
-        for problem in problems.iter().take(2) {
+        for (_, problem) in problems.iter().take(2) {
             writeln!(result, "{problem}").expect("string write");
         }
-        result.push_str("Open Ariadne. In each Claude session run /reload-plugins, then /ariadne-connect <session id> (Copy ID on the session card).\n");
+        for note in &notes {
+            writeln!(result, "{note}").expect("string write");
+        }
+        if sessions.is_empty() {
+            result.push_str("Open Ariadne. Start a Claude session and run /ariadne-connect, or start Codex and use Connect existing session in Ariadne.\n");
+        } else {
+            result.push_str("Open Ariadne. In Claude, run /reload-plugins, then /ariadne-connect. For Codex, use Connect existing session in Ariadne and paste the copied instruction into Codex.\n");
+        }
         if problems.len() > 2 {
             writeln!(
                 result,
-                "Run `ariadne doctor` for details and {} more problems.",
-                problems.len() - 2
+                "Run `ariadne doctor` for details and {} more {}.",
+                problems.len() - 2,
+                if problems.len() == 3 {
+                    "problem"
+                } else {
+                    "problems"
+                }
             )
             .expect("string write");
         } else {
             result.push_str("Run `ariadne doctor` for details.\n");
         }
     } else {
-        for issue in &global {
+        for note in &notes {
+            writeln!(result, "{note}").expect("string write");
+        }
+        for (_, issue) in &global {
             writeln!(result, "{issue}").expect("string write");
         }
-        for (session, issues) in sessions.iter().zip(&grouped) {
+        for ((session, name), issues) in sessions.iter().zip(&names).zip(&grouped) {
             writeln!(
                 result,
                 "{}: {}.",
-                plain(&session.name),
+                name,
                 match connection(session, checks) {
                     Connection::Connected => "connected",
                     Connection::NotConnected => "not connected",
@@ -214,13 +285,18 @@ pub(super) fn render(report: &Value, sessions: &[Session], summary: bool) -> Str
                 }
             )
             .expect("string write");
-            for issue in issues {
+            for (_, issue) in issues {
                 writeln!(result, "  {issue}").expect("string write");
             }
         }
-        if !checks.iter().any(|check| {
-            check["code"] == "control.socket" && check["facts"]["validated_socket"] == true
-        }) {
+        if unknown_count > 0
+            || checks.iter().any(|check| {
+                check["code"] == "desktop.supervisor_health" && check["facts"]["state"] == "stale"
+            })
+            || !checks.iter().any(|check| {
+                check["code"] == "control.socket" && check["facts"]["validated_socket"] == true
+            })
+        {
             result.push_str("Live status is unavailable. Open Ariadne to connect agents.\n");
         }
         if global.is_empty() && grouped.iter().all(Vec::is_empty) {
@@ -364,5 +440,119 @@ mod tests {
         assert!(text.contains("0 connections confirmed; live status unavailable for 1"));
         assert!(!text.contains("not connected"));
         assert!(!text.contains("Warning"));
+    }
+
+    #[test]
+    fn summary_prioritizes_a_late_error_and_uses_the_singular_remaining_problem() {
+        let (mut report, sessions) = sample();
+        for (status, message) in [
+            ("warning", "First warning."),
+            ("warning", "Second warning."),
+            ("error", "Late error."),
+        ] {
+            report["checks"].as_array_mut().unwrap().push(json!({
+                "code":"example.problem", "status":status, "message":message, "hint":"Check it."
+            }));
+        }
+        let text = render(&report, &sessions, true);
+        let lines: Vec<_> = text.lines().collect();
+        assert_eq!(lines[1], "Error: Late error. Check it.");
+        assert_eq!(lines[2], "Warning: First warning. Check it.");
+        assert!(!text.contains("Second warning"));
+        assert!(text.contains("1 more problem."));
+        assert!(!text.contains("1 more problems"));
+    }
+
+    #[test]
+    fn fresh_presence_with_a_warning_does_not_confirm_a_connection() {
+        let (mut report, mut sessions) = sample();
+        sessions[0].active_binding_id = Some("00000000-0000-4000-8000-000000000002".to_owned());
+        report["checks"][3]["status"] = json!("warning");
+        report["checks"].as_array_mut().unwrap().push(json!({
+            "code":"control.socket", "status":"ok", "facts":{"validated_socket":true}
+        }));
+        for summary in [false, true] {
+            let text = render(&report, &sessions, summary);
+            assert!(text.contains("0 connections confirmed; live status unavailable for 1"));
+            assert!(text.contains("Open Ariadne"));
+            assert!(!text.contains("Notes: connected."));
+        }
+    }
+
+    #[test]
+    fn stale_heartbeat_prompts_opening_the_app_even_with_a_socket_and_no_sessions() {
+        let report = json!({"checks":[
+            {"code":"control.socket","status":"ok","facts":{"validated_socket":true}},
+            {"code":"desktop.supervisor_health","status":"warning","facts":{"state":"stale"}}
+        ]});
+        let text = render(&report, &[], false);
+        assert!(text.contains("Open Ariadne to connect agents."));
+        assert!(!text.contains("Warning"));
+    }
+
+    #[test]
+    fn untested_versions_and_identical_parked_copies_are_notes_outside_problem_slots() {
+        let report = json!({"checks":[
+            {"code":"codex.version","status":"warning","message":"Newer Codex is untested.","facts":{"host_version_status":"untested"}},
+            {"code":"claude.version","status":"warning","message":"Newer Claude is untested.","facts":{"host_version_status":"untested"}},
+            {"code":"store.legacy","status":"warning","message":"Parked copy is identical to the store; safe to delete."},
+            {"code":"example.first","status":"warning","message":"First problem.","hint":"Check it."},
+            {"code":"example.second","status":"warning","message":"Second problem.","hint":"Check it."}
+        ]});
+        for summary in [false, true] {
+            let text = render(&report, &[], summary);
+            assert!(text.contains("Note: Newer Codex is untested."));
+            assert!(text.contains("Note: Newer Claude is untested."));
+            assert!(text.contains("Note: Parked copy is identical to the store; safe to delete."));
+            assert!(text.contains("Warning: First problem."));
+            assert!(text.contains("Warning: Second problem."));
+            assert!(!text.contains("more problems"));
+        }
+        let mut unsupported = report["checks"][0].clone();
+        unsupported["facts"]["host_version_status"] = json!("unsupported");
+        unsupported["hint"] = json!("Update Codex.");
+        assert!(issue(&unsupported, false).unwrap().starts_with("Warning:"));
+    }
+
+    #[test]
+    fn connection_instructions_cover_both_hosts_and_empty_or_unreadable_installs() {
+        let (report, sessions) = sample();
+        let text = render(&report, &sessions, true);
+        assert!(text.contains("In Claude, run /reload-plugins, then /ariadne-connect."));
+        assert!(text.contains("For Codex, use Connect existing session in Ariadne and paste the copied instruction into Codex."));
+        assert!(!text.contains("session id"));
+        let report = json!({"checks":[]});
+        let text = render(&report, &[], true);
+        assert!(text.contains("0 sessions in 0 projects"));
+        assert!(text.contains("Start a Claude session and run /ariadne-connect, or start Codex and use Connect existing session in Ariadne."));
+        let report = json!({"checks":[{"code":"registry.unavailable","status":"error","message":"Can't read saved sessions.","hint":"Check folder access."}]});
+        let text = render(&report, &[], true);
+        assert!(text.contains("Session counts are unavailable"));
+        assert!(!text.contains("At least 0"));
+    }
+
+    #[test]
+    fn duplicate_session_names_have_distinct_lines_and_problem_labels_without_ids() {
+        let (mut report, mut sessions) = sample();
+        report["checks"][2] = json!({"code":"example.problem","status":"warning","message":"Check this session.","hint":"Open it."});
+        for name in ["Notes", "Notes (2)"] {
+            sessions.push(Session {
+                name: name.to_owned(),
+                checks: 0..0,
+                binding_ids: Vec::new(),
+                active_binding_id: None,
+                recovery_binding_ids: Vec::new(),
+            });
+        }
+        report["checks"].as_array_mut().unwrap().push(json!({"code":"example.problem","status":"warning","message":"Check the other session.","hint":"Open it."}));
+        sessions[1].checks = 4..5;
+        let text = render(&report, &sessions, false);
+        for name in ["Notes", "Notes (3)", "Notes (2)"] {
+            assert!(text.contains(&format!("{name}: not connected.")), "{text}");
+        }
+        let text = render(&report, &sessions, true);
+        assert!(text.contains("Notes: Warning: Check this session."));
+        assert!(text.contains("Notes (3): Warning: Check the other session."));
+        assert!(!text.contains("00000000"));
     }
 }

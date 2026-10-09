@@ -957,13 +957,18 @@ def main(argv=None):
     require(home.is_absolute(), "An absolute HOME is required.")
     if args.action == "uninstall":
         uninstall(home)
-    elif args.package is not None:
+        return
+    if args.package is not None:
         installed = install_package(home, args.package)
-        run([installed / "bin/ariadne", "doctor", "--summary"])
     else:
         artifacts, facts = build()
         installed = install(home, artifacts, facts)
+    try:
         run([installed / "bin/ariadne", "doctor", "--summary"])
+    except subprocess.CalledProcessError:
+        print("Ariadne is installed, but doctor found a problem. Run `ariadne doctor` for details.",
+              file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

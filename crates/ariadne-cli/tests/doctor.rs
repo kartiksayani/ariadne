@@ -88,6 +88,19 @@ impl Profile {
         self.store()
             .join("sessions/00000000-0000-4000-8000-000000000002.json")
     }
+    fn display(&self, args: &[&str]) -> (i32, String) {
+        let mut output = Vec::new();
+        let mut errors = Vec::new();
+        let code = ariadne_cli::doctor::run_in_installation(
+            args,
+            &self.data,
+            Some(&self.version),
+            &mut output,
+            &mut errors,
+        );
+        assert!(errors.is_empty());
+        (code, String::from_utf8(output).unwrap())
+    }
 }
 
 #[test]
@@ -563,53 +576,58 @@ fn control_status_is_read_only_generation_scoped_and_reports_fresh_and_stale() {
     fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).unwrap();
     let before = snapshot(profile.project.path());
     let server = std::thread::spawn(move || {
-        for (n, freshness) in [(20, Freshness::Fresh), (21, Freshness::Stale)] {
-            let mut stream = accept_fixture(&listener);
-            stream
-                .set_read_timeout(Some(Duration::from_secs(2)))
-                .unwrap();
-            let mut length = [0; 4];
-            stream.read_exact(&mut length).unwrap();
-            let mut request = vec![0; u32::from_be_bytes(length) as usize];
-            stream.read_exact(&mut request).unwrap();
-            let request: Value = serde_json::from_slice(&request).unwrap();
-            assert_eq!(request["method"], "connection_status");
-            assert_eq!(request["params"]["binding_id"], id(n).as_str());
-            let binding = &session.bindings.0[&id(n)];
-            assert_eq!(request["params"]["generation"], binding.generation.as_str());
-            let status = BindingSummary {
-                id: binding.id.clone(),
-                adapter_id: binding.adapter_id.clone(),
-                external_session_id: binding.external_session_id.clone(),
-                generation: binding.generation.clone(),
-                dispatch_state: binding.dispatch_state.clone(),
-                owner_paused: binding.owner_paused,
-                pause_reason: binding.pause_reason.clone(),
-                connection_state: ConnectionState::Connected,
-                presence: Some(PresenceObservation {
-                    instance_id: id(901),
+        for mismatched_presence in [false, false, true] {
+            for (n, freshness) in [(20, Freshness::Fresh), (21, Freshness::Stale)] {
+                let mut stream = accept_fixture(&listener);
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut length = [0; 4];
+                stream.read_exact(&mut length).unwrap();
+                let mut request = vec![0; u32::from_be_bytes(length) as usize];
+                stream.read_exact(&mut request).unwrap();
+                let request: Value = serde_json::from_slice(&request).unwrap();
+                assert_eq!(request["method"], "connection_status");
+                assert_eq!(request["params"]["binding_id"], id(n).as_str());
+                let binding = &session.bindings.0[&id(n)];
+                assert_eq!(request["params"]["generation"], binding.generation.as_str());
+                let status = BindingSummary {
+                    id: binding.id.clone(),
+                    adapter_id: binding.adapter_id.clone(),
+                    external_session_id: binding.external_session_id.clone(),
                     generation: binding.generation.clone(),
+                    dispatch_state: binding.dispatch_state.clone(),
+                    owner_paused: binding.owner_paused,
+                    pause_reason: binding.pause_reason.clone(),
                     connection_state: ConnectionState::Connected,
-                    execution_state: ExecutionState::Unknown,
-                    last_seen_at: Some(UtcMillis::new("2026-10-04T12:00:00.000Z").unwrap()),
-                    source: Some(PresenceSource::BridgeHeartbeat),
-                    process_identity: None,
-                    freshness,
-                }),
-                host_location: None,
-            };
-            let response = serde_json::to_vec(
+                    presence: Some(PresenceObservation {
+                        instance_id: id(901),
+                        generation: if mismatched_presence {
+                            id(902)
+                        } else {
+                            binding.generation.clone()
+                        },
+                        connection_state: ConnectionState::Connected,
+                        execution_state: ExecutionState::Unknown,
+                        last_seen_at: Some(UtcMillis::new("2026-10-04T12:00:00.000Z").unwrap()),
+                        source: Some(PresenceSource::BridgeHeartbeat),
+                        process_identity: None,
+                        freshness,
+                    }),
+                    host_location: None,
+                };
+                let response = serde_json::to_vec(
                 &serde_json::json!({"v":1,"kind":"response","id":request["id"],"result":status}),
             )
             .unwrap();
-            stream
-                .write_all(&(response.len() as u32).to_be_bytes())
-                .unwrap();
-            stream.write_all(&response).unwrap();
+                stream
+                    .write_all(&(response.len() as u32).to_be_bytes())
+                    .unwrap();
+                stream.write_all(&response).unwrap();
+            }
         }
     });
     let report = profile.report();
-    server.join().unwrap();
     let presence = checks(&report, "binding.presence");
     assert_eq!(presence[0]["status"], "ok");
     assert_eq!(presence[1]["status"], "warning");
@@ -617,7 +635,47 @@ fn control_status_is_read_only_generation_scoped_and_reports_fresh_and_stale() {
         checks(&report, "claude.loaded_gate")[0]["facts"]["adapter_gate"],
         "native_qualified_fresh"
     );
+    let (code, text) = profile.display(&[]);
+    assert_eq!(code, 0);
+    assert!(text.contains("1 connected right now."), "{text}");
+    let (code, text) = profile.display(&[]);
+    assert_eq!(code, 0);
+    assert!(
+        text.contains("0 connections confirmed; live status unavailable for 1"),
+        "{text}"
+    );
+    assert!(text.contains("Open Ariadne to connect agents."));
+    server.join().unwrap();
     assert_eq!(snapshot(profile.project.path()), before);
+}
+
+#[test]
+fn stale_control_socket_and_heartbeat_still_prompt_opening_ariadne() {
+    use std::os::unix::net::UnixListener;
+    let profile = Profile::new();
+    let run = profile.data.join("run");
+    fs::create_dir(&run).unwrap();
+    fs::set_permissions(&run, fs::Permissions::from_mode(0o700)).unwrap();
+    let socket = run.join("control.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).unwrap();
+    drop(listener);
+    write_health(&profile.data, &now_utc(-3600), Vec::new());
+    let report = profile.report();
+    assert_eq!(
+        checks(&report, "control.socket")[0]["facts"]["validated_socket"],
+        true
+    );
+    assert_eq!(
+        checks(&report, "desktop.supervisor_health")[0]["facts"]["state"],
+        "stale"
+    );
+    let before = snapshot(profile.home.path());
+    let (code, text) = profile.display(&[]);
+    assert_eq!(code, 0);
+    assert!(text.contains("live status unavailable for 1"));
+    assert!(text.contains("Open Ariadne to connect agents."));
+    assert_eq!(snapshot(profile.home.path()), before);
 }
 
 fn copy_store(from: &Path, to: &Path) {
@@ -1145,6 +1203,8 @@ fn fresh_install_groups_named_sessions_without_warnings_or_ids_and_keeps_detaile
     let summary = run(&["--summary"]);
     assert_eq!(summary.lines().count(), 3);
     assert!(!summary.contains("00000000"));
+    assert!(summary.contains("In Claude, run /reload-plugins, then /ariadne-connect."));
+    assert!(summary.contains("For Codex, use Connect existing session in Ariadne and paste the copied instruction into Codex."));
     let verbose = run(&["--verbose"]);
     assert!(verbose.contains("binding.recovery"));
     assert!(verbose.contains(session.active_binding_id.as_ref().unwrap().as_str()));
@@ -1159,6 +1219,141 @@ fn fresh_install_groups_named_sessions_without_warnings_or_ids_and_keeps_detaile
         checks(report, "binding.presence_unknown")[0]["status"],
         "warning"
     );
+    assert_eq!(snapshot(profile.home.path()), before);
+
+    second.name = Some("Notes".to_owned());
+    fs::write(
+        profile
+            .store()
+            .join(format!("sessions/{}.json", second.id.as_str())),
+        serde_json::to_vec(&second).unwrap(),
+    )
+    .unwrap();
+    let before = snapshot(profile.home.path());
+    let text = run(&[]);
+    assert!(text.contains("Notes: not connected."));
+    assert!(text.contains("Notes (2): not connected."));
+    assert!(!text.contains("00000000"));
+    assert_eq!(snapshot(profile.home.path()), before);
+}
+
+#[test]
+fn summary_shows_a_late_error_before_warnings_and_preserves_exit_four() {
+    let profile = Profile::new();
+    fs::remove_file(
+        profile
+            .version
+            .join("integrations/codex-skills/ariadne/SKILL.md"),
+    )
+    .unwrap();
+    fs::write(profile.live(), b"{\"schema_version\":2}").unwrap();
+    let report = profile.report();
+    let all = report["checks"].as_array().unwrap();
+    let error = all
+        .iter()
+        .position(|check| check["status"] == "error")
+        .unwrap();
+    assert!(
+        all[..error]
+            .iter()
+            .filter(|check| {
+                matches!(
+                    check["code"].as_str(),
+                    Some("installation.resource_parity" | "registry.binding_index")
+                ) && check["status"] == "warning"
+            })
+            .count()
+            >= 2
+    );
+    let before = snapshot(profile.home.path());
+    let (code, text) = profile.display(&["--summary"]);
+    assert_eq!(code, 4);
+    let lines: Vec<_> = text.lines().collect();
+    assert_eq!(
+        lines[1],
+        "Error: This data was saved by a newer Ariadne version. Install that version to read it."
+    );
+    assert!(lines[2].starts_with("Warning:"));
+    assert!(text.contains("1 more problem."), "{text}");
+    assert!(!text.contains("At least 0 sessions"));
+    assert!(!text.contains("00000000"));
+    assert_eq!(snapshot(profile.home.path()), before);
+}
+
+#[test]
+fn empty_install_and_unreadable_counts_use_fitting_summary_text() {
+    let profile = tempfile::tempdir().unwrap();
+    let data = profile.path().join("absent");
+    let mut output = Vec::new();
+    assert_eq!(
+        ariadne_cli::doctor::run_in_installation(
+            &["--summary"],
+            &data,
+            None,
+            &mut output,
+            &mut Vec::new()
+        ),
+        0
+    );
+    let text = String::from_utf8(output).unwrap();
+    assert!(text.contains("0 sessions in 0 projects"));
+    assert!(text.contains("Start a Claude session and run /ariadne-connect, or start Codex and use Connect existing session in Ariadne."));
+    assert!(!data.exists());
+    let profile = Profile::new();
+    fs::remove_file(profile.data.join("registry.lock")).unwrap();
+    let (code, text) = profile.display(&["--summary"]);
+    assert_eq!(code, 0);
+    assert!(text.contains("Session counts are unavailable"));
+    assert!(!text.contains("At least 0"));
+}
+
+#[test]
+fn newer_codex_and_identical_parked_copy_are_notes_in_both_human_modes() {
+    let profile = Profile::new();
+    park_copy(&profile);
+    let codex = profile.home.path().join("codex");
+    executable(&codex, "codex-cli 0.161.0");
+    let before = snapshot(profile.home.path());
+    for summary in [false, true] {
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_ariadne"));
+        command
+            .env("HOME", profile.home.path())
+            .env("ARIADNE_HOME", &profile.data)
+            .env("CODEX_HOME", profile.home.path().join("codex-home"))
+            .args(["doctor", "--codex-bin"])
+            .arg(&codex);
+        if summary {
+            command.arg("--summary");
+        }
+        let output = command.output().unwrap();
+        assert_eq!(output.status.code(), Some(0));
+        assert!(output.stderr.is_empty());
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(
+            text.contains("Note: Codex 0.161.0 is newer than the tested 0.160.0"),
+            "{text}"
+        );
+        assert!(
+            text.lines()
+                .any(|line| line.starts_with("Note: Parked copy at ")
+                    && line.ends_with("safe to delete.")),
+            "{text}"
+        );
+        assert!(!text
+            .lines()
+            .any(|line| line.starts_with("Warning: Codex")
+                || line.starts_with("Warning: Parked copy")));
+        if summary {
+            assert_eq!(
+                text.lines()
+                    .filter(|line| line.contains("Warning:"))
+                    .count(),
+                2
+            );
+            assert!(text.contains("1 more problem."), "{text}");
+        }
+        assert!(!text.contains("00000000"));
+    }
     assert_eq!(snapshot(profile.home.path()), before);
 }
 

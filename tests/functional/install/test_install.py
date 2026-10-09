@@ -826,6 +826,21 @@ class InstallationTests(unittest.TestCase):
             build.assert_called_once()
         self.assertIn("No personal Ariadne package", self.output.getvalue())
 
+    def test_main_source_install_reports_doctor_failure_separately(self):
+        command = [Path("/fixture/version/bin/ariadne"), "doctor", "--summary"]
+        errors = io.StringIO()
+        with patch.dict(os.environ, {"HOME": str(self.home)}), \
+                patch.object(installer, "build", return_value=(self.artifacts, self.facts)), \
+                patch.object(installer, "install", return_value=Path("/fixture/version")) as install, \
+                patch.object(installer, "run", side_effect=subprocess.CalledProcessError(4, command)) as run, \
+                contextlib.redirect_stderr(errors), self.assertRaises(SystemExit) as stopped:
+            installer.main(["install"])
+        install.assert_called_once_with(self.home, self.artifacts, self.facts)
+        run.assert_called_once_with(command)
+        self.assertEqual(stopped.exception.code, 1)
+        self.assertEqual(errors.getvalue(),
+                         "Ariadne is installed, but doctor found a problem. Run `ariadne doctor` for details.\n")
+
 
 def shutil_error():
     return shutil.Error
@@ -1100,6 +1115,27 @@ class PackageTests(unittest.TestCase):
         self.assertEqual("\n".join(lines[1:]) + "\n", summary)
         self.assertNotRegex(self.output.getvalue(), r"[0-9a-f]{8}-[0-9a-f]{4}-")
         self.assertNotIn("Result: warning", self.output.getvalue())
+
+    def test_package_doctor_exit_four_keeps_the_install_and_reports_plain_guidance(self):
+        _, package = self.extract()
+        errors = io.StringIO()
+        installer_run = installer.run
+        def invoke(args, **kwargs):
+            if args[1:] == ["doctor", "--summary"]:
+                raise subprocess.CalledProcessError(4, args)
+            return installer_run(args, **kwargs)
+        with patch.dict(os.environ, {"HOME": str(self.home)}), \
+                patch.object(installer, "run", side_effect=invoke), contextlib.redirect_stderr(errors), \
+                self.assertRaises(SystemExit) as stopped:
+            installer.main(["install", "--package", str(package)])
+        self.assertEqual(stopped.exception.code, 1)
+        self.assertEqual(errors.getvalue(),
+                         "Ariadne is installed, but doctor found a problem. Run `ariadne doctor` for details.\n")
+        final = self.root / "versions/0.1.0"
+        self.assertEqual((self.root / "current").resolve(), final)
+        self.assertEqual(installer.inventory(final), installer.descriptor(final, self.home)["owned_files"])
+        self.assertTrue((self.home / "Applications/Ariadne.app").is_dir())
+        self.assertIn("Installed Ariadne 0.1.0.", self.output.getvalue())
 
     def test_main_package_action_builds_then_assembles(self):
         with patch.object(installer, "build", return_value=(self.artifacts, self.facts)) as build, \
