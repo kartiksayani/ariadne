@@ -1,4 +1,4 @@
-//! Recoverable agent deletion preserves history and abandons pending delivery.
+//! Recoverable agent deletion preserves history and cancels undelivered queue work.
 use super::{
     batch::{increment, Batch},
     error::core,
@@ -42,7 +42,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             .items
             .0
             .values()
-            .filter(|item| descendant(session, item, &id))
+            .filter(|item| !item_is_removed(session, item) && descendant(session, item, &id))
             .map(|item| item.id.clone())
             .collect();
         let revision = increment(item.revision)?;
@@ -88,7 +88,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             .items
             .0
             .values()
-            .filter(|item| item.topic_id == id)
+            .filter(|item| item.topic_id == id && !item_is_removed(session, item))
             .map(|item| item.id.clone())
             .collect();
         let notice = self.removal_notice(session, id.clone(), None, item_ids)?;
@@ -145,8 +145,8 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
         Ok(message_id)
     }
 
-    // Operations and result linking run first. In particular, deleting the
-    // dispatched source cannot seal its attempt before this batch saves its result.
+    // Operations and result linking run first. Deletion only cancels queue work
+    // that never reached the host; dispatched work keeps its result/completion join.
     pub(super) fn cancel_removed_inputs(&mut self, session: &mut Session) {
         for removal in &mut self.agent_removals {
             let targets: Vec<_> = session
@@ -154,6 +154,24 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                 .0
                 .values()
                 .filter(|input| {
+                    if input.state != InputState::Queued
+                        || input.kind == InputKind::Removed
+                        || self.request.source_input_id.as_ref() == Some(&input.id)
+                        || input.active_attempt_id.is_some()
+                        || input.attempts.iter().any(|attempt| {
+                            attempt.sealed_at.is_none()
+                                || !matches!(
+                                    attempt.acceptance,
+                                    AcceptanceState::Prepared | AcceptanceState::Rejected
+                                )
+                                || attempt.host_turn_id.is_some()
+                                || attempt.turn_state != TurnState::Unknown
+                                || attempt.domain_result.is_some()
+                                || attempt.result_state == ResultState::Committed
+                        })
+                    {
+                        return false;
+                    }
                     if removal.item_id.is_none() {
                         input.target.topic_id == removal.topic_id
                     } else {

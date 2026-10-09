@@ -25,8 +25,10 @@ commit exactly one `input_result`:
   for none.
 - `handled_through_message_number`: the envelope's `owner_message_number`.
 
-Host completion is not a result. Write full answers as `reply`, then use a brief
-chat summary. Deleted queued messages never reach you.
+Host completion is not a result. Write answers as `reply`, with a brief chat
+summary. Only queued, undelivered owner inputs cancel on deletion. Removed notices
+and claimed or received inputs, including the source, stay valid; a missing
+`input_result` can land later.
 
 ## Input kinds
 
@@ -51,22 +53,21 @@ Finish parents per `checklist.md`.
 
 ## Examples
 
-Answer [owner choice](item:1): Retry meant five attempts, but the owner says
-"Cap retries at three." The note wins. Update [retry cap](item:1.1) and
-[retry budget](item:3) together; name all three in the result.
+Answer [owner choice](item:1): "Cap retries at three" overrides five attempts.
+Update [retry cap](item:1.1) and [retry budget](item:3) together; name all three
+in the result.
 
 ```json
 {"source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{"1":4,"1.1":1,"3":1},"summary":"Answered [owner choice](item:1)","operations":[{"op":"reply","ref":"r1","item":{"id":"1"},"text":"Use Retry with three attempts, following your note."},{"op":"item.status","item":{"id":"1"},"status":"open","ack_to":"decided","reason":"Choice ready to read","outcome":"Retry with three attempts","why":"Your note overrides the option's five-attempt consequence."},{"op":"item.status","item":{"id":"1.1"},"status":"open","ack_to":"done","reason":"Finding updated","outcome":"Three attempts","why":"The retry cap follows your choice and note."},{"op":"item.status","item":{"id":"3"},"status":"open","ack_to":"dropped","reason":"Question no longer needed","outcome":"No five-attempt budget needed","why":"Three attempts make this question moot."}],"input_result":{"outcome":"answered","explanation":"Selected [owner choice](item:1) with your note: cap retries at three. Updated [retry cap](item:1.1) and ruled out [retry budget](item:3).","reply_refs":[{"ref":"r1"}],"handled_through_message_number":7}}
 ```
 
-The last [cache choice](item:1.1) is settled; it and [shipping decision](item:1)
-await Ack:
+[Cache choice](item:1.1) and [shipping decision](item:1) await Ack:
 
 ```json
 {"expected_item_revisions":{"1":2,"1.1":1},"summary":"Settled the last choice","operations":[{"op":"item.status","item":{"id":"1.1"},"status":"open","ack_to":"decided","reason":"The last choice is recorded","outcome":"Use cache A","why":"The owner picked A."},{"op":"item.status","item":{"id":"1"},"status":"open","ack_to":"decided","reason":"Choice ready to read","outcome":"Ship with cache A","why":"Every choice under it is decided."}]}
 ```
 
-The owner presses Drop on [waiting question](item:1); preserve text and history:
+Owner Drop on [waiting question](item:1) preserves text and history:
 
 ```json
 {"source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{"1":2},"operations":[{"op":"reply","ref":"r1","item":{"id":"1"},"text":"Dropped at your request; its text and history stay here."},{"op":"item.status","item":{"id":"1"},"status":"dropped","outcome":"Question withdrawn","why":"You pressed Drop."}],"input_result":{"outcome":"answered","explanation":"Dropped [waiting question](item:1) at your request.","reply_refs":[{"ref":"r1"}],"handled_through_message_number":3}}

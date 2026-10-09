@@ -611,6 +611,17 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             } => {
                 let id = self.item_ref(item)?;
                 let replacement = self.item_ref(replacement)?;
+                if session
+                    .items
+                    .0
+                    .get(&replacement)
+                    .is_some_and(|item| ariadne_domain::visibility::item_is_removed(session, item))
+                {
+                    return Err(core(
+                        CoreErrorCode::InvalidTransition,
+                        "The replacement item is in the bin. Ask the owner to restore it first.",
+                    ));
+                }
                 self.change(
                     session,
                     &id,

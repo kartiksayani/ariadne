@@ -37,12 +37,12 @@ end-to-end contract-generation and agent-skill pattern.
   reads report omitted work in plain words. Other writes to removed work refuse
   with an instruction to ask the owner to restore it. Owner snapshots and direct
   conversation reads retain the bin and cancelled message text.
-- Pending owner messages for removed work follow the archive abandon path:
-  queued messages cancel; in-flight and needs-attention attempts seal and cancel;
-  a committed result instead makes its input handled. Each affected delivery
-  barrier clears. Their text stays visible as cancelled. A valid result in the
-  deleting batch commits before abandonment; the existing explicit-reply
-  requirement is unchanged, and a reply before delete stays in history.
+- Deletion cancels only queued, undelivered owner inputs for removed work and
+  clears their delivery barriers; their text stays visible as cancelled. Removed
+  notices and already claimed or received inputs, including the deleting request's
+  source input, remain valid. A result may land later if the deleting batch omitted
+  it. A valid same-request result commits normally; the explicit-reply requirement
+  is unchanged, and a reply before delete stays in history.
 - Each newly removed scope saves a plain owner notice and an Apply receipt entry
   listing its items, waiting-question count and cancelled inputs. The desktop
   notice names the work and counts and offers Restore and View. It does not ask
@@ -63,7 +63,10 @@ end-to-end contract-generation and agent-skill pattern.
   behavior. Source state remains intact.
 - Agent rules teach deletion only for clearly wrong, duplicate or obsolete work
   the agent created or the owner asked to delete. Prefer Drop or Replace for real
-  work that is no longer needed. Always reply briefly with what was deleted and why.
+  work that is no longer needed. Explain briefly what was deleted and why: reply
+  before deleting an item; for an empty topic, explain in the next reply on another
+  live item or in turn text. Include `input_result` in the deleting request when
+  the owner asked.
   These are behavioral instructions, not content-based authorization refusals.
 
 ## Consequences

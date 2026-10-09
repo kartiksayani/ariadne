@@ -12,7 +12,7 @@
   digits or `_`, at most 32); `{"id":"1.2"}` names an item, UUID for topic/message.
   `item.edit` short/note: omit to keep, string to replace, null to clear.
 - Delete moves a subtree/topic to Bin, preserving history. Guard the root item
-  or topic. Reply before deleting. Owner text, unanswered asks and Ack targets
+  or topic. Explain deletion (`SKILL.md`). Owner text, unanswered asks and Ack targets
   are eligible; archived work refuses. `agent_removals` lists items, waiting
   questions and cancelled inputs. Reads omit Bin work and its links.
 - Connections: `item.add.related` or `item.edit.patch.related` takes item numbers
@@ -61,7 +61,7 @@ new one. Exit 3 (`revision_conflict`, `invalid_transition`, `binding_mismatch`,
 | `unsupported`, `future_schema` | 5 | Stop and tell the owner. |
 
 Replays write once. Never resend owner messages or repeat finished work.
-Missing output or timeouts do not prove non-delivery.
+A failed receipt does not prove non-delivery; neither do missing output or timeouts.
 
 ## Result-only repair
 

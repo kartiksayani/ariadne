@@ -1,7 +1,10 @@
+use ariadne_agent_protocol::{EventPayload, NormalizedEvent, TurnFinishedStatus};
 use ariadne_core::{
     apply::{ApplyError, ApplyService},
+    delivery::DeliveryService,
     history_actions::HistoryActionService,
     inputs::InputService,
+    recovery::RecoveryService,
     *,
 };
 use ariadne_domain::models::*;
@@ -126,9 +129,10 @@ fn agent_delete_preserves_subtree_and_redelete_and_restore_exact_marker() {
 }
 
 #[test]
-fn agent_delete_source_with_valid_result_handles_it_and_keeps_full_reply() {
+fn agent_delete_source_with_valid_result_preserves_completion_join_and_full_reply() {
     for turn in [TurnState::Running, TurnState::Completed] {
         let setup = Setup::new(&seed());
+        let completed = turn == TurnState::Completed;
         let source = setup.prepare(turn);
         let mut request = setup.dispatched(1510, &source);
         request.operations.push(Operation::ItemDelete {
@@ -138,11 +142,25 @@ fn agent_delete_source_with_valid_result_handles_it_and_keeps_full_reply() {
         assert!(agent_removals(&receipt)[0].cancelled_input_ids.is_empty());
         let saved = setup.saved();
         let input = &saved.inputs.0[&source];
-        assert_eq!(input.state, InputState::Handled);
-        assert!(input.attempts[0].sealed_at.is_some());
+        assert_eq!(
+            input.state,
+            if completed {
+                InputState::Handled
+            } else {
+                InputState::InFlight
+            }
+        );
+        assert_eq!(input.attempts[0].sealed_at.is_some(), completed);
         assert_eq!(input.attempts[0].result_state, ResultState::Committed);
         assert_eq!(input.cancel_cause, None);
-        assert_eq!(saved.bindings.0[&id(3)].active_input_id, None);
+        assert_eq!(
+            saved.bindings.0[&id(3)].active_input_id,
+            if completed {
+                None
+            } else {
+                Some(source.clone())
+            }
+        );
         assert!(saved
             .messages
             .iter()
@@ -155,46 +173,108 @@ fn agent_delete_source_with_valid_result_handles_it_and_keeps_full_reply() {
 }
 
 #[test]
-fn agent_delete_source_without_result_cancels_and_seals_and_retains_owner_text() {
-    for needs_attention in [false, true] {
+fn agent_delete_source_without_result_preserves_attempt_and_accepts_later_result() {
+    for (state, turn) in [
+        (InputState::InFlight, TurnState::Running),
+        (InputState::NeedsAttention, TurnState::Completed),
+        (InputState::Queued, TurnState::Running),
+    ] {
         let setup = Setup::new(&seed());
-        let source = setup.prepare(TurnState::Running);
-        if needs_attention {
+        let source = setup.prepare(turn);
+        if state != InputState::InFlight {
             setup.write(1519, |session| {
-                session.inputs.0.get_mut(&source).unwrap().state = InputState::NeedsAttention;
-                let binding = session.bindings.0.get_mut(&id(3)).unwrap();
-                binding.dispatch_state = DispatchState::RecoveryRequired;
-                binding.pause_reason = Some(PauseReason::Uncertain);
+                session.inputs.0.get_mut(&source).unwrap().state = state.clone();
+                if state == InputState::NeedsAttention {
+                    let binding = session.bindings.0.get_mut(&id(3)).unwrap();
+                    binding.dispatch_state = DispatchState::RecoveryRequired;
+                    binding.pause_reason = Some(PauseReason::ResultMissing);
+                }
             });
         }
         let before = setup.saved();
         let mut request = setup.dispatched(1520, &source);
-        request.operations.clear();
         request.operations.push(Operation::ItemDelete {
             item: existing("1"),
         });
         request.input_result = None;
         let receipt = setup.execute(&request).unwrap();
-        assert_eq!(
-            agent_removals(&receipt)[0].cancelled_input_ids,
-            vec![source.clone()]
-        );
+        assert!(agent_removals(&receipt)[0].cancelled_input_ids.is_empty());
         let saved = setup.saved();
         let input = &saved.inputs.0[&source];
-        assert_eq!(input.state, InputState::Cancelled);
-        assert_eq!(input.cancel_cause, Some(CancelCause::AgentRemoved));
-        assert!(input.active_attempt_id.is_none());
-        assert!(input.attempts[0].sealed_at.is_some());
-        assert_eq!(input.payload, before.inputs.0[&source].payload);
+        assert_eq!(input, &before.inputs.0[&source]);
+        assert!(input.attempts[0].sealed_at.is_none());
         assert_eq!(
             saved.messages.iter().find(|m| m.id == input.message_id),
             before.messages.iter().find(|m| m.id == input.message_id)
         );
-        assert_eq!(saved.bindings.0[&id(3)].active_input_id, None);
-        assert_eq!(saved.bindings.0[&id(3)].pause_reason, None);
+        assert_eq!(saved.bindings.0[&id(3)], before.bindings.0[&id(3)]);
+        assert!(matches!(
+            &receipt.data,
+            SavedReceiptData::Apply {
+                queue_join_state: Some(join_state), input_result_state: None, ..
+            } if join_state == &state
+        ));
+        assert_eq!(setup.execute(&request).unwrap(), receipt);
+        let SavedReceiptData::Apply { allocated_refs, .. } = &receipt.data else {
+            panic!("apply")
+        };
+        let AllocatedRef::Message { id: response } =
+            &allocated_refs.0[&RequestRef::new("response").unwrap()]
+        else {
+            panic!("reply")
+        };
+        let mut later = setup.dispatched(1522, &source);
+        later.operations.clear();
+        later.input_result.as_mut().unwrap().reply_refs =
+            vec![UuidRef::Existing(ExistingUuidRef {
+                id: response.clone(),
+            })];
+        setup.execute(&later).unwrap();
+        assert_eq!(
+            setup.saved().inputs.0[&source].attempts[0].result_state,
+            ResultState::Committed
+        );
+        if state != InputState::NeedsAttention {
+            finish_input(&setup, &source, id(800), 1523);
+        }
+        let handled = setup.saved();
+        assert_eq!(handled.inputs.0[&source].state, InputState::Handled);
+        assert!(handled.inputs.0[&source].attempts[0].sealed_at.is_some());
+        assert!(handled.inputs.0[&source].cancel_cause.is_none());
+        assert_eq!(handled.bindings.0[&id(3)].active_input_id, None);
+        assert_eq!(handled.bindings.0[&id(3)].pause_reason, None);
         restore_item(&setup, "1", saved.items.0[&item("1")].revision, 1521).unwrap();
-        assert_eq!(setup.saved().inputs.0[&source].state, InputState::Cancelled);
+        assert_eq!(setup.saved().inputs.0[&source].state, InputState::Handled);
     }
+}
+
+fn finish_input(setup: &Setup, source: &UuidV4, attempt: UuidV4, op: u64) {
+    DeliveryService::new(&setup.registry)
+        .report(
+            &AdapterContext::from_trusted_entrypoint(
+                RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+                id(3),
+                id(4),
+                None,
+            ),
+            &NormalizedEvent {
+                binding_id: id(3),
+                generation: id(4),
+                event_id: format!("finished-{op}"),
+                input_id: Some(source.clone()),
+                attempt_id: Some(attempt),
+                host_turn_id: Some("actual-host-turn".into()),
+                observed_at: at(),
+                event: EventPayload::TurnFinished {
+                    status: TurnFinishedStatus::Completed,
+                    reason: None,
+                    diagnostic_text: None,
+                    truncated: false,
+                },
+            },
+            || id(op),
+        )
+        .unwrap();
 }
 
 #[test]
@@ -282,6 +362,454 @@ fn queued_input(setup: &Setup, topic_id: UuidV4, item_id: Option<ItemRef>, op: u
 }
 
 #[test]
+fn agent_delete_preserves_independently_claimed_input_and_its_later_result() {
+    for uncertain in [false, true] {
+        let setup = Setup::new(&seed());
+        let source = queued_input(&setup, id(5), Some(item("1")), 1580);
+        let prepared = DeliveryService::new(&setup.registry)
+            .claim(
+                &ValidatedDispatchContext::from_trusted_current_lease(
+                    RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+                    id(3),
+                    id(4),
+                ),
+                &ClaimRequest {
+                    binding_id: id(3),
+                    generation: id(4),
+                    request_id: id(1581),
+                },
+                || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                at(),
+            )
+            .unwrap()
+            .unwrap();
+        DeliveryService::new(&setup.registry)
+            .report(
+                &AdapterContext::from_trusted_entrypoint(
+                    RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+                    id(3),
+                    id(4),
+                    None,
+                ),
+                &NormalizedEvent {
+                    binding_id: id(3),
+                    generation: id(4),
+                    event_id: "received-input".into(),
+                    input_id: Some(source.clone()),
+                    attempt_id: Some(prepared.attempt_id.clone()),
+                    host_turn_id: None,
+                    observed_at: at(),
+                    event: if uncertain {
+                        EventPayload::Uncertain {
+                            reason: "Receipt unavailable".into(),
+                        }
+                    } else {
+                        EventPayload::Accepted { receipt: None }
+                    },
+                },
+                || id(1582),
+            )
+            .unwrap();
+        let context = AgentContext::from_trusted_entrypoint(
+            RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+            id(3),
+            id(4),
+            AgentReadScope::Dispatched {
+                source_input_id: source.clone(),
+                attempt_id: prepared.attempt_id.clone(),
+                issued_through_message_number: setup.saved().bindings.0[&id(3)]
+                    .issued_through_message_number,
+            },
+        );
+        let mut response = guarded(
+            1586,
+            "1",
+            setup.saved().items.0[&item("1")].revision.value(),
+        );
+        response.source_input_id = Some(source.clone());
+        response.attempt_id = Some(prepared.attempt_id.clone());
+        response.operations.push(reply(
+            existing("1"),
+            "response",
+            "Saved reply before moving the item",
+        ));
+        let response_receipt = ApplyService::new(&setup.registry)
+            .execute(
+                &context,
+                &response,
+                || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                at(),
+            )
+            .unwrap();
+        let before = setup.saved();
+        let mut delete = guarded(1583, "1", before.items.0[&item("1")].revision.value());
+        delete.operations.push(Operation::ItemDelete {
+            item: existing("1"),
+        });
+        let receipt = setup.execute(&delete).unwrap();
+        assert!(agent_removals(&receipt)[0].cancelled_input_ids.is_empty());
+        assert_eq!(setup.saved().inputs.0[&source], before.inputs.0[&source]);
+        assert_eq!(setup.saved().bindings.0[&id(3)], before.bindings.0[&id(3)]);
+        let SavedReceiptData::Apply { allocated_refs, .. } = response_receipt.data else {
+            panic!("apply")
+        };
+        let AllocatedRef::Message { id: response } =
+            &allocated_refs.0[&RequestRef::new("response").unwrap()]
+        else {
+            panic!("reply")
+        };
+        let mut later = request(1584);
+        later.source_input_id = Some(source.clone());
+        later.attempt_id = Some(prepared.attempt_id.clone());
+        later.input_result = Some(ResultDraft {
+            reply_refs: vec![UuidRef::Existing(ExistingUuidRef {
+                id: response.clone(),
+            })],
+            handled_through_message_number: p(before.bindings.0[&id(3)]
+                .issued_through_message_number
+                .value()),
+            ..result()
+        });
+        ApplyService::new(&setup.registry)
+            .execute(
+                &context,
+                &later,
+                || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                at(),
+            )
+            .unwrap();
+        if !uncertain {
+            assert_eq!(setup.saved().inputs.0[&source].state, InputState::InFlight);
+            finish_input(&setup, &source, prepared.attempt_id, 1585);
+        }
+        assert_eq!(setup.saved().inputs.0[&source].state, InputState::Handled);
+        assert!(setup.saved().inputs.0[&source].cancel_cause.is_none());
+    }
+}
+
+#[test]
+fn binned_completed_work_can_deliver_result_repair_and_commit_original_reply() {
+    for topic_delete in [false, true] {
+        for repair_before_delete in [false, true] {
+            let setup = Setup::new(&seed());
+            let source = setup.prepare(TurnState::Completed);
+            let mut response = setup.dispatched(1620, &source);
+            response.input_result = None;
+            let response_receipt = setup.execute(&response).unwrap();
+            let SavedReceiptData::Apply { allocated_refs, .. } = response_receipt.data else {
+                panic!("apply")
+            };
+            let AllocatedRef::Message { id: reply_id } =
+                &allocated_refs.0[&RequestRef::new("response").unwrap()]
+            else {
+                panic!("reply")
+            };
+            let queued = queued_input(&setup, id(5), Some(item("1")), 1621);
+            let repair = || {
+                RecoveryService::new(&setup.registry)
+                    .execute(
+                        &owner_route(),
+                        &OwnerCommand::InputResolve {
+                            api_version: SchemaVersion::new(1).unwrap(),
+                            op_id: id(1622),
+                            params: InputResolveParams {
+                                input_id: source.clone(),
+                                attempt_id: id(800),
+                                decision: ResolutionKind::RequestResultRepair,
+                                reason: "Publish the result for completed work".into(),
+                                expected_revision: setup.saved().revision,
+                                evidence: Some(OwnerResolutionEvidence {
+                                    source: OwnerEvidenceSource::OwnerAttestation,
+                                    turn_state: TurnState::Completed,
+                                    host_turn_id: Some("actual-host-turn".into()),
+                                    owner_attested_idle: true,
+                                    at: at(),
+                                }),
+                            },
+                        },
+                        None,
+                        at(),
+                    )
+                    .unwrap();
+            };
+            if repair_before_delete {
+                repair();
+            }
+            let before = setup.saved();
+            let mut delete = request(1623);
+            if topic_delete {
+                delete
+                    .expected_topic_revisions
+                    .0
+                    .insert(id(5), before.topics.0[&id(5)].revision);
+                delete
+                    .operations
+                    .push(Operation::TopicDelete { topic: uuid(5) });
+            } else {
+                delete
+                    .expected_item_revisions
+                    .0
+                    .insert(item("1"), before.items.0[&item("1")].revision);
+                delete.operations.push(Operation::ItemDelete {
+                    item: existing("1"),
+                });
+            }
+            let receipt = setup.execute(&delete).unwrap();
+            assert_eq!(
+                agent_removals(&receipt)[0].cancelled_input_ids,
+                vec![queued]
+            );
+            assert_eq!(setup.saved().inputs.0[&source], before.inputs.0[&source]);
+            if !repair_before_delete {
+                repair();
+            }
+            let prepared = DeliveryService::new(&setup.registry)
+                .claim(
+                    &ValidatedDispatchContext::from_trusted_current_lease(
+                        RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+                        id(3),
+                        id(4),
+                    ),
+                    &ClaimRequest {
+                        binding_id: id(3),
+                        generation: id(4),
+                        request_id: id(1624),
+                    },
+                    || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                    at(),
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(prepared.input_id, source);
+            let claimed = setup.saved();
+            let attempt = claimed.inputs.0[&source].attempts.last().unwrap();
+            assert_eq!(attempt.purpose, AttemptPurpose::ResultRepair);
+            assert_eq!(attempt.repair_for_attempt_id, Some(id(800)));
+            assert!(prepared.formatted_payload.contains(reply_id.as_str()));
+            assert!(!prepared
+                .formatted_payload
+                .contains("Original immutable owner message."));
+            let mut result_request = request(1625);
+            result_request.source_input_id = Some(source.clone());
+            result_request.attempt_id = Some(prepared.attempt_id.clone());
+            result_request.input_result = Some(ResultDraft {
+                reply_refs: vec![UuidRef::Existing(ExistingUuidRef {
+                    id: reply_id.clone(),
+                })],
+                handled_through_message_number: p(claimed.bindings.0[&id(3)]
+                    .issued_through_message_number
+                    .value()),
+                ..result()
+            });
+            ApplyService::new(&setup.registry)
+                .execute(
+                    &AgentContext::from_trusted_entrypoint(
+                        RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+                        id(3),
+                        id(4),
+                        AgentReadScope::Dispatched {
+                            source_input_id: source.clone(),
+                            attempt_id: prepared.attempt_id.clone(),
+                            issued_through_message_number: claimed.bindings.0[&id(3)]
+                                .issued_through_message_number,
+                        },
+                    ),
+                    &result_request,
+                    || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                    at(),
+                )
+                .unwrap();
+            finish_input(&setup, &source, prepared.attempt_id, 1626);
+            let completed = setup.saved();
+            assert_eq!(completed.inputs.0[&source].state, InputState::Handled);
+            assert!(ariadne_domain::visibility::item_is_removed(
+                &completed,
+                &completed.items.0[&item("1")]
+            ));
+            assert_eq!(
+                completed.inputs.0[&source]
+                    .attempts
+                    .last()
+                    .unwrap()
+                    .domain_result
+                    .as_ref()
+                    .unwrap()
+                    .reply_message_ids,
+                vec![reply_id.clone()]
+            );
+        }
+    }
+}
+
+#[test]
+fn agent_topic_delete_preserves_removed_notice_and_cancels_only_undelivered_owner_messages() {
+    let setup = Setup::new(&seed());
+    let source = setup.prepare(TurnState::Running);
+    // A received input queued for result repair is still received work.
+    setup.write(1590, |session| {
+        let input = session.inputs.0.get_mut(&source).unwrap();
+        input.state = InputState::Queued;
+        input.active_attempt_id = None;
+        input.attempts[0].sealed_at = Some(at());
+        session.bindings.0.get_mut(&id(3)).unwrap().active_input_id = None;
+    });
+    let queued = queued_input(&setup, id(5), Some(item("1")), 1591);
+    let receipt = HistoryActionService::new(&setup.registry)
+        .remove(
+            &owner_route(),
+            &OwnerCommand::ItemRemove {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(1592),
+                params: ItemRemoveParams {
+                    item_id: item("2"),
+                    expected_revision: setup.saved().items.0[&item("2")].revision,
+                },
+            },
+            || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+            at(),
+        )
+        .unwrap();
+    let MutationReceipt::Session(receipt) = receipt else {
+        panic!("session")
+    };
+    let SavedReceiptData::Removal {
+        notice: Some(notice),
+        ..
+    } = receipt.data
+    else {
+        panic!("notice")
+    };
+    let before = setup.saved();
+    assert_eq!(before.inputs.0[&notice.id].kind, InputKind::Removed);
+    let mut delete = request(1593);
+    delete
+        .expected_topic_revisions
+        .0
+        .insert(id(5), before.topics.0[&id(5)].revision);
+    delete
+        .operations
+        .push(Operation::TopicDelete { topic: uuid(5) });
+    let receipt = setup.execute(&delete).unwrap();
+    assert_eq!(
+        agent_removals(&receipt)[0].cancelled_input_ids,
+        vec![queued.clone()]
+    );
+    let after = setup.saved();
+    assert_eq!(after.inputs.0[&source], before.inputs.0[&source]);
+    assert_eq!(after.inputs.0[&notice.id], before.inputs.0[&notice.id]);
+    assert_eq!(
+        after.inputs.0[&queued].cancel_cause,
+        Some(CancelCause::AgentRemoved)
+    );
+    assert_eq!(
+        after.inputs.0[&queued].payload,
+        before.inputs.0[&queued].payload
+    );
+    let prepared = DeliveryService::new(&setup.registry)
+        .claim(
+            &ValidatedDispatchContext::from_trusted_current_lease(
+                RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+                id(3),
+                id(4),
+            ),
+            &ClaimRequest {
+                binding_id: id(3),
+                generation: id(4),
+                request_id: id(1594),
+            },
+            || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+            at(),
+        )
+        .unwrap()
+        .unwrap();
+    // The removed notice remains deliverable; the received input queued without
+    // a result-repair decision and ordinary cancelled message do not dispatch.
+    assert_eq!(prepared.input_id, notice.id);
+    assert_eq!(setup.saved().inputs.0[&source], before.inputs.0[&source]);
+}
+
+#[test]
+fn agent_delete_parent_notice_counts_only_newly_binned_descendants() {
+    let setup = Setup::new(&seed());
+    let mut children = guarded(
+        1600,
+        "1",
+        setup.saved().items.0[&item("1")].revision.value(),
+    );
+    children
+        .operations
+        .push(add("child", uuid(5), Some(existing("1")), true));
+    setup.execute(&children).unwrap();
+    let mut child_delete = guarded(
+        1601,
+        "1.1",
+        setup.saved().items.0[&item("1.1")].revision.value(),
+    );
+    child_delete.operations.push(Operation::ItemDelete {
+        item: existing("1.1"),
+    });
+    setup.execute(&child_delete).unwrap();
+    let before = setup.saved();
+    let mut delete = guarded(1602, "1", before.items.0[&item("1")].revision.value());
+    delete.operations.push(Operation::ItemDelete {
+        item: existing("1"),
+    });
+    let receipt = setup.execute(&delete).unwrap();
+    let removal = &agent_removals(&receipt)[0];
+    assert_eq!(removal.item_ids, vec![item("1")]);
+    assert_eq!(removal.waiting_questions.value(), 0);
+    assert_eq!(
+        setup.saved().items.0[&item("1.1")],
+        before.items.0[&item("1.1")]
+    );
+    assert!(setup
+        .saved()
+        .messages
+        .iter()
+        .find(|message| message.id == removal.message_id)
+        .unwrap()
+        .body
+        .contains("Agent removed 1 item"));
+}
+
+#[test]
+fn item_replace_refuses_a_binned_replacement_atomically() {
+    for same_batch in [false, true] {
+        let setup = Setup::new(&seed());
+        let mut delete = guarded(
+            1610,
+            "2",
+            setup.saved().items.0[&item("2")].revision.value(),
+        );
+        delete.operations.push(Operation::ItemDelete {
+            item: existing("2"),
+        });
+        if !same_batch {
+            setup.execute(&delete).unwrap();
+        }
+        let mut replace = guarded(
+            1611,
+            "1",
+            setup.saved().items.0[&item("1")].revision.value(),
+        );
+        if same_batch {
+            replace
+                .expected_item_revisions
+                .0
+                .extend(delete.expected_item_revisions.0);
+            replace.operations = delete.operations;
+        }
+        replace.operations.push(Operation::ItemReplace {
+            item: existing("1"),
+            replacement: existing("2"),
+            outcome: "Use the replacement".into(),
+            why: "Work was superseded".into(),
+        });
+        setup.rejected(&replace, CoreErrorCode::InvalidTransition);
+    }
+}
+
+#[test]
 fn agent_topic_delete_cancels_targeted_inputs_and_restore_keeps_separate_item_bin() {
     let setup = Setup::new(&seed());
     let mut add_work = guarded(
@@ -336,11 +864,19 @@ fn agent_topic_delete_cancels_targeted_inputs_and_restore_keeps_separate_item_bi
     let receipt = setup.execute(&delete).unwrap();
     let removal = &agent_removals(&receipt)[0];
     assert_eq!(removal.item_id, None);
+    assert_eq!(removal.item_ids, vec![item("1"), item("2")]);
     assert_eq!(removal.waiting_questions.value(), 0);
     assert_eq!(removal.cancelled_input_ids.len(), 2);
     assert!(removal.cancelled_input_ids.contains(&item_input));
     assert!(removal.cancelled_input_ids.contains(&topic_input));
     let deleted = setup.saved();
+    assert!(deleted
+        .messages
+        .iter()
+        .find(|message| message.id == removal.message_id)
+        .unwrap()
+        .body
+        .contains("Agent removed 2 items"));
     assert_eq!(deleted.inputs.0[&unaffected], before.inputs.0[&unaffected]);
     assert_eq!(deleted.items, before.items);
     assert!(ariadne_domain::visibility::item_is_removed(

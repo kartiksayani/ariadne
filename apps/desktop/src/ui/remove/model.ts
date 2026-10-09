@@ -70,17 +70,19 @@ export function tellOf(session: Immutable<Session>): NonNullable<RemoveTell> {
 const waitingCount = (items: readonly Immutable<Item>[]) => items.filter(item => item.status === 'waiting_on_me').length;
 const topicName = (topic: Immutable<Topic>) => topic.short?.trim() || topic.name;
 
-/** The owner's queued messages in `sessions` (those `within` keeps): removing cancels them. Named for their agent, or "the agent" when several. */
+/** Queued messages are cancelled; words already cancelled by agent removal are permanently deleted. */
 export function unsentOf(sessions: readonly Immutable<Session>[], within: (input: Immutable<Input>) => boolean = () => true): RemoveUnsent {
   const agents = new Set<string>();
-  let count = 0;
+  let count = 0, cancelled = 0;
   for (const session of sessions) for (const input of Object.values(session.inputs)) {
-    if (!input || input.state !== 'queued' || !within(input)) continue;
+    if (!input || !within(input)) continue;
+    if (input.kind !== 'removed' && input.state === 'cancelled' && input.cancel_cause === 'agent_removed') cancelled++;
+    if (input.state !== 'queued') continue;
     count++;
     const binding = session.bindings[input.binding_id];
     agents.add(binding ? agentName(binding.adapter_id) : 'the agent');
   }
-  return { count, agent: agents.size === 1 ? [...agents][0]! : 'the agent' };
+  return { count, agent: agents.size === 1 ? [...agents][0]! : 'the agent', ...(cancelled ? { cancelled } : {}) };
 }
 
 /** The Remove dialog subject of an item or topic in `session`; null when it is gone. */
@@ -88,14 +90,15 @@ export function removeSubject(session: Immutable<Session>, target: Extract<Remov
   if (target.kind === 'item') {
     const item = session.items[target.item.item_id];
     if (!item) return null;
-    const items = subtree(session, item.id), ids = new Set(items.map(value => value.id));
-    return { kind: 'item', short: shortLabel(item), items: items.length, waiting: waitingCount(items.filter(value => !itemRemoved(session, value.id))), tell: tellOf(session),
+    const items = subtree(session, item.id), ids = new Set(items.map(value => value.id)), removed = itemRemoved(session, item.id);
+    return { kind: 'item', short: shortLabel(item), items: items.length, waiting: waitingCount(removed ? items : items.filter(value => !itemRemoved(session, value.id))), tell: tellOf(session), removed,
       unsent: unsentOf([session], input => !!input.target.item_id && ids.has(input.target.item_id)) };
   }
   const topic = session.topics[target.topic_id];
   if (!topic) return null;
   const items = itemList(session).filter(item => item.topic_id === topic.id);
-  return { kind: 'topic', name: topicName(topic), items: items.length, waiting: waitingCount(items.filter(value => !itemRemoved(session, value.id))), tell: tellOf(session),
+  const removed = !!topic.removed_at;
+  return { kind: 'topic', name: topicName(topic), items: items.length, waiting: waitingCount(removed ? items : items.filter(value => !itemRemoved(session, value.id))), tell: tellOf(session), removed,
     unsent: unsentOf([session], input => input.target.topic_id === topic.id) };
 }
 

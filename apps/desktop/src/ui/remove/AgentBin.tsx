@@ -36,7 +36,8 @@ export async function restoreRemoved(actions: SessionActions, topicId: string, i
 
 export function removalNotice(session: Immutable<Session>, removal: Immutable<AgentRemoval>): string {
   const name = removal.item_id ? session.items[removal.item_id] ? shortLabel(session.items[removal.item_id]!) : 'an item' : session.topics[removal.topic_id]?.name ?? 'a topic';
-  return `The agent removed “${name}”${removal.item_ids.length ? ` and its work (${removal.item_ids.length} item${removal.item_ids.length === 1 ? '' : 's'})` : ''}.`
+  const work = removal.item_id ? removal.item_ids.length > 1 : removal.item_ids.length > 0;
+  return `The agent removed “${name}”${work ? ` and its work (${removal.item_ids.length} item${removal.item_ids.length === 1 ? '' : 's'})` : ''}.`
     + (removal.waiting_questions ? ` ${removal.waiting_questions} waiting question${removal.waiting_questions === 1 ? '' : 's'} left your panel.` : '')
     + (removal.cancelled_input_ids.length ? ` ${removal.cancelled_input_ids.length} unsent message${removal.cancelled_input_ids.length === 1 ? ' was' : 's were'} cancelled. Your words are kept in the bin.` : '');
 }
@@ -92,7 +93,7 @@ export function AgentBin({ session, actions, topicId = null, onRemove }: {
     {error && <p role="alert">{error}</p>}
     {open && <div className="agent-bin-entries">{entries.map(entry => {
       const ids = new Set(entry.items.map(item => item?.id));
-      const cancelled = Object.values(session.inputs).filter(input => input?.state === 'cancelled'
+      const cancelled = Object.values(session.inputs).filter(input => input?.kind !== 'removed' && input?.state === 'cancelled' && input.cancel_cause === 'agent_removed'
         && (entry.itemId ? !!input.target.item_id && ids.has(input.target.item_id) : input.target.topic_id === entry.topicId));
       const rounds = Object.values(session.rounds).filter(round => round && ids.has(round.item_id));
       const roundIds = new Set(rounds.map(round => round!.id));

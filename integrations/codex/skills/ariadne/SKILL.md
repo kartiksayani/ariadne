@@ -42,15 +42,14 @@ absolute path. Use only the CLI; never access `.ariadne/` files directly.
 - `ariadne item messages|rounds --binding B --generation G --item ID --json`:
   one item's full history.
 - `ariadne apply --binding B --generation G --json-stdin --json`: one request on
-  stdin (use a quoted heredoc). `--dry-run` validates without committing. The
-  receipt lists `op_id`, and each changed topic/item's `id`, `short` label,
-  new `revision` and `created` flag (topics also have a `number`).
+  stdin (quoted heredoc). `--dry-run` validates without committing. Receipts list
+  `op_id` and changed topic/item `id`, `short`, `revision`, `created`; topics have `number`.
 
 An unexpected `"replayed":true` files nothing new; use a fresh explicit `op_id` to deliberately file the identical request again.
 
 ## Request
 
-One JSON object on stdin. Only `operations` is required.
+One JSON object; `operations` is required.
 
 | Field | Meaning |
 |---|---|
@@ -59,10 +58,10 @@ One JSON object on stdin. Only `operations` is required.
 | `summary` | Optional; one short line shown in the timeline of every item touched |
 | `source_input_id`, `attempt_id`, `input_result` | Optional; only to answer a dispatched input (`inputs.md`) |
 
-Reuse receipt revisions and item numbers as `{"id":...}`. Omit optional fields.
+Reuse receipt revisions and numbers as `{"id":...}`.
 
-Set `related` only when a connection helps the owner: dependencies, duplicates or
-consequences. Omit it by default; declare once on either item in this session.
+Set `related` for useful dependencies, duplicates or consequences, once on either
+item in this session; otherwise omit it.
 In prose use `[label](item:3.2)`, never bare numbers: clickable prose links do not create `related` connections.
 
 | `op` | Required | Optional |
@@ -79,28 +78,28 @@ In prose use `[label](item:3.2)`, never bare numbers: clickable prose links do n
 | `round.close` | `round_id` | |
 
 Set `topic` explicitly if neither default applies.
-Read `errors.md` for unfamiliar defaults, children, refs, transitions or limits.
+Read `errors.md` for defaults, children, refs, transitions or limits.
 
 Delete refs accept number/UUID strings or `{id}` and earlier batch refs or `{ref}`.
-Guard only the existing root item or topic you delete. History stays in Bin.
+Guard the existing root item or topic; history stays in Bin.
 
-Give new topics/items a stable `short` label: a 2-4 word tree title,
-at most 40 characters ("Notes sync review").
+Give new topics/items a stable `short` label: 2-4 words, at most 40 characters
+("Notes sync review").
 
 Text is markdown; topic names, `short` and option labels are plain text.
 
 ## Shape the work
 
-When connected or told "use Ariadne", organise the work there yourself.
+When connected or told "use Ariadne", file work there.
 
 - **File as you go.** Start a topic with an `in_progress` summary; update items
   in place. Finish `open` with `ack_to`, result and evidence. Never repeat a report.
 - **Route.** File results over a few lines or with multiple points, including
   findings. Chat is 1-3 lines pointing at the topic. Owner instructions win.
-- **Topic.** One per concern (PR, test run, incident, plan), not per step.
+- **Topic.** One per concern, not per step.
 - **Tree.** Summary first: result and what waits on the owner. Then decisions
-  and sections in reading order, with points as children. Each point appears
-  once with its ask. Keep this tree for later writes.
+  and sections in reading order; points are children, each once with its ask.
+  Keep this tree for later writes.
 - **Type and status** say what the owner has to do. Never create an item
   `decided`, `done`, `dropped` or `replaced`; new results start `open` for Ack.
 
@@ -128,7 +127,7 @@ When connected or told "use Ariadne", organise the work there yourself.
   owned by the owner. Each option needs `label` and `consequence`; at most one
   is `recommended`. Without options the answer is free text. Ask questions
   there, not in chat. `item.ask` starts another round on an existing item.
-- **Proposals** (comments to post, fixes to apply): one child each with its own
+- **Proposals**: one child each with its own
   `ask` and options. The parent is a summary with no ask. Never file them `done`
   under one blanket ask on the parent.
 - **Choice notes.** Free text overrides the option's consequence; ask there if
@@ -140,12 +139,13 @@ When connected or told "use Ariadne", organise the work there yourself.
   discusses row by row is one item with a table.
 - **Delete.** Delete clearly wrong, duplicate or obsolete work you created, or
   work the owner asks to delete. Prefer Drop/Replace for real work no longer
-  needed. Always `reply` before deletion, briefly saying what and why. Reads
-  omit Bin work with a notice; the owner can restore it (`errors.md`).
+  needed. Briefly explain what and why: `reply` before deleting an item; for an
+  empty topic, explain in your next reply on another live item or in turn text.
+  Include `input_result` in the same request when you delete because the owner
+  asked (`inputs.md`).
+  Reads omit Bin work with a notice; the owner can restore it (`errors.md`).
 
 ## Examples
-
-[Review summary](item:1) below is a placeholder.
 
 Open a topic with an in-progress summary item and a finding under it:
 
@@ -163,4 +163,10 @@ Delete an accidental duplicate, explaining why first:
 
 ```json
 {"operations":[{"op":"topic.add","name":"Duplicate review","short":"Duplicate review","ref":"t"},{"op":"item.add","ref":"i","short":"Duplicate item","question":"Duplicate review summary","type":"finding"},{"op":"reply","item":{"ref":"i"},"text":"Deleted duplicate work; the original review is filed."},{"op":"item.delete","item":"i"},{"op":"topic.delete","topic":"t"}]}
+```
+
+Delete an existing duplicate at revision 3:
+
+```json
+{"expected_item_revisions":{"1":3},"operations":[{"op":"reply","item":{"id":"1"},"text":"Deleted this duplicate; the original remains."},{"op":"item.delete","item":{"id":"1"}}]}
 ```

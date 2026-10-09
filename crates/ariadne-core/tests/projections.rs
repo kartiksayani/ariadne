@@ -1863,6 +1863,81 @@ fn removed_subtrees_leave_live_reads_counts_and_links_but_restore_saved_declarat
 }
 
 #[test]
+fn agent_message_reads_hide_binned_item_and_descendant_history_until_restored() {
+    let mut session = seed();
+    let mut child = session.items.0[&reference("2")].clone();
+    child.id = reference("2.1");
+    child.parent = Some(reference("2"));
+    child.ordinal = p(1);
+    session.items.0.insert(child.id.clone(), child);
+    session.items.0.get_mut(&reference("2")).unwrap().next_child = p(2);
+    session.messages[0].items_touched.push(reference("2.1"));
+    let setup = Setup::new(&session);
+    setup.submit(81, "2", "Saved parent conversation");
+    setup.submit(82, "2.1", "Saved child conversation");
+    setup.submit(83, "1", "Visible live conversation");
+    let mut session = setup.saved();
+    let grant = session.messages.last().unwrap().number.value();
+    session
+        .bindings
+        .0
+        .get_mut(&id(3))
+        .unwrap()
+        .issued_through_message_number = NonnegativeSafeInteger::new(grant).unwrap();
+    let provenance = removal_source(&mut session, Some(reference("2")));
+    let removed = session.items.0.get_mut(&reference("2")).unwrap();
+    removed.removed_at = Some(session.updated_at.clone());
+    removed.removed_by = Some(provenance);
+    setup.replace(&session);
+    for item_id in [None, Some(reference("2")), Some(reference("2.1"))] {
+        let request = QueryRequest::SessionRead(SessionReadRequest {
+            selection: ReadView::Messages {
+                topic_id: Some(id(5)),
+                item_id: item_id.clone(),
+            },
+            cursor: None,
+            limit: limit(100),
+            item_pages: vec![],
+        });
+        let owner_history = messages(setup.query(&owner(), &request).unwrap());
+        assert!(owner_history
+            .items
+            .iter()
+            .any(|message| message.body.starts_with("Saved ")));
+        let agent_history = messages(setup.query(&agent(grant), &request).unwrap());
+        assert!(agent_history
+            .items
+            .iter()
+            .all(|message| !message.body.starts_with("Saved ")));
+        if item_id.is_none() {
+            assert!(agent_history
+                .items
+                .iter()
+                .any(|message| message.body == "Visible live conversation"));
+        } else {
+            assert!(agent_history.items.is_empty());
+        }
+    }
+    assert_eq!(setup.saved(), session);
+    session.items.0.get_mut(&reference("2")).unwrap().removed_at = None;
+    session.items.0.get_mut(&reference("2")).unwrap().removed_by = None;
+    setup.replace(&session);
+    let restored = messages(
+        setup
+            .query(&agent(grant), &message_request(None, 100))
+            .unwrap(),
+    );
+    assert_eq!(
+        restored
+            .items
+            .iter()
+            .filter(|message| message.body.starts_with("Saved "))
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn removed_topics_hide_items_and_totals_but_keep_cancelled_owner_message_text_readable() {
     let setup = Setup::new(&seed());
     setup.submit(10, "1", "Cancelled owner text.\nStill readable exactly.  ");
@@ -1896,10 +1971,30 @@ fn removed_topics_hide_items_and_totals_but_keep_cancelled_owner_message_text_re
         };
         assert!(topics.items.is_empty());
         let history = messages(setup.query(&context, &message_request(None, 100)).unwrap());
-        assert!(history
-            .items
-            .iter()
-            .any(|message| message.body == "Cancelled owner text.\nStill readable exactly.  "));
+        assert_eq!(
+            history
+                .items
+                .iter()
+                .any(|message| message.body == "Cancelled owner text.\nStill readable exactly.  "),
+            matches!(context.visibility(), QueryVisibility::Owner(_))
+        );
+        for item_id in [None, Some(reference("1"))] {
+            let targeted = QueryRequest::SessionRead(SessionReadRequest {
+                selection: ReadView::Messages {
+                    topic_id: Some(id(5)),
+                    item_id,
+                },
+                cursor: None,
+                limit: limit(100),
+                item_pages: vec![],
+            });
+            let targeted_history = messages(setup.query(&context, &targeted).unwrap());
+            if matches!(context.visibility(), QueryVisibility::Agent(_)) {
+                assert!(targeted_history.items.is_empty());
+            } else {
+                assert!(!targeted_history.items.is_empty());
+            }
+        }
     }
     let QueryResult::ItemMessages(timeline) = setup
         .query(

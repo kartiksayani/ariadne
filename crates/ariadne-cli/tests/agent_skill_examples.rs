@@ -727,7 +727,7 @@ fn assert_compact(data: &Value) {
 
 #[test]
 fn every_terminal_example_commits_on_a_seeded_session() {
-    // The core's three examples and every kind-of-work example that does not
+    // The core's examples and every kind-of-work example that does not
     // answer a dispatched input.
     let blocks: Vec<String> = [RULES, ERRORS, REPORT, REVIEW, CHECKLIST]
         .into_iter()
@@ -735,8 +735,8 @@ fn every_terminal_example_commits_on_a_seeded_session() {
         .collect();
     assert_eq!(
         blocks.len(),
-        7,
-        "expected seven terminal examples including deletion"
+        8,
+        "expected eight terminal examples including existing-item deletion"
     );
     for block in &blocks {
         let (seeded, request, data) = Seeded::committed(block);
@@ -749,6 +749,32 @@ fn every_terminal_example_commits_on_a_seeded_session() {
             assert_eq!(row["revision"], item.revision.value(), "{row}");
         }
     }
+}
+
+#[test]
+fn existing_item_delete_example_is_guarded_and_retains_its_reply_and_history() {
+    let block = examples(RULES)
+        .into_iter()
+        .find(|block| {
+            let request = checked(block);
+            request["expected_item_revisions"]["1"] == 3
+                && operations(&request)
+                    .iter()
+                    .any(|op| kind(op) == "item.delete")
+        })
+        .expect("core must teach deletion of an existing guarded item");
+    let (seeded, request, data) = Seeded::committed(&block);
+    assert_eq!(request["expected_item_revisions"]["1"], 1);
+    let session = seeded.session();
+    let item = &session.items.0[&ItemRef::new("1").unwrap()];
+    assert!(item.removed_at.is_some());
+    assert_eq!(item.status, ItemStatus::Open);
+    assert_eq!(data["agent_removals"][0]["item_ids"], json!(["1"]));
+    assert!(session.messages.iter().any(|message| {
+        message.kind == MessageKind::Reply
+            && message.item_id.as_ref() == Some(&item.id)
+            && message.body == "Deleted this duplicate; the original remains."
+    }));
 }
 
 #[test]
@@ -1188,8 +1214,8 @@ fn rules_explain_the_envelope_fields_and_every_error_code_they_name_exists() {
         assert!(RULES.contains(needle), "{needle}");
     }
     for needle in [
-        "Set `related` only when a connection helps the owner",
-        "Omit it by default",
+        "Set `related` for useful dependencies, duplicates or consequences",
+        "otherwise omit it",
         "In prose use `[label](item:3.2)`, never bare",
         "clickable prose links do not create `related` connections",
     ] {

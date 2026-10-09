@@ -912,18 +912,21 @@ archived/closed sessions remain read-only. Deleting already removed work succeed
 without a second notice. Other writes to removed work return `invalid_transition`
 with a plain instruction to ask the owner to restore it.
 
-Agent reads omit removed topics and effectively removed items; CLI read reports
-how many were omitted. Message/input history retains cancelled text under the
+Agent reads omit removed topics and effectively removed items; CLI and MCP reads
+report how many were omitted in plain words. MCP keeps the canonical structured
+result and appends the notice as text content. Owner history retains cancelled
+text. Agent message reads omit messages on binned items/topics and retain the
 existing issued-message visibility rules. Related and replacement declarations
 remain stored, but live projections skip removed destinations until Restore.
 
 The Apply receipt optionally carries `agent_removals`, one record per newly
 removed root or topic: `{topic_id,item_id,message_id,item_ids,waiting_questions,
-cancelled_input_ids}`. `item_id` is null for a whole topic. Cancellation uses the
-archive abandon path: pending inputs are cancelled and sealed, while a committed
-result wins and its input is handled. A result supplied by the same batch commits
-before removal cancellation. Removed content and cancelled message text remain
-in the session. Restore never resends cancelled messages.
+cancelled_input_ids}`. `item_id` is null for a whole topic. Only queued,
+undelivered owner inputs cancel. Removed notices and already claimed or received
+inputs, including the source input, remain valid; a missing same-request result
+can still land later. A result supplied by the same batch commits normally.
+Removed content and cancelled message text remain in the session. Restore never
+resends cancelled messages.
 
 Owner `item_restore` uses `{item_id,expected_revision}`; `topic_removed_restore`
 uses `{topic_id,expected_revision}`. Both return a `bin_restore` receipt with

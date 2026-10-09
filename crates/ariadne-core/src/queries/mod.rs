@@ -552,6 +552,17 @@ fn read(
                 .iter()
                 .filter(|message| {
                     visibility::message(context, message)
+                        && (matches!(context.visibility(), QueryVisibility::Owner(_))
+                            || (message
+                                .item_id
+                                .as_ref()
+                                .and_then(|id| session.items.0.get(id))
+                                .is_none_or(|item| !item_is_removed(session, item))
+                                && message
+                                    .topic_id
+                                    .as_ref()
+                                    .and_then(|id| session.topics.0.get(id))
+                                    .is_none_or(|topic| !topic_is_removed(session, topic))))
                         && topic_id
                             .as_ref()
                             .is_none_or(|id| message.topic_id.as_ref() == Some(id))

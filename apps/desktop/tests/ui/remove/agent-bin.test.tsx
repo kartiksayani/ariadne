@@ -40,7 +40,7 @@ function removedSession(): Session {
 }
 function cancelledInput(session: Session, itemId = '1.1.1'): Input {
   const input = structuredClone(Object.values(session.inputs).find(value => value)!);
-  input.state = 'cancelled'; input.answer_id = null;
+  input.state = 'cancelled'; input.cancel_cause = 'agent_removed'; input.answer_id = null;
   input.target = { topic_id: session.items[itemId]!.topic_id, item_id: itemId };
   input.payload.text = 'Please keep my original delivery notes.';
   return input;
@@ -217,6 +217,10 @@ describe('removed work projections', () => {
 });
 
 describe('agent removal notices', () => {
+  it('names a single removed item without counting it as additional work', () => {
+    expect(removalNotice(removedSession(), notice({ item_ids: ['1'], waiting_questions: 0, cancelled_input_ids: [] })))
+      .toBe('The agent removed “Old delivery plans”.');
+  });
   it('names removed work and explains the waiting questions and preserved cancelled words', () => {
     expect(removalNotice(removedSession(), notice())).toBe('The agent removed “Old delivery plans” and its work (4 items). 2 waiting questions left your panel. 1 unsent message was cancelled. Your words are kept in the bin.');
   });
@@ -228,6 +232,19 @@ describe('agent removal notices', () => {
 });
 
 describe('agent removal bin', () => {
+  it('only labels owner messages cancelled by agent removal as cancelled bin messages', async () => {
+    const session = removedSession(), removed = cancelledInput(session), other = structuredClone(removed), notification = structuredClone(removed);
+    other.id = '00000000-0000-4000-8000-000000000097'; other.cancel_cause = 'owner';
+    other.payload.text = 'I cancelled this message myself.';
+    notification.id = '00000000-0000-4000-8000-000000000096'; notification.kind = 'removed';
+    notification.payload.text = 'Automatic removal notice.';
+    session.inputs = { [removed.id]: removed, [other.id]: other, [notification.id]: notification };
+    const { actions } = await setup(session); render(<LiveBin actions={actions} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
+    expect(screen.getByText(`Cancelled unsent message: ${removed.payload.text}`)).toBeTruthy();
+    expect(screen.queryByText(`Cancelled unsent message: ${other.payload.text}`)).toBeNull();
+    expect(screen.queryByText(`Cancelled unsent message: ${notification.payload.text}`)).toBeNull();
+  });
   it('keeps earlier agent replies and handled owner words in the expanded read-only conversation', async () => {
     const session = removedSession(), handled = cancelledInput(session), cancelled = structuredClone(handled);
     handled.id = '00000000-0000-4000-8000-000000000096'; handled.state = 'handled';
@@ -342,13 +359,15 @@ describe('agent removal bin', () => {
   });
 
   it('keeps Delete forever behind the ordinary app confirmation and preserves Undo before permanent removal', async () => {
-    const transport = new BinTransport(); render(<DesktopApp service={createDesktopService(transport)} />);
+    const session = removedSession(), input = cancelledInput(session); session.inputs = { [input.id]: input };
+    const transport = new BinTransport(session); render(<DesktopApp service={createDesktopService(transport)} />);
     fireEvent.click(await sessionButton(route)); await screen.findByRole('tree', { name: 'Session items' });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete forever' }));
     const confirm = within(await screen.findByRole('alertdialog'));
     expect(confirm.getByRole('button', { name: 'Remove 4 items' })).toBeTruthy();
+    expect(confirm.getByText('1 question waiting on you goes with it. Your 1 cancelled message is deleted forever.')).toBeTruthy();
     expect(transport.mutations.filter(request => request.command.command === 'item_remove')).toEqual([]);
     fireEvent.click(confirm.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('alertdialog')).toBeNull();
@@ -360,6 +379,41 @@ describe('agent removal bin', () => {
     expect(transport.mutations.find(request => request.command.command === 'item_remove') as OwnerMutationRequest)
       .toMatchObject({ session: route, command: { command: 'item_remove', params: { item_id: '1' } } });
     expect(transport.source.items['1']).toBeUndefined(); expect(transport.source.items['1.1.1']).toBeUndefined();
+  });
+
+  it('warns about binned waiting questions and cancelled owner words before permanently deleting a topic', async () => {
+    const session = removedSession(), input = cancelledInput(session, '8'); session.inputs = { [input.id]: input };
+    session.items['8']!.status = 'waiting_on_me';
+    const transport = new BinTransport(session); await openApp(transport);
+    const bin = within(document.querySelector<HTMLElement>('[data-agent-bin="topics"]')!);
+    fireEvent.click(bin.getByRole('button', { name: 'Removed by agent · 1' }));
+    fireEvent.click(bin.getByRole('button', { name: 'Delete forever' }));
+    const confirm = within(await screen.findByRole('alertdialog'));
+    expect(confirm.getByText('1 question waiting on you goes with it. Your 1 cancelled message is deleted forever.')).toBeTruthy();
+    expect(confirm.getByRole('button', { name: 'Remove topic' })).toBeTruthy();
+    fireEvent.click(confirm.getByRole('button', { name: 'Cancel' }));
+    expect(transport.mutations.filter(request => request.command.command === 'topic_remove')).toEqual([]);
+  });
+
+  it('keeps work restored from the bin while Delete forever is waiting for Undo', async () => {
+    const session = receiptSession(), transport = new BinTransport(session); await openApp(transport);
+    const removal = within((await screen.findByText(removalNotice(session, notice()))).closest<HTMLElement>('.pw-note')!);
+    const bin = within(document.querySelector<HTMLElement>(`[data-agent-bin="${topicA}"]`)!);
+    fireEvent.click(bin.getByRole('button', { name: 'Removed by agent · 4' }));
+    fireEvent.click(bin.getByRole('button', { name: 'Delete forever' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove 4 items' }));
+    await screen.findByRole('button', { name: 'Undo' });
+    const restore = removal.getByRole('button', { name: 'Restore' });
+    await waitFor(() => expect(restore.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(restore);
+    await waitFor(() => expect(transport.source.items['1']!.removed_at).toBeUndefined());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
+    await act(async () => { window.dispatchEvent(new Event('pagehide')); });
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull());
+    await screen.findByRole('button', { name: 'Removed by agent · 2' });
+    expect(transport.mutations.filter(request => request.command.command === 'item_remove')).toEqual([]);
+    expect(transport.source.items['1']).toBeDefined(); expect(transport.source.items['1']!.removed_at).toBeUndefined();
+    expect(transport.source.items['1.1']!.removed_at).toBeTruthy();
   });
 });
 

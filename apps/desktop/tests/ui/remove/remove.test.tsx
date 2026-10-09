@@ -147,6 +147,50 @@ describe('the removal queue', () => {
     expect(service.removeItem.mock.calls.map(call => ((call as unknown[])[1] as { expected_revision: number }).expected_revision)).toEqual([3, 3]);
   });
 
+  it.each(['item', 'topic'] as const)('drops queued permanent %s deletion when its bin work is restored during Undo', async kind => {
+    const binned = structuredClone(demo) as Session;
+    if (kind === 'item') binned.items['1']!.removed_at = binned.updated_at;
+    else binned.topics[topicId]!.removed_at = binned.updated_at;
+    let current = binned;
+    const { service, queue, notices, removed } = harness(async () => current);
+    const target = kind === 'item' ? itemTarget('1') : { kind: 'topic' as const, session: route, topic_id: topicId };
+    queue.schedule(target, removeSubject(binned, target as Extract<RemoveTarget, { kind: 'item' | 'topic' }>)!);
+    current = structuredClone(binned);
+    if (kind === 'item') { delete current.items['1']!.removed_at; ++current.items['1']!.revision; }
+    else { delete current.topics[topicId]!.removed_at; ++current.topics[topicId]!.revision; }
+    await queue.flush();
+    expect(service.removeItem).not.toHaveBeenCalled(); expect(service.removeTopic).not.toHaveBeenCalled();
+    expect(removed).not.toHaveBeenCalled(); expect(notices.getSnapshot()).toEqual([]);
+    expect(queue.pending()).toEqual([]); expect(queue.getSnapshot().empty).toBe(true);
+  });
+
+  it.each(['item', 'topic'] as const)('permanently removes %s work that remains in the bin', async kind => {
+    const binned = structuredClone(demo) as Session;
+    if (kind === 'item') binned.items['1']!.removed_at = binned.updated_at;
+    else binned.topics[topicId]!.removed_at = binned.updated_at;
+    const { service, queue, removed } = harness(async () => binned);
+    const target = kind === 'item' ? itemTarget('1') : { kind: 'topic' as const, session: route, topic_id: topicId };
+    queue.schedule(target, removeSubject(binned, target as Extract<RemoveTarget, { kind: 'item' | 'topic' }>)!);
+    await queue.flush();
+    expect(kind === 'item' ? service.removeItem : service.removeTopic).toHaveBeenCalledOnce();
+    expect(removed).toHaveBeenCalledWith(target);
+  });
+
+  it('retries an uncertain permanent deletion with its exact command even after an apparent restore', async () => {
+    const binned = structuredClone(demo) as Session;
+    binned.items['1']!.removed_at = binned.updated_at;
+    let current = binned;
+    const { service, queue } = harness(async () => current);
+    service.removeItem.mockRejectedValueOnce(new Error('Desktop service is unavailable.'));
+    const target = { kind: 'item' as const, item: { ...route, item_id: '1' } };
+    const op = queue.schedule(target, removeSubject(binned, target)!);
+    await queue.flush();
+    current = structuredClone(binned); delete current.items['1']!.removed_at; ++current.items['1']!.revision;
+    await queue.retry(op);
+    expect(service.removeItem).toHaveBeenCalledTimes(2);
+    expect(service.removeItem.mock.calls[1]).toEqual(service.removeItem.mock.calls[0]);
+  });
+
   it('flushes pending removals when the window hides or the page goes, and skips what is already gone', async () => {
     const { service, queue } = harness(async () => ({ ...session, items: {} }) as unknown as Immutable<Session>);
     const detach = queue.attach(window);
@@ -205,6 +249,35 @@ describe('remove model', () => {
     // Waiting questions and unsent messages are both named.
     expect(removeCopy({ ...removeSubject(session, item('4'))!, waiting: 1 } as RemoveSubject).warn)
       .toBe('1 question waiting on you goes with it. 1 of your messages hasn’t reached demo.local yet; removing cancels it.');
+  });
+
+  it.each(['item', 'topic'] as const)('warns about binned questions and only messages cancelled by agent removal for a %s', kind => {
+    const binned = structuredClone(demo) as Session, input = Object.values(binned.inputs).find(value => value?.state === 'queued')!;
+    const itemId = input.target.item_id!, item = binned.items[itemId]!, topic = binned.topics[item.topic_id]!;
+    Object.values(binned.items).forEach(value => { if (value?.status === 'waiting_on_me') value.status = 'open'; });
+    item.status = 'waiting_on_me';
+    if (kind === 'item') item.removed_at = binned.updated_at;
+    else topic.removed_at = binned.updated_at;
+    input.state = 'cancelled'; input.cancel_cause = 'agent_removed';
+    const unrelated = structuredClone(input); unrelated.id = '00000000-0000-4000-8000-000000000098'; unrelated.cancel_cause = 'owner';
+    const notification = structuredClone(input); notification.id = '00000000-0000-4000-8000-000000000099'; notification.kind = 'removed';
+    binned.inputs = { [input.id]: input, [unrelated.id]: unrelated, [notification.id]: notification };
+    const target = kind === 'item' ? { kind: 'item' as const, item: { ...route, item_id: itemId } }
+      : { kind: 'topic' as const, session: route, topic_id: topic.id };
+    const subject = removeSubject(binned, target)!;
+    expect(subject).toMatchObject({ removed: true, waiting: 1, unsent: { count: 0, cancelled: 1 } });
+    expect(removeCopy(subject).warn).toBe('1 question waiting on you goes with it. Your 1 cancelled message is deleted forever.');
+    unrelated.cancel_cause = 'agent_removed';
+    expect(removeCopy(removeSubject(binned, target)!).warn).toBe('1 question waiting on you goes with it. Your 2 cancelled messages are deleted forever.');
+    unrelated.cancel_cause = 'owner';
+    input.state = 'queued'; delete input.cancel_cause;
+    expect(removeSubject(binned, target)!.unsent).toEqual({ count: 1, agent: 'demo.local' });
+  });
+  it('keeps binned waiting questions out of an active topic removal warning', () => {
+    const current = structuredClone(demo) as Session;
+    Object.values(current.items).forEach(item => { if (item?.status === 'waiting_on_me') item.removed_at = current.updated_at; });
+    expect(removeSubject(current, { kind: 'topic', session: route, topic_id: topicId }))
+      .toMatchObject({ removed: false, waiting: 0 });
   });
   it('selects the next row, else the parent, else none', () => {
     const view = new AppTransport().view();
