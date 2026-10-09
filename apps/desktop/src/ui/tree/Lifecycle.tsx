@@ -13,6 +13,7 @@ import { archiveImpact, archiveWarning, closeImpact, closeWarning } from '../../
 import { announceClosed } from '../pages/SessionDialogs';
 import { agentName, ownerName, sessionPhrase, sessionWhen } from '../shell/model';
 import { displayStatus } from '../../selectors/waiting/replied';
+import { saveSessionLabel } from '../shared/SessionRename';
 import '../../components/history-actions/history-actions.css';
 
 type Kind = 'topic_archive' | 'topic_restore' | 'session_close' | 'session_reopen';
@@ -30,6 +31,8 @@ export interface Archived { readonly topicId: string; readonly name: string; rea
 export interface Lifecycle {
   /** Close or reopen the session through the review. */
   readonly session: () => void;
+  /** Rename against the latest ready session capture. */
+  readonly rename: (name: string, description: string) => Promise<string | null>;
   /** Archive: confirm first when open items stay or unsent messages are cancelled, else at once. */
   readonly archive: (topicId: string) => void;
   readonly restore: (topicId: string) => void;
@@ -52,12 +55,18 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
   const [archived, setArchived] = useState<Archived | null>(null);
   const [error, setError] = useState<string | null>(null);
   const running = useRef(false);
+  const readyWait = useRef<{ cancelled: boolean; cancel: () => void } | null>(null);
   const [waiting, setWaiting] = useState(false);
   const session = state.snapshot?.session ?? null;
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] ?? null : null;
   const agent = binding ? agentName(binding.adapter_id) : 'the agent';
   const disabled = waiting || operation.writing || !!operation.pending;
-  const resetReview = () => setReview(null);
+  const cancelWait = () => {
+    if (actions.getSnapshot().writing) return false;
+    if (readyWait.current) { readyWait.current.cancelled = true; readyWait.current.cancel(); }
+    return true;
+  };
+  const resetReview = () => { if (cancelWait()) setReview(null); };
   const prepare = (kind: Kind, topicId: string | null = null) => {
     if (!session) return;
     setError(null);
@@ -68,13 +77,28 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
   const withReady = async (change: (current: NonNullable<typeof session>) => Promise<boolean> | boolean) => {
     if (running.current || actions.getSnapshot().writing || actions.getSnapshot().pending) return false;
     running.current = true;
+    let abandon!: () => void;
+    const cancelled = new Promise<boolean>(resolve => { abandon = () => resolve(false); });
+    const attempt = { cancelled: false, cancel: abandon };
+    readyWait.current = attempt;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     setWaiting(true);
     setError(null);
     try {
       const store = actions.session;
-      if (store.getSnapshot().status !== 'ready' || store.getSnapshot().error) await store.refresh(true);
+      let refreshed = true;
+      if (store.getSnapshot().status !== 'ready' || store.getSnapshot().error) {
+        refreshed = await Promise.race([
+          store.refresh(true).then(() => true, () => false),
+          new Promise<boolean>(resolve => { timeout = setTimeout(() => resolve(false), 5000); }),
+          cancelled,
+        ]);
+      }
+      // Cancel abandons this click even if the shared refresh completes later.
+      if (attempt.cancelled) return false;
+      readyWait.current = null;
       const current = store.getSnapshot();
-      if (actions.session !== store || current.status !== 'ready' || current.error || !current.snapshot) {
+      if (!refreshed || actions.session !== store || current.status !== 'ready' || current.error || !current.snapshot) {
         setError(loadingError);
         setConfirming(value => value && { ...value, error: loadingError });
         return false;
@@ -82,7 +106,15 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
       if (actions.getSnapshot().writing || actions.getSnapshot().pending) return false;
       const result = change(current.snapshot.session);
       return typeof result === 'boolean' ? result : await result;
-    } finally { running.current = false; setWaiting(false); }
+    } finally { clearTimeout(timeout); readyWait.current = null; running.current = false; setWaiting(false); }
+  };
+  const rename = async (name: string, description: string) => {
+    let failure: string | null = loadingError;
+    const saved = await withReady(async current => {
+      failure = await saveSessionLabel(actions, current.revision, name, description);
+      return failure === null;
+    });
+    return saved ? null : failure;
   };
   const run = async (command: OwnerCommand, current: NonNullable<typeof session>) => {
     const saved = await actions.execute(command, current.revision);
@@ -136,14 +168,26 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
     // The confirmation reads the topic as it is now; an agent write meanwhile only updates its words.
     const warning = archiveWarning(archiveImpact(session, confirmed.id), agent) ?? 'You can restore it any time.';
     dialog = <ConfirmDialog title={`Archive “${confirmed.name}”?`} body={warning} confirmLabel="Archive topic" busy={disabled}
-      error={confirming.error} onCancel={() => { if (!running.current && !actions.getSnapshot().writing) setConfirming(null); }}
+      error={confirming.error} onCancel={() => { if (cancelWait()) setConfirming(null); }}
       onConfirm={() => {
-        void withReady(current => archiveCurrent(confirmed.id, current)).then(saved => {
+        setConfirming(value => value && { ...value, error: null });
+        let warningChanged = false;
+        void withReady(current => {
+          const binding = current.active_binding_id ? current.bindings[current.active_binding_id] : null;
+          const currentWarning = archiveWarning(archiveImpact(current, confirmed.id), binding ? agentName(binding.adapter_id) : 'the agent') ?? 'You can restore it any time.';
+          if (currentWarning !== warning) {
+            warningChanged = true;
+            setConfirming(value => value && { ...value, error: null });
+            return false;
+          }
+          return archiveCurrent(confirmed.id, current);
+        }).then(saved => {
+          if (warningChanged) return;
           // An unconfirmed save is reconciled from the column's banner, not here.
           if (saved || actions.getSnapshot().pending) { setConfirming(null); return; }
           setError(null);
-          setConfirming(current => current && { ...current, error: actions.session.getSnapshot().status !== 'ready' || actions.session.getSnapshot().error
-            ? loadingError : plainFailure(actions.getSnapshot().error, 'The topic was not archived. Try again.') });
+          setConfirming(current => current && { ...current, error: current.error ?? (actions.session.getSnapshot().status !== 'ready' || actions.session.getSnapshot().error
+            ? loadingError : plainFailure(actions.getSnapshot().error, 'The topic was not archived. Try again.')) });
         });
       }} />;
   } else if (review && session) {
@@ -172,7 +216,7 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
     const title = closing ? `Close ${sessionPhrase(session, agent, sessionWhen(Date.parse(session.created_at), Date.now()))}?` : words.title;
     const warning = closing ? closeWarning(closeImpact(session), agent) : null;
     const buttons = <>
-      <button type="button" className="btn btn-ghost" disabled={waiting || operation.writing} onClick={resetReview}>Cancel</button>
+      <button type="button" className="btn btn-ghost" disabled={operation.writing} onClick={resetReview}>Cancel</button>
       {operation.pending ? <button type="button" className="btn btn-primary" disabled={operation.writing} onClick={() => {
         const previousError = actions.getSnapshot().error;
         void actions.retry().then(saved => { if (saved) resetReview(); else recordFailure(review, previousError); });
@@ -180,7 +224,7 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
         : <button type="button" className="btn btn-primary" disabled={disabled || changing} onClick={() => { void confirm(); }}>
           {words.button}</button>}
     </>;
-    dialog = <Dialog label={title} width={580} onCancel={() => { if (!running.current && !actions.getSnapshot().writing) resetReview(); }}>
+    dialog = <Dialog label={title} width={580} onCancel={resetReview}>
       <div className="dialog-title">{title}</div><div className="history-action-dialog">
       <p>{ownerName(session) ?? session.title}{review.topicId && ` · ${session.topics[review.topicId]?.name}`}</p>
       <p>{closing ? 'Ariadne marks the session Closed and keeps it read-only. The agent process isn’t touched.'
@@ -194,7 +238,7 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
   }
   return {
     session: () => { if (session) prepare(session.state === 'closed' ? 'session_reopen' : 'session_close'); },
-    archive, restore, archived, undo, dismiss: () => setArchived(null), busy: disabled, error, dialog,
+    rename, archive, restore, archived, undo, dismiss: () => setArchived(null), busy: disabled, error, dialog,
     pending: operation.pending && !review ? unconfirmedText(operation.pending.command.command) : null,
     reconcile: () => {
       if (operation.writing) return;

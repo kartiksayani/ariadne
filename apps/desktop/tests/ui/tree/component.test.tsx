@@ -63,6 +63,45 @@ const patches = (transport: AppTransport) => transport.mutations.filter(request 
 const chip = (label: string) => within(screen.getByRole('group', { name: 'Filter items' })).getByRole('button', { name: new RegExp(`^${label}`) });
 
 describe('session tree rows', () => {
+  it.each(['ready', 'failed'] as const)('waits for a stale session rename refresh that becomes %s, then saves or shows the loading error', async result => {
+    const transport = new HistoryTransport();
+    const { store, actions } = await mount({ transport });
+    const execute = vi.spyOn(actions, 'execute');
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'session_get') {
+        await gate;
+        if (result === 'failed') throw new Error('Read failed');
+      }
+      return invoke(name, args);
+    });
+    ++transport.source.revision;
+    act(() => { transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: transport.source.revision }); });
+    expect(store.getSnapshot().status).toBe('stale');
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Session name' }), { target: { value: 'Fresh session name' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(transport.mutations.filter(value => value.command.command === 'session_label_set')).toHaveLength(0);
+    const revision = transport.source.revision;
+    await act(async () => { release(); await store.refresh(); });
+    const writes = transport.mutations.filter(value => value.command.command === 'session_label_set');
+    if (result === 'failed') {
+      expect(writes).toHaveLength(0);
+      expect(execute).not.toHaveBeenCalled();
+      expect(within(screen.getByRole('group', { name: 'Rename session' })).getByRole('alert').textContent)
+        .toBe("Ariadne is still loading this session's latest changes. Try again.");
+      expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
+      return;
+    }
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ command: { params: { name: 'Fresh session name' } } });
+    expect(execute).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ command: 'session_label_set' }), revision);
+    expect(screen.queryByRole('group', { name: 'Rename session' })).toBeNull();
+    expect(document.querySelector('.tree-session-title')?.textContent).toBe('Fresh session name');
+  });
   it('renders topic bands and item rows with one roving tab stop and the session bar', async () => {
     await mount();
     expect(screen.getByRole('tree', { name: 'Session items' })).toBeTruthy();

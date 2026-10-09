@@ -32,24 +32,34 @@ test('history recovery requires the plain changed-view alert and enabled Refresh
 });
 
 test('history topic actions use their accessible names and the all-closed prompt stays outside the sticky band', async t => {
-  const dom = new JSDOM(`<div class="tree-rows"><div class="tree-topic" role="treeitem" aria-label="Native topic" data-topic-id="topic" tabindex="0">
+  const dom = new JSDOM(`<section class="tree-column" aria-label="Session tree" data-session-status="stale"><div class="tree-rows"><div class="tree-topic" role="treeitem" aria-label="Native topic" data-topic-id="topic" tabindex="0">
     <button aria-label="Continue here"><i></i></button><button aria-label="Archive"><i></i></button></div>
     <div class="tree-topic-content"><div class="tree-prompt"><button>Archive topic</button></div></div>
-    <div data-topic-id="other"></div><div class="tree-topic-content"><div class="tree-prompt"><button>Archive other topic</button></div></div></div>`);
+    <div data-topic-id="other"></div><div class="tree-topic-content"><div class="tree-prompt"><button>Archive other topic</button></div></div></div></section>`);
   const previousBrowser = globalThis.browser;
   t.after(() => { globalThis.browser = previousBrowser; dom.window.close(); });
-  const clicked = [];
+  const clicked = [], admitted = [];
   const wrap = node => {
     assert.ok(node, 'The current native selector must find an actual rendered control');
     return { node, async waitForDisplayed() {}, async waitForEnabled() {},
+      async getAttribute(name) { return node.getAttribute(name); },
       async click() { clicked.push(node.getAttribute('aria-label') ?? node.textContent); },
       $(selector) { return wrap(node.querySelector(selector)); } };
   };
   globalThis.browser = { $(selector) { return wrap(dom.window.document.querySelector(selector)); },
+    async waitUntil(condition, options) {
+      assert.equal(options.timeout, 20000);
+      admitted.push(await condition());
+      assert.deepEqual(clicked, ['Continue here', 'Archive'], 'A stale session must wait before clicking its archive prompt');
+      dom.window.document.querySelector('.tree-column').setAttribute('data-session-status', 'ready');
+      admitted.push(await condition());
+      assert.equal(admitted.at(-1), true);
+    },
     async execute(callback, element) { return callback(element.node); } };
   await topicAction('Native topic', 'Continue here');
   await topicAction('Native topic', 'Archive');
   await archiveClosedTopic('topic');
+  assert.deepEqual(admitted, [false, true]);
   assert.deepEqual(clicked, ['Continue here', 'Archive', 'Archive topic']);
 });
 

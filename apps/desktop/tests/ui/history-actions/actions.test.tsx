@@ -19,7 +19,7 @@ import { HistoryTransport } from './fixture';
 const op = '00000000-0000-4000-8000-000000000099';
 const targetRoute = { ...route, session_id: secondId };
 const opened: OpenSessions[] = [];
-afterEach(() => { cleanup(); opened.splice(0).forEach(sessions => sessions.closeAll()); });
+afterEach(() => { cleanup(); opened.splice(0).forEach(sessions => sessions.closeAll()); vi.useRealTimers(); });
 function failure(code: CoreFailure['error']['code']): MutationEnvelope {
   return { api_version: 1, ok: false, error: { code, message: `Rejected ${code}`, hint: 'Review current data.', retryable: false, field_errors: [] } };
 }
@@ -101,16 +101,58 @@ describe('guarded history controls', () => {
     expect(value.transport.mutations).toHaveLength(0);
     expect(dialog().getByText(/1 open item stays as it is/)).toBeTruthy();
   });
-  it('waits for a stale archive confirmation and holds cancellation until that accepted click finishes', async () => {
+  it.each(['Archive topic', 'Close session'] as const)('lets Cancel abandon a stale %s confirmation without a late write', async kind => {
+    const value = await setup(); render(<HistoryActions {...value.props} />);
+    fireEvent.click(screen.getByRole('button', { name: kind === 'Archive topic' ? `Archive ${value.topic.name}` : kind }));
+    const { release } = await staleRefresh(value);
+    fireEvent.click(dialog().getByRole('button', { name: kind }));
+    expect((dialog().getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(dialog().getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(value.transport.mutations).toHaveLength(0);
+    await act(async () => {});
+    expect((screen.getAllByRole('button', { name: 'Close session' })[0] as HTMLButtonElement).disabled).toBe(false);
+    await act(async () => { release(); await value.store.refresh(); });
+    expect(value.transport.mutations).toHaveLength(0);
+    expect(value.topic.archived_at).toBeNull();
+    expect(value.transport.source.state).toBe('active');
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+  it.each(['Archive prompt', 'Archive topic', 'Close session'] as const)('bounds a stuck %s refresh at five seconds and ignores its late completion', async kind => {
+    const value = await setup(kind === 'Archive prompt'); render(<HistoryActions {...value.props} />);
+    if (kind !== 'Archive prompt') fireEvent.click(screen.getByRole('button', { name: kind === 'Archive topic' ? `Archive ${value.topic.name}` : kind }));
+    const { release } = await staleRefresh(value);
+    vi.useFakeTimers();
+    fireEvent.click(kind === 'Archive prompt' ? screen.getByRole('button', { name: `Archive topic prompt ${value.topic.name}` })
+      : dialog().getByRole('button', { name: kind }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
+    expect(screen.queryByRole('alert')).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    const area = kind === 'Archive prompt' ? screen : dialog();
+    expect(area.getByRole('alert').textContent).toContain("Ariadne is still loading this session's latest changes. Try again.");
+    expect(value.transport.mutations).toHaveLength(0);
+    expect((screen.getAllByRole('button', { name: 'Close session' })[0] as HTMLButtonElement).disabled).toBe(false);
+    await act(async () => { release(); await value.store.refresh(); });
+    expect(value.transport.mutations).toHaveLength(0);
+    vi.useRealTimers();
+  });
+  it.each(['open items', 'unsent messages'] as const)('requires confirmation of updated %s warning after refreshing', async changed => {
     const value = await setup(); render(<HistoryActions {...value.props} />);
     fireEvent.click(screen.getByRole('button', { name: `Archive ${value.topic.name}` }));
+    const warning = dialog().getByText(/You can restore it any time/).textContent;
     const { release } = await staleRefresh(value);
     fireEvent.click(dialog().getByRole('button', { name: 'Archive topic' }));
-    fireEvent.click(dialog().getByRole('button', { name: 'Cancel' }));
-    expect(screen.getByRole('dialog')).toBeTruthy();
-    expect(value.transport.mutations).toHaveLength(0);
+    if (changed === 'open items') {
+      Object.values(value.transport.source.items).find(item => item?.topic_id === value.topic.id && !['done', 'decided', 'dropped', 'replaced'].includes(item.status))!.status = 'done';
+    } else {
+      Object.values(value.transport.source.inputs).filter(input => input?.target.topic_id === value.topic.id).forEach(input => { input!.state = 'cancelled'; });
+    }
     await act(async () => { release(); await value.store.refresh(); });
-    await waitFor(() => expect(value.transport.mutations).toHaveLength(1));
+    expect(value.transport.mutations).toHaveLength(0);
+    expect(dialog().getByText(/You can restore it any time/).textContent).not.toBe(warning);
+    expect(dialog().queryByRole('alert')).toBeNull();
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Archive topic' })); });
+    expect(value.transport.mutations).toHaveLength(1);
     expect(value.topic.archived_at).not.toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
   });
