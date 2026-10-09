@@ -12,9 +12,9 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); delete document.documentElem
 
 const now = new Date(2026, 9, 7, 15, 30).getTime();
 function props(patch: Partial<ShellProps> = {}): ShellProps {
-  const sessions = [{ id: 's1', project: 'checkout', agent: 'claude-code', createdAt: new Date(2026, 9, 7, 14, 2).getTime(), endedAt: null, running: true, on: true }];
+  const sessions = [{ id: 's1', project: 'search', agent: 'claude-code', createdAt: new Date(2026, 9, 7, 14, 2).getTime(), endedAt: null, running: true, on: true }];
   return {
-    header: { text: { sessionText: 'checkout · started 14:02', connText: 'Connected · claude-code', connColor: 'var(--st-done)' }, query: '', views: null,
+    header: { text: { sessionText: 'search · started 14:02', connText: 'Connected · claude-code', connColor: 'var(--st-done)' }, query: '', views: null,
       railOn: false, theme: 'dark' },
     tabs: { tabs: tabModels({ selection: 'session', sessions, projectCount: 1 }, now), onSelect: vi.fn(), onClose: vi.fn() },
     body: { waiting: <p>Waiting column</p>, center: <p>Centre column</p> },
@@ -59,7 +59,7 @@ describe('Paperwhite shell', () => {
 
   it('renders header, tabs, body and footer from props', () => {
     const value = props(); render(<Shell {...value} />);
-    expect(document.querySelector('.shell-session-text')?.textContent).toBe('checkout · started 14:02');
+    expect(document.querySelector('.shell-session-text')?.textContent).toBe('search · started 14:02');
     expect(document.querySelector('.shell-connection-text')?.textContent).toBe('Connected · claude-code');
     const search = screen.getByRole<HTMLInputElement>('textbox', { name: 'Search questions and outcomes' });
     expect(search.readOnly).toBe(true); expect(search.dataset.shellSearch).toBe('');

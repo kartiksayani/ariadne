@@ -74,9 +74,6 @@ production fallback. No new executor, shared DTO, business state or recovery
 framework is introduced. Application logic remains measured; default-off fake
 features are consumer dev dependencies and remain absent from normal release.
 
-MCP/Seezo remain disabled under the owner's current-session waiver. Organization
-security guidance was not checked; no organizational approval is claimed.
-
 ## Spec references
 
 - [PROCESS: ownership and control](../planning/low-level/PROCESS_AND_PROTOCOLS.md#1-ownership-leases-and-app-control)

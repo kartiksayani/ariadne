@@ -52,19 +52,19 @@ Items must make sense to someone who doesn't remember any codes. Every item read
 - Light and dark variants.
 - A component sheet: status badge, item row, answer control, message excerpt.
 
-**Example data to design with,** taken from a real session:
+**Example data to design with,** a synthetic software review session:
 - **Reviewer's comments on the SDK cache PR (#226)**
   - *Should the SDK use the shared cache by default when no experiment is set?* → **Decided:** yes. Teams roll out with an experiment, then remove it and stay on the shared cache.
-  - *Can cached plans go stale forever, since reads keep extending their life?* → **Decided:** the service guarantees every change republishes the plan; no expiry cap.
+  - *Can cached profiles go stale forever, since reads keep extending their life?* → **Decided:** the service guarantees every change republishes the profile; no expiry cap.
     - *What would a "maximum age" check involve?* → **Explained:** it would need changes in the service too, and would cap cache life at that age.
     - *Do we need a runbook for fixing stale entries?* → **Done:** a task to write the SOP was created.
   - *Are the byte-for-byte test fixtures worth keeping?* → **Decided:** no. Removed them, along with the test-only encoder.
     - *Does the fallback-merge test still earn its place?* → **Decided:** keep it, slimmed down.
       - *Add a check that a second merge reads nothing from Redis?* → **Decided:** keep.
-      - *Count Redis reads when the starting plan is a merchant's?* → **Dropped:** it duplicates an existing test.
-        - *Check one experiment decision per payment fee calc?* → **Replaced, then dropped:** already covered.
+      - *Count Redis reads when the initial profile belongs to a workspace?* → **Dropped:** it duplicates an existing test.
+        - *Check one experiment decision per sync quota calculation?* → **Replaced, then dropped:** already covered.
 - **Should the SDK delete cache entries it can't read?** → **Decided:** no. The service repairs them; the SDK code and its metric were removed.
-  - *Should the service serve default plans from the shared cache too?* → **Waiting on me:** approve PR #757. Options: "Approve" (recommended: review found nothing blocking) / "Request changes".
+  - *Should the service serve default profiles from the shared cache too?* → **Waiting on me:** approve PR #757. Options: "Approve" (recommended: review found nothing blocking) / "Request changes".
 - *Should we remove the duplicate sub-agent rule from CLAUDE.md?* → **Waiting on me.** Options: "Yes, keep it only in AGENTS.md" (recommended) / "No, keep both".
 
 ---

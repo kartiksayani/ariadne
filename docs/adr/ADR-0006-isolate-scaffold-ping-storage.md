@@ -28,8 +28,7 @@ the renderer supplies only nonce and a nonempty, control-free payload of at most
 
 This is temporary wiring evidence, not domain/session persistence. Production
 ignores E2E environment switches. The bounded test root needs no additional UID
-dependency or general recovery mechanism. Organization security guidance was not
-checked under the owner's explicit session waiver; no compliance claim is made.
+dependency or general recovery mechanism.
 
 ## Spec references
 

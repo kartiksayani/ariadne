@@ -64,8 +64,8 @@ externally through codex queue and read-only WebSocket history on its existing
 daemon. Neither path requires resume or a new conversation. Neither Ariadne nor
 its MCP server handles provider credentials or replaces host permissions.
 
-See [Claude proof](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/claude-mods/RESULTS.md) and
-[Codex proof](https://github.com/kartiksayani/ariadne/blob/a5e306f/poc/codex-queue/RESULTS.md). The POCs captured raw final answers
+See [Claude proof](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/claude-mods/RESULTS.md) and
+[Codex proof](https://github.com/kartiksayani/ariadne/blob/reference/planning-and-pocs/poc/codex-queue/RESULTS.md). The POCs captured raw final answers
 in fixtures to prove transport; production item replies deliberately use domain
 tools as requested by the owner. Five-message structured-result acceptance is
 specified but has not run against a production implementation.

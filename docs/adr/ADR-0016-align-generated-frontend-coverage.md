@@ -27,8 +27,7 @@ LCOV while executed and untested handwritten sources remain measured; the
 actual inventory/checker accepts the matching report. This tests coverage-path
 alignment, not domain-generation fidelity. Handwritten implementation cannot be
 hidden in generated directories, and executable application coverage stays at
-least 80% under the unchanged gates. Organization security guidance was not
-checked in this session; no organization approval is claimed.
+least 80% under the unchanged gates.
 
 ## Spec references
 

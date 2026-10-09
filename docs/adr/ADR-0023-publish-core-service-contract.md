@@ -53,6 +53,3 @@ Declarations use the existing `src/dto` coverage convention; contexts, bounds,
 serde helpers, error mapping and fake execution remain measured. Existing release
 selection is narrowly extended to core Rust changes because its test-support
 feature must remain absent from ordinary builds.
-
-Organization security guidance was not checked under the owner's MCP/Seezo waiver;
-no organizational approval is claimed.
