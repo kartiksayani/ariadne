@@ -732,3 +732,7 @@
 .detail-copy > i {
   font-size: calc(13px * var(--text-scale));
 }
+
+.detail-saved-message .detail-message-copy {
+  opacity: 1;
+}

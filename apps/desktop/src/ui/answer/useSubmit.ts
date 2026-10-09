@@ -82,7 +82,7 @@ export interface Submit {
 const stale = 'The session is unavailable or stale. Refresh before sending.';
 
 export function useSubmit({ drafts, session, current, itemId, intent, onAgentNotRunning, onSaved, presence }: SubmitOptions): Submit {
-  const state = useOwnerDrafts(drafts);
+  const state = useOwnerDrafts(drafts, session);
   const route = session ? { project_id: session.project_id, session_id: session.id } : null;
   const entry = route ? drafts.find(route, itemId, intent) : undefined;
   const item = session?.items[itemId];

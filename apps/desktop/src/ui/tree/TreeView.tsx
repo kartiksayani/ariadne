@@ -118,7 +118,7 @@ export function TreeView(props: TreeViewProps) {
   const [continuing, setContinuing] = useState<string | null>(null);
   const [replying, setReplying] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
-  useOwnerDrafts(drafts);
+  useOwnerDrafts(drafts, raw);
   const lifecycle = useLifecycle(actions);
   const ack = useAck(actions, selectedId);
   const elements = useRef(new Map<string, HTMLDivElement>()), scroller = useRef<HTMLDivElement>(null);

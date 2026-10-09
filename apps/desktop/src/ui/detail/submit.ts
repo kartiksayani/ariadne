@@ -58,7 +58,7 @@ export interface DetailSubmit {
 }
 
 export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, itemId: string): DetailSubmit {
-  const state = useOwnerDrafts(drafts), current = useSession(store), session = current.snapshot?.session;
+  const current = useSession(store), session = current.snapshot?.session, state = useOwnerDrafts(drafts, session);
   const [sendError, setSendError] = useState<string | null>(null);
   const [reopening, setReopening] = useState(false);
   const ready = state.ready && current.status === 'ready' && !current.error && !!session;
@@ -153,7 +153,7 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
         const id = drafts.find(latest.route, itemId, intentOf(target))?.draft.op_id ?? drafts.begin(sendingSession, itemId, intentOf(target));
         // A specific words draft must keep its identity even if a newer one exists.
         const sendingId = typeof target !== 'string' && target.id && !stored?.receipt ? target.id : id;
-        if (!sendingId) { setSendError('This action is no longer available for the current item.'); return false; }
+        if (!sendingId) { setSendError("You can't do that on this item right now."); return false; }
         const entry = drafts.getSnapshot().entries[sendingId];
         if (text !== undefined && entry && !entry.uncertain && entry.draft.text !== text) drafts.edit(sendingId, { text });
         const sent = await drafts.submit(sendingId, as);
