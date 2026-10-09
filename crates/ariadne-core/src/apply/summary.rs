@@ -10,6 +10,8 @@ use std::collections::BTreeSet;
 /// value after the request; use it as the next `expected_*_revisions` entry.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ApplySummary {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub agent_removals: Vec<AgentRemoval>,
     pub op_id: UuidV4,
     pub session_revision: PositiveSafeInteger,
     pub topics: Vec<TopicChange>,
@@ -49,6 +51,7 @@ pub struct ItemChange {
 /// revisions come from the receipt, so a later edit does not rewrite them.
 pub fn summarize(session: &Session, receipt: &SavedReceipt) -> Result<ApplySummary, CoreError> {
     let SavedReceiptData::Apply {
+        agent_removals,
         allocated_refs,
         item_revisions,
         topic_revisions,
@@ -112,6 +115,7 @@ pub fn summarize(session: &Session, receipt: &SavedReceipt) -> Result<ApplySumma
         .collect::<Result<Vec<_>, CoreError>>()?;
     items.sort_by_key(|item| number_path(&item.id));
     Ok(ApplySummary {
+        agent_removals: agent_removals.clone(),
         op_id: receipt.operation_id.clone(),
         session_revision: receipt.revision,
         topics,

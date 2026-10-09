@@ -883,7 +883,11 @@ fn archived_closed_source_is_readable_and_external_replacement_becomes_explicit_
         Some("The original source replacement remains provenance; it is not a live target edge.")
     );
     let prior = dropped.status_history.last().unwrap();
-    assert_eq!(prior.previous_replaced_by.as_ref().unwrap().as_str(), "8");
+    assert!(prior.previous_replaced_by.is_none());
+    assert_eq!(
+        original.items.0[&ItemRef::new("7").unwrap()].replaced_by,
+        Some(ItemRef::new("8").unwrap())
+    );
     assert_eq!(
         prior.previous_outcome,
         original.items.0[&ItemRef::new("7").unwrap()].outcome

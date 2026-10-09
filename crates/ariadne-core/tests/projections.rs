@@ -25,6 +25,29 @@ fn reference(s: &str) -> ItemRef {
 fn seed() -> Session {
     serde_json::from_str(include_str!("../../../fixtures/domain/history/seed.json")).unwrap()
 }
+fn removal_source(session: &mut Session, item_id: Option<ItemRef>) -> AgentRemovalSource {
+    let mut message = session.messages[0].clone();
+    message.id = id(80);
+    message.number = session.counters.next_message;
+    session.counters.next_message = p(message.number.value() + 1);
+    message.author = MessageAuthor::System;
+    message.kind = MessageKind::Lifecycle;
+    message.body = "Agent removed saved entries".into();
+    message.topic_id = Some(
+        item_id
+            .as_ref()
+            .map(|id| session.items.0[id].topic_id.clone())
+            .unwrap_or_else(|| id(5)),
+    );
+    message.item_id = item_id;
+    message.created_at = session.updated_at.clone();
+    message.items_touched.clear();
+    session.messages.push(message);
+    AgentRemovalSource {
+        binding_id: id(3),
+        message_id: id(80),
+    }
+}
 fn limit(n: u64) -> PageLimit {
     PageLimit::new(n).unwrap()
 }
@@ -1729,4 +1752,283 @@ fn archived_related_reads_stay_in_the_same_session_and_create_no_owner_input() {
         }))
     ));
     assert_eq!(fs::read(setup.path()).unwrap(), before);
+}
+
+#[test]
+fn removed_subtrees_leave_live_reads_counts_and_links_but_restore_saved_declarations() {
+    let mut session = seed();
+    let removed = reference("2");
+    let child_id = reference("2.1");
+    let mut child = session.items.0[&removed].clone();
+    child.id = child_id.clone();
+    child.parent = Some(removed.clone());
+    child.ordinal = p(1);
+    session.items.0.insert(child_id.clone(), child);
+    session.items.0.get_mut(&removed).unwrap().next_child = p(2);
+    session.messages[0].items_touched.push(child_id);
+    let declaring = session.items.0.get_mut(&reference("1")).unwrap();
+    declaring.related = Some(vec![removed.clone()]);
+    declaring.status = ItemStatus::Replaced;
+    declaring.outcome = Some("The replacement is retained in saved history".into());
+    declaring.why = Some("The replacement remains useful after restore".into());
+    declaring.replaced_by = Some(removed.clone());
+    let provenance = removal_source(&mut session, Some(removed.clone()));
+    let removed_item = session.items.0.get_mut(&removed).unwrap();
+    removed_item.removed_at = Some(session.updated_at.clone());
+    removed_item.removed_by = Some(provenance);
+    let setup = Setup::new(&session);
+    let request = QueryRequest::SessionRead(SessionReadRequest {
+        selection: ReadView::Items {
+            topic_id: None,
+            item_id: None,
+            parent_item_id: None,
+            statuses: vec![],
+            archived: None,
+        },
+        cursor: None,
+        limit: limit(100),
+        item_pages: vec![],
+    });
+    for context in [owner(), agent(0)] {
+        let QueryResult::SessionRead(SessionReadResult::Items(items)) =
+            setup.query(&context, &request).unwrap()
+        else {
+            panic!("items")
+        };
+        assert_eq!(items.items.len(), 1);
+        assert_eq!(items.items[0].item.id, reference("1"));
+        assert_eq!(items.items[0].item.related, Some(vec![]));
+        assert!(items.items[0].item.replaced_by.is_none());
+    }
+    let list = QueryRequest::SessionList(SessionListRequest {
+        project_id: None,
+        state: None,
+        cursor: None,
+        limit: limit(100),
+    });
+    let counts = sessions(setup.query(&registry_owner(), &list).unwrap()).counts;
+    assert_eq!(counts.items_by_status.replaced.value(), 1);
+    assert_eq!(counts.items_by_status.done.value(), 0);
+    let QueryResult::SessionGet(snapshot) =
+        setup.query(&owner(), &QueryRequest::SessionGet {}).unwrap()
+    else {
+        panic!("snapshot")
+    };
+    assert_eq!(snapshot.session, session);
+    assert_eq!(setup.saved(), session);
+    assert_eq!(
+        error(
+            setup
+                .query(
+                    &owner(),
+                    &QueryRequest::RevealItem {
+                        item_id: removed.clone()
+                    }
+                )
+                .unwrap_err()
+        )
+        .code,
+        CoreErrorCode::NotFound
+    );
+    for request in [
+        QueryRequest::ItemMessages(ItemMessagesRequest {
+            item_id: removed.clone(),
+            cursor: None,
+            limit: limit(100),
+        }),
+        QueryRequest::ItemRounds(ItemRoundsRequest {
+            item_id: removed.clone(),
+            cursor: None,
+            limit: limit(100),
+            round_pages: vec![],
+        }),
+    ] {
+        assert!(setup.query(&owner(), &request).is_ok());
+        assert_eq!(
+            error(setup.query(&agent(0), &request).unwrap_err()).code,
+            CoreErrorCode::NotFound
+        );
+    }
+    session.items.0.get_mut(&removed).unwrap().removed_at = None;
+    session.items.0.get_mut(&removed).unwrap().removed_by = None;
+    setup.replace(&session);
+    let QueryResult::SessionRead(SessionReadResult::Items(items)) =
+        setup.query(&agent(0), &request).unwrap()
+    else {
+        panic!("items")
+    };
+    assert_eq!(items.items.len(), 3);
+    assert_eq!(items.items[0].item.related, Some(vec![removed.clone()]));
+    assert_eq!(items.items[0].item.replaced_by, Some(removed));
+}
+
+#[test]
+fn agent_message_reads_hide_binned_item_and_descendant_history_until_restored() {
+    let mut session = seed();
+    let mut child = session.items.0[&reference("2")].clone();
+    child.id = reference("2.1");
+    child.parent = Some(reference("2"));
+    child.ordinal = p(1);
+    session.items.0.insert(child.id.clone(), child);
+    session.items.0.get_mut(&reference("2")).unwrap().next_child = p(2);
+    session.messages[0].items_touched.push(reference("2.1"));
+    let setup = Setup::new(&session);
+    setup.submit(81, "2", "Saved parent conversation");
+    setup.submit(82, "2.1", "Saved child conversation");
+    setup.submit(83, "1", "Visible live conversation");
+    let mut session = setup.saved();
+    let grant = session.messages.last().unwrap().number.value();
+    session
+        .bindings
+        .0
+        .get_mut(&id(3))
+        .unwrap()
+        .issued_through_message_number = NonnegativeSafeInteger::new(grant).unwrap();
+    let provenance = removal_source(&mut session, Some(reference("2")));
+    let removed = session.items.0.get_mut(&reference("2")).unwrap();
+    removed.removed_at = Some(session.updated_at.clone());
+    removed.removed_by = Some(provenance);
+    setup.replace(&session);
+    for item_id in [None, Some(reference("2")), Some(reference("2.1"))] {
+        let request = QueryRequest::SessionRead(SessionReadRequest {
+            selection: ReadView::Messages {
+                topic_id: Some(id(5)),
+                item_id: item_id.clone(),
+            },
+            cursor: None,
+            limit: limit(100),
+            item_pages: vec![],
+        });
+        let owner_history = messages(setup.query(&owner(), &request).unwrap());
+        assert!(owner_history
+            .items
+            .iter()
+            .any(|message| message.body.starts_with("Saved ")));
+        let agent_history = messages(setup.query(&agent(grant), &request).unwrap());
+        assert!(agent_history
+            .items
+            .iter()
+            .all(|message| !message.body.starts_with("Saved ")));
+        if item_id.is_none() {
+            assert!(agent_history
+                .items
+                .iter()
+                .any(|message| message.body == "Visible live conversation"));
+        } else {
+            assert!(agent_history.items.is_empty());
+        }
+    }
+    assert_eq!(setup.saved(), session);
+    session.items.0.get_mut(&reference("2")).unwrap().removed_at = None;
+    session.items.0.get_mut(&reference("2")).unwrap().removed_by = None;
+    setup.replace(&session);
+    let restored = messages(
+        setup
+            .query(&agent(grant), &message_request(None, 100))
+            .unwrap(),
+    );
+    assert_eq!(
+        restored
+            .items
+            .iter()
+            .filter(|message| message.body.starts_with("Saved "))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn removed_topics_hide_items_and_totals_but_keep_cancelled_owner_message_text_readable() {
+    let setup = Setup::new(&seed());
+    setup.submit(10, "1", "Cancelled owner text.\nStill readable exactly.  ");
+    let mut session = setup.saved();
+    let provenance = removal_source(&mut session, None);
+    let topic = session.topics.0.get_mut(&id(5)).unwrap();
+    topic.removed_at = Some(session.updated_at.clone());
+    topic.removed_by = Some(provenance);
+    topic.archived_at = Some(session.updated_at.clone());
+    for input in session.inputs.0.values_mut() {
+        input.state = InputState::Cancelled;
+    }
+    session
+        .bindings
+        .0
+        .get_mut(&id(3))
+        .unwrap()
+        .issued_through_message_number = NonnegativeSafeInteger::new(2).unwrap();
+    setup.replace(&session);
+    let request = QueryRequest::SessionRead(SessionReadRequest {
+        selection: ReadView::Topics { archived: None },
+        cursor: None,
+        limit: limit(100),
+        item_pages: vec![],
+    });
+    for context in [owner(), agent(2)] {
+        let QueryResult::SessionRead(SessionReadResult::Topics(topics)) =
+            setup.query(&context, &request).unwrap()
+        else {
+            panic!("topics")
+        };
+        assert!(topics.items.is_empty());
+        let history = messages(setup.query(&context, &message_request(None, 100)).unwrap());
+        assert_eq!(
+            history
+                .items
+                .iter()
+                .any(|message| message.body == "Cancelled owner text.\nStill readable exactly.  "),
+            matches!(context.visibility(), QueryVisibility::Owner(_))
+        );
+        for item_id in [None, Some(reference("1"))] {
+            let targeted = QueryRequest::SessionRead(SessionReadRequest {
+                selection: ReadView::Messages {
+                    topic_id: Some(id(5)),
+                    item_id,
+                },
+                cursor: None,
+                limit: limit(100),
+                item_pages: vec![],
+            });
+            let targeted_history = messages(setup.query(&context, &targeted).unwrap());
+            if matches!(context.visibility(), QueryVisibility::Agent(_)) {
+                assert!(targeted_history.items.is_empty());
+            } else {
+                assert!(!targeted_history.items.is_empty());
+            }
+        }
+    }
+    let QueryResult::ItemMessages(timeline) = setup
+        .query(
+            &owner(),
+            &QueryRequest::ItemMessages(ItemMessagesRequest {
+                item_id: reference("1"),
+                cursor: None,
+                limit: limit(100),
+            }),
+        )
+        .unwrap()
+    else {
+        panic!("timeline")
+    };
+    assert_eq!(
+        timeline.messages.items[0].body,
+        "Cancelled owner text.\nStill readable exactly.  "
+    );
+    let list = sessions(
+        setup
+            .query(
+                &registry_owner(),
+                &QueryRequest::SessionList(SessionListRequest {
+                    project_id: None,
+                    state: None,
+                    cursor: None,
+                    limit: limit(100),
+                }),
+            )
+            .unwrap(),
+    );
+    assert_eq!(list.sessions.items[0].topic_count.value(), 0);
+    assert_eq!(list.counts.items_by_status.open.value(), 0);
+    assert_eq!(list.counts.items_by_status.done.value(), 0);
+    assert_eq!(list.counts.archived_topics.value(), 0);
+    assert_eq!(setup.saved(), session);
 }

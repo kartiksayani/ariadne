@@ -1,3 +1,4 @@
+import { itemRemoved } from '../../selectors/removed';
 import { useEffect, useSyncExternalStore } from 'react';
 import type { MutationReceipt, OwnerDraft, OwnerMutationRequest, PreferencesPatchEntry, SessionRef } from '../../generated/core';
 import type { Item, InputKind, SavedReceipt, Session } from '../../generated/domain/models';
@@ -71,7 +72,7 @@ const sendBlocked = (draft: Immutable<OwnerDraft>, session: Immutable<Session>):
 /** A reply to a whole topic: the topic is there and open, the binding is current, and there is text. */
 function topicBlocked(draft: Immutable<OwnerDraft>, session: Immutable<Session>): string | null {
   const topic = session.topics[draft.target.topic_id];
-  if (!sameSession(draft.session, { project_id: session.project_id, session_id: session.id }) || !topic || draft.intent !== TOPIC_REPLY) return "This item isn't available any more. Open its session again.";
+  if (!sameSession(draft.session, { project_id: session.project_id, session_id: session.id }) || !topic || topic.removed_at || draft.intent !== TOPIC_REPLY) return "This item isn't available any more. Open its session again.";
   if (session.archived_at != null) return 'This session is archived. Restore it, then reopen it to send this reply.';
   if (session.state !== 'active') return 'This session is closed. Reopen it to send this reply.';
   if (topic.archived_at !== null) return 'This topic is archived. Restore it to send this reply.';
@@ -81,7 +82,7 @@ function topicBlocked(draft: Immutable<OwnerDraft>, session: Immutable<Session>)
 export function blockedDraft(draft: Immutable<OwnerDraft>, session: Immutable<Session>): string | null {
   if (draft.target.item_id === null) return topicBlocked(draft, session);
   const item = session.items[draft.target.item_id];
-  if (!sameSession(draft.session, { project_id: session.project_id, session_id: session.id }) || !item || item.topic_id !== draft.target.topic_id) return "This item isn't available any more. Open its session again.";
+  if (!sameSession(draft.session, { project_id: session.project_id, session_id: session.id }) || !item || itemRemoved(session, item.id) || item.topic_id !== draft.target.topic_id) return "This item isn't available any more. Open its session again.";
   if (session.archived_at != null) return 'This session is archived. Restore it, then reopen it to send this reply.';
   if (session.state !== 'active') return 'This session is closed. Reopen it to send this reply.';
   if (session.topics[item.topic_id]?.archived_at !== null) return 'This topic is archived. Restore it to send this reply.';
@@ -196,7 +197,7 @@ export class OwnerDraftStore {
     const route = { project_id: session.project_id, session_id: session.id }, existing = this.find(route, itemId, intent);
     if (existing && !revised) return existing.draft.op_id;
     const item = session.items[itemId], binding = session.active_binding_id;
-    if (!this.state.ready || !item || !binding || !ownerActions(item).includes(intent)) return null;
+    if (!this.state.ready || !item || itemRemoved(session, item.id) || !binding || !ownerActions(item).includes(intent)) return null;
     const draft: OwnerDraft = { submission_attempted: false, op_id: this.operationId(), session: route, binding_id: binding, target: { topic_id: item.topic_id, item_id: item.id },
       intent, text: '', selected_option_id: null, target_revision: item.revision, question_revision: item.question_revision,
       supersedes_answer_id: intent === 'answer' ? session.answers.filter(answer => answer.item_id === item.id && answer.question_revision === item.question_revision).sort((a, b) => b.seq - a.seq)[0]?.id ?? null : null };
@@ -212,7 +213,7 @@ export class OwnerDraftStore {
     const route = { project_id: session.project_id, session_id: session.id }, existing = this.findTopic(route, topicId);
     if (existing && !revised) return existing.draft.op_id;
     const topic = session.topics[topicId], binding = session.active_binding_id;
-    if (!this.state.ready || !topic || topic.archived_at !== null || !binding) return null;
+    if (!this.state.ready || !topic || topic.removed_at || topic.archived_at !== null || !binding) return null;
     const draft: OwnerDraft = { submission_attempted: false, op_id: this.operationId(), session: route, binding_id: binding, target: { topic_id: topic.id, item_id: null },
       intent: TOPIC_REPLY, text: '', selected_option_id: null, target_revision: topic.revision, question_revision: null, supersedes_answer_id: null };
     this.publish({ entries: Object.freeze({ ...this.state.entries, [draft.op_id]: Object.freeze({ draft: immutable(draft), saving: false, uncertain: false, error: null, receipt: null, rejected: false }) }) });

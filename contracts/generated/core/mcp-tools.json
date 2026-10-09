@@ -1854,6 +1854,40 @@
               {
                 "additionalProperties": false,
                 "properties": {
+                  "item": {
+                    "$ref": "#/$defs/EntityRef"
+                  },
+                  "op": {
+                    "const": "item.delete",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "op",
+                  "item"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "op": {
+                    "const": "topic.delete",
+                    "type": "string"
+                  },
+                  "topic": {
+                    "$ref": "#/$defs/UuidRef"
+                  }
+                },
+                "required": [
+                  "op",
+                  "topic"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
                   "name": {
                     "type": "string"
                   },

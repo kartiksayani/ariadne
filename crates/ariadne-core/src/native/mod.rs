@@ -259,6 +259,8 @@ impl CoreService for NativeCoreService {
             }
             OwnerCommand::TopicArchive { .. }
             | OwnerCommand::TopicRestore { .. }
+            | OwnerCommand::TopicRemovedRestore { .. }
+            | OwnerCommand::ItemRestore { .. }
             | OwnerCommand::SessionClose { .. }
             | OwnerCommand::SessionReopen { .. }
             | OwnerCommand::SessionArchive { .. }

@@ -83,6 +83,8 @@ fn item(id: &str, parent: Option<&str>, ordinal: u64) -> Item {
         current_round_id: None,
         source_round_id: None,
         origin: None,
+        removed_at: None,
+        removed_by: None,
     }
 }
 fn message(id: u64, number: u64, author: MessageAuthor) -> Message {
@@ -157,6 +159,8 @@ fn session() -> Session {
                     revision: positive(1),
                     created_at: time(),
                     archived_at: None,
+                    removed_at: None,
+                    removed_by: None,
                     origin: None,
                 },
             )]

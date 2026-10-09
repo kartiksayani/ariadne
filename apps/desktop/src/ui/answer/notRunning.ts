@@ -1,3 +1,4 @@
+import { itemRemoved } from '../../selectors/removed';
 // What Send does when the session's agent isn't running (handoff 1ad,
 // Ariadne.dc.html:1691-1705). The owner queues the answer for that agent, or
 // sends it to a running session in the same project: that session continues
@@ -42,7 +43,7 @@ export async function carryAnswer(navigation: NavigationStore, drafts: OwnerDraf
   const session = store.getSnapshot().snapshot?.session;
   const copy = session ? Object.values(session.items).find(value => {
     const origin = value?.origin;
-    return origin?.project_id === project_id && origin.session_id === session_id && origin.entity_id === item_id;
+    return !!value && !itemRemoved(session!, value.id) && origin?.project_id === project_id && origin.session_id === session_id && origin.entity_id === item_id;
   }) : undefined;
   if (!session || !copy) return null;
   const route = { ...target, item_id: copy.id };

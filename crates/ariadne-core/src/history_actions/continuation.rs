@@ -1,6 +1,7 @@
 use super::{core, preview, HistoryActionError, HistoryActionService};
 use crate::*;
 use ariadne_domain::models::*;
+use ariadne_domain::visibility::{item_is_removed, topic_is_removed};
 use ariadne_store::session::Store;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -151,6 +152,17 @@ fn copy(
     allocate: &mut impl FnMut() -> UuidV4,
     at: &UtcMillis,
 ) -> Result<SavedReceiptData, CoreError> {
+    if source
+        .topics
+        .0
+        .get(&params.source_topic_id)
+        .is_some_and(|topic| topic_is_removed(source, topic))
+    {
+        return Err(core(
+            CoreErrorCode::InvalidTransition,
+            "Restore the removed source topic before continuing it",
+        ));
+    }
     if source.archived_at.is_some() {
         return Err(core(
             CoreErrorCode::InvalidTransition,
@@ -223,7 +235,7 @@ fn copy(
         .items
         .0
         .values()
-        .filter(|i| i.topic_id == params.source_topic_id)
+        .filter(|i| i.topic_id == params.source_topic_id && !item_is_removed(source, i))
         .collect();
     ordered.sort_by_key(|i| (i.id.as_str().split('.').count(), i.id.clone()));
     for item in &ordered {
@@ -385,7 +397,7 @@ fn copy(
         r.fork_item_ids = old
             .fork_item_ids
             .iter()
-            .map(|id| item_map[id].clone())
+            .filter_map(|id| item_map.get(id).cloned())
             .collect();
         r.origin = Some(RoundOrigin {
             project_id: source.project_id.clone(),
@@ -455,7 +467,7 @@ fn copy(
             h.previous_replaced_by = h
                 .previous_replaced_by
                 .as_ref()
-                .map(|id| item_map.get(id).unwrap_or(id).clone());
+                .and_then(|id| item_map.get(id).cloned());
         }
         if let ContinueCopyAction::ImportedDrop { outcome, why, .. } = &transforms
             .iter()
@@ -468,7 +480,10 @@ fn copy(
                 new_status: ItemStatus::Dropped,
                 previous_outcome: old.outcome.clone(),
                 previous_why: old.why.clone(),
-                previous_replaced_by: old.replaced_by.clone(),
+                previous_replaced_by: old
+                    .replaced_by
+                    .as_ref()
+                    .and_then(|id| item_map.get(id).cloned()),
                 cause_message_id: import_message_id.clone().expect("transformation message"),
                 at: at.clone(),
                 binding_id: None,
@@ -509,7 +524,7 @@ fn copy(
     if let Some(id) = import_message_id {
         let number = target.counters.next_message;
         target.counters.next_message = increment(number)?;
-        target.messages.push(Message{id,number,author:MessageAuthor::System,kind:MessageKind::Lifecycle,body:"Imported external replacements as Dropped; original replacement links and outcomes remain in source-qualified status history.".into(),created_at:at.clone(),item_id:None,topic_id:Some(topic_id.clone()),items_touched:drops.iter().map(|a|item_map[&a.source_item_id].clone()).collect(),binding_id:None,input_id:None,attempt_id:None,host_turn_id:None,round_id:None,origin:None});
+        target.messages.push(Message{id,number,author:MessageAuthor::System,kind:MessageKind::Lifecycle,body:"Imported replacements outside the copied set as Dropped; original replacement links and outcomes remain in source history.".into(),created_at:at.clone(),item_id:None,topic_id:Some(topic_id.clone()),items_touched:drops.iter().map(|a|item_map[&a.source_item_id].clone()).collect(),binding_id:None,input_id:None,attempt_id:None,host_turn_id:None,round_id:None,origin:None});
     }
     let continuation = ContinuationReceipt {
         operation_id: operation_id.clone(),

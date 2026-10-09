@@ -114,3 +114,6 @@ keeping their history readable.
 [ADR-0096](ADR-0096-recover-stale-claude-connect.md) recovers obsolete Claude
 connect requests and lost desktop routes while preserving exact timeout retries,
 pending messages and live conversations elsewhere.
+
+[ADR-0097](ADR-0097-agent-delete-bin.md) lets agents remove items, subtrees and
+whole topics into a recoverable bin, with visible owner notices and exact Restore.

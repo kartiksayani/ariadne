@@ -68,6 +68,12 @@ pub struct SessionCounters {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct Topic {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub removed_at: Option<UtcMillis>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub removed_by: Option<AgentRemovalSource>,
     pub id: UuidV4,
     pub name: String,
     // Agent-written 2-4 word label (ADR-0084), absent in stores written before it.
@@ -85,6 +91,12 @@ pub struct Topic {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct Item {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub removed_at: Option<UtcMillis>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub removed_by: Option<AgentRemovalSource>,
     pub id: ItemRef,
     pub ordinal: PositiveSafeInteger,
     pub topic_id: UuidV4,
@@ -299,4 +311,12 @@ pub struct Round {
     pub fork_item_ids: Vec<ItemRef>,
     pub closed_at: Option<UtcMillis>,
     pub origin: Option<RoundOrigin>,
+}
+
+/// The agent and activity message that put work in the recoverable bin.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct AgentRemovalSource {
+    pub binding_id: UuidV4,
+    pub message_id: UuidV4,
 }

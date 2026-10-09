@@ -93,6 +93,9 @@ pub fn transition_item(
         .get(id)
         .ok_or(TransitionError::MissingItem)?;
     validation::validate_item(session, old)?;
+    if crate::visibility::item_is_removed(session, old) {
+        return Err(TransitionError::InvalidTransition);
+    }
     validate_context(session, old, context)?;
     let mut item = old.clone();
     let mut fresh_round = false;

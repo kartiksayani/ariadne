@@ -29,6 +29,23 @@ pub fn validate_session_items(session: &Session) -> Result<(), ValidationError> 
         )?;
         text(&topic.name, "topics.name", true, None)?;
         optional_short_label(&topic.short, "topics.short")?;
+        validate_removal(
+            session,
+            &topic.removed_at,
+            &topic.removed_by,
+            "topics.removed_by",
+        )?;
+        if let Some(source) = &topic.removed_by {
+            require(
+                session.messages.iter().any(|message| {
+                    message.id == source.message_id
+                        && message.item_id.is_none()
+                        && message.topic_id.as_ref() == Some(&topic.id)
+                }),
+                "topics.removed_by",
+                ValidationErrorKind::IdentityMismatch,
+            )?;
+        }
     }
     for (id, binding) in &session.bindings.0 {
         require(

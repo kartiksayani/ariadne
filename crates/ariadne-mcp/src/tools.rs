@@ -10,6 +10,8 @@ use std::sync::Arc;
 type ResolveAgent = dyn Fn(UuidV4, UuidV4, Option<UuidV4>, Option<UuidV4>) -> Result<AgentContext, CoreError>
     + Send
     + Sync;
+type ReadNotices =
+    dyn Fn(&AgentContext, &SessionReadRequest, &QueryResult) -> Vec<String> + Send + Sync;
 
 /// Trusted native startup supplies the actual service and registered binding
 /// resolver. Tool callers cannot install either or choose an actor/path/ceiling.
@@ -18,6 +20,7 @@ pub struct AgentMcpService {
     core: Arc<dyn CoreService>,
     resolve: Arc<ResolveAgent>,
     tools: Arc<Vec<Tool>>,
+    read_notices: Arc<ReadNotices>,
 }
 impl AgentMcpService {
     pub fn from_trusted_startup(
@@ -31,7 +34,20 @@ impl AgentMcpService {
             core,
             resolve: Arc::new(resolve),
             tools: Arc::new(manifest()?),
+            read_notices: Arc::new(|_, _, _| vec![]),
         })
+    }
+    /// Native composition supplies only omission counts for an already authorized
+    /// query. Callers cannot install this callback or choose its snapshot route.
+    pub(crate) fn with_read_notices(
+        mut self,
+        notices: impl Fn(&AgentContext, &SessionReadRequest, &QueryResult) -> Vec<String>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        self.read_notices = Arc::new(notices);
+        self
     }
     async fn call(
         &self,
@@ -64,9 +80,19 @@ impl AgentMcpService {
                     )))
             }
         };
-        Ok(tool_result(result))
+        let (result, notices) = match result {
+            Ok((value, notices)) => (Ok(value), notices),
+            Err(error) => (Err(error), vec![]),
+        };
+        let mut response = tool_result(result);
+        if response.is_error != Some(true) {
+            response
+                .content
+                .extend(notices.into_iter().map(ContentBlock::text));
+        }
+        Ok(response)
     }
-    fn execute(&self, call: Call) -> Result<Value, CoreError> {
+    fn execute(&self, call: Call) -> Result<(Value, Vec<String>), CoreError> {
         let context = (self.resolve)(
             call.binding_id.clone(),
             call.generation.clone(),
@@ -101,13 +127,21 @@ impl AgentMcpService {
                 let receipt = self.core.apply(context.clone(), request.clone())?;
                 validate_apply_receipt(&receipt, &context, &request)?;
                 serde_json::to_value(receipt)
+                    .map(|value| (value, vec![]))
                     .map_err(|_| invalid("Cannot encode canonical apply receipt."))
             }
             Operation::Query(request) => {
-                let context = QueryContext::agent(context);
-                let result = self.core.query(context.clone(), request.clone())?;
-                result.validate_for(&context, &request)?;
+                let query_context = QueryContext::agent(context.clone());
+                let result = self.core.query(query_context.clone(), request.clone())?;
+                result.validate_for(&query_context, &request)?;
+                let notices = match &request {
+                    QueryRequest::SessionRead(params) => {
+                        (self.read_notices)(&context, params, &result)
+                    }
+                    _ => vec![],
+                };
                 serde_json::to_value(result)
+                    .map(|value| (value, notices))
                     .map_err(|_| invalid("Cannot encode canonical query result."))
             }
         }

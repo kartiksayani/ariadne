@@ -24,6 +24,13 @@ pub(super) fn apply(
         .0
         .get(&params.item_id)
         .ok_or_else(|| core(CoreErrorCode::NotFound, "This item no longer exists"))?;
+    if ariadne_domain::visibility::item_is_removed(session, old) {
+        return Err(CoreError::new(
+            CoreErrorCode::InvalidTransition,
+            "Restore this item from the bin before acknowledging it.",
+            "Restore the removed work from the bin, then acknowledge this item.",
+        ));
+    }
     if old.revision != params.expected_revision {
         let mut error = core(
             CoreErrorCode::RevisionConflict,

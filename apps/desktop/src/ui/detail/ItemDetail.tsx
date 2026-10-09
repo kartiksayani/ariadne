@@ -1,3 +1,4 @@
+import { itemRemoved } from '../../selectors/removed';
 // The item detail panel (handoff README §5 "Item detail"; Ariadne.dc.html
 // lines 324-464), laid out like a chat. The shell's aside holds the header;
 // DetailPath fills the header's breadcrumb and ItemDetail the body: what the
@@ -354,7 +355,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const docked = !!(model.open || model.followUp || showAnswer || savedAnswers.length > 0 || owner || ackTo || ack.error || submit.error);
   return <ItemRefs.Provider value={{ lookup: id => {
     const target = session.items[id];
-    return target ? { label: shortLabel(target), status: displayStatus(session, target) } : null;
+    return target && !itemRemoved(session, target.id) ? { label: shortLabel(target), status: displayStatus(session, target) } : null;
   }, onOpenItem }}><FileRefProject.Provider value={session.project_id}><article className="item-detail" data-detail-item-id={itemId} data-status={model.status} aria-label={`Detail of #${model.id}`}>
     <div className="detail-body" ref={body} onScroll={event => { atEnd.current = nearEnd(event.currentTarget); }}>
     <div className="detail-head">

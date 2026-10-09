@@ -4,6 +4,11 @@
   "description": "Who or what cancelled an input before it was delivered.",
   "oneOf": [
     {
+      "description": "An agent moved the work into the recoverable bin.",
+      "type": "string",
+      "const": "agent_removed"
+    },
+    {
       "description": "The owner deleted it.",
       "type": "string",
       "const": "owner"

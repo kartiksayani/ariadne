@@ -44,7 +44,7 @@ pub fn artifacts() -> Result<BTreeMap<PathBuf, String>, String> {
         Capabilities, DeliveryMode, Binding, DispatchState, PauseReason, ConnectionState,
         PresenceObservation, ExecutionState, PresenceSource, Freshness, ProcessIdentity,
         Input, InputKind, InputState, CancelCause, InputTarget, InputPayload, RemovedNotice, RemovedRef,
-        RemovalTarget, InputTargetSnapshot,
+        RemovalTarget, AgentRemovalSource, AgentRemoval, InputTargetSnapshot,
         InputContext, Attempt, AttemptPurpose, AcceptanceState, TurnState, ResultState,
         HostReceipt, DomainResult, ResultOutcome, AttemptError, ResolutionHistoryEntry,
         ResolutionKind, OwnerResolutionEvidence, OwnerEvidenceSource, Checkpoint,

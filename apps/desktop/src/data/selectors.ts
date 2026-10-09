@@ -1,6 +1,7 @@
 import type { Item, Message, Round, Session, SessionSummary, SummaryCounts } from '../generated/domain/models';
 import type { ItemRoute } from '../generated/core';
 import type { Immutable } from './session-store';
+import { itemRemoved } from '../selectors/removed';
 
 export interface SessionIndexes {
   readonly itemById: Immutable<Session['items']>;
@@ -23,7 +24,7 @@ export function indexSession(session: Immutable<Session>): SessionIndexes {
   const messages = new Map<string, Immutable<Message>[]>();
   const rounds = new Map<string, Immutable<Round>[]>();
   for (const item of Object.values(session.items)) {
-    if (!item) continue;
+    if (!item || itemRemoved(session, item.id)) continue;
     if (item.parent !== null && !session.items[item.parent]) throw new Error('Item parent is unavailable.');
     append(children, item.parent, item);
   }
@@ -58,7 +59,7 @@ export function indexSession(session: Immutable<Session>): SessionIndexes {
 }
 export function revealAncestors(session: Immutable<Session>, route: ItemRoute): readonly string[] {
   const item = session.items[route.item_id];
-  if (session.project_id !== route.project_id || session.id !== route.session_id || !item) {
+  if (session.project_id !== route.project_id || session.id !== route.session_id || !item || itemRemoved(session, item.id)) {
     throw new Error('The registered item is unavailable in this session.');
   }
   const ancestors: string[] = [];

@@ -43,6 +43,8 @@ fn complete_model_artifacts_are_deterministic_and_schema_roots_are_valid() {
         "OperationReceipt",
         "SavedReceipt",
         "ContinuationReceipt",
+        "AgentRemovalSource",
+        "AgentRemoval",
         "SummaryCounts",
         "QueryCursor",
         "ItemMessagesProjection",

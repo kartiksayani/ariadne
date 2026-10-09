@@ -380,3 +380,22 @@ Rust validates every renderer command and enforces project/session/item membersh
 ## 10. Security boundaries
 
 The renderer and storage constraints above are design requirements.
+
+## Removed by agent (Alpha.12, ADR-0097)
+
+Each topic folds removed item subtrees under `Removed by agent · N`; each session
+folds removed topics under the same label. Rows are dimmed and offer Restore and
+Delete forever. Restore uses the current store and the lifecycle action's write
+barrier before its revision-guarded command. Delete forever uses the existing
+permanent Remove confirmation. Restoring brings back positions, descendants and
+statuses; cancelled messages stay cancelled.
+
+Every new agent removal produces a plain notice naming the topic and removed
+item count, with Restore and View. If questions waited on the owner or unsent
+owner messages were cancelled, it names those counts. View opens the folded bin
+and retained conversation. Active counts, Waiting, acknowledgments, Sent, search,
+tree, graph and menus all exclude effectively removed work. Related and replacement
+links to bin contents are skipped until Restore.
+
+Permanent Remove confirmations describe the full scope they will destroy,
+including bin contents; these scope counts are separate from active-work totals.

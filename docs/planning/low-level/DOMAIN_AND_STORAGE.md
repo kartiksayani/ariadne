@@ -879,3 +879,27 @@ restoration is required. Keep schema_version and reject unknown future versions
 for writes. Add a concrete migration and its test when the first real stored
 schema changes; no generic migration registry is needed beforehand. Uninstall
 preserves session files and backups.
+
+## Recoverable agent removals (Alpha.12, ADR-0097)
+
+Item and Topic have optional `removed_at` and `removed_by` fields, omitted in old
+and ordinary records. `removed_by` is `{binding_id,message_id}`, pointing to the
+acting agent and the saved lifecycle notice. Only a selected item subtree root
+or topic receives the marker; descendants inherit removal through their parent
+chain and topic. Markers do not change statuses, acknowledgments, owner text,
+questions, answers, rounds, ordering or provenance. Restore clears the marker,
+keeping the entire prior state and leaving cancelled inputs cancelled.
+
+Effective removal excludes work from ordinary counts, Waiting, acknowledgments,
+Sent, tree, graph and search. Raw owner session snapshots retain every record for
+the bin and its conversation. A removed topic appears only in the session's
+folded Removed by agent group; removed item subtrees appear in the topic's folded
+group. Each deletion saves an owner notice and receipt with question and cancelled
+message counts. The owner can Restore or use existing permanent Remove.
+
+Saved related/replaced_by references across the bin remain valid. Live projections
+skip removed destinations and expose them again after Restore. Continuation
+refuses a removed source topic and copies only effectively live items. References
+are remapped only within the copied set; external related links are omitted and
+replacement links outside it use the existing imported-drop behavior. Source
+history and removed work stay untouched.

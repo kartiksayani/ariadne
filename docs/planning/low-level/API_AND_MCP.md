@@ -530,6 +530,8 @@ input_result: ResultDraft|null
 | `item.edit` | `item,patch` restricted to question/type/note/links/related/short/ack_to; expected revision; ack_to changes an existing Open/InProgress Ack choice only |
 | `item.ask` | `item,ask,options,recipient_binding_id`; opens new round + waiting episode, owner=me |
 | `item.status` | `item,status`; optional `ack_to` for open/in_progress with proposed outcome/why; `outcome,why` required for decided/done/dropped; `reason` required for other transitions; replaced uses item.replace; waiting uses item.ask |
+| `item.delete` | `item`; expected root revision; moves the item and subtree to the recoverable bin, idempotent when already removed |
+| `topic.delete` | `topic`; expected topic revision; moves its contents to the recoverable bin in this session only |
 | `item.replace` | `item,replacement,outcome,why` |
 | `reply` | `ref,item,text,round_id?`; exactly one full item reply |
 | `round.close` | `round_id`; immutable history retained |
@@ -908,3 +910,37 @@ pointers null; exact continuation mapping/origin validation is required. Repeate
 continuation preserves that original historical target. Local item conversations
 use direct local item matches, so coincidentally equal foreign ItemRefs and
 `items_touched` backlinks cannot reanchor a Reply.
+
+### Agent delete and owner Restore (Alpha.12, ADR-0097)
+
+`item.delete` takes an item reference; `topic.delete` takes a topic reference.
+Strict references use `{id}` or in-batch `{ref}`; the CLI also accepts the usual
+number/local-ref strings. Existing binding, generation and session authorization
+apply. Any content in the acting session may be removed, including owner-written
+items, unanswered questions and proposed acknowledgments. Archived topics and
+archived/closed sessions remain read-only. Deleting already removed work succeeds
+without a second notice. Other writes to removed work return `invalid_transition`
+with a plain instruction to ask the owner to restore it.
+
+Agent reads omit removed topics and effectively removed items; CLI and MCP reads
+report how many were omitted in plain words. MCP keeps the canonical structured
+result and appends the notice as text content. Owner history retains cancelled
+text. Agent message reads omit messages on binned items/topics and retain the
+existing issued-message visibility rules. Related and replacement declarations
+remain stored, but live projections skip removed destinations until Restore.
+
+The Apply receipt optionally carries `agent_removals`, one record per newly
+removed root or topic: `{topic_id,item_id,message_id,item_ids,waiting_questions,
+cancelled_input_ids}`. `item_id` is null for a whole topic. Only queued,
+undelivered owner inputs cancel. Removed notices and already claimed or received
+inputs, including the source input, remain valid; a missing same-request result
+can still land later. A result supplied by the same batch commits normally.
+Removed content and cancelled message text remain in the session. Restore never
+resends cancelled messages.
+
+Owner `item_restore` uses `{item_id,expected_revision}`; `topic_removed_restore`
+uses `{topic_id,expected_revision}`. Both return a `bin_restore` receipt with
+`topic_id` and nullable `item_id`. Restore clears only the selected removal marker
+and advances its revision. It queues no agent input. The existing `item_remove`
+and `topic_remove` commands perform Delete forever, retaining backup, integrity
+checks and permanent-removal notification semantics (ADR-0083, ADR-0088).

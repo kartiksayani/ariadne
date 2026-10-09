@@ -3,3 +3,4 @@ pub mod history;
 pub mod models;
 pub mod transitions;
 pub mod validation;
+pub mod visibility;

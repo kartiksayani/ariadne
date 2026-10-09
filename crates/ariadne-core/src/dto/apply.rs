@@ -54,6 +54,10 @@ pub struct ExistingUuidRef {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Operation {
+    #[serde(rename = "item.delete")]
+    ItemDelete { item: EntityRef },
+    #[serde(rename = "topic.delete")]
+    TopicDelete { topic: UuidRef },
     #[serde(rename = "topic.add")]
     TopicAdd {
         r#ref: RequestRef,
