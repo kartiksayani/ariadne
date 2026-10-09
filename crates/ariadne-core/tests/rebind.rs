@@ -70,13 +70,18 @@ struct Setup {
 }
 impl Setup {
     fn new() -> Self {
+        Self::with_adapter("claude_code_mod")
+    }
+    fn with_adapter(adapter: &str) -> Self {
         let home = tempfile::tempdir().unwrap();
         let root = tempfile::tempdir().unwrap();
         let registry = Registry::open(home.path()).unwrap();
         registry.register(root.path(), &id(99), || id(1)).unwrap();
+        let mut session = seed();
+        session.bindings.0.get_mut(&id(3)).unwrap().adapter_id = adapter.into();
         Store::open_registered(&store_dir(home.path(), 1), id(1))
             .unwrap()
-            .create(&seed())
+            .create(&session)
             .unwrap();
         Self {
             home,
@@ -291,6 +296,33 @@ impl Setup {
             .unwrap();
         self.saved().inputs.0[&p.input_id].state.clone()
     }
+}
+
+#[test]
+fn same_non_claude_adapter_replaces_a_live_conversation_with_pending_work() {
+    let s = Setup::with_adapter("fake.local");
+    let sent = s.queue(100);
+    let queued = s.queue(101);
+    let attempt = s.claim(&id(3), 102);
+    let before = s.saved();
+    let new = s.connect("fake.local", "other-thread", 103).unwrap();
+    let saved = s.saved();
+    assert_ne!(new, id(3));
+    assert_eq!(saved.active_binding_id, Some(new.clone()));
+    assert_eq!(saved.messages, before.messages);
+    assert_eq!(saved.inputs.0[&sent].binding_id, new);
+    assert_eq!(saved.inputs.0[&sent].state, InputState::NeedsAttention);
+    assert_eq!(
+        saved.inputs.0[&sent].active_attempt_id,
+        Some(attempt.attempt_id)
+    );
+    assert_eq!(saved.inputs.0[&queued].binding_id, new);
+    assert_eq!(saved.inputs.0[&queued].state, InputState::Queued);
+    assert_eq!(
+        saved.bindings.0[&new].pause_reason,
+        Some(PauseReason::Uncertain)
+    );
+    assert_eq!(s.blocked(&new, 104), Some(BarrierReason::RecoveryRequired));
 }
 
 #[test]

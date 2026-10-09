@@ -1,7 +1,7 @@
 import installed from './installed.js';
 import { BUSY, claimLoop } from './claims.js';
 import { forget, qualify, recall, remember, setup } from './setup.js';
-import { bounded, descriptorValid, ModError, uuid } from './contracts.js';
+import { bounded, descriptorValid, ModError, plainFailure, uuid } from './contracts.js';
 import { announcements } from './discovery.js';
 
 // Claude's static validator follows `$` only inside this file, so imported
@@ -36,6 +36,7 @@ const TEXT = Object.freeze({
   gone:'Ariadne: the Ariadne session for this conversation no longer exists. Run /ariadne-connect to connect again.',
   unreachable:"Ariadne can't be reached, so this session's work isn't being recorded. Open Ariadne and it will reconnect.",
   failure:'Ariadne could not finish connecting this conversation. Run /ariadne-connect again; if it keeps happening, update Ariadne and its Claude plugin.',
+  connectAgain:'Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.',
 });
 // Codes with which the app refuses an announcement for a scope it no longer has.
 const STALE_SCOPE = ['stale_generation','binding_mismatch','not_found','invalid_argument'];
@@ -55,7 +56,7 @@ export function createRegister(descriptor, publish) {
 // Only our bounded plain sentences are displayed; raw rejected host
 // promises, helper stderr and owner payloads are never reflected.
 function failureText(state, error) {
-  if (state.loopBinding && error instanceof ModError && error.code === 'host_unreachable') return TEXT.unreachable;
+  if (state.loopBinding && error instanceof ModError && error.code === 'host_unreachable' && error.plain === plainFailure('host_unreachable')) return TEXT.unreachable;
   return (error instanceof ModError ? error.plain : undefined) ?? TEXT.failure;
 }
 // Printed once per outage: the 'helper' slot clears when a helper call works again.
@@ -134,18 +135,30 @@ async function transition(state, $, action, recover = false) {
   if (state.ownerTransition) return {text:TEXT.inProgress};
   if (state.sessionEnded) return {text:TEXT.ended};
   state.ownerTransition = true;
+  let reachable = false;
   try {
     if (state.following) await state.following;
     const h = host($);
     // Finish what is in flight first: save pending reports and retry an
     // unconfirmed claim with its original ID. Refuse only if that fails.
     for (const loop of loops(state)) await loop.settle(h);
-    if (recover) for (const loop of loops(state)) await loop.recover(h);
+    if (recover) for (const loop of loops(state)) {
+      if (await loop.recover(h)) {
+        reachable = true;
+        if (state.sessionEnded) return {text:TEXT.ended};
+        if (loop.outstanding()) return {text:BUSY[loop.busy()] ?? TEXT.inProgress};
+        if (state.loop === loop) { state.loop = null; state.loopBinding = null; }
+        if (state.pending?.loop === loop) state.pending = null;
+      }
+    }
     if (state.sessionEnded) return {text:TEXT.ended};
     await drainRetired(state,h);
     const reason = busy(state);
     if (reason) return {text:BUSY[reason]};
     return await action();
+  } catch (error) {
+    if (reachable && error instanceof ModError && error.code === 'host_unreachable') error.plain = TEXT.connectAgain;
+    throw error;
   } finally {
     state.ownerTransition = false;
     reopen(state);
@@ -232,9 +245,10 @@ async function followChange(state, $) {
 // Every reconnect rotates the generation. A note in the conversation (a meta
 // row the model reads on its next turn, not a prompt) gives Claude the new
 // routing, so its Ariadne commands keep working without an owner command.
-function routingNote(binding, helperPath) {
+function routingNote(binding, helperPath, explicit = false) {
   const {binding_id,generation,session} = binding;
-  return `Ariadne reconnected this conversation to session ${session.session_id} in project ${session.project_id} by itself. From now on use binding ${binding_id} and generation ${generation} in every ariadne command; any earlier binding or generation in this conversation is no longer current.\n${commandLine(helperPath)}\nIf your context is fresh, read reconnect.md in the ariadne skill first. This note is not a message from the owner; do not reply to it.`;
+  const connected = explicit ? 'Ariadne connected this conversation at the owner’s request' : 'Ariadne reconnected this conversation by itself';
+  return `${connected} to session ${session.session_id} in project ${session.project_id}. From now on use binding ${binding_id} and generation ${generation} in every ariadne command; any earlier binding or generation in this conversation is no longer current.\n${commandLine(helperPath)}\nIf your context is fresh, read reconnect.md in the ariadne skill first. This note is not a message from the owner; do not reply to it.`;
 }
 // The skill tells the agent to run this path verbatim, so a path with a space or
 // another shell-special character is single-quoted here.
@@ -253,7 +267,7 @@ async function deliverNote(state, $) {
   note.sending = true;
   note.tries += 1;
   try {
-    await $.session.append({message:{type:'user',content:[{type:'text',text:routingNote(note.binding,state.descriptor.helperPath)}]}});
+    await $.session.append({message:{type:'user',content:[{type:'text',text:routingNote(note.binding,state.descriptor.helperPath,note.explicit)}]}});
     if (state.note === note) state.note = null;
   } catch {
     if (state.note === note && note.tries >= NOTE_TRIES) state.note = null;
@@ -353,7 +367,7 @@ async function connectTransition(state, $, requestedSessionId) {
   // Give Claude its routing through the existing note; keep owner output plain.
   const {binding} = bound.result;
   const guidance = chosen === null ? '' : '\nThis resumes an earlier session: read reconnect.md in the ariadne skill first.';
-  state.note = {binding,tries:0,sending:false};
+  state.note = {binding,explicit:true,tries:0,sending:false};
   await deliverNote(state,$);
   const summary = 'This conversation is connected to Ariadne. File your work as you go; the ariadne skill has the rest.';
   return {text:summary + guidance};

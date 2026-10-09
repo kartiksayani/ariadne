@@ -50,6 +50,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
   let reporting = null;
   let observations = 0;
   let stopped = false;
+  let recovered = false;
   let ended = false;
   let claimId = null;
   // An earlier try with claimId had an unknown outcome, so the app may have saved it.
@@ -367,6 +368,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     finally { admissionOpen = false; }
   }
   async function recover($) {
+    if (recovered) return true;
     if (busy() !== 'claim') return;
     // Only an unconfirmed request can be retired here. Captured payloads,
     // active turns and unsaved reports still block rotation.
@@ -378,10 +380,14 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     } catch (error) {
       if (!connectionGone(error)) throw error;
     }
+    // Session end or late turn evidence can arrive while status is pending.
+    if (busy() !== 'claim') return;
     claimId = null;
     claimUnknown = false;
     stopped = true;
+    recovered = true;
     admissionOpen = false;
+    return true;
   }
   // Retry unsaved reports of a retired loop; true once nothing is left.
   async function drain($) {

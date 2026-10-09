@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 const { test } = process.env.VITEST ? await import('vitest') : await import('node:test');
 import { createRegister } from '../../../integrations/claude/plugin/hooks/register.js';
 import { setup } from '../../../integrations/claude/plugin/hooks/setup.js';
-import { capabilities, descriptor, failure, host, ids, status, success } from './fixtures.js';
+import { capabilities, deferred, descriptor, failure, host, ids, prepared, status, success } from './fixtures.js';
 
 function hooks() {
   const callbacks = new Map();
@@ -77,6 +77,171 @@ test('a different requested session discards an uncommitted old request', async 
   assert.notEqual(before.op_id,after.op_id);
   assert.equal(after.params.existing_session_id,ids.input);
   assert.equal(h.calls.find(call => call.argv.includes('--replay-only')).options.stdin,mutations(h)[0].options.stdin);
+});
+
+test('a removed session does not trap later connects behind its failed replay lookup', async () => {
+  let timedOut = true;
+  const h = host({handler:(argv,options) => {
+    if (argv.includes('--replay-only')) return failure('io_error');
+    if (argv[2] === 'connect') {
+      if (timedOut) {timedOut=false;throw new Error('SDK timeout');}
+      return receipt(JSON.parse(options.stdin),ids.input);
+    }
+  }});
+  const owner = setup(descriptor.helperPath);
+  await assert.rejects(owner.connect(h.$,ids.session),/timeout/);
+  const result = await owner.connect(h.$,ids.input);
+  assert.equal(result.binding.session.session_id,ids.input);
+  const [old,fresh] = mutations(h).map(call => JSON.parse(call.options.stdin).command);
+  assert.notEqual(old.op_id,fresh.op_id);
+  assert.equal(fresh.params.existing_session_id,ids.input);
+  assert.equal(h.calls.find(call => call.argv.includes('--replay-only')).options.stdin,mutations(h)[0].options.stdin);
+});
+
+for (const lookupFailure of ['io_error','host_unreachable','SDK rejection']) {
+  test(`failed replay lookup (${lookupFailure}) discards only a changed request`, async () => {
+    const h = host({handler:(argv,options) => {
+      if (argv.includes('--replay-only')) {
+        if (lookupFailure === 'SDK rejection') throw new Error('SDK rejection');
+        return failure(lookupFailure);
+      }
+      if (argv[2] === 'connect' && !argv.includes('--replay-only')) {
+        if (mutations(h).length === 1) throw new Error('SDK timeout');
+        return receipt(JSON.parse(options.stdin),ids.input);
+      }
+    }});
+    const owner = setup(descriptor.helperPath);
+    await assert.rejects(owner.connect(h.$,ids.session));
+    await assert.rejects(owner.connect(h.$,ids.session));
+    assert.equal(mutations(h).length,1);
+    await owner.connect(h.$,ids.input);
+    assert.notEqual(mutations(h)[0].options.stdin,mutations(h)[1].options.stdin);
+  });
+}
+
+test('retiring an unconfirmed fetch lets the heartbeat reconnect after a reachable app times out', async () => {
+  let lost = false, connectFails = false, generation = ids.generation;
+  const h = host({handler:(argv,options) => {
+    if (argv[2] === 'claim') return lost ? failure('not_found',{reason:'lease_invalid'}) : failure('delivery_uncertain');
+    if (argv[2] === 'connection-status') return success({...status,generation,connection_state:lost ? 'disconnected' : 'connected'});
+    if (argv[2] === 'connect' && !argv.includes('--replay-only')) {
+      if (connectFails) return failure('host_unreachable');
+      if (lost) {lost=false;generation=ids.attempt;}
+      return receipt(JSON.parse(options.stdin),ids.session,generation);
+    }
+  }});
+  const commands = hooks();
+  await commands.get('session.start')(h.$,{},next);
+  await commands.get('ariadne-connect')(h.$,{args:ids.session});
+  h.timer().callback();
+  for (let i = 0; i < 20; i += 1) {
+    await new Promise(resolve => setTimeout(resolve,0));
+    if (JSON.parse((await commands.get('ariadne-status')(h.$)).text).local.pending_claim_request_id) break;
+  }
+  lost = true;
+  connectFails = true;
+  const result = await commands.get('ariadne-connect')(h.$,{args:ids.session});
+  assert.match(result.text,/Run \/ariadne-connect again/);
+  assert.doesNotMatch(result.text,/Open Ariadne|Open the Ariadne app|will reconnect/);
+  plain(result.text);
+  assert.equal(JSON.parse((await commands.get('ariadne-status')(h.$)).text).local,null);
+  connectFails = false;
+  await h.timers().find(timer => timer.ms === 30000).callback();
+  assert.equal(mutations(h).length,3);
+  const local = JSON.parse((await commands.get('ariadne-status')(h.$)).text).local;
+  assert.equal(local.stopped,false);
+  assert.equal(local.admission_open,true);
+  assert.equal(h.store.get('binding:original-host-session').session_id,ids.session);
+  assert.deepEqual(h.prompts,[]);
+});
+
+for (const timing of ['during lookup','after lookup']) for (const lateEvidence of ['session end','changed answer']) {
+  test(`recovery preserves an unsaved ${lateEvidence} report arriving ${timing}`, async () => {
+    const entered = deferred(), reply = deferred();
+    const value = await prepared();
+    let delivered = false, recovering = false, failReport = false;
+    const h = host({claim:value,handler:async argv => {
+      if (argv[2] === 'claim') {
+        if (lateEvidence === 'changed answer' && !delivered) {delivered=true;return success(value);}
+        return failure('delivery_uncertain');
+      }
+      if (argv[2] === 'connection-status' && recovering) {
+        entered.resolve();
+        await reply.promise;
+        return success({...status,connection_state:'disconnected'});
+      }
+      if (argv[2] === 'report' && failReport) return failure('commit_uncertain');
+    }});
+    const commands = hooks();
+    const addEvidence = () => lateEvidence === 'session end' ? commands.get('session.end')(h.$,{},next)
+      : commands.get('turn.complete')(h.$,{turnId:'original-turn',answer:'changed',reason:'answer',isAborted:false},next);
+    let evidence;
+    if (timing === 'after lookup') {
+      const run = h.$.process.run;
+      h.$.process.run = (argv,options) => {
+        const result = run(argv,options);
+        if (argv[2] === 'connection-status' && recovering) result.then(() => globalThis.queueMicrotask(() => {
+          failReport = true;
+          evidence = addEvidence();
+        }));
+        return result;
+      };
+    }
+    await commands.get('session.start')(h.$,{},next);
+    await commands.get('ariadne-connect')(h.$,{args:ids.session});
+    if (lateEvidence === 'changed answer') {
+      h.timer().callback();
+      await h.reported('accepted');
+      await commands.get('turn.start')(h.$,{text:value.formatted_payload,turnId:'original-turn'},next);
+      await commands.get('turn.complete')(h.$,{turnId:'original-turn',answer:'first',reason:'answer',isAborted:false},next);
+    }
+    h.timer().callback();
+    for (let i = 0; i < 20; i += 1) {
+      await new Promise(resolve => setTimeout(resolve,0));
+      if (JSON.parse((await commands.get('ariadne-status')(h.$)).text).local.pending_claim_request_id) break;
+    }
+    recovering = true;
+    const connecting = commands.get('ariadne-connect')(h.$,{args:ids.session});
+    await entered.promise;
+    if (timing === 'during lookup') { failReport = true; await addEvidence(); }
+    reply.resolve();
+    const result = await connecting;
+    await evidence;
+    const failed = h.calls.filter(call => call.argv[2] === 'report').at(-1).options.stdin;
+    assert.match(result.text,lateEvidence === 'session end' ? /conversation has ended/ : /could not save Claude's last progress|still answering a message/);
+    assert.equal(mutations(h).length,1);
+    recovering = false;
+    const local = JSON.parse((await commands.get('ariadne-status')(h.$)).text).local;
+    assert.equal(local.pending_reports,1);
+    failReport = false;
+    if (lateEvidence === 'session end') await commands.get('session.end')(h.$,{},next);
+    else await commands.get('ariadne-connect')(h.$,{args:ids.session});
+    assert.equal(h.calls.filter(call => call.argv[2] === 'report').at(-1).options.stdin,failed);
+    assert.ok(h.events.some(event => JSON.stringify(event) === failed));
+  });
+}
+
+test('status before connecting gives a plain connect instruction', async () => {
+  const h = host();
+  const result = await hooks().get('ariadne-status')(h.$);
+  assert.equal(result.text,'That did not complete. This conversation is not connected to Ariadne. Run /ariadne-connect to connect it.');
+  plain(result.text);
+  assert.equal(mutations(h).length,0);
+});
+
+test('explicit connects and automatic reconnects explain their cause to Claude', async () => {
+  const h = host();
+  const explicitCommands = hooks();
+  await explicitCommands.get('session.start')(h.$,{},next);
+  await explicitCommands.get('ariadne-connect')(h.$,{args:ids.session});
+  const explicit = h.appended.at(-1).message.content[0].text;
+  assert.match(explicit,/^Ariadne connected this conversation at the owner’s request/);
+  assert.doesNotMatch(explicit,/by itself|reconnected/);
+  const commands = hooks();
+  await commands.get('session.start')(h.$,{},next);
+  for (let i = 0; i < 20 && h.appended.length < 2; i += 1) await new Promise(resolve => setTimeout(resolve,0));
+  assert.equal(h.appended.length,2);
+  assert.match(h.appended.at(-1).message.content[0].text,/^Ariadne reconnected this conversation .*by itself/);
 });
 
 test('reloaded hooks recover an automatic reconnect for a different session', async () => {
@@ -174,6 +339,34 @@ test('a previously saved conversation cannot move sessions silently and gets a w
   plain(result.text);
   assert.equal(mutations(h).length,2);
   assert.notEqual(mutations(h)[0].options.stdin,mutations(h)[1].options.stdin);
+  assert.deepEqual(h.prompts,[]);
+});
+
+test('a discarded request that commits late can be recovered by reconnecting the earlier session', async () => {
+  let original = null, committed = false;
+  const h = host({handler:(argv,options) => {
+    if (argv.includes('--replay-only')) return success(null);
+    if (argv[2] === 'connect') {
+      const request = JSON.parse(options.stdin);
+      if (!original) {original=request;throw new Error('SDK timeout');}
+      // The first native call finishes after the replay miss, before the new call.
+      committed = true;
+      if (request.command.params.existing_session_id !== original.command.params.existing_session_id) return failure('binding_conflict');
+      return receipt(request);
+    }
+  }});
+  const commands = hooks();
+  await commands.get('ariadne-connect')(h.$,{args:ids.session});
+  const refused = await commands.get('ariadne-connect')(h.$,{args:ids.input});
+  assert.equal(committed,true);
+  assert.match(refused.text,/session you chose earlier.*copy that session in Ariadne and run \/ariadne-connect followed by what you copied to reconnect here/);
+  plain(refused.text);
+  const result = await commands.get('ariadne-connect')(h.$,{args:ids.session});
+  assert.match(result.text,/connected to Ariadne/);
+  plain(result.text);
+  const local = JSON.parse((await commands.get('ariadne-status')(h.$)).text).local;
+  assert.equal(local.stopped,false);
+  assert.equal(local.admission_open,true);
   assert.deepEqual(h.prompts,[]);
 });
 

@@ -41,7 +41,7 @@ const HELPER_FAILURES = Object.freeze({
   stale_generation: GONE_FAILURE,
   binding_mismatch: GONE_FAILURE,
   binding_ambiguous: GONE_FAILURE,
-  binding_conflict: 'Check this session in Ariadne and disconnect its current conversation before trying again. If this Claude conversation already follows a different Ariadne session, start another Claude conversation, then run /ariadne-connect there.',
+  binding_conflict: 'Check this session in Ariadne and disconnect its current conversation before trying again. If this conversation already follows the Ariadne session you chose earlier, copy that session in Ariadne and run /ariadne-connect followed by what you copied to reconnect here. To use a different Ariadne session, start another Claude conversation, then run /ariadne-connect there.',
   not_found: "Ariadne can't find that session. Open Ariadne to check it still exists, then run /ariadne-connect.",
   invalid_argument: "Ariadne didn't accept that request. Run /ariadne-connect again; if it keeps happening, update the Ariadne app and plugin so they match.",
   permission_denied: "Ariadne isn't allowed to do that. Open the Ariadne app to check what is allowed for this session.",

@@ -641,19 +641,23 @@ fn connect_existing(
                             .any(|attempt| attempt.sealed_at.is_none())))
             })
     });
-    // A different identity cannot replace a Claude route until disconnected:
+    // A different conversation cannot replace a Claude route until disconnected:
     // native preflight saves Unknown while a live conversation awaits its bound
     // announcement. /clear disconnects the old route before rebinding.
     // Other adapters retain their established rule:
     // same-adapter replacement, or another paused adapter with nothing pending.
-    let live_elsewhere = !same
-        && existing.is_some_and(|old| {
-            (old.adapter_id == "claude_code_mod"
-                && old.connection_state != ConnectionState::Disconnected)
-                || (old.connection_state == ConnectionState::Connected
-                    && old.adapter_id != host.adapter_id
-                    && (has_unresolved || old.dispatch_state != DispatchState::Paused))
-        });
+    let same_conversation = existing.is_some_and(|old| {
+        old.adapter_id == host.adapter_id && old.external_session_id == host.external_session_id
+    });
+    let live_elsewhere = existing.is_some_and(|old| {
+        (old.adapter_id == "claude_code_mod"
+            && !same_conversation
+            && old.connection_state != ConnectionState::Disconnected)
+            || (!same
+                && old.connection_state == ConnectionState::Connected
+                && old.adapter_id != host.adapter_id
+                && (has_unresolved || old.dispatch_state != DispatchState::Paused))
+    });
     if live_elsewhere {
         return Err(conflict(
             "This session is connected to another live conversation; disconnect it first",

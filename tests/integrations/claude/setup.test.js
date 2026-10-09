@@ -73,7 +73,7 @@ describe('installed owner helper setup', () => {
   it('does not retry connection status errors other than not_found', async () => {
     const h = host({handler:argv => argv[2] === 'connection-status' ? failure('host_unreachable') : undefined});
     await expect(setup(descriptor.helperPath,undefined,{waitMs:2000,pollMs:1}).connect(h.$))
-      .rejects.toMatchObject({code:'host_unreachable',plain:'Open the Ariadne app, then run /ariadne-connect again.'});
+      .rejects.toMatchObject({code:'host_unreachable',plain:'Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.'});
     expect(h.calls.filter(call => call.argv[2] === 'connection-status')).toHaveLength(1);
   });
   it('uses canonical bootstrap wrappers and installed fixed provider facts, then validates scoped status', async () => {

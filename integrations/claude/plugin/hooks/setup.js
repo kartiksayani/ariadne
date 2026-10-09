@@ -103,7 +103,7 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
     } catch { /* diagnostics never change retry authority */ }
   }
   async function status($, selected = binding) {
-    if (!selected) throw new ModError('Run /ariadne-connect in this original conversation first.');
+    if (!selected) throw new ModError('Run /ariadne-connect in this original conversation first.','This conversation is not connected to Ariadne. Run /ariadne-connect to connect it.');
     const value = envelope(await $.process.run([helperPath,'bridge','connection-status',
       '--binding',selected.binding_id,'--generation',selected.generation,
       '--request-id',globalThis.crypto.randomUUID()],{timeoutMs:5000}));
@@ -149,8 +149,15 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
       const changed = connectRequest.command.params.existing_session_id !== targetSessionId
         || connectRequest.command.params.external_session_id !== externalSession;
       // Never execute an obsolete request to discover whether it committed.
-      const saved = await owner($,'binding','connect',connectRequest,true);
-      if (saved !== null) {
+      let saved;
+      try { saved = await owner($,'binding','connect',connectRequest,true); }
+      catch (error) {
+        if (!changed) throw error;
+        // A removed session can fail lookup with io_error. Core fences fresh
+        // competing requests even when lookup fails or an old call commits late.
+        connectRequest = null;
+      }
+      if (connectRequest && saved !== null) {
         const selected = selection(saved,connectRequest);
         try {
           const current = await status($,selected);
@@ -182,7 +189,7 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
       projection = await published($,selected);
     } catch (error) {
       const failure = new ModError(`Ariadne binding ${selected.binding_id} was saved; connection status remains pending. Original operation ${connectRequest.command.op_id}. ${error?.code ?? 'unknown'}`,
-        error instanceof ModError && error.code === 'host_unreachable' ? error.plain : 'Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.');
+        'Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.');
       if (error instanceof ModError && error.code === 'host_unreachable') failure.code = error.code;
       throw failure;
     }
