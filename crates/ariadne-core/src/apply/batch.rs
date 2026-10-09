@@ -377,12 +377,19 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             expected_question_revision: None,
         };
         let candidate = transition_item(session, id, &change, &context).map_err(transition)?;
+        let old = &session.items.0[id];
         if matches!(candidate.status, ItemStatus::Open | ItemStatus::InProgress)
             && candidate
                 .ask
                 .as_ref()
                 .is_some_and(|ask| !ask.trim().is_empty())
-            && crate::queries::question_unanswered(session, &candidate)
+            && if old.status == ItemStatus::WaitingOnMe {
+                // A handled clarification leaves the question waiting. Judge it
+                // before leaving WaitingOnMe retains the round for Ack.
+                crate::queries::waiting_unanswered(session, old)
+            } else {
+                crate::queries::question_unanswered(session, &candidate)
+            }
         {
             return Err(core(
                 CoreErrorCode::InvalidTransition,

@@ -1861,6 +1861,52 @@ fn lenient_ack_repair_is_locked_state_aware_and_replays_after_owner_ack() {
 }
 
 #[test]
+fn handled_clarification_cannot_abandon_an_unanswered_waiting_question() {
+    for kind in [InputKind::Reply, InputKind::Followup] {
+        for status in [ItemStatus::Open, ItemStatus::InProgress] {
+            for ack_to in [None, Some(AckTarget::Done)] {
+                let setup = Setup::new(&seed());
+                let mut ask = guarded(1016, "1", 1);
+                ask.operations.push(Operation::ItemAsk {
+                    item: existing("1"),
+                    ask: "Choose A or B?".into(),
+                    options: vec![],
+                    recipient_binding_id: id(3),
+                });
+                setup.execute(&ask).unwrap();
+                let source =
+                    setup.prepare_kind(TurnState::Completed, kind.clone(), "What does B mean?");
+                let mut explanation = setup.dispatched(1017, &source);
+                explanation.operations = vec![reply(
+                    existing("1"),
+                    "response",
+                    "B means keeping the existing behavior. Which do you choose?",
+                )];
+                setup.execute(&explanation).unwrap();
+                let saved = setup.saved();
+                let question = &saved.items.0[&item("1")];
+                assert_eq!(question.status, ItemStatus::WaitingOnMe);
+                assert!(question.current_round_id.is_some());
+                assert_eq!(saved.inputs.0[&source].state, InputState::Handled);
+                assert!(saved.answers.is_empty());
+                assert!(ariadne_core::queries::waiting_unanswered(&saved, question));
+
+                let mut hide = guarded(1018, "1", question.revision.value());
+                hide.operations.push(Operation::ItemStatus {
+                    item: existing("1"),
+                    status: status.clone(),
+                    ack_to,
+                    outcome: ack_to.map(|_| "Explained B.".into()),
+                    why: ack_to.map(|_| "The clarification was handled.".into()),
+                    reason: Some("Finished explaining.".into()),
+                });
+                setup.rejected(&hide, CoreErrorCode::InvalidTransition);
+            }
+        }
+    }
+}
+
+#[test]
 fn handled_reply_keeps_a_proposed_completion_ackable_and_new_questions_answerable() {
     let setup = Setup::new(&seed());
     let mut ask = guarded(1009, "1", 1);

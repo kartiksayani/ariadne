@@ -7,7 +7,7 @@ import { createDesktopService } from '../../../src/data/service';
 import type { ContinuePreview, OwnerMutationRequest, OwnerQueryRequest } from '../../../src/generated/core';
 import type { ItemStatus } from '../../../src/generated/domain/models';
 import { ackTarget } from '../../../src/ui/shared/ack';
-import { ownerReplied } from '../../../src/selectors/waiting/replied';
+import { currentQuestionReplied, ownerReplied } from '../../../src/selectors/waiting/replied';
 import { continueGroups } from '../../../src/ui/pages/model';
 import { AppTransport, route } from '../app/transport';
 import { sessionButton } from '../app/open';
@@ -332,6 +332,27 @@ describe('Ack eligibility follows the current question episode', () => {
     ++input.payload.target_snapshot.question_revision!;
     expect(ackTarget(session, item)).toBeNull();
     input.payload.target_snapshot.question_revision = item.question_revision;
+  });
+
+  it.each(['followup', 'drop', 'reply'] as const)('keeps a handled %s answerable while the saved item is Waiting on me', kind => {
+    const transport = new AckTransport(), session = transport.sessions.get(route.session_id)!, item = session.items['2']!;
+    const input = structuredClone(Object.values(session.inputs).find(value => value)!);
+    input.target.item_id = item.id; input.answer_id = null; input.state = 'handled'; input.kind = kind; input.payload.intent = kind;
+    input.payload.target_snapshot.question_revision = item.question_revision;
+    session.inputs = { [input.id]: input }; session.answers = [];
+    expect(item.status).toBe('waiting_on_me');
+    expect(currentQuestionReplied(session, item)).toBe(false);
+    expect(ownerReplied(session, item)).toBe(false);
+    expect(ackTarget(session, item)).toBeNull();
+    // A saved Open/InProgress item retains handled replies for Ack; a candidate
+    // status must never be substituted when checking a still-waiting item.
+    for (const status of ['open', 'in_progress'] as const) {
+      const saved = { ...item, status };
+      expect(currentQuestionReplied(session, saved)).toBe(true);
+      expect(ackTarget(session, saved)).toBe('decided');
+    }
+    expect(item.status).toBe('waiting_on_me');
+    expect(ackTarget(session, item)).toBeNull();
   });
 
   it('allows a standing answer but refuses superseded answers and unanswered new episodes', () => {
