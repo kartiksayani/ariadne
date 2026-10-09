@@ -105,7 +105,8 @@ class InstallationTests(unittest.TestCase):
         (self.home / ".local/bin").rmdir()
         final = self.install()
         self.assertFalse((self.home / ".local/bin").exists())
-        self.assertIn("PATH directory is absent", self.output.getvalue())
+        self.assertIn("add ~/.local/share/ariadne/current/bin to PATH", self.output.getvalue())
+        self.assertEqual(len(self.output.getvalue().splitlines()), 1)
         self.assertEqual(set(installer.json_read(final / "install.json")["owned_links"]),
                          {installer.SKILL_LINK})
 
@@ -815,12 +816,12 @@ class InstallationTests(unittest.TestCase):
     def test_main_uses_build_and_installed_doctor_and_never_builds_uninstall(self):
         with patch.dict(os.environ, {"HOME": str(self.home)}), \
                 patch.object(installer, "build", return_value=(self.artifacts, self.facts)) as build, \
-                patch.object(installer, "run") as run:
+                patch.object(installer, "run", return_value="") as run:
             # The file installer independently probes versions; leave it real in other tests.
             with patch.object(installer, "install", return_value=Path("/fixture/version")):
                 installer.main(["install"])
             build.assert_called_once()
-            run.assert_called_once_with([Path("/fixture/version/bin/ariadne"), "doctor"])
+            run.assert_called_once_with([Path("/fixture/version/bin/ariadne"), "doctor", "--summary"])
             installer.main(["uninstall"])
             build.assert_called_once()
         self.assertIn("No personal Ariadne package", self.output.getvalue())
@@ -1068,16 +1069,37 @@ class PackageTests(unittest.TestCase):
         with patch.dict(os.environ, {"HOME": str(self.home)}), \
                 patch.object(installer, "build") as build, \
                 patch.object(installer, "install_package", return_value=Path("/fixture/version")) as install_package, \
-                patch.object(installer, "run") as run:
+                patch.object(installer, "run", return_value="") as run:
             installer.main(["install", "--package", str(package)])
         build.assert_not_called()
         install_package.assert_called_once_with(self.home, package)
-        run.assert_called_once_with([Path("/fixture/version/bin/ariadne"), "doctor"])
+        run.assert_called_once_with([Path("/fixture/version/bin/ariadne"), "doctor", "--summary"])
         with self.assertRaisesRegex(installer.InstallError, "install only"):
             installer.main(["package", "--package", str(package)])
         with patch.dict(os.environ, {"HOME": str(self.home)}), \
                 self.assertRaisesRegex(installer.InstallError, "install only"):
             installer.main(["uninstall", "--package", str(package)])
+
+    def test_package_install_ends_with_a_short_plain_summary_without_ids(self):
+        _, package = self.extract()
+        summary = ("9 sessions in 3 projects; none connected right now.\n"
+                   "Open Ariadne. In each Claude session run /reload-plugins, then /ariadne-connect <session id> "
+                   "(Copy ID on the session card).\nRun `ariadne doctor` for details.\n")
+        def invoke(args, **kwargs):
+            if args[1:] == ["doctor", "--summary"]:
+                self.assertEqual(kwargs, {})
+                print(summary, end="")
+                return None
+            return installer_run(args, **kwargs)
+        installer_run = installer.run
+        with patch.dict(os.environ, {"HOME": str(self.home)}), patch.object(installer, "run", side_effect=invoke):
+            installer.main(["install", "--package", str(package)])
+        lines = self.output.getvalue().splitlines()
+        self.assertEqual(len(lines), 4)
+        self.assertEqual(lines[0], "Installed Ariadne 0.1.0.")
+        self.assertEqual("\n".join(lines[1:]) + "\n", summary)
+        self.assertNotRegex(self.output.getvalue(), r"[0-9a-f]{8}-[0-9a-f]{4}-")
+        self.assertNotIn("Result: warning", self.output.getvalue())
 
     def test_main_package_action_builds_then_assembles(self):
         with patch.object(installer, "build", return_value=(self.artifacts, self.facts)) as build, \

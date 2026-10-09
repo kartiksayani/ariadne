@@ -2,13 +2,14 @@
 use ariadne_core::{CoreError, CoreErrorCode};
 use serde_json::{json, Value};
 use std::{io::Write, path::PathBuf};
+mod human;
 pub mod inspect;
 
-pub const HELP: &str = "Diagnostics: ariadne doctor [--project /absolute/project] [--claude-bin /absolute/claude] [--codex-bin /absolute/codex] [--json]\nChecks Ariadne's install, data, app and agent connections. It only reads: it never repairs data, resends messages, approves anything or starts an agent.\n--claude-bin and --codex-bin override the paths `ariadne setup` recorded. Codex is reached through its running app-server (CODEX_HOME, or the default folder).\n";
+pub const HELP: &str = "Diagnostics: ariadne doctor [--project /absolute/project] [--claude-bin /absolute/claude] [--codex-bin /absolute/codex] [--verbose | --json | --summary]\nChecks Ariadne's install, data, app and agent connections. It only reads: it never repairs data, resends messages, approves anything or starts an agent.\n--claude-bin and --codex-bin override the paths `ariadne setup` recorded. Codex is reached through its running app-server (CODEX_HOME, or the default folder).\nThe default view groups sessions by name; not connected is normal. --verbose keeps the detailed checks; --json keeps the machine report. --summary prints the short install summary.\n";
 
 pub(crate) fn parse(args: &[&str]) -> Result<inspect::Options, CoreError> {
     let mut options = inspect::Options::default();
-    let mut json = false;
+    let mut format = false;
     let mut i = 0;
     while i < args.len() {
         match args[i] {
@@ -34,7 +35,7 @@ pub(crate) fn parse(args: &[&str]) -> Result<inspect::Options, CoreError> {
                 }
                 *slot = Some(path);
             }
-            "--json" if !json => json = true,
+            "--json" | "--verbose" | "--summary" if !format => format = true,
             _ => return Err(invalid("Unknown or repeated doctor flag.")),
         }
         i += 1;
@@ -82,6 +83,9 @@ impl Report {
 pub(crate) fn write(
     result: Result<Value, CoreError>,
     json_output: bool,
+    verbose: bool,
+    summary: bool,
+    sessions: &[human::Session],
     output: &mut dyn Write,
     errors: &mut dyn Write,
 ) -> i32 {
@@ -93,6 +97,14 @@ pub(crate) fn write(
     if json_output {
         let wrote = crate::output::write(Ok(report), true, output, errors);
         return if wrote == 0 { exit } else { wrote };
+    }
+    if !verbose {
+        let text = human::render(&report, sessions, summary);
+        return if output.write_all(text.as_bytes()).is_ok() {
+            exit
+        } else {
+            4
+        };
     }
     for check in report["checks"].as_array().expect("report checks") {
         if writeln!(
@@ -135,9 +147,18 @@ pub fn run_in_installation(
             4
         };
     }
+    let result =
+        parse(args).map(|options| inspect::collect_for_display(data, version_root, &options));
+    let (report, sessions) = match result {
+        Ok((report, sessions)) => (Ok(report), sessions),
+        Err(error) => (Err(error), Vec::new()),
+    };
     write(
-        parse(args).map(|options| inspect::collect(data, version_root, &options)),
+        report,
         args.contains(&"--json"),
+        args.contains(&"--verbose"),
+        args.contains(&"--summary"),
+        &sessions,
         output,
         errors,
     )
@@ -157,7 +178,7 @@ pub fn run(args: &[&str], output: &mut dyn Write, errors: &mut dyn Write) -> i32
         let data = crate::bridge::command::home_from_environment()?;
         let root = crate::setup::package_root_from_environment()?;
         let package = crate::open::installed_package(&root, crate::setup::resources::VERSION);
-        let mut report = inspect::collect(
+        let (mut report, sessions) = inspect::collect_for_display(
             &data,
             package.as_ref().ok().map(|p| p.version_root.as_path()),
             &options,
@@ -176,7 +197,19 @@ pub fn run(args: &[&str], output: &mut dyn Write, errors: &mut dyn Write) -> i32
                 report["status"] = json!("error");
             }
         }
-        Ok(report)
+        Ok((report, sessions))
     })();
-    write(result, args.contains(&"--json"), output, errors)
+    let (report, sessions) = match result {
+        Ok((report, sessions)) => (Ok(report), sessions),
+        Err(error) => (Err(error), Vec::new()),
+    };
+    write(
+        report,
+        args.contains(&"--json"),
+        args.contains(&"--verbose"),
+        args.contains(&"--summary"),
+        &sessions,
+        output,
+        errors,
+    )
 }

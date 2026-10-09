@@ -725,6 +725,8 @@ fn doctor_flags_output_and_error_exit_are_stable_without_root_creation() {
             "--json",
         ],
         vec!["--json", "--json"],
+        vec!["--verbose", "--verbose", "--json"],
+        vec!["--summary", "--json"],
         vec!["--unknown", "--json"],
     ] {
         let mut output = Vec::new();
@@ -778,7 +780,7 @@ fn doctor_flags_output_and_error_exit_are_stable_without_root_creation() {
     );
     assert!(String::from_utf8(output)
         .unwrap()
-        .contains("session.future_schema"));
+        .contains("Install that version to read it."));
 }
 
 struct CodexDoctorRun {
@@ -1077,4 +1079,104 @@ fn supervisor_health_reads_the_app_heartbeat_and_says_what_is_wrong_in_plain_wor
     let unreadable = checks(&profile.report(), "desktop.supervisor_health");
     assert_eq!(unreadable[0]["facts"]["state"], "unreadable");
     assert_eq!(unreadable[0]["status"], "warning");
+}
+
+#[test]
+fn fresh_install_groups_named_sessions_without_warnings_or_ids_and_keeps_detailed_modes() {
+    let profile = Profile::new();
+    let mut session: Session = serde_json::from_slice(&fs::read(profile.live()).unwrap()).unwrap();
+    session.topics.0.clear();
+    session.items.0.clear();
+    session.messages.clear();
+    session.rounds.0.clear();
+    session.answers.clear();
+    session.inputs.0.clear();
+    session.operation_receipts.0.clear();
+    session.continuations.0.clear();
+    let mut binding = session.bindings.0.values().next().unwrap().clone();
+    binding.dispatch_state = DispatchState::Disconnected;
+    binding.active_input_id = None;
+    binding.connection_state = ConnectionState::Reconnecting;
+    session.bindings.0.clear();
+    session.bindings.0.insert(binding.id.clone(), binding);
+    session.active_binding_id = session.bindings.0.keys().next().cloned();
+    session.name = Some("Notes".to_owned());
+    fs::write(profile.live(), serde_json::to_vec(&session).unwrap()).unwrap();
+    let mut second = session.clone();
+    second.id = id(800);
+    second.name = None;
+    second.title = "Research".to_owned();
+    second.bindings.0.clear();
+    second.active_binding_id = None;
+    ariadne_store::session::Store::open_registered(&profile.store(), second.project_id.clone())
+        .unwrap()
+        .create(&second)
+        .unwrap();
+    Registry::open_data_directory(&profile.data)
+        .unwrap()
+        .rebuild()
+        .unwrap();
+    let before = snapshot(profile.home.path());
+    let run = |args: &[&str]| {
+        let mut output = Vec::new();
+        let mut errors = Vec::new();
+        let code = ariadne_cli::doctor::run_in_installation(
+            args,
+            &profile.data,
+            Some(&profile.version),
+            &mut output,
+            &mut errors,
+        );
+        assert_eq!(code, 0);
+        assert!(errors.is_empty());
+        String::from_utf8(output).unwrap()
+    };
+    let text = run(&[]);
+    assert!(
+        text.contains("2 sessions in 1 project; none connected right now."),
+        "{text}"
+    );
+    assert!(text.contains("Notes: not connected."));
+    assert!(text.contains("Research: not connected."));
+    assert!(text.contains("No problems found."));
+    assert!(!text.contains("Warning"));
+    assert!(!text.contains("00000000"));
+    assert!(!text.contains("Review recovery"));
+    let summary = run(&["--summary"]);
+    assert_eq!(summary.lines().count(), 3);
+    assert!(!summary.contains("00000000"));
+    let verbose = run(&["--verbose"]);
+    assert!(verbose.contains("binding.recovery"));
+    assert!(verbose.contains(session.active_binding_id.as_ref().unwrap().as_str()));
+    let json: Value = serde_json::from_str(&run(&["--json"])).unwrap();
+    let report = &json["data"];
+    assert_eq!(report.as_object().unwrap().len(), 5);
+    assert_eq!(
+        checks(report, "session.valid")[0]["facts"]["session_id"],
+        session.id.as_str()
+    );
+    assert_eq!(
+        checks(report, "binding.presence_unknown")[0]["status"],
+        "warning"
+    );
+    assert_eq!(snapshot(profile.home.path()), before);
+}
+
+#[test]
+fn recovery_is_one_actionable_line_under_the_session_name() {
+    let profile = Profile::new();
+    let session: Session = serde_json::from_slice(&fs::read(profile.live()).unwrap()).unwrap();
+    let mut output = Vec::new();
+    let code = ariadne_cli::doctor::run_in_installation(
+        &[],
+        &profile.data,
+        Some(&profile.version),
+        &mut output,
+        &mut Vec::new(),
+    );
+    assert_eq!(code, 0);
+    let text = String::from_utf8(output).unwrap();
+    assert!(text.contains(&format!("{}: not connected.", session.title)));
+    assert!(text.lines().any(|line| line == "  Warning: Earlier messages need your review. Open this session in Ariadne and choose \"Review recovery\"."));
+    assert!(!text.contains("00000000"));
 }

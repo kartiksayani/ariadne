@@ -789,9 +789,8 @@ def install(home, artifacts, facts, resource_loader=resources):
         finally:
             if exists_at(versions_fd, stage.name):
                 shutil.rmtree(stage.name, dir_fd=versions_fd)
-        print(f"Installed Ariadne {version}: {home / APP_PATH}\nHelpers: {final / 'bin'}", flush=True)
-        if not exists(home / ".local/bin"):
-            print(f"PATH directory is absent. Add {root / 'current/bin'} to PATH explicitly; shell startup files were not edited.")
+        path_hint = "" if exists(home / ".local/bin") else " To use Ariadne from a terminal, add ~/.local/share/ariadne/current/bin to PATH."
+        print(f"Installed Ariadne {version}.{path_hint}", flush=True)
         return final
 
 
@@ -960,11 +959,11 @@ def main(argv=None):
         uninstall(home)
     elif args.package is not None:
         installed = install_package(home, args.package)
-        run([installed / "bin/ariadne", "doctor"])
+        run([installed / "bin/ariadne", "doctor", "--summary"])
     else:
         artifacts, facts = build()
         installed = install(home, artifacts, facts)
-        run([installed / "bin/ariadne", "doctor"])
+        run([installed / "bin/ariadne", "doctor", "--summary"])
 
 
 if __name__ == "__main__":
