@@ -6,39 +6,41 @@
 - Defaults: `topic` is the only `topic.add`; nested `children` inherit parent/topic.
   `status` is `waiting_on_me` with `ask`, else `open`; `owner` is you, or
   `{"kind":"me"}` with `ask`; others use `{"kind":"other","name":"N"}`.
-  Option ids: 1, 2, ...; refs: r1, r2, ... by position. Name refs to use them later.
-  Answers route to you. `children` holds nested `item.add` objects.
+  Option ids: 1, 2, ...; refs: r1, r2, ... by position.
+  Answers route to you.
 - Refs: `{"ref":"a"}` names an earlier request ref (letter first, then letters,
   digits or `_`, at most 32); `{"id":"1.2"}` names an item, UUID for topic/message.
   `item.edit` short/note: omit to keep, string to replace, null to clear.
 - Connections: `item.add.related` or `item.edit.patch.related` takes item numbers
   or batch refs: `["3.2","notes"]` or `[{"id":"3.2"},{"ref":"notes"}]`.
-  Adds accept later refs and nested children. Connections cross topics in this
-  session and show at both ends. Omit/null keeps them; `[]` clears them.
+  Adds accept later refs and children. Links cross topics and show at both ends.
+  Omit/null keeps them; `[]` clears them.
   Self/duplicate/new missing targets fail. Reads omit removed targets;
   resending declared removed targets prunes them (`pruned_related`: source → targets).
 - Limits: `question`, `ask`, `note`, `outcome`, `why` at most 4096 bytes, `reply`
   64 KiB, 100 expanded operations, 12 options, 32 links and 32 related items per item.
-- `item.add` never creates terminal items. Results start `open` with `ack_to`:
-  `decided`, `done` or `dropped`, never `replaced`; retain outcome/why.
-  Strict creation rejects terminal statuses; lenient creation repairs those three
-  to Open with that target. `ack_to` requires nonterminal status; it can coexist
-  with an ask, but Ack requires Open/InProgress with no unanswered ask.
-  `item.status` Open/InProgress can set a target. Existing Ack items refuse
-  strict terminal status; lenient filing keeps Open with the requested target.
-  An Answer, Reply or Drop input directing completion on that same item permits
-  terminal status with `source_input_id`, clearing `ack_to`. Items without
-  targets retain terminal transitions. Keep unanswered asks `waiting_on_me`;
+- `item.add` never creates terminal items. Choose `ack_to` as in `SKILL.md`;
+  preserve outcome/why. Strict creation rejects terminal statuses; lenient filing
+  repairs Decided/Done/Dropped to Open with that explicit target, never Replaced.
+  A new finding/explanation without ask needs a target: strict filing says
+  "choose ack_to ..." when missing; CLI repairs to `open` and reports it.
+  Ack needs Open/InProgress without an unanswered ask. `item.status`
+  Open/InProgress sets a target; `item.edit.patch.ack_to` changes one on an Open/InProgress
+  Ack item, preserving status/prose. Strict terminal status on Ack items fails;
+  CLI keeps Open with the requested target. An Answer, Reply or Drop directing
+  completion on that same item permits terminal status with `source_input_id`,
+  clearing `ack_to`. Items without targets can close normally.
+  Keep unanswered asks `waiting_on_me`;
   explain withdrawal in a new `ack_to: "dropped"` item, or supersede with
   `item.replace`, clearing the target.
 - Types: question, decision, finding, task, explanation. `item.status` needs
   `reason` for `open`/`in_progress`, outcome/why for `decided`/`done`/`dropped`;
   `replaced` requires `item.replace`, `waiting_on_me` an ask.
 
-Link sync to [cache choice](item:1) and notes.
+Link sync to [cache choice](item:1) and notes. Reading leaves notes Open.
 
 ```json
-{"summary":"Linked sync","operations":[{"op":"topic.add","name":"Notes sync","short":"Notes sync"},{"op":"item.add","ref":"notes","question":"Read notes offline","short":"Offline notes","type":"finding","status":"open","ack_to":"done","outcome":"Notes read offline","why":"Read offline."},{"op":"item.add","question":"Sync notes","short":"Sync local notes","type":"task","owner":{"kind":"other","name":"Sam"},"related":["1","notes"]}]}
+{"summary":"Linked sync","operations":[{"op":"topic.add","name":"Notes sync","short":"Notes sync"},{"op":"item.add","ref":"notes","question":"Read notes offline","short":"Offline notes","type":"finding","status":"open","ack_to":"open","outcome":"Notes read offline","why":"Read offline."},{"op":"item.add","question":"Sync notes","short":"Sync local notes","type":"task","owner":{"kind":"other","name":"Sam"},"related":["1","notes"]}]}
 ```
 
 ## Failed commands
@@ -60,8 +62,8 @@ without committing. Never repair failures by editing `.ariadne/` files.
 | any other exit 4 (e.g. `capacity_exceeded`, `host_unreachable`) | 4 | Stop and tell the owner; do not retry in a loop. |
 | `unsupported`, `future_schema` | 5 | Stop and tell the owner. |
 
-Replays write once. Never resend owner messages, repeat finished work or scrape
-transcripts. Missing output, presence, timeout or failed receipt do not prove non-delivery.
+Replays write once. Never resend owner messages or repeat finished work. Missing
+output, timeout or failed receipts do not prove non-delivery.
 
 ## Result-only repair
 

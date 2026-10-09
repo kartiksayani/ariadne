@@ -9,7 +9,7 @@ import { deliveryEvidence } from '../../selectors/waiting/delivery';
 import { agentName } from '../shell/model';
 import { shortLabel } from '../shared/short';
 import { excerptView, messageNumber, type ExcerptView } from '../shared/excerpt';
-import { STATUS, statusKey, type StatusKey } from '../shared/status';
+import { statusKey, type StatusKey } from '../shared/status';
 import { deliveryLine as deliveryText, deliveryStage, deliverySteps, type DeliveryStage } from '../answer/delivery';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { counted, heldInput, notSent, stuckInput, withdrawn, type NotSent, type Stuck } from '../../selectors/waiting/stuck';
@@ -227,8 +227,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   const outbox = active.map((input): PendingView => ({ input, ...sentView(input), caption: CAPTION[input.state] ?? '',
     stuck: saving ? null : stuckInput(session, input, presence, health) }));
   const pending = !!sub?.stage && sub.stage !== 'failed' && !held;
-  const proposal = (status === 'open' || status === 'progress') ? item.ack_to : null;
-  const outLabel = proposal ? `Proposed ${STATUS[proposal].label}` : status === 'done' && item.type === 'explanation' ? 'Explained' : OUTLBL[status];
+  const outLabel = status === 'done' && item.type === 'explanation' ? 'Explained' : OUTLBL[status];
   const ownerLabel = item.owner.kind === 'me' ? 'you' : item.owner.kind === 'agent' ? 'the agent' : item.owner.name;
   const showSteps = sub && (sub.stage !== null || (status !== 'waiting' && status !== 'open'));
 
@@ -384,7 +383,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     followUp,
     // The chat carries the ask once; the composer only carries the answer control.
     answer: answerable ? { heading: !showSteps, options: item.options, recommended, blocked } : null,
-    outcome: item.outcome ? { label: outLabel ?? 'Outcome', text: item.outcome, color: `var(--st-${proposal ?? status})` } : null,
+    outcome: item.outcome ? { label: outLabel ?? 'Outcome', text: item.outcome, color: `var(--st-${status})` } : null,
     note: item.note && status === 'progress' ? item.note : null,
     why: item.why,
     replaced: replacement ? kid(replacement) : null,

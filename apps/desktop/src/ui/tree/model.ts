@@ -190,6 +190,7 @@ export interface ItemRow {
   readonly item: Immutable<Item>;
   /** What the row shows: the item's status, or Waiting on agent once the owner replied. */
   readonly status: DisplayStatus;
+  readonly ack: NonNullable<Item['ack_to']> | null;
   readonly depth: number;
   readonly hasKids: boolean;
   readonly expanded: boolean;
@@ -377,7 +378,7 @@ export function treeModel(input: TreeInput): TreeModel {
             progress: below.filter(value => value.status === 'in_progress' || display(value) === 'waiting_on_agent').length, closed: below.filter(value => closed(value.status)).length, ids: below.map(value => value.id) };
         }
         const parked = item.status === 'open' && later.has(item.id);
-        built.push({ kind: 'item', key: item.id, item, status: display(item), depth, hasKids: children.length > 0, expanded: open,
+        built.push({ kind: 'item', key: item.id, item, status: display(item), ack: ackTarget(session, item), depth, hasKids: children.length > 0, expanded: open,
           hidden: hidden.has(item.id), context: filtering && !matched.has(item.id) && !forced.has(item.id), later: parked, segments: segments(item.question, input.search),
           replacedBy: item.replaced_by ? session.items[item.replaced_by] ?? null : null, rounds: indexes.roundsByItem.get(item.id)?.length ?? 0,
           relatedCount: relatedItems(session, item.id).length,

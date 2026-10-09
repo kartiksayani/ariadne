@@ -106,6 +106,9 @@ pub enum Operation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct ItemPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub ack_to: Option<AckTarget>,
     pub question: Option<String>,
     #[serde(rename = "type")]
     pub item_type: Option<ItemType>,

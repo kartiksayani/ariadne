@@ -819,7 +819,7 @@ describe('ordinary desktop composition', () => {
     if (outcome === 'tab close') {
       expect(screen.queryByLabelText('Detail of #1')).toBeNull();
       expect(transport.preferences.sessions[0].tab_open).toBe(false);
-    } else expect(screen.getByLabelText('Detail of #1')).toBeTruthy();
+    } else expect(await screen.findByLabelText('Detail of #1')).toBeTruthy();
     if (outcome === 'read failure') expect(document.querySelector('.nav-banner[role="alert"]')).not.toBeNull();
     expect(transport.preferences.global.theme).toBe('light');
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1');

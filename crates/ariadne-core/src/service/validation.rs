@@ -216,6 +216,21 @@ impl ApplyRequest {
                     if ask.is_some() && value.status != ItemStatus::WaitingOnMe {
                         return Err(invalid("A new item with an ask must be waiting_on_me so the owner can answer it"));
                     }
+                    if value.item_type.is_read_only_material(ask.as_deref())
+                        && value.ack_to.is_none()
+                    {
+                        return Err(invalid(
+                            "choose ack_to: open, in_progress, decided, done or dropped",
+                        ));
+                    }
+                    if matches!(value.status, ItemStatus::Open | ItemStatus::InProgress)
+                        && value.ack_to.is_none()
+                        && (outcome.is_some() || why.is_some())
+                    {
+                        return Err(invalid(
+                            "item.add outcome and why require an explicit ack_to",
+                        ));
+                    }
                     text(question, 4096, true)?;
                     short_label(short.as_deref())?;
                     for value in [ask, outcome, why].into_iter().flatten() {
@@ -1093,7 +1108,11 @@ pub fn validate_owner_receipt(
                                 == params.expected_revision.value().saturating_add(1)
                             && matches!(
                                 status,
-                                ItemStatus::Decided | ItemStatus::Done | ItemStatus::Dropped
+                                ItemStatus::Open
+                                    | ItemStatus::InProgress
+                                    | ItemStatus::Decided
+                                    | ItemStatus::Done
+                                    | ItemStatus::Dropped
                             )
                     }
                     _ => true,

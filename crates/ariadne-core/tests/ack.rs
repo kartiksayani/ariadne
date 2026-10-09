@@ -90,7 +90,13 @@ fn dir(home: &TempDir) -> std::path::PathBuf {
 
 #[test]
 fn native_ack_preserves_prose_records_owner_history_and_dispatches_nothing() {
-    for target in [AckTarget::Decided, AckTarget::Done, AckTarget::Dropped] {
+    for target in [
+        AckTarget::Open,
+        AckTarget::InProgress,
+        AckTarget::Decided,
+        AckTarget::Done,
+        AckTarget::Dropped,
+    ] {
         let mut source = proposed(target);
         let key = ItemRef::new("1").unwrap();
         let item = source.items.0.get_mut(&key).unwrap();
@@ -123,6 +129,27 @@ fn native_ack_preserves_prose_records_owner_history_and_dispatches_nothing() {
             &receipt,
         )
         .unwrap();
+        for invalid_status in [ItemStatus::WaitingOnMe, ItemStatus::Replaced] {
+            let mut invalid_receipt = receipt.clone();
+            let MutationReceipt::Session(invalid) = &mut invalid_receipt else {
+                panic!("session")
+            };
+            let SavedReceiptData::ItemAck { status, .. } = &mut invalid.data else {
+                panic!("Ack")
+            };
+            *status = invalid_status;
+            assert!(service::validate_owner_receipt(
+                &OwnerMutationRequest {
+                    session: Some(SessionRef {
+                        project_id: id(1),
+                        session_id: id(2)
+                    }),
+                    command: command(1)
+                },
+                &invalid_receipt
+            )
+            .is_err());
+        }
         let saved = setup.read();
         let item = &saved.items.0[&key];
         assert_eq!(item.status, target.status());
@@ -182,6 +209,57 @@ fn defaults_keep_terminal_metadata_valid_and_in_progress_can_ack() {
         .why
         .as_ref()
         .is_some_and(|text| !text.trim().is_empty()));
+}
+
+#[test]
+fn nonterminal_ack_clears_unread_work_and_keeps_the_open_item_readable() {
+    for target in [AckTarget::Open, AckTarget::InProgress] {
+        let source = proposed(target);
+        let setup = Setup::new(&source);
+        setup
+            .service()
+            .acknowledge(&owner(), &command(1), at(), || id(301))
+            .unwrap();
+        let saved = setup.read();
+        let item = &saved.items.0[&ItemRef::new("1").unwrap()];
+        assert_eq!(item.status, target.status());
+        assert_eq!(item.ack_to, None);
+        assert_eq!(item.outcome, None);
+        assert_eq!(item.why, None);
+        assert_eq!(
+            saved
+                .items
+                .0
+                .values()
+                .filter(|item| item.ack_to.is_some())
+                .count(),
+            0
+        );
+        let QueryResult::SessionRead(SessionReadResult::Items(page)) =
+            ariadne_core::queries::QueryService::new(&setup.registry)
+                .query(
+                    &QueryContext::owner(owner()),
+                    &QueryRequest::SessionRead(SessionReadRequest {
+                        selection: ReadView::Items {
+                            topic_id: None,
+                            item_id: Some(item.id.clone()),
+                            parent_item_id: None,
+                            statuses: vec![],
+                            archived: None,
+                        },
+                        cursor: None,
+                        limit: PageLimit::new(10).unwrap(),
+                        item_pages: vec![],
+                    }),
+                )
+                .unwrap()
+        else {
+            panic!("items")
+        };
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].item.status, target.status());
+        assert_eq!(page.items[0].item.ack_to, None);
+    }
 }
 
 #[test]

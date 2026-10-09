@@ -142,7 +142,7 @@ export class SessionActions {
             && data.continuation.summary === command.params.summary
         : command.command === 'ack' ? data.kind === 'item_ack' && data.item_id === command.params.item_id
           && data.item_revision === command.params.expected_revision + 1
-          && ['decided', 'done', 'dropped'].includes(data.status) && uuid(data.message_id)
+          && ['open', 'in_progress', 'decided', 'done', 'dropped'].includes(data.status) && uuid(data.message_id)
         : command.command === 'binding_connect' ? data.kind === 'binding_connect'
         : command.command === 'input_cancel' ? data.kind === 'input_cancel' && data.input_id === command.params.input_id
         : command.command === 'input_resolve' ? data.kind === 'input_resolve' && data.input_id === command.params.input_id

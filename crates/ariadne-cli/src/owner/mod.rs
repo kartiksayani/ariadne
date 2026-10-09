@@ -18,7 +18,8 @@ Remove is permanent inside Ariadne; files and the agent's conversation stay.
 Item and topic removal use a session route and queue a `removed` notice for
 the told agent; session and project removal use session:null. Every removal
 first writes a pre-remove backup and its receipt prints the backup path.
-Item Ack finishes an item at its stored ack_to target using its expected revision;
+Item Ack marks an item read and uses the agent's chosen state: Open, In progress,
+Decided, Done or Dropped. It clears the unread acknowledgment;
 the canonical owner command tag is ack. Ack is an owner action, not an agent tool.
 Stdin is the complete canonical OwnerQueryRequest or OwnerMutationRequest,
 at most 512KiB. Its command tag must match the CLI noun/verb. Stdin commands

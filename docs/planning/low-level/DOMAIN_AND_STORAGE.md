@@ -145,12 +145,17 @@ created_at,updated_at,created_message_id,updated_message_ids,status_history,
 waiting_since,recipient_binding_id,current_round_id,source_round_id,origin}`.
 `type=question|decision|finding|task|explanation`;
 `status=open|waiting_on_me|in_progress|decided|done|dropped|replaced`.
-`ack_to`, when present, is `decided|done|dropped` (ADR-0093). It is omitted when
+`ack_to`, when present, is `open|in_progress|decided|done|dropped` (ADR-0093,
+alpha.12). The agent chooses it per item; there is no implicit Done. It is omitted when
 absent, so old items load without adding a field or rewriting their stored bytes.
 New agent items cannot have a terminal status. Strict core rejects such creation;
 the lenient CLI repairs Decided/Done/Dropped to Open with the requested target,
-including nested children, and reports the repair. Open or InProgress items
-with a target may retain intended outcome/why text. item.status open/in_progress
+including nested children, and reports the repair. New Open/InProgress findings
+and explanations without an ask require an explicit `ack_to` in strict filing;
+lenient filing repairs an omitted value to `open` and reports the repair.
+Tasks, decisions and questions without reading material retain their existing
+creation behavior. Open or InProgress items may retain outcome/why text,
+including after acknowledgment. item.status open/in_progress
 can set a target; omission keeps it and its existing text. Strict core refuses an
 agent terminal status while the item has a target, unless an authenticated Answer,
 Reply or Drop input targets that same item and directs completion. Such completion
@@ -159,7 +164,9 @@ transitions. The lenient CLI repairs other terminal status requests on existing
 Ack items to Open with the requested target and full completion text. The repair
 uses live state under the store lock after replay lookup; operation identity and
 digest still follow the original request, so exact retries remain stable after Ack.
-Owner Ack clears the target. An unanswered ask must keep its owner answer route: new asks
+`item.edit` can change an existing Ack choice on an Open/InProgress item;
+it cannot add Ack again after acknowledgment. Owner Ack sets the chosen status
+and clears the target, retaining outcome/why. An unanswered ask must keep its owner answer route: new asks
 start Waiting on me with a round; lenient filing repairs explicit Open/InProgress
 asks accordingly, preserving the proposal.
 `owner={kind:me}|{kind:agent,binding_id}|{kind:other,name}`.

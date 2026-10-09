@@ -1,9 +1,8 @@
 ## Commands
 
-`ariadne` means the exact connect/setup command: keep its `ARIADNE_HOME=...`
-prefix and absolute path; your shell may lack them. Use only the CLI for Ariadne
-state. Never open, edit or create `.ariadne/` or `~/.ariadne` files: bypassing
-revisions and validation can make the session unreadable.
+`ariadne` is the exact connect/setup command, including `ARIADNE_HOME=...` and
+absolute path. Use only the CLI for state. Never access `.ariadne/` or
+`~/.ariadne` files: bypassing validation can make the session unreadable.
 
 - `ariadne read --binding B --generation G --view items|topics|messages|inputs --json`:
   20 entries a page, `--limit N` up to 100. `--view items --topic <id|number>`
@@ -41,7 +40,7 @@ item numbers: clickable prose links do not create `related` connections.
 |---|---|---|
 | `topic.add` | `name` | `short`, `ref` |
 | `item.add` | `question`, `type` | `topic` (the only `topic.add`; children inherit their parent's topic), `short`, `status`, `ack_to`, `owner`, `ask`, `options`, `parent`, `note`, `links`, `related`, `outcome`, `why`, `children`, `ref` |
-| `item.edit` | `item`, `patch` | patch: `question`, `type`, `note`, `links`, `related`, `short` |
+| `item.edit` | `item`, `patch` | patch: `question`, `type`, `note`, `links`, `related`, `short`, `ack_to` (on an Open/InProgress Ack item) |
 | `item.ask` | `item`, `ask` | `options` |
 | `item.status` | `item`, `status` | `ack_to`, `outcome`, `why`, `reason` |
 | `item.replace` | `item`, `replacement`, `outcome`, `why` | |
@@ -49,7 +48,7 @@ item numbers: clickable prose links do not create `related` connections.
 | `round.close` | `round_id` | |
 
 Set `topic` explicitly if neither default applies.
-Read `errors.md` for unfamiliar defaults, children, refs, transitions or limits.
+For defaults, refs and transitions, read `errors.md`.
 
 Give new topics/items a stable `short` label: a 2-4 word tree title,
 at most 40 characters ("Notes sync review").
@@ -58,19 +57,18 @@ Text is markdown; topic names, `short` and option labels are plain text.
 
 ## Shape the work
 
-When connected or told "use Ariadne", organise the work there yourself.
+When connected, organise the work in Ariadne.
 
 - **File as you go.** Start with a topic and an `in_progress` summary. Update
   items in place (`item.edit` note, `item.status`, `reply`). Finish the summary
   with `item.status` `open` and `ack_to`, result and evidence. Never wait until
   the end or post the same report twice.
-- **Route.** File results over a few lines or with multiple points, including
-  findings. Chat is 1-3 lines pointing at the topic. Owner instructions win.
+- **Route.** File findings and multi-point results. Chat is 1-3 lines pointing
+  at the topic. Owner instructions win.
 - **Topic.** One per concern (PR, test run, incident, plan), not per step.
 - **Tree.** Summary first: result and what waits on the owner; then whole-work
   decisions and sections in reading order. Points are children; sub-points nest.
-  Each point the owner may decide, comment on or track appears once, with its
-  ask. Keep this shape for later writes.
+  Each point the owner may act on appears once, with its ask.
 - **Type and status** say what the owner has to do. Never create an item
   `decided`, `done`, `dropped` or `replaced`; new results start `open` for Ack.
 
@@ -78,23 +76,26 @@ When connected or told "use Ariadne", organise the work there yourself.
 |---|---|---|
 | A decision only the owner can make | decision or question | `waiting_on_me`: set `ask` |
 | A nonblocking question | question | `open` |
-| A decision you already took | decision | `open`, `ack_to: "decided"` |
-| Something you established | finding | `open`, `ack_to: "done"` |
-| Something the owner should understand | explanation | `open`, `ack_to: "done"` |
+| A decision you already took, now finished | decision | `open`, `ack_to: "decided"` |
+| A finding still being investigated | finding | `open`, `ack_to: "open"` |
+| An explanation of work still running | explanation | `open`, `ack_to: "in_progress"` |
+| A finished result, once read | finding, explanation or task | `open`, `ack_to: "done"` |
 | Work you are doing now | task | `in_progress`, with a `note` |
 | Work for later or someone else | task | `open`, owner `other` |
 | Something you will not do | any | `open`, `ack_to: "dropped"` |
 
-- **Ack.** New reading material starts `open` with `ack_to`: usually `done`,
-  recorded decisions `decided`, ruled-out points `dropped`. Ack moves it there
-  without agent delivery. An ask may coexist; Ack waits for the owner reply.
-  Keep `ack_to` work open unless an Answer, Reply or Drop input targets that
-  item and directs completion: terminal `item.status` with `source_input_id`
-  clears the target. Existing work without
-  `ack_to` can close normally. Use `item.replace` for superseded work.
-  Keep unanswered asks `waiting_on_me`; explain withdrawal with a new
-  `ack_to: "dropped"` item. Permission to act needs a real question and a
-  "Got it, go ahead" option. Progress tasks finish `open` with `ack_to` too.
+- **Ack.** Choose `ack_to`: `open` for reading while work continues,
+  `in_progress` if underway, `done`/`decided` only if finished once read,
+  `dropped` if ruled out. Type alone never chooses it. New findings/explanations
+  without an ask require it: strict filing says "choose ack_to ..."; the CLI
+  reports a repair using the current `open` or `in_progress` status.
+  New Open/InProgress items need `ack_to` for `outcome` or `why`.
+  Ack clears it, sets that status and sends no input. Change an Open/InProgress
+  Ack choice with `item.edit.patch.ack_to`, preserving status and prose.
+  Keep it open for reading; owner-directed completion and replacement exceptions
+  are in `errors.md`. Ack waits for unanswered asks; keep them
+  `waiting_on_me`. Permission to act needs a real ask and a "Got it, go ahead"
+  option. Finished progress tasks also await Ack.
 - **Fields.** `question`: one-sentence heading; `ask` and `options`: answer box;
   `outcome` and `why`: result and evidence; `note`: progress line;
   `links`: `pr`, `file` or `doc` targets; `reply`: owner answer or long detail.
@@ -120,16 +121,15 @@ When connected or told "use Ariadne", organise the work there yourself.
 
 ## Examples
 
-[Review summary](item:1) below is a placeholder.
-
-Open a topic with an in-progress summary item and a finding under it:
+Start a topic with an in-progress summary and finding:
 
 ```json
-{"summary":"Started the retry review","operations":[{"op":"topic.add","name":"Review: notes sync retries","short":"Notes sync review"},{"op":"item.add","question":"Notes sync retry review","short":"Review summary","type":"task","status":"in_progress","note":"Reading the diff","children":[{"question":"Backoff has no jitter","short":"No jitter","type":"finding","status":"open","ack_to":"done","outcome":"Clients retry in lockstep","why":"The delay is fixed at 2s."}]}]}
+{"summary":"Started the retry review","operations":[{"op":"topic.add","name":"Review: notes sync retries","short":"Notes sync review"},{"op":"item.add","question":"Notes sync retry review","short":"Review summary","type":"task","status":"in_progress","note":"Reading the diff","children":[{"question":"Backoff has no jitter","short":"No jitter","type":"finding","status":"open","ack_to":"open","outcome":"Clients retry in lockstep","why":"The delay is fixed at 2s."}]}]}
 ```
 
-Finish [review summary](item:1) for Ack, using receipt revision 3:
+Reading leaves the finding and summary Open while the fix is tracked. File the
+report using receipt revision 3:
 
 ```json
-{"expected_item_revisions":{"1":3},"operations":[{"op":"item.status","item":{"id":"1"},"status":"open","ack_to":"done","reason":"Review ready to read","outcome":"Notes sync needs one fix","why":"See [no jitter](item:1.1)."}]}
+{"expected_item_revisions":{"1":3},"operations":[{"op":"item.status","item":{"id":"1"},"status":"open","ack_to":"open","reason":"Review ready to read","outcome":"Notes sync needs one fix","why":"See [no jitter](item:1.1)."}]}
 ```

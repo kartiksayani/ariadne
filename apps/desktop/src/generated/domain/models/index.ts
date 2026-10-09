@@ -8,7 +8,7 @@ import type { Sha256 } from '../primitives/Sha256';
 import type { UtcMillis } from '../primitives/UtcMillis';
 import type { UuidV4 } from '../primitives/UuidV4';
 export type AcceptanceState = "prepared" | "accepted" | "rejected" | "uncertain";
-export type AckTarget = "decided" | "done" | "dropped";
+export type AckTarget = "open" | "in_progress" | "decided" | "done" | "dropped";
 export type AdapterConfig = { namespace: string, values: UniqueMap<string, JsonValue>, };
 export type AllocatedRef = { "kind": "topic", id: UuidV4, } | { "kind": "item", id: ItemRef, } | { "kind": "message", id: UuidV4, } | { "kind": "round", id: UuidV4, };
 export type Answer = { id: UuidV4, seq: PositiveSafeInteger, item_id: ItemRef, question_revision: PositiveSafeInteger, question_snapshot: string, ask_snapshot: string | null, options_snapshot: Array<ItemOption>, selected_option_id: string | null, text: string, message_id: UuidV4, input_id: UuidV4, supersedes_answer_id: UuidV4 | null, created_at: UtcMillis, };

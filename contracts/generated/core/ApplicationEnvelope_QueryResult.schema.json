@@ -20,9 +20,11 @@
       ]
     },
     "AckTarget": {
-      "description": "Terminal state the agent proposes for an explicit owner acknowledgment.",
+      "description": "State the agent proposes for an explicit owner acknowledgment.",
       "type": "string",
       "enum": [
+        "open",
+        "in_progress",
         "decided",
         "done",
         "dropped"

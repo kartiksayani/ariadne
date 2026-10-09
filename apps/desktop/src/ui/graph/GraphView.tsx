@@ -66,7 +66,7 @@ const Node = memo(function Node({ node, focusable, onOpen, onCollapse, onHover }
     <div className="graph-node-head">
       <i className={`graph-node-icon ${visual.icon}`} role="img" aria-label={visual.label} title={visual.label} style={{ color: `var(--st-${node.status})` }} />
       <span className="graph-node-title">{node.short}</span>
-      {node.ack && <span className="graph-node-ack" title={`${ackTitle(node.ack)} · open details`}>Ack</span>}
+      {node.ack && <span className="graph-node-ack" title={`${ackTitle(node.ack, node.item.status)} · open details`}>{ackTitle(node.ack, node.item.status)}</span>}
       {node.collapsed && <span className="graph-node-below" title={belowTitle}>+{node.below}</span>}
       {node.canCollapse && <button type="button" className="graph-node-collapse" title="Collapse branches" aria-label="Collapse branches" tabIndex={-1}
         onClick={(event: MouseEvent) => { event.stopPropagation(); onCollapse(node); }}><i className="ph ph-minus" aria-hidden="true" /></button>}

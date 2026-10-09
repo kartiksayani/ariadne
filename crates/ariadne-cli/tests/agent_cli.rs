@@ -1150,12 +1150,97 @@ fn terminal_creation_is_repaired_recursively_and_read_exposes_the_ack_target() {
 }
 
 #[test]
+fn missing_read_only_ack_preserves_parent_and_child_status_in_preview_commit_and_ack() {
+    for item_type in ["finding", "explanation"] {
+        for status in ["open", "in_progress"] {
+            let setup = Setup::new(&seed());
+            let child_status = if status == "open" {
+                "in_progress"
+            } else {
+                "open"
+            };
+            let body = serde_json::to_vec(&json!({"operations": [{
+                "op": "item.add", "topic": {"id": id(5)}, "type": item_type,
+                "question": "Read the report.", "status": status,
+                "outcome": "Investigation continues.", "why": "More evidence is needed.",
+                "children": [{"type": item_type, "question": "Read the detail.",
+                    "status": child_status}]
+            }]}))
+            .unwrap();
+            let before = setup.bytes();
+            let preview = envelope(&setup.apply_with(&["--dry-run"], &body), 0);
+            assert_eq!(setup.bytes(), before);
+            let repairs = preview["data"]["repairs"].as_array().unwrap();
+            assert_eq!(repairs.len(), 2);
+            for (repair, expected) in repairs.iter().zip([status, child_status]) {
+                assert!(repair.as_str().unwrap().contains(&format!(
+                    "repaired to `{expected}` to keep the current status"
+                )));
+            }
+            let filed = envelope(&setup.apply_with(&[], &body), 0);
+            let mut expected = preview;
+            expected["data"].as_object_mut().unwrap().remove("dry_run");
+            assert_eq!(filed, expected);
+            for (number, status, op) in [("3", status, 998), ("3.1", child_status, 999)] {
+                let session = setup.store().read(&id(2)).unwrap();
+                let item = &session.items.0[&ItemRef::new(number).unwrap()];
+                assert_eq!(serde_json::to_value(&item.status).unwrap(), status);
+                assert_eq!(serde_json::to_value(item.ack_to).unwrap(), status);
+                let request = json!({"session": {"project_id": id(1), "session_id": id(2)},
+                    "command": {"command": "ack", "api_version": 1, "op_id": id(op),
+                        "params": {"item_id": number, "expected_revision": item.revision}}});
+                envelope(
+                    &setup.call(
+                        &["item", "ack", "--json-stdin", "--json"],
+                        Some(&serde_json::to_vec(&request).unwrap()),
+                    ),
+                    0,
+                );
+                let after = setup.store().read(&id(2)).unwrap();
+                let read = &after.items.0[&ItemRef::new(number).unwrap()];
+                assert_eq!(read.status, item.status);
+                assert_eq!(read.ack_to, None);
+                assert_eq!(read.outcome, item.outcome);
+                assert_eq!(read.why, item.why);
+            }
+        }
+    }
+}
+
+#[test]
+fn new_ordinary_items_with_result_prose_without_ack_are_refused_without_writes() {
+    for item_type in ["task", "decision", "question"] {
+        for status in ["open", "in_progress"] {
+            for prose in [
+                json!({"outcome": "Result"}),
+                json!({"why": "Evidence"}),
+                json!({"outcome": "Result", "why": "Evidence"}),
+            ] {
+                let setup = Setup::new(&seed());
+                let mut item = json!({"op": "item.add", "topic": {"id": id(5)},
+                    "type": item_type, "question": "Work remains.", "status": status});
+                item.as_object_mut()
+                    .unwrap()
+                    .extend(prose.as_object().unwrap().clone());
+                let body = serde_json::to_vec(&json!({"operations": [item]})).unwrap();
+                let before = setup.bytes();
+                for flags in [&["--dry-run"][..], &[][..]] {
+                    let refused = envelope(&setup.apply_with(flags, &body), 2);
+                    assert_eq!(refused["error"]["code"], "invalid_argument");
+                    assert_eq!(setup.bytes(), before);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn strict_creation_rejects_every_terminal_status_including_nested_item_operations() {
     for status in ["decided", "done", "dropped", "replaced"] {
         let mut strict = request(650);
         strict["operations"] = json!([
             {"op": "item.add", "ref": "parent", "topic": {"id": id(5)},
-             "type": "finding", "question": "Parent", "status": "open",
+             "type": "finding", "question": "Parent", "status": "open", "ack_to": "open",
              "owner": {"kind": "agent", "binding_id": id(3)}},
             {"op": "item.add", "ref": "child", "topic": {"id": id(5)},
              "parent": {"ref": "parent"}, "type": "finding", "question": "Child",
@@ -1173,7 +1258,7 @@ fn strict_creation_rejects_every_terminal_status_including_nested_item_operation
 #[test]
 fn explicit_ack_creation_is_accepted_and_conflicts_or_replaced_are_atomic_failures() {
     let setup = Setup::new(&seed());
-    for target in ["decided", "done", "dropped"] {
+    for target in ["open", "in_progress", "decided", "done", "dropped"] {
         let value = envelope(
             &setup.apply(&json!({"operations": [{
                 "op": "item.add", "topic": {"id": id(5)}, "type": "finding",
@@ -1620,9 +1705,9 @@ fn the_help_example_uses_explicit_ack_targets_for_the_lenient_fixture() {
         .0;
     let mut expected: Value = serde_json::from_str(LENIENT).unwrap();
     expected["operations"][1]["status"] = json!("open");
-    expected["operations"][1]["ack_to"] = json!("done");
+    expected["operations"][1]["ack_to"] = json!("open");
     expected["operations"][1]["children"][0]["status"] = json!("open");
-    expected["operations"][1]["children"][0]["ack_to"] = json!("done");
+    expected["operations"][1]["children"][0]["ack_to"] = json!("open");
     assert_eq!(serde_json::from_str::<Value>(body).unwrap(), expected);
     for word in [
         "--dry-run",
