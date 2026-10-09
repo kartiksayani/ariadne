@@ -82,21 +82,39 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
     expect(after.toolbarGap).toBe(before.toolbarGap);
     expect(after.headerTop).toBe(before.headerTop);
     await expect(page.getByRole('group', { name: 'Filter items' }).getByRole('button', { name: /\bOpen \d+$/ })).toBeInViewport();
+    const actionTimeout = 15_000;
+    const requiredControls = ['Close session', 'Rename', 'Copy ID', 'Sending and connection'];
     for (const viewport of [{ width: 1000, height: 668 }, { width: 900, height: 650 }]) {
       await page.setViewportSize(viewport);
       // The bar keeps Close session and the sending chip (details, Pause); connect lives on the project page.
       const bar = page.locator('.tree-session-bar');
       await expect(bar.getByRole('button', { name: 'Close session' })).toBeInViewport();
-      for (const action of await bar.getByRole('button').all()) {
-        await action.scrollIntoViewIfNeeded();
+      const sessionControls = await bar.getByRole('button').evaluateAll(buttons => buttons.map(button => {
+        const title = button.getAttribute('title'), ariaLabel = button.getAttribute('aria-label');
+        const label = (title === 'Sending and connection' ? title : ariaLabel ?? (button as HTMLElement).innerText)
+          .replace(/[\uE000-\uF8FF]/g, '').replace(/\s+/g, ' ').trim();
+        return { label, title, ariaLabel };
+      }));
+      expect(sessionControls.map(control => control.label)).toEqual(expect.arrayContaining(requiredControls));
+      const visitedControls: string[] = [];
+      for (const { label, title, ariaLabel } of sessionControls) {
+        // The sending button can change its name while its dialog is open; its title still identifies the focus return target.
+        // Text controls include icon glyphs in their accessible name; match their readable text instead.
+        const action = title
+          ? bar.getByRole('button').and(bar.getByTitle(title, { exact: true }))
+          : ariaLabel ? bar.getByRole('button', { name: ariaLabel, exact: true })
+            : bar.getByRole('button').filter({ hasText: label });
+        // Optional dispatch actions can disappear as status changes; required controls must all be checked.
+        if (!requiredControls.includes(label) && await action.count() === 0) continue;
+        await action.scrollIntoViewIfNeeded({ timeout: actionTimeout });
         await expect(action).toBeInViewport();
         expect(await action.evaluate(element => {
           const bounds = element.getBoundingClientRect();
           return document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.closest('button') === element;
-        })).toBe(true);
+        }, undefined, { timeout: actionTimeout })).toBe(true);
+        visitedControls.push(label);
         // Pause and Resume write at once; Close session and the sending details open a dialog to dismiss.
         // Pause and Resume are icon buttons: their name is the aria-label.
-        const label = ((await action.getAttribute('aria-label')) ?? (await action.innerText())).trim();
         if (/Pause|Resume|Try again/.test(label)) continue;
         // Copy ID acts immediately without a dialog. This layout harness grants no clipboard permissions.
         if (label === 'Copy ID') {
@@ -105,20 +123,21 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
         }
         // Rename opens its fields in the bar, not a dialog; Esc closes them and focus returns to the button.
         if (label === 'Rename') {
-          await action.click();
+          await action.click({ timeout: actionTimeout });
           const field = bar.getByLabel('Session name');
           await expect(field).toBeInViewport();
           await page.keyboard.press('Escape');
           await expect(field).toHaveCount(0);
           continue;
         }
-        await action.click();
+        await action.click({ timeout: actionTimeout });
         const review = page.getByRole('dialog');
         await expect(review).toBeInViewport();
         await review.getByRole('button', { name: label === 'Close session' ? 'Cancel' : 'Done', exact: true }).click();
         await expect(review).toHaveCount(0);
         await expect(action).toBeFocused();
       }
+      expect(visitedControls, `session controls checked at ${viewport.width}×${viewport.height}`).toEqual(expect.arrayContaining(requiredControls));
       const current = await geometry();
       expect(current.rowsHeight).toBeGreaterThan(usefulRows);
       expect(current.centerScrollTop).toBe(0);

@@ -101,6 +101,7 @@ async function holdSuccessor(configuration, expectedCount, successorId, message)
 export async function runRecoveryAcceptance(configuration) {
   const evidence = process.env.ARIADNE_E2E_EVIDENCE, nonce = process.env.ARIADNE_E2E_NONCE;
   const baseline = await snapshot(configuration), queuedBefore = await admissions(configuration);
+  assert.equal(baseline.items[configuration.itemId].status, 'waiting_on_me', 'Recovery must answer the restored waiting item');
   assert.ok(Object.values(baseline.inputs).every(input => input.state === 'handled'));
   assert.equal(baseline.bindings[configuration.bindingId].dispatch_state, 'enabled');
   const demoBefore = await readFile(configuration.demo.sessionPath);
@@ -114,6 +115,8 @@ export async function runRecoveryAcceptance(configuration) {
   let session = await snapshot(configuration);
   const input = session.inputs[original.inputId], successor = Object.values(session.inputs).find(input => input.payload.text === successorText);
   assert.ok(successor); assert.equal(input.payload.text, workText); assert.equal(input.attempts.length, 1);
+  assert.equal(input.kind, 'answer'); assert.equal(input.payload.selected_option_id, null, 'Recovery sends own words without the recommended option');
+  assert.equal(successor.kind, 'reply'); assert.equal(successor.payload.selected_option_id, null);
   assert.equal(successor.seq, input.seq + 1);
   await holdSuccessor(configuration, queuedBefore.length + 1, successor.id, 'Original running turn must hold its successor');
   const replyText = `native-retained-recovery-reply-${nonce}\nThe completed original work remains published in full.`;

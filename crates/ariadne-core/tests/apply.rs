@@ -1608,7 +1608,11 @@ fn related_refusals_identify_operation_and_target_number_or_batch_ref() {
         (vec![existing("1")], "1", "itself"),
         (vec![existing("2"), existing("2")], "2", "more than once"),
         (vec![existing("99")], "99", "does not exist"),
-        (vec![local("notes")], "notes", "earlier item"),
+        (
+            vec![local("notse")],
+            "notse",
+            "no item in this batch has ref 'notse'",
+        ),
     ] {
         let setup = Setup::new(&seed());
         let mut r = guarded(10, "1", 1);

@@ -12,7 +12,7 @@ closed-source freemium product: never add an open-source licence (Cargo.toml is
 
 ## Alpha.7 work in progress
 
-Branch `fix/a8-hide` holds the alpha.7 UI and hide-item work; alpha.7 is not released. This review-fix task leaves changes in the working tree without committing or pushing.
+The alpha.7 UI and hide-item fixes are committed on `fix/a8-hide` in [PR #143](https://github.com/kartiksayani/ariadne/pull/143), awaiting merge; alpha.7 is not released.
 
 - Waiting on me and Sent scroll separately. Sent holds messages waiting for the agent to pick up, with Edit and Delete actions.
 - ⌥1–9 picks and sends a quick answer; ⌥0 focuses own words. Choices keep any typed note.
@@ -174,7 +174,7 @@ Follow-ups the run surfaced:
 
 ## Next steps
 
-1. Review the uncommitted alpha.7 fixes on `fix/a8-hide` and the focused check results.
+1. Review the committed alpha.7 fixes in [PR #143](https://github.com/kartiksayani/ariadne/pull/143), awaiting merge, and the focused check results.
 2. Complete the remaining alpha.7 acceptance before publishing a release; this task does not run native/e2e checks.
 3. Update the release checkpoint when alpha.7 is released.
 

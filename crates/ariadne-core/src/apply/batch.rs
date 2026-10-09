@@ -228,7 +228,10 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                     EntityRef::Existing(existing) => existing.id.as_str(),
                     EntityRef::Local(local) => local.r#ref.as_str(),
                 };
-                core(CoreErrorCode::InvalidRef, format!("{operation}: related ref '{label}' must name an earlier item in this batch"))
+                core(
+                    CoreErrorCode::InvalidRef,
+                    format!("{operation}: no item in this batch has ref '{label}'"),
+                )
             })?;
             if &target == source {
                 return Err(core(
