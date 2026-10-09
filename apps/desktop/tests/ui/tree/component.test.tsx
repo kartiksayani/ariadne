@@ -63,6 +63,45 @@ const patches = (transport: AppTransport) => transport.mutations.filter(request 
 const chip = (label: string) => within(screen.getByRole('group', { name: 'Filter items' })).getByRole('button', { name: new RegExp(`^${label}`) });
 
 describe('session tree rows', () => {
+  it.each(['ready', 'failed'] as const)('waits for a stale session rename refresh that becomes %s, then saves or shows the loading error', async result => {
+    const transport = new HistoryTransport();
+    const { store, actions } = await mount({ transport });
+    const execute = vi.spyOn(actions, 'execute');
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'session_get') {
+        await gate;
+        if (result === 'failed') throw new Error('Read failed');
+      }
+      return invoke(name, args);
+    });
+    ++transport.source.revision;
+    act(() => { transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: transport.source.revision }); });
+    expect(store.getSnapshot().status).toBe('stale');
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Session name' }), { target: { value: 'Fresh session name' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(transport.mutations.filter(value => value.command.command === 'session_label_set')).toHaveLength(0);
+    const revision = transport.source.revision;
+    await act(async () => { release(); await store.refresh(); });
+    const writes = transport.mutations.filter(value => value.command.command === 'session_label_set');
+    if (result === 'failed') {
+      expect(writes).toHaveLength(0);
+      expect(execute).not.toHaveBeenCalled();
+      expect(within(screen.getByRole('group', { name: 'Rename session' })).getByRole('alert').textContent)
+        .toBe("Ariadne is still loading this session's latest changes. Try again.");
+      expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
+      return;
+    }
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ command: { params: { name: 'Fresh session name' } } });
+    expect(execute).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ command: 'session_label_set' }), revision);
+    expect(screen.queryByRole('group', { name: 'Rename session' })).toBeNull();
+    expect(document.querySelector('.tree-session-title')?.textContent).toBe('Fresh session name');
+  });
   it('renders topic bands and item rows with one roving tab stop and the session bar', async () => {
     await mount();
     expect(screen.getByRole('tree', { name: 'Session items' })).toBeTruthy();
@@ -213,6 +252,14 @@ describe('session tree rows', () => {
     expect(row('1.1').getAttribute('data-highlight')).toBe('strong'); expect(row('1').getAttribute('data-highlight')).toBeNull();
     fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' }));
     await waitFor(() => expect(row('1').getAttribute('data-highlight')).toBe('weak'));
+    const badge = row('1').querySelector('.tree-collapsed')!;
+    expect(badge.hasAttribute('data-weak')).toBe(true);
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    const rule = (selector: string) => [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(([, value]) => value!.trim() === selector)?.[2];
+    expect(rule('.tree-collapsed')).toContain('color: var(--a-acc-text)');
+    expect(rule('.tree-collapsed[data-weak]')).toContain('var(--color-accent) 7%, var(--a-card)');
+    expect(rule('.tree-collapsed[data-weak]')).not.toBe(rule('.tree-collapsed'));
+    expect(rule('.tree-collapsed[data-weak]:hover')).toContain('var(--color-accent) 10%, var(--a-card)');
   });
   it('offers the row actions for the item status and routes them to the workspace', async () => {
     const { calls } = await mount();
@@ -223,13 +270,45 @@ describe('session tree rows', () => {
     fireEvent.click(within(row('1.1')).getByRole('button', { name: 'Remove (⌫)' }));
     expect(calls.acts.map(([intent, target]) => `${intent}:${target.item_id}`)).toEqual(['bring:1.1', 'later:1.1', 'reopen:5', 'followup:5']);
     expect(calls.removed).toBe(1);
-    // A delivery on its way (item 3's in-flight input) leaves only Remove.
-    expect(within(row('3')).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Remove (⌫)']);
+    // A delivery on its way still permits owner-only Hide and Remove.
+    expect(within(row('3')).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Hide (x)', 'Remove (⌫)']);
     fireEvent.keyDown(row('1.1'), { key: 'b' }); expect(calls.acts).toHaveLength(4);
   });
 });
 
 describe('session tree filters', () => {
+  it('counts the matches themselves, excluding context and forced selections', async () => {
+    const { rerender } = await mount({ props: { query: 'receipt', selectedId: '4' } });
+    expect(screen.getByText('Showing 2 of 9 items matching “receipt”')).toBeTruthy();
+    expect(ids()).toContain('1'); // parent kept as context
+    expect(ids()).toContain('4'); // selection kept despite not matching
+    rerender({ query: '' });
+    expect(screen.queryByText(/items matching/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Clear search' })).toBeNull();
+  });
+  it('explains picked statuses and clears only search', async () => {
+    let currentQuery = 'receipt';
+    const clear = vi.fn();
+    const view = await mount({ configure: value => { viewOf(value).filters.statuses = ['open']; },
+      props: { query: currentQuery, onClearSearch: () => { clear(); currentQuery = ''; } } });
+    expect(screen.getByText('Showing 1 of 9 items matching “receipt” in the statuses you picked')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+    view.rerender({ query: currentQuery });
+    expect(clear).toHaveBeenCalledOnce();
+    expect(viewOf(view.transport).filters.statuses).toEqual(['open']);
+    expect(chip('Open').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByText(/items matching/)).toBeNull();
+  });
+  it('counts only items in the current archive mode', async () => {
+    const view = await mount({ configure: value => {
+      const session = value.sessions.get(route.session_id)!;
+      session.topics[session.items['8']!.topic_id]!.archived_at = '2026-10-07T12:00:00Z';
+    }, props: { query: 'receipt' } });
+    expect(screen.getByText('Showing 2 of 8 items matching “receipt”')).toBeTruthy();
+    viewOf(view.transport).filters.archived = true;
+    await act(async () => { await view.navigation.refresh(); });
+    expect(screen.getByText('Showing 0 of 1 items matching “receipt”')).toBeTruthy();
+  });
   it('reads a saved full status set, including duplicates, as All', async () => {
     const { transport } = await mount({ configure: value => {
       viewOf(value).filters.statuses = ['done', 'open', 'waiting_on_me', 'replaced', 'decided', 'in_progress', 'dropped', 'open', 'done'];
@@ -681,7 +760,7 @@ describe('session tree inline answering', () => {
     await waitFor(() => expect(picked()).toEqual(['true', 'false']));
     const text = within(control()!).getByLabelText('Reply in your own words');
     fireEvent.change(text, { target: { value: 'Neither, ship tomorrow.' } });
-    await waitFor(() => expect((within(control()!).getByRole('button', { name: 'Send reply' }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect((within(control()!).getByRole('button', { name: 'Send as a reply only' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.keyDown(text, { key: 'Escape' });
     expect(control()).toBeNull(); expect(document.activeElement).toBe(row('2'));
     fireEvent.keyDown(row('2'), { key: 'a' });
@@ -699,12 +778,16 @@ describe('session tree inline answering', () => {
     await waitFor(() => expect(control()).not.toBeNull());
     await waitFor(() => expect(drafts.getSnapshot().ready).toBe(true));
     await waitFor(() => expect((within(control()!).getByRole('button', { name: /Send “Afternoon”/ }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(within(control()!).getByRole('textbox'), { target: { value: ' After the review, please.  ' } });
+    expect(within(control()!).getByRole('button', { name: 'Send “Afternoon” with your note' })).toBeTruthy();
     fireEvent.keyDown(row('2'), { key: 'Enter' });
     await waitFor(() => expect(held).toHaveLength(1));
-    expect(held[0]).toMatchObject({ route: { ...route, item_id: '2' }, intent: 'answer', label: 'Afternoon', question: transport.sessions.get(route.session_id)!.items['2']!.question });
+    expect(held[0]).toMatchObject({ route: { ...route, item_id: '2' }, intent: 'answer', label: 'Afternoon', question: transport.sessions.get(route.session_id)!.items['2']!.question,
+      change: { selected_option_id: 'afternoon', text: ' After the review, please.  ' } });
     expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(false);
     expect(await held[0].queue()).toBe(true);
     expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(true);
+    expect(transport.mutations.find(request => request.command.command === 'input_submit')?.command).toMatchObject({ params: { selected_option_id: 'afternoon', text: ' After the review, please.  ' } });
   });
   it('answers the oldest waiting question when a is pressed elsewhere', async () => {
     await mount({ configure: options });
@@ -964,6 +1047,66 @@ describe('scrolling the tree', () => {
   };
   const link = (view: Awaited<ReturnType<typeof mount>>, id: string): RevealedItem =>
     ({ kind: 'item', route: { ...route, item_id: id }, store: view.store, temporaryExpandedItemIds: [] });
+
+  it('observes sticky topic headers arriving after a saved search starts loading', async () => {
+    const observers: Set<Element>[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      targets = new Set<Element>();
+      constructor() { observers.push(this.targets); }
+      observe(target: Element) { this.targets.add(target); }
+      disconnect() { this.targets.clear(); }
+    });
+    try {
+      const view = await mount({ load: false, props: { query: 'receipt', selectedId: '8' } });
+      expect(document.querySelector('.tree-topic')).toBeNull();
+      await act(async () => { await view.store.refresh(); });
+      expect(document.querySelector('.tree-topic')).not.toBeNull();
+      expect(observers.some(targets => targets.has(scroller()) && [...targets].some(target => target.matches('.tree-topic')))).toBe(true);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('keeps the selected row below its topic header when the search line appears or wraps', async () => {
+    let bannerHeight = 48, headerHeight = 60;
+    const observers: { callback: () => void; targets: Set<Element> }[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      targets = new Set<Element>();
+      constructor(callback: () => void) { observers.push({ callback, targets: this.targets }); }
+      observe(target: Element) { this.targets.add(target); }
+      disconnect() {}
+    });
+    const rectangle = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = scroller(), banner = screen.queryByRole('button', { name: 'Clear search' });
+      const top = banner ? bannerHeight : 0;
+      if (this === box) return new DOMRect(0, top, 300, 400 - top);
+      if (this.matches('.tree-topic')) return new DOMRect(0, top, 300, headerHeight);
+      const id = this.dataset.itemId, at = id ? ids().indexOf(id) : -1;
+      if (this.getAttribute('role') === 'treeitem' && at >= 0) return new DOMRect(0, top + at * 100 - (box?.scrollTop ?? 0), 300, 40);
+      return rectangle.call(this);
+    });
+    try {
+      const view = await mount({ props: { selectedId: '8', detailOpen: true }, configure: value => {
+        for (const item of Object.values(value.sessions.get(route.session_id)!.items)) if (item) item.question = 'Matching text';
+      } });
+      scroller().scrollTop = 440; fireEvent.scroll(scroller());
+      view.rerender({ query: 'Matching' });
+      expect(row('8').getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+      expect(row('8').getBoundingClientRect().top).toBeGreaterThanOrEqual(108);
+      bannerHeight = 96;
+      const resize = observers.find(observer => observer.targets.has(scroller()) && [...observer.targets].some(target => target.matches('.tree-topic')))!;
+      act(resize.callback);
+      expect(row('8').getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+      expect(row('8').getBoundingClientRect().top).toBeGreaterThanOrEqual(156);
+      // A topic can wrap without changing the search line or the viewport height.
+      scroller().scrollTop += row('8').getBoundingClientRect().top - 296;
+      fireEvent.scroll(scroller());
+      headerHeight = 220;
+      expect([...resize.targets].some(target => target.matches('.tree-topic'))).toBe(true);
+      act(resize.callback);
+      expect(row('8').getBoundingClientRect().top).toBeGreaterThanOrEqual(316);
+      expect(row('8').getBoundingClientRect().bottom).toBeLessThanOrEqual(400);
+    } finally { vi.unstubAllGlobals(); }
+  });
 
   it('never scrolls when an item is clicked, even once the workspace echoes the opening back', async () => {
     const view = await opened();

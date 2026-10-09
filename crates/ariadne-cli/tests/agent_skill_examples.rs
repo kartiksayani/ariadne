@@ -201,19 +201,29 @@ impl Seeded {
 
     /// Bind an example's placeholders to this session: the revision of every
     /// existing item it guards becomes the current one, and an example that
-    /// answers a dispatched input gets that input delivered first (item `1`
-    /// replied to, the input in flight under attempt `...0011`).
+    /// answers a dispatched input gets that input delivered first (an answer
+    /// with a note or a reply on item `1`, in flight under attempt `...0011`).
     fn bound(&self, mut request: Value) -> Value {
         if !request["source_input_id"].is_null() {
             assert_eq!(request["source_input_id"], id(0x10).as_str());
             assert_eq!(request["attempt_id"], id(0x11).as_str());
-            let (input, number) = self.deliver_reply();
+            let choice_with_note = request["expected_item_revisions"].get("3").is_some();
+            if choice_with_note {
+                self.prepare_retry_choice();
+            }
+            let (input, number) = self.deliver_input(choice_with_note);
             request["source_input_id"] = json!(input.as_str());
             request["input_result"]["handled_through_message_number"] = json!(number);
         }
         // The closing-parent example settles the last open child `1.1` of item
         // `1`; the seed has no child, so file one that waits on the owner.
-        if request["expected_item_revisions"].get("1.1").is_some() {
+        if request["expected_item_revisions"].get("1.1").is_some()
+            && !self
+                .session()
+                .items
+                .0
+                .contains_key(&ItemRef::new("1.1").unwrap())
+        {
             let child = json!({
                 "expected_item_revisions": {"1": self.revision("1")},
                 "operations": [{"op": "item.add", "topic": {"id": id(5)}, "parent": {"id": "1"},
@@ -233,10 +243,41 @@ impl Seeded {
         request
     }
 
-    /// The owner replies on item `1`, and the reply is delivered: the input is in
-    /// flight under attempt `...0011`. Returns the input and the owner message
-    /// number that the agent's result has to handle.
-    fn deliver_reply(&self) -> (UuidV4, u64) {
+    /// File the ask and its related same-topic finding and cross-topic question
+    /// through the real CLI before the owner chooses an option with a note.
+    fn prepare_retry_choice(&self) {
+        self.succeeds(
+            &[],
+            &json!({
+                "expected_item_revisions": {"1": self.revision("1")},
+                "operations": [
+                    {"op": "item.ask", "item": {"id": "1"}, "ask": "Retry or stop?",
+                        "options": [{"id": "x", "label": "Retry", "consequence": "Five attempts"}]},
+                    {"op": "item.add", "topic": {"id": id(5)}, "parent": {"id": "1"},
+                        "question": "Retry up to five attempts", "short": "Retry cap", "type": "finding",
+                        "status": "done", "outcome": "Five attempts", "why": "The initial retry plan."},
+                    {"op": "topic.add", "ref": "budget", "name": "Retry budget", "short": "Retry budget"},
+                    {"op": "item.add", "topic": {"ref": "budget"}, "question": "Budget for five attempts?",
+                        "short": "Retry budget", "type": "question", "status": "open"}
+                ]
+            }),
+        );
+    }
+
+    /// The owner answers with a choice and note or replies on item `1`, and the
+    /// input is delivered under attempt `...0011`. Returns the input and the
+    /// owner message number that the agent's result has to handle.
+    fn deliver_input(&self, choice_with_note: bool) -> (UuidV4, u64) {
+        let (kind, text, selected_option_id, expected_question_revision) = if choice_with_note {
+            (
+                InputKind::Answer,
+                "Cap retries at three.",
+                Some("x".into()),
+                Some(self.session().items.0[&ItemRef::new("1").unwrap()].question_revision),
+            )
+        } else {
+            (InputKind::Reply, "What are Q10 and Q11?", None, None)
+        };
         let command = OwnerCommand::InputSubmit {
             api_version: SchemaVersion::new(1).unwrap(),
             op_id: id(700),
@@ -246,10 +287,10 @@ impl Seeded {
                     topic_id: id(5),
                     item_id: Some(ItemRef::new("1").unwrap()),
                 },
-                kind: InputKind::Reply,
-                text: "What are Q10 and Q11?".into(),
-                selected_option_id: None,
-                expected_question_revision: None,
+                kind,
+                text: text.into(),
+                selected_option_id,
+                expected_question_revision,
                 supersedes_answer_id: None,
             },
         };
@@ -284,7 +325,7 @@ impl Seeded {
                 |session| {
                     let marker =
                         format!("[ARIADNE_INPUT:{}:{}]", input_id.as_str(), attempt.as_str());
-                    let payload = format!("{marker}\nWhat are Q10 and Q11?\n");
+                    let payload = format!("{marker}\n{text}\n");
                     let input = session.inputs.0.get_mut(&input_id).unwrap();
                     input.state = InputState::InFlight;
                     input.active_attempt_id = Some(attempt.clone());
@@ -427,13 +468,13 @@ fn the_skill_text_names_no_retired_field_or_receipt_shape() {
             }
         }
     }
-    // The lenient defaults the core teaches are the ones the CLI applies.
+    // The lenient defaults the errors file teaches are the ones the CLI applies.
     for needle in [
         "`owner`: you; `{\"kind\":\"me\"}`",
         "`ref`: r1, r2, ...",
         "Option `id`: 1, 2",
     ] {
-        assert!(RULES.contains(needle), "{needle}");
+        assert!(ERRORS.contains(needle), "{needle}");
     }
 }
 
@@ -493,6 +534,49 @@ fn the_core_and_on_demand_files_stay_small_and_are_each_pointed_at() {
         "the read-once rule belongs in reconnect.md only"
     );
     assert!(RECONNECT.contains("`ariadne read` once"));
+}
+
+#[test]
+fn the_skill_routes_parent_closure_to_the_file_that_teaches_it() {
+    assert!(CHECKLIST.contains("## Closing the parent"));
+    assert!(INPUTS.contains("See `checklist.md` for when and how to close a parent"));
+    assert!(!REVIEW.contains("closing rule in `inputs.md`"));
+    for directory in SKILL_DIRECTORIES {
+        let files = generated(directory);
+        let route = files[0]
+            .1
+            .lines()
+            .find(|line| line.contains("closing a parent"))
+            .expect("core must route parent closure");
+        assert!(route.starts_with("| `checklist.md` |"), "{route}");
+    }
+}
+
+#[test]
+fn the_core_marks_topic_optional_and_explains_its_defaults() {
+    for directory in SKILL_DIRECTORIES {
+        let files = generated(directory);
+        let row = files[0]
+            .1
+            .lines()
+            .find(|line| line.starts_with("| `item.add` |"))
+            .unwrap();
+        let columns: Vec<_> = row.split('|').map(str::trim).collect();
+        assert!(!columns[2].contains("`topic`"), "{row}");
+        assert!(columns[3].contains("`topic`"), "{row}");
+        assert!(columns[3].contains("the request's only `topic.add`"));
+        assert!(columns[3].contains("nested `children` inherit their parent's topic"));
+        assert!(files[0]
+            .1
+            .contains("Set `topic` explicitly if neither default applies."));
+    }
+    // The opening example omits topic on both the parent and its child. The
+    // real CLI wires both to the sole topic.add, as the core table promises.
+    let (seeded, _, _) = Seeded::committed(&examples(RULES)[0]);
+    let session = seeded.session();
+    let (topic, items) = topic_items(&session, "Review: PR #812");
+    assert_eq!(by_short(&items, "Review summary").topic_id, topic.id);
+    assert_eq!(by_short(&items, "No jitter").topic_id, topic.id);
 }
 
 /// The compact receipt names the values the next request needs.
@@ -693,23 +777,66 @@ fn the_closing_parent_example_settles_the_last_child_and_closes_the_parent() {
     assert_eq!(ids, ["1", "1.1"]);
 }
 
-/// The inputs example answers a reply on item `1`: a reply, a decision and a
-/// result that cites the reply.
+/// A choice with a note decides item `1`, updates a same-topic finding and drops
+/// a cross-topic question, leaving unrelated items alone and explaining both.
 #[test]
 fn the_inputs_example_replies_decides_and_commits_its_result() {
-    let (seeded, request, data) = Seeded::committed(&examples(INPUTS)[0]);
+    let seeded = Seeded::new();
+    let unrelated = seeded.session().items.0[&ItemRef::new("2").unwrap()].clone();
+    let request = seeded.bound(checked(&examples(INPUTS)[0]));
+    let question_revision = seeded.session().items.0[&ItemRef::new("1").unwrap()].question_revision;
+    let data = seeded.succeeds(&[], &request);
     assert_compact(&data);
     assert_eq!(request["summary"], "Answered [owner choice](item:1)");
     let session = seeded.session();
     let item = &session.items.0[&ItemRef::new("1").unwrap()];
     assert_eq!(item.status, ItemStatus::Decided);
-    let input = UuidV4::new(request["source_input_id"].as_str().unwrap()).unwrap();
-    let result = session.inputs.0[&input].attempts[0]
+    assert_eq!(item.outcome.as_deref(), Some("Retry with three attempts"));
+    let cap = &session.items.0[&ItemRef::new("1.1").unwrap()];
+    assert_eq!(cap.parent.as_ref(), Some(&item.id));
+    assert_eq!(cap.topic_id, item.topic_id);
+    assert_eq!(cap.status, ItemStatus::Done);
+    assert_eq!(cap.outcome.as_deref(), Some("Three attempts"));
+    let budget = &session.items.0[&ItemRef::new("3").unwrap()];
+    assert!(budget.parent.is_none());
+    assert_ne!(budget.topic_id, item.topic_id);
+    assert_eq!(budget.status, ItemStatus::Dropped);
+    assert_eq!(
+        budget.outcome.as_deref(),
+        Some("No five-attempt budget needed")
+    );
+    assert_eq!(session.items.0[&unrelated.id], unrelated);
+    let input_id = UuidV4::new(request["source_input_id"].as_str().unwrap()).unwrap();
+    let input = &session.inputs.0[&input_id];
+    assert_eq!(input.kind, InputKind::Answer);
+    assert_eq!(input.payload.intent, InputKind::Answer);
+    assert_eq!(input.payload.selected_option_id.as_deref(), Some("x"));
+    assert_eq!(input.payload.text, "Cap retries at three.");
+    assert_eq!(input.expected_question_revision, Some(question_revision));
+    let options = &input.payload.target_snapshot.options;
+    assert_eq!(options.len(), 1);
+    assert_eq!(options[0].id, "x");
+    assert_eq!(options[0].label, "Retry");
+    assert_eq!(options[0].consequence, "Five attempts");
+    let result = input.attempts[0]
         .domain_result
         .as_ref()
         .expect("the input has a committed result");
     assert_eq!(result.reply_message_ids.len(), 1);
     assert!(result.followup_item_ids.is_empty());
+    assert!(result.explanation.contains("cap retries at three"));
+    assert!(result.explanation.contains("[retry cap](item:1.1)"));
+    assert!(result.explanation.contains("[retry budget](item:3)"));
+    let reply = session
+        .messages
+        .iter()
+        .find(|message| message.id == result.reply_message_ids[0])
+        .unwrap();
+    assert_eq!(reply.item_id.as_ref(), Some(&item.id));
+    assert_eq!(
+        reply.body,
+        "Use Retry with three attempts, following your note."
+    );
 }
 
 /// The follow-up example answers a reply on item `1`: two explanation children

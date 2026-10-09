@@ -11,7 +11,11 @@ import { blockedDraft, emptyDraft, ownerActions, useOwnerDrafts, type DraftEntry
 import { agentName } from '../shell/model';
 
 /** A keyboard request to open the input for an intent, optionally choosing option `optionIndex`. */
-export interface OwnerFocusRequest { intent: OwnerIntent; token: number; optionIndex?: number }
+export interface OwnerFocusRequest {
+  intent: OwnerIntent; token: number; optionIndex?: number; sendOption?: boolean; ownWords?: boolean;
+  /** An immediate answer must still be the option and question visible at the key press. */
+  answerTarget?: { optionId: string; revision: number; questionRevision: number; bindingId: string | null };
+}
 
 /** The text and option a send puts into the draft. */
 export interface DraftChange { readonly text: string; readonly selected_option_id: string | null }
@@ -61,8 +65,8 @@ export interface Submit {
   readonly error: string | null;
   select: (optionId: string | null) => void;
   write: (text: string) => void;
-  /** Sends the option only. */
-  sendOption: (optionId: string) => void;
+  /** Sends the option with the given note, or the draft's current text when omitted. */
+  sendOption: (optionId: string, note?: string) => void;
   /** Sends the text only, never with an option. */
   sendText: (text: string) => void;
   /** Sends the draft as written (non-answer intents). */
@@ -128,10 +132,10 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
     error: entry?.error ? plainFailure(entry.error) : state.error ? plainFailure(state.error) : null,
     select: optionId => { if (entry && !locked) drafts.edit(entry.draft.op_id, { selected_option_id: optionId }); },
     write: text => { if (entry && !locked) drafts.edit(entry.draft.op_id, { text }); },
-    sendOption: optionId => {
+    sendOption: (optionId, note) => {
       const option = item?.options.find(value => value.id === optionId);
       if (!entry || !option || !ready()) return;
-      dispatch(option.label, { selected_option_id: option.id, text: '' });
+      dispatch(option.label, { selected_option_id: option.id, text: note ?? drafts.getSnapshot().entries[entry.draft.op_id]?.draft.text ?? entry.draft.text });
     },
     sendText: text => {
       if (!entry || !text.trim() || !ready()) return;

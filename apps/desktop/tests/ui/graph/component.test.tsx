@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -47,6 +49,68 @@ const ids = () => [...document.querySelectorAll<HTMLElement>('.graph-node')].map
 const selected = () => document.querySelector<HTMLElement>('.graph-node[aria-selected="true"]')?.dataset.itemId;
 
 describe('session graph view', () => {
+  it('fades hidden branches while keeping click and outside selection paths into detail', async () => {
+    const value = await setup(undefined, preferences({ hidden_item_ids: ['1'] }));
+    const { rerender } = render(<value.Composition />);
+    for (const id of ['1', '1.1', '1.1.1', '1.2']) expect(node(id).className).toContain('is-hidden');
+    expect(node('2').className).not.toContain('is-hidden');
+    expect(node('1.1.1').getAttribute('aria-label')).toContain('(hidden)');
+    fireEvent.click(node('1.1.1'));
+    await waitFor(() => expect(value.reveals).toEqual([['1.1.1', true]]));
+    expect(value.saved.at(-1)?.hidden_item_ids).toEqual(['1']);
+    const reveal = await value.routes.revealItem({ ...value.route, item_id: '1.2' });
+    rerender(<value.Composition reveal={reveal} />);
+    expect(selected()).toBe('1.2');
+    expect(node('1.2').className).toContain('is-hidden');
+  });
+
+  it('highlights collapsed children consistently in graph badges and tree notes', () => {
+    for (const [file, selector] of [['graph/graph.css', '.graph-node-below'], ['tree/tree.css', '.tree-collapsed']]) {
+      const css = readFileSync(resolve(__dirname, '../../../src/ui', file!), 'utf8');
+      const declarations = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+        .find(([, rule]) => rule!.trim() === selector)?.[2];
+      expect(declarations).toMatch(/color:\s*var\(--a-acc-text\);/);
+      expect(declarations).toMatch(/background:\s*color-mix\(in srgb, var\(--color-accent\) 15%, var\(--a-card\)\);/);
+    }
+  });
+
+  it('mutes collapsed badges on hidden graph nodes and tree rows, including hover', () => {
+    for (const [file, selector] of [['graph/graph.css', '.graph-node.is-hidden .graph-node-below'],
+      ['tree/tree.css', '.tree-item-hidden .tree-collapsed'], ['tree/tree.css', '.tree-item-hidden .tree-collapsed:hover']]) {
+      const css = readFileSync(resolve(__dirname, '../../../src/ui', file!), 'utf8');
+      const declarations = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+        .find(([, rule]) => rule!.trim() === selector)?.[2];
+      expect(declarations).toMatch(/color:\s*color-mix\(in srgb, var\(--color-text\) 62%, transparent\);/);
+      expect(declarations).toMatch(/background:\s*color-mix\(in srgb, var\(--color-text\) \d+%, transparent\);/);
+      expect(declarations).not.toMatch(/var\(--(?:color-accent|a-acc-text)\)/);
+    }
+  });
+
+  it('opens hidden collapsed branches without clearing their hidden preference', async () => {
+    const value = await setup(undefined, preferences({ hidden_item_ids: ['1'], expanded_item_ids: [] }));
+    render(<value.Composition />);
+    expect(node('1').classList.contains('is-hidden')).toBe(true);
+    fireEvent.click(within(node('1')).getByText('+3'));
+    await waitFor(() => expect(value.reveals).toEqual([['1', true]]));
+    expect(node('1.1').classList.contains('is-hidden')).toBe(true);
+    expect(value.saved.at(-1)).toMatchObject({ hidden_item_ids: ['1'], expanded_item_ids: ['1'], selected_item_id: '1' });
+  });
+
+  it('keeps hidden filter context at least as faded as other context nodes', async () => {
+    const value = await setup(undefined, preferences({ hidden_item_ids: ['1'],
+      filters: { ...preferences().filters, search: 'morning or evening' } }));
+    render(<value.Composition />);
+    const style = document.createElement('style');
+    style.textContent = readFileSync(resolve(__dirname, '../../../src/ui/graph/graph.css'), 'utf8');
+    document.head.append(style);
+    try {
+      expect(node('1').classList.contains('is-dimmed')).toBe(true);
+      expect(node('1').classList.contains('is-hidden')).toBe(true);
+      expect(getComputedStyle(node('1')).opacity).toBe('0.4');
+      expect(getComputedStyle(node('1.1.1')).opacity).toBe('0.45');
+    } finally { style.remove(); }
+  });
+
   it('renders the legend and one card per topic with its nodes and edges', async () => {
     const value = await setup(); render(<value.Composition />);
     for (const text of ['Thread to the selected item', 'Replaced by', 'Waiting on me', 'Closed', 'One graph per topic']) expect(screen.getByText(text)).toBeTruthy();
@@ -71,7 +135,9 @@ describe('session graph view', () => {
 
   it('opens a collapsed node: selects it, expands it, opens detail and saves the view', async () => {
     const value = await setup(undefined, preferences({ expanded_item_ids: [] })); render(<value.Composition />);
-    expect(within(node('1')).getByText('+3').title).toBe('3 items below, collapsed · click to open the next tier');
+    const badge = within(node('1')).getByText('+3');
+    expect(badge.classList.contains('graph-node-below')).toBe(true);
+    expect(badge.title).toBe('3 items below, collapsed · click to open the next tier');
     expect(node('1').getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(node('1'));
     expect(selected()).toBe('1'); expect(ids()).toContain('1.1');

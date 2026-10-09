@@ -300,6 +300,7 @@ Keyboard navigation works when focus is outside editable controls:
 | `r` | Focus reply/note/follow-up editor based on item status |
 | `d` | Focus drop intent; require explicit submit |
 | `z` | Toggle local Later flag |
+| `x` | Hide or unhide the item and its subtree in the owner's view |
 | `o` | Focus reopen intent for eligible terminal item; Replaced items offer Follow up only |
 | `e` | Open guarded topic archive action |
 | `/` or Cmd+F | Focus search |

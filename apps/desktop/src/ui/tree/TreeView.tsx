@@ -18,6 +18,9 @@ import { AnswerControl } from '../answer/AnswerControl';
 import type { PendingSubmission } from '../answer/useSubmit';
 import { notices as noticeStore } from '../pages/notices';
 import { chipsOf, collapsedNote, oldestWaiting, parentKey, sessionBar, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
+import { HiddenRow } from './HiddenRow';
+import { hiddenGroupKey, hiddenGroupsFor } from './hidden';
+import { HideIcon } from '../shared/HideIcon';
 import { ItemRow, type RowAction } from './ItemRow';
 import { TopicRow, type TopicAction } from './TopicRow';
 import { TopicReply } from '../answer/TopicReply';
@@ -25,7 +28,6 @@ import { StuckNote } from '../answer/StuckNote';
 import { editQueued, inEditor } from '../answer/held';
 import { InlineRecovery } from '../../components/recovery/RecoveryPanel';
 import { Banner, SessionBar } from './SessionBar';
-import { saveSessionLabel } from '../shared/SessionRename';
 import { FilterBar } from './FilterBar';
 import { useLifecycle } from './Lifecycle';
 import { ItemRefs } from '../shared/MarkdownText';
@@ -39,7 +41,7 @@ import { visibleSession } from '../remove/model';
 import { reconnectingNote } from '../shared/connection';
 import './tree.css';
 
-export type RowIntent = 'bring' | 'reply' | 'drop' | 'note' | 'followup' | 'reopen' | 'later';
+export type RowIntent = 'bring' | 'reply' | 'drop' | 'note' | 'followup' | 'reopen' | 'later' | 'hide';
 export interface TreeViewProps {
   readonly navigation: NavigationStore;
   readonly store: SessionStore;
@@ -70,6 +72,7 @@ export interface TreeViewProps {
   readonly onResume: () => void;
   readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
   readonly onClearFilters: () => void;
+  readonly onClearSearch?: () => void;
   readonly onShowArchive: () => void;
   /** Called instead of sending when the agent is not running; without it the send queues. */
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
@@ -89,7 +92,7 @@ const SKELETON = [
 
 export function TreeView(props: TreeViewProps) {
   const { navigation, store, actions, drafts, query, reveal, selectedId, detailOpen, railOpen, graph, notices, highlightedItems, highlightedMessages,
-    summaries, onHoverItem, onSelected, onDismissReveal, onResume, onAct, onClearFilters, onShowArchive,
+    summaries, onHoverItem, onSelected, onDismissReveal, onResume, onAct, onClearFilters, onClearSearch, onShowArchive,
     onAgentNotRunning, onRemove } = props;
   const state = useSession(store), raw = state.snapshot?.session ?? null;
   const nav = useNavigation(navigation), preferences = nav.preferences;
@@ -106,6 +109,8 @@ export function TreeView(props: TreeViewProps) {
   const [folds, setFolds] = useState<ReadonlySet<string> | null>(null);
   const savedFolds = view?.collapsed_topic_ids;
   const closedTopics = useMemo(() => folds ?? new Set(savedFolds ?? []), [folds, savedFolds]);
+  const hiddenFocus = useRef<string | null>(null);
+  const [expandedHiddenGroups, setExpandedHiddenGroups] = useState<ReadonlySet<string>>(new Set());
   const [focusKey, setFocusKey] = useState<string | null>(selectedId);
   const [kbd, setKbd] = useState(false);
   const [answering, setAnswering] = useState<string | null>(null);
@@ -128,13 +133,13 @@ export function TreeView(props: TreeViewProps) {
   const revealId = reveal?.kind === 'item' ? reveal.route.item_id : null;
   const temporary = reveal?.kind === 'item' ? reveal.temporaryExpandedItemIds : null;
   const model = useMemo(() => session && view ? treeModel({ session, view, search: query, later, collapsedTopics: closedTopics, selectedId, revealId,
-    temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute }) : null,
-  [session, view, query, later, closedTopics, selectedId, revealId, temporary, presence, health, summaries, minute]);
+    expandedHiddenGroups, temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute }) : null,
+  [session, view, query, expandedHiddenGroups, later, closedTopics, selectedId, revealId, temporary, presence, health, summaries, minute]);
   const summary = summaries.find(value => value.project_id === route.project_id && value.session_id === route.session_id) ?? null;
   const bar = sessionBar(session, summary, minute, presence);
   const rows = useMemo(() => model?.rows ?? [], [model]);
   const sections = useMemo(() => {
-    const groups: { topic: Extract<Row, { kind: 'topic' }>; items: ItemRowModel[] }[] = [];
+    const groups: { topic: Extract<Row, { kind: 'topic' }>; items: Exclude<Row, { kind: 'topic' }> [] }[] = [];
     for (const row of rows) {
       if (row.kind === 'topic') groups.push({ topic: row, items: [] });
       else groups.at(-1)?.items.push(row);
@@ -143,6 +148,43 @@ export function TreeView(props: TreeViewProps) {
   }, [rows]);
   const latest = useRef({ view, preferences, rows, session, folds });
   latest.current = { view, preferences, rows, session, folds };
+
+  const hiddenSelection = useRef<{ sessionId?: string; selectedId: string | null }>({ selectedId: null });
+  useEffect(() => {
+    const current = latest.current;
+    if (!current.session) return;
+    const previous = hiddenSelection.current;
+    hiddenSelection.current = { sessionId: current.session.id, selectedId };
+    const selectionChanged = previous.sessionId !== current.session.id || previous.selectedId !== selectedId;
+    const ids = [selectionChanged ? selectedId : null, reveal?.kind === 'item' ? reveal.route.item_id : null,
+      props.historyReveal?.kind === 'item' ? props.historyReveal.route.item_id : null];
+    const explicit = new Set(current.view?.hidden_item_ids ?? []);
+    setExpandedHiddenGroups(previous => {
+      const next = new Set(previous);
+      ids.forEach(id => { if (id) hiddenGroupsFor(current.session!, explicit, id).forEach(key => next.add(key)); });
+      return next.size === previous.size ? previous : next;
+    });
+  }, [session?.id, selectedId, reveal, props.historyReveal]);
+  const toggleHiddenGroup = (key: string) => {
+    onDismissReveal();
+    setExpandedHiddenGroups(previous => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+  const hideItem = (row: ItemRowModel) => {
+    const current = navigation.getSnapshot();
+    if (!current.preferences || current.writing || current.pendingOperationId !== null) return;
+    onDismissReveal();
+    const element = elements.current.get(row.key);
+    const groupKey = hiddenGroupKey(row.item.topic_id, row.item.parent);
+    if (!row.hidden && !expandedHiddenGroups.has(groupKey) && element?.contains(document.activeElement)) hiddenFocus.current = groupKey;
+    void navigation.setHidden({ ...route, item_id: row.item.id }, !row.hidden, current.preferences.revision).then(saved => {
+      if (!saved) { hiddenFocus.current = null; noticeStore.push({ id: 'hide-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
+        text: 'The hidden items preference could not be saved. Try again.' }); }
+    });
+  };
 
   // ------------------------------------------------------------ writes
   const saveView = (change: (next: SessionPreferences) => void) => {
@@ -239,7 +281,10 @@ export function TreeView(props: TreeViewProps) {
       onAgentNotRunning({ route: { ...route, item_id: item.id }, intent: 'answer', question: item.question, label, agent: bar?.agent ?? 'the agent', change, queue: submit });
     } else void submit();
   };
-  const sendOption = (index: number) => { const option = options[index]; if (option) send({ selected_option_id: option.id, text: '' }); };
+  const sendOption = (index: number, note?: string) => {
+    const option = options[index];
+    if (entry && option) send({ selected_option_id: option.id, text: note ?? drafts.getSnapshot().entries[entry.draft.op_id]?.draft.text ?? entry.draft.text });
+  };
   const answerControl = answerRow ? <AnswerControl variant="full" selected={chosen} draft={entry?.draft.text ?? ''}
     options={options.map(option => ({ id: option.id, label: option.label, consequence: option.consequence, recommended: option.recommended }))}
     warn={entry?.error ? plainFailure(entry.error) : undefined} blocked={blocked ?? undefined} locked={!entry || entry.saving}
@@ -264,13 +309,15 @@ export function TreeView(props: TreeViewProps) {
     'move-down': move(index => index + 1), 'move-up': move(index => index - 1), first: move(() => 0), last: move((_index, visible) => visible.length - 1),
     unfold: onRow((row, index) => {
       const next = latest.current.rows[index + 1];
-      if (row.kind === 'topic' && !row.expanded) toggleTopic(row.topic.id);
+      if (row.kind === 'hidden' && !row.expanded) toggleHiddenGroup(row.key);
+      else if (row.kind === 'topic' && !row.expanded) toggleTopic(row.topic.id);
       else if (row.kind === 'item' && row.hasKids && !row.expanded) toggleItem(row.item.id);
-      else if (row.expanded && next && next.depth > row.depth) focusRow(next.key);
+      else if (row.expanded && next && (next.depth > row.depth || row.kind === 'hidden' && next.kind === 'item' && next.hidden)) focusRow(next.key);
       return true;
     }),
     fold: onRow(row => {
       if (row.kind === 'topic') { if (row.expanded) toggleTopic(row.topic.id); return true; }
+      if (row.kind === 'hidden') { if (row.expanded) toggleHiddenGroup(row.key); else { const parent = parentKey(row); if (parent) focusRow(parent); } return true; }
       if (row.hasKids && row.expanded && !model?.filtering) { toggleItem(row.item.id); return true; }
       const parent = parentKey(row);
       if (parent && latest.current.rows.some(value => value.key === parent)) focusRow(parent);
@@ -278,6 +325,7 @@ export function TreeView(props: TreeViewProps) {
     }),
     enter: onRow(row => {
       if (row.kind === 'topic') { toggleTopic(row.topic.id); return true; }
+      if (row.kind === 'hidden') { toggleHiddenGroup(row.key); return true; }
       if (answering === row.key && chosen >= 0) { sendOption(chosen); return true; }
       select(row.item.id); return true;
     }),
@@ -288,19 +336,21 @@ export function TreeView(props: TreeViewProps) {
       focusRow(target.key); openAnswer(target.key); return true;
     }),
     choose: onRow((row, _index, intent) => {
-      if (row.kind === 'topic') return true;
+      if (row.kind !== 'item') return true;
       if (answering !== row.key || intent.kind !== 'choose') return false;
       if (entry && options[intent.index]) drafts.edit(entry.draft.op_id, { selected_option_id: options[intent.index].id });
       return true;
     }),
     escape: onRow(row => { if (answering !== row.key) return false; setAnswering(null); return true; }),
     archive: onRow(row => {
-      const topicId = row.kind === 'topic' ? row.topic.id : row.item.topic_id;
+      const topicId = row.kind === 'topic' ? row.topic.id : row.kind === 'hidden' ? row.topicId : row.item.topic_id;
       if (archivedMode) lifecycle.restore(topicId); else lifecycle.archive(topicId);
       return true;
     }),
     bring: topicOnly, respond: topicOnly, drop: topicOnly, reopen: topicOnly, later: topicOnly,
+    hide: (intent, event) => event.repeat ? true : onRow(row => { if (row.kind === 'item') hideItem(row); return true; })(intent, event),
     remove: onRow(row => {
+      if (row.kind === 'hidden') return true;
       onRemove(row.kind === 'topic' ? { kind: 'topic', session: route, topic_id: row.topic.id } : { kind: 'item', item: { ...route, item_id: row.item.id } });
       return true;
     }),
@@ -312,6 +362,12 @@ export function TreeView(props: TreeViewProps) {
   }).current;
   useEffect(() => { if (selectedId) { setKbd(false); setFocusKey(selectedId); } }, [selectedId]);
   useLayoutEffect(() => {
+    const hiddenTarget = hiddenFocus.current;
+    if (hiddenTarget && rows.some(row => row.key === hiddenTarget)) {
+      hiddenFocus.current = null;
+      setFocusKey(hiddenTarget); elements.current.get(hiddenTarget)?.focus({ preventScroll: true });
+      return;
+    }
     if (!rows.length || (focusKey && rows.some(row => row.key === focusKey))) return;
     let candidate: string | null = focusKey && session?.items[focusKey] ? session.items[focusKey]!.parent ?? session.items[focusKey]!.topic_id : null;
     while (candidate && !rows.some(row => row.key === candidate)) candidate = session?.items[candidate]?.parent ?? session?.items[candidate]?.topic_id ?? null;
@@ -484,6 +540,35 @@ export function TreeView(props: TreeViewProps) {
     if (current?.item_id !== scroll.item_id || current.offset !== scroll.offset) void saveView(next => { next.scroll = scroll; });
   };
 
+  const selectedForResize = useRef(selectedId);
+  selectedForResize.current = selectedId;
+  const previousQuery = useRef(query);
+  const topicKeys = JSON.stringify(sections.map(section => section.topic.key));
+  useLayoutEffect(() => {
+    const box = scroller.current;
+    if (!box || graph) return;
+    const keepSelected = () => {
+      const id = selectedForResize.current;
+      if (id && !inView(id)) nearest(id);
+    };
+    if (previousQuery.current !== query) keepSelected();
+    previousQuery.current = query;
+    if (!query || typeof ResizeObserver === 'undefined') return;
+    const selectedHeaderHeight = () => {
+      const element = selectedForResize.current ? elements.current.get(selectedForResize.current) : undefined;
+      return element ? headerHeight(element) : 0;
+    };
+    let height = box.getBoundingClientRect().height, topicHeight = selectedHeaderHeight();
+    // The search line changes the viewport; a wrapped sticky topic changes its reading top.
+    const observer = new ResizeObserver(() => {
+      const next = box.getBoundingClientRect().height, nextTopic = selectedHeaderHeight();
+      if (next !== height || nextTopic !== topicHeight) { height = next; topicHeight = nextTopic; keepSelected(); }
+    });
+    observer.observe(box);
+    box.querySelectorAll('.tree-topic').forEach(header => observer.observe(header));
+    return () => observer.disconnect();
+  }, [query, graph, topicKeys]);
+
   // ------------------------------------------------------------ rows
   const running = bar?.running ?? false;
   const touchedMessage = highlightedMessages.size && session ? session.messages.find(message => highlightedMessages.has(message.id))?.number ?? null : null;
@@ -501,6 +586,7 @@ export function TreeView(props: TreeViewProps) {
         if (item.status !== 'replaced') list.push({ icon: 'ph ph-arrow-counter-clockwise', title: 'Back to Open (o)', run: act('reopen') });
       }
     }
+    list.push({ icon: '', glyph: <HideIcon hidden={row.hidden} />, label: row.hidden ? 'Unhide' : undefined, title: row.hidden ? 'Unhide (x)' : 'Hide (x)', run: () => hideItem(row) });
     list.push({ icon: 'ph ph-trash', title: 'Remove (⌫)', run: () => onRemove({ kind: 'item', item: target }) });
     return list;
   };
@@ -541,7 +627,9 @@ export function TreeView(props: TreeViewProps) {
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
         reply={replying === row.topic.id && !archivedMode ? <TopicReply drafts={drafts} store={store} actions={actions} topicId={row.topic.id}
           agent={bar?.agent ?? 'the agent'} onClose={() => { setReplying(null); focusRow(row.key); }} /> : null} fix={fixOf(row)} />
-      {items.map(row => <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={busy}
+      {items.map(row => row.kind === 'hidden'
+        ? <HiddenRow key={row.key} row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleHiddenGroup} />
+        : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={busy}
         highlight={highlightedItems.has(row.key) ? 'strong' : row.collapsed?.ids.some(id => highlightedItems.has(id)) ? 'weak' : null}
         note={row.collapsed ? collapsedNote(row.collapsed, { items: highlightedItems, message: touchedMessage }) : null}
         actions={itemActions(row)} answer={answering === row.key ? answerControl : null} fix={fixOf(row)}
@@ -585,14 +673,16 @@ export function TreeView(props: TreeViewProps) {
     body = <div className="tree-no-match"><div className="tree-no-match-title">No archived topics in this session.</div></div>;
   } else body = tree;
 
-  return <section className="tree-column" aria-label="Session tree" data-kbd={kbd || undefined}
+  return <section className="tree-column" aria-label="Session tree" data-session-status={state.status} data-kbd={kbd || undefined}
     onKeyDownCapture={() => { if (!kbd) setKbd(true); }} onMouseDownCapture={() => { if (kbd) setKbd(false); }}>
     {bar && !archivedMode && <SessionBar bar={bar} busy={lifecycle.busy || !session} onClose={lifecycle.session}
-      onRename={session ? (name, description) => saveSessionLabel(actions, session.revision, name, description) : undefined}
+      onRename={session ? lifecycle.rename : undefined}
       dispatch={<DispatchChip actions={actions} onDetails={() => setSending(true)} />} />}
     {sending && <DispatchDialog store={actions.session} actions={actions} agent={bar?.agent ?? 'the agent'} onClose={() => setSending(false)} />}
     {filtersShown && <FilterBar chips={model?.chips ?? chipsOf([])} counts={counts} topics={model?.topics ?? []} topicId={view?.filters.topic_id ?? null}
       showTopics={!(detailOpen && railOpen)} disabled={nav.writing || nav.pendingOperationId !== null} onChip={setChip} onTopic={setTopic} />}
+    {model && !graph && (!!query || !model.chips.has('all')) && <Banner icon={query ? 'ph ph-magnifying-glass' : 'ph ph-funnel'} actions={<><span aria-hidden="true">·</span><button type="button" className="btn btn-ghost" disabled={nav.writing || nav.pendingOperationId !== null} onClick={query ? onClearSearch : onClearFilters}>{query ? 'Clear search' : 'Clear filters'}</button></>}>
+      Showing {model.searchCount} of {model.itemCount} items{query ? ` matching “${query}”` : ''}{model.hiddenCount > 0 ? ` (${model.hiddenCount} hidden)` : ''}{!model.chips.has('all') ? ' in the statuses you picked' : ''}</Banner>}
     {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>
       Showing an item outside your current filters.</Banner>}
     {archived && <Banner icon="ph ph-archive" actions={<>
