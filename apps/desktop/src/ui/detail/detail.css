@@ -296,12 +296,6 @@
   gap: 8px;
 }
 
-.detail-ask {
-  font-size: calc(14.5px * var(--text-scale));
-  line-height: 1.5;
-  color: var(--a-acc-text);
-}
-
 /* — outcome, note, why — */
 .detail-outcome-text {
   margin: 0;
@@ -549,6 +543,11 @@
   min-width: 0;
 }
 
+.detail-turn-cancelled .detail-bubble-you {
+  color: var(--a-label);
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
+}
+
 .detail-reply {
   display: flex;
   flex-direction: column;
@@ -617,14 +616,44 @@
   text-wrap: pretty;
 }
 
-/* — timeline (Message Excerpt, timeline variant) — */
-.detail-timeline {
-  gap: 10px;
+/* Quiet metadata within the single chat. */
+.detail-agent-meta,
+.detail-chat-marker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: calc(11.5px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
-.detail-timeline-list {
-  display: flex;
-  flex-direction: column;
+.detail-turn.excerpt-highlighted .detail-bubble {
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+
+.detail-kids-box {
+  position: relative;
+}
+
+.detail-kids-scroll {
+  max-height: calc(111px * var(--text-scale));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px;
+}
+
+.detail-kids-scroll .detail-kid {
+  margin-left: 0;
+}
+
+.detail-kids-more::after {
+  position: absolute;
+  right: 12px;
+  bottom: 0;
+  left: 0;
+  height: 16px;
+  pointer-events: none;
+  content: '';
+  background: linear-gradient(transparent, var(--a-side));
 }
 
 /* — agent reference — */
@@ -634,15 +663,6 @@
   gap: 8px;
   font-size: calc(11.5px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 58%, transparent);
-}
-
-.detail-reference > code {
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: calc(11.5px * var(--text-scale));
-  color: color-mix(in srgb, var(--color-text) 78%, transparent);
-  background: color-mix(in srgb, var(--color-text) 7%, transparent);
 }
 
 .detail-reference > .detail-copy {

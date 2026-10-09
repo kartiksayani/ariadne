@@ -4790,6 +4790,12 @@
         "filters": {
           "$ref": "#/$defs/ViewFilters"
         },
+        "hidden_item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
         "rail": {
           "$ref": "#/$defs/RailView"
         },

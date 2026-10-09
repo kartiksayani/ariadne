@@ -110,9 +110,12 @@
   <script id="roadmap-data" type="application/json">{
   "schema_version": 1,
   "status": {
-    "updated_at": "2026-10-07T01:00:00Z",
-    "headline": "58/58 done; P8.3 Paperwhite redesign done on feat/paperwhite-integration (integration PR #138 pending); P8.13 host location and topic counts merged in #133 and #134.",
+    "updated_at": "2026-10-09T00:00:00Z",
+    "headline": "58/58 done; alpha.6 released (v0.1.0-alpha.6, #141); alpha.7 UI and hide-item work in progress on fix/a8-hide, with three review fixes.",
     "notes": [
+      "Alpha.6 released on 2026-10-09 as v0.1.0-alpha.6 at 859c7a6c (#141): lighter skill, easier filing, copy, back/forward, item links, tidier tree and text size.",
+      "Alpha.7 work on fix/a8-hide: independently scrolling Waiting on me and Sent sections; Option (⌥) 1–9 quick answers and ⌥0 for own words; one chronological detail chat; dimmed and labelled cancelled bubbles that keep the original choice and note; highlighted +N badges; persisted hide items via x, row actions and detail, with expandable hidden groups and waiting questions retained in Waiting on me. Alpha.7 is not yet released.",
+      "Alpha.7 minor review fixes: hide waits for a stale session to refresh; indirect-match +N badges use a quieter accent tint with AA text in both themes; pending Remove hides Sent rows immediately and Undo restores them. Focused regression tests and npm run check are the local checks for this work; native runs are excluded by the owner for this task.",
       "P7.3 live Codex run on 2026-10-06 proved the core loop. Codex onboarding defects D1-D6 were fixed and merged in #116 (main 1e8d9e7), and docs/GUIDE.md documents the fixed behaviour; D7 is task P8.3; D8 follow-up: Ariadne should send the setup instruction through codex queue itself instead of the owner pasting it.",
       "P7.2 live Claude run on 2026-10-06 proved the core loop (ADR-0076, PR #114); remaining coverage rows deferred by owner ruling 2026-10-06. Follow-ups: queued inputs stay bound to a retired binding after rebind; no confirm-completed resolution for committed-result/unknown-turn attempts; a session with a Disconnected binding cannot be closed; delivery format: `recent_context` re-sends every topic message the host already produced; send only messages this binding has not seen (other bindings or pre-connect history), shrink topic/item snapshots to id+status, and move the fixed instruction sentence to the skill; rules source.md should say option consequence is required; Claude Mod uses undocumented $.plugin.root.",
       "PR #107 (agent rule sheet) merged to main as db352e5. It is not a roadmap item.",
@@ -2011,7 +2014,7 @@
         "prs": [
           117
         ],
-        "note": "Merged in #117; v0.1.0-alpha.1 pre-release published by release workflow run 37523466225 (Apple Silicon tarball + install.sh)."
+        "note": "Merged in #117; v0.1.0-alpha.1 pre-release published by release workflow run 37523466225 (Apple Silicon tarball + install.sh). Alpha.6 released on 2026-10-09 as v0.1.0-alpha.6 at 859c7a6c (#141); alpha.7 work remains unreleased on fix/a8-hide."
       }
     },
     {
@@ -2051,7 +2054,7 @@
           137,
           138
         ],
-        "note": "Delivered as the Paperwhite redesign (ADR-0086) in work packages #126-#132 on feat/paperwhite-integration; the finish (#136) adds fidelity thresholds of measured + 0.01 and native spec selectors. Integration PR to main pending."
+        "note": "Delivered as the Paperwhite redesign (ADR-0086) in work packages #126-#132 and integrated in #138; the finish (#136) adds fidelity thresholds of measured + 0.01 and native spec selectors. Alpha.6 released with the #141 UI improvements. Alpha.7 work on fix/a8-hide adds the Waiting/Sent split, ⌥ quick answers, one-chat detail, labelled cancelled bubbles with retained choice and note, highlighted +N badges and persisted hide items. Review fixes make hide wait for refresh, restore the quieter weak badge cue with AA text in both themes, and remove Sent rows during the Remove undo window with Undo restoration. Alpha.7 remains unreleased."
       }
     },
     {

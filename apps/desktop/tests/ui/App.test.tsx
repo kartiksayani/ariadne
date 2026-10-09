@@ -244,7 +244,7 @@ describe('ordinary desktop composition', () => {
     expect(mutations(transport, 'input_submit')[0]).toMatchObject({ session: route, command: { params: { kind: 'reply', text: 'Owner nonce: exact café\nsecond line' } } });
     // The detail shows the request's delivery steps and the reply in its timeline.
     expect(await screen.findByRole('region', { name: 'Your request' })).toBeTruthy();
-    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Timeline' })).getByText('Owner nonce: exact café second line', { exact: false })).toBeTruthy());
+    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Conversation' })).getByText('Owner nonce: exact café second line', { exact: false })).toBeTruthy());
     expect(await screen.findAllByText(/Sent/)).not.toHaveLength(0);
     expect(transport.sessions.get(route.session_id)?.items['8']?.status).toBe(originalStatus);
   });
@@ -588,7 +588,7 @@ describe('ordinary desktop composition', () => {
     const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
     await act(async () => { parent.focus(); });
     expect(document.activeElement).toBe(parent);
-    const fork = await screen.findByRole('button', { name: /^Add the receipt lookup test/ });
+    const fork = await screen.findByRole('button', { name: /^Branched into Add the receipt lookup test/ });
     expect(fork.hasAttribute('disabled')).toBe(false);
     await act(async () => {
       if (ordering === 'click then focus') { fireEvent.click(fork); fork.focus(); }
@@ -671,7 +671,7 @@ describe('ordinary desktop composition', () => {
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
     const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
     await act(async () => { parent.focus(); });
-    const fork = await screen.findByRole('button', { name: /^Add the receipt lookup test/ });
+    const fork = await screen.findByRole('button', { name: /^Branched into Add the receipt lookup test/ });
     await act(async () => { fireEvent.click(fork); fork.focus(); });
     await waitFor(() => expect(entered).toBe(true));
     await act(async () => { release(); await gate; });
@@ -774,7 +774,7 @@ describe('ordinary desktop composition', () => {
     await act(async () => { release(); await gate; });
     await waitFor(() => expect(completed).toBe(true));
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
-    expect(document.querySelector('.shell-detail .detail-reference code')?.textContent).toBe('1');
+    expect(document.querySelector<HTMLElement>('.shell-detail .item-detail')?.dataset.detailItemId).toBe('1');
     expect(screen.getByLabelText('Detail of #1')).toBeTruthy();
     expect(parent.getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('region', { name: 'Child items' })).toBeTruthy();

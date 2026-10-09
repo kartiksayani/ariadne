@@ -86,6 +86,7 @@ fn view() -> SessionPreferences {
         selected_item_id: Some(ItemRef::new("1").unwrap()),
         tab_order: NonnegativeSafeInteger::new(4).unwrap(),
         expanded_item_ids: vec![ItemRef::new("1").unwrap()],
+        hidden_item_ids: vec![],
         filters: ViewFilters {
             search: " exact café\n".into(),
             statuses: vec![ItemStatus::WaitingOnMe],
@@ -283,6 +284,211 @@ fn absent_preferences_are_canonical_defaults_without_a_data_write() {
     let lock = fs::metadata(s.home.path().join(".ariadne/ui.lock")).unwrap();
     assert_eq!(lock.mode() & 0o777, 0o600);
     assert_eq!(s.preferences().get(&owner()).unwrap(), value);
+}
+
+#[test]
+fn legacy_session_preferences_default_hidden_items_without_rewriting_or_changing_replay() {
+    let s = Setup::new();
+    let command = patch(
+        90,
+        1,
+        vec![PreferencesPatchEntry::SetSessionView {
+            preferences: view(),
+        }],
+    );
+    let legacy = serde_json::to_value(&command).unwrap();
+    assert!(legacy["params"]["entries"][0]["preferences"]
+        .get("hidden_item_ids")
+        .is_none());
+    let decoded: OwnerCommand = serde_json::from_value(legacy.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&decoded).unwrap(), legacy);
+    let saved = s.preferences().patch(&owner(), &decoded).unwrap();
+    let before = fs::read(s.live()).unwrap();
+    assert!(!String::from_utf8(before.clone())
+        .unwrap()
+        .contains("hidden_item_ids"));
+    let reopened = Registry::open(s.home.path()).unwrap();
+    let service = PreferencesService::new(&reopened);
+    assert!(service.get(&owner()).unwrap().sessions[0]
+        .hidden_item_ids
+        .is_empty());
+    assert_eq!(service.patch(&owner(), &command).unwrap(), saved);
+    assert_eq!(fs::read(s.live()).unwrap(), before);
+}
+
+#[test]
+fn hidden_item_preferences_preserve_independent_descendants_and_survive_reopening() {
+    let s = Setup::new();
+    let mut preferences = view();
+    for (index, ids) in [vec!["1", "1.1"], vec!["1.1"], vec![]]
+        .into_iter()
+        .enumerate()
+    {
+        preferences.hidden_item_ids = ids
+            .into_iter()
+            .map(|item| ItemRef::new(item).unwrap())
+            .collect();
+        let command = patch(
+            100 + index as u64,
+            1 + index as u64,
+            vec![PreferencesPatchEntry::SetSessionView {
+                preferences: preferences.clone(),
+            }],
+        );
+        s.preferences().patch(&owner(), &command).unwrap();
+        let reopened = Registry::open(s.home.path()).unwrap();
+        assert_eq!(
+            PreferencesService::new(&reopened)
+                .get(&owner())
+                .unwrap()
+                .sessions[0],
+            preferences
+        );
+    }
+    assert!(!String::from_utf8(fs::read(s.live()).unwrap())
+        .unwrap()
+        .contains("hidden_item_ids"));
+}
+
+#[test]
+fn hidden_item_preferences_validate_ids_duplicates_and_existing_byte_bounds() {
+    for invalid in ["", "0", "01", "1..2", "9007199254740992"] {
+        let mut wire = serde_json::to_value(view()).unwrap();
+        wire["hidden_item_ids"] = serde_json::json!([invalid]);
+        assert!(serde_json::from_value::<SessionPreferences>(wire).is_err());
+    }
+    let s = Setup::new();
+    let mut preferences = view();
+    preferences.hidden_item_ids = vec![ItemRef::new("1").unwrap(); 2];
+    let duplicate = patch(
+        100,
+        1,
+        vec![PreferencesPatchEntry::SetSessionView {
+            preferences: preferences.clone(),
+        }],
+    );
+    assert_eq!(
+        duplicate.validate_wire().unwrap_err().code,
+        CoreErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        s.preferences()
+            .patch(&owner(), &duplicate)
+            .unwrap_err()
+            .code,
+        CoreErrorCode::InvalidArgument
+    );
+    assert!(!s.live().exists());
+
+    // Like Later, hidden items have no separate item-count cap.
+    preferences.hidden_item_ids = (1..=1024)
+        .map(|n| ItemRef::new(n.to_string()).unwrap())
+        .collect();
+    s.preferences()
+        .patch(
+            &owner(),
+            &patch(
+                101,
+                1,
+                vec![PreferencesPatchEntry::SetSessionView {
+                    preferences: preferences.clone(),
+                }],
+            ),
+        )
+        .unwrap();
+    assert_eq!(
+        s.preferences().get(&owner()).unwrap().sessions[0]
+            .hidden_item_ids
+            .len(),
+        1024
+    );
+    let before = fs::read(s.live()).unwrap();
+    let backup = fs::read(s.backup()).ok();
+    preferences.hidden_item_ids = (1..=90_000)
+        .map(|n| ItemRef::new(n.to_string()).unwrap())
+        .collect();
+    assert_eq!(
+        s.preferences()
+            .patch(
+                &owner(),
+                &patch(
+                    102,
+                    2,
+                    vec![PreferencesPatchEntry::SetSessionView { preferences }],
+                ),
+            )
+            .unwrap_err()
+            .code,
+        CoreErrorCode::CapacityExceeded
+    );
+    assert_eq!(fs::read(s.live()).unwrap(), before);
+    assert_eq!(fs::read(s.backup()).ok(), backup);
+}
+
+#[test]
+fn duplicate_hidden_items_in_saved_preferences_preserve_the_file_for_recovery() {
+    let s = Setup::new();
+    s.preferences()
+        .patch(
+            &owner(),
+            &patch(
+                100,
+                1,
+                vec![PreferencesPatchEntry::SetSessionView {
+                    preferences: view(),
+                }],
+            ),
+        )
+        .unwrap();
+    let mut record: serde_json::Value =
+        serde_json::from_slice(&fs::read(s.live()).unwrap()).unwrap();
+    record["snapshot"]["sessions"][0]["hidden_item_ids"] = serde_json::json!(["1", "1"]);
+    let bytes = serde_json::to_vec_pretty(&record).unwrap();
+    write_private(&s.live(), &bytes);
+    assert_eq!(
+        s.preferences().get(&owner()).unwrap_err().code,
+        CoreErrorCode::CorruptSession
+    );
+    assert_eq!(fs::read(s.live()).unwrap(), bytes);
+}
+
+#[test]
+fn hidden_item_preferences_keep_the_existing_complete_response_budget() {
+    let s = Setup::new();
+    let mut preferences = view();
+    preferences.hidden_item_ids = (1..=40_000)
+        .map(|n| ItemRef::new(n.to_string()).unwrap())
+        .collect();
+    for index in 0..3 {
+        preferences.session = reference(700 + index * 10);
+        s.preferences()
+            .patch(
+                &owner(),
+                &patch(
+                    100 + index,
+                    1 + index,
+                    vec![PreferencesPatchEntry::SetSessionView {
+                        preferences: preferences.clone(),
+                    }],
+                ),
+            )
+            .unwrap();
+    }
+    let before = fs::read(s.live()).unwrap();
+    let backup = fs::read(s.backup()).unwrap();
+    preferences.session = reference(730);
+    let command = patch(
+        103,
+        4,
+        vec![PreferencesPatchEntry::SetSessionView { preferences }],
+    );
+    assert!(command.validate_wire().is_ok());
+    assert_eq!(
+        s.preferences().patch(&owner(), &command).unwrap_err().code,
+        CoreErrorCode::CapacityExceeded
+    );
+    assert_eq!(fs::read(s.live()).unwrap(), before);
+    assert_eq!(fs::read(s.backup()).unwrap(), backup);
 }
 
 #[test]

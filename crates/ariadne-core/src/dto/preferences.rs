@@ -109,6 +109,10 @@ pub struct SessionPreferences {
     pub selected_item_id: Option<ItemRef>,
     pub tab_order: NonnegativeSafeInteger,
     pub expanded_item_ids: Vec<ItemRef>,
+    // Items the owner hid in this session; descendants inherit their parent's visibility.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<ItemRef>>", optional)]
+    pub hidden_item_ids: Vec<ItemRef>,
     pub filters: ViewFilters,
     pub rail: RailView,
     pub scroll: Option<ScrollAnchor>,

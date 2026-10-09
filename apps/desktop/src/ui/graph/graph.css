@@ -231,6 +231,11 @@
   box-shadow: 0 0 0 1.5px var(--color-accent), var(--a-lift);
 }
 
+.graph-node.is-hidden {
+  opacity: 0.45;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
 .graph-node.is-dimmed {
   opacity: 0.4;
 }
@@ -269,11 +274,16 @@
   flex: none;
   padding: 0 5px;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 15%, var(--a-card));
   font-size: calc(10.5px * var(--text-scale));
   font-weight: 500;
   line-height: calc(15px * var(--text-scale));
-  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+  color: var(--a-acc-text);
+}
+
+.graph-node.is-hidden .graph-node-below {
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
 }
 
 .graph-node-collapse {
@@ -310,5 +320,10 @@
 }
 
 .graph-node.is-closed .graph-node-question {
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.graph-node.is-hidden .graph-node-title,
+.graph-node.is-hidden .graph-node-question {
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }

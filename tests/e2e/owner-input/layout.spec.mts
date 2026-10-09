@@ -82,21 +82,39 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
     expect(after.toolbarGap).toBe(before.toolbarGap);
     expect(after.headerTop).toBe(before.headerTop);
     await expect(page.getByRole('group', { name: 'Filter items' }).getByRole('button', { name: /\bOpen \d+$/ })).toBeInViewport();
+    const actionTimeout = 15_000;
+    const requiredControls = ['Close session', 'Rename', 'Copy ID', 'Sending and connection'];
     for (const viewport of [{ width: 1000, height: 668 }, { width: 900, height: 650 }]) {
       await page.setViewportSize(viewport);
       // The bar keeps Close session and the sending chip (details, Pause); connect lives on the project page.
       const bar = page.locator('.tree-session-bar');
       await expect(bar.getByRole('button', { name: 'Close session' })).toBeInViewport();
-      for (const action of await bar.getByRole('button').all()) {
-        await action.scrollIntoViewIfNeeded();
+      const sessionControls = await bar.getByRole('button').evaluateAll(buttons => buttons.map(button => {
+        const title = button.getAttribute('title'), ariaLabel = button.getAttribute('aria-label');
+        const label = (title === 'Sending and connection' ? title : ariaLabel ?? (button as HTMLElement).innerText)
+          .replace(/[\uE000-\uF8FF]/g, '').replace(/\s+/g, ' ').trim();
+        return { label, title, ariaLabel };
+      }));
+      expect(sessionControls.map(control => control.label)).toEqual(expect.arrayContaining(requiredControls));
+      const visitedControls: string[] = [];
+      for (const { label, title, ariaLabel } of sessionControls) {
+        // The sending button can change its name while its dialog is open; its title still identifies the focus return target.
+        // Text controls include icon glyphs in their accessible name; match their readable text instead.
+        const action = title
+          ? bar.getByRole('button').and(bar.getByTitle(title, { exact: true }))
+          : ariaLabel ? bar.getByRole('button', { name: ariaLabel, exact: true })
+            : bar.getByRole('button').filter({ hasText: label });
+        // Optional dispatch actions can disappear as status changes; required controls must all be checked.
+        if (!requiredControls.includes(label) && await action.count() === 0) continue;
+        await action.scrollIntoViewIfNeeded({ timeout: actionTimeout });
         await expect(action).toBeInViewport();
         expect(await action.evaluate(element => {
           const bounds = element.getBoundingClientRect();
           return document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.closest('button') === element;
-        })).toBe(true);
+        }, undefined, { timeout: actionTimeout })).toBe(true);
+        visitedControls.push(label);
         // Pause and Resume write at once; Close session and the sending details open a dialog to dismiss.
         // Pause and Resume are icon buttons: their name is the aria-label.
-        const label = ((await action.getAttribute('aria-label')) ?? (await action.innerText())).trim();
         if (/Pause|Resume|Try again/.test(label)) continue;
         // Copy ID acts immediately without a dialog. This layout harness grants no clipboard permissions.
         if (label === 'Copy ID') {
@@ -105,20 +123,21 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
         }
         // Rename opens its fields in the bar, not a dialog; Esc closes them and focus returns to the button.
         if (label === 'Rename') {
-          await action.click();
+          await action.click({ timeout: actionTimeout });
           const field = bar.getByLabel('Session name');
           await expect(field).toBeInViewport();
           await page.keyboard.press('Escape');
           await expect(field).toHaveCount(0);
           continue;
         }
-        await action.click();
+        await action.click({ timeout: actionTimeout });
         const review = page.getByRole('dialog');
         await expect(review).toBeInViewport();
         await review.getByRole('button', { name: label === 'Close session' ? 'Cancel' : 'Done', exact: true }).click();
         await expect(review).toHaveCount(0);
         await expect(action).toBeFocused();
       }
+      expect(visitedControls, `session controls checked at ${viewport.width}×${viewport.height}`).toEqual(expect.arrayContaining(requiredControls));
       const current = await geometry();
       expect(current.rowsHeight).toBeGreaterThan(usefulRows);
       expect(current.centerScrollTop).toBe(0);
@@ -158,7 +177,7 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
   } finally { await server.close(); }
 });
 
-test('keeps a sent answer between the item question and its timeline in the ordinary App', async ({ page }, testInfo) => {
+test('keeps one sent answer with its delivery controls in the ordinary App', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
@@ -178,27 +197,26 @@ test('keeps a sent answer between the item question and its timeline in the ordi
     await expect(session).toBeEnabled(); await session.click();
     await expect(page.locator('.tree-session-bar').getByRole('button', { name: 'Close session' })).toBeEnabled();
     await page.locator('[data-item-id="2"]').click();
-    // The reference (head, delivery receipt, timeline) scrolls on top; the composer is docked below it.
+    // The item and chat scroll on top; the composer is docked below it.
     const detail = page.locator('.shell-detail-scroll'), head = detail.locator('.item-detail .detail-head');
     await expect(head.getByRole('heading', { name: 'Which native delivery window should we use?', level: 2 })).toBeVisible();
     await detail.getByLabel('Reply in your own words').fill('Use the saved native delivery option.');
-    await detail.getByRole('button', { name: 'Send reply', exact: true }).click();
-    // A sent answer becomes the delivery stepper on top, the reply joins the timeline, and the
-    // reply ends the conversation as the owner's pending message. The fixture's session already
+    await detail.getByRole('button', { name: 'Send as a reply only', exact: true }).click();
+    // A sent answer becomes the delivery stepper on top and one pending bubble in the chat.
+    // The fixture's session already
     // has a message in flight, so its status line says what the reply waits behind instead of
     // echoing it; that line sits with the pending message.
     const receipt = detail.getByRole('region', { name: 'Conversation' }).getByRole('status').filter({ hasText: 'Queued behind your message' });
-    const sent = detail.getByRole('region', { name: 'Timeline' }).getByText('Use the saved native delivery option.');
+    const sent = detail.getByRole('region', { name: 'Conversation' }).getByText('Use the saved native delivery option.');
+    await expect(sent).toHaveCount(1);
+    await expect(detail.getByRole('region', { name: 'Timeline' })).toHaveCount(0);
     await expect(detail.getByRole('region', { name: 'Your answer' })).toContainText('Sending');
     await expect(receipt).toBeVisible(); await expect(sent).toBeAttached();
     await expect(detail.getByLabel('Reply in your own words')).toHaveCount(0);
-    // The sent reply also ends the conversation, as the owner's pending message, after the timeline.
+    // Delivery controls stay with the one pending owner message.
     const pending = detail.getByRole('region', { name: 'Conversation' }).locator('li[data-pending]').last();
     await expect(pending).toContainText('Use the saved native delivery option.');
-    expect(await detail.evaluate(element => {
-      const timeline = element.querySelector('[aria-label="Timeline"]')!, chat = element.querySelector('[aria-label="Conversation"]')!;
-      return !!(timeline.compareDocumentPosition(chat) & Node.DOCUMENT_POSITION_FOLLOWING);
-    })).toBe(true);
+    await expect(pending.getByRole('status').filter({ hasText: 'Queued behind your message' })).toBeVisible();
     // Check actual rectangles at the reported size, the supported minimum and
     // the wide workspace, including a shorter window that requires scrolling.
     for (const viewport of [{ width: 900, height: 650 }, { width: 1000, height: 700 }, { width: 1600, height: 960 }, { width: 1000, height: 500 }]) {
@@ -208,7 +226,7 @@ test('keeps a sent answer between the item question and its timeline in the ordi
       await expect(sent).toBeInViewport();
       const headBox = (await head.boundingBox())!, receiptBox = (await receipt.boundingBox())!, sentBox = (await sent.boundingBox())!;
       expect(receiptBox.y, `receipt below the question at ${viewport.width}×${viewport.height}`).toBeGreaterThanOrEqual(headBox.y + headBox.height);
-      expect(receiptBox.y, `pending message after the timeline reply at ${viewport.width}×${viewport.height}`).toBeGreaterThanOrEqual(sentBox.y + sentBox.height);
+      expect(receiptBox.y, `delivery controls below their reply at ${viewport.width}×${viewport.height}`).toBeGreaterThanOrEqual(sentBox.y + sentBox.height);
       for (const content of await head.locator('h2, .detail-status').all()) {
         const box = (await content.boundingBox())!;
         expect(box.y + box.height, `question head above receipt at ${viewport.width}×${viewport.height}`).toBeLessThanOrEqual(receiptBox.y);
@@ -307,9 +325,12 @@ test('reads as a chat: oldest exchange first with no round headers, quick replie
 
     // A closed item: its exchanges run oldest first, with no round headers, and no composer, only its revisit actions in the dock.
     await page.locator('[data-item-id="1"]').click();
-    const turns = pane.locator('.detail-chat-list li[data-round]');
-    await expect(turns).toHaveCount(3);
-    expect(await turns.evaluateAll(list => list.map(turn => turn.getAttribute('data-round')))).toEqual(['1', '2', '3']);
+    const turns = pane.locator('.detail-chat-list li[data-message-id]');
+    await expect(turns).not.toHaveCount(0);
+    const ids = await turns.evaluateAll(list => list.map(turn => turn.getAttribute('data-message-id')));
+    expect(new Set(ids).size).toBe(ids.length);
+    const chatText = await pane.getByRole('region', { name: 'Conversation' }).innerText();
+    expect(chatText.indexOf('Second reply of the chat')).toBeLessThan(chatText.indexOf('Third reply of the chat'));
     const tops = await turns.evaluateAll(list => list.map(turn => turn.getBoundingClientRect().top));
     expect(tops).toEqual([...tops].sort((a, b) => a - b));
     await expect(pane.getByRole('region', { name: 'Conversation' })).toContainText('Second reply of the chat');

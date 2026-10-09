@@ -24,6 +24,23 @@ function props(patch: Partial<ShellProps> = {}): ShellProps {
 }
 
 describe('Paperwhite shell', () => {
+  it('hides and unhides from the detail header next to Remove, and explains the key in the footer', () => {
+    const hide = vi.fn();
+    const value = props({ body: { waiting: null, center: null, detail: <p>Detail</p>, onHide: hide } });
+    const { rerender } = render(<Shell {...value} />);
+    const button = screen.getByRole('button', { name: 'Hide item' });
+    expect(button.title).toBe('Hide (x)');
+    expect(button.querySelector('svg path[d="m3 3 18 18"]')).not.toBeNull();
+    expect(button.nextElementSibling?.getAttribute('aria-label')).toBe('Remove item');
+    fireEvent.click(button); expect(hide).toHaveBeenCalledOnce();
+    expect(document.querySelector('.shell-footer')?.textContent).toContain('xhide / unhide');
+    rerender(<Shell {...value} body={{ ...value.body, hidden: true }} />);
+    const unhide = screen.getByRole('button', { name: 'Unhide item' });
+    expect(unhide.title).toBe('Unhide (x)');
+    expect(unhide.querySelector('svg path[d="m3 3 18 18"]')).toBeNull();
+    fireEvent.click(unhide); expect(hide).toHaveBeenCalledTimes(2);
+  });
+
   it('puts accessible Back/Forward icons before the detail breadcrumb, with shortcut tooltips and disabled endpoints', () => {
     const back = vi.fn(() => true), forward = vi.fn(() => true);
     const value = props({ body: { waiting: null, center: null, detail: <p>Detail</p>, detailPath: <span>Topic / #2</span> } });
@@ -61,6 +78,10 @@ describe('Paperwhite shell', () => {
     expect(screen.queryByRole('complementary', { name: 'Item detail' })).toBeNull();
     expect(document.querySelector('.shell-summary')?.textContent).toBe('10 items · 3 waiting on you · 2 in progress · 4 open');
     expect([...document.querySelectorAll('.shell-footer .pw-keycap')].map(key => key.textContent)).toContain('esc');
+    const footer = document.querySelector('.shell-footer')!;
+    expect(footer.textContent).toContain('⌥1–9send choice + note');
+    expect(footer.textContent).toContain('⌥0focus own words');
+    expect(footer.textContent).toContain('⌘↵reply only');
   });
 
   it('wires views, search, rail, theme and the detail column', () => {

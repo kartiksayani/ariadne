@@ -24,7 +24,7 @@ export function historyFailureFacts() {
     search: { present: Boolean(search), disabled: search ? search.disabled : null, value: search?.value ?? null,
       statusLabel: all('[role="status"]').map(text).find(label => label?.startsWith('Search preview')) ?? null },
     selected: { treeItemIds: all('[data-item-id][aria-selected="true"], [data-item-id][aria-current]').map(node => node.getAttribute('data-item-id')),
-      detailHeader: text(document.querySelector('.item-detail .detail-reference code')),
+      detailHeader: document.querySelector('.item-detail')?.getAttribute('data-detail-item-id') ?? null,
       detailQuestion: text(document.querySelector('.item-detail .detail-question')),
       rounds: all('.item-detail .detail-chat-list li[data-round]').map(node => node.getAttribute('data-round')) },
     ownerInput: { present: Boolean(owner), itemId: owner?.getAttribute('data-owner-input') ?? null,

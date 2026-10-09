@@ -29,5 +29,5 @@ it.each(frameIds)('mounts DesktopApp in design frame %s through the real stores'
   if (spec.state !== 'empty' && !graphFrame(spec)) await screen.findByRole('tree', { name: 'Session items' });
   if (spec.state === 'empty') expect(await screen.findByText('No items yet', { exact: false })).toBeTruthy();
   if (spec.state === 'clear') expect(await screen.findByText('Nothing waiting on you')).toBeTruthy();
-  if (spec.selected) await waitFor(() => expect(document.querySelector('.shell-detail .detail-reference code')?.textContent).toBe(spec.selected));
+  if (spec.selected) await waitFor(() => expect(document.querySelector<HTMLElement>('.shell-detail .item-detail')?.dataset.detailItemId).toBe(spec.selected));
 });

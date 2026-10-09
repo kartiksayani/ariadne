@@ -1,4 +1,4 @@
-# Ariadne handoff — 2026-10-07
+# Ariadne handoff — 2026-10-09
 
 Claude Code session is the maintainer (Fable 5.1); reviewers Opus 5.5, implementers
 Sonnet 5.5, at most seven delegates. The owner approved autonomous delivery, pushes
@@ -8,10 +8,31 @@ Ariadne behaviour, not Apple window/menu mechanics. Latency budgets are not gate
 closed-source freemium product: never add an open-source licence (Cargo.toml is
 `LicenseRef-Proprietary` since #108).
 
+**Released: alpha.6 (`v0.1.0-alpha.6`, 859c7a6c, #141), 2026-10-09. Roadmap: 58/58 done.** The release includes the lighter skill, easier filing, copy, back/forward, item links, tidier tree and text size. The Paperwhite redesign (ADR-0086) was integrated in #138. [Alpha.6 release](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.6).
+
+## Alpha.7 work in progress
+
+The alpha.7 UI and hide-item fixes are committed on `fix/a8-hide` in [PR #143](https://github.com/kartiksayani/ariadne/pull/143), awaiting merge; alpha.7 is not released.
+
+- Waiting on me and Sent scroll separately. Sent holds messages waiting for the agent to pick up, with Edit and Delete actions.
+- ⌥1–9 picks and sends a quick answer; ⌥0 focuses own words. Choices keep any typed note.
+- Item detail is one chronological chat. Results avoid repeating a full follow-up message, and children have their own scrolling list.
+- Cancelled bubbles are dimmed and labelled to say whether the agent may have seen them; the original choice and note remain visible.
+- The +N children badge has an accent highlight. An indirect match gets a quieter tint while keeping AA text contrast in both themes.
+- Hide items uses x, row actions or detail, saves the hidden preference and gathers rows into expandable muted groups. Hidden questions still appear in Waiting on me; the graph fades hidden items.
+- Review fixes: x waits for a stale session refresh before saving; weak badges regain their cue; pending Remove hides Sent rows immediately and Undo brings them back. Regression tests cover these paths, including item, topic, session and project removals.
+
+Local verification for this task is `npm run check`, focused Vitest and `python3 scripts/regenerate-roadmap.py --check`. The generated roadmap is refreshed with the task catalogue. Native/e2e runs are excluded by the owner's task instruction; no new native acceptance is claimed here.
+
+## Earlier delivery evidence
+
+### Paperwhite checkpoint (2026-10-07)
+
 **Main: fddd998 (#134). Roadmap: 58/58 done; P8.11 (remove commands) merged in #125, P8.12 (short labels) in #131 and P8.13 (host location and topic counts) in #133 and #134.** P8.3 is done as the Paperwhite redesign (ADR-0086): work packages #126-#132 and the finish #136 sit on `feat/paperwhite-integration`, and its integration PR to main is pending. `npm run test:design` is the fidelity gate (thresholds = measured + 0.01). Follow-ups: rewrite UI_AND_NATIVE for the Paperwhite UI; fidelity of frames 1m, 1z, 1w and 1ac. Continue is one picker, `ui/dialogs/ContinueTopicDialog.tsx`, which the tree and the other entry points share; the old `components/history-actions/ContinueDialog` is gone. Topic folds are saved in the session preferences (`collapsed_topic_ids`, at most 256 kept) and survive a restart; the Waiting column's fold is saved in the global layout (`waiting_collapsed`), folds by itself below 1300 px without sideways scroll, and the `w` key toggles it. Still open: a Rust `ExitRequested` flush for pending removals; the removal `expected_revision` is read at run time, so agent edits in the undo window are removed silently. P8.1 (release evidence) is done in #118; P8.2 (prebuilt alpha package) is done in #117 and the `v0.1.0-alpha.1` pre-release is published ([release](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.1), workflow run 37523466225).
+
 #109 was squash-merged as 1906583 at head ed56f7d after quality run 37411039163; #110
 (docs, install-trial evidence and README updates) as a2cfa9d at head 72dd525.
-No open PRs. The release install trial ran on main 1e8d9e7; its green `quality` run is [37511788713](https://github.com/kartiksayani/ariadne/actions/runs/37511788713). P8.1 is done in #118; manual release checks still need the owner’s date, tester and results for V11, V21 and V24 in the [verification contract](../planning/low-level/VERIFICATION.md#required-acceptance-matrix). Duplicate and
+At the #110 checkpoint, no open PRs were recorded. The release install trial ran on main 1e8d9e7; its green `quality` run is [37511788713](https://github.com/kartiksayani/ariadne/actions/runs/37511788713). P8.1 is done in #118; manual release checks still need the owner’s date, tester and results for V11, V21 and V24 in the [verification contract](../planning/low-level/VERIFICATION.md#required-acceptance-matrix). Duplicate and
 out-of-order event handling (P7.1 acceptance) is proved in core and CLI tests
 (`crates/ariadne-core/tests/history_actions.rs`, `tests/functional/acceptance/parallel_cli.rs`)
 rather than the native journey.
@@ -148,8 +169,10 @@ Follow-ups the run surfaced:
 
 ## Next steps
 
-1. P8.13 is done (above). P8.3 is done as the Paperwhite redesign (ADR-0086) on
-   `feat/paperwhite-integration`; its integration PR to main is pending.
-2. Previous committed screenshots were removed for privacy. Use the current design
-   harness (`npm run test:design`, [ADR-0086](../adr/ADR-0086-paperwhite-design.md))
-   for future captures with neutral fixture data.
+1. Review the committed alpha.7 fixes in [PR #143](https://github.com/kartiksayani/ariadne/pull/143), awaiting merge, and the focused check results.
+2. Complete the remaining alpha.7 acceptance before publishing a release; this task does not run native/e2e checks.
+3. Update the release checkpoint when alpha.7 is released.
+
+Previous committed screenshots were removed for privacy. Use the current design
+harness (`npm run test:design`, [ADR-0086](../adr/ADR-0086-paperwhite-design.md))
+for future captures with neutral fixture data.

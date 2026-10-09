@@ -8,14 +8,61 @@ import { withdrawn } from '../../../src/selectors/waiting/stuck';
 import { immutable } from '../../../src/data';
 import { extraMessage, setup } from './fixtures';
 
+const copy = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
+vi.mock('../../../src/ui/shared/clipboard', () => ({ copyText: (text: string) => copy(text) }));
 const opened: ReturnType<typeof setup>[] = [];
 async function ready(change?: (session: ReturnType<typeof setup>['transport']['session']) => void) {
   const value = setup(); opened.push(value); change?.(value.transport.session); await value.store.refresh(); return value;
 }
-afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.restoreAllMocks(); copy.mockClear(); });
 type FixtureSession = ReturnType<typeof setup>['transport']['session'];
-/** The rail's message count: the owner messages cancelled before they were sent are left out. */
+/** The rail keeps cancellations; only an edited message sent again leaves the history. */
 const shown = (session: FixtureSession) => session.messages.filter(message => !withdrawn(immutable(session), immutable(message))).length;
+
+describe('cancelled owner text in the chat and Messages', () => {
+  it.each([
+    { cause: 'owner' as const, attempted: false }, { cause: 'owner' as const, attempted: true },
+    { cause: undefined, attempted: false }, { cause: undefined, attempted: true },
+    { cause: 'owner_edit' as const, attempted: false }, { cause: 'owner_edit' as const, attempted: true },
+    { cause: 'topic_archived' as const, attempted: false }, { cause: 'topic_archived' as const, attempted: true },
+    { cause: 'session_closed' as const, attempted: false }, { cause: 'session_closed' as const, attempted: true },
+  ])('keeps and labels the complete text for cause $cause, after an attempt: $attempted', async ({ cause, attempted }) => {
+    const body = '  Cancelled owner words\nKeep every line and trailing spaces  ', highlight = vi.fn();
+    const value = await ready(session => {
+      const input = session.inputs['00000000-0000-4000-8000-000000000076']!;
+      input.kind = 'reply'; input.state = 'cancelled'; input.cancel_cause = cause;
+      input.attempts = attempted ? structuredClone(session.inputs['00000000-0000-4000-8000-000000000072']!.attempts) : [];
+      input.payload.text = body;
+      session.messages.find(message => message.id === input.message_id)!.body = body;
+    }), session = value.transport.session, input = session.inputs['00000000-0000-4000-8000-000000000076']!;
+    const warning = attempted ? 'Cancelled — the agent may already have seen it' : 'Cancelled before it reached the agent';
+    const line = cause === 'owner_edit' ? `Taken back to edit. ${warning}`
+      : !attempted && cause === 'topic_archived' ? 'Not sent: cancelled when you archived this topic'
+      : !attempted && cause === 'session_closed' ? 'Not sent: cancelled when you closed this session' : warning;
+    render(<><ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="4" later={false} onOpenItem={vi.fn()} />
+      <MessageRail {...value} onHighlight={highlight} /></>);
+    const chat = await screen.findByRole('region', { name: 'Conversation' });
+    const turn = chat.querySelector<HTMLElement>(`[data-message-id="${input.message_id}"]`)!;
+    expect(turn).not.toBeNull(); expect(turn.classList.contains('detail-turn-cancelled')).toBe(true);
+    expect(turn.textContent).toContain('Cancelled owner words'); expect(turn.textContent).toContain('Keep every line and trailing spaces');
+    expect(turn.textContent).toContain(line); expect(turn.hasAttribute('data-owner-said')).toBe(false);
+    expect(turn.closest('[hidden], [aria-hidden="true"]')).toBeNull();
+    fireEvent.click(within(turn).getByRole('button', { name: 'Copy message' }));
+    expect(copy).toHaveBeenLastCalledWith(body);
+    const log = screen.getByRole('log');
+    const card = await waitFor(() => { const found = log.querySelector<HTMLElement>(`[data-message-id="${input.message_id}"]`); expect(found).not.toBeNull(); return found!; });
+    expect(card.querySelector('.pw-excerpt-text')!.textContent).toBe(body);
+    expect(card.parentElement!.classList.contains('pw-excerpt-cancelled')).toBe(true);
+    expect(card.parentElement!.textContent).toContain(line);
+    expect(card.closest('[hidden], [aria-hidden="true"]')).toBeNull();
+    if (cause === 'owner' || cause === undefined) {
+      fireEvent.click(within(card.parentElement!).getByRole('button', { name: 'Copy message' }));
+      expect(copy).toHaveBeenLastCalledWith(body);
+    }
+    fireEvent.click(card);
+    expect(highlight).toHaveBeenLastCalledWith(new Set([input.target.item_id]), new Set([input.message_id]));
+  });
+});
 
 describe('item detail panel', () => {
   const panel = (value: Awaited<ReturnType<typeof ready>>, itemId = '1', open = vi.fn()) =>
@@ -28,7 +75,7 @@ describe('item detail panel', () => {
       <MessageRail {...value} onHighlight={() => {}} earlierAgent="codex" /></>);
     await screen.findByRole('heading', { name: item.question });
     expect(screen.getByText(`Decision · next action: you · raised in codex #${created.number}`)).toBeTruthy();
-    expect(within(screen.getByRole('region', { name: 'Timeline' })).getAllByText(`codex #${created.number}`).length).toBeGreaterThan(0);
+    expect(within(screen.getByRole('region', { name: 'Conversation' })).getAllByText(`codex #${created.number}`).length).toBeGreaterThan(0);
     const log = await screen.findByRole('log');
     await waitFor(() => expect(log.querySelector(`[data-message-id="${created.id}"] .pw-excerpt-number`)?.textContent).toBe(`codex #${created.number}`));
   });
@@ -39,14 +86,14 @@ describe('item detail panel', () => {
     await screen.findByRole('heading', { name: item.question });
     const created = session.messages.find(message => message.id === item.created_message_id)!;
     expect(screen.getByText(`Decision · next action: you · raised in #${created.number}`)).toBeTruthy();
-    expect(within(screen.getByRole('region', { name: 'Timeline' })).getAllByText(`#${created.number}`).length).toBeGreaterThan(0);
+    expect(within(screen.getByRole('region', { name: 'Conversation' })).getAllByText(`#${created.number}`).length).toBeGreaterThan(0);
     expect(screen.getByRole('region', { name: 'Current outcome' }).textContent).toBe(`Done${item.outcome}`);
     expect(screen.getByText(item.why!)).toBeTruthy();
-    // Reference first (scrolls), the conversation last; the revisit actions sit in the dock, outside the scrolling body.
+    // One transcript follows the item context; revisit actions sit in the dock.
     const detail = document.querySelector('.item-detail')!;
     expect([...detail.children].map(element => element.className)).toEqual(['detail-body', 'detail-dock']);
     const order = [...document.querySelectorAll('.detail-body > section, .detail-body > div')].map(element => element.getAttribute('aria-label') ?? element.className);
-    const body = ['detail-head', 'Your answer', 'Current outcome', 'Child items', 'Item links', 'Timeline', 'detail-reference', 'Conversation'];
+    const body = ['detail-head', 'Your answer', 'Current outcome', 'Child items', 'Item links', 'Conversation'];
     expect(order.filter(name => body.includes(name))).toEqual(body);
     expect([...detail.querySelectorAll('.detail-dock > section')].map(element => element.getAttribute('aria-label'))).toEqual(['Revisit']);
     // The handled answer is the request the stepper follows.
@@ -54,23 +101,25 @@ describe('item detail panel', () => {
     expect(screen.queryByText('Back and forth')).toBeNull();
     expect(screen.queryByLabelText(/^Round \d/)).toBeNull();
     expect(document.body.textContent).not.toMatch(/Round \d/);
-    const round = document.querySelector<HTMLElement>('[data-round="1"]')!;
-    expect(round.textContent).toContain('You chose “Keep complete history”');
-    expect(round.textContent).toContain('Recorded the original reply and receipt-test follow-up.');
-    fireEvent.click(within(round).getByRole('button', { name: /Add the receipt lookup test/ }));
+    const chat = screen.getByRole('region', { name: 'Conversation' });
+    expect(chat.textContent).toContain('You chose “Keep complete history”');
+    expect(chat.textContent).toContain('Retain the full history, including earlier outcomes.');
+    expect(chat.textContent).toContain('The full history is retained.');
+    expect(chat.textContent).not.toContain('Recorded the original reply and receipt-test follow-up.');
+    fireEvent.click(within(chat).getByRole('button', { name: /Branched into Add the receipt lookup test/ }));
     expect(open).toHaveBeenCalledWith('1.1');
     fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     expect(open).toHaveBeenCalledTimes(2);
     // Without a desktop to open files, a link to a file is its label as plain text (see item-links.test.tsx).
     expect([...screen.getByRole('region', { name: 'Item links' }).querySelectorAll('.detail-link')].map(link => link.textContent)).toEqual(item.links.map(link => link.label));
-    const timeline = screen.getByRole('region', { name: 'Timeline' });
-    // Owner messages on the item join as replies, as the handoff keeps them in `updated`.
-    const replies = session.messages.filter(message => message.author === 'owner' && message.item_id === item.id).map(message => message.id);
-    expect(replies.length).toBeGreaterThan(0);
-    expect(timeline.querySelectorAll('.excerpt-timeline')).toHaveLength(new Set([item.created_message_id, ...item.updated_message_ids, ...replies]).size);
-    expect(timeline.querySelector('.excerpt-created .excerpt-mark')!.textContent).toBe('Agent raised this');
-    expect([...timeline.querySelectorAll('.excerpt-mark')].map(mark => mark.textContent)).toContain('You replied');
-    expect(screen.getByText('Agent reference').parentElement!.querySelector('code')!.textContent).toBe('1');
+    const expected = session.messages.filter(message => !withdrawn(immutable(session), immutable(message)) &&
+      (message.id === item.created_message_id || item.updated_message_ids.includes(message.id) || message.item_id === item.id || message.items_touched.includes(item.id)))
+      .sort((a, b) => a.number - b.number);
+    expect([...chat.querySelectorAll<HTMLElement>('li[data-message-id]')].map(entry => entry.dataset.messageId)).toEqual(expected.map(message => message.id));
+    expect(chat.querySelector('.detail-chat-marker')!.textContent).toBe('Agent raised this');
+    expect(screen.queryByRole('region', { name: 'Timeline' })).toBeNull();
+    expect(document.querySelector('.detail-head .detail-reference')!.contains(screen.getByText('Agent reference'))).toBe(true);
+    expect(screen.getByText('Agent reference').parentElement!.querySelector('code')).toBeNull();
   });
   it('does not count an answer that archive cancelled as the owner’s answer: Waiting on you, with the not-sent line', async () => {
     const value = await ready(session => {
@@ -95,41 +144,102 @@ describe('item detail panel', () => {
     }), session = value.transport.session;
     render(panel(value, '2'));
     const chat = await screen.findByRole('region', { name: 'Conversation' });
-    const round = () => chat.querySelector<HTMLElement>('[data-round="2"]')!;
+    const waiting = () => within(chat).queryByText('Waiting on you');
     const bubble = () => chat.querySelector<HTMLElement>('[data-pending="00000000-0000-4000-8000-000000000945"]');
     // On its way, the answer counts: it ends the conversation as a pending bubble and the round no longer waits on the owner.
     expect(bubble()!.textContent).toContain('Not sent yet');
     expect(bubble()!.textContent).toContain('You chose');
-    expect(round().textContent).not.toContain('You chose');
-    expect(within(round()).queryByText('Waiting on you')).toBeNull();
+    expect(chat.querySelectorAll('.detail-msg-you')).toHaveLength(2);
+    expect(waiting()).toBeNull();
     const input = session.inputs['00000000-0000-4000-8000-000000000945']!;
     input.state = 'cancelled'; input.cancel_cause = 'topic_archived'; session.revision++;
     await act(() => value.store.refresh());
-    // Cancelled by archive, it never reached the agent: not "You chose", and Waiting on you again.
-    await waitFor(() => expect(within(round()).getByText('Waiting on you')).toBeTruthy());
-    expect(chat.textContent).not.toContain('You chose');
+    // Cancelled by archive: keep the choice visible, labelled, and Waiting on you again.
+    await waitFor(() => expect(waiting()).toBeTruthy());
+    expect(chat.querySelector('.detail-turn-cancelled')!.textContent).toContain('You chose');
     expect(bubble()).toBeNull();
-    expect(within(screen.getByRole('region', { name: 'Timeline' })).getByText('Not sent: cancelled when you archived this topic')).toBeTruthy();
+    expect(within(screen.getByRole('region', { name: 'Conversation' })).getByText('Not sent: cancelled when you archived this topic')).toBeTruthy();
     // Restore the topic: the cancelled answer stays cancelled, so it is still the owner's turn and the line stays.
     const topic = session.topics[session.items['2']!.topic_id]!;
     topic.archived_at = '2026-10-04T12:00:00.000Z'; session.revision++; await act(() => value.store.refresh());
     topic.archived_at = null; session.revision++; await act(() => value.store.refresh());
-    await waitFor(() => expect(within(round()).getByText('Waiting on you')).toBeTruthy());
-    expect(chat.textContent).not.toContain('You chose');
-    expect(within(screen.getByRole('region', { name: 'Timeline' })).getByText('Not sent: cancelled when you archived this topic')).toBeTruthy();
+    await waitFor(() => expect(waiting()).toBeTruthy());
+    expect(chat.querySelector('.detail-turn-cancelled')!.textContent).toContain('You chose');
+    expect(within(screen.getByRole('region', { name: 'Conversation' })).getByText('Not sent: cancelled when you archived this topic')).toBeTruthy();
   });
-  it('deduplicates a message that both created and updated the item into one timeline entry', async () => {
+  it('deduplicates messages shared by creation, updates, and rounds into one chat entry', async () => {
     const value = await ready(session => {
       const item = session.items['1']!;
       item.updated_message_ids = [item.created_message_id, ...item.updated_message_ids, item.updated_message_ids[0]];
     }), item = value.transport.session.items['1']!;
     render(panel(value));
-    const timeline = await screen.findByRole('region', { name: 'Timeline' });
-    const replies = value.transport.session.messages.filter(message => message.author === 'owner' && message.item_id === item.id).map(message => message.id);
-    const ids = new Set([...item.updated_message_ids, ...replies]);
-    expect(timeline.querySelectorAll('.excerpt-timeline')).toHaveLength(ids.size);
-    expect(timeline.querySelector('.excerpt-created .excerpt-mark')!.textContent).toBe('Agent raised this · Agent updated');
+    const timeline = await screen.findByRole('region', { name: 'Conversation' });
+    const replies = value.transport.session.messages.filter(message => message.author === 'owner' && message.item_id === item.id && !withdrawn(immutable(value.transport.session), immutable(message))).map(message => message.id);
+    const ids = new Set([...item.updated_message_ids.filter(id => value.transport.session.messages.some(message => message.id === id && !withdrawn(immutable(value.transport.session), immutable(message)))), ...replies]);
+    const entries = [...timeline.querySelectorAll<HTMLElement>('li[data-message-id]')];
+    expect(entries.map(entry => entry.dataset.messageId)).toEqual([...ids].sort((a, b) => value.transport.session.messages.find(message => message.id === a)!.number - value.transport.session.messages.find(message => message.id === b)!.number));
+    expect(timeline.querySelector('.detail-chat-marker')!.textContent).toBe('Agent raised this');
   });
+  it('shows a short result only beneath the owner message with no full agent reply before the next owner message', async () => {
+    const value = await ready(session => {
+      const item = session.items['1']!, round = Object.values(session.rounds).find(value => value?.item_id === item.id)!;
+      const full = session.messages.find(message => message.id === round.agent_message_ids[0])!;
+      const later = session.messages.find(message => message.id === round.owner_message_ids[1])!;
+      // The original result remains valid, but its full response belongs after the next owner turn.
+      full.number = 12;
+      const input = session.inputs[later.input_id!]!;
+      input.state = 'handled'; delete input.cancel_cause;
+      later.body = 'Second owner message';
+      input.payload.text = later.body;
+      input.payload.selected_option_id = null;
+      session.answers = session.answers.filter(answer => answer.message_id !== later.id);
+    });
+    render(panel(value));
+    const chat = await screen.findByRole('region', { name: 'Conversation' });
+    const first = chat.querySelector<HTMLElement>('[data-message-id="00000000-0000-4000-8000-000000000102"]')!;
+    const second = chat.querySelector<HTMLElement>('[data-message-id="00000000-0000-4000-8000-000000000111"]')!;
+    expect(first.querySelector('.detail-msg-result')!.textContent).toContain('Recorded the original reply and receipt-test follow-up.');
+    expect(second.querySelector('.detail-msg-result')).toBeNull();
+    expect(chat.querySelectorAll('.detail-msg-result')).toHaveLength(1);
+    const full = value.transport.session.messages.find(message => message.id === '00000000-0000-4000-8000-000000000103')!;
+    full.number = 3; value.transport.session.revision++;
+    await act(() => value.store.refresh());
+    await waitFor(() => expect(chat.querySelector('.detail-msg-result')).toBeNull());
+    expect(chat.textContent).toContain('The full history is retained.');
+  });
+
+  it('keeps rail highlights and parent provenance on the single transcript', async () => {
+    const value = await ready(), session = value.transport.session, item = session.items['1.1']!, open = vi.fn();
+    const highlights = new Set([item.created_message_id]);
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId={item.id} later={false} onOpenItem={open} highlightedMessageIds={highlights} />);
+    const chat = await screen.findByRole('region', { name: 'Conversation' });
+    expect(within(chat).getByText('Parent raised here')).toBeTruthy();
+    expect(within(chat).getByText('Agent raised this')).toBeTruthy();
+    const parent = session.items[item.parent!]!;
+    expect(chat.querySelector(`[data-message-id="${parent.created_message_id}"]`)!.textContent).toContain(parent.question);
+    const raised = chat.querySelector(`[data-message-id="${item.created_message_id}"]`)!;
+    expect(raised.classList.contains('excerpt-highlighted')).toBe(true);
+    expect(chat.querySelectorAll('li[data-message-id]')).toHaveLength(2);
+    expect(within(raised as HTMLElement).getByRole('button', { name: 'Copy message' })).toBeTruthy();
+  });
+
+  it('deduplicates the current ask against its full agent message and keeps one Waiting on you tag', async () => {
+    const value = await ready(session => {
+      const item = session.items['2']!, round = session.rounds[item.current_round_id!]!;
+      const message = session.messages.find(message => message.id === round.agent_message_ids[0])!;
+      message.body = 'Full explanation.';
+      // An earlier handled reply does not answer this newly raised ask.
+      round.owner_message_ids = [];
+      round.result_input_ids = [];
+    });
+    render(panel(value, '2'));
+    const chat = await screen.findByRole('region', { name: 'Conversation' });
+    expect(chat.textContent!.split(value.transport.session.items['2']!.ask!).length - 1).toBe(1);
+    expect(within(chat).getAllByText('Waiting on you')).toHaveLength(1);
+    expect(within(chat).getByText('Full explanation.')).toBeTruthy();
+    expect(document.querySelectorAll('.detail-ask')).toHaveLength(0);
+  });
+
   it('shows the outcome before reopening and never offers Back to Open on a replaced item', async () => {
     const reopened = await ready(session => {
       const item = session.items['1']!;
@@ -241,18 +351,18 @@ describe('complete message rail', () => {
     fireEvent.click(within(rail).getByRole('button', { name: 'Hide messages' }));
     expect(close).toHaveBeenCalledOnce();
   });
-  it('leaves out a message deleted before it was sent, and drops one the moment it is deleted', async () => {
+  it('keeps a queued message visible when the owner deletes it, and changes its label immediately', async () => {
     const value = await ready(), session = value.transport.session;
     render(<MessageRail {...value} onHighlight={vi.fn()} />);
     const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(session)));
-    const gone = session.messages.filter(message => withdrawn(immutable(session), immutable(message)));
-    expect(gone.length).toBeGreaterThan(0);
-    for (const message of gone) expect(log.querySelector(`[data-message-id="${message.id}"]`)).toBeNull();
     const queued = Object.values(session.inputs).find(input => input?.state === 'queued' && input.attempts.length === 0 && input.kind !== 'continue')!;
+    const message = session.messages.find(message => message.id === queued.message_id)!;
     expect(log.querySelector(`[data-message-id="${queued.message_id}"]`)).not.toBeNull();
-    queued.state = 'cancelled'; session.revision++;
+    queued.state = 'cancelled'; queued.cancel_cause = 'owner'; session.revision++;
     await act(() => value.store.refresh());
-    await waitFor(() => expect(log.querySelector(`[data-message-id="${queued.message_id}"]`)).toBeNull());
+    await waitFor(() => expect(log.querySelector(`[data-message-id="${queued.message_id}"]`)!.parentElement!.textContent).toContain('Cancelled before it reached the agent'));
+    expect(log.querySelector(`[data-message-id="${queued.message_id}"]`)!.textContent).toContain(message.body);
+    expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(session));
   });
   it('keeps a message that archive or close cancelled, marked as not sent', async () => {
     const value = await ready(), session = value.transport.session;

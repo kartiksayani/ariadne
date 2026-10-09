@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { openOwnerReply } from '../../../apps/desktop/tests/e2e/owner-reply.mjs';
+import { JSDOM } from 'jsdom';
+import { openFollowUp, openOwnerReply, replyControlState, sendDetailReply } from '../../../apps/desktop/tests/e2e/owner-reply.mjs';
 import { assertRepairAdmission, originalReplyRequest, repairResultRequest } from '../../../apps/desktop/tests/e2e/recovery.spec.mjs';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
 
@@ -73,8 +74,9 @@ function replyBoxBrowser(emptiesAfter) {
   const exists = value => ({ async isExisting() { return value(); } });
   const browser = {
     $(selector) {
-      if (selector === '.item-detail .detail-answer-slot') return exists(() => false);
-      if (selector === '.item-detail .detail-box textarea') return box;
+      if (selector === '.item-detail .detail-answer-slot[data-owner-input]') return exists(() => false);
+      if (selector.includes('[aria-label="Reply"]')) return exists(() => false);
+      if (selector === '.item-detail [data-owner-input] .detail-box textarea') return box;
       return assert.fail(`The docked Reply box needs no press: ${selector}`);
     },
     async waitUntil(condition, options) {
@@ -104,7 +106,8 @@ test('a missing Saved acknowledgement fails while the sent Reply box still holds
   // A waiting item's answer slot must show its Saved receipt's "Write another input" first.
   globalThis.browser = {
     $(selector) {
-      if (selector === '.item-detail .detail-answer-slot') return { async isExisting() { return true; }, $(selector) {
+      if (selector === '.item-detail [data-owner-input] .detail-box textarea') return { async isExisting() { return false; } };
+      if (selector === '.item-detail .detail-answer-slot[data-owner-input]') return { async isExisting() { return true; }, $(selector) {
         assert.equal(selector, 'button=Write another input');
         return { async waitForDisplayed() { throw new Error('Saved acknowledgement absent'); } };
       } };
@@ -120,8 +123,8 @@ test('a missing Reply box after a send is a clear failure, not a saved reply, an
   const exists = value => ({ async isExisting() { return value; } });
   globalThis.browser = {
     $(selector) {
-      if (selector === '.item-detail .detail-answer-slot') return exists(false);
-      if (selector === '.item-detail .detail-box textarea') return exists(false);
+      if (selector === '.item-detail .detail-answer-slot[data-owner-input]' || selector.includes('[aria-label="Reply"]')) return exists(false);
+      if (selector === '.item-detail [data-owner-input] .detail-box textarea') return exists(false);
       return assert.fail(`A closed item has no Reply to press: ${selector}`);
     },
     async waitUntil(condition, options) {
@@ -133,8 +136,8 @@ test('a missing Reply box after a send is a clear failure, not a saved reply, an
   // Without a send to wait for, no box and no Reply button says so instead of timing out on a click.
   globalThis.browser = {
     $(selector) {
-      if (selector === '.item-detail .detail-answer-slot' || selector === '.item-detail .detail-box textarea') return exists(false);
-      if (selector === '[aria-label="Item actions"]') return { $() { return exists(false); } };
+      if (selector === '.item-detail .detail-answer-slot[data-owner-input]' || selector === '.item-detail [data-owner-input] .detail-box textarea'
+        || selector.includes('[aria-label="Item actions"]')) return exists(false);
       return assert.fail(`Unexpected lookup: ${selector}`);
     },
   };
@@ -181,4 +184,116 @@ test('reply-only and result-only recovery requests deserialize through real CLI/
       assert.deepEqual(await readFile(path), before, 'Wire acceptance cannot fabricate native recovery or rewrite canonical storage');
     }
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+// Resolve the helper's selectors against DOM, rather than returning whichever control a mock expects.
+function domBrowser(document, onPoll = () => {}) {
+  const control = (selector, parent = document) => {
+    const node = () => selector.startsWith('button=')
+      ? [...parent.querySelectorAll('button')].find(button => button.textContent === selector.slice(7))
+      : parent.querySelector(selector);
+    const required = () => { assert.ok(node(), `Missing control: ${selector}`); return node(); };
+    return {
+      $: child => control(child, required()),
+      isExisting: async () => Boolean(node()),
+      waitForExist: async () => { required(); },
+      waitForDisplayed: async () => { required(); },
+      waitForEnabled: async () => { assert.equal(required().disabled, false); },
+      scrollIntoView: async () => { required(); },
+      getValue: async () => required().value,
+      setValue: async text => { required().value = text; },
+      getText: async () => required().textContent,
+      isEnabled: async () => !required().disabled,
+      getAttribute: async name => required().getAttribute(name),
+      click: async () => { required().click(); },
+    };
+  };
+  return { $: control, waitUntil: async (condition, options) => {
+    for (let poll = 0; poll < 3; poll++) { onPoll(); if (await condition()) return; }
+    throw new Error(options.timeoutMsg);
+  } };
+}
+
+const wordsBox = label => `<div class="detail-box"><textarea></textarea><div class="detail-box-row">
+  <button aria-label="${label}">${label}</button><button>Cancel</button></div></div>`;
+const answerBox = `<div class="detail-answer-slot" data-owner-input="1"><button class="answer-send">Send “Chosen option”</button>
+  <div class="answer-reply answer-composer"><textarea></textarea><button class="answer-reply-send">Send as a reply only</button></div></div>`;
+
+for (const [status, label] of [['waiting', 'Send as a reply only'], ['open', 'Send reply'], ['progress', 'Send note'], ['done', 'Send follow-up']]) {
+  test(`sends exact own words with one click from the ${status} composer and diagnoses its actual Send`, async t => {
+    const root = await mkdtemp(join(tmpdir(), 'ariadne-owner-composer-'));
+    const dom = new JSDOM(`<article class="item-detail" data-status="${status}">${status === 'waiting' ? answerBox
+      : `<div data-owner-input="1">${wordsBox(label)}${wordsBox(label + ', another draft')}</div>
+        <div class="detail-answer-slot"><button>Write another input</button></div>`}</article>`);
+    const previousBrowser = globalThis.browser, previousDocument = globalThis.document;
+    t.after(async () => { globalThis.browser = previousBrowser; globalThis.document = previousDocument; dom.window.close(); await rm(root, { recursive: true, force: true }); });
+    const document = dom.window.document;
+    globalThis.document = document; globalThis.browser = domBrowser(document);
+    const configuration = { itemId: '1', sessionPath: join(root, 'session.json') }, text = 'Exact own words\nKeep this full second line.';
+    await writeFile(configuration.sessionPath, JSON.stringify({ inputs: {} }));
+    let clicks = 0;
+    // Wrong clicks fail: neither the recommended choice, another draft nor a retained answer may be submitted.
+    const send = document.querySelector(status === 'waiting' ? '.answer-reply-send' : '.detail-box button');
+    for (const button of document.querySelectorAll('button')) button.addEventListener('click', () => {
+      assert.equal(button, send); clicks++;
+      assert.equal(document.querySelector('[data-owner-input] textarea').value, text);
+    });
+    send.addEventListener('click', () => {
+      // The snapshot update is awaited by the helper's persistence polling.
+      pending = writeFile(configuration.sessionPath, JSON.stringify({ inputs: { saved: { payload: { text } } } }));
+    });
+    let pending = Promise.resolve();
+    globalThis.browser.waitUntil = async (condition, options) => { await pending; assert.ok(await condition(), options.timeoutMsg); };
+    await openOwnerReply();
+    await sendDetailReply(configuration, text);
+    assert.equal(clicks, 1);
+    assert.deepEqual(replyControlState('1'), { formPresent: true, editorPresent: true, value: text,
+      editorEnabled: true, sendPresent: true, sendEnabled: true, alerts: [] });
+    send.setAttribute('aria-disabled', 'true');
+    assert.equal(replyControlState('1').sendEnabled, false);
+    send.removeAttribute('aria-disabled'); send.disabled = true;
+    assert.equal(replyControlState('1').sendEnabled, false);
+  });
+}
+
+test('opens the current closed-item Follow up action, scoped to its detail', async t => {
+  const dom = new JSDOM(`<button title="Comment, or ask for more">Unrelated</button><article class="item-detail" data-status="done">
+    <div aria-label="Item actions"><button title="Comment, or ask for more">Follow up<span>r</span></button></div></article>`);
+  const previous = globalThis.browser;
+  t.after(() => { globalThis.browser = previous; dom.window.close(); });
+  const document = dom.window.document, detail = document.querySelector('.item-detail');
+  document.querySelector('.item-detail button').addEventListener('click', () => detail.insertAdjacentHTML('beforeend', `<div data-owner-input="1">${wordsBox('Send follow-up')}</div>`));
+  globalThis.browser = domBrowser(document);
+  await openOwnerReply();
+  assert.ok(detail.querySelector('textarea'));
+});
+
+test('a successive progress note waits for its docked box to empty instead of waiting for it to disappear', async t => {
+  const dom = new JSDOM(`<article class="item-detail" data-status="progress"><div data-owner-input="1">${wordsBox('Send note')}</div>
+    <div class="detail-answer-slot"><button>Write another input</button></div></article>`);
+  const previous = globalThis.browser;
+  t.after(() => { globalThis.browser = previous; dom.window.close(); });
+  const editor = dom.window.document.querySelector('textarea'); editor.value = 'Previously saved note';
+  let polls = 0;
+  globalThis.browser = domBrowser(dom.window.document, () => { if (++polls === 2) editor.value = ''; });
+  await openFollowUp(true);
+  assert.equal(polls, 2); assert.equal(editor.value, '');
+  assert.ok(editor.isConnected);
+});
+
+test('a successive waiting reply waits for its saved box to close, then reopens Add a reply', async t => {
+  const dom = new JSDOM(`<article class="item-detail" data-status="waiting"><section aria-label="Reply"><div aria-label="Item actions">
+    <button>Add a reply<span>r</span></button></div></section><div data-owner-input="1">${wordsBox('Send reply')}</div></article>`);
+  const previous = globalThis.browser;
+  t.after(() => { globalThis.browser = previous; dom.window.close(); });
+  const document = dom.window.document, detail = document.querySelector('.item-detail'), old = detail.querySelector('[data-owner-input]');
+  let polls = 0, clicks = 0;
+  detail.querySelector('section button').addEventListener('click', () => {
+    assert.equal(old.isConnected, false); clicks++;
+    detail.insertAdjacentHTML('beforeend', `<div data-owner-input="1">${wordsBox('Send reply')}</div>`);
+  });
+  globalThis.browser = domBrowser(document, () => { if (++polls === 2) old.remove(); });
+  await openOwnerReply(true);
+  assert.equal(polls, 2); assert.equal(clicks, 1);
+  assert.equal(detail.querySelector('[data-owner-input] textarea').value, '');
 });

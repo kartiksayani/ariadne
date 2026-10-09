@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { useRef, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { InputKind, Session, SessionSummary, ProjectSummary } from '../../../src/generated/domain/models';
@@ -18,13 +18,15 @@ import { editQueued, NOT_TAKEN_BACK, putBackCancelled } from '../../../src/ui/an
 import { StuckNote } from '../../../src/ui/answer/StuckNote';
 import { sessionActionsFor, type SessionActions } from '../../../src/components/bindings/actions';
 import { AnswerSlot, changedText, type AnswerSlotProps } from '../../../src/ui/detail/AnswerSlot';
-import type { PendingSubmission } from '../../../src/ui/answer/useSubmit';
+import { useSubmit, type PendingSubmission } from '../../../src/ui/answer/useSubmit';
 import { WaitingColumn } from '../../../src/ui/waiting/WaitingColumn';
 import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { sentAs } from '../../../src/ui/detail/model';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
 import { HistoryTransport } from '../history/fixtures';
 import { useWindowKeys } from '../../../src/ui/shell/windowKeys';
+// @ts-expect-error Native e2e helpers are plain ESM without type declarations.
+import { replyControlState } from '../../e2e/owner-reply.mjs';
 
 const route = { project_id: demo.project_id, session_id: demo.id };
 const opened: OpenSessions[] = [];
@@ -34,10 +36,11 @@ const uuid = (n: number) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(n).padStart(12, '0
 function preferences(): PreferencesSnapshot {
   return { schema_version: 1, revision: 1, global: { theme: 'system', selected_navigation: { kind: 'projects' }, window: null, pinned: false, notification_watermark: null }, sessions: [], later: [], drafts: [] };
 }
-async function setup(saved: OwnerDraft[] = []) {
+async function setup(saved: OwnerDraft[] = [], change: (session: Session) => void = () => {}) {
   const session = structuredClone(demo) as Session, prefs = preferences(); prefs.drafts = structuredClone(saved);
   session.items['2']!.options = [{ id: 'yes', label: 'Keep the design', consequence: 'Retain the current contract.', recommended: true },
     { id: 'no', label: 'Change the design', consequence: 'Review a new contract.', recommended: false }];
+  change(session);
   const calls: OwnerMutationRequest[] = [], writes: OwnerMutationRequest[] = [];
   let outcome: 'ok' | 'uncertain' | 'malformed' | 'error' | 'question_changed' | 'operation_reused' = 'ok', preferenceOutcome: 'ok' | 'uncertain' = 'ok', readError = false, deleteConflicts = 0;
   let submitGate: Promise<void> | null = null, cancelGate: Promise<void> | null = null, prefGate: Promise<void> | null = null;
@@ -131,6 +134,22 @@ function KeyedRoot({ children, shortcuts }: { readonly children: ReactNode; read
 const staleView = (store: object) => act(() => { (store as unknown as { publish: (update: object) => void }).publish({ status: 'stale' }); });
 
 describe('owner input component and durable draft controller', () => {
+  it.each([
+    { note: undefined, expected: 'Latest draft before React renders' },
+    { note: 'Explicit answer-box note', expected: 'Explicit answer-box note' },
+    { note: '', expected: '' },
+  ])('uses an explicit option note or the fresh draft when omitted: $note', async ({ note, expected }) => {
+    const value = await setup(), session = value.store.getSnapshot().snapshot!.session;
+    const id = value.drafts.begin(session, '2', 'answer')!;
+    const { result } = renderHook(() => useSubmit({ drafts: value.drafts, session, current: true, itemId: '2', intent: 'answer' }));
+    // The shortcut may run before the store notification gives React its next render.
+    await act(async () => {
+      value.drafts.edit(id, { text: 'Latest draft before React renders' });
+      result.current.sendOption('no', note);
+    });
+    await waitFor(() => expect(value.calls).toHaveLength(1));
+    expect(value.calls[0]!.command).toMatchObject({ command: 'input_submit', params: { selected_option_id: 'no', text: expected } });
+  });
   // The tree's z-persists-Later versus editor-typing check lives in App.test.tsx now that rows hand z to the workspace keys.
   // A finished item (1) opens its follow-up box on press; an open item (1.1) always shows its reply box.
   it.each([['1', 'Follow up', 'Follow-up message', false], ['1.1', 'Reply', 'Reply message', true]])('focuses the box only after explicit %s %s; Esc leaves it and keeps the draft', async (itemId, action, label, always) => {
@@ -156,6 +175,17 @@ describe('owner input component and durable draft controller', () => {
   describe('the reply box is always docked on an open or in-progress item', () => {
     const show = (value: Awaited<ReturnType<typeof setup>>, itemId: string) =>
       render(<ItemDetail drafts={value.drafts} store={value.store} itemId={itemId} later={false} onOpenItem={() => {}} />);
+    it('diagnoses the waiting answer composer independently of its chosen-option Send', async () => {
+      const value = await setup(); show(value, '2');
+      const user = userEvent.setup();
+      const text = await screen.findByRole('textbox', { name: 'Reply in your own words' });
+      expect(screen.getByRole('button', { name: 'Send “Keep the design”' })).toBeTruthy();
+      expect(replyControlState('2')).toMatchObject({ editorPresent: true, sendPresent: true, sendEnabled: false });
+      await user.type(text, 'My own answer');
+      await waitFor(() => expect(replyControlState('2')).toMatchObject({ value: 'My own answer', editorEnabled: true, sendPresent: true, sendEnabled: true }));
+      await user.click(screen.getByRole('button', { name: 'Send as a reply only' }));
+      await waitFor(() => expect(value.calls.map(call => call.command)).toMatchObject([{ command: 'input_submit', params: { kind: 'answer', text: 'My own answer', selected_option_id: null } }]));
+    });
     it.each([['8', 'open', 'Reply message'], ['3', 'in_progress', 'Note message']])('keeps the composer visible outside the scrolling detail for %s (%s), without waiting on the owner', async (itemId, status, label) => {
       const value = await setup();
       expect(value.session.items[itemId]!.status).toBe(status);
@@ -441,9 +471,10 @@ describe('owner input component and durable draft controller', () => {
       show(value, itemId);
       const label = { reply: 'Reply message', note: 'Note message', followup: 'Follow-up message' }[sentKind], button = { reply: 'Send reply', note: 'Send note', followup: 'Send follow-up' }[sentKind];
       expect((await screen.findByRole('textbox', { name: label }) as HTMLTextAreaElement).value).toBe('Words to map');
-      // A waiting item also has its answer box with a Send reply button: the owner's words box is the one in "Your message".
+      // A waiting item also has its answer composer; the marked words box is the one in "Your message".
       const mine = () => within(screen.getByRole('region', { name: 'Your message' })).getByRole('button', { name: button }) as HTMLButtonElement;
       await waitFor(() => expect(mine().disabled).toBe(false));
+      expect(replyControlState(itemId)).toMatchObject({ editorPresent: true, value: 'Words to map', editorEnabled: true, sendPresent: true, sendEnabled: true });
       await userEvent.setup().click(mine());
       await waitFor(() => expect(value.calls.map(call => call.command)).toMatchObject([{ command: 'input_submit', params: { kind: sentKind, text: 'Words to map' } }]));
       await waitFor(() => expect(value.prefs.drafts).toEqual([]));
@@ -537,7 +568,7 @@ describe('owner input component and durable draft controller', () => {
   });
   it('pre-selects the recommendation; numbers select only; focused Cmd+Enter and duplicate clicks send the reply once after durable draft save', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox');
-    expect(screen.getByRole('button', { name: 'Send reply' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Send as a reply only' }).hasAttribute('disabled')).toBe(true);
     const [first, second] = screen.getAllByRole('button').filter(button => button.hasAttribute('data-answer-option'));
     expect(first!.getAttribute('aria-pressed')).toBe('true'); expect(screen.getByRole('button', { name: 'Send “Keep the design”' })).toBeTruthy();
     second!.focus(); fireEvent.keyDown(second!, { key: '2' });
@@ -545,7 +576,7 @@ describe('owner input component and durable draft controller', () => {
     expect(value.calls).toHaveLength(0);
     fireEvent.change(editor(), { target: { value: ' Exact owner bytes \n' } });
     const finish = value.gate(); editor().focus(); fireEvent.keyDown(editor(), { key: 'Enter', metaKey: true });
-    const send = screen.getByRole('button', { name: 'Send reply' }); fireEvent.click(send); fireEvent.keyDown(editor(), { key: 'Enter', metaKey: true });
+    const send = screen.getByRole('button', { name: 'Send as a reply only' }); fireEvent.click(send); fireEvent.keyDown(editor(), { key: 'Enter', metaKey: true });
     await waitFor(() => expect(value.calls).toHaveLength(1));
     expect(value.prefs.drafts[0]?.submission_attempted).toBe(true);
     expect(value.calls[0]?.command.command === 'input_submit' && value.calls[0].command.params).toMatchObject({ text: ' Exact owner bytes \n', selected_option_id: null });
@@ -553,16 +584,32 @@ describe('owner input component and durable draft controller', () => {
     await screen.findByText('Saved · Queue position #4'); expect(value.calls).toHaveLength(1); expect(value.prefs.drafts).toEqual([]);
     expect(value.session.items['2']!.status).toBe('waiting_on_me');
   });
-  it('retains editable unsent text over detail changes, unrelated preferences, refresh and restart without auto-send', async () => {
+  it('sends a selected option with the exact note once, after saving both in the durable draft', async () => {
+    const value = await setup(); value.render(); await screen.findByRole('textbox');
+    fireEvent.click(screen.getByRole('button', { name: /2Change the design/ }));
+    fireEvent.change(editor(), { target: { value: ' Keep these exact note bytes \n' } });
+    const send = screen.getByRole('button', { name: 'Send “Change the design” with your note' }), finish = value.gate();
+    fireEvent.click(send); fireEvent.click(send);
+    fireEvent.keyDown(editor(), { key: 'Enter', metaKey: true });
+    await waitFor(() => expect(value.calls).toHaveLength(1));
+    expect(value.prefs.drafts[0]).toMatchObject({ selected_option_id: 'no', text: ' Keep these exact note bytes \n', submission_attempted: true });
+    expect(value.calls[0]?.command).toMatchObject({ command: 'input_submit', params: { selected_option_id: 'no', text: ' Keep these exact note bytes \n' } });
+    await act(async () => { finish(); });
+    await screen.findByText('Saved · Queue position #4'); expect(value.calls).toHaveLength(1);
+  });
+  it('retains editable unsent option and note over detail changes, unrelated preferences, refresh and restart without auto-send', async () => {
     const value = await setup(), view = value.render(); await screen.findByRole('textbox');
+    fireEvent.click(screen.getByRole('button', { name: /2Change the design/ }));
     fireEvent.change(editor(), { target: { value: 'Keep this draft' } });
-    await waitFor(() => expect(value.prefs.drafts[0]?.text).toBe('Keep this draft'));
+    await waitFor(() => expect(value.prefs.drafts[0]).toMatchObject({ selected_option_id: 'no', text: 'Keep this draft' }));
     view.rerender(<AnswerSlot drafts={value.drafts} store={value.store} itemId="4" onEscape={() => {}} />); expect(screen.queryByRole('textbox')).toBeNull();
     value.prefs.global.theme = 'dark'; value.prefs.revision++;
     view.rerender(<AnswerSlot drafts={value.drafts} store={value.store} itemId="2" onEscape={() => {}} />); expect(editor().value).toBe('Keep this draft');
     await act(async () => { await value.store.refresh(); }); expect(editor().value).toBe('Keep this draft');
     const restored = await value.restart(); view.rerender(<AnswerSlot drafts={restored} store={value.store} itemId="2" onEscape={() => {}} />);
     expect(editor().value).toBe('Keep this draft'); expect(editor().disabled).toBe(false); expect(value.calls).toHaveLength(0);
+    expect(screen.getByRole('button', { name: /2Change the design/ }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Send “Change the design” with your note' })).toBeTruthy();
   });
   it('persists the latest logical edits queued behind an uncertain preference operation after explicit reconciliation', async () => {
     const value = await setup(), id = value.drafts.begin(value.store.getSnapshot().snapshot!.session, '2', 'answer')!;
@@ -583,7 +630,7 @@ describe('owner input component and durable draft controller', () => {
   it.each(['in_progress', 'replaced'] as const)('keeps a restored attempted answer reachable and exactly retryable after the item becomes %s', async status => {
     const value = await setup(), view = value.render(); await screen.findByRole('textbox'); value.outcome('uncertain');
     fireEvent.change(editor(), { target: { value: 'Frozen original answer' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send reply' })); await screen.findByRole('button', { name: 'Try sending again' });
+    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' })); await screen.findByRole('button', { name: 'Try sending again' });
     const original = structuredClone(value.calls[0]), restored = await value.restart();
     value.session.items['2']!.status = status; value.session.items['2']!.revision++; value.session.revision++;
     await act(async () => { await value.store.refresh(); });
@@ -595,7 +642,7 @@ describe('owner input component and durable draft controller', () => {
   });
   it.each(['uncertain', 'malformed'] as const)('freezes exact op/body after %s receipt and explicitly replays it across restart and a changed target', async outcome => {
     const value = await setup(), view = value.render(); await screen.findByRole('textbox'); value.outcome(outcome);
-    fireEvent.change(editor(), { target: { value: 'Exact untrimmed bytes  ' } }); fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    fireEvent.change(editor(), { target: { value: 'Exact untrimmed bytes  ' } }); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
     await screen.findByRole('button', { name: 'Try sending again' }); expect(value.prefs.drafts[0]?.submission_attempted).toBe(true);
     const original = structuredClone(value.calls[0]); expect(editor().disabled).toBe(true);
     const restored = await value.restart(); value.session.items['2']!.question_revision++; value.session.items['2']!.revision++; value.session.revision++;
@@ -614,19 +661,19 @@ describe('owner input component and durable draft controller', () => {
     fireEvent.change(editor(), { target: { value: 'Keep my words' } });
     const saved = () => Object.values(value.drafts.getSnapshot().entries).find(entry => entry.draft.target.item_id === '2')!.draft;
     await waitFor(() => expect(saved().text).toBe('Keep my words'));
-    const reply = screen.getByRole('button', { name: 'Send reply' });
+    const reply = screen.getByRole('button', { name: 'Send as a reply only' });
     await waitFor(() => expect(reply.hasAttribute('disabled')).toBe(false));
     fireEvent.click(reply);
     expect(held).toHaveLength(1); expect(held[0]!.change).toEqual({ selected_option_id: null, text: 'Keep my words' });
     // Cancel: the dialog never queues, so the draft is unchanged.
     expect([saved().text, saved().selected_option_id]).toEqual(['Keep my words', 'no']);
-    fireEvent.click(screen.getByRole('button', { name: 'Send “Change the design”' }));
-    expect(held).toHaveLength(2); expect(held[1]!.change).toEqual({ selected_option_id: 'no', text: '' });
+    fireEvent.click(screen.getByRole('button', { name: 'Send “Change the design” with your note' }));
+    expect(held).toHaveLength(2); expect(held[1]!.change).toEqual({ selected_option_id: 'no', text: 'Keep my words' });
     expect([saved().text, saved().selected_option_id]).toEqual(['Keep my words', 'no']);
     expect(editor().value).toBe('Keep my words'); expect(value.calls).toHaveLength(0);
     await act(async () => { await held[1]!.queue(); });
     const sent = value.calls[0]!.command;
-    expect(sent.command === 'input_submit' && [sent.params.text, sent.params.selected_option_id]).toEqual(['', 'no']);
+    expect(sent.command === 'input_submit' && [sent.params.text, sent.params.selected_option_id]).toEqual(['Keep my words', 'no']);
   });
   it('asks to review a saved detail reply after the item changed, then sends it re-based on the current revision', async () => {
     const value = await setup(), user = userEvent.setup();
@@ -656,9 +703,9 @@ describe('owner input component and durable draft controller', () => {
     value.session.items['2']!.revision++; value.session.items['2']!.question_revision++; value.session.revision++;
     value.session.rounds[value.session.items['2']!.current_round_id!]!.question_revision++;
     await act(async () => { await value.store.refresh(); });
-    fireEvent.click(screen.getByRole('button', { name: 'Send reply' })); expect(value.calls).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' })); expect(value.calls).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Review current target' })); expect(editor().value).toBe('Retain explanation');
-    fireEvent.click(screen.getByRole('button', { name: 'Send reply' })); await screen.findByText('Saved · Queue position #4');
+    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' })); await screen.findByText('Saved · Queue position #4');
     expect(value.calls[0]?.command.command === 'input_submit' && value.calls[0].command.params.expected_question_revision).toBe(value.session.items['2']!.question_revision);
   });
   it('never sends before an uncertain preference save is explicitly reconciled', async () => {
@@ -671,22 +718,22 @@ describe('owner input component and durable draft controller', () => {
   it('preserves content and disables mutation after session read failure', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); fireEvent.change(editor(), { target: { value: 'Survives failure' } });
     value.unavailable(); await act(async () => { await value.store.refresh(); });
-    expect(editor().value).toBe('Survives failure'); fireEvent.click(screen.getByRole('button', { name: 'Send reply' })); expect(value.calls).toHaveLength(0);
+    expect(editor().value).toBe('Survives failure'); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' })); expect(value.calls).toHaveLength(0);
   });
   it('prepares a separate reviewed draft only after definitive question rejection, retaining the old frozen record', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); value.outcome('question_changed');
-    fireEvent.change(editor(), { target: { value: 'Owner explanation remains exact' } }); fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    fireEvent.change(editor(), { target: { value: 'Owner explanation remains exact' } }); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
     await screen.findByRole('button', { name: 'Edit and send again' }); const original = structuredClone(value.prefs.drafts[0]);
     fireEvent.click(screen.getByRole('button', { name: 'Edit and send again' }));
     await screen.findByRole('button', { name: 'Review current target' }); expect(value.calls).toHaveLength(1); expect(editor().value).toBe('Owner explanation remains exact');
     await waitFor(() => expect(value.prefs.drafts).toHaveLength(2)); expect(value.prefs.drafts[0]).toEqual(original);
     fireEvent.click(screen.getByRole('button', { name: 'Review current target' })); value.outcome('ok');
-    fireEvent.click(screen.getByRole('button', { name: 'Send reply' })); await screen.findByText('Saved · Queue position #4');
+    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' })); await screen.findByText('Saved · Queue position #4');
     expect(value.calls[1]?.command.op_id).not.toBe(value.calls[0]?.command.op_id); expect(value.prefs.drafts).toEqual([original]);
   });
   it('never permits changed-payload recovery for operation reuse or restored unknown attempts', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); value.outcome('operation_reused');
-    fireEvent.change(editor(), { target: { value: 'Keep operation identity' } }); fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    fireEvent.change(editor(), { target: { value: 'Keep operation identity' } }); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
     await screen.findByRole('button', { name: 'Try sending again' }); expect(screen.queryByRole('button', { name: 'Edit and send again' })).toBeNull();
     expect(editor().disabled).toBe(true); const restored = await value.restart();
     expect(Object.values(restored.getSnapshot().entries)[0]?.rejected).toBe(false); expect(value.calls).toHaveLength(1);
@@ -741,6 +788,29 @@ describe('owner input component and durable draft controller', () => {
     fireEvent.click(await screen.findByText('Sending “Keep the design”…')); expect(revealed).toBe('2');
     expect(screen.getByText('Nothing waiting on you')).toBeTruthy();
   });
+  it('uses a labelled pencil icon to take a queued Sent message back into its durable reply draft', async () => {
+    const text = 'Complete queued message\nKeep the final spaces  ';
+    const value = await setup([], session => {
+      const queued = session.inputs['00000000-0000-4000-8000-000000000076']!;
+      queued.kind = 'reply'; queued.payload.text = text;
+      session.messages.find(message => message.id === queued.message_id)!.body = text;
+    }), input = value.session.inputs['00000000-0000-4000-8000-000000000076']!;
+    const queue = new WaitingStore(value.service, value.sessions); waitingStores.push(queue); await queue.start();
+    const reveal = vi.fn();
+    render(<WaitingColumn drafts={value.drafts} store={queue} revealItem={reveal} openSession={() => {}} />);
+    const edit = await screen.findByRole('button', { name: 'Edit message' });
+    expect(edit.getAttribute('title')).toBe('Edit message');
+    expect(edit.querySelector('i.ph-pencil-simple')).not.toBeNull();
+    expect(edit.textContent).toBe('');
+    await waitFor(() => expect(edit.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(edit);
+    await waitFor(() => expect(value.calls.map(call => call.command)).toMatchObject([{ command: 'input_cancel', params: { input_id: input.id, purpose: 'edit' } }]));
+    await waitFor(() => expect(value.prefs.drafts).toMatchObject([{ text, intent: 'reply', target: { item_id: '4' } }]));
+    expect(value.drafts.find(route, '4', 'reply')?.draft.text).toBe(text);
+    expect(reveal).toHaveBeenCalledWith({ ...route, item_id: '4' });
+    expect(value.events.indexOf(`draft:${text}`)).toBeGreaterThan(value.events.indexOf('cancelled'));
+    expect(value.calls.some(call => call.command.command === 'input_submit')).toBe(false);
+  });
   it('moves an unknown Waiting answer to Sent as Checking and retries the exact operation from detail', async () => {
     const value = await setup(), queue = new WaitingStore(value.service, value.sessions); waitingStores.push(queue); await queue.start(); value.outcome('uncertain');
     let revealed: string | undefined;
@@ -754,7 +824,7 @@ describe('owner input component and durable draft controller', () => {
   });
   it('reconciles uncertain cleanup after a validated input receipt without re-submitting or losing durable draft recovery', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); const finish = value.gate();
-    fireEvent.change(editor(), { target: { value: 'Already durably submitted' } }); fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    fireEvent.change(editor(), { target: { value: 'Already durably submitted' } }); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
     await waitFor(() => expect(value.calls).toHaveLength(1)); value.preferenceOutcome('uncertain'); await act(async () => { finish(); });
     await screen.findByText('Saved · Queue position #4'); await screen.findByRole('button', { name: 'Try saving your draft again' });
     expect(value.prefs.drafts[0]?.submission_attempted).toBe(true); expect(value.calls).toHaveLength(1);
@@ -763,7 +833,7 @@ describe('owner input component and durable draft controller', () => {
   });
   it('retries draft cleanup after a saved input when an interleaved navigation patch bumped the revision', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); const finish = value.gate();
-    fireEvent.change(editor(), { target: { value: 'Saved then conflicted' } }); fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    fireEvent.change(editor(), { target: { value: 'Saved then conflicted' } }); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
     await waitFor(() => expect(value.calls).toHaveLength(1)); value.conflictDeletes(1); await act(async () => { finish(); });
     await screen.findByText('Saved · Queue position #4');
     await waitFor(() => expect(value.prefs.drafts).toEqual([]));
@@ -773,7 +843,7 @@ describe('owner input component and durable draft controller', () => {
   });
   it('surfaces draft cleanup failure after three revision conflicts without further retries', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); const finish = value.gate();
-    fireEvent.change(editor(), { target: { value: 'Conflicted thrice' } }); fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    fireEvent.change(editor(), { target: { value: 'Conflicted thrice' } }); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
     await waitFor(() => expect(value.calls).toHaveLength(1)); value.conflictDeletes(5); await act(async () => { finish(); });
     await screen.findByText('Saved · Queue position #4');
     await waitFor(() => expect(value.drafts.getSnapshot().error).not.toBeNull());
@@ -782,7 +852,7 @@ describe('owner input component and durable draft controller', () => {
   });
   it('never retries cleanup on commit_uncertain and keeps the draft recoverable as uncertain', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); const finish = value.gate();
-    fireEvent.change(editor(), { target: { value: 'Uncertain cleanup' } }); fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    fireEvent.change(editor(), { target: { value: 'Uncertain cleanup' } }); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
     await waitFor(() => expect(value.calls).toHaveLength(1)); value.preferenceOutcome('uncertain'); await act(async () => { finish(); });
     await screen.findByRole('button', { name: 'Try saving your draft again' });
     expect(value.writes.filter(write => write.command.command === 'preferences_patch' && write.command.params.entries.some(entry => entry.kind === 'delete_draft'))).toHaveLength(1);
@@ -881,13 +951,13 @@ describe('owner input component and durable draft controller', () => {
     expect(document.activeElement).toBe(editor());
     expect(shortcuts).toEqual([]);
     // Nothing goes out against a view that may be behind: neither the reply nor the option.
-    expect(screen.getByRole('button', { name: 'Send reply' }).getAttribute('aria-disabled')).toBe('true');
-    expect(screen.getByRole('button', { name: 'Send “Keep the design”' }).getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Send as a reply only' }).getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Send “Keep the design” with your note' }).getAttribute('aria-disabled')).toBe('true');
     await user.keyboard('{Meta>}{Enter}{/Meta}');
-    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
     expect(value.calls).toHaveLength(0);
     await act(async () => { await value.store.refresh(); });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Send reply' }).hasAttribute('aria-disabled')).toBe(false));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send as a reply only' }).hasAttribute('aria-disabled')).toBe(false));
     expect(editor().value).toBe('de1');
   });
   it('keeps a focused option focusable while the view refreshes: aria-disabled, so a click, Enter or digit changes and sends nothing', async () => {
@@ -924,8 +994,8 @@ describe('owner input component and durable draft controller', () => {
     await act(async () => { await value.store.refresh(); });
     await screen.findByRole('button', { name: 'Review current target' });
     expect(screen.getByText(changedText)).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Send reply' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByRole('button', { name: 'Send “Keep the design”' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Send as a reply only' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Send “Keep the design” with your note' }).hasAttribute('disabled')).toBe(true);
     expect(editor().value).toBe('Keep it');
     expect(value.calls).toHaveLength(0);
     // The box locks for the review, which drops focus to <body>: further keys stay the owner's, never tree shortcuts. A browser
@@ -988,7 +1058,7 @@ describe('owner input component and durable draft controller', () => {
     expect(Object.values(value.drafts.getSnapshot().entries)[0]!.draft.text).toBe('Typed before clear');
     expect(screen.queryByText(changedText)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Review current target' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
     await waitFor(() => expect(value.calls).toHaveLength(1));
   });
   it('does not move a saving or uncertain entry to the new binding', async () => {
@@ -996,7 +1066,7 @@ describe('owner input component and durable draft controller', () => {
     fireEvent.change(editor(), { target: { value: 'In flight' } });
     await waitFor(() => expect(value.prefs.drafts[0]?.text).toBe('In flight'));
     const release = value.gate(); value.outcome('uncertain');
-    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
     await waitFor(() => expect(Object.values(value.drafts.getSnapshot().entries)[0]!.saving).toBe(true));
     const original = await rebindTo(value);
     expect(Object.values(value.drafts.getSnapshot().entries)[0]!.draft.binding_id).toBe(original);
@@ -1042,6 +1112,10 @@ describe('the detail explains messages that have not reached the agent', () => {
   // Input 76 is item 4's queued "drop" request; item 4 is open.
   const queuedText = 'Drop request for item 4.\nPreserve this complete owner text.';
   const detail = () => document.querySelector('.item-detail')!;
+  const cancelledTurn = () => detail().querySelector<HTMLElement>('[data-message-id="00000000-0000-4000-8000-000000000109"]');
+  const getPutBack = () => within(cancelledTurn()!).getByRole('button', { name: 'Put back in reply box' });
+  const queryPutBack = () => cancelledTurn() ? within(cancelledTurn()!).queryByRole('button', { name: 'Put back in reply box' }) : null;
+  const findPutBack = () => waitFor(getPutBack);
   // Input 76 is made a queued reply (it has words to edit) unless the test asks for another kind.
   const queuedOnItem4 = async (kind: InputKind = 'reply') => {
     const value = await setup();
@@ -1055,15 +1129,16 @@ describe('the detail explains messages that have not reached the agent', () => {
     await waitFor(() => expect(remove.hasAttribute('disabled')).toBe(false));
     return { value, edit, remove, revision: value.session.revision };
   };
-  it('explains a queued message in the tracker; Delete cancels it and it leaves the timeline', async () => {
+  it('explains a queued message in the tracker; Delete keeps its cancelled text in the timeline', async () => {
     const { value, remove, revision } = await queuedOnItem4();
     expect(detail().textContent).toContain('Drop request for item 4.');
     fireEvent.click(remove);
     await waitFor(() => expect(cancels(value.calls)).toEqual([{ input_id: demoInput('76'), expected_revision: revision }]));
     expect(value.prefs.drafts).toEqual([]);
-    // Core cancelled it before any delivery: the tracker and the timeline no longer show it.
+    // Core cancelled it before any delivery: it leaves the tracker but keeps readable text in the chat.
     await waitFor(() => expect(screen.queryByText('Queued behind your message on “Implement receipt lookup”')).toBeNull());
-    expect(detail().textContent).not.toContain('Drop request for item 4.');
+    expect(detail().textContent).toContain('Drop request for item 4.');
+    expect(within(document.querySelector<HTMLElement>('[data-message-id="00000000-0000-4000-8000-000000000109"]')!).getByText('Cancelled before it reached the agent')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
   });
   it.each(['drop', 'bring', 'reopen'] as const)('offers only Delete for a queued %s request: it has no text to edit', async kind => {
@@ -1086,8 +1161,8 @@ describe('the detail explains messages that have not reached the agent', () => {
     expect(value.prefs.drafts).toMatchObject([{ intent: 'reply', text: queuedText, target: { item_id: '4' } }]);
     loadedAfterCancel(value.events);
     expect(value.session.inputs[demoInput('76')]).toMatchObject({ state: 'cancelled', cancel_cause: 'owner_edit' });
-    expect(await screen.findByText('Taken back to edit')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Put back in reply box' })).toBeTruthy();
+    expect(await screen.findByText('Taken back to edit. Cancelled before it reached the agent')).toBeTruthy();
+    expect(getPutBack()).toBeTruthy();
     expect(value.calls.some(call => call.command.command === 'input_submit')).toBe(false);
   });
   it('Edit on a queued note while the item is open shows its words in the docked reply box, labelled as a reply, with no extra step', async () => {
@@ -1185,12 +1260,12 @@ describe('the detail explains messages that have not reached the agent', () => {
       // The cancel may still land: it is kept, and Check again sends the same operation.
       value.cancelOutcome('ok');
       fireEvent.click(within(detail() as HTMLElement).getByRole('button', { name: 'Check again' }));
-      expect(await screen.findByText('Taken back to edit')).toBeTruthy();
+      expect(await screen.findByText('Taken back to edit. Cancelled before it reached the agent')).toBeTruthy();
       const [first, second] = value.calls.filter(call => call.command.command === 'input_cancel');
       expect(second?.command.op_id).toBe(first?.command.op_id);
       expect(cancels(value.calls).every(params => 'purpose' in params && params.purpose === 'edit')).toBe(true);
       untouched(value);
-      fireEvent.click(screen.getByRole('button', { name: 'Put back in reply box' }));
+      fireEvent.click(getPutBack());
       expect((await screen.findByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement).value).toBe(queuedText);
       loadedAfterCancel(value.events);
     });
@@ -1303,7 +1378,7 @@ describe('the detail explains messages that have not reached the agent', () => {
       const value = await cancelledBy('topic_archived');
       expect(await screen.findByText('Not sent: cancelled when you archived this topic')).toBeTruthy();
       expect(detail().textContent).toContain('Drop request for item 4.');
-      fireEvent.click(screen.getByRole('button', { name: 'Put back in reply box' }));
+      fireEvent.click(getPutBack());
       expect((await screen.findByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement).value).toBe(queuedText);
       expect(value.prefs.drafts).toMatchObject([{ intent: 'reply', text: queuedText, target: { item_id: '4' } }]);
       // Nothing is cancelled or sent by putting it back.
@@ -1312,21 +1387,21 @@ describe('the detail explains messages that have not reached the agent', () => {
     it('says the session was closed when close cancelled it; Put back waits for Reopen', async () => {
       await cancelledBy('session_closed', session => { session.state = 'closed'; session.closed_at = '2026-10-04T12:00:00.000Z'; });
       expect(await screen.findByText(/Not sent: cancelled when you closed this session\. Reopen the session/)).toBeTruthy();
-      expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull();
+      expect(queryPutBack()).toBeNull();
     });
     it('says the session was closed when close cancelled it and it is open again', async () => {
       await cancelledBy('session_closed');
       expect(await screen.findByText('Not sent: cancelled when you closed this session')).toBeTruthy();
-      expect(screen.getByRole('button', { name: 'Put back in reply box' })).toBeTruthy();
+      expect(getPutBack()).toBeTruthy();
     });
     it('after a restart, a message taken back to edit still reads Taken back to edit, and Put back loads it', async () => {
       // A fresh draft store and session read stand for the app started again with the cancel saved in core.
       const value = await cancelledBy('owner_edit'), restored = await value.restart();
       cleanup();
       render(<ItemDetail drafts={restored} store={value.store} itemId="4" later={false} onOpenItem={() => {}} />);
-      expect(await screen.findByText('Taken back to edit')).toBeTruthy();
+      expect(await screen.findByText('Taken back to edit. Cancelled before it reached the agent')).toBeTruthy();
       expect(detail().textContent).toContain('Drop request for item 4.');
-      fireEvent.click(screen.getByRole('button', { name: 'Put back in reply box' }));
+      fireEvent.click(getPutBack());
       expect((await screen.findByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement).value).toBe(queuedText);
       expect(restored.find(route, '4', 'reply')!.draft.text).toBe(queuedText);
       expect(value.writes.map(write => write.command.command).filter(name => name !== 'preferences_patch')).toEqual([]);
@@ -1339,24 +1414,25 @@ describe('the detail explains messages that have not reached the agent', () => {
       });
       await waitFor(() => expect(detail().textContent).not.toContain('Drop request for item 4.'));
       expect(screen.queryByText(/Taken back to edit/)).toBeNull();
-      expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull();
+      expect(queryPutBack()).toBeNull();
     });
     it('never overwrites a reply the owner already started: the old text shows to copy', async () => {
       const value = await cancelledBy('topic_archived');
       const id = value.drafts.begin(value.store.getSnapshot().snapshot!.session, '4', 'reply')!;
       value.drafts.edit(id, { text: 'My own reply' });
       await waitFor(() => expect(value.prefs.drafts.some(draft => draft.op_id === id && draft.text === 'My own reply')).toBe(true));
-      fireEvent.click(await screen.findByRole('button', { name: 'Put back in reply box' }));
+      fireEvent.click(await findPutBack());
       expect((await screen.findByRole('textbox', { name: 'Your earlier message' }) as HTMLTextAreaElement).value).toBe(queuedText);
       expect(value.drafts.find(route, '4', 'reply')!.draft.text).toBe('My own reply');
     });
-    it('hides a message the owner deleted, and one from a store with no recorded cause', async () => {
-      await cancelledBy('owner');
-      await waitFor(() => expect(detail().textContent).not.toContain('Drop request for item 4.'));
-      cleanup();
-      await cancelledBy(undefined);
-      await waitFor(() => expect(detail().textContent).not.toContain('Drop request for item 4.'));
-      expect(screen.queryByText(/Not sent:/)).toBeNull();
+    it.each([['owner'], [undefined]] as const)('keeps an owner-deleted message and its reason when cause is %s', async cause => {
+      await cancelledBy(cause);
+      const turn = document.querySelector<HTMLElement>('[data-message-id="00000000-0000-4000-8000-000000000109"]')!;
+      expect(await within(turn).findByText('Cancelled before it reached the agent')).toBeTruthy();
+      expect(turn.textContent).toContain('Drop request for item 4.');
+      expect(turn.classList.contains('detail-turn-cancelled')).toBe(true);
+      expect(within(turn).getByRole('button', { name: 'Copy message' })).toBeTruthy();
+      expect(turn.closest('[hidden], [aria-hidden="true"]')).toBeNull();
     });
     it('puts a topic reply that archive cancelled into that topic’s reply draft, never over one the owner started', async () => {
       const value = await setup(), input = value.session.inputs[demoInput('76')]!, topicId = input.target.topic_id;
@@ -1380,50 +1456,50 @@ describe('the detail explains messages that have not reached the agent', () => {
         session.inputs[later.id] = later;
       });
       expect(await screen.findByText('Not sent: cancelled when you archived this topic. You sent it again.')).toBeTruthy();
-      expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull();
+      expect(queryPutBack()).toBeNull();
     });
     it('offers no Put back after it was put back and sent', async () => {
       const value = await cancelledBy('topic_archived');
-      fireEvent.click(await screen.findByRole('button', { name: 'Put back in reply box' }));
+      fireEvent.click(await findPutBack());
       await screen.findByRole('textbox', { name: 'Reply message' });
       // The owner sends it: a new queued reply with the same words, to the same item.
       const later = structuredClone(value.session.inputs[demoInput('76')]!);
       later.id = demoInput('97'); later.seq += 100; later.state = 'queued'; later.cancel_cause = undefined; value.session.inputs[later.id] = later; value.session.revision++;
       await act(async () => { await value.store.refresh(); });
-      await waitFor(() => expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull());
+      await waitFor(() => expect(queryPutBack()).toBeNull());
       expect(screen.getByText(/You sent it again\./)).toBeTruthy();
     });
     it('offers no Put back while the put-back words are sending, nor after they are sent, before the session view catches up', async () => {
       const value = await cancelledBy('owner_edit');
-      fireEvent.click(await screen.findByRole('button', { name: 'Put back in reply box' }));
+      fireEvent.click(await findPutBack());
       await screen.findByRole('textbox', { name: 'Reply message' });
       const finish = value.gate();
       fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
       await waitFor(() => expect(Object.values(value.drafts.getSnapshot().entries).some(entry => entry.saving)).toBe(true));
       // Sending: the session still shows only the cancelled message.
-      expect(await screen.findByText(/Taken back to edit\. You sent it again\./)).toBeTruthy();
-      expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull();
+      expect(await screen.findByText(/Taken back to edit\. Cancelled before it reached the agent\. You sent it again\./)).toBeTruthy();
+      expect(queryPutBack()).toBeNull();
       await act(async () => { finish(); });
       await waitFor(() => expect(Object.values(value.drafts.getSnapshot().entries).some(entry => entry.receipt)).toBe(true));
       // Sent, session view not refreshed: still no button, and loading the words again is refused.
-      expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull();
+      expect(queryPutBack()).toBeNull();
       const session = value.store.getSnapshot().snapshot!.session;
       expect(await putBackCancelled(value.drafts, session, session.inputs[demoInput('76')]!)).toEqual({ kind: 'already_sent' });
     });
     it('offers Put back again when the sent words were refused', async () => {
       const value = await cancelledBy('owner_edit');
-      fireEvent.click(await screen.findByRole('button', { name: 'Put back in reply box' }));
+      fireEvent.click(await findPutBack());
       await screen.findByRole('textbox', { name: 'Reply message' });
       value.outcome('error');
       fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
       await waitFor(() => expect(value.calls.some(call => call.command.command === 'input_submit')).toBe(true));
       await waitFor(() => expect(Object.values(value.drafts.getSnapshot().entries).every(entry => !entry.saving)).toBe(true));
-      expect(await screen.findByRole('button', { name: 'Put back in reply box' })).toBeTruthy();
+      expect(await findPutBack()).toBeTruthy();
     });
     it('offers no Put back while the topic is archived: it says to restore it first', async () => {
       await cancelledBy('topic_archived', session => { session.topics[session.items['4']!.topic_id]!.archived_at = '2026-10-04T12:00:00.000Z'; });
       expect(await screen.findByText(/Not sent: cancelled when you archived this topic\. Restore the topic/)).toBeTruthy();
-      expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull();
+      expect(queryPutBack()).toBeNull();
     });
   });
   it('lets the newer question win over a held answer; Review and send again prefills the box and cancels the held one', async () => {
@@ -1563,7 +1639,9 @@ describe('the item detail reads like a chat', () => {
     const labels = [...body.children].map(element => element.getAttribute('aria-label') ?? element.className);
     expect(labels[0]).toBe('detail-head');
     expect(labels.at(-1)).toBe('Conversation');
-    expect(labels.indexOf('Timeline')).toBeLessThan(labels.indexOf('Conversation'));
+    expect(labels).not.toContain('Timeline');
+    expect(body.querySelector('.detail-head .detail-reference')).toBeTruthy();
+    expect(body.querySelector('.detail-reference code')).toBeNull();
     expect(dock!.querySelector('textarea')).toBeTruthy();
     expect(body.contains(dock)).toBe(false);
     // The pane does not scroll; the body does, and the dock keeps its own height.
@@ -1576,16 +1654,20 @@ describe('the item detail reads like a chat', () => {
     expect(rule('.detail-body')).toMatch(/flex:\s*1/);
     expect(rule('.detail-dock')).toMatch(/flex:\s*none/);
   });
-  it('lists the exchanges oldest first with no round headers or count', async () => {
-    const { chat } = await view('1', rounds);
-    const list = turns(chat()!);
-    expect(list.map(turn => turn.dataset.round)).toEqual(['1', '2', '3']);
-    expect(list[0]!.textContent).toContain('You chose “Keep complete history”');
-    expect(list[1]!.textContent).toContain('Second ask'); expect(list[1]!.textContent).toContain('Second reply');
-    expect(list[2]!.textContent).toContain('Third ask'); expect(list[2]!.textContent).toContain('Third reply');
+  it('lists every saved message once in number order, with inline forks and no round headers', async () => {
+    const { chat, value } = await view('1', rounds);
+    const list = turns(chat()!), ids = list.map(turn => turn.dataset.messageId);
+    expect(new Set(ids).size).toBe(ids.length);
+    const numbers = ids.map(id => value.session.messages.find(message => message.id === id)!.number);
+    expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
+    expect(chat()!.textContent).toContain('You chose “Keep complete history”');
+    expect(chat()!.textContent).toContain('Second reply');
+    expect(chat()!.textContent).toContain('Third reply');
+    expect(chat()!.textContent).toContain('The full history is retained.');
+    expect(chat()!.textContent).toContain('Agent raised this');
+    expect(chat()!.querySelector('.detail-msg-result')).toBeNull();
     expect(document.body.textContent).not.toMatch(/Round \d|Back and forth|\d+ rounds?/);
-    // Forked items follow their exchange as links.
-    expect(within(list[0]!).getByRole('button', { name: /Add the receipt lookup test/ })).toBeTruthy();
+    expect(within(chat()!).getByRole('button', { name: /Branched into Add the receipt lookup test/ })).toBeTruthy();
   });
   it('shows a first, unanswered ask as the open one, marked Waiting on you', async () => {
     const { chat } = await view('2', session => {
@@ -1593,7 +1675,7 @@ describe('the item detail reads like a chat', () => {
       round.owner_message_ids = []; round.result_input_ids = [];
       for (const input of Object.values(session.inputs)) if (input!.target.item_id === '2') input!.state = 'cancelled';
     });
-    const [turn] = turns(chat()!);
+    const turn = turns(chat()!).find(turn => turn.classList.contains('detail-turn-now'))!;
     expect(turn!.className).toContain('detail-turn-now');
     expect(turn!.querySelector('.detail-bubble-agent')!.textContent).toContain('Choose the next delivery window.');
     expect(within(turn!).getByText('Waiting on you')).toBeTruthy();
@@ -1605,9 +1687,10 @@ describe('the item detail reads like a chat', () => {
       round.ask_snapshot = round.question_snapshot; round.owner_message_ids = []; round.result_input_ids = [];
       for (const input of Object.values(session.inputs)) if (input!.target.item_id === '2') input!.state = 'cancelled';
     });
-    const [turn] = turns(chat()!);
+    const turn = turns(chat()!).find(turn => turn.classList.contains('detail-turn-now'))!;
     expect(within(turn!).getByText('Waiting on you')).toBeTruthy();
-    expect(body.textContent!.split('Which delivery window?')).toHaveLength(2);
+    expect(body.querySelector('.detail-question')!.textContent).toBe('Which delivery window?');
+    expect(chat()!.textContent!.split('Choose the next delivery window.')).toHaveLength(2);
   });
   it('does not mark an ask the owner already answered as waiting on them', async () => {
     const { chat } = await view('2');
@@ -1650,12 +1733,12 @@ describe('the item detail reads like a chat', () => {
       const input = session.inputs[demoId('71')]!;
       input.state = 'queued'; input.kind = 'answer'; input.payload.text = 'Keep the design';
     });
-    const list = turns(chat()!);
+    const list = turns(chat()!).filter(turn => turn.dataset.pending);
     expect(list.at(-1)!.dataset.pending).toBe(demoId('71'));
     // The owner's own words can be taken back to edit, or deleted, right on the bubble.
     expect(within(list.at(-1)!).getByRole('button', { name: 'Edit' })).toBeTruthy();
     expect(within(list.at(-1)!).getByRole('button', { name: 'Delete' })).toBeTruthy();
-    expect(chat()!.textContent!.split('Bring request for item 2.')).toHaveLength(1);
+    expect(chat()!.querySelectorAll('[data-pending]')).toHaveLength(1);
     expect(within(chat()!).queryByText('Waiting on you')).toBeNull();
   });
   describe('the newest ask keeps Waiting on you while an older or unrelated message is pending', () => {
@@ -1675,7 +1758,7 @@ describe('the item detail reads like a chat', () => {
         bring.state = 'queued'; round.owner_message_ids = [bring.message_id];
       });
       expect(document.querySelector('[data-pending]')).toBeTruthy();
-      expect(within(turns(chat()!).at(0)!).getByText('Waiting on you')).toBeTruthy();
+      expect(within(chat()!).getByText('Waiting on you')).toBeTruthy();
     });
     it('keeps it with a queued note filed under the asking round', async () => {
       const { chat } = await view('2', session => {
@@ -1683,7 +1766,7 @@ describe('the item detail reads like a chat', () => {
         note.state = 'queued'; note.kind = 'note'; note.payload.text = 'Also mind the retry path'; round.owner_message_ids = [note.message_id];
       });
       expect(document.querySelector('[data-pending]')).toBeTruthy();
-      expect(within(turns(chat()!).at(0)!).getByText('Waiting on you')).toBeTruthy();
+      expect(within(chat()!).getByText('Waiting on you')).toBeTruthy();
     });
     it('drops it once an answer to the current ask is on its way, and also for a reply to it', async () => {
       for (const kind of ['answer', 'reply'] as const) {
@@ -1740,7 +1823,7 @@ describe('the item detail reads like a chat', () => {
     // Among the references at the top, ahead of the timeline and the conversation.
     const labels = [...body.children].map(element => element.getAttribute('aria-label') ?? element.className);
     expect(labels.indexOf('Original item')).toBeGreaterThan(0);
-    expect(labels.indexOf('Original item')).toBeLessThan(labels.indexOf('Timeline'));
+    expect(labels.indexOf('Original item')).toBeLessThan(labels.indexOf('Conversation'));
     // An item that was not copied has no such section.
     cleanup();
     render(<ItemDetail drafts={value.drafts} store={value.store} itemId="1.1" later={false} onOpenItem={() => {}} provenance={<span>Never shown</span>} />);
@@ -1755,7 +1838,7 @@ describe('the item detail reads like a chat', () => {
       // Scrolled up to read: arrivals leave the view alone, a send does not.
       body.scrollTop = 100; fireEvent.scroll(body);
       fireEvent.change(screen.getByRole('textbox', { name: 'Reply in your own words' }), { target: { value: 'Next week' } });
-      fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
       await waitFor(() => expect(value.calls).toHaveLength(1));
       await waitFor(() => expect(body.scrollTop).toBe(900));
     } finally { height.mockRestore(); }

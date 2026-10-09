@@ -11,17 +11,17 @@ const opened: ReturnType<typeof setup>[] = [];
 afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.clearAllMocks(); });
 
 describe('conversation message copying', () => {
-  it('copies each Timeline entry raw body, preserving markdown and whitespace', async () => {
+  it('copies each chat message raw body, preserving markdown and whitespace', async () => {
     const value = setup(); opened.push(value);
     const session = value.transport.session;
     session.messages.forEach(message => { message.body = `  **Message ${message.id}**\r\n\r\n- source with spaces  `; });
     await value.store.refresh();
     render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={vi.fn()} />);
-    const timeline = await screen.findByRole('region', { name: 'Timeline' });
-    const entries = timeline.querySelectorAll<HTMLElement>('.excerpt-timeline');
+    const timeline = await screen.findByRole('region', { name: 'Conversation' });
+    const entries = timeline.querySelectorAll<HTMLElement>('li[data-message-id] > .detail-msg:first-of-type');
     expect(entries.length).toBeGreaterThan(0);
     for (const entry of entries) {
-      const message = session.messages.find(message => message.id === entry.dataset.messageId)!;
+      const message = session.messages.find(message => message.id === entry.parentElement!.dataset.messageId)!;
       expect(message).toBeDefined();
       fireEvent.click(within(entry).getByRole('button', { name: 'Copy message' }));
       expect(copy).toHaveBeenLastCalledWith(message.body);
@@ -45,14 +45,15 @@ describe('conversation message copying', () => {
     const messages = chat.querySelectorAll('.detail-msg');
     expect(messages.length).toBeGreaterThanOrEqual(3);
     messages.forEach(message => expect(within(message as HTMLElement).getAllByRole('button', { name: 'Copy message' })).toHaveLength(1));
+    const first = session.messages.find(message => message.id === item.created_message_id)!;
     fireEvent.click(within(messages[0] as HTMLElement).getByRole('button', { name: 'Copy message' }));
+    expect(copy).toHaveBeenLastCalledWith(first.body);
+    const askMessage = [...chat.querySelectorAll<HTMLElement>('.detail-msg')].find(message => message.textContent?.includes('Original ask'))!;
+    fireEvent.click(within(askMessage).getByRole('button', { name: 'Copy message' }));
     expect(copy).toHaveBeenLastCalledWith(round.ask_snapshot);
     fireEvent.click(within(chat.querySelector('.detail-msg-you') as HTMLElement).getByRole('button', { name: 'Copy message' }));
     expect(copy).toHaveBeenLastCalledWith(owner.body);
-    const result = chat.querySelector('.detail-msg-result') as HTMLElement;
-    fireEvent.click(within(result).getByRole('button', { name: 'Copy message' }));
-    const explanation = round.result_input_ids.flatMap(id => session.inputs[id]?.attempts ?? []).find(attempt => attempt.domain_result)?.domain_result?.explanation;
-    expect(copy).toHaveBeenLastCalledWith(explanation);
+    expect(chat.querySelector('.detail-msg-result')).toBeNull(); // The full agent reply replaces its short result.
     rendered.rerender(<ItemDetail key={pending.target.item_id} drafts={drafts} store={value.store} itemId={pending.target.item_id!} later={false} onOpenItem={vi.fn()} />);
     const bubble = document.querySelector(`[data-pending="${pending.id}"]`) as HTMLElement;
     fireEvent.click(within(bubble).getByRole('button', { name: 'Copy message' }));
@@ -76,8 +77,8 @@ describe('conversation message copying', () => {
     fireEvent.keyDown(within(chat).getByRole('link', { name: 'receipt follow-up' }), { key: 'Enter' });
     expect(open.mock.calls).toEqual([['1.1'], ['1.1']]);
     expect(within(chat).queryByRole('link', { name: 'owner label' })).toBeNull();
-    expect(chat.querySelector('.detail-bubble-you')?.textContent).toContain('owner label');
-    expect(within(screen.getByRole('region', { name: 'Timeline' })).queryByRole('link', { name: 'owner label' })).toBeNull();
+    expect(chat.textContent).toContain('owner label');
+    expect(within(screen.getByRole('region', { name: 'Conversation' })).queryByRole('link', { name: 'owner label' })).toBeNull();
     expect(external).not.toHaveBeenCalled();
   });
 });
