@@ -44,7 +44,8 @@ for (const scenario of ['delayed-readiness', 'wrong-text', 'disabled-send', 'fro
     try {
       process.env.ARIADNE_HOME = root; process.env.ARIADNE_E2E_EVIDENCE = root;
       await writeFile(configuration.sessionPath, JSON.stringify(saved));
-      await writeFile(join(root, 'ui.json'), JSON.stringify({ snapshot: { revision: 8, drafts: [] } }));
+      await writeFile(join(root, 'ui.json'), JSON.stringify({ snapshot: { revision: 8, drafts: [{ session: { session_id: configuration.sessionId },
+        target: { item_id: configuration.itemId }, intent: 'answer', op_id: 'answer-draft', target_revision: 3, submission_attempted: true, text }] } }));
       const editor = { waitForDisplayed: async () => calls.push('editor displayed'), waitForEnabled: async () => calls.push('editor enabled'),
         setValue: async input => { assert.equal(input, text); calls.push('type'); }, getValue: async () => value, isEnabled: async () => true };
       const send = { waitForDisplayed: async () => calls.push('send displayed'), isEnabled: async () => enabled,
@@ -56,7 +57,16 @@ for (const scenario of ['delayed-readiness', 'wrong-text', 'disabled-send', 'fro
         }
       } };
       globalThis.browser = {
-        $: async selector => selector.endsWith(' textarea') ? editor : { $: async selector => { assert.equal(selector, 'button=Send reply'); return send; } },
+        $: async selector => {
+          assert.equal(selector, '.item-detail [data-owner-input="1"]');
+          return { waitForExist: async () => {}, $: async selector => {
+            assert.equal(selector, '.detail-box, .answer-reply');
+            return { waitForExist: async () => {}, $: async selector => {
+              if (selector === 'textarea') return editor;
+              assert.equal(selector, 'button[aria-label^="Send "], button.answer-reply-send'); return send;
+            } };
+          } };
+        },
         waitUntil: async (condition, options) => {
           assert.equal(options.timeout, 20000); assert.equal(options.interval, 100);
           if (options.timeoutMsg.startsWith('Detail Reply')) {
@@ -88,6 +98,7 @@ for (const scenario of ['delayed-readiness', 'wrong-text', 'disabled-send', 'fro
         assert.equal(proof.local.value, value); assert.equal(proof.local.sendEnabled, enabled && !frozen);
         assert.equal(proof.canonical.revision, 7); assert.deepEqual(proof.canonical.inputs, []);
         assert.equal(proof.preferences.revision, 8);
+        assert.deepEqual(proof.preferences.drafts, [{ opId: 'answer-draft', targetRevision: 3, submissionAttempted: true, textMatchesExpected: true }]);
       }
     } finally {
       if (prior.browser === undefined) delete globalThis.browser; else globalThis.browser = prior.browser;

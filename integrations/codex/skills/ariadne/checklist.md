@@ -16,6 +16,23 @@ still apply.
   step `done` with its result and start the next. The tree is the checklist; the
   owner watches "In progress". Closing a step ends its note.
 
+## Closing the parent
+
+When your request settles the last open child of a parent (`done`, `decided`,
+`dropped` or `replaced`), close the parent in that same request, but only if all
+of these hold:
+
+- Your own work on the parent is finished.
+- The parent is yours to close: you own it, not the owner or someone else, and it
+  has no ask of its own still waiting.
+- Nothing else on it is open: no unanswered owner message, no follow-up you owe.
+
+Close it as `decided` when its type is `decision` or `question`, and as `done`
+when it is a `finding`, `explanation` or `task`. Its `outcome` is one line summing
+up the children's results; its `why` says why it is finished. Guard both items
+with their revisions. If the owner's answers reopen something on the parent, keep
+it open.
+
 ## Live work
 
 - The work is a `task`, `in_progress`; its `note` is the one line the owner sees in

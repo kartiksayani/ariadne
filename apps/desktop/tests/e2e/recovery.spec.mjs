@@ -72,7 +72,7 @@ async function openPrimary(configuration) {
   // Graph mode can be retained from the preceding acceptance; choose Tree explicitly.
   await click(await browser.$('button[title="Tree (g)"]'));
   await click(await browser.$(`.tree-item[data-item-id="${configuration.itemId}"]`));
-  await wait(async () => await browser.$('.item-detail .detail-reference code').getText() === configuration.itemId, 'Recovery selected a different item');
+  await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === configuration.itemId, 'Recovery selected a different item');
 }
 
 /** Opens the "Sending to <agent>" dialog from the session card in All sessions (its sending button, title "Sending and connection"). */
@@ -101,6 +101,7 @@ async function holdSuccessor(configuration, expectedCount, successorId, message)
 export async function runRecoveryAcceptance(configuration) {
   const evidence = process.env.ARIADNE_E2E_EVIDENCE, nonce = process.env.ARIADNE_E2E_NONCE;
   const baseline = await snapshot(configuration), queuedBefore = await admissions(configuration);
+  assert.equal(baseline.items[configuration.itemId].status, 'waiting_on_me', 'Recovery must answer the restored waiting item');
   assert.ok(Object.values(baseline.inputs).every(input => input.state === 'handled'));
   assert.equal(baseline.bindings[configuration.bindingId].dispatch_state, 'enabled');
   const demoBefore = await readFile(configuration.demo.sessionPath);
@@ -114,6 +115,8 @@ export async function runRecoveryAcceptance(configuration) {
   let session = await snapshot(configuration);
   const input = session.inputs[original.inputId], successor = Object.values(session.inputs).find(input => input.payload.text === successorText);
   assert.ok(successor); assert.equal(input.payload.text, workText); assert.equal(input.attempts.length, 1);
+  assert.equal(input.kind, 'answer'); assert.equal(input.payload.selected_option_id, null, 'Recovery sends own words without the recommended option');
+  assert.equal(successor.kind, 'reply'); assert.equal(successor.payload.selected_option_id, null);
   assert.equal(successor.seq, input.seq + 1);
   await holdSuccessor(configuration, queuedBefore.length + 1, successor.id, 'Original running turn must hold its successor');
   const replyText = `native-retained-recovery-reply-${nonce}\nThe completed original work remains published in full.`;
@@ -213,7 +216,7 @@ export async function runRecoveryAcceptance(configuration) {
   assert.deepEqual(finalSession.messages.find(message => message.id === reply.id), reply);
   for (const [id, prior] of Object.entries(baseline.inputs)) assert.deepEqual(finalSession.inputs[id], prior, 'Recovery cannot rewrite the restored golden inputs');
   assert.deepEqual(await readFile(configuration.demo.sessionPath), demoBefore);
-  await (await browser.$('.item-detail [aria-label="Timeline"]')).waitForDisplayed();
+  await (await browser.$('.item-detail [aria-label="Conversation"]')).waitForDisplayed();
   await wait(async () => {
     // The timeline lays a multi-line body out as one paragraph: compare with white space folded.
     const text = folded(await browser.$('[aria-label="Item detail"]').getText());

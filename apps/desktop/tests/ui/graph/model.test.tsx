@@ -8,6 +8,27 @@ const build = (overrides: Partial<GraphInput> = {}) =>
   sessionGraph({ session: graphSession(), view: preferences(), later: new Set(), selectedId: null, tight: false, ...overrides });
 
 describe('graph model', () => {
+  it('keeps hidden parents and descendants reachable and marks them faded, including the selected node', () => {
+    const graph = build({ view: preferences({ hidden_item_ids: ['1'] }), selectedId: '1.1.1' });
+    expect(graph.order).toEqual(['1', '1.1', '1.1.1', '1.2', '2', '3', '8']);
+    for (const id of ['1', '1.1', '1.1.1', '1.2']) expect(graph.nodes.get(id)!.hidden).toBe(true);
+    expect(graph.nodes.get('1.1.1')!.selected).toBe(true);
+    expect(graph.nodes.get('2')!.hidden).toBe(false);
+    expect(graph.topics[0].counts).toContain('1 waiting on you');
+  });
+
+  it('keeps a child hidden independently when its parent is unhidden', () => {
+    const both = build({ view: preferences({ hidden_item_ids: ['1', '1.1'] }) });
+    expect(both.nodes.get('1.2')!.hidden).toBe(true);
+    const child = build({ view: preferences({ hidden_item_ids: ['1.1'] }) });
+    expect(child.nodes.get('1')!.hidden).toBe(false);
+    expect(child.nodes.get('1.2')!.hidden).toBe(false);
+    expect(child.nodes.get('1.1')!.hidden).toBe(true);
+    expect(child.nodes.get('1.1.1')!.hidden).toBe(true);
+    const clear = build({ view: preferences({ hidden_item_ids: [] }) });
+    expect([...clear.nodes.values()].some(node => node.hidden)).toBe(false);
+  });
+
   it('lays out one graph per topic left to right as the prototype does', () => {
     const graph = build(), [a, b] = graph.topics;
     expect(graph.topics.map(topic => topic.topic.id)).toEqual([topicA, topicB]);

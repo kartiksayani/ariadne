@@ -24,6 +24,8 @@ export interface StuckNoteProps {
   readonly stuck: Stuck;
   /** Not sent yet: take the queued message back, then put it in the owner's editor (held.ts `editQueued`). */
   readonly onEdit?: () => Promise<ReviewOutcome>;
+  /** Queued cards use small Edit/Delete icons on their bottom line. */
+  readonly compactActions?: boolean;
 }
 
 /** What Edit ("Review and send again") says when it could not simply move the message. */
@@ -47,7 +49,7 @@ export function ReviewResult({ outcome }: { readonly outcome: ReviewOutcome }) {
   </div>;
 }
 
-export function StuckNote({ actions, input, stuck, onEdit }: StuckNoteProps) {
+export function StuckNote({ actions, input, stuck, onEdit, compactActions = false }: StuckNoteProps) {
   const state = useSession(actions.session), operation = useSessionActions(actions), dispatch = useDispatch(actions);
   /** This note wrote last: a failure of that write shows here. */
   const [acted, setActed] = useState(false);
@@ -82,14 +84,15 @@ export function StuckNote({ actions, input, stuck, onEdit }: StuckNoteProps) {
   const onItsWay = stuck.kind === 'sent';
   // Not sent yet: the owner can take it back to edit, or delete it; once on its way or stopped, only cancel.
   const unsent = input.state === 'queued', canEdit = unsent && !!onEdit && editable(input.kind);
+  const icons = compactActions && unsent;
   return <div className="stuck-note" data-stuck={stuck.kind} data-stuck-input={input.id}>
     {!onItsWay && <i className={stuck.kind === 'paused' ? 'ph ph-pause-circle' : stuck.kind === 'decision' || stuck.kind === 'blocked' || stuck.kind === 'held'
       ? 'ph ph-warning-circle' : 'ph ph-hourglass-medium'} aria-hidden="true" />}
     {!onItsWay && <span role="status">{stuck.text}</span>}
-    <span className="stuck-actions">
-      {canEdit && <button type="button" className={stuck.kind === 'held' ? 'btn btn-secondary dispatch-action' : 'btn btn-ghost dispatch-action'}
-        disabled={busy || review.running} title="Put it back in your editor to change it; it won’t be sent until you send it again"
-        onClick={quiet(runReview)}>{stuck.kind === 'held' ? 'Review and send again' : 'Edit'}</button>}
+    <span className={`stuck-actions${icons ? ' stuck-actions-compact' : ''}`}>
+      {canEdit && <button type="button" className={icons ? 'btn btn-ghost btn-icon' : stuck.kind === 'held' ? 'btn btn-secondary dispatch-action' : 'btn btn-ghost dispatch-action'}
+        disabled={busy || review.running} aria-label={icons ? 'Edit message' : undefined} title={icons ? 'Edit message' : 'Put it back in your editor to change it; it won’t be sent until you send it again'}
+        onClick={quiet(runReview)}>{icons ? <i className="ph ph-pencil-simple" aria-hidden="true" /> : stuck.kind === 'held' ? 'Review and send again' : 'Edit'}</button>}
       {stuck.resume && <button type="button" className="btn btn-secondary dispatch-action" disabled={dispatch.busy}
         onClick={quiet(() => { void dispatch.resume(); })}><i className="ph ph-play" aria-hidden="true" />Resume</button>}
       {stuck.retry && <button type="button" className="btn btn-secondary dispatch-action" disabled={busy || !!working}
@@ -99,8 +102,8 @@ export function StuckNote({ actions, input, stuck, onEdit }: StuckNoteProps) {
         title={working ?? 'Stop trying; the message stays in the history as not delivered'} onClick={quiet(() => resolve('skip'))}>Mark as done</button>}
       {stuck.settle === 'accept_result' && <button type="button" className="btn btn-primary dispatch-action" disabled={busy}
         title="The agent saved its answer" onClick={quiet(() => resolve('accept_result'))}>Mark as handled</button>}
-      {unsent ? <button type="button" className="btn btn-ghost dispatch-action" disabled={busy} title="Delete this message; it won’t be sent"
-        onClick={quiet(cancel)}><i className="ph ph-trash" aria-hidden="true" />Delete</button>
+      {unsent ? <button type="button" className={icons ? 'btn btn-ghost btn-icon' : 'btn btn-ghost dispatch-action'} disabled={busy} aria-label={icons ? 'Delete message' : undefined} title={icons ? 'Delete message' : 'Delete this message; it won’t be sent'}
+        onClick={quiet(cancel)}><i className="ph ph-trash" aria-hidden="true" />{!icons && 'Delete'}</button>
         : <button type="button" className="btn btn-ghost dispatch-action" disabled={busy} title="Cancel this message; it won’t be sent"
           onClick={quiet(cancel)}>Cancel message</button>}
       {attempt && <button type="button" className="btn btn-ghost dispatch-action" disabled={busy}

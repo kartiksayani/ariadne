@@ -8,6 +8,7 @@ import { indexSession, type Immutable } from '../../data';
 import { normalizeSearch, sentenceRows, type SentenceRow } from '../../selectors/tree/rows';
 import { shortLabel } from '../shared/short';
 import { displayStatus, type DisplayStatus } from '../../selectors/waiting/replied';
+import { hiddenItems } from '../tree/hidden';
 
 export type GraphStatus = 'open' | 'waiting' | 'agent' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
 
@@ -51,6 +52,8 @@ export interface GraphNode {
   readonly closed: boolean;
   /** Shown only as context for a filter: 40% opacity. */
   readonly dimmed: boolean;
+  /** Hidden by the owner, directly or through a parent. Still opens in detail. */
+  readonly hidden: boolean;
 }
 export interface GraphEdge { readonly id: string; readonly d: string; readonly on: boolean }
 export interface GraphReplacement { readonly id: string; readonly d: string; readonly labelX: number; readonly labelY: number }
@@ -119,6 +122,7 @@ export const edgePath = (x1: number, y1: number, x2: number, y2: number): string
 export function sessionGraph(input: GraphInput): SessionGraph {
   const { session, view, later, selectedId, tight } = input;
   const filtering = isFiltering(view.filters);
+  const hidden = hiddenItems(session, new Set(view.hidden_item_ids ?? []));
   const rows = sentenceRows(session, view, later, input.temporaryExpandedItemIds ?? [], input.revealedItemId ?? null).rows;
   const visible = new Map<string, SentenceRow>(rows.map(row => [row.item.id, row]));
   const children = new Map<string, string[]>();
@@ -171,7 +175,8 @@ export function sessionGraph(input: GraphInput): SessionGraph {
       const collapsed = row.childCount > 0 && !shown, selected = selectedId === item.id;
       const node: GraphNode = { item, status: graphStatus(displayStatus(session, item)), short: shortLabel(item), x: at.x, y: at.y, below,
         collapsed: collapsed && below > 0, canCollapse: !filtering && !collapsed && below > 0, selected,
-        onThread: thread.has(item.id) && !selected, closed: isClosed(item.status), dimmed: filtering && row.context && !selected };
+        onThread: thread.has(item.id) && !selected, closed: isClosed(item.status), dimmed: filtering && row.context && !selected,
+        hidden: hidden.has(item.id) };
       nodes.set(item.id, node);
       return node;
     });

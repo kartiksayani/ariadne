@@ -356,6 +356,14 @@ impl OwnerCommand {
                             }
                         }
                         PreferencesPatchEntry::SetSessionView { preferences } => {
+                            let mut hidden = std::collections::BTreeSet::new();
+                            if !preferences
+                                .hidden_item_ids
+                                .iter()
+                                .all(|item| hidden.insert(item))
+                            {
+                                return Err(invalid("Duplicate hidden item"));
+                            }
                             for owner in &preferences.filters.owners {
                                 if let ItemOwner::Other { name } = owner {
                                     text(name, usize::MAX, true)?;

@@ -66,6 +66,16 @@
   padding: 0 10px 8px 14px;
 }
 
+.pw-excerpt-cancelled .pw-excerpt-text {
+  display: block;
+  overflow: visible;
+  user-select: text;
+  color: var(--a-label);
+}
+
+.pw-excerpt-cancelled:hover .detail-message-copy,
+.pw-excerpt-cancelled:focus-within .detail-message-copy { opacity: 1; }
+
 .pw-rail-note {
   padding: 6px 10px;
   font-size: calc(13px * var(--text-scale));

@@ -41,7 +41,7 @@ for example `[cache choice](item:3.2)`; never use a bare item number such as
 | `op` | Required | Optional |
 |---|---|---|
 | `topic.add` | `name` | `short`, `ref` |
-| `item.add` | `question`, `type`, `topic` | `short`, `status`, `owner`, `ask`, `options`, `parent`, `note`, `links`, `outcome`, `why`, `children`, `ref` |
+| `item.add` | `question`, `type` | `topic` (the request's only `topic.add`; nested `children` inherit their parent's topic), `short`, `status`, `owner`, `ask`, `options`, `parent`, `note`, `links`, `outcome`, `why`, `children`, `ref` |
 | `item.edit` | `item`, `patch` | patch: `question`, `type`, `note`, `links`, `short` |
 | `item.ask` | `item`, `ask` | `options` |
 | `item.status` | `item`, `status` | `outcome`, `why`, `reason` |
@@ -49,27 +49,16 @@ for example `[cache choice](item:3.2)`; never use a bare item number such as
 | `reply` | `item`, `text` | `ref`, `round_id` |
 | `round.close` | `round_id` | |
 
-- Defaults. `topic`: the request's only `topic.add` (a child takes its parent's).
-  `status`: `waiting_on_me` with an `ask`, else `open`. `owner`: you; `{"kind":"me"}`
-  with an `ask`; others are `{"kind":"other","name":"N"}`. Option `id`: 1, 2, ...
-  `ref`: r1, r2, ... by position; name one only to reference it later. An ask's
-  answer comes back to you.
-- `children: [...]` on `item.add` holds nested `item.add` objects; their parent
-  and topic are wired automatically.
-- References: `{"ref":"a"}` names an earlier `ref` of this request (a letter, then
-  letters, digits or `_`, at most 32); `{"id":"1.2"}` is an existing item, or a
-  UUID for a topic or message. In `item.edit`, omit `short` or `note` to keep it,
-  send a string to replace it, `null` to clear it.
-- Types: question, decision, finding, task, explanation. Statuses: `open` and
-  `in_progress` take a `reason` (only in `item.status`); `decided`, `done` and
-  `dropped` need `outcome` and `why`; `replaced` only through `item.replace`;
-  `waiting_on_me` only through an `ask`.
-- Every topic and item you create gets a `short` label: a 2-4 word noun phrase of
-  at most 40 characters, such as "SDK cache PR". It is the tree node title; keep
-  it stable.
-- Limits: `question`, `ask`, `note`, `outcome`, `why` at most 4096 bytes, `reply`
-  64 KiB, 100 operations, 12 options and 32 links per item. Text renders as
-  markdown; topic names, `short` labels and option labels are plain text.
+Set `topic` explicitly if neither default applies.
+For other defaults, nested children, reference syntax, transitions and field limits,
+read `errors.md` when preparing an unfamiliar request.
+
+Every topic and item you create gets a `short` label: a 2-4 word noun phrase of
+at most 40 characters, such as "SDK cache PR". It is the tree node title; keep
+it stable.
+
+Text renders as markdown; topic names, `short` labels and option labels are plain
+text.
 
 ## Shape the work
 
@@ -117,6 +106,15 @@ yourself; the owner never names topics or items.
 - **Proposals** (comments to post, fixes to apply): one child each with its own
   `ask` and options. The parent is a summary with no ask. Never file them `done`
   under one blanket ask on the parent.
+- **Choice notes.** A choice can carry free text; follow the note even over the
+  option's consequence, ask on that item if ambiguous, and reflect it in the
+  input result (`inputs.md`).
+- **Ripple updates.** After acting on an owner answer or reply, check the session's
+  other items in the same topic and other topics for outcomes now wrong, questions
+  now moot or follow-ups now needed. Update affected items in the same filing
+  where possible, then name each changed item in the input result as
+  `[label](item:<id>)`. Never silently reverse an owner decision on another item:
+  raise a new ask on that item instead. Leave unrelated items alone.
 - **Spend few tokens.** File a result in one request, children nested with
   `children`. Data nobody discusses row by row is one item with a table.
 

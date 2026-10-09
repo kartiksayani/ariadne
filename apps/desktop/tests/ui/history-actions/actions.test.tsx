@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MutationEnvelope } from '../../../src/generated/core';
 import { createDesktopService, CoreFailure } from '../../../src/data/service';
 import { OpenSessions } from '../../../src/data/session-store';
@@ -19,7 +19,7 @@ import { HistoryTransport } from './fixture';
 const op = '00000000-0000-4000-8000-000000000099';
 const targetRoute = { ...route, session_id: secondId };
 const opened: OpenSessions[] = [];
-afterEach(() => { cleanup(); opened.splice(0).forEach(sessions => sessions.closeAll()); });
+afterEach(() => { cleanup(); opened.splice(0).forEach(sessions => sessions.closeAll()); vi.useRealTimers(); });
 function failure(code: CoreFailure['error']['code']): MutationEnvelope {
   return { api_version: 1, ok: false, error: { code, message: `Rejected ${code}`, hint: 'Review current data.', retryable: false, field_errors: [] } };
 }
@@ -43,6 +43,8 @@ function HistoryActions({ actions }: { actions: SessionActions }) {
   if (!session) return null;
   return <section aria-label="History actions">
     <button type="button" disabled={lifecycle.busy} onClick={lifecycle.session}>{session.state === 'closed' ? 'Reopen session' : 'Close session'}</button>
+    {Object.values(session.topics).map(topic => topic && !topic.archived_at && <button key={`prompt-${topic.id}`} type="button"
+      onClick={() => lifecycle.archive(topic.id)}>Archive topic prompt {topic.name}</button>)}
     {Object.values(session.topics).map(topic => topic && <button key={topic.id} type="button" disabled={lifecycle.busy}
       onClick={() => { if (topic.archived_at) lifecycle.restore(topic.id); else lifecycle.archive(topic.id); }}>{topic.archived_at ? 'Restore' : 'Archive'} {topic.name}</button>)}
     {lifecycle.archived && <p role="status">Archived {lifecycle.archived.name} · {lifecycle.archived.cancelled} cancelled<button type="button" onClick={lifecycle.undo}>Undo</button>
@@ -54,6 +56,155 @@ function HistoryActions({ actions }: { actions: SessionActions }) {
 }
 
 describe('guarded history controls', () => {
+  async function staleRefresh(value: Awaited<ReturnType<typeof setup>>) {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const invoke = value.transport.invoke.bind(value.transport);
+    const spy = vi.spyOn(value.transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'session_get') await gate;
+      return invoke(name, args);
+    });
+    ++value.transport.source.revision; ++value.topic.revision;
+    act(() => { value.transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: value.transport.source.revision }); });
+    expect(value.store.getSnapshot().status).toBe('stale');
+    return { release, spy };
+  }
+  it('waits for a stale capture and archives once against the latest revisions even after repeated prompt clicks', async () => {
+    const value = await setup(true); render(<HistoryActions {...value.props} />);
+    const { release } = await staleRefresh(value);
+    const prompt = screen.getByRole('button', { name: `Archive topic prompt ${value.topic.name}` });
+    fireEvent.click(prompt); fireEvent.click(prompt);
+    expect(value.transport.mutations).toHaveLength(0);
+    const revision = value.topic.revision;
+    await act(async () => { release(); await value.store.refresh(); });
+    await waitFor(() => expect(value.transport.mutations).toHaveLength(1));
+    expect(value.transport.mutations[0]!.command).toMatchObject({ command: 'topic_archive', params: { expected_revision: revision } });
+    expect(value.topic.archived_at).not.toBeNull();
+  });
+  it.each(['stale', 'failed'] as const)('reports a plain error when the archive refresh remains %s', async result => {
+    const value = await setup(true); render(<HistoryActions {...value.props} />);
+    const { release, spy } = await staleRefresh(value);
+    fireEvent.click(screen.getByRole('button', { name: `Archive topic prompt ${value.topic.name}` }));
+    if (result === 'stale') --value.transport.source.revision;
+    else spy.mockRejectedValue(new Error('Read failed'));
+    await act(async () => { release(); await value.store.refresh(); });
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe("Ariadne is still loading this session's latest changes. Try again."));
+    expect(value.transport.mutations).toHaveLength(0);
+  });
+  it('rechecks archive impact after refreshing and asks before archiving newly open items', async () => {
+    const value = await setup(true); render(<HistoryActions {...value.props} />);
+    const { release } = await staleRefresh(value);
+    fireEvent.click(screen.getByRole('button', { name: `Archive topic prompt ${value.topic.name}` }));
+    Object.values(value.transport.source.items).find(item => item?.topic_id === value.topic.id)!.status = 'open';
+    await act(async () => { release(); await value.store.refresh(); });
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
+    expect(value.transport.mutations).toHaveLength(0);
+    expect(dialog().getByText(/1 open item stays as it is/)).toBeTruthy();
+  });
+  it.each(['Archive topic', 'Close session'] as const)('lets Cancel abandon a stale %s confirmation without a late write', async kind => {
+    const value = await setup(); render(<HistoryActions {...value.props} />);
+    fireEvent.click(screen.getByRole('button', { name: kind === 'Archive topic' ? `Archive ${value.topic.name}` : kind }));
+    const { release } = await staleRefresh(value);
+    fireEvent.click(dialog().getByRole('button', { name: kind }));
+    expect((dialog().getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(dialog().getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(value.transport.mutations).toHaveLength(0);
+    await act(async () => {});
+    expect((screen.getAllByRole('button', { name: 'Close session' })[0] as HTMLButtonElement).disabled).toBe(false);
+    await act(async () => { release(); await value.store.refresh(); });
+    expect(value.transport.mutations).toHaveLength(0);
+    expect(value.topic.archived_at).toBeNull();
+    expect(value.transport.source.state).toBe('active');
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+  it.each(['Archive prompt', 'Archive topic', 'Close session'] as const)('bounds a stuck %s refresh at five seconds and ignores its late completion', async kind => {
+    const value = await setup(kind === 'Archive prompt'); render(<HistoryActions {...value.props} />);
+    if (kind !== 'Archive prompt') fireEvent.click(screen.getByRole('button', { name: kind === 'Archive topic' ? `Archive ${value.topic.name}` : kind }));
+    const { release } = await staleRefresh(value);
+    vi.useFakeTimers();
+    fireEvent.click(kind === 'Archive prompt' ? screen.getByRole('button', { name: `Archive topic prompt ${value.topic.name}` })
+      : dialog().getByRole('button', { name: kind }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
+    expect(screen.queryByRole('alert')).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    const area = kind === 'Archive prompt' ? screen : dialog();
+    expect(area.getByRole('alert').textContent).toContain("Ariadne is still loading this session's latest changes. Try again.");
+    expect(value.transport.mutations).toHaveLength(0);
+    expect((screen.getAllByRole('button', { name: 'Close session' })[0] as HTMLButtonElement).disabled).toBe(false);
+    await act(async () => { release(); await value.store.refresh(); });
+    expect(value.transport.mutations).toHaveLength(0);
+    vi.useRealTimers();
+  });
+  it.each(['open items', 'unsent messages'] as const)('requires confirmation of updated %s warning after refreshing', async changed => {
+    const value = await setup(); render(<HistoryActions {...value.props} />);
+    fireEvent.click(screen.getByRole('button', { name: `Archive ${value.topic.name}` }));
+    const warning = dialog().getByText(/You can restore it any time/).textContent;
+    const { release } = await staleRefresh(value);
+    fireEvent.click(dialog().getByRole('button', { name: 'Archive topic' }));
+    if (changed === 'open items') {
+      Object.values(value.transport.source.items).find(item => item?.topic_id === value.topic.id && !['done', 'decided', 'dropped', 'replaced'].includes(item.status))!.status = 'done';
+    } else {
+      Object.values(value.transport.source.inputs).filter(input => input?.target.topic_id === value.topic.id).forEach(input => { input!.state = 'cancelled'; });
+    }
+    await act(async () => { release(); await value.store.refresh(); });
+    expect(value.transport.mutations).toHaveLength(0);
+    expect(dialog().getByText(/You can restore it any time/).textContent).not.toBe(warning);
+    expect(dialog().queryByRole('alert')).toBeNull();
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Archive topic' })); });
+    expect(value.transport.mutations).toHaveLength(1);
+    expect(value.topic.archived_at).not.toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+  it.each(['Archive topic', 'Close session'] as const)('keeps %s refresh failure readable inside its confirmation', async kind => {
+    const value = await setup(); render(<HistoryActions {...value.props} />);
+    fireEvent.click(screen.getByRole('button', { name: kind === 'Archive topic' ? `Archive ${value.topic.name}` : kind }));
+    const { release, spy } = await staleRefresh(value);
+    fireEvent.click(dialog().getByRole('button', { name: kind }));
+    spy.mockRejectedValue(new Error('Read failed'));
+    await act(async () => { release(); await value.store.refresh(); });
+    await waitFor(() => expect(dialog().getByRole('alert').textContent).toContain("Ariadne is still loading this session's latest changes. Try again."));
+    expect(value.transport.mutations).toHaveLength(0);
+  });
+  it('keeps the shared write guard when another owner action starts during the refresh', async () => {
+    const value = await setup(true); render(<HistoryActions {...value.props} />);
+    const { release } = await staleRefresh(value);
+    // Publish the fresh capture before the refresh promise settles, as SessionStore does.
+    let finish!: () => void;
+    const competing = new Promise<MutationEnvelope>(resolve => { finish = () => resolve(failure('revision_conflict')); });
+    const unsubscribe = value.store.subscribe(() => {
+      const current = value.store.getSnapshot();
+      if (current.status !== 'ready') return;
+      unsubscribe();
+      value.transport.replies.push(competing);
+      void value.actions.execute({ command: 'session_close', api_version: 1, op_id: '', params: { expected_revision: current.snapshot!.session.revision } }, current.snapshot!.session.revision);
+    });
+    fireEvent.click(screen.getByRole('button', { name: `Archive topic prompt ${value.topic.name}` }));
+    await act(async () => { release(); await value.store.refresh(); });
+    expect(value.transport.mutations.map(value => value.command.command)).toEqual(['session_close']);
+    expect(value.topic.archived_at).toBeNull();
+    await act(async () => { finish(); });
+  });
+  it.each(['Restore', 'Undo', 'Close session', 'Reopen session'] as const)('waits for a stale refresh before %s without duplicate writes', async kind => {
+    const value = await setup(true); render(<HistoryActions {...value.props} />);
+    if (kind === 'Restore' || kind === 'Undo') {
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Archive ${value.topic.name}` })); });
+    } else if (kind === 'Reopen session') {
+      fireEvent.click(screen.getByRole('button', { name: 'Close session' }));
+      await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Close session' })); });
+    }
+    if (kind === 'Close session' || kind === 'Reopen session') fireEvent.click(screen.getByRole('button', { name: kind }));
+    const before = value.transport.mutations.length;
+    const { release } = await staleRefresh(value);
+    const control = kind === 'Close session' || kind === 'Reopen session' ? dialog().getByRole('button', { name: kind })
+      : screen.getByRole('button', { name: kind === 'Restore' ? `Restore ${value.topic.name}` : kind });
+    fireEvent.click(control); fireEvent.click(control);
+    expect(value.transport.mutations).toHaveLength(before);
+    await act(async () => { release(); await value.store.refresh(); });
+    await waitFor(() => expect(value.transport.mutations).toHaveLength(before + 1));
+    expect(value.transport.mutations.at(-1)!.command.command).toBe(kind === 'Restore' || kind === 'Undo' ? 'topic_restore'
+      : kind === 'Close session' ? 'session_close' : 'session_reopen');
+  });
   it('archives a topic with open items and unsent messages after one plain confirmation, cancelling only the messages', async () => {
     const { props, topic, transport } = await setup(); render(<HistoryActions {...props} />);
     const open = Object.values(transport.source.items).filter(item => item?.topic_id === topic.id

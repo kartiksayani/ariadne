@@ -62,7 +62,7 @@ async function openSession(sessionId, itemId) {
     }, 'Selected session navigation did not finish its saved preference update');
     const item = await browser.$(`.tree-item[data-item-id="${itemId}"]`);
     await item.waitForDisplayed(); await item.waitForEnabled(); await item.click();
-    await wait(async () => await browser.$('.item-detail .detail-reference code').getText() === itemId, 'Selected item detail did not load');
+    await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === itemId, 'Selected item detail did not load');
   } catch (error) {
     await json(join(evidence, `navigation-failure-${sessionId}.json`), { before,
       after: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')),
@@ -72,16 +72,18 @@ async function openSession(sessionId, itemId) {
   }
 }
 async function showHistory(texts) {
-  // The Timeline is a section of the detail panel; it lays multi-line bodies out as one paragraph.
-  const timeline = await browser.$('.item-detail [aria-label="Timeline"]');
-  await timeline.waitForDisplayed(); await timeline.scrollIntoView();
+  // The single chat lays multi-line stored bodies out as paragraphs.
+  const conversation = await browser.$('.item-detail [aria-label="Conversation"]');
+  await conversation.waitForDisplayed(); await conversation.scrollIntoView();
   await wait(async () => {
     const detail = folded(await browser.$('[aria-label="Item detail"]').getText());
     return texts.every(text => detail.includes(folded(text)));
   }, 'Complete saved history was not visible in native item detail');
 }
 async function nativeCard(kind, question) {
-  for (const card of await browser.$$(`aside[aria-label="Waiting on me"] .waiting-${kind === 'waiting' ? 'card' : 'sent'}`)) {
+  const region = kind === 'waiting' ? '[aria-label="Waiting questions"] .waiting-card'
+    : '[aria-label="Sent · waiting for the agent to pick up"] .waiting-sent';
+  for (const card of await browser.$$(`aside[aria-label="Waiting on me"] ${region}`)) {
     if ((await card.getText()).includes(question)) return card;
   }
   return undefined;
@@ -111,9 +113,9 @@ async function delivery(configuration) {
   // its canonical pending/recovery examples rather than rebinding its storage.
   await openSession(configuration.demo.session_id, '1');
   await showHistory(configuration.demo.before.messages.filter(message => message.item_id === '1').map(message => message.body));
-  const child = await browser.$('[aria-label="Child items"] button');
+  const child = await browser.$('.item-detail button.detail-fork');
   await child.waitForDisplayed(); assert.ok((await child.getText()).includes('Add the receipt lookup test')); await child.click();
-  await wait(async () => await browser.$('.item-detail .detail-reference code').getText() === '1.1'
+  await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === '1.1'
     && (await browser.$('[aria-label="Item detail"]').getText()).includes('Add the receipt lookup test'), 'Canonical demo child navigation failed');
   await browser.saveScreenshot(join(evidence, 'canonical-demo.png'));
 

@@ -15,6 +15,7 @@ import { agentLine, agentName, dayWord, hostApp, ownerName, sessionLabel, sessio
 import { STATUS, statusKey, type StatusKey } from '../shared/status';
 import { displayStatus, type DisplayStatus } from '../../selectors/waiting/replied';
 import { continuedLabel } from '../shared/continued';
+import { hiddenGroupKey, hiddenGroupsFor, hiddenItems } from './hidden';
 import { agentRunning, connectionOf, type Connection } from '../shared/connection';
 
 export const visual = (status: DisplayStatus): StatusKey => statusKey[status];
@@ -192,6 +193,7 @@ export interface ItemRow {
   readonly context: boolean;
   readonly guides: readonly Guide[];
   readonly later: boolean;
+  readonly hidden: boolean;
   readonly segments: readonly Segment[];
   readonly replacedBy: Immutable<Item> | null;
   readonly rounds: number;
@@ -199,7 +201,19 @@ export interface ItemRow {
   readonly delivery: Delivery | null;
   readonly badge: string;
 }
-export type Row = TopicRow | ItemRow;
+export interface HiddenRow {
+  readonly kind: 'hidden';
+  readonly key: string;
+  readonly topicId: string;
+  readonly parent: string | null;
+  readonly depth: number;
+  readonly count: number;
+  readonly waiting: boolean;
+  readonly expanded: boolean;
+  readonly guides: readonly Guide[];
+  readonly delivery: null;
+}
+export type Row = TopicRow | ItemRow | HiddenRow;
 
 export interface TreeInput {
   readonly session: Immutable<Session>;
@@ -207,6 +221,7 @@ export interface TreeInput {
   /** The header search as typed, which can run ahead of the saved filter. */
   readonly search: string;
   readonly later: ReadonlySet<string>;
+  readonly expandedHiddenGroups?: ReadonlySet<string>;
   readonly collapsedTopics: ReadonlySet<string>;
   readonly selectedId: string | null;
   /** An item revealed from elsewhere (a link, the waiting panel). */
@@ -222,6 +237,9 @@ export interface TreeInput {
 export interface TreeModel {
   readonly rows: readonly Row[];
   readonly filtering: boolean;
+  readonly searchCount: number;
+  readonly hiddenCount: number;
+  readonly itemCount: number;
   /** "Showing an item outside your current filters." */
   readonly outside: boolean;
   readonly noMatch: boolean;
@@ -271,6 +289,10 @@ export function badgeLabel(item: Immutable<Item>, later: boolean, status: Displa
 export function treeModel(input: TreeInput): TreeModel {
   const { session, view, later, selectedId, revealId } = input, filters = view.filters;
   const indexes = indexSession(session), all = items(session);
+  const explicitHidden = new Set(view.hidden_item_ids ?? []);
+  const hidden = hiddenItems(session, explicitHidden);
+  const hiddenGroups = new Set(input.expandedHiddenGroups ?? []);
+  if (revealId) hiddenGroupsFor(session, explicitHidden, revealId).forEach(key => hiddenGroups.add(key));
   const terms = words(input.search);
   const chips = chipsOf(filters.statuses);
   const topics = topicList(session).filter(topic => filters.archived ? topic.archived_at !== null : topic.archived_at === null);
@@ -289,7 +311,7 @@ export function treeModel(input: TreeInput): TreeModel {
   const statusMatch = (item: Immutable<Item>) => !statusFiltered || statusIn(filters.statuses, display(item));
   const filtering = terms.length > 0 || statusFiltered || filters.owners.length > 0 || filters.hide_later;
   const scoped = live.filter(item => base(item) && (filters.topic_id === null || item.topic_id === filters.topic_id));
-  const counts = Object.fromEntries(CHIPS.map(({ chip: key }) => [key, scoped.filter(item => inChip(key, display(item))).length])) as Record<Chip, number>;
+  const counts = Object.fromEntries(CHIPS.map(({ chip: key }) => [key, scoped.filter(item => (!hidden.has(item.id) || key === 'waiting') && inChip(key, display(item))).length])) as Record<Chip, number>;
 
   // includeSets: matches, the forced reveal and selection, and their ancestors.
   const matched = new Set<string>(), forced = new Set<string>(), include = new Set<string>();
@@ -308,7 +330,7 @@ export function treeModel(input: TreeInput): TreeModel {
   const kids = (id: string | null) => indexes.childrenByParent.get(id) ?? [];
   const rootsOf = (topicId: string) => kids(null).filter(item => item.topic_id === topicId);
 
-  const built: (Omit<TopicRow, 'guides'> | Omit<ItemRow, 'guides'>)[] = [];
+  const built: (Omit<TopicRow, 'guides'> | Omit<ItemRow, 'guides'> | Omit<HiddenRow, 'guides'>)[] = [];
   for (const topic of topics) {
     if (filters.topic_id !== null && filters.topic_id !== topic.id) continue;
     const roots = rootsOf(topic.id);
@@ -323,8 +345,21 @@ export function treeModel(input: TreeInput): TreeModel {
       earlier: !topic.origin && !!chipValue, chip: chipValue, allClosed: !delivery && statuses.length > 0 && statuses.every(status => status !== 'waiting_on_agent' && closed(status)), delivery });
     if (!open) continue;
     const walk = (list: readonly Immutable<Item>[], depth: number) => {
-      for (const item of list) {
-        if (filtering && !include.has(item.id)) continue;
+      const eligible = list.filter(item => !filtering || include.has(item.id));
+      const hiddenSiblings = eligible.filter(item => explicitHidden.has(item.id));
+      const firstHidden = hiddenSiblings[0];
+      const groupKey = hiddenGroupKey(topic.id, list[0]?.parent ?? null);
+      const groupOpen = hiddenGroups.has(groupKey);
+      for (const item of eligible) {
+        if (item === firstHidden) {
+          const below: Immutable<Item>[] = [];
+          const gather = (value: Immutable<Item>) => { below.push(value); kids(value.id).forEach(gather); };
+          hiddenSiblings.forEach(gather);
+          built.push({ kind: 'hidden', key: groupKey, topicId: topic.id, parent: item.parent, depth,
+            count: hiddenSiblings.length, waiting: below.some(value => display(value) === 'waiting_on_me'),
+            expanded: groupOpen, delivery: null });
+        }
+        if (explicitHidden.has(item.id) && !groupOpen) continue;
         const children = kids(item.id);
         const open = children.length > 0 && (filtering ? children.some(child => include.has(child.id)) : expanded.has(item.id));
         let collapsed: ItemRow['collapsed'] = null;
@@ -337,7 +372,7 @@ export function treeModel(input: TreeInput): TreeModel {
         }
         const parked = item.status === 'open' && later.has(item.id);
         built.push({ kind: 'item', key: item.id, item, status: display(item), depth, hasKids: children.length > 0, expanded: open,
-          context: filtering && !matched.has(item.id) && !forced.has(item.id), later: parked, segments: segments(item.question, input.search),
+          hidden: hidden.has(item.id), context: filtering && !matched.has(item.id) && !forced.has(item.id), later: parked, segments: segments(item.question, input.search),
           replacedBy: item.replaced_by ? session.items[item.replaced_by] ?? null : null, rounds: indexes.roundsByItem.get(item.id)?.length ?? 0,
           collapsed, delivery: deliveryLine(session, { topicId: item.topic_id, itemId: item.id }, input.presence, input.health), badge: badgeLabel(item, parked, display(item)) });
         if (open) walk(children, depth + 1);
@@ -376,13 +411,14 @@ export function treeModel(input: TreeInput): TreeModel {
 
   // hasReveal (Ariadne.dc.html:2169): only a reveal raises the banner, not a plain selection.
   const outside = filtering && rows.length > 0 && !!revealId && forced.has(revealId) && !matched.has(revealId);
-  return { rows, filtering, outside, noMatch: live.length > 0 && rows.length === 0, empty: all.length === 0, chips, counts,
+  return { rows, filtering, searchCount: scoped.filter(item => !hidden.has(item.id) && statusMatch(item)).length, hiddenCount: scoped.filter(item => hidden.has(item.id) && statusMatch(item)).length, itemCount: live.filter(item => !hidden.has(item.id)).length, outside, noMatch: live.length > 0 && rows.length === 0, empty: all.length === 0, chips, counts,
     topics: topics.map(topic => ({ id: topic.id, name: topic.name })) };
 }
 
 /** The row ← moves to: the parent item, or the topic of a root item. */
 export function parentKey(row: Row): string | null {
   if (row.kind === 'topic') return null;
+  if (row.kind === 'hidden') return row.parent ?? row.topicId;
   return row.item.parent ?? row.item.topic_id;
 }
 

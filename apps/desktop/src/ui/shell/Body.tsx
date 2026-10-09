@@ -2,6 +2,7 @@ import { useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, t
 import { bodyLayout, DETAIL_DEFAULT, DETAIL_MIN } from './model';
 import { WaitingFold } from './fold';
 import { ItemHistoryContext } from './itemHistory';
+import { HideIcon } from '../shared/HideIcon';
 
 export interface BodyProps {
   readonly waiting: ReactNode;
@@ -12,6 +13,8 @@ export interface BodyProps {
   readonly rail?: ReactNode;
   readonly onCloseDetail?: () => void;
   readonly onRemove?: () => void;
+  readonly hidden?: boolean;
+  readonly onHide?: () => void;
   /** The owner's saved detail width; null or absent for the default. */
   readonly detailWidth?: number | null;
   /** Saves the width the owner dragged the detail panel to. */
@@ -37,7 +40,7 @@ function useWidth(ref: RefObject<HTMLDivElement | null>): number | null {
   return width;
 }
 
-export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail, onRemove, detailWidth = null, onResizeDetail,
+export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail, onRemove, hidden = false, onHide, detailWidth = null, onResizeDetail,
   waitingFolded = false, onFoldWaiting }: BodyProps) {
   const ref = useRef<HTMLDivElement>(null);
   const history = useContext(ItemHistoryContext);
@@ -105,6 +108,8 @@ export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail,
             disabled={!history.canForward} onClick={history.forward}><i className="ph ph-arrow-right" aria-hidden="true" /></button>
         </div>}
         <div className="shell-detail-path">{detailPath}</div>
+        {onHide && <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title={hidden ? 'Unhide (x)' : 'Hide (x)'}
+          aria-label={hidden ? 'Unhide item' : 'Hide item'} onClick={onHide}><HideIcon hidden={hidden} /></button>}
         <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Remove (⌫)" aria-label="Remove item" onClick={onRemove}>
           <i className="ph ph-trash" aria-hidden="true" /></button>
         <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Close (Esc)" aria-label="Close detail" onClick={onCloseDetail}>

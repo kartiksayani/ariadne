@@ -96,7 +96,7 @@ describe('window-level workspace keys', () => {
     fireEvent.keyDown(screen.getByTestId('text'), { key: 'g' });
     expect(onKey).toHaveBeenCalledTimes(1);
     onKey.mockClear();
-    expect(press(document.body, 'x').defaultPrevented).toBe(false);
+    expect(press(document.body, 'q').defaultPrevented).toBe(false);
     expect(press(document.body, 'j', { metaKey: true }).defaultPrevented).toBe(false);
     const outside = document.body.appendChild(document.createElement('textarea'));
     press(outside, 'g');

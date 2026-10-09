@@ -752,6 +752,16 @@ describe('source-backed navigation views and explicit registration', () => {
     expect(within(card).queryByRole('button', { name: 'Copy instruction' })).toBeNull();
     expect(card.querySelector('pre')).toBeNull();
   });
+  it('passes the hidden item and unhide action to the detail header', async () => {
+    const { transport, store } = setup(); read(transport, preferences());
+    const hide = vi.fn();
+    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} hidden onHide={hide}
+      detail={<p>Hidden item detail</p>} renderSession={() => null} />);
+    const button = await screen.findByRole('button', { name: 'Unhide item' });
+    expect(button.title).toBe('Unhide (x)');
+    fireEvent.click(button); expect(hide).toHaveBeenCalledOnce();
+  });
+
   it('saves the Waiting column fold and the detail width with the global preferences and applies them at once', async () => {
     const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs);
     render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} detail={<p>Detail</p>} renderSession={() => <p>Session workspace</p>} />);
