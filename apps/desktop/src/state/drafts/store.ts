@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import type { MutationReceipt, OwnerDraft, OwnerMutationRequest, PreferencesPatchEntry, SessionRef } from '../../generated/core';
 import type { Item, InputKind, SavedReceipt, Session } from '../../generated/domain/models';
 import { immutable, type Immutable } from '../../data/session-store';
@@ -35,6 +35,10 @@ const unknownCommit = (error: Failure) => error instanceof ServiceFailure || err
 // before guards, so this response establishes the exact operation was not saved.
 const definitiveRejection = (error: Failure) => error instanceof CoreFailure &&
   ['question_changed', 'revision_conflict', 'binding_mismatch', 'invalid_transition', 'queue_full'].includes(error.error.code);
+const validInputReceipt = (receipt: Immutable<SavedReceipt>, draft: Immutable<OwnerDraft>): boolean =>
+  receipt.operation_id === draft.op_id && receipt.session_id === draft.session.session_id
+  && Number.isSafeInteger(receipt.revision) && receipt.revision > 0 && receipt.data.kind === 'input_submit'
+  && !!receipt.data.input_id && !!receipt.data.message_id && receipt.data.input_seq > 0 && receipt.data.message_number > 0;
 const terminal = (item: Immutable<Item>) => ['decided', 'done', 'dropped', 'replaced'].includes(item.status);
 
 export function ownerActions(item: Immutable<Item>): OwnerIntent[] {
@@ -64,27 +68,28 @@ const sendBlocked = (draft: Immutable<OwnerDraft>, session: Immutable<Session>):
 /** A reply to a whole topic: the topic is there and open, the binding is current, and there is text. */
 function topicBlocked(draft: Immutable<OwnerDraft>, session: Immutable<Session>): string | null {
   const topic = session.topics[draft.target.topic_id];
-  if (!sameSession(draft.session, { project_id: session.project_id, session_id: session.id }) || !topic || draft.intent !== TOPIC_REPLY) return 'The saved target is unavailable. Open its registered session.';
+  if (!sameSession(draft.session, { project_id: session.project_id, session_id: session.id }) || !topic || draft.intent !== TOPIC_REPLY) return "This item isn't available any more. Open its session again.";
   if (session.archived_at != null) return 'This session is archived. Restore it, then reopen it to send this reply.';
   if (session.state !== 'active') return 'This session is closed. Reopen it to send this reply.';
   if (topic.archived_at !== null) return 'This topic is archived. Restore it to send this reply.';
-  if (session.active_binding_id !== draft.binding_id || !session.bindings[draft.binding_id]) return 'The selected binding changed. Review the current target before sending.';
+  if (session.active_binding_id !== draft.binding_id || !session.bindings[draft.binding_id]) return 'The agent connection changed. Check where this reply goes before sending.';
   return sendBlocked(draft, session);
 }
 export function blockedDraft(draft: Immutable<OwnerDraft>, session: Immutable<Session>): string | null {
   if (draft.target.item_id === null) return topicBlocked(draft, session);
   const item = session.items[draft.target.item_id];
-  if (!sameSession(draft.session, { project_id: session.project_id, session_id: session.id }) || !item || item.topic_id !== draft.target.topic_id) return 'The saved target is unavailable. Open its registered session.';
+  if (!sameSession(draft.session, { project_id: session.project_id, session_id: session.id }) || !item || item.topic_id !== draft.target.topic_id) return "This item isn't available any more. Open its session again.";
   if (session.archived_at != null) return 'This session is archived. Restore it, then reopen it to send this reply.';
   if (session.state !== 'active') return 'This session is closed. Reopen it to send this reply.';
   if (session.topics[item.topic_id]?.archived_at !== null) return 'This topic is archived. Restore it to send this reply.';
-  if (session.active_binding_id !== draft.binding_id || !session.bindings[draft.binding_id]) return 'The selected binding changed. Review the current target before sending.';
-  if (item.revision !== draft.target_revision || item.question_revision !== draft.question_revision) return 'This item changed. Review the current question and options before sending.';
-  if (!ownerActions(item).includes(draft.intent as OwnerIntent)) return 'This action is no longer available for the current item.';
+  if (session.active_binding_id !== draft.binding_id || !session.bindings[draft.binding_id]) return 'The agent connection changed. Check where this reply goes before sending.';
+  if (draft.intent === 'answer' && item.status !== 'waiting_on_me') return "The agent isn't waiting for an answer to this any more.";
+  if (item.revision !== draft.target_revision || item.question_revision !== draft.question_revision) return 'This question changed. Read it again before sending.';
+  if (!ownerActions(item).includes(draft.intent as OwnerIntent)) return "You can't do that on this item right now.";
   if (draft.intent === 'answer') {
-    if (item.recipient_binding_id !== draft.binding_id) return 'The current question belongs to another binding.';
+    if (item.recipient_binding_id !== draft.binding_id) return 'This question was asked by a different agent connection.';
     const round = item.current_round_id ? session.rounds[item.current_round_id] : null;
-    if (!round || round.closed_at !== null || round.question_revision !== item.question_revision) return 'The current question is no longer open for an answer.';
+    if (!round || round.closed_at !== null || round.question_revision !== item.question_revision) return "The agent isn't waiting for an answer to this any more.";
     if (draft.selected_option_id && !item.options.some(option => option.id === draft.selected_option_id)) return 'Choose one of the current options.';
   }
   return sendBlocked(draft, session);
@@ -126,7 +131,42 @@ export class OwnerDraftStore {
         if (draft.submission_attempted) this.pendingInputs.set(draft.op_id, this.inputRequest(draft));
       }
       this.publish({ entries: Object.freeze(entries), ready: true, error: null });
+      const sessions = new Map<string, Immutable<SessionRef>>();
+      for (const entry of Object.values(entries)) if (entry.draft.submission_attempted && !entry.receipt) {
+        sessions.set(JSON.stringify(entry.draft.session), entry.draft.session);
+      }
+      await Promise.all([...sessions.values()].map(async session => {
+        try {
+          const snapshot = await this.service.query({ session, request: { command: 'session_get', params: {} } });
+          await this.reconcile(snapshot.session);
+        } catch { /* An unavailable session leaves the owner's draft intact. */ }
+      }));
     } catch (error: unknown) { this.publish({ error: failure(error) }); }
+  }
+  /** An owner operation's saved receipt links the draft to its exact input, regardless of delivery state. */
+  async reconcile(session: Immutable<Session>): Promise<void> {
+    const cleanup: Promise<boolean>[] = [];
+    for (const entry of Object.values(this.state.entries)) {
+      const draft = entry.draft;
+      if (!draft.submission_attempted || entry.receipt || !sameSession(draft.session, { project_id: session.project_id, session_id: session.id })) continue;
+      const operation = session.operation_receipts[draft.op_id]?.find(receipt => receipt.actor_scope.kind === 'owner'
+        && receipt.operation_id === draft.op_id && receipt.result.operation_id === draft.op_id && receipt.result.session_id === session.id
+        && receipt.result.data.kind === 'input_submit');
+      const receipt = operation?.result;
+      if (!receipt || !validInputReceipt(receipt, draft) || receipt.data.kind !== 'input_submit' || !session.inputs[receipt.data.input_id]) continue;
+      cleanup.push(this.confirm(draft.op_id, receipt));
+    }
+    await Promise.all(cleanup);
+  }
+  private confirm(id: string, receipt: Immutable<SavedReceipt>): Promise<boolean> {
+    const entry = this.state.entries[id];
+    if (!entry || entry.receipt) return Promise.resolve(true);
+    this.pendingInputs.delete(id);
+    this.entry(id, { receipt: immutable(receipt), uncertain: false, error: null, rejected: false,
+      sent: { text: entry.draft.text, selected_option_id: entry.draft.selected_option_id },
+      draft: immutable({ ...structuredClone(entry.draft), text: '', selected_option_id: null } as OwnerDraft) });
+    // Cleanup failure keeps the durable draft recoverable; the receipt proves core has the words.
+    return this.save([{ kind: 'delete_draft', operation_id: id }]);
   }
   find(session: SessionRef, itemId: string, intent: OwnerIntent): DraftEntry | undefined {
     return Object.values(this.state.entries).reverse().find(entry => sameSession(entry.draft.session, session) && entry.draft.target.item_id === itemId && entry.draft.intent === intent);
@@ -307,21 +347,17 @@ export class OwnerDraftStore {
         request = this.inputRequest(draft); this.pendingInputs.set(id, request);
       }
       const receipt: MutationReceipt = await this.service.executeOwner(request);
-      if (!('session_id' in receipt) || receipt.operation_id !== id || receipt.session_id !== entry.draft.session.session_id
-        || !Number.isSafeInteger(receipt.revision) || receipt.revision <= 0 || receipt.data.kind !== 'input_submit'
-        || !receipt.data.input_id || !receipt.data.message_id || receipt.data.input_seq <= 0 || receipt.data.message_number <= 0) throw new ServiceFailure('invalid_response');
-      this.pendingInputs.delete(id); this.entry(id, { receipt: immutable(receipt), uncertain: false, error: null, sent: request.command.command === 'input_submit'
-        ? { text: request.command.params.text, selected_option_id: request.command.params.selected_option_id } : null,
-        draft: immutable({ ...structuredClone((this.state.entries[id] ?? entry).draft), text: '', selected_option_id: null } as OwnerDraft) });
-      // A failed cleanup leaves the durable draft recoverable. A validated input
-      // receipt, never local button acceptance, authorizes its removal.
-      await this.save([{ kind: 'delete_draft', operation_id: id }]); return true;
+      if (!('session_id' in receipt) || !validInputReceipt(receipt, entry.draft)) throw new ServiceFailure('invalid_response');
+      await this.confirm(id, immutable(receipt)); return true;
     } catch (error: unknown) {
+      if (this.state.entries[id]?.receipt) return true;
       const reason = failure(error), uncertain = this.pendingInputs.has(id);
       this.entry(id, { uncertain, error: reason, rejected: uncertain && definitiveRejection(reason) }); return false;
     }
   }
 }
-export function useOwnerDrafts(store: OwnerDraftStore): DraftState {
-  return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+export function useOwnerDrafts(store: OwnerDraftStore, session?: Immutable<Session> | null): DraftState {
+  const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  useEffect(() => { if (state.ready && session) void store.reconcile(session); }, [store, session, state.ready, state.entries]);
+  return state;
 }

@@ -184,13 +184,11 @@ function ItemLink({ link }: { readonly link: LinkView }) {
 
 export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, highlightedMessageIds, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds }: ItemDetailProps) {
   const current = useSession(store), session = current.snapshot?.session;
-  const item = session?.items[itemId], topic = item ? session?.topics[item.topic_id] : undefined;
-  const archived = session?.archived_at != null || topic?.archived_at != null;
+  const item = session?.items[itemId];
   const submit = useDetailSubmit(drafts, store, itemId);
-  const draftState = useOwnerDrafts(drafts);
-  // An attempted or failed answer stays reachable here after the item stops waiting.
+  const draftState = useOwnerDrafts(drafts, session);
+  // A failed answer stays reachable after the question closes, outside the answer control.
   const retained = session && draftState.ready ? drafts.find({ project_id: session.project_id, session_id: session.id }, itemId, 'answer') : undefined;
-  const retainedAnswer = !archived && !!(retained?.uncertain || retained?.error);
   const [mode, setMode] = useState<OpenMode | null>(null);
   const [focusBox, setFocusBox] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -210,6 +208,15 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const health = useSupervisorHealth(drafts.service, binding?.id, binding?.generation);
   const model = session ? detailModel({ session, itemId, now: Date.now(), mode, later, saving: submit.saving, presence, health, earlierAgent,
     replyDraft: mode === 'reply' || submit.written.length > 0, hiddenItemIds }) : null;
+  const round = item?.current_round_id ? session?.rounds[item.current_round_id] : null;
+  const currentQuestionOpen = item?.status === 'waiting_on_me' && !!round && round.closed_at === null
+    && round.question_revision === item.question_revision;
+  const archived = session?.archived_at != null || (item && session?.topics[item.topic_id]?.archived_at != null);
+  const showAnswer = !archived && currentQuestionOpen && !!(model?.answer || retained?.uncertain || retained?.error);
+  const savedAnswers = !showAnswer && session ? Object.values(draftState.entries).filter(entry => !entry.receipt
+    && entry.draft.session.project_id === session.project_id && entry.draft.session.session_id === session.id
+    && entry.draft.target.item_id === itemId && entry.draft.intent === 'answer'
+    && (entry.draft.text || entry.draft.selected_option_id || entry.uncertain || entry.error)) : [];
   const ackTo = session && item ? ackTarget(session, item) : null;
   // An open item is replied to and an in-progress item gets notes: that box is always there, never behind a button. Other
   // boxes (drop reason, follow-up on a finished item) open on press.
@@ -346,7 +353,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       </div>
     </div>}
   </div>;
-  const docked = !!(model.open || model.followUp || model.answer || retainedAnswer || owner || ackTo || ack.error || submit.error);
+  const docked = !!(model.open || model.followUp || showAnswer || savedAnswers.length > 0 || owner || ackTo || ack.error || submit.error);
   return <ItemRefs.Provider value={{ lookup: id => {
     const target = session.items[id];
     return target ? { label: shortLabel(target), status: displayStatus(session, target) } : null;
@@ -468,7 +475,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       </button><span className="detail-hint">Mark {STATUS[ackTo].label}</span>
     </section>}
     {ack.error && <p className="detail-error" role="alert">{ack.error}</p>}
-    {submit.error && !((model.answer || retainedAnswer) && submit.error === answerSlotError(draftState, retained))
+    {submit.error && !((showAnswer || savedAnswers.length > 0) && submit.error === answerSlotError(draftState, retained))
       && <p className="detail-error" role="alert">{submit.error}</p>}
     {model.open && <section className="detail-section detail-open" aria-label={model.open.title}>
       {sectionLabel(model.open.title)}
@@ -499,13 +506,26 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       {owner}
     </section>}
 
-    {(model.answer || retainedAnswer) && <section className="detail-section detail-answer" aria-label="Your answer">
+    {showAnswer && <section className="detail-section detail-answer" aria-label="Your answer">
       {model.answer?.heading && <div className="detail-label detail-label-accent">Your answer</div>}
       {model.answer && <PausedNote actions={actions} />}
       {/* While the follow-up box is open, it is the detail's one data-owner-input. */}
       <AnswerSlot drafts={drafts} store={store} itemId={itemId} blocked={model.answer?.blocked} focusRequest={answerFocus}
         marked={!owner}
         onFocusRequestConsumed={onFocusRequestConsumed} onEscape={() => focusRoot(itemId)} onAgentNotRunning={onAgentNotRunning} onSent={sentJustNow} />
+    </section>}
+    {savedAnswers.length > 0 && <section className="detail-section detail-open detail-saved-message" aria-label="Saved message">
+      {sectionLabel('Saved message')}
+      <p className="detail-hint">{!currentQuestionOpen && "The agent isn't waiting for this answer any more. "}Your draft is kept. Copy it into a reply if you still want to send it.</p>
+      {savedAnswers.map(entry => <div className="detail-box" key={entry.draft.op_id}>
+        {entry.draft.selected_option_id && <p className="detail-hint">{item.options.find(option => option.id === entry.draft.selected_option_id)?.label
+          ? `You chose “${item.options.find(option => option.id === entry.draft.selected_option_id)!.label}”`
+          : 'Your saved choice is no longer listed.'}</p>}
+        {entry.draft.text && <><textarea className="input" aria-label="Saved answer text" readOnly value={entry.draft.text} rows={3} />
+          <CopyMessage text={entry.draft.text} /></>}
+        {answerSlotError(draftState, entry) && <p className="detail-error" role="alert">{answerSlotError(draftState, entry)}</p>}
+      </div>)}
+      {draftState.preferenceUncertain && <button type="button" className="btn btn-secondary" onClick={() => { void drafts.retryPreferences(); }}>Try saving your draft again</button>}
     </section>}
     </div>}
   </article></FileRefProject.Provider></ItemRefs.Provider>;

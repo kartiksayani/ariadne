@@ -74,6 +74,12 @@ export function WaitingColumn({ store, drafts, revealItem, openSession, selected
   const state = useWaiting(store), draftState = useOwnerDrafts(drafts);
   useEffect(() => { void store.start(); }, [store]);
   useEffect(() => { if (!drafts.getSnapshot().ready) void drafts.load(); }, [drafts]);
+  useEffect(() => {
+    if (draftState.ready) state.sessions.forEach(({ session }) => {
+      const latest = store.sessionState({ project_id: session.project_id, session_id: session.id })?.snapshot?.session ?? session;
+      void drafts.reconcile(latest);
+    });
+  }, [drafts, store, state, draftState.ready, draftState.entries]);
   const clock = now ?? Date.now();
   const hidden = useHidden();
   const health = useSupervisorHealthLookup(drafts.service);
