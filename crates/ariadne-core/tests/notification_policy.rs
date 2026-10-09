@@ -563,6 +563,7 @@ fn capture_uses_global_counts_labels_and_registered_snapshots() {
                 sessions: sessions.clone(),
                 active_total: NonnegativeSafeInteger::new(1).unwrap(),
                 closed_total: NonnegativeSafeInteger::new(0).unwrap(),
+                archived_total: NonnegativeSafeInteger::new(0).unwrap(),
                 counts: counts.clone(),
             }),
             QueryRequest::SessionGet {} => QueryResult::SessionGet(SessionSnapshot {
@@ -655,6 +656,7 @@ fn capture_skips_empty_sessions_but_keeps_diagnostics_and_rechecks_their_revisio
                             sessions,
                             active_total: NonnegativeSafeInteger::new(1).unwrap(),
                             closed_total: NonnegativeSafeInteger::new(0).unwrap(),
+                            archived_total: NonnegativeSafeInteger::new(0).unwrap(),
                             counts: counts.clone(),
                         })
                     }

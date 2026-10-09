@@ -39,7 +39,7 @@ function success(data: Extract<QueryEnvelope, { ok: true }>['data']): QueryEnvel
   return { api_version: 1, ok: true, data };
 }
 const loaded = (revision = 21) => success({ kind: 'session_get', data: snapshot(revision) });
-const presenceList = () => ({ sessions: structuredClone(summaries) as SessionListResult['sessions'], active_total: 1, closed_total: 0,
+const presenceList = () => ({ sessions: structuredClone(summaries) as SessionListResult['sessions'], active_total: 1, closed_total: 0, archived_total: 0,
   counts: structuredClone(summaries.items[0].counts) as SessionListResult['counts'] });
 const coreError: CoreError = { code: 'io_error', message: 'Registered directory is inaccessible.', hint: 'Check local access.', retryable: false, field_errors: [] };
 const ownerStep = cases.cases[0].steps[0] as unknown as { request: OwnerMutationRequest['command']; response: Extract<MutationEnvelope, { ok: true }> };

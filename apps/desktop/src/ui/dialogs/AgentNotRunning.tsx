@@ -38,7 +38,7 @@ function settle(request: Request, choice: NotRunningChoice) {
   request.resolve(choice);
 }
 
-const running = (session: Immutable<SessionSummary>) => session.state === 'active' && session.active_binding?.connection_state === 'connected';
+const running = (session: Immutable<SessionSummary>) => session.archived_at == null && session.state === 'active' && session.active_binding?.connection_state === 'connected';
 
 function NotRunningDialog({ request, navigation, now }: { readonly request: Request; readonly navigation: NavigationStore; readonly now: () => number }) {
   const state = useNavigation(navigation);

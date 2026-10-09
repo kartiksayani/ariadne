@@ -135,6 +135,7 @@ export interface SessionBar {
   /** The agent connection (ui/shared/connection): a stale host reads "Reconnecting", the agent still running. */
   readonly connection: Connection;
   readonly closed: boolean;
+  readonly archived?: boolean;
 }
 /** "claude-code", "Today 14:02 – now · 3 topics", running or not (Ariadne.dc.html:1722). */
 export function sessionBar(session: Immutable<Session> | null, summary: Immutable<SessionSummary> | null, now: number,
@@ -153,7 +154,7 @@ export function sessionBar(session: Immutable<Session> | null, summary: Immutabl
   const label = sessionLabel(session ?? summary, agentLine(agent, location));
   return { sessionId: session?.id ?? summary!.session_id, title: label.title, secondary: label.secondary, description: label.description, named: label.named, agent, where: hostApp(location),
     meta: topics === null ? range : `${range} · ${plural(topics, 'topic')}`,
-    running, connection, closed: (session?.state ?? summary?.state) === 'closed' };
+    running, connection, closed: (session?.state ?? summary?.state) === 'closed', archived: (session ?? summary)?.archived_at != null };
 }
 
 // ---------------------------------------------------------------- rows

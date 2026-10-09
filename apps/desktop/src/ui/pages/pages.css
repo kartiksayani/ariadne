@@ -600,3 +600,9 @@
 /* Kept last: more specific than the icon rules above. */
 .pw-card-button i { font-size: calc(13px * var(--text-scale)); }
 .pw-page .btn i { font-size: calc(13px * var(--text-scale)); }
+
+.pw-archive-fold {
+  padding: 0;
+  font: inherit;
+  color: inherit;
+}

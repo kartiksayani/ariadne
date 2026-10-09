@@ -32,6 +32,9 @@ pub struct Session {
     pub updated_at: UtcMillis,
     pub revision: PositiveSafeInteger,
     pub closed_at: Option<UtcMillis>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub archived_at: Option<UtcMillis>,
     pub counters: SessionCounters,
     pub active_binding_id: Option<UuidV4>,
     pub topics: UniqueMap<UuidV4, Topic>,

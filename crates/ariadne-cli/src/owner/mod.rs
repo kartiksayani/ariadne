@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 
 pub const HELP: &str = r#"Owner commands (explicit registered routes):
   ariadne project list|register [--json-stdin] [--json]
-  ariadne session list|read|close|reopen [--json-stdin] [--json]
+  ariadne session list|read|close|reopen|archive|restore [--json-stdin] [--json]
   ariadne binding connect|pause|resume|disconnect --json-stdin [--json]
   ariadne input submit|cancel|resolve --json-stdin [--json]
   ariadne topic archive|restore|continue|continue-preview --json-stdin [--json]

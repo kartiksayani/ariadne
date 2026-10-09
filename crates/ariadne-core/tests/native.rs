@@ -275,6 +275,7 @@ fn absent_preferences_are_canonical_defaults_without_a_data_write() {
         NavigationSelection::Projects {}
     );
     assert!(!value.global.pinned);
+    assert!(value.global.session_archive_expanded_project_ids.is_empty());
     assert!(value.global.window.is_none());
     assert!(value.global.notification_watermark.is_none());
     assert!(value.global.detail_width.is_none() && !value.global.waiting_collapsed);
@@ -563,6 +564,7 @@ fn all_typed_patch_effects_are_durable_preserving_stale_routes_and_inert_exact_d
     global.notification_watermark = Some(at());
     global.detail_width = Some(DETAIL_WIDTH_MAX);
     global.waiting_collapsed = true;
+    global.session_archive_expanded_project_ids = vec![id(700)];
     global.selected_navigation = NavigationSelection::Session {
         session: reference(700),
     };
@@ -1723,4 +1725,39 @@ fn native_registration_and_binding_preflight_use_actual_locks_and_exact_replay()
         .code,
         CoreErrorCode::HostUnreachable
     );
+}
+
+#[test]
+fn session_archive_group_preferences_default_folded_and_validate_unique_bounded_projects() {
+    let s = Setup::new();
+    let global = s.preferences().get(&owner()).unwrap().global;
+    let legacy = serde_json::to_value(&global).unwrap();
+    assert!(legacy.get("session_archive_expanded_project_ids").is_none());
+    let decoded: GlobalPreferences = serde_json::from_value(legacy).unwrap();
+    assert!(decoded.session_archive_expanded_project_ids.is_empty());
+    for (ids, code) in [
+        (vec![id(700), id(700)], CoreErrorCode::InvalidArgument),
+        (
+            (0..=SESSION_ARCHIVE_EXPANSION_CAPACITY as u64)
+                .map(|n| id(700 + n))
+                .collect(),
+            CoreErrorCode::CapacityExceeded,
+        ),
+    ] {
+        let mut changed = global.clone();
+        changed.session_archive_expanded_project_ids = ids;
+        let command = patch(
+            100,
+            1,
+            vec![PreferencesPatchEntry::SetGlobal {
+                preferences: changed,
+            }],
+        );
+        assert_eq!(command.validate_wire().unwrap_err().code, code);
+        assert_eq!(
+            s.preferences().patch(&owner(), &command).unwrap_err().code,
+            code
+        );
+        assert!(!s.live().exists());
+    }
 }

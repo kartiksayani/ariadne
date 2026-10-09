@@ -7,7 +7,7 @@ import type { AdapterChoice } from './NavigationWorkspace';
 import { Dialog } from '../../ui/dialogs/Dialog';
 import { ownerName } from '../../ui/shell/model';
 import { candidateIdentity, useDiscovery, type DiscoveryController } from '../../data/discovery';
-import { CandidateList } from './Discovery';
+import { archivedCandidate, CandidateList } from './Discovery';
 
 function RegistrationFailure({ store }: { store: NavigationStore }) {
   const state = useNavigation(store);
@@ -44,12 +44,12 @@ export function BindSession({ store, project, sessions, adapters, disabled, clos
   const discoveryState = useDiscovery(discovery);
   useEffect(() => discovery?.acquire(), [discovery]);
   const candidate = discoveryState.snapshot?.candidates.find(value => candidateIdentity(value) === selected && value.cwd === project.canonical_root);
-  const noLongerFresh = selected !== null && (!candidate || candidate.freshness !== 'fresh' || discoveryState.error !== null);
+  const noLongerFresh = selected !== null && (!candidate || candidate.freshness !== 'fresh' || discoveryState.error !== null || archivedCandidate(candidate, sessions));
   useEffect(() => { if (noLongerFresh) setInvalidated(true); }, [noLongerFresh]);
   const invalidSelection = selected !== null && (invalidated || noLongerFresh);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (invalidSelection || disabled) return;
+    if (invalidSelection || disabled || sessionChoice === 'existing' && !sessions.some(session => session.session_id === existingSession && session.archived_at == null)) return;
     const adapter = adapters.find(choice => choice.adapter_id === adapterId);
     if (!adapter) return;
     if (await store.bind({ project_id: project.project_id, adapter_id: adapter.adapter_id, external_session_id: externalId,
@@ -59,7 +59,7 @@ export function BindSession({ store, project, sessions, adapters, disabled, clos
   return <Dialog label="Connect existing session" width={520} onCancel={close}><div className="dialog-title">Connect existing session</div><div className="nav-registration">
     <p>{project.project?.display_name ?? 'Unavailable project'} · {project.canonical_root}</p>
     <p>Choose an existing host session explicitly. The backend verifies its identity and capabilities before connecting.</p>
-    {discovery && <CandidateList controller={discovery} root={project.canonical_root} selected={selected} select={candidate => {
+    {discovery && <CandidateList controller={discovery} root={project.canonical_root} sessions={sessions} selected={selected} select={candidate => {
       setSelected(candidateIdentity(candidate)); setInvalidated(false); setAdapterId(candidate.adapter_id); setExternalId(candidate.external_session_id);
       setKind(candidate.endpoint.kind); setEndpoint(candidate.endpoint.kind === 'unix_socket' ? candidate.endpoint.path : candidate.endpoint.name);
     }} />}
@@ -81,7 +81,7 @@ export function BindSession({ store, project, sessions, adapters, disabled, clos
         <label><input type="radio" name="session-choice" checked={sessionChoice === 'existing'} onChange={() => setSessionChoice('existing')} />Attach to an existing Ariadne session</label>
       </fieldset>
       {sessionChoice === 'existing' && <><label>Registered Ariadne session<select tabIndex={0} required value={existingSession} onChange={event => setExistingSession(event.target.value)}><option value="">Choose a session</option>
-        {sessions.map(session => <option key={session.session_id} value={session.session_id}>{ownerName(session) ?? session.title} · {session.state}</option>)}</select></label>
+        {sessions.filter(session => session.archived_at == null).map(session => <option key={session.session_id} value={session.session_id}>{ownerName(session) ?? session.title} · {session.state}</option>)}</select></label>
         <p>Ariadne keeps this session’s topics, items and history. Follow the saved setup instruction to attach this host conversation.</p></>}
       <div className="nav-dialog-actions"><button type="button" className="btn btn-ghost" onClick={close}>Cancel</button>
         <button type="submit" className="btn btn-primary" disabled={invalidSelection}>Connect existing session</button></div>

@@ -59,7 +59,7 @@ async function setup(saved: OwnerDraft[] = [], change: (session: Session) => voi
       }
       if (command === 'session_list') {
         const summary = structuredClone(summariesFixture.items[0]) as SessionSummary;
-        return envelope({ kind: command, data: { counts: summary.counts, active_total: 1, closed_total: 0,
+        return envelope({ kind: command, data: { counts: summary.counts, active_total: 1, closed_total: 0, archived_total: 0,
           sessions: { items: [summary], next_cursor: null, snapshot_revision: 21 } } });
       }
       if (command === 'session_get') {

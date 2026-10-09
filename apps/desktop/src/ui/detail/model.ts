@@ -205,7 +205,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   const created = byId.get(item.created_message_id);
   const binding = session.active_binding_id ? session.bindings[session.active_binding_id] : null;
   const agent = binding ? agentName(binding.adapter_id) : 'the agent';
-  const readOnly = session.state !== 'active' || !topic || topic.archived_at !== null;
+  const readOnly = session.archived_at != null || session.state !== 'active' || !topic || topic.archived_at !== null;
   const offline = connectionOf(binding, presence) === 'reconnecting';
   const sub = submission(session, item, saving);
   // The latest unsettled message to this item, or a stopped one needing a decision. A held one (written for an older question)
@@ -269,7 +269,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   const followUp = !readOnly && status === 'waiting' && (pending || replyDraft) ? { label: `Add a ${sentAs(status)}`,
     hint: pending ? 'Queued behind the answer in flight' : 'Your reply is kept. Send it, or answer below.', disabled: offline } : null;
   const recommended = item.options.findIndex(option => option.recommended);
-  const blocked = session.state !== 'active' ? 'This session is closed. Reopen it to answer.'
+  const blocked = session.archived_at != null ? 'This session is archived. Restore it, then reopen it to answer.' : session.state !== 'active' ? 'This session is closed. Reopen it to answer.'
     : offline ? reconnectingNote(agent) : null;
 
   const rounds = Object.values(session.rounds).filter((round): round is Immutable<Round> => !!round && round.item_id === item.id).sort((a, b) => a.ordinal - b.ordinal);

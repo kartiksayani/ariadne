@@ -7,11 +7,19 @@ pub(super) fn authorize(
     context: &AgentContext,
     request: &ApplyRequest,
 ) -> Result<(), CoreError> {
-    if session.state != SessionState::Active {
+    if session.state != SessionState::Active || session.archived_at.is_some() {
         let mut error = core(
             CoreErrorCode::InvalidTransition,
-            "The owner closed this session; it takes no changes until reopened",
+            if session.archived_at.is_some() {
+                "The owner archived this session; it takes no changes until the owner restores and reopens it"
+            } else {
+                "The owner closed this session; it takes no changes until reopened"
+            },
         );
+        if session.archived_at.is_some() {
+            error.hint =
+                "Ask the owner to restore and reopen this session before sending changes.".into();
+        }
         error.details = Some(reason(context, BarrierReason::SessionClosed));
         return Err(error);
     }

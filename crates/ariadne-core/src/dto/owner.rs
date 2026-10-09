@@ -25,6 +25,8 @@ owner_commands!(
     TopicRestore(TopicLifecycleParams),
     SessionClose(SessionLifecycleParams),
     SessionReopen(SessionLifecycleParams),
+    SessionArchive(SessionLifecycleParams),
+    SessionRestore(SessionRestoreParams),
     TopicContinue(TopicContinueParams),
     PreferencesPatch(PreferencesPatch),
     ItemRemove(ItemRemoveParams),
@@ -115,6 +117,16 @@ pub struct TopicLifecycleParams {
 #[serde(deny_unknown_fields)]
 pub struct SessionLifecycleParams {
     pub expected_revision: PositiveSafeInteger,
+}
+/// Restore normally leaves the session Closed. Undo of an active archive
+/// requests reopening in the same revision-guarded transaction.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct SessionRestoreParams {
+    pub expected_revision: PositiveSafeInteger,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[ts(as = "Option<bool>", optional)]
+    pub reopen: bool,
 }
 /// Replaces the routed session's owner-set name and description. `null` or a
 /// blank string clears a field (the session falls back to its agent label).

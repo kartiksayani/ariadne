@@ -183,6 +183,21 @@ fn command(kind: &str, revision: u64, op: u64) -> OwnerCommand {
                 expected_revision: p(revision),
             },
         },
+        "session_archive" => OwnerCommand::SessionArchive {
+            api_version: version,
+            op_id: id(op),
+            params: SessionLifecycleParams {
+                expected_revision: p(revision),
+            },
+        },
+        "session_restore" => OwnerCommand::SessionRestore {
+            api_version: version,
+            op_id: id(op),
+            params: SessionRestoreParams {
+                reopen: false,
+                expected_revision: p(revision),
+            },
+        },
         "reopen" => OwnerCommand::SessionReopen {
             api_version: version,
             op_id: id(op),
@@ -721,6 +736,7 @@ fn source_revision_or_hash_change_rejects_stale_preview_without_target_effects()
                 Ok::<_, CoreError>(SavedReceiptData::SessionLifecycle {
                     state: s.state.clone(),
                     closed_at: s.closed_at.clone(),
+                    archived_at: None,
                     cancelled_input_ids: vec![],
                 })
             },
@@ -934,6 +950,7 @@ fn preview_and_commit_require_distinct_active_explicitly_bound_target() {
                 Ok::<_, CoreError>(SavedReceiptData::SessionLifecycle {
                     state: s.state.clone(),
                     closed_at: s.closed_at.clone(),
+                    archived_at: None,
                     cancelled_input_ids: vec![],
                 })
             },
@@ -1125,6 +1142,7 @@ fn continuation_uses_validated_source_snapshot_when_source_changes_after_its_loc
                                     Ok::<_, CoreError>(SavedReceiptData::SessionLifecycle {
                                         state: s.state.clone(),
                                         closed_at: s.closed_at.clone(),
+                                        archived_at: None,
                                         cancelled_input_ids: vec![],
                                     })
                                 },
@@ -1523,4 +1541,400 @@ fn same_topic_reply_maps_direct_target_and_retains_source_route() {
             round_id: original.round_id.clone()
         }
     );
+}
+
+#[test]
+fn session_archive_closes_active_preserves_history_and_restore_stays_closed() {
+    let original = seed();
+    let setup = Setup::new(&original);
+    let service = HistoryActionService::new(&setup.registry);
+    let archive = command("session_archive", 1, 300);
+    let receipt = service.execute(&context(), &archive, at()).unwrap();
+    assert!(matches!(
+        saved(receipt.clone()).data,
+        SavedReceiptData::SessionLifecycle {
+            state: SessionState::Closed,
+            archived_at: Some(_),
+            closed_at: Some(_),
+            ..
+        }
+    ));
+    let archived = setup.store().read(&id(2)).unwrap();
+    assert_eq!(archived.items, original.items);
+    assert_eq!(archived.topics, original.topics);
+    assert_eq!(archived.rounds, original.rounds);
+    assert_eq!(archived.answers, original.answers);
+    assert_eq!(
+        &archived.messages[..original.messages.len()],
+        &original.messages
+    );
+    assert_eq!(archived.messages.last().unwrap().body, "Session archived.");
+    assert!(archived.bindings.0[&id(3)].owner_paused);
+    let bytes = setup.bytes();
+    assert_eq!(
+        service.execute(&context(), &archive, at()).unwrap(),
+        receipt
+    );
+    assert_eq!(setup.bytes(), bytes);
+    for (kind, revision, code) in [
+        ("session_archive", 2, CoreErrorCode::InvalidTransition),
+        ("reopen", 2, CoreErrorCode::InvalidTransition),
+        ("session_restore", 1, CoreErrorCode::RevisionConflict),
+    ] {
+        assert_eq!(
+            error(service.execute(&context(), &command(kind, revision, 301), at())).code,
+            code
+        );
+        assert_eq!(setup.bytes(), bytes);
+    }
+    service
+        .execute(&context(), &command("session_restore", 2, 302), at())
+        .unwrap();
+    let restored = setup.store().read(&id(2)).unwrap();
+    assert!(restored.archived_at.is_none());
+    assert_eq!(restored.state, SessionState::Closed);
+    assert_eq!(restored.closed_at, archived.closed_at);
+    assert_eq!(restored.bindings, archived.bindings);
+    assert_eq!(
+        restored.messages.last().unwrap().body,
+        "Session restored; it remains closed."
+    );
+    assert_eq!(
+        error(service.execute(&context(), &command("session_restore", 3, 303), at())).code,
+        CoreErrorCode::InvalidTransition
+    );
+    service
+        .execute(&context(), &command("reopen", 3, 304), at())
+        .unwrap();
+    assert_eq!(
+        setup.store().read(&id(2)).unwrap().state,
+        SessionState::Active
+    );
+}
+
+#[test]
+fn session_archive_of_closed_session_only_changes_archive_and_lifecycle_history() {
+    let setup = Setup::new(&seed());
+    let service = HistoryActionService::new(&setup.registry);
+    service
+        .execute(&context(), &command("close", 1, 300), at())
+        .unwrap();
+    let closed = setup.store().read(&id(2)).unwrap();
+    service
+        .execute(&context(), &command("session_archive", 2, 301), at())
+        .unwrap();
+    let archived = setup.store().read(&id(2)).unwrap();
+    assert_eq!(archived.closed_at, closed.closed_at);
+    assert_eq!(archived.bindings, closed.bindings);
+    assert_eq!(archived.inputs, closed.inputs);
+    assert_eq!(archived.items, closed.items);
+    assert!(archived.archived_at.is_some());
+}
+
+#[test]
+fn legacy_session_read_and_refused_archive_leave_original_store_bytes_untouched() {
+    let setup = Setup::new(&seed());
+    fs::write(
+        session_path(&setup, 2),
+        include_bytes!("../../../fixtures/domain/history/seed.json"),
+    )
+    .unwrap();
+    let bytes = setup.bytes();
+    assert!(serde_json::from_slice::<serde_json::Value>(&bytes)
+        .unwrap()
+        .get("archived_at")
+        .is_none());
+    assert!(setup.store().read(&id(2)).unwrap().archived_at.is_none());
+    assert_eq!(setup.bytes(), bytes);
+    assert_eq!(
+        error(HistoryActionService::new(&setup.registry).execute(
+            &context(),
+            &command("session_archive", 9, 300),
+            at()
+        ))
+        .code,
+        CoreErrorCode::RevisionConflict
+    );
+    assert_eq!(setup.bytes(), bytes);
+    let encoded = serde_json::to_value(setup.store().read(&id(2)).unwrap()).unwrap();
+    assert!(encoded.get("archived_at").is_none());
+}
+
+#[test]
+fn archive_history_id_and_counter_conflicts_roll_back_the_entire_close() {
+    for collision in [true, false] {
+        let mut original = seed();
+        if !collision {
+            original.counters.next_message = p(9_007_199_254_740_991);
+        }
+        let op = if collision {
+            original.messages[0].id.clone()
+        } else {
+            id(300)
+        };
+        let setup = Setup::new(&original);
+        let bytes = setup.bytes();
+        let cmd = OwnerCommand::SessionArchive {
+            api_version: SchemaVersion::new(1).unwrap(),
+            op_id: op,
+            params: SessionLifecycleParams {
+                expected_revision: p(1),
+            },
+        };
+        let code =
+            error(HistoryActionService::new(&setup.registry).execute(&context(), &cmd, at())).code;
+        assert_eq!(
+            code,
+            if collision {
+                CoreErrorCode::InvalidArgument
+            } else {
+                CoreErrorCode::CapacityExceeded
+            }
+        );
+        assert_eq!(setup.bytes(), bytes);
+    }
+}
+
+#[test]
+fn session_archive_cancels_queued_input_restore_keeps_it_cancelled_and_refuses_new_inputs() {
+    let setup = Setup::new(&seed());
+    let submit = OwnerCommand::InputSubmit {
+        api_version: SchemaVersion::new(1).unwrap(),
+        op_id: id(300),
+        params: InputSubmitParams {
+            binding_id: id(3),
+            target: InputTarget {
+                topic_id: id(5),
+                item_id: Some(ItemRef::new("1").unwrap()),
+            },
+            kind: InputKind::Note,
+            text: "Keep this owner request in saved history".into(),
+            selected_option_id: None,
+            expected_question_revision: None,
+            supersedes_answer_id: None,
+        },
+    };
+    let inputs = ariadne_core::inputs::InputService::new(&setup.registry);
+    let SavedReceiptData::InputSubmit { input_id, .. } = saved(
+        inputs
+            .execute(&context(), &submit, allocator(10000), at())
+            .unwrap(),
+    )
+    .data
+    else {
+        unreachable!()
+    };
+    let service = HistoryActionService::new(&setup.registry);
+    let receipt = saved(
+        service
+            .execute(&context(), &command("session_archive", 2, 301), at())
+            .unwrap(),
+    );
+    assert!(
+        matches!(receipt.data, SavedReceiptData::SessionLifecycle { cancelled_input_ids, .. } if cancelled_input_ids == vec![input_id.clone()])
+    );
+    let archived = setup.store().read(&id(2)).unwrap();
+    assert_eq!(
+        archived.inputs.0[&input_id].cancel_cause,
+        Some(CancelCause::SessionClosed)
+    );
+    let mut new_submit = submit.clone();
+    if let OwnerCommand::InputSubmit { op_id, .. } = &mut new_submit {
+        *op_id = id(302);
+    }
+    let bytes = setup.bytes();
+    assert!(
+        matches!(inputs.execute(&context(), &new_submit, || panic!("archived input allocates no IDs"), at()), Err(ariadne_core::inputs::InputError::Core(error)) if error.code == CoreErrorCode::InvalidTransition)
+    );
+    assert_eq!(setup.bytes(), bytes);
+    service
+        .execute(&context(), &command("session_restore", 3, 303), at())
+        .unwrap();
+    assert_eq!(
+        setup.store().read(&id(2)).unwrap().inputs.0[&input_id].state,
+        InputState::Cancelled
+    );
+}
+
+#[test]
+fn active_archive_undo_is_atomic_revision_guarded_replayable_and_resumes_sending() {
+    let setup = Setup::new(&seed());
+    let service = HistoryActionService::new(&setup.registry);
+    service
+        .execute(&context(), &command("session_archive", 1, 300), at())
+        .unwrap();
+    let undo = OwnerCommand::SessionRestore {
+        api_version: SchemaVersion::new(1).unwrap(),
+        op_id: id(301),
+        params: SessionRestoreParams {
+            expected_revision: p(2),
+            reopen: true,
+        },
+    };
+    let mut stale = undo.clone();
+    if let OwnerCommand::SessionRestore { params, .. } = &mut stale {
+        params.expected_revision = p(1);
+    }
+    let archived_bytes = setup.bytes();
+    assert_eq!(
+        error(service.execute(&context(), &stale, at())).code,
+        CoreErrorCode::RevisionConflict
+    );
+    assert_eq!(setup.bytes(), archived_bytes);
+    let mut collision = undo.clone();
+    if let OwnerCommand::SessionRestore { op_id, .. } = &mut collision {
+        *op_id = seed().messages[0].id.clone();
+    }
+    assert_eq!(
+        error(service.execute(&context(), &collision, at())).code,
+        CoreErrorCode::InvalidArgument
+    );
+    assert_eq!(setup.bytes(), archived_bytes);
+    let receipt = service.execute(&context(), &undo, at()).unwrap();
+    let restored = setup.store().read(&id(2)).unwrap();
+    assert_eq!(restored.state, SessionState::Active);
+    assert!(restored.archived_at.is_none());
+    assert!(restored.closed_at.is_none());
+    assert!(!restored.bindings.0[&id(3)].owner_paused);
+    assert_eq!(
+        restored.bindings.0[&id(3)].dispatch_state,
+        DispatchState::Enabled
+    );
+    assert_eq!(
+        restored.messages.last().unwrap().body,
+        "Session restored and reopened."
+    );
+    let bytes = setup.bytes();
+    assert_eq!(service.execute(&context(), &undo, at()).unwrap(), receipt);
+    assert_eq!(setup.bytes(), bytes);
+    let submit = OwnerCommand::InputSubmit {
+        api_version: SchemaVersion::new(1).unwrap(),
+        op_id: id(302),
+        params: InputSubmitParams {
+            binding_id: id(3),
+            target: InputTarget {
+                topic_id: id(5),
+                item_id: Some(ItemRef::new("1").unwrap()),
+            },
+            kind: InputKind::Note,
+            text: "Carry on after Undo".into(),
+            selected_option_id: None,
+            expected_question_revision: None,
+            supersedes_answer_id: None,
+        },
+    };
+    let input = saved(
+        ariadne_core::inputs::InputService::new(&setup.registry)
+            .execute(&context(), &submit, allocator(10000), at())
+            .unwrap(),
+    );
+    let SavedReceiptData::InputSubmit { input_id, .. } = input.data else {
+        unreachable!()
+    };
+    let dispatch = ValidatedDispatchContext::from_trusted_current_lease(
+        RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+        id(3),
+        id(4),
+    );
+    let claim = DeliveryService::new(&setup.registry)
+        .claim(
+            &dispatch,
+            &ClaimRequest {
+                binding_id: id(3),
+                generation: id(4),
+                request_id: id(303),
+            },
+            allocator(11000),
+            at(),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.input_id, input_id);
+}
+
+#[test]
+fn closed_archive_undo_preserves_closed_time_and_sending_pause() {
+    let setup = Setup::new(&seed());
+    let service = HistoryActionService::new(&setup.registry);
+    service
+        .execute(&context(), &command("close", 1, 300), at())
+        .unwrap();
+    let closed = setup.store().read(&id(2)).unwrap();
+    service
+        .execute(&context(), &command("session_archive", 2, 301), at())
+        .unwrap();
+    service
+        .execute(&context(), &command("session_restore", 3, 302), at())
+        .unwrap();
+    let restored = setup.store().read(&id(2)).unwrap();
+    assert_eq!(restored.state, SessionState::Closed);
+    assert_eq!(restored.closed_at, closed.closed_at);
+    assert_eq!(restored.bindings, closed.bindings);
+}
+
+#[test]
+fn closed_archive_cancels_legacy_pending_inputs_without_changing_close_time() {
+    let setup = Setup::new(&seed());
+    let submit = OwnerCommand::InputSubmit {
+        api_version: SchemaVersion::new(1).unwrap(),
+        op_id: id(300),
+        params: InputSubmitParams {
+            binding_id: id(3),
+            target: InputTarget {
+                topic_id: id(5),
+                item_id: Some(ItemRef::new("1").unwrap()),
+            },
+            kind: InputKind::Note,
+            text: "Retained pending owner words".into(),
+            selected_option_id: None,
+            expected_question_revision: None,
+            supersedes_answer_id: None,
+        },
+    };
+    let queued = saved(
+        ariadne_core::inputs::InputService::new(&setup.registry)
+            .execute(&context(), &submit, allocator(10000), at())
+            .unwrap(),
+    );
+    let SavedReceiptData::InputSubmit { input_id, .. } = queued.data else {
+        unreachable!()
+    };
+    setup
+        .store()
+        .transact(
+            &id(2),
+            &ReceiptActorScope::Owner {},
+            &id(301),
+            &serde_json::json!({"kind":"legacy_closed"}),
+            |session| {
+                session.state = SessionState::Closed;
+                session.closed_at = Some(at());
+                let binding = session.bindings.0.get_mut(&id(3)).unwrap();
+                binding.owner_paused = true;
+                binding.dispatch_state = DispatchState::Paused;
+                Ok::<_, CoreError>(SavedReceiptData::SessionLifecycle {
+                    state: SessionState::Closed,
+                    closed_at: session.closed_at.clone(),
+                    archived_at: None,
+                    cancelled_input_ids: vec![],
+                })
+            },
+        )
+        .unwrap();
+    let archive_at = UtcMillis::new("2026-10-09T12:00:00.000Z").unwrap();
+    let receipt = saved(
+        HistoryActionService::new(&setup.registry)
+            .execute(&context(), &command("session_archive", 3, 302), archive_at)
+            .unwrap(),
+    );
+    assert!(
+        matches!(receipt.data, SavedReceiptData::SessionLifecycle { cancelled_input_ids, .. } if cancelled_input_ids == vec![input_id.clone()])
+    );
+    let archived = setup.store().read(&id(2)).unwrap();
+    assert_eq!(archived.closed_at, Some(at()));
+    assert_eq!(archived.inputs.0[&input_id].state, InputState::Cancelled);
+    assert!(archived
+        .messages
+        .iter()
+        .any(|message| message.body == "Retained pending owner words"));
 }

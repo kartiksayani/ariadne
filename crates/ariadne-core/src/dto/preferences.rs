@@ -47,6 +47,11 @@ pub struct GlobalPreferences {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[ts(as = "Option<bool>", optional)]
     pub waiting_collapsed: bool,
+    // Project archive groups the owner expanded; all others start folded.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = 256))]
+    #[ts(as = "Option<Vec<UuidV4>>", optional)]
+    pub session_archive_expanded_project_ids: Vec<UuidV4>,
 }
 
 pub const TEXT_SCALE_DEFAULT: u16 = 80;
@@ -66,6 +71,7 @@ pub const DETAIL_WIDTH_MIN: u32 = 320;
 pub const DETAIL_WIDTH_MAX: u32 = 720;
 /// Most folded topic bands kept per session.
 pub const COLLAPSED_TOPICS_CAPACITY: usize = 256;
+pub const SESSION_ARCHIVE_EXPANSION_CAPACITY: usize = 256;
 
 pub const NOTIFICATION_LEDGER_CAPACITY: usize = 256;
 

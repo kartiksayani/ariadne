@@ -11,7 +11,7 @@ pub fn record_owner_history(
     new_round_id: Option<UuidV4>,
 ) -> Result<Session, HistoryError> {
     require(
-        session.state == SessionState::Active,
+        session.state == SessionState::Active && session.archived_at.is_none(),
         HistoryError::ClosedSession,
     )?;
     fresh_message(session, &message.id)?;

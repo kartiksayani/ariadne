@@ -145,7 +145,7 @@ export function sendingAgain(state: DraftState, session: Immutable<Session>, inp
  * could be sent from there), or null when it can. The Not sent line shows this instead of the button.
  */
 export function putBackBlocked(session: Immutable<Session>, input: Immutable<Input>): string | null {
-  return session.state !== 'active' ? 'Reopen the session to put it back in the reply box.'
+  return session.archived_at != null ? 'Restore the session, then reopen it to put it back in the reply box.' : session.state !== 'active' ? 'Reopen the session to put it back in the reply box.'
     : session.topics[input.target.topic_id]?.archived_at ? 'Restore the topic to put it back in the reply box.' : null;
 }
 

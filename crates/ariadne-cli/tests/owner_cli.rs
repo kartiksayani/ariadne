@@ -47,6 +47,7 @@ fn canonical_stdin_preserves_exact_command_and_stale_guards_for_core_replay() {
         data: SavedReceiptData::SessionLifecycle {
             state: SessionState::Closed,
             closed_at: None,
+            archived_at: None,
             cancelled_input_ids: vec![],
         },
     }));
@@ -161,6 +162,7 @@ fn mismatched_core_receipt_is_not_printed_as_owner_success() {
                 data: SavedReceiptData::SessionLifecycle {
                     state: SessionState::Closed,
                     closed_at: None,
+                    archived_at: None,
                     cancelled_input_ids: vec![],
                 },
             },
@@ -539,4 +541,63 @@ fn saved_connect_instruction_routes_real_read_and_apply_processes() {
     let applied: ApplyReceipt = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(applied.operation_id, id(92));
     assert_eq!(applied.session_id, saved.session_id);
+}
+
+#[test]
+fn session_archive_restore_cli_routes_exact_canonical_command_and_revision() {
+    for archive in [true, false] {
+        let params = SessionLifecycleParams {
+            expected_revision: PositiveSafeInteger::new(7).unwrap(),
+        };
+        let command = if archive {
+            OwnerCommand::SessionArchive {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(9),
+                params,
+            }
+        } else {
+            OwnerCommand::SessionRestore {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(9),
+                params: SessionRestoreParams {
+                    expected_revision: params.expected_revision,
+                    reopen: false,
+                },
+            }
+        };
+        let recorded = RecordedRequest::Owner(
+            OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
+                RegisteredSession::from_trusted_entrypoint(id(1), id(2)),
+            )),
+            Box::new(command.clone()),
+        );
+        let receipt = MutationReceipt::Session(Box::new(SavedReceipt {
+            operation_id: id(9),
+            session_id: id(2),
+            revision: PositiveSafeInteger::new(8).unwrap(),
+            data: SavedReceiptData::SessionLifecycle {
+                state: SessionState::Closed,
+                closed_at: None,
+                archived_at: archive.then(|| UtcMillis::new("2026-10-04T00:00:00.000Z").unwrap()),
+                cancelled_input_ids: vec![],
+            },
+        }));
+        let core = ScriptedCoreService::new([ScriptStep {
+            request: recorded.clone(),
+            response: ScriptedResponse::Owner(Box::new(Ok(receipt.clone()))),
+        }]);
+        let bytes = serde_json::to_vec(&OwnerMutationRequest {
+            session: Some(SessionRef {
+                project_id: id(1),
+                session_id: id(2),
+            }),
+            command,
+        })
+        .unwrap();
+        let verb = if archive { "archive" } else { "restore" };
+        let (exit, result) = call(&core, &["session", verb, "--json-stdin"], &bytes);
+        assert_eq!(exit, 0);
+        assert_eq!(result["data"], serde_json::to_value(receipt).unwrap());
+        assert_eq!(core.history().unwrap(), vec![recorded]);
+    }
 }

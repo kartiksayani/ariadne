@@ -159,7 +159,11 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
     </div><div className="dialog-actions">{buttons}</div></Dialog>;
   }
   return {
-    session: () => { if (session) prepare(session.state === 'closed' ? 'session_reopen' : 'session_close'); },
+    session: () => {
+      if (!session) return;
+      if (session.archived_at != null) { void run({ command: 'session_restore', api_version: 1, op_id: '', params: { expected_revision: session.revision } }); return; }
+      prepare(session.state === 'closed' ? 'session_reopen' : 'session_close');
+    },
     archive, restore, archived, undo, dismiss: () => setArchived(null), busy: disabled, error, dialog,
     pending: operation.pending && !review ? unconfirmedText(operation.pending.command.command) : null,
     reconcile: () => {

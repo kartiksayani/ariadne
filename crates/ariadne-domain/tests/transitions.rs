@@ -135,6 +135,7 @@ fn session() -> Session {
         updated_at: time(),
         revision: positive(1),
         closed_at: None,
+        archived_at: None,
         counters: SessionCounters {
             next_root: positive(2),
             next_topic_order: positive(2),
@@ -1629,4 +1630,21 @@ fn stored_records_without_short_load_and_serialize_unchanged() {
     assert!(item.get("short").is_none());
     item["short"] = json!(null);
     assert_eq!(serde_json::from_value::<Item>(item).unwrap().short, None);
+}
+
+#[test]
+fn archived_session_requires_closed_state_and_close_timestamp() {
+    let mut s = session();
+    s.archived_at = Some(time());
+    assert_eq!(
+        validate_session_delivery(&s).unwrap_err().kind,
+        ValidationErrorKind::InvalidState
+    );
+    s.state = SessionState::Closed;
+    assert_eq!(
+        validate_session_delivery(&s).unwrap_err().kind,
+        ValidationErrorKind::InvalidState
+    );
+    s.closed_at = Some(time());
+    validate_session_delivery(&s).unwrap();
 }

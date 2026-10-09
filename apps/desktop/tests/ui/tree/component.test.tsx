@@ -755,6 +755,16 @@ describe('session tree inline answering', () => {
     row('4').focus(); fireEvent.keyDown(row('4'), { key: 'a' });
     await waitFor(() => expect(control()).not.toBeNull()); expect(document.activeElement).toBe(row('2'));
   });
+  it('explains Restore before Reopen when answering in an archived session', async () => {
+    await mount({ configure: transport => {
+      options(transport);
+      const session = transport.sessions.get(route.session_id)!;
+      session.state = 'closed'; session.archived_at = session.updated_at;
+    } });
+    row('2').focus(); fireEvent.keyDown(row('2'), { key: 'a' });
+    await waitFor(() => expect(control()).not.toBeNull());
+    expect(within(control()!).getByText('This session is archived. Restore it, then reopen it to answer.')).toBeTruthy();
+  });
   it('blocks sending in a closed session', async () => {
     await mount({ configure: transport => { options(transport); transport.sessions.get(route.session_id)!.state = 'closed'; } });
     row('2').focus(); fireEvent.keyDown(row('2'), { key: 'a' });

@@ -2130,3 +2130,116 @@ fn invalid_persisted_attempt_is_never_overwritten_or_claimed_as_valid() {
     ));
     assert_eq!(bytes, fs::read(file).unwrap());
 }
+
+fn session_archive(t: &Setup, op: u64) -> Vec<UuidV4> {
+    let MutationReceipt::Session(receipt) = HistoryActionService::new(&t.registry)
+        .execute(
+            &OwnerContext::from_trusted_entrypoint(OwnerScope::Session(route())),
+            &OwnerCommand::SessionArchive {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: id(op),
+                params: SessionLifecycleParams {
+                    expected_revision: t.saved().revision,
+                },
+            },
+            at("07"),
+        )
+        .unwrap()
+    else {
+        panic!("session receipt")
+    };
+    let SavedReceiptData::SessionLifecycle {
+        cancelled_input_ids,
+        ..
+    } = receipt.data
+    else {
+        panic!("lifecycle receipt")
+    };
+    cancelled_input_ids
+}
+
+#[test]
+fn session_archive_cancels_in_flight_and_needs_attention_and_seals_late_reports() {
+    for needs_attention in [false, true] {
+        let t = Setup::new();
+        let first = t.queue(100);
+        let second = t.queue(101);
+        let p = t.claim(200);
+        if needs_attention {
+            t.report(&t.event(
+                &p,
+                "uncertain",
+                EventPayload::Uncertain {
+                    reason: "Host completion is unknown".into(),
+                },
+            ))
+            .unwrap();
+            assert_eq!(t.saved().inputs.0[&first].state, InputState::NeedsAttention);
+        }
+        let mut cancelled = session_archive(&t, 300);
+        cancelled.sort();
+        let mut expected = vec![first.clone(), second.clone()];
+        expected.sort();
+        assert_eq!(cancelled, expected);
+        let archived = t.saved();
+        assert_eq!(archived.state, SessionState::Closed);
+        assert!(archived.archived_at.is_some());
+        assert!(archived.bindings.0[&id(3)].owner_paused);
+        assert_eq!(archived.bindings.0[&id(3)].active_input_id, None);
+        assert!(archived.inputs.0[&first].attempts[0].sealed_at.is_some());
+        for input in [&first, &second] {
+            assert_eq!(archived.inputs.0[input].state, InputState::Cancelled);
+            assert_eq!(
+                archived.inputs.0[input].cancel_cause,
+                Some(CancelCause::SessionClosed)
+            );
+        }
+        let bytes = t.bytes();
+        let refusal = t.try_result(&p, 301).unwrap_err();
+        let ariadne_core::apply::ApplyError::Core(refusal) = refusal else {
+            panic!("typed archive refusal")
+        };
+        assert_eq!(
+            refusal.message,
+            "The owner archived this session; it takes no changes until the owner restores and reopens it"
+        );
+        assert_eq!(
+            refusal.hint,
+            "Ask the owner to restore and reopen this session before sending changes."
+        );
+        assert_eq!(t.bytes(), bytes);
+        let claim = DeliveryService::new(&t.registry)
+            .claim(
+                &t.lease(),
+                &ClaimRequest {
+                    binding_id: id(3),
+                    generation: archived.bindings.0[&id(3)].generation.clone(),
+                    request_id: id(302),
+                },
+                || t.uuid(),
+                at("08"),
+            )
+            .unwrap_err();
+        let ariadne_core::delivery::DeliveryError::Core(claim) = claim else {
+            panic!("typed archive claim refusal")
+        };
+        assert_eq!(
+            claim.message,
+            "The owner archived this session; restore it, then reopen it to resume sending"
+        );
+        assert_eq!(t.bytes(), bytes);
+    }
+}
+
+#[test]
+fn session_archive_hands_committed_result_without_reporting_it_cancelled() {
+    let t = Setup::new();
+    t.queue(100);
+    let p = t.claim(200);
+    t.result(&p, 300);
+    assert!(session_archive(&t, 301).is_empty());
+    let archived = t.saved();
+    assert_eq!(archived.inputs.0[&p.input_id].state, InputState::Handled);
+    assert_eq!(archived.bindings.0[&id(3)].active_input_id, None);
+    assert!(archived.bindings.0[&id(3)].owner_paused);
+}

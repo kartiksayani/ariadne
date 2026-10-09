@@ -1,3 +1,4 @@
+import { cancellableInput } from '../../../src/components/history-actions/selectors';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import projectsFixture from '../../../../../fixtures/domain/projections/projects.json';
 import sessionsFixture from '../../../../../fixtures/domain/projections/sessions.json';
@@ -98,6 +99,23 @@ export class AppTransport implements DesktopTransport {
         return { api_version: 1, ok: true, data: { operation_id: command.op_id, session_id: session.id, revision: session.revision,
           data: { kind: 'session_label', name: name ?? null, description: description ?? null } } } as T;
       }
+      if (['session_archive', 'session_restore', 'session_reopen', 'session_close'].includes(command.command)) {
+        const archived = command.command === 'session_archive', restored = command.command === 'session_restore';
+        session.state = command.command === 'session_reopen' || command.command === 'session_restore' && command.params.reopen ? 'active' : 'closed';
+        binding.owner_paused = session.state === 'closed'; binding.dispatch_state = binding.owner_paused ? 'paused' : 'enabled';
+        session.closed_at = session.state === 'closed' ? session.closed_at ?? session.updated_at : null;
+        if (archived) session.archived_at = session.updated_at;
+        if (restored) delete session.archived_at;
+        const cancelled: string[] = [];
+        if (archived || command.command === 'session_close') for (const input of Object.values(session.inputs)) {
+          if (input && cancellableInput(input)) { input.state = 'cancelled'; cancelled.push(input.id); }
+          else if (input?.state === 'in_flight') input.state = 'handled';
+        }
+        ++session.revision;
+        this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+        return { api_version: 1, ok: true, data: { operation_id: command.op_id, session_id: session.id, revision: session.revision,
+          data: { kind: 'session_lifecycle', state: session.state, closed_at: session.closed_at, archived_at: session.archived_at ?? null, cancelled_input_ids: cancelled } } } as T;
+      }
       if (command.command === 'input_cancel') {
         const input = session.inputs[command.params.input_id]!;
         input.state = 'cancelled'; input.active_attempt_id = null; ++session.revision;
@@ -152,9 +170,9 @@ export class AppTransport implements DesktopTransport {
       return { projects: page([project], 1), counts };
     }
     if (query.command === 'session_list') return { sessions: page([...this.sessions.values()].map(session => ({
-      ...structuredClone(sessionsFixture.items[0]), session_id: session.id, title: session.title, revision: session.revision,
+      ...structuredClone(sessionsFixture.items[0]), session_id: session.id, title: session.title, revision: session.revision, state: session.state, closed_at: session.closed_at, archived_at: session.archived_at,
       ...session.name ? { name: session.name } : {}, ...session.description ? { description: session.description } : {},
-    })) as SessionSummary[], 1), counts, active_total: this.sessions.size, closed_total: 0 };
+    })) as SessionSummary[], 1), counts, active_total: [...this.sessions.values()].filter(session => session.state === 'active' && session.archived_at == null).length, closed_total: [...this.sessions.values()].filter(session => session.state === 'closed' && session.archived_at == null).length, archived_total: [...this.sessions.values()].filter(session => session.archived_at != null).length };
     const session = this.sessions.get(request.session!.session_id)!;
     if (query.command === 'session_get') return { session, freshness: 'fresh' };
     if (query.command === 'reveal_item') return { ...request.session, item_id: query.params.item_id };

@@ -64,6 +64,6 @@ export async function sessions(service: RendererService, projectId: string | nul
     }
     return result;
   }, result => result.sessions,
-  result => [result.active_total, result.closed_total, result.counts], item => JSON.stringify([item.project_id, item.session_id]));
+  result => [result.active_total, result.closed_total, result.archived_total, result.counts], item => JSON.stringify([item.project_id, item.session_id]));
   return { ...capture.first, sessions: { ...capture.first.sessions, items: capture.items, next_cursor: null } };
 }

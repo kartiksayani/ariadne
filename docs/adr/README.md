@@ -100,3 +100,7 @@ pickers and confirmations; the agent line becomes the quieter label.
 (generated `op_id`, defaults, nested `children`) while core stays strict, adds
 `--dry-run`, makes the default receipt compact (`--full` for the old one) and gives
 `ariadne read --view items` `--topic` and `--archived`.
+
+[ADR-0095](ADR-0095-session-archive.md) puts finished sessions in a remembered,
+folded Archived group, closes them safely, and restores them as Closed while
+keeping their history readable.

@@ -185,6 +185,13 @@
         "selected_navigation": {
           "$ref": "#/$defs/NavigationSelection"
         },
+        "session_archive_expanded_project_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          },
+          "maxItems": 256
+        },
         "text_scale": {
           "type": "integer",
           "enum": [
@@ -894,6 +901,56 @@
             },
             "command": {
               "type": "string",
+              "const": "session_archive"
+            },
+            "op_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "params": {
+              "$ref": "#/$defs/SessionLifecycleParams"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "api_version",
+            "op_id",
+            "params"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "api_version": {
+              "$ref": "#/$defs/SchemaVersion"
+            },
+            "command": {
+              "type": "string",
+              "const": "session_restore"
+            },
+            "op_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "params": {
+              "$ref": "#/$defs/SessionRestoreParams"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "api_version",
+            "op_id",
+            "params"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "api_version": {
+              "$ref": "#/$defs/SchemaVersion"
+            },
+            "command": {
+              "type": "string",
               "const": "topic_continue"
             },
             "op_id": {
@@ -1505,6 +1562,22 @@
       "required": [
         "project_id",
         "session_id",
+        "expected_revision"
+      ]
+    },
+    "SessionRestoreParams": {
+      "description": "Restore normally leaves the session Closed. Undo of an active archive\nrequests reopening in the same revision-guarded transaction.",
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "reopen": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
         "expected_revision"
       ]
     },

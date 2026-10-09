@@ -32,15 +32,17 @@ export interface NavigationState {
   readonly setupProjectId: string | null;
 }
 /** Renderer layout choices saved with the global preferences. */
-export type LayoutChange = Partial<Pick<GlobalPreferences, 'detail_width' | 'waiting_collapsed'>>;
+export type LayoutChange = Partial<Pick<GlobalPreferences, 'detail_width' | 'waiting_collapsed' | 'session_archive_expanded_project_ids'>>;
 const sameRoute = (a: SessionRef, b: SessionRef) => a.project_id === b.project_id && a.session_id === b.session_id;
 const fail = (error: unknown): Failure => error instanceof CoreFailure || error instanceof ServiceFailure
   ? error : new ServiceFailure('transport');
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const filterStatuses: Record<ItemStatus, true> = { open: true, waiting_on_me: true, in_progress: true,
   decided: true, done: true, dropped: true, replaced: true };
-function normalizeStatusFilters(preferences: PreferencesSnapshot): PreferencesSnapshot {
-  return { ...preferences, sessions: preferences.sessions.map(view => Object.keys(filterStatuses).every(status => view.filters.statuses.includes(status as ItemStatus))
+function normalizeStatusFilters(preferences: PreferencesSnapshot, registered?: ReadonlySet<string>): PreferencesSnapshot {
+  return { ...preferences, global: { ...preferences.global,
+    ...(preferences.global.session_archive_expanded_project_ids ? { session_archive_expanded_project_ids:
+      preferences.global.session_archive_expanded_project_ids.filter(id => !registered || registered.has(id)) } : {}) }, sessions: preferences.sessions.map(view => Object.keys(filterStatuses).every(status => view.filters.statuses.includes(status as ItemStatus))
     ? { ...view, filters: { ...view.filters, statuses: [] } } : view) };
 }
 // Patch semantics for a retry: apply only the fields the owner's action changed (`base` -> `desired`)
@@ -211,7 +213,7 @@ export class NavigationStore {
             ? [store.refresh(true)] : [];
         }));
         if (this.stopped || epoch !== this.epoch || preferences.revision < Math.max(this.state.preferences?.revision ?? 0, this.preferencesFloor)) continue;
-        this.publish({ preferences: immutable(normalizeStatusFilters(preferences)), projects: immutable(projects), sessions: immutable(sessions),
+        this.publish({ preferences: immutable(normalizeStatusFilters(preferences, registered)), projects: immutable(projects), sessions: immutable(sessions),
           sessionProjectId: projectId, status: 'ready', error: this.mutationFailure, ...this.setupAfter(sessions, projectId) });
         this.flushStartupRoute();
       } catch (error: unknown) {
@@ -255,6 +257,12 @@ export class NavigationStore {
   }
   private pruneHidden(entries: NavigationPatch[]): NavigationPatch[] {
     return entries.map(entry => {
+      if (entry.kind === 'set_global' && this.state.projects && this.state.status === 'ready') {
+        const registered = new Set(this.state.projects.projects.items.map(project => project.project_id));
+        return { ...entry, preferences: { ...entry.preferences,
+          ...(entry.preferences.session_archive_expanded_project_ids ? { session_archive_expanded_project_ids:
+            entry.preferences.session_archive_expanded_project_ids.filter(id => registered.has(id)) } : {}) } };
+      }
       if (entry.kind !== 'set_session_view' || !entry.preferences.hidden_item_ids?.length) return entry;
       const state = this.opened.get(entry.preferences.session)?.getSnapshot();
       if (!state?.snapshot || state.status !== 'ready' || state.snapshot.freshness !== 'fresh') return entry;

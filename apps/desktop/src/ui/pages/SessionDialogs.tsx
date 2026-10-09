@@ -3,6 +3,7 @@
 // Reconnect checks the same agent session again on the project-scoped path.
 // Close is one confirmation: it says what stays open and which unsent messages
 // it cancels, then closes.
+import { useRef } from 'react';
 import { plainFailure, useSession, type SessionStore } from '../../data';
 import type { OwnerCommand } from '../../generated/core';
 import type { AdapterConfig } from '../../generated/domain/models';
@@ -24,8 +25,8 @@ function Failure({ actions }: { readonly actions: SessionActions }) {
 const connectionWords = { connected: 'Connected', reconnecting: 'Reconnecting…', not_running: 'Not running', none: 'Not connected' } as const;
 
 /** Pause or resume sending, reconnect or disconnect the session's agent. */
-export function DispatchDialog({ store, actions, agent, onClose }: {
-  readonly store: SessionStore; readonly actions: SessionActions; readonly agent: string; readonly onClose: () => void;
+export function DispatchDialog({ store, actions, agent, onClose, onSaved }: {
+  readonly store: SessionStore; readonly actions: SessionActions; readonly agent: string; readonly onClose: () => void; readonly onSaved?: () => void;
 }) {
   const state = useSession(store), operation = useSessionActions(actions), control = useDispatch(actions);
   const session = state.snapshot?.session;
@@ -67,7 +68,7 @@ export function DispatchDialog({ store, actions, agent, onClose }: {
     </>}
     <Failure actions={actions} />
     <div className="dialog-actions">
-      {operation.pending && <button type="button" className="btn btn-secondary" disabled={operation.writing} onClick={() => { void actions.retry(); }}>Check again</button>}
+      {operation.pending && <button type="button" className="btn btn-secondary" disabled={operation.writing} onClick={() => { void actions.retry().then(saved => { if (saved) onSaved?.(); }); }}>Check again</button>}
       <button type="button" className="btn btn-ghost" disabled={operation.writing} onClick={onClose}>Done</button>
     </div>
   </Dialog>;
@@ -109,6 +110,35 @@ export function CloseSessionDialog({ store, actions, agent, when, name = null, o
       <button type="button" className="btn btn-ghost" disabled={operation.writing} onClick={onClose}>Cancel</button>
       <button type="button" className="btn btn-primary" disabled={disabled} onClick={() => { void close(); }}>
         <i className="ph ph-x-circle" aria-hidden="true" />Close session</button>
+    </div>
+  </Dialog>;
+}
+
+/** Archive explains closing, waiting questions and message cancellation. */
+export function ArchiveSessionDialog({ store, actions, agent, onClose, onSaved }: {
+  readonly store: SessionStore; readonly actions: SessionActions; readonly agent: string; readonly onClose: () => void; readonly onSaved: (wasActive: boolean) => void;
+}) {
+  const state = useSession(store), operation = useSessionActions(actions), session = state.snapshot?.session;
+  // Keep the state submitted with the exact operation, even if its response is
+  // lost and the reader subsequently captures the already archived session.
+  const wasActive = useRef<boolean | null>(null);
+  const warning = session ? closeWarning(closeImpact(session), agent, 'archiving') : null;
+  const disabled = !session || session.archived_at != null || state.status !== 'ready' || !!state.error || operation.writing || !!operation.pending;
+  const archive = async () => {
+    if (!session || disabled) return;
+    wasActive.current = session.state === 'active';
+    if (await actions.execute({ command: 'session_archive', api_version: 1, op_id: '', params: { expected_revision: session.revision } }, session.revision)) onSaved(wasActive.current);
+  };
+  return <Dialog label="Archive this session?" width={520} onCancel={() => { if (!operation.writing) onClose(); }} onConfirm={() => { void archive(); }}>
+    <div className="dialog-title">Archive this session?</div>
+    <div className="pw-dialog-body">{session?.state === 'active' ? 'Archiving closes this session and stops sending to the agent. ' : ''}All saved history stays. You can restore this session any time.</div>
+    {warning && <div className="pw-dialog-body" data-close-warning>{warning}</div>}
+    <Failure actions={actions} />
+    <div className="dialog-actions">
+      <button type="button" className="btn btn-ghost" disabled={operation.writing} onClick={onClose}>Cancel</button>
+      {operation.pending
+        ? <button type="button" className="btn btn-primary" disabled={operation.writing} onClick={() => { void actions.retry().then(saved => { if (saved) onSaved(wasActive.current ?? false); }); }}>Check again</button>
+        : <button type="button" className="btn btn-primary" disabled={disabled} onClick={() => { void archive(); }}>Archive session</button>}
     </div>
   </Dialog>;
 }

@@ -554,6 +554,16 @@
         {
           "type": "object",
           "properties": {
+            "archived_at": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UtcMillis"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "cancelled_input_ids": {
               "type": "array",
               "items": {

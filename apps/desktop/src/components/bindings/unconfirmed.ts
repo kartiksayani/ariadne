@@ -14,6 +14,8 @@ const subject: Record<OwnerCommand['command'], string> = {
   topic_archive: 'Archiving the topic',
   topic_restore: 'Restoring the topic',
   session_close: 'Closing the session',
+  session_archive: 'Archiving the session',
+  session_restore: 'Restoring the session',
   session_reopen: 'Reopening the session',
   topic_continue: 'Continuing the topic',
   preferences_patch: 'Saving your settings',

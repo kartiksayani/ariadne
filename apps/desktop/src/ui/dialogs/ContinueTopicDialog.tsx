@@ -40,7 +40,7 @@ export interface ContinueTarget { readonly route: SessionRef; readonly label: st
 /** The sessions a topic of `source` can continue in: the other active sessions, those of its own project first. */
 export function continueTargets(source: SessionRef, sessions: readonly Immutable<SessionSummary>[]): ContinueTarget[] {
   const own = (session: Immutable<SessionSummary>) => session.project_id === source.project_id;
-  return sessions.filter(session => session.state === 'active' && !sameRoute(session, source))
+  return sessions.filter(session => session.archived_at == null && session.state === 'active' && !sameRoute(session, source))
     .sort((a, b) => Number(own(b)) - Number(own(a)))
     .map(session => {
       const binding = session.active_binding;

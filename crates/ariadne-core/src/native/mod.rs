@@ -239,6 +239,8 @@ impl CoreService for NativeCoreService {
             | OwnerCommand::TopicRestore { .. }
             | OwnerCommand::SessionClose { .. }
             | OwnerCommand::SessionReopen { .. }
+            | OwnerCommand::SessionArchive { .. }
+            | OwnerCommand::SessionRestore { .. }
             | OwnerCommand::SessionLabelSet { .. } => HistoryActionService::new(&self.registry)
                 .execute(&context, &command, (self.now)())
                 .map_err(errors::history),

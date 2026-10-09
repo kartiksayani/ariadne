@@ -156,6 +156,7 @@ impl<'a> QueryService<'a> {
         let mut entries = Vec::new();
         let mut active = 0;
         let mut closed = 0;
+        let mut archived = 0;
         for project in captured
             .projects
             .iter()
@@ -169,18 +170,20 @@ impl<'a> QueryService<'a> {
                         for outcome in outcomes {
                             match &outcome.result {
                                 Ok(session) => {
-                                    if session.state == SessionState::Active {
+                                    if session.archived_at.is_some() {
+                                        archived += 1;
+                                    } else if session.state == SessionState::Active {
                                         active += 1;
                                     } else {
                                         closed += 1;
                                     }
                                     let counts = counts::session(session)?;
-                                    counts::merge(&mut total, &counts)?;
-                                    if request
-                                        .state
-                                        .as_ref()
-                                        .is_some_and(|state| state != &session.state)
-                                    {
+                                    if session.archived_at.is_none() {
+                                        counts::merge(&mut total, &counts)?;
+                                    }
+                                    if request.state.as_ref().is_some_and(|state| {
+                                        session.archived_at.is_some() || state != &session.state
+                                    }) {
                                         continue;
                                     }
                                     entries.push((
@@ -218,6 +221,7 @@ impl<'a> QueryService<'a> {
             )?,
             active_total: NonnegativeSafeInteger::new(active).map_err(|_| page::capacity())?,
             closed_total: NonnegativeSafeInteger::new(closed).map_err(|_| page::capacity())?,
+            archived_total: NonnegativeSafeInteger::new(archived).map_err(|_| page::capacity())?,
             counts: total,
         }))
     }
@@ -231,7 +235,10 @@ fn project_counts(
             Ok(sessions) => {
                 for session in sessions {
                     match &session.result {
-                        Ok(session) => counts::merge(&mut result, &counts::session(session)?)?,
+                        Ok(session) if session.archived_at.is_none() => {
+                            counts::merge(&mut result, &counts::session(session)?)?;
+                        }
+                        Ok(_) => {}
                         Err(_) => {
                             result.completeness = Completeness::Partial;
                             result
@@ -306,6 +313,7 @@ fn summary(
         created_at: session.created_at.clone(),
         updated_at: session.updated_at.clone(),
         closed_at: session.closed_at.clone(),
+        archived_at: session.archived_at.clone(),
         active_binding: session
             .active_binding_id
             .as_ref()

@@ -25,9 +25,9 @@ export interface ProjectsPageProps {
   readonly children?: ReactNode;
 }
 
-function Discover({ controller, register }: { controller: DiscoveryController; register: (root: string) => void }) {
+function Discover({ controller, register, sessions }: { controller: DiscoveryController; register: (root: string) => void; sessions: readonly Immutable<SessionSummary>[] }) {
   useEffect(() => controller.acquire(), [controller]);
-  return <section className="pw-discover" aria-label="Discover host sessions"><CandidateList controller={controller} select={candidate => register(candidate.cwd)} /></section>;
+  return <section className="pw-discover" aria-label="Discover host sessions"><CandidateList controller={controller} sessions={sessions} select={candidate => register(candidate.cwd)} /></section>;
 }
 
 export function ProjectsPage({ projects, sessions, snapshots, now, discovered, disabled, discovery, onOpen, onRegister, onRemove, children }: ProjectsPageProps) {
@@ -77,7 +77,7 @@ export function ProjectsPage({ projects, sessions, snapshots, now, discovered, d
         <i className="ph ph-magnifying-glass" aria-hidden="true" />Discover host sessions</button>}
     </div>
     {children}
-    {discovering && discovery && <Discover controller={discovery} register={onRegister} />}
+    {discovering && discovery && <Discover controller={discovery} register={onRegister} sessions={sessions} />}
     {removing && <RemoveDialog subject={removing.subject} onCancel={() => setRemoving(null)}
       onConfirm={() => onRemove({ kind: 'project', project_id: removing.id }, removing.subject)} />}
   </div>;

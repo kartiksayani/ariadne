@@ -1501,3 +1501,107 @@ fn session_summary_carries_the_owner_name_and_description_only_when_set() {
     let json = serde_json::to_string(summary).unwrap();
     assert!(!json.contains("\"name\"") && !json.contains("\"description\""));
 }
+
+#[test]
+fn archived_sessions_have_separate_totals_readable_history_and_no_aggregate_waiting_counts() {
+    let setup = Setup::new(&seed());
+    let mut archived = seed();
+    archived.id = id(20);
+    archived.state = SessionState::Closed;
+    archived.closed_at = Some(archived.updated_at.clone());
+    archived.archived_at = Some(archived.updated_at.clone());
+    let binding = archived.bindings.0.get_mut(&id(3)).unwrap();
+    binding.owner_paused = true;
+    binding.dispatch_state = DispatchState::Paused;
+    Store::open_registered(&store_dir(setup._home.path(), 1), id(1))
+        .unwrap()
+        .create(&archived)
+        .unwrap();
+    let result = sessions(
+        setup
+            .query(
+                &registry_owner(),
+                &QueryRequest::SessionList(SessionListRequest {
+                    project_id: Some(id(1)),
+                    state: None,
+                    cursor: None,
+                    limit: limit(100),
+                }),
+            )
+            .unwrap(),
+    );
+    assert_eq!(result.sessions.items.len(), 2);
+    assert_eq!(result.active_total.value(), 1);
+    assert_eq!(result.closed_total.value(), 0);
+    assert_eq!(result.archived_total.value(), 1);
+    for state in [SessionState::Active, SessionState::Closed] {
+        let filtered = sessions(
+            setup
+                .query(
+                    &registry_owner(),
+                    &QueryRequest::SessionList(SessionListRequest {
+                        project_id: Some(id(1)),
+                        state: Some(state.clone()),
+                        cursor: None,
+                        limit: limit(100),
+                    }),
+                )
+                .unwrap(),
+        );
+        assert!(filtered
+            .sessions
+            .items
+            .iter()
+            .all(|session| session.archived_at.is_none()));
+        assert_eq!(
+            filtered.sessions.items.len(),
+            if state == SessionState::Active { 1 } else { 0 }
+        );
+        assert_eq!(filtered.archived_total.value(), 1);
+        assert_eq!(filtered.counts, result.counts);
+    }
+
+    let archived_summary = result
+        .sessions
+        .items
+        .iter()
+        .find(|s| s.session_id == id(20))
+        .unwrap();
+    assert!(archived_summary.archived_at.is_some());
+    assert_eq!(
+        result.counts,
+        result
+            .sessions
+            .items
+            .iter()
+            .find(|s| s.session_id == id(2))
+            .unwrap()
+            .counts
+    );
+    let project = projects(
+        setup
+            .query(
+                &registry_owner(),
+                &QueryRequest::ProjectList(ProjectListRequest {
+                    cursor: None,
+                    limit: limit(100),
+                }),
+            )
+            .unwrap(),
+    );
+    assert_eq!(project.counts, result.counts);
+    let owner = QueryContext::owner(OwnerContext::from_trusted_entrypoint(OwnerScope::Session(
+        RegisteredSession::from_trusted_entrypoint(id(1), id(20)),
+    )));
+    let history = messages(setup.query(&owner, &message_request(None, 100)).unwrap());
+    assert_eq!(history.items, archived.messages);
+    let agent = QueryContext::agent(AgentContext::from_trusted_entrypoint(
+        RegisteredSession::from_trusted_entrypoint(id(1), id(20)),
+        id(3),
+        id(4),
+        AgentReadScope::Terminal {
+            issued_through_message_number: NonnegativeSafeInteger::new(0).unwrap(),
+        },
+    ));
+    assert!(setup.query(&agent, &message_request(None, 100)).is_ok());
+}

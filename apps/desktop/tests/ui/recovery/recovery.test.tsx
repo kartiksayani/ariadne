@@ -41,7 +41,7 @@ class Transport implements DesktopTransport {
       return { api_version: 1, ok: true, data: { kind: 'session_list', data: {
         sessions: { items: [{ ...summary, session_id: this.session.id, project_id: this.session.project_id, revision: this.session.revision,
           active_binding: { ...summary.active_binding, id: binding.id, generation: binding.generation, presence: null } }],
-        next_cursor: null, snapshot_revision: this.session.revision }, active_total: 1, closed_total: 0, counts: summary.counts,
+        next_cursor: null, snapshot_revision: this.session.revision }, active_total: 1, closed_total: 0, archived_total: 0, counts: summary.counts,
       } } } as T;
     }
     this.mutations.push(structuredClone(request) as OwnerMutationRequest);

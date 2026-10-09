@@ -285,6 +285,7 @@ fn accept_result_marks_a_legacy_stuck_input_handled_without_attestation_or_revis
                 Ok::<_, ()>(SavedReceiptData::SessionLifecycle {
                     state: session.state.clone(),
                     closed_at: None,
+                    archived_at: None,
                     cancelled_input_ids: vec![],
                 })
             },

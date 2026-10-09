@@ -133,6 +133,22 @@
     {
       "api_version": 1,
       "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "session_archive",
+      "params": {
+        "expected_revision": 21
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
+      "command": "session_restore",
+      "params": {
+        "expected_revision": 21
+      }
+    },
+    {
+      "api_version": 1,
+      "op_id": "00000000-0000-4000-8000-000000000400",
       "command": "session_reopen",
       "params": {
         "expected_revision": 21

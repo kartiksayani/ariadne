@@ -13,6 +13,16 @@
         }
       ]
     },
+    "archived_at": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "closed_at": {
       "anyOf": [
         {

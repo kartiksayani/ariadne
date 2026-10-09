@@ -50,12 +50,12 @@ export function lastActivity(at: number, now: number): string {
 }
 
 /** The agent of a session is running: active in Ariadne and its binding connected or reconnecting (ui/shared/connection). */
-export const isRunning = (session: Immutable<SessionSummary>) => session.state === 'active' && agentRunning(connectionOf(session.active_binding));
+export const isRunning = (session: Immutable<SessionSummary>) => session.archived_at == null && session.state === 'active' && agentRunning(connectionOf(session.active_binding));
 export const agentOf = (session: Immutable<SessionSummary>) => session.active_binding ? agentName(session.active_binding.adapter_id) : 'No agent';
 
 /** The card's sending state, read like the session bar's chip (components/bindings/dispatch). */
 export function cardDispatch(summary: Immutable<SessionSummary>, health: SupervisorHealth | null = null, now = Date.now()): DispatchStatus {
-  return dispatchStatus({ binding: summary.active_binding, closed: summary.state === 'closed', presence: summary.active_binding?.presence ?? null,
+  return dispatchStatus({ binding: summary.active_binding, closed: summary.archived_at != null || summary.state === 'closed', presence: summary.active_binding?.presence ?? null,
     needsDecision: summary.counts.sent_inputs.needs_attention > 0, health, agent: agentOf(summary), now });
 }
 export interface Run { readonly run: string; readonly runColor: string; readonly runDot: string; readonly runRing: string; readonly dispatch: DispatchStatus }
@@ -82,7 +82,7 @@ export interface ProjectCardModel {
 }
 
 export function projectCard(project: Immutable<ProjectSummary>, sessions: readonly Immutable<SessionSummary>[], now: number): ProjectCardModel {
-  const own = sessions.filter(session => session.project_id === project.project_id);
+  const own = sessions.filter(session => session.project_id === project.project_id && session.archived_at == null);
   const active = own.filter(session => session.state !== 'closed').length, closed = own.length - active, running = own.filter(isRunning).length;
   const wait = project.counts.waiting_unanswered;
   const latest = Math.max(...own.map(session => Date.parse(session.updated_at)));
@@ -149,7 +149,7 @@ export interface SessionCardText extends Run {
 }
 export function sessionCardText(summary: Immutable<SessionSummary>, snapshot: Immutable<Session> | null, now: number, where: string | null = null,
   health: SupervisorHealth | null = null): SessionCardText {
-  const closed = summary.state === 'closed', running = isRunning(summary), agent = agentOf(summary);
+  const closed = summary.archived_at != null || summary.state === 'closed', running = isRunning(summary), agent = agentOf(summary);
   const range = sessionRange(Date.parse(summary.created_at), Date.parse(summary.closed_at ?? summary.updated_at), running, now);
   const messages = snapshot ? ` · ${plural(snapshot.messages.length, 'message')}` : '';
   const label = sessionLabel(summary, agentLine(agent, where));

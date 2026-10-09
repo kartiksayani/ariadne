@@ -101,7 +101,11 @@ Project: `{schema_version:1,id,display_name}`.
 
 Session: `{schema_version:1,id,project_id,title,state,created_at,updated_at,
 revision,closed_at,counters,active_binding_id,topics,items,messages,rounds,
-answers,bindings,inputs,operation_receipts,continuations,name?,description?}`.
+answers,bindings,inputs,operation_receipts,continuations,name?,description?,archived_at?}`.
+`archived_at` is absent for ordinary sessions. Archive closes an active session
+with Close's cancellation and pause semantics before setting it; Restore clears
+it while keeping the session Closed. Undo of an Active session restores and reopens
+in one revision-guarded transaction. History and IDs remain intact (ADR-0095).
 `name` and `description` are the owner's own label for the session: trimmed, a
 name of 1 to 60 characters and a one-line description of at most 200, both
 omitted when unset (ADR-0091). `title` holds the external session id and is not
@@ -414,7 +418,7 @@ union of exact saved outcome shapes:
 | input_cancel | input_id, state |
 | input_resolve | input_id, attempt_id, resolution_kind, state |
 | topic_lifecycle | topic_id, topic_revision, archived_at nullable, cancelled_input_ids (omitted when empty) |
-| session_lifecycle | state, closed_at nullable |
+| session_lifecycle | state, closed_at nullable, archived_at optional, cancelled_input_ids (omitted when empty) |
 | binding_connect | binding_id, generation, capabilities, setup_instruction |
 | binding_state | binding_id, generation, dispatch_state, owner_paused, pause_reason nullable, connection_state |
 | apply | allocated_refs, messages, item_revisions, topic_revisions, input_result_state nullable, queue_join_state nullable |

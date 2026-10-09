@@ -427,6 +427,7 @@ fn mutation_receipts_keep_the_saved_shape_and_validate_operation_route_and_kind(
     wrong.data = SavedReceiptData::SessionLifecycle {
         state: SessionState::Closed,
         closed_at: None,
+        archived_at: None,
         cancelled_input_ids: vec![],
     };
     assert!(validate_receipt(&wrapper, &MutationReceipt::Session(wrong)).is_err());
@@ -865,6 +866,7 @@ fn topic_removal_hints_every_other_family_session_at_its_listed_revision() {
             },
             active_total: NonnegativeSafeInteger::new(3).unwrap(),
             closed_total: NonnegativeSafeInteger::new(0).unwrap(),
+            archived_total: NonnegativeSafeInteger::new(0).unwrap(),
             counts,
         })
     };

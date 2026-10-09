@@ -263,7 +263,8 @@ export function TreeView(props: TreeViewProps) {
   const options = answerRow?.item.options ?? [];
   const pickedIndex = entry?.draft.selected_option_id ? options.findIndex(option => option.id === entry.draft.selected_option_id) : -1;
   const chosen = pickedIndex >= 0 ? pickedIndex : options.findIndex(option => option.recommended);
-  const blocked = session?.state !== 'active' ? 'This session is closed. Reopen it to answer.'
+  const blocked = session?.archived_at != null ? 'This session is archived. Restore it, then reopen it to answer.'
+    : session?.state !== 'active' ? 'This session is closed. Reopen it to answer.'
     : bar?.connection === 'reconnecting' ? reconnectingNote(bar.agent) : null;
   const focusRow = (key: string) => { setFocusKey(key); elements.current.get(key)?.focus({ preventScroll: true }); };
   const send = (change: { selected_option_id: string | null; text: string }) => {

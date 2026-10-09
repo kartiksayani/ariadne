@@ -34,7 +34,7 @@ function projectResult(): ProjectListResult {
   return { projects: structuredClone(projectsFixture) as Page<ProjectSummary>, counts: { ...structuredClone(counts), completeness: 'partial' } };
 }
 function sessionResult(): SessionListResult {
-  return { sessions: structuredClone(sessionsFixture) as Page<SessionSummary>, counts: structuredClone(counts), active_total: 9, closed_total: 3 };
+  return { sessions: structuredClone(sessionsFixture) as Page<SessionSummary>, counts: structuredClone(counts), active_total: 9, closed_total: 3, archived_total: 0 };
 }
 const loaded = () => success('session_get', { session: structuredClone(demo) as Session, freshness: 'fresh' });
 function success(kind: Extract<QueryEnvelope, { ok: true }>['data']['kind'], data: unknown): QueryEnvelope {

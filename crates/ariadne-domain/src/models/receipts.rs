@@ -63,6 +63,9 @@ pub enum SavedReceiptData {
     SessionLifecycle {
         state: SessionState,
         closed_at: Option<UtcMillis>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        archived_at: Option<UtcMillis>,
         // Inputs a close cancelled (queued, in flight or needing attention).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         #[ts(as = "Option<Vec<UuidV4>>", optional)]
