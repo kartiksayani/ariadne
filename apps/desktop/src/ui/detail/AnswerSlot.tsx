@@ -76,6 +76,8 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
       root.current?.querySelector<HTMLTextAreaElement>('textarea:not(:disabled)')?.focus();
       return;
     }
+    const choices = root.current?.querySelector('details');
+    if (choices) choices.open = true;
     const buttons = root.current?.querySelectorAll<HTMLButtonElement>('[data-answer-option]');
     if (focusRequest.optionIndex !== undefined) {
       const choice = item?.options[focusRequest.optionIndex], button = buttons?.[focusRequest.optionIndex];

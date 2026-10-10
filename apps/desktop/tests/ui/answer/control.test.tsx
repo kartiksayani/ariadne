@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AnswerControl, type AnswerControlProps } from '../../../src/ui/answer/AnswerControl';
 
@@ -52,6 +52,51 @@ describe('compact chat choices', () => {
     { ...options[0]!, consequence: 'Keep the current plan and check each example before sending it. '.repeat(12) },
     { id: 'no', label: 'Change the design after comparing the alternatives', consequence: 'Review the alternatives and explain the tradeoffs in the conversation. '.repeat(12), recommended: false },
   ];
+  it.each(['', '  \n'])('rests with closed choices for an empty note %j and keeps the selected send outside the disclosure', async draft => {
+    const user = userEvent.setup(), values = props({ options: choices, variant: 'chat', draft });
+    const view = render(<AnswerControl {...values} />);
+    const details = view.container.querySelector<HTMLDetailsElement>('details.answer-choices')!;
+    expect(details).toBeTruthy(); expect(details.open).toBe(false);
+    const summary = details.querySelector('summary')!;
+    expect(summary.textContent).toContain('Choices');
+    expect(summary.textContent).toContain('Keep the design');
+    expect(summary.textContent).toContain('Recommended');
+    const send = screen.getByRole('button', { name: 'Send “Keep the design”' });
+    expect(details.contains(send)).toBe(false);
+    fireEvent.click(send);
+    expect(values.onSendOption).toHaveBeenCalledExactlyOnceWith(0, draft);
+    await user.click(summary);
+    expect(details.open).toBe(true);
+    await user.click(within(details).getByRole('button', { name: new RegExp(`2${choices[1]!.label}`) }));
+    expect(values.onSelect).toHaveBeenCalledExactlyOnceWith(1);
+    expect(values.onSendOption).toHaveBeenCalledTimes(1);
+    view.rerender(<AnswerControl {...values} selected={1} />);
+    expect(summary.textContent).toContain(choices[1]!.label);
+    expect(summary.textContent).not.toContain('Recommended');
+    await user.click(summary); expect(details.open).toBe(false);
+    fireEvent.keyDown(view.container.querySelector('.answer')!, { key: '2' });
+    expect(details.open).toBe(true);
+    expect(values.onSelect).toHaveBeenCalledTimes(2);
+    expect(values.onSelect).toHaveBeenLastCalledWith(1);
+    expect(values.onSendOption).toHaveBeenCalledTimes(1);
+  });
+  it('opens saved words initially, then Escape closes choices and keeps the exact draft for sending', async () => {
+    const user = userEvent.setup(), values = props({ options: choices, variant: 'chat', onEscape: vi.fn() });
+    const view = render(<AnswerControl {...values} />);
+    const details = view.container.querySelector<HTMLDetailsElement>('details.answer-choices')!;
+    expect(details.open).toBe(true);
+    const box = screen.getByRole('textbox') as HTMLTextAreaElement;
+    box.focus(); await user.keyboard('{Escape}');
+    expect(details.open).toBe(false);
+    expect(box.value).toBe(values.draft);
+    expect(document.activeElement).not.toBe(box);
+    expect(values.onDraft).not.toHaveBeenCalled();
+    expect(values.onEscape).toHaveBeenCalledExactlyOnceWith();
+    fireEvent.click(screen.getByRole('button', { name: 'Send “Keep the design” with your note' }));
+    expect(values.onSendOption).toHaveBeenCalledExactlyOnceWith(0, values.draft);
+    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
+    expect(values.onSendText).toHaveBeenCalledExactlyOnceWith(values.draft);
+  });
   it('expands with a click or Enter while keeping the full accessible name, selection and draft', async () => {
     const user = userEvent.setup(), values = props({ options: choices, variant: 'chat', selected: 1 });
     const view = render(<AnswerControl {...values} />);
@@ -97,8 +142,9 @@ describe('compact chat choices', () => {
   });
   it('offers just the composer and its shortcuts for a free-text question', async () => {
     const user = userEvent.setup(), values = props({ options: [], variant: 'chat', selected: -1 });
-    render(<AnswerControl {...values} />);
+    const view = render(<AnswerControl {...values} />);
     expect(screen.queryByRole('button', { name: /More about|Send “/ })).toBeNull();
+    expect(view.container.querySelector('details.answer-choices')).toBeNull();
     expect(screen.getByText('⌘↵ reply only · Esc keeps draft')).toBeTruthy();
     screen.getByRole('textbox').focus(); await user.keyboard('{Meta>}{Enter}{/Meta}');
     expect(values.onSendText).toHaveBeenCalledExactlyOnceWith(values.draft);

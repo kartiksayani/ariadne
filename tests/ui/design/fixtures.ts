@@ -97,6 +97,23 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
         + 'Each example includes a short explanation and a link to example.com for the sample material. '.repeat(8)
         + 'The final paragraph explains what to read next.' }));
   }
+  if (spec.dockState) {
+    const item = items.find(item => item.id === spec.selected)!;
+    item.q = 'How should we share the examples with the readers?';
+    item.short = 'Share the examples';
+    item.status = spec.dockState === 'question' ? 'waiting' : 'open';
+    item.type = spec.dockState === 'question' ? 'question' : 'decision';
+    item.ask = spec.dockState === 'question' ? 'Choose how to share the examples, or write a reply.' : undefined;
+    item.options = spec.dockState === 'question' ? [
+      { id: 'complete', label: 'Share the complete examples', consequence: 'Readers see the introduction and captions together.', rec: true },
+      { id: 'short', label: 'Share a shorter collection', consequence: 'Readers begin with a few examples.' },
+    ] : [];
+    item.note = undefined; item.outcome = ''; item.why = ''; item.links = [];
+    const messageIndex = msgs.findIndex(message => message.number === item.created);
+    msgs[messageIndex] = { ...msgs[messageIndex],
+      excerpt: 'The examples are ready to share. Read the introduction, check the captions, and keep the sample links with the explanation.\n\n'
+        + 'Each example includes a short explanation for readers. The conversation keeps that context available while you consider the next step.\n\n'.repeat(12) };
+  }
   for (const id of spec.hiddenItems ?? []) {
     const item = items.find(item => item.id === id)!;
     if (id !== spec.selected) item.q = 'Review the shared examples';
@@ -263,7 +280,8 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
       const waiting = status === 'waiting_on_me' ? messageTimes.get(proto.waitingSince ?? -1) ?? created : null;
       return [proto.id, { id: proto.id, ordinal: siblings.indexOf(proto) + 1, topic_id: topicIds.get(proto.topic)!, parent: proto.parent, question: proto.q,
         short: proto.short,
-        type: proto.type, status, owner: proto.owner === 'me' ? { kind: 'me' } : proto.owner === 'agent' ? { kind: 'agent', binding_id: bindingId } : { kind: 'other', name: proto.owner },
+        type: proto.type, status, ...(spec.dockState && spec.dockState !== 'question' && proto.id === spec.selected ? { ack_to: 'decided' as const } : {}),
+        owner: proto.owner === 'me' ? { kind: 'me' } : proto.owner === 'agent' ? { kind: 'agent', binding_id: bindingId } : { kind: 'other', name: proto.owner },
         revision: 1 + proto.updated.length, question_revision: 1, next_child: protoItems.filter(item => item.parent === proto.id).length + 1,
         ask: proto.ask || null, note: proto.note || null,
         options: (proto.options ?? []).map(option => ({ id: option.id, label: option.label, consequence: option.consequence, recommended: !!option.rec })),
@@ -316,6 +334,28 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
         short: topic.short, order: order + 1, revision: 1, created_at: times.created, archived_at: topic.archived ? archivedAt(topic.archivedAt, times.created) : null, origin: null }])),
       items, messages, rounds, answers, bindings: { [bindingId]: binding }, inputs, operation_receipts: {}, continuations: {} };
   });
+  if (spec.dockState === 'pending') {
+    const session = sessions.find(session => session.items[spec.selected!])!, item = session.items[spec.selected!]!;
+    const binding = session.bindings[session.active_binding_id!]!, inputId = uuid('f', 900), attemptId = uuid('f', 901), messageId = uuid('d', 900);
+    const created = at(0, '15:06'), text = 'Keep the captions with the examples.', marker = `[ARIADNE_INPUT:${inputId}:${attemptId}]`;
+    const number = session.counters.next_message++;
+    session.messages.push({ id: messageId, number, author: 'owner', kind: 'owner_input', body: text, created_at: created,
+      item_id: item.id, topic_id: item.topic_id, items_touched: [item.id], binding_id: binding.id, input_id: inputId,
+      attempt_id: attemptId, host_turn_id: null, round_id: null, origin: null });
+    item.updated_message_ids.push(messageId);
+    session.inputs[inputId] = { id: inputId, seq: session.counters.next_input++, binding_id: binding.id, kind: 'reply',
+      target: { topic_id: item.topic_id, item_id: item.id }, message_id: messageId, answer_id: null, created_at: created, expected_question_revision: null,
+      payload: { text, intent: 'reply', selected_option_id: null,
+        target_snapshot: { topic_name: session.topics[item.topic_id]!.name, item_question: item.question,
+          question_revision: item.question_revision, ask: null, options: [] },
+        context: { message_ids: [], item_ids: [item.id], round_id: null, continuation_operation_id: null } },
+      state: 'in_flight', attempts: [{ id: attemptId, purpose: 'work', repair_for_attempt_id: null, claim_request_id: uuid('f', 902),
+        binding_generation: binding.generation, prepared_at: created, formatted_payload: `${marker}\n${text}`, payload_sha256: '0'.repeat(64),
+        wire_marker: marker, ...attemptFacts('received'), acceptance_receipt: null, acceptance_observed_at: created,
+        host_turn_id: 'examples-turn', turn_observed_at: null, domain_result: null, result_state: 'pending', sealed_at: null, reconciliation_checkpoint: null }],
+      active_attempt_id: attemptId, resolution_history: [] };
+    binding.active_input_id = inputId;
+  }
   const summaries = sessions.map((session, index): SessionSummary => {
     const binding = session.bindings[session.active_binding_id!]!, running = world.sessions[index].running;
     return { project_id: session.project_id, session_id: session.id, title: session.title, state: session.state, revision: session.revision,

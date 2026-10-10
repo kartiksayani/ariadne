@@ -70,10 +70,11 @@ export function defaultSelection(options: readonly Pick<AnswerOption, 'id' | 're
 
 export function AnswerControl({ options, variant, selected, draft, warn, warnAction, blocked, locked = false, frozen = false, noText = false, label,
   onSelect, onDraft, onSendOption, onSendText, onEscape }: AnswerControlProps) {
-  const root = useRef<HTMLDivElement>(null), text = useRef<HTMLTextAreaElement>(null);
+  const root = useRef<HTMLDivElement>(null), text = useRef<HTMLTextAreaElement>(null), choices = useRef<HTMLDetailsElement>(null);
+  const [collapsed, setCollapsed] = useState(false), [choicesOpen, setChoicesOpen] = useState(!!draft.trim());
   const descriptionId = useId(), [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const chat = variant === 'chat', full = variant !== 'compact', picked = options[selected];
-  useGrow(text, draft, chat);
+  useGrow(text, draft, chat && !collapsed);
   // `off` stops choosing and sending; only `locked` stops the owner typing.
   const off = locked || frozen;
   const canSend = !!picked && !blocked && !off;
@@ -91,7 +92,7 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
     choose: (intent, event) => {
       if (intent.kind !== 'choose' || !options[intent.index]) return false;
       event.stopPropagation();
-      if (!off) onSelect(intent.index);
+      if (!off) { setChoicesOpen(true); onSelect(intent.index); }
       return true;
     },
     enter: (_intent, event) => {
@@ -112,6 +113,9 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
     },
     escape: (_intent, event) => {
       event.stopPropagation();
+      if (chat) setCollapsed(true);
+      setChoicesOpen(false);
+      if (choices.current) choices.current.open = false;
       if (document.activeElement instanceof HTMLElement && root.current?.contains(document.activeElement)) document.activeElement.blur();
       onEscape?.();
       return true;
@@ -120,9 +124,7 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
   const hint = blocked ? '' : full && options.length > 1 ? `1–${Math.min(options.length, 9)} to select · Enter sends${withNote ? ' with your note' : ''} · Esc closes, keeps your draft` : `Enter sends${withNote ? ' with your note' : ''}`;
   const chatHint = [!blocked && options.length > 1 ? `1–${Math.min(options.length, 9)} select` : '', !blocked && picked ? 'Enter sends' : '',
     hasText ? '⌘↵ reply only' : '', 'Esc keeps draft'].filter(Boolean).join(' · ');
-  return <div ref={root} className={`answer answer-${variant}${chat ? ' answer-full' : ''}`} role="group" aria-label={label} onKeyDown={keys}>
-    {warn && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{warn}</span>
-      {warnAction && <button type="button" className="btn btn-secondary answer-warn-action" onClick={event => { event.stopPropagation(); warnAction.onAction(); }}>{warnAction.label}</button>}</div>}
+  const optionCards = (
     <div className="answer-options">
       {options.map((option, index) => {
         const on = index === selected;
@@ -151,18 +153,32 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
         </div> : button;
       })}
     </div>
-    {picked && <div className="answer-send-row">
+  );
+  const sendButton = picked && <div className="answer-send-row">
       <button type="button" className="btn btn-primary answer-send" {...gate(locked, frozen || !!blocked)} onClick={event => { event.stopPropagation(); sendOption(selected); }}>
         <i className="ph ph-paper-plane-right" aria-hidden="true" />
         <span className="answer-send-label">{full ? `Send “${picked.label}”${withNote ? ' with your note' : ''}` : 'Send answer'}</span>
         <span className="answer-enter" aria-hidden="true">↵</span>
       </button>
       {!chat && <span className="answer-hint">{hint}</span>}
-    </div>}
+    </div>;
+  return <div ref={root} className={`answer answer-${variant}${chat ? ' answer-full' : ''}${collapsed ? ' answer-collapsed' : ''}`} role="group" aria-label={label} onKeyDown={keys}>
+    {warn && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{warn}</span>
+      {warnAction && <button type="button" className="btn btn-secondary answer-warn-action" onClick={event => { event.stopPropagation(); warnAction.onAction(); }}>{warnAction.label}</button>}</div>}
+    {chat ? <div className="answer-quick-row">
+      {options.length > 0 && <details ref={choices} className="answer-choices" open={choicesOpen} onToggle={event => setChoicesOpen(event.currentTarget.open)}>
+        <summary title={picked ? `${picked.label}\n${picked.consequence}` : 'Choose an answer'}>
+          <span>Choices</span><span className="answer-choice-label">{picked?.label ?? 'Choose an answer'}</span>
+          {picked?.recommended && <span className="answer-recommended">Recommended</span>}
+        </summary>
+        {optionCards}
+      </details>}
+      {sendButton}
+    </div> : <>{optionCards}{sendButton}</>}
     {chat && !noText && <div className="answer-reply answer-composer">
       <div className="answer-composer-row">
         <textarea ref={text} className="input answer-text" aria-label="Reply in your own words" placeholder="Add a note to your choice, or reply on its own…" rows={1}
-          value={draft} disabled={locked} onClick={event => event.stopPropagation()} onChange={event => onDraft(event.target.value)} />
+          value={draft} disabled={locked} onFocus={() => setCollapsed(false)} onClick={event => event.stopPropagation()} onChange={event => { setCollapsed(false); onDraft(event.target.value); }} />
         <button type="button" className="btn btn-secondary answer-reply-send" {...gate(!draft.trim() || locked, frozen || !!blocked)}
           onClick={event => { event.stopPropagation(); sendText(); }}>Send as a reply only</button>
       </div>

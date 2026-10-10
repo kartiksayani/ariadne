@@ -206,6 +206,64 @@ textarea.answer-text {
 }
 
 /* Chat variant (the detail's docked composer): quick replies above a one-line reply box that grows as you type. */
+.answer-chat {
+  gap: 6px;
+}
+
+.answer-quick-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.answer-choices {
+  flex: 1;
+  min-width: 0;
+}
+
+.answer-choices > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  cursor: pointer;
+  font-size: calc(12px * var(--text-scale));
+}
+
+.answer-choices > summary::before {
+  content: '▸';
+}
+
+.answer-choices[open] > summary::before {
+  content: '▾';
+}
+
+.answer-choices > summary::-webkit-details-marker {
+  display: none;
+}
+
+.answer-choice-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.answer-quick-row > .answer-send-row {
+  flex: none;
+  max-width: 40%;
+}
+
+.answer-chat .answer-send {
+  padding: 0 8px;
+  font-size: calc(12px * var(--text-scale));
+}
+
+.answer-collapsed textarea {
+  height: 34px !important;
+  overflow-y: auto !important;
+}
+
 .answer-chat .answer-options {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
   align-items: start;
@@ -224,6 +282,12 @@ textarea.answer-text {
 
 .answer-chat .answer-recommended {
   display: flex;
+}
+
+.answer-choices > summary .answer-recommended {
+  flex: none;
+  margin: 0;
+  font-size: calc(10px * var(--text-scale));
 }
 
 .answer-description {
