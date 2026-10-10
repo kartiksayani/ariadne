@@ -344,9 +344,12 @@ for (const id of dockFrameIds) {
     const composer = dock.getByRole('textbox', { name: spec.dockState === 'question' ? 'Reply in your own words' : 'Reply message', exact: true });
     await expect(composer).toHaveValue('');
     await expect(composer).toBeInViewport();
-    const lines = await composer.evaluate(element => ({ height: element.getBoundingClientRect().height,
-      line: parseFloat(getComputedStyle(element).lineHeight), padding: parseFloat(getComputedStyle(element).paddingTop) + parseFloat(getComputedStyle(element).paddingBottom) }));
-    expect(lines.height, 'resting composer is one line').toBeLessThanOrEqual(lines.line + lines.padding + 2);
+    const lines = await composer.evaluate(element => {
+      const style = getComputedStyle(element);
+      return { height: element.getBoundingClientRect().height, minimum: parseFloat(style.minHeight), line: parseFloat(style.lineHeight),
+        padding: parseFloat(style.paddingTop) + parseFloat(style.paddingBottom), border: parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth) };
+    });
+    expect(lines.height, 'resting composer is one line').toBeLessThanOrEqual(Math.max(lines.minimum, Math.ceil(lines.line + lines.padding + lines.border)));
     if (spec.dockState === 'question') {
       const choices = dock.locator('.answer-choices');
       await expect(choices.locator('summary')).toContainText('Choices');

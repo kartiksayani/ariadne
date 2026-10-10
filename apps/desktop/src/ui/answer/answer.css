@@ -231,7 +231,12 @@ textarea.answer-text {
 }
 
 .answer-choices > summary::before {
+  flex: none;
   content: '▸';
+}
+
+.answer-choices > summary > span:first-of-type {
+  flex: none;
 }
 
 .answer-choices[open] > summary::before {

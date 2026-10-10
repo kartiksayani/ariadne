@@ -2244,6 +2244,26 @@ describe('the item detail reads like a chat', () => {
       await waitFor(() => expect(body.scrollTop).toBe(900));
     } finally { height.mockRestore(); }
   });
+  it.each([{ itemId: '2', label: 'Reply in your own words' }, { itemId: '8', label: 'Reply message' }])('keeps an empty $label one row despite its wrapped placeholder, and shrinks after clearing', async ({ itemId, label }) => {
+    const client = vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) { return this.classList.contains('item-detail') ? 600 : 0; });
+    let contentHeight = 75;
+    const height = vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) { return this instanceof HTMLTextAreaElement ? contentHeight : 0; });
+    try {
+      await view(itemId);
+      const box = screen.getByRole('textbox', { name: label }) as HTMLTextAreaElement;
+      expect(box.rows).toBe(1); expect(box.value).toBe('');
+      expect(box.style.height).toBe('auto'); expect(box.style.overflowY).toBe('hidden');
+      fireEvent(window, new Event('resize'));
+      expect(box.style.height).toBe('auto');
+      contentHeight = 900; fireEvent.change(box, { target: { value: 'A long draft\n'.repeat(30) } });
+      expect(box.style.height).toBe('200px'); expect(box.style.overflowY).toBe('auto');
+      contentHeight = 75; fireEvent.change(box, { target: { value: '' } });
+      expect(box.style.height).toBe('auto'); expect(box.style.overflowY).toBe('hidden');
+      fireEvent(window, new Event('resize'));
+      expect(box.style.height).toBe('auto');
+    } finally { height.mockRestore(); client.mockRestore(); }
+  });
+
   it.each([{ itemId: '2', kind: 'answer' as const, label: 'Reply in your own words' }, { itemId: '8', kind: 'reply' as const, label: 'Reply message' }])('grows an existing $kind draft on the first render', async ({ itemId, kind, label }) => {
     const client = vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) { return this.classList.contains('item-detail') ? 600 : 0; });
     const height = vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) { return this instanceof HTMLTextAreaElement ? 80 : 0; });

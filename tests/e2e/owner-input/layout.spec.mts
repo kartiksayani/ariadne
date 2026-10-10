@@ -277,8 +277,14 @@ test('docks the composer under a scrolling detail body that grows it to a third 
       await expect(composer).toBeInViewport();
       // Quick replies sit above the composer inside the dock.
       if (await dock.locator('[data-answer-option]').count()) {
+        const choices = dock.locator('.answer-choices');
+        await choices.locator('summary').click();
+        await expect(choices).toHaveAttribute('open');
+        await expect(dock.locator('[data-answer-option]').first()).toBeVisible();
         const options = (await dock.locator('[data-answer-option]').first().boundingBox())!, box = (await composer.boundingBox())!;
         expect(options.y + options.height).toBeLessThanOrEqual(box.y);
+        await choices.locator('summary').click();
+        await expect(choices).not.toHaveAttribute('open');
       }
     }
     // One line when empty; grows with its text to about a third of the pane, then scrolls inside itself.
@@ -313,14 +319,20 @@ test('reads as a chat: oldest exchange first with no round headers, quick replie
     await expect(page.locator('.tree-session-bar').getByRole('button', { name: 'Close session' })).toBeEnabled();
     const pane = page.locator('.item-detail');
 
-    // A waiting item: its quick replies sit above the composer, which is the last thing in the dock.
+    // A waiting item: Choices opens the quick replies above the composer.
     await page.locator('[data-item-id="2"]').click();
     const composer = pane.getByLabel('Reply in your own words');
     await expect(composer).toBeVisible();
     const options = pane.locator('.detail-dock [data-answer-option]');
     await expect(options).toHaveCount(2);
+    const choices = pane.locator('.answer-choices');
+    await expect(choices).not.toHaveAttribute('open');
+    await expect(options.first()).not.toBeVisible();
+    await choices.locator('summary').click();
+    await expect(choices).toHaveAttribute('open');
     const composerBox = (await composer.boundingBox())!;
     for (const option of await options.all()) {
+      await expect(option).toBeVisible();
       const box = (await option.boundingBox())!;
       expect(box.y + box.height, 'quick reply above the composer').toBeLessThanOrEqual(composerBox.y);
     }
