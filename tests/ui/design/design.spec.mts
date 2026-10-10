@@ -240,6 +240,47 @@ for (const id of [...designFrames, ...variantIds]) {
   });
 }
 
+for (const width of [1920, 1600, 1280]) {
+  test(`failed-delivery layout at ${width}px`, async ({ page, origin }) => {
+    const denied: string[] = [];
+    await route(page.context(), origin, denied);
+    await openApp(page, origin, { ...frameSpec('1m'), width });
+    for (const selector of ['.tree-item[data-item-id="3.1"]', '.shell-detail-scroll']) {
+      const note = page.locator(`${selector} .stuck-note[data-stuck="decision"]`).first();
+      await expect(note).toBeVisible();
+      const layout = await note.evaluate(element => {
+        const status = element.querySelector<HTMLElement>(':scope > [role="status"]')!;
+        const actions = element.querySelector<HTMLElement>(':scope > .stuck-actions')!;
+        const text = status.firstChild!, content = text.textContent!;
+        const words = [...content.matchAll(/\S+/g)].map(word => {
+          const range = document.createRange();
+          range.setStart(text, word.index); range.setEnd(text, word.index + word[0].length);
+          return { word: word[0], lines: range.getClientRects().length };
+        });
+        const box = (node: Element) => {
+          const { x, y, width, right, bottom } = node.getBoundingClientRect();
+          return { x, y, width, right, bottom };
+        };
+        return { note: box(element), status: box(status), actions: box(actions), words,
+          buttons: [...actions.querySelectorAll('button')].map(box) };
+      });
+      // Enough room for ordinary words: recovery controls must never squeeze the reason to a sliver.
+      expect(layout.status.width, `${selector} status width`).toBeGreaterThanOrEqual(190);
+      for (const word of layout.words) expect(word.lines, `${selector}: ${word.word}`).toBe(1);
+      // Only the wider window has room for the reason and all four buttons beside it.
+      if (width === 1920 && selector.startsWith('.tree-item')) {
+        expect(layout.actions.x).toBeGreaterThan(layout.status.right);
+        expect(layout.actions.y).toBeLessThan(layout.status.bottom);
+      } else expect(layout.actions.y).toBeGreaterThanOrEqual(layout.status.bottom);
+      for (const button of layout.buttons) {
+        expect(button.x).toBeGreaterThanOrEqual(layout.note.x - 0.5);
+        expect(button.right).toBeLessThanOrEqual(layout.note.right + 0.5);
+      }
+    }
+    expect(denied).toEqual([]);
+  });
+}
+
 async function capture(page: Page, designPage: Page, spec: FrameSpec, id: string, card: string, denied: readonly string[]) {
   {
     const shell = await page.evaluate(() => {

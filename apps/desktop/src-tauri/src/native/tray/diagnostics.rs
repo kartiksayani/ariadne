@@ -1,4 +1,6 @@
-use std::collections::BTreeMap;
+use super::capture::binding_status;
+use ariadne_domain::models::{BindingSummary, ConnectionState};
+use std::collections::{BTreeMap, BTreeSet};
 
 const LIMIT: usize = 16;
 const TEXT_LIMIT: usize = 256;
@@ -49,10 +51,15 @@ impl Diagnostics {
         if stopped {
             return;
         }
-        let omitted = rows.len().saturating_sub(LIMIT);
+        let mut seen = BTreeSet::new();
         self.rows = rows
             .into_iter()
-            .take(LIMIT)
+            // Producers put the newest outcome first.
+            .filter(|row| {
+                row.binding_id
+                    .as_ref()
+                    .is_none_or(|id| seen.insert(id.clone()))
+            })
             .map(|mut row| {
                 let mut characters = row.text.chars();
                 let mut bounded: String = characters.by_ref().take(TEXT_LIMIT).collect();
@@ -63,19 +70,52 @@ impl Diagnostics {
                 row
             })
             .collect();
-        if omitted > 0 {
-            self.rows.push(LifecycleNote::general(format!(
-                "{omitted} more connection notes not shown."
-            )));
-        }
     }
     #[cfg(test)]
     pub(crate) fn rows(&self) -> &[LifecycleNote] {
         &self.rows
     }
-    /// The notes as menu lines, sessions named by `labels`.
-    pub(crate) fn render(&self, labels: &BTreeMap<String, String>) -> Vec<String> {
-        self.rows.iter().map(|row| row.render(labels)).collect()
+    /// Combine launch outcomes with current open-session status before applying
+    /// the menu bound. Unlisted and connected bindings have no launch note.
+    pub(crate) fn render(
+        &self,
+        labels: &BTreeMap<String, String>,
+        bindings: &[BindingSummary],
+    ) -> Vec<String> {
+        let current: BTreeMap<_, _> = bindings
+            .iter()
+            .map(|binding| (binding.id.as_str(), binding))
+            .collect();
+        let mut shown = BTreeSet::new();
+        let mut lines: Vec<_> = self
+            .rows
+            .iter()
+            .filter_map(|row| {
+                if let Some(id) = &row.binding_id {
+                    let binding = current.get(id.as_str())?;
+                    if !labels.contains_key(id)
+                        || binding.connection_state == ConnectionState::Connected
+                    {
+                        return None;
+                    }
+                    shown.insert(id.as_str());
+                }
+                Some(row.render(labels))
+            })
+            .collect();
+        lines.extend(bindings.iter().filter_map(|binding| {
+            if shown.contains(binding.id.as_str()) {
+                return None;
+            }
+            let label = labels.get(binding.id.as_str())?;
+            binding_status(binding).map(|status| format!("{label}: {status}"))
+        }));
+        let omitted = lines.len().saturating_sub(LIMIT);
+        lines.truncate(LIMIT);
+        if omitted > 0 {
+            lines.push(format!("{omitted} more connection notes not shown."));
+        }
+        lines
     }
 }
 
@@ -84,6 +124,20 @@ mod tests {
     use super::*;
     fn general(text: &str) -> LifecycleNote {
         LifecycleNote::general(text)
+    }
+    fn binding() -> BindingSummary {
+        let page: ariadne_domain::models::Page<ariadne_domain::models::SessionSummary> =
+            serde_json::from_str(include_str!(
+                "../../../../../../fixtures/domain/projections/sessions.json"
+            ))
+            .unwrap();
+        let mut binding = page.items[0].active_binding.clone().unwrap();
+        binding.connection_state = ConnectionState::Disconnected;
+        binding
+    }
+
+    fn labels(binding: &BindingSummary) -> BTreeMap<String, String> {
+        BTreeMap::from([(binding.id.as_str().to_owned(), "Notes sync".to_owned())])
     }
     #[test]
     fn latest_snapshot_replaces_and_stop_rejects_late_publication() {
@@ -100,16 +154,15 @@ mod tests {
     fn bounds_are_explicit_instead_of_silently_hiding_diagnostics() {
         let mut state = Diagnostics::default();
         state.replace(vec![general(&"x".repeat(TEXT_LIMIT + 1)); LIMIT + 2], false);
-        assert_eq!(state.rows().len(), LIMIT + 1);
         assert!(state.rows()[0].text.ends_with('…'));
-        assert_eq!(
-            state.rows()[LIMIT].text,
-            "2 more connection notes not shown."
-        );
+        let lines = state.render(&BTreeMap::new(), &[]);
+        assert_eq!(lines.len(), LIMIT + 1);
+        assert_eq!(lines[LIMIT], "2 more connection notes not shown.");
     }
     #[test]
     fn binding_notes_name_the_session_by_label_never_by_id() {
-        let id = "6e5fdf82-0000-4000-8000-000000000001";
+        let binding = binding();
+        let id = binding.id.as_str();
         let mut state = Diagnostics::default();
         state.replace(
             vec![
@@ -120,15 +173,75 @@ mod tests {
             false,
         );
         let labels = BTreeMap::from([(id.to_owned(), "claude-code · iTerm window 1".to_owned())]);
-        let lines = state.render(&labels);
+        let lines = state.render(&labels, &[binding]);
         assert_eq!(
             lines,
             [
                 "claude-code · iTerm window 1: could not connect",
-                "A session: stopped unexpectedly",
                 "Notifications are off.",
             ]
         );
-        assert!(lines.iter().all(|line| !line.contains("6e5fdf82")));
+        assert!(lines.iter().all(|line| !line.contains("0000-4000")));
+    }
+
+    #[test]
+    fn failed_start_disappears_after_the_binding_connects() {
+        let mut binding = binding();
+        let labels = labels(&binding);
+        let mut state = Diagnostics::default();
+        state.replace(
+            vec![LifecycleNote::binding(
+                binding.id.as_str(),
+                "could not start",
+            )],
+            false,
+        );
+        assert_eq!(
+            state.render(&labels, std::slice::from_ref(&binding)),
+            ["Notes sync: could not start"]
+        );
+        binding.connection_state = ConnectionState::Connected;
+        assert!(state
+            .render(&labels, std::slice::from_ref(&binding))
+            .is_empty());
+        binding.owner_paused = true;
+        assert_eq!(state.render(&labels, &[binding]), ["Notes sync: paused"]);
+    }
+
+    #[test]
+    fn newest_launch_outcome_replaces_older_outcomes_and_capture_status() {
+        let binding = binding();
+        let labels = labels(&binding);
+        let mut state = Diagnostics::default();
+        state.replace(
+            vec![
+                LifecycleNote::binding(binding.id.as_str(), "could not connect"),
+                LifecycleNote::binding(binding.id.as_str(), "could not start"),
+            ],
+            false,
+        );
+        assert_eq!(
+            state.render(&labels, &[binding]),
+            ["Notes sync: could not connect"]
+        );
+    }
+
+    #[test]
+    fn hidden_launch_outcomes_do_not_use_the_visible_note_limit() {
+        let binding = binding();
+        let mut state = Diagnostics::default();
+        let mut notes: Vec<_> = (0..LIMIT + 2)
+            .map(|index| LifecycleNote::binding(&format!("gone-{index}"), "could not start"))
+            .collect();
+        notes.push(LifecycleNote::binding(
+            binding.id.as_str(),
+            "could not connect",
+        ));
+        notes.push(general("Notifications are off."));
+        state.replace(notes, false);
+        assert_eq!(
+            state.render(&labels(&binding), &[binding]),
+            ["Notes sync: could not connect", "Notifications are off.",]
+        );
     }
 }

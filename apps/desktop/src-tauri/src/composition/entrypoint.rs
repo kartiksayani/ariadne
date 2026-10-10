@@ -2,6 +2,7 @@ use super::{NativeConfiguration, NativeRuntime};
 use crate::native::tray::LifecycleNote;
 use ariadne_core::CoreError;
 use ariadne_runtime::activation::ActivationOutcome;
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 
@@ -15,11 +16,20 @@ impl ActivationHandoffs {
     }
     /// Plain tray notes per binding; the tray names each session by its label.
     pub(crate) fn diagnostics(&self) -> Vec<LifecycleNote> {
+        let mut seen = BTreeSet::new();
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .iter()
             .rev()
+            .filter(|outcome| {
+                let scope = match outcome {
+                    ActivationOutcome::ConnectFailed { scope, .. }
+                    | ActivationOutcome::Failed { scope, .. }
+                    | ActivationOutcome::Stopped { scope, .. } => scope,
+                };
+                seen.insert(scope.binding_id.clone())
+            })
             .filter_map(|outcome| {
                 let (scope, text) = match outcome {
                     ActivationOutcome::ConnectFailed { scope, .. } => (scope, "could not connect"),
@@ -35,7 +45,6 @@ impl ActivationHandoffs {
                 };
                 Some(LifecycleNote::binding(scope.binding_id.as_str(), text))
             })
-            .take(16)
             .collect()
     }
 }

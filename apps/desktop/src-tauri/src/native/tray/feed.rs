@@ -1,5 +1,5 @@
 use super::{
-    capture,
+    capture::capture_for_tray,
     coalescing::Coalesced,
     diagnostics::{Diagnostics, LifecycleNote},
     menu, TrayProjection,
@@ -219,11 +219,12 @@ fn run<R: tauri::Runtime>(
         }
         if pending.take_due(instant).is_some() && !stopped.load(Ordering::Acquire) {
             let result = (|| {
-                let captured = capture(|request| service.native_query(request))?;
+                let (captured, bindings) =
+                    capture_for_tray(|request| service.native_query(request))?;
                 let mut diagnostics = lifecycle
                     .lock()
                     .map_err(|_| unavailable())?
-                    .render(&captured.labels);
+                    .render(&captured.labels, &bindings);
                 let observation = (|| {
                     let mut plans = Vec::new();
                     if let Some(plan) =

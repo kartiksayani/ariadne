@@ -197,14 +197,16 @@
 }
 
 .stuck-note > span[role="status"] {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 16em;
+  min-width: min(100%, 16em);
+  overflow-wrap: break-word;
 }
 
 .stuck-actions {
   display: inline-flex;
   flex-wrap: wrap;
   gap: 6px;
+  max-width: 100%;
 }
 
 .stuck-failure {

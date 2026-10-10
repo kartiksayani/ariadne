@@ -83,6 +83,21 @@ pub(crate) fn inconsistent() -> CoreError {
 pub fn capture(
     query: impl Fn(OwnerQueryRequest) -> Result<QueryResult, CoreError>,
 ) -> Result<WaitingCapture, CoreError> {
+    let (mut captured, bindings) = capture_for_tray(query)?;
+    captured
+        .diagnostics
+        .extend(bindings.iter().filter_map(|binding| {
+            binding_status(binding)
+                .map(|status| format!("{}: {status}", captured.labels[binding.id.as_str()]))
+        }));
+    Ok(captured)
+}
+
+/// Keeps connection status separate until the tray can combine it with launch
+/// outcomes. The public capture still includes standalone status notes.
+pub(crate) fn capture_for_tray(
+    query: impl Fn(OwnerQueryRequest) -> Result<QueryResult, CoreError>,
+) -> Result<(WaitingCapture, Vec<BindingSummary>), CoreError> {
     let mut projects = BTreeMap::new();
     let mut cursor = None;
     let mut project_revision = None;
@@ -160,6 +175,7 @@ pub fn capture(
     let mut rows = Vec::new();
     let mut diagnostics = Vec::new();
     let mut labels = BTreeMap::new();
+    let mut bindings = Vec::new();
     if counts.completeness == Completeness::Partial {
         diagnostics
             .push("Some projects or sessions could not be read, so the count may be low.".into());
@@ -181,11 +197,13 @@ pub fn capture(
         }
         let project = projects.get(&summary.project_id).ok_or_else(inconsistent)?;
         let session_label = session_label(summary.name.as_deref(), summary.active_binding.as_ref());
-        if let Some(binding) = &summary.active_binding {
+        if let Some(binding) = summary
+            .active_binding
+            .as_ref()
+            .filter(|_| summary.state == SessionState::Active)
+        {
             labels.insert(binding.id.as_str().to_owned(), session_label.clone());
-            if let Some(status) = binding_status(binding) {
-                diagnostics.push(format!("{session_label}: {status}"));
-            }
+            bindings.push(binding.clone());
         }
         // The authoritative summary already proves there are no Waiting rows.
         // Keep this session in the final inventory check so a concurrent change
@@ -299,12 +317,15 @@ pub fn capture(
     if expected != final_inventory || final_revision != session_revision {
         return Err(inconsistent());
     }
-    Ok(WaitingCapture {
-        counts,
-        rows,
-        diagnostics,
-        labels,
-    })
+    Ok((
+        WaitingCapture {
+            counts,
+            rows,
+            diagnostics,
+            labels,
+        },
+        bindings,
+    ))
 }
 
 fn check_page<T>(
@@ -341,8 +362,7 @@ fn item_order(a: &ItemRef, b: &ItemRef) -> std::cmp::Ordering {
 mod label_tests {
     use super::*;
 
-    #[test]
-    fn archived_sessions_have_no_tray_targets_or_binding_notes() {
+    fn paused_session(state: SessionState, archived: bool) -> WaitingCapture {
         let mut projects: Page<ProjectSummary> = serde_json::from_str(include_str!(
             "../../../../../../fixtures/domain/projections/projects.json"
         ))
@@ -356,14 +376,16 @@ mod label_tests {
         let mut counts = projects.items[0].counts.clone();
         counts.waiting_unanswered = NonnegativeSafeInteger::new(0).unwrap();
         projects.items[0].counts = counts.clone();
-        sessions.items[0].archived_at = Some(UtcMillis::new("2026-10-09T00:00:00.000Z").unwrap());
-        sessions.items[0].state = SessionState::Closed;
+        sessions.items[0].counts = counts.clone();
+        sessions.items[0].archived_at =
+            archived.then(|| UtcMillis::new("2026-10-09T00:00:00.000Z").unwrap());
+        sessions.items[0].state = state;
         sessions.items[0]
             .active_binding
             .as_mut()
             .unwrap()
             .owner_paused = true;
-        let captured = capture(|request| match request.request {
+        capture(|request| match request.request {
             QueryRequest::ProjectList(_) => Ok(QueryResult::ProjectList(ProjectListResult {
                 projects: projects.clone(),
                 counts: counts.clone(),
@@ -375,12 +397,27 @@ mod label_tests {
                 archived_total: NonnegativeSafeInteger::new(1).unwrap(),
                 counts: counts.clone(),
             })),
-            _ => panic!("Archived sessions do not need a tray snapshot"),
+            _ => panic!("Sessions with no waiting questions do not need a tray snapshot"),
         })
-        .unwrap();
-        assert!(captured.rows.is_empty());
-        assert!(captured.labels.is_empty());
-        assert!(captured.diagnostics.is_empty());
+        .unwrap()
+    }
+
+    #[test]
+    fn closed_and_archived_sessions_have_no_tray_targets_or_binding_notes() {
+        for archived in [false, true] {
+            let captured = paused_session(SessionState::Closed, archived);
+            assert!(captured.rows.is_empty());
+            assert!(captured.labels.is_empty());
+            assert!(captured.diagnostics.is_empty());
+        }
+    }
+
+    #[test]
+    fn owner_paused_open_session_keeps_its_status_note() {
+        let captured = paused_session(SessionState::Active, false);
+        assert_eq!(captured.labels.len(), 1);
+        assert_eq!(captured.diagnostics.len(), 1);
+        assert!(captured.diagnostics[0].ends_with(": paused"));
     }
 
     fn binding() -> BindingSummary {

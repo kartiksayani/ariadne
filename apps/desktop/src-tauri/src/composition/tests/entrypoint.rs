@@ -39,3 +39,48 @@ fn native_display_snapshots_leave_exact_recovery_facts_owned() {
     assert_eq!(handoffs.take().len(), 1);
     assert!(handoffs.diagnostics().is_empty());
 }
+
+#[test]
+fn latest_outcome_supersedes_failure_without_consuming_evidence() {
+    let handoffs = ActivationHandoffs::default();
+    let scope = BindingScope {
+        binding_id: UuidV4::new("00000000-0000-4000-8000-000000000001").unwrap(),
+        generation: UuidV4::new("00000000-0000-4000-8000-000000000002").unwrap(),
+    };
+    let error = || {
+        CoreError::new(
+            CoreErrorCode::HostUnreachable,
+            "Host unavailable.",
+            "Try again later.",
+        )
+    };
+    handoffs.0.lock().unwrap().extend([
+        ActivationOutcome::Failed {
+            scope: scope.clone(),
+            error: error(),
+        },
+        ActivationOutcome::Stopped {
+            scope: scope.clone(),
+            exit: Err(error()),
+        },
+    ]);
+    assert_eq!(
+        handoffs.diagnostics(),
+        [LifecycleNote::binding(
+            scope.binding_id.as_str(),
+            "disconnected unexpectedly"
+        )]
+    );
+    handoffs.0.lock().unwrap().push(ActivationOutcome::Stopped {
+        scope,
+        exit: Ok(ariadne_runtime::supervisor::SupervisorExit {
+            pending: None,
+            pending_claim: None,
+            acknowledged_checkpoint: None,
+            diagnostics: vec![],
+            error: None,
+        }),
+    });
+    assert!(handoffs.diagnostics().is_empty());
+    assert_eq!(handoffs.take().len(), 3);
+}
