@@ -221,7 +221,7 @@ describe('quick owner answers from the desktop', () => {
     await within(detail()).findByText('This item changed. Review it before sending. Your note is kept.');
     expect(sends(transport)).toHaveLength(0);
     expect(within(detail()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe(note);
-    fireEvent.click(within(detail()).getByRole('button', { name: 'Review current target' }));
+    fireEvent.click(within(detail()).getByRole('button', { name: 'Review this question' }));
     await waitFor(() => expect(within(detail()).queryByText('This item changed. Review it before sending. Your note is kept.')).toBeNull());
     row().focus(); alt(row(), 1);
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
@@ -257,7 +257,7 @@ describe('quick owner answers from the desktop', () => {
     expect(sends(transport)).toHaveLength(0);
     expect(within(detail()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe(note);
     if (change === 'question revision') {
-      fireEvent.click(within(detail()).getByRole('button', { name: 'Review current target' }));
+      fireEvent.click(within(detail()).getByRole('button', { name: 'Review this question' }));
       await waitFor(() => expect(within(detail()).queryByText('This item changed. Review it before sending. Your note is kept.')).toBeNull());
     }
     row().focus(); alt(row(), 1);

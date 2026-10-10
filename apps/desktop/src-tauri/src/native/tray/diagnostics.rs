@@ -10,6 +10,8 @@ const TEXT_LIMIT: usize = 256;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LifecycleNote {
     pub binding_id: Option<String>,
+    /// Connection identity for launch outcomes; generic binding notes omit it.
+    pub generation: Option<String>,
     /// Plain words, without the session name: "could not connect".
     pub text: String,
 }
@@ -17,12 +19,21 @@ impl LifecycleNote {
     pub fn binding(binding_id: &str, text: impl Into<String>) -> Self {
         Self {
             binding_id: Some(binding_id.to_owned()),
+            generation: None,
+            text: text.into(),
+        }
+    }
+    pub fn connection(binding_id: &str, generation: &str, text: impl Into<String>) -> Self {
+        Self {
+            binding_id: Some(binding_id.to_owned()),
+            generation: Some(generation.to_owned()),
             text: text.into(),
         }
     }
     pub fn general(text: impl Into<String>) -> Self {
         Self {
             binding_id: None,
+            generation: None,
             text: text.into(),
         }
     }
@@ -58,7 +69,7 @@ impl Diagnostics {
             .filter(|row| {
                 row.binding_id
                     .as_ref()
-                    .is_none_or(|id| seen.insert(id.clone()))
+                    .is_none_or(|id| seen.insert((id.clone(), row.generation.clone())))
             })
             .map(|mut row| {
                 let mut characters = row.text.chars();
@@ -95,6 +106,11 @@ impl Diagnostics {
                     let binding = current.get(id.as_str())?;
                     if !labels.contains_key(id)
                         || binding.connection_state == ConnectionState::Connected
+                        || row
+                            .generation
+                            .as_ref()
+                            .is_some_and(|generation| generation != binding.generation.as_str())
+                        || shown.contains(id.as_str())
                     {
                         return None;
                     }
@@ -220,6 +236,68 @@ mod tests {
             ],
             false,
         );
+        assert_eq!(
+            state.render(&labels, &[binding]),
+            ["Notes sync: could not connect"]
+        );
+    }
+
+    #[test]
+    fn previous_connection_note_gives_way_to_current_connection_status() {
+        let mut binding = binding();
+        let labels = labels(&binding);
+        let previous_generation = binding.generation.clone();
+        let mut state = Diagnostics::default();
+        state.replace(
+            vec![LifecycleNote::connection(
+                binding.id.as_str(),
+                previous_generation.as_str(),
+                "could not start",
+            )],
+            false,
+        );
+        binding.generation =
+            ariadne_domain::models::UuidV4::new("00000000-0000-4000-8000-000000000099").unwrap();
+        binding.connection_state = ConnectionState::Reconnecting;
+        assert_eq!(
+            state.render(&labels, std::slice::from_ref(&binding)),
+            ["Notes sync: reconnecting"]
+        );
+        // Hiding display text never consumes recovery evidence.
+        assert_eq!(state.rows().len(), 1);
+        binding.connection_state = ConnectionState::Disconnected;
+        assert_eq!(
+            state.render(&labels, &[binding]),
+            ["Notes sync: not connected"]
+        );
+    }
+
+    #[test]
+    fn late_previous_connection_note_cannot_hide_current_failure() {
+        let binding = binding();
+        let labels = labels(&binding);
+        let mut state = Diagnostics::default();
+        state.replace(
+            vec![
+                LifecycleNote::connection(
+                    binding.id.as_str(),
+                    "00000000-0000-4000-8000-000000000099",
+                    "disconnected unexpectedly",
+                ),
+                LifecycleNote::connection(
+                    binding.id.as_str(),
+                    binding.generation.as_str(),
+                    "could not connect",
+                ),
+                LifecycleNote::connection(
+                    binding.id.as_str(),
+                    binding.generation.as_str(),
+                    "could not start",
+                ),
+            ],
+            false,
+        );
+        assert_eq!(state.rows().len(), 2);
         assert_eq!(
             state.render(&labels, &[binding]),
             ["Notes sync: could not connect"]

@@ -30,6 +30,8 @@ export interface FrameSpec {
   readonly hiddenItems?: readonly string[];
   /** Compact dock states are app-only, independent of immutable handoff comparisons. */
   readonly dockState?: 'question' | 'open' | 'pending';
+  /** Compare a stopped turn after delivery with a rejection before delivery. */
+  readonly acceptedFailure?: boolean;
 }
 
 const wide = { width: 1600, height: 960 } as const, narrow = { width: 1280, height: 800 } as const;
@@ -75,9 +77,11 @@ const specs: readonly FrameSpec[] = [
   { ...base, width: 1400, height: 500, id: 'answer-short', selected: '3.1', detail: true, answerOptions: 2 },
   { ...base, width: 1400, height: 830, id: 'detail-hidden', selected: '3.1', detail: true, answerOptions: 2, hiddenItems: ['3.1'] },
   { ...base, width: 1400, height: 830, id: 'detail-hidden-parent', selected: '2.1.1', detail: true, answerOptions: 2, hiddenItems: ['2.1'] },
+  { ...base, width: 1400, height: 830, id: 'detail-hidden-with-parent', selected: '2.1.1', detail: true, answerOptions: 2, hiddenItems: ['2.1', '2.1.1'] },
   { ...base, width: 1400, height: 830, id: 'question-resting', selected: '3.1', detail: true, dockState: 'question' },
   { ...base, width: 1400, height: 830, id: 'nonquestion-resting', selected: '3.1', detail: true, dockState: 'open' },
   { ...base, width: 1280, height: 1240, id: 'nonquestion-pending', selected: '3.1', detail: true, dockState: 'pending' },
+  { ...base, id: 'delivery-stopped', scenario: 'failed', selected: '3.1', detail: true, acceptedFailure: true },
 ];
 
 /** Harness states drawn from another board frame's card (FrameSpec.design). */

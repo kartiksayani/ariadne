@@ -110,7 +110,7 @@ function WordsField({ slot, sentAs, first, register, sendOff, closable, onEdit, 
   const note = slot.kind !== sentAs && !slot.locked;
   return <>
     {slot.changed && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
-      <button type="button" className="btn btn-secondary answer-warn-action" disabled={slot.locked} onClick={onReview}>Review current target</button></div>}
+      <button type="button" className="btn btn-secondary answer-warn-action" disabled={slot.locked} onClick={onReview}>Review this question</button></div>}
     <div className={`detail-box${collapsed ? ' detail-box-collapsed' : ''}`}>
       {note && <p className="detail-box-note" id={noteId}>{`This will be sent as a ${kindName[sentAs]}, which fits the item now. You wrote it as a ${kindName[slot.kind]}.`}</p>}
       <div className="detail-composer-row">
@@ -196,6 +196,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const [mode, setMode] = useState<OpenMode | null>(null);
   const [focusBox, setFocusBox] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [titleExpanded, setTitleExpanded] = useState(false);
   const [laterError, setLaterError] = useState(false);
   // The drop reason is local; the sent text wraps it (Ariadne.dc.html:1207).
   const [reason, setReason] = useState('');
@@ -240,25 +241,31 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   blankShown.current = slots.length === 1 && slots[0]?.id === null;
   const slotKey = (slot: Words) => slot.id === null || slot.id === lead.current ? 'blank' : slot.id;
 
-  // Open at the conversation: its start for an unanswered ask, its end after an exchange.
-  // The item's references remain above it in the same scroller. Arrivals leave a reader where they are.
+  // Open at the current ask, even after a long earlier conversation. Once answered, open at the end.
+  // The sticky title stays above the ask; arrivals leave a reader where they are.
   const showLatest = () => {
     const pane = body.current;
     if (!pane) return;
-    if (pane.querySelector('.detail-chat [data-owner-said="true"], .detail-chat .detail-msg-result')) pane.scrollTop = pane.scrollHeight;
+    const waiting = pane.querySelector('.detail-turn-now');
+    const anchor = waiting?.querySelector('.detail-waiting-tag')?.closest('.detail-bubble-agent') ?? waiting;
+    if (anchor) {
+      const headHeight = pane.querySelector('.detail-head')?.getBoundingClientRect().height ?? 0;
+      pane.scrollTop += anchor.getBoundingClientRect().top - pane.getBoundingClientRect().top - headHeight;
+    } else if (pane.querySelector('.detail-chat [data-owner-said="true"], .detail-chat .detail-msg-result')) pane.scrollTop = pane.scrollHeight;
     else {
       const chat = pane.querySelector('.detail-chat');
       if (chat) pane.scrollTop += chat.getBoundingClientRect().top - pane.getBoundingClientRect().top;
     }
     atEnd.current = nearEnd(pane);
   };
+  useEffect(() => { atEnd.current = true; setTitleExpanded(false); }, [itemId]);
   const sentJustNow = () => { justSent.current = true; showLatest(); };
   const chatKey = model ? model.chat.map(entry => `${entry.id}:${entry.message.body}:${entry.result}:${entry.pending?.input.state}:${entry.asks.map(ask => `${ask.text}:${ask.now}`).join(',')}:${entry.forks.length}`).join('|') : null;
   useEffect(() => {
     if (chatKey === null) return;
     if (atEnd.current || justSent.current) showLatest();
     justSent.current = false;
-  }, [chatKey]);
+  }, [chatKey, itemId]);
   // The composer growing shrinks the scrolling body; at the end of the chat, the end stays in view.
   useEffect(() => {
     const element = body.current;
@@ -312,7 +319,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     else if (intent === 'reopen' && available.has('reopen')) void send('reopen', actionText('reopen', model.question));
   });
 
-  if (!session || !item || !model) return <p role="status">The current item is unavailable. Refresh its registered session.</p>;
+  if (!session || !item || !model) return <p role="status">The current item is unavailable. Open its session again.</p>;
   // A reopen that could not go out was written against an older item (OwnerInput's Review step). Only the Open section offers it.
   const reopenStale = !!model.open && submit.changed('reopen');
   const answerFocus = focusRequest && model.status === 'waiting' && !model.followUp && focusRequest.intent === 'reply' ? { ...focusRequest, intent: 'answer' as const } : focusRequest;
@@ -339,7 +346,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const owner = (slots.length > 0 || dropOpen || reopenStale) && <div className="detail-owner-input" data-owner-input={itemId}>
     <PausedNote actions={actions} />
     {reopenStale && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
-      <button type="button" className="btn btn-secondary answer-warn-action" disabled={submit.locked('reopen')} onClick={() => submit.review('reopen')}>Review current target</button></div>}
+      <button type="button" className="btn btn-secondary answer-warn-action" disabled={submit.locked('reopen')} onClick={() => submit.review('reopen')}>Review this question</button></div>}
     {fit && slots.map((slot, index) => <WordsField key={slotKey(slot)} slot={slot} sentAs={fit} first={index === 0} sendOff={sendOff(slot)}
       register={element => { const key = slotKey(slot); if (element) boxes.current.set(key, element); else boxes.current.delete(key); }}
       closable={closable} onEdit={value => { edited.current = slotKey(slot); submit.edit(slot, value); }} onKeyDown={wordsKey(slot)} onSend={() => sendWords(slot)} onCancel={closeBox}
@@ -356,20 +363,25 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     </div>}
   </div>;
   const docked = !!(model.open || model.followUp || showAnswer || savedAnswers.length > 0 || owner || ackTo || ack.error || submit.error);
-  const dockHint = model.chat.some(entry => entry.pending) ? model.delivery?.text
-    : current.status !== 'ready' || current.error ? model.open?.hint : null;
+  const disabledActions = model.open?.actions.some(action => action.disabled);
+  const dockHint = current.status !== 'ready' || current.error || disabledActions ? model.open?.hint
+    : model.chat.some(entry => entry.pending) ? model.delivery?.text : null;
   return <ItemRefs.Provider value={{ lookup: id => {
     const target = session.items[id];
     return target && !itemRemoved(session, target.id) ? { label: shortLabel(target), status: displayStatus(session, target) } : null;
   }, onOpenItem }}><FileRefProject.Provider value={session.project_id}><article className="item-detail" data-detail-item-id={itemId} data-status={model.status} aria-label={`Detail of #${model.id}`}>
     <div className="detail-body" ref={body} onScroll={event => { atEnd.current = nearEnd(event.currentTarget); }}>
-    <div className="detail-head">
+    <div className={`detail-head${titleExpanded ? ' detail-head-expanded' : ''}`}>
       {/* The handoff embeds the badge in a block host; its line box makes the row 23px. */}
       <div className="detail-status"><div className="detail-badge"><StatusBadge status={model.display} label={model.badgeLabel} /></div>
         <span className="detail-meta" title={model.meta}>{model.meta}</span>
         <span className="detail-reference"><button type="button" className="btn btn-ghost detail-copy" title="Copy the agent reference" onClick={copy}>
           <i className={copied ? 'ph ph-check' : 'ph ph-copy'} aria-hidden="true" />{copied ? 'Copied' : 'Copy reference'}</button></span></div>
-      <h2 className="detail-question"><Markdown text={model.question} inline /></h2>
+      <h2 className="detail-question" title={model.question}><Markdown text={model.question} inline compact={!titleExpanded} /></h2>
+      <button type="button" className="btn btn-ghost detail-title-toggle" aria-label={titleExpanded ? 'Collapse title' : 'Expand title'}
+        aria-expanded={titleExpanded} onClick={() => setTitleExpanded(value => !value)}>
+        <i className={titleExpanded ? 'ph ph-caret-up' : 'ph ph-caret-down'} aria-hidden="true" />
+      </button>
     </div>
 
     {model.steps && <section className="detail-section detail-steps" aria-label={model.stepsTitle}>

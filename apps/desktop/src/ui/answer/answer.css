@@ -210,55 +210,6 @@ textarea.answer-text {
   gap: 6px;
 }
 
-.answer-quick-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-}
-
-.answer-choices {
-  flex: 1;
-  min-width: 0;
-}
-
-.answer-choices > summary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 32px;
-  cursor: pointer;
-  font-size: calc(12px * var(--text-scale));
-}
-
-.answer-choices > summary::before {
-  flex: none;
-  content: '▸';
-}
-
-.answer-choices > summary > span:first-of-type {
-  flex: none;
-}
-
-.answer-choices[open] > summary::before {
-  content: '▾';
-}
-
-.answer-choices > summary::-webkit-details-marker {
-  display: none;
-}
-
-.answer-choice-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.answer-quick-row > .answer-send-row {
-  flex: none;
-  max-width: 40%;
-}
-
 .answer-chat .answer-send {
   padding: 0 8px;
   font-size: calc(12px * var(--text-scale));
@@ -287,12 +238,6 @@ textarea.answer-text {
 
 .answer-chat .answer-recommended {
   display: flex;
-}
-
-.answer-choices > summary .answer-recommended {
-  flex: none;
-  margin: 0;
-  font-size: calc(10px * var(--text-scale));
 }
 
 .answer-description {

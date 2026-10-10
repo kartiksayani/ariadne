@@ -22,6 +22,13 @@ export function hiddenSource(session: Immutable<Session>, explicit: ReadonlySet<
   return null;
 }
 
+/** The nearest hidden parent, even when this item is also explicitly hidden. */
+export function hiddenParentSource(session: Immutable<Session>, explicit: ReadonlySet<string>, itemId: string): string | null {
+  const parent = session.items[itemId]?.parent;
+  const source = parent ? hiddenSource(session, explicit, parent) : null;
+  return source === itemId ? null : source;
+}
+
 export const hiddenGroupKey = (topicId: string, parent: string | null) => `hidden:${topicId}:${parent ?? ''}`;
 
 /** Every hidden group on the route to an outside selection must open. */

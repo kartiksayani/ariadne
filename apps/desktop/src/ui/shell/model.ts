@@ -241,14 +241,14 @@ export function bodyLayout({ width, detail, rail, detailWidth, folded = false, p
   const narrow = room < WAITING_WIDTH + CENTRE_MIN + (detail ? wanted : 0) + railWidth;
   const strip = folded || (narrow && !peek);
   const waiting = strip ? WAITING_FOLDED : WAITING_WIDTH;
-  // An owner-opened column in a narrow window squeezes the centre instead of scrolling the body.
-  const peekMin = narrow && !strip ? 0 : CENTRE_MIN;
-  const resizeMin = detail && peekMin ? CENTRE_RESIZE_MIN : peekMin;
+  // Opening Waiting can squeeze the centre; a detail pane shrinks first to keep the tree usable.
+  const peekMin = narrow && !strip ? detail ? CENTRE_RESIZE_MIN : 0 : CENTRE_MIN;
+  const resizeMin = detail ? CENTRE_RESIZE_MIN : peekMin;
   const detailMax = clamp(Math.floor(room - waiting - resizeMin - railWidth), DETAIL_MIN, DETAIL_MAX);
   // Only an owner-widened panel can borrow from the centre's usual minimum.
   const widened = detail && wanted > DETAIL_DEFAULT;
   const shown = Math.min(wanted, widened ? detailMax : clamp(Math.floor(room - waiting - peekMin - railWidth), DETAIL_MIN, DETAIL_MAX));
-  const centreMin = widened ? Math.min(peekMin, Math.max(resizeMin, Math.floor(room - waiting - shown - railWidth))) : peekMin;
+  const centreMin = widened ? Math.min(CENTRE_MIN, Math.max(resizeMin, Math.floor(room - waiting - shown - railWidth))) : peekMin;
   const centre = `minmax(${centreMin ? `${centreMin}px` : '0'},1fr)`;
   return { columns: `${waiting}px ${centre}${detail ? ` ${shown}px` : ''}${rail ? ` ${RAIL_WIDTH}px` : ''}`,
     folded: strip, auto: strip && !folded, narrow, detailWidth: shown, detailMax };

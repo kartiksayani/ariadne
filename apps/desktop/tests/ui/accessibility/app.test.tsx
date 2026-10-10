@@ -196,7 +196,7 @@ it.each(['item', 'question', 'binding'])('preserves retained option until explic
   expect(detail.getByRole('button', { name: /^1Morning/ }).getAttribute('aria-pressed')).toBe('true');
   fireEvent.keyDown(detail.getByRole('group', { name: 'Answer' }), { key: '2' });
   expect(transport.preferences.drafts[0].selected_option_id).toBe('morning');
-  fireEvent.click(detail.getByRole('button', { name: 'Review current target' }));
+  fireEvent.click(detail.getByRole('button', { name: 'Review this question' }));
   await waitFor(() => expect(transport.preferences.drafts[0].selected_option_id).toBeNull());
   expect(detail.getByRole('button', { name: /^2Afternoon/ }).getAttribute('aria-pressed')).toBe('false');
   row.focus(); fireEvent.keyDown(row, { key: '2' });

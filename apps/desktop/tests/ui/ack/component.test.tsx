@@ -226,7 +226,7 @@ describe('local acknowledgement', () => {
   it('offers a quiet row Ack with a target tooltip and a topic count, while questions keep their answer controls', async () => {
     await mount();
     const button = within(row()).getByRole('button', { name: 'Ack → Done' });
-    expect(button.textContent).toBe('Ack'); expect(button.title).toBe('Ack → Done');
+    expect(button.textContent).toBe(''); expect(button.title).toBe('Ack → Done');
     expect(button.closest('.tree-ack-slot')).not.toBeNull();
     expect(button.closest('.tree-actions')).toBeNull();
     expect(button.classList.contains('tree-action-ack')).toBe(true);
@@ -237,7 +237,6 @@ describe('local acknowledgement', () => {
     expect(css).toMatch(/\.tree-actions\s*\{[^}]*visibility:\s*hidden/s);
     expect(button.closest('.tree-action-grid')).not.toBeNull();
     expect(css).toMatch(/\.tree-ack-slot\s*\{[^}]*display:\s*contents/s);
-    expect(css).toMatch(/\.tree-action-label\s*\{[^}]*display:\s*none/s);
   });
 
   it.each(['done', 'decided', 'dropped'] as const)('names %s in the detail tooltip, refreshes and keeps Follow up and Back to Open', async target => {

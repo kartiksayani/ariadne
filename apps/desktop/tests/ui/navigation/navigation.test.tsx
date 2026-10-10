@@ -758,7 +758,10 @@ describe('source-backed navigation views and explicit registration', () => {
     render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} hidden onHide={hide}
       detail={<p>Hidden item detail</p>} renderSession={() => null} />);
     const button = await screen.findByRole('button', { name: 'Unhide item' });
-    expect(button.title).toBe('Unhide (x)');
+    expect(button.title).toBe('Unhide');
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    expect(within(screen.getByRole('complementary', { name: 'Item detail' })).getByRole('status').textContent)
+      .toContain('Hidden — this item is hidden from the list.');
     fireEvent.click(button); expect(hide).toHaveBeenCalledOnce();
   });
 

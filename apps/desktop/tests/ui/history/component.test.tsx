@@ -95,7 +95,7 @@ describe('item detail panel', () => {
     const order = [...document.querySelectorAll('.detail-body > section, .detail-body > div')].map(element => element.getAttribute('aria-label') ?? element.className);
     const body = ['detail-head', 'Your answer', 'Current outcome', 'Child items', 'Item links', 'Conversation'];
     expect(order.filter(name => body.includes(name))).toEqual(body);
-    expect([...detail.querySelectorAll('.detail-dock > section')].map(element => element.getAttribute('aria-label'))).toEqual(['Revisit']);
+    expect([...detail.querySelectorAll('.detail-dock .detail-quick-actions > section')].map(element => element.getAttribute('aria-label'))).toEqual(['Revisit']);
     // The handled answer is the request the stepper follows.
     expect(within(screen.getByRole('region', { name: 'Your answer' })).getByText('Resolved')).toBeTruthy();
     expect(screen.queryByText('Back and forth')).toBeNull();
@@ -118,8 +118,8 @@ describe('item detail panel', () => {
     expect([...chat.querySelectorAll<HTMLElement>('li[data-message-id]')].map(entry => entry.dataset.messageId)).toEqual(expected.map(message => message.id));
     expect(chat.querySelector('.detail-chat-marker')!.textContent).toBe('Agent raised this');
     expect(screen.queryByRole('region', { name: 'Timeline' })).toBeNull();
-    expect(document.querySelector('.detail-head .detail-reference')!.contains(screen.getByText('Agent reference'))).toBe(true);
-    expect(screen.getByText('Agent reference').parentElement!.querySelector('code')).toBeNull();
+    expect(document.querySelector('.detail-head .detail-reference')!.contains(screen.getByText('Copy reference'))).toBe(true);
+    expect(screen.getByText('Copy reference').parentElement!.querySelector('code')).toBeNull();
   });
   it('does not count an answer that archive cancelled as the owner’s answer: Waiting on you, with the not-sent line', async () => {
     const value = await ready(session => {

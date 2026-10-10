@@ -23,7 +23,7 @@ import { SessionActionControllers } from './components/bindings/actions';
 import { RecoveryPanel, recoveryTargets } from './components/recovery/RecoveryPanel';
 import { CopiedProvenance } from './components/history-actions/CopiedProvenance';
 import { SessionNotice } from './components/edge-states/EdgeState';
-import { hiddenItems, hiddenSource } from './ui/tree/hidden';
+import { hiddenItems, hiddenParentSource, hiddenSource } from './ui/tree/hidden';
 import { TreeView, type RowIntent } from './ui/tree/TreeView';
 import { ArchivePage } from './ui/pages/ArchivePage';
 import { useSessionSnapshots } from './ui/pages/snapshots';
@@ -532,10 +532,13 @@ function Workspace({ application }: { application: Application }) {
     return true;
   };
   const selectedSession = sessionState?.snapshot?.session;
-  const hiddenBy = selectedSession && selectedId ? hiddenSource(selectedSession, new Set(view?.hidden_item_ids ?? []), selectedId) : null;
+  const explicitHidden = new Set(view?.hidden_item_ids ?? []);
+  const hiddenBy = selectedSession && selectedId ? hiddenSource(selectedSession, explicitHidden, selectedId) : null;
   const selectedHidden = hiddenBy !== null;
-  const hiddenParent = hiddenBy && hiddenBy !== selectedId ? selectedSession?.items[hiddenBy]?.question : null;
-  const hiddenNotice = hiddenParent ? `Hidden with its parent “${hiddenParent}”` : undefined;
+  const hiddenParentId = selectedSession && selectedId ? hiddenParentSource(selectedSession, explicitHidden, selectedId) : null;
+  const hiddenParent = hiddenParentId ? selectedSession?.items[hiddenParentId]?.question : null;
+  const hiddenNotice = hiddenParent ? selectedId && explicitHidden.has(selectedId)
+    ? `Hidden, along with its parent “${hiddenParent}”.` : `Hidden with its parent “${hiddenParent}”` : undefined;
   const keys = useWorkspaceKeys<HTMLDivElement>(workspaceKeys({
     store: !!store, closeDetail, focusOwner, quickAnswer, queueBring, ack: (target, repeat) => {
       const store = navigation.opened.open(target), session = store.getSnapshot().snapshot?.session, item = session?.items[target.item_id];

@@ -33,12 +33,13 @@ describe('compact row actions', () => {
   it('keeps every item action in its existing order with the same names, tab behavior and callbacks', () => {
     const names = ['Ack → Done', 'Bring it up (b)', 'Reply (r)', 'Drop (d)', 'Later (z)', 'Back to Open (o)', 'Hide (x)', 'Remove (⌫)'];
     const actions: RowAction[] = names.map((title, index) => ({ title, icon: 'ph ph-check', run: vi.fn(),
-      ...(index === 0 ? { label: 'Ack', persistent: true } : {}),
+      ...(index === 0 ? { persistent: true } : {}),
       ...(title === 'Hide (x)' ? { glyph: <svg aria-hidden="true" data-testid="hide-icon" /> } : {}) }));
     const props = itemProps(actions), { container } = render(<ItemRow {...props} />);
     const grid = container.querySelector('.tree-action-grid')!, buttons = within(grid as HTMLElement).getAllByRole('button');
     expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(names);
     expect(buttons.map(button => button.title)).toEqual(names);
+    expect(buttons.every(button => button.textContent === '')).toBe(true);
     expect(buttons.map(button => button.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1, -1]);
     expect(container.querySelectorAll('.tree-ack-slot')).toHaveLength(1);
     expect(container.querySelectorAll('.tree-actions')).toHaveLength(1);
@@ -58,7 +59,7 @@ describe('compact row actions', () => {
 
   it('preserves disabled Ack and keeps action markup stable when hovering and selecting a row', () => {
     const ack = vi.fn(), reply = vi.fn(), props = itemProps([
-      { title: 'Ack → Done', icon: 'ph ph-check', label: 'Ack', persistent: true, disabled: true, run: ack },
+      { title: 'Ack → Done', icon: 'ph ph-check', persistent: true, disabled: true, run: ack },
       { title: 'Reply (r)', icon: 'ph ph-chat-text', run: reply },
     ]);
     const { container, rerender } = render(<ItemRow {...props} />);

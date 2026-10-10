@@ -39,7 +39,8 @@ describe('owner hide and unhide actions', () => {
     { selected: '1.1', hidden: ['1', '3'], parent: '1' },
     { selected: '1.1.1', hidden: ['1', '3'], parent: '1' },
     { selected: '1.1.1', hidden: ['1', '1.1', '3'], parent: '1.1' },
-    { selected: '1.1', hidden: ['1', '1.1', '3'], parent: null },
+    { selected: '1.1', hidden: ['1', '1.1', '3'], parent: '1' },
+    { selected: '1.1.1', hidden: ['1', '1.1', '1.1.1', '3'], parent: '1.1' },
   ])('explains hiding in the pane and restores the item and its parents without moving the reader: %o', async ({ selected, hidden, parent }) => {
     const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
     session.items['1.1.1'] = { ...session.items['1.1']!, id: '1.1.1', parent: '1.1', ordinal: 1 };
@@ -47,10 +48,14 @@ describe('owner hide and unhide actions', () => {
     await mount(transport);
     const pane = await screen.findByLabelText(`Detail of #${selected}`), detail = screen.getByRole('complementary', { name: 'Item detail' });
     const notice = within(detail).getByRole('status'), body = pane.querySelector<HTMLElement>('.detail-body')!;
-    expect(notice.textContent).toContain(parent ? `Hidden with its parent “${session.items[parent]!.question}”` : 'Hidden — this item is hidden from the list.');
+    const message = parent ? hidden.includes(selected) ? `Hidden, along with its parent “${session.items[parent]!.question}”.`
+      : `Hidden with its parent “${session.items[parent]!.question}”` : 'Hidden — this item is hidden from the list.';
+    expect(notice.textContent).toContain(message);
     expect(detail.classList.contains('shell-detail-hidden')).toBe(true);
     const toggle = within(detail).getByRole('button', { name: 'Unhide item' });
-    expect(toggle.title).toBe('Unhide'); expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    const title = parent ? 'Unhide this item and its hidden parents' : 'Unhide';
+    expect(toggle.title).toBe(title); expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(within(notice).getByRole('button', { name: 'Unhide' }).title).toBe(title);
     body.scrollTop = 120; fireEvent.scroll(body);
     fireEvent.click(within(notice).getByRole('button', { name: 'Unhide' }));
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['3'])); await ready();
@@ -159,7 +164,7 @@ describe('owner hide and unhide actions', () => {
     expect(group().getAttribute('aria-expanded')).toBe('true');
     expect(row('1')!.classList.contains('tree-item-hidden')).toBe(true);
     expect(row('1.1')!.classList.contains('tree-item-hidden')).toBe(true);
-    expect(within(row('1')!).getByRole('button', { name: 'Unhide (x)' }).textContent).toContain('Unhide');
+    expect(within(row('1')!).getByRole('button', { name: 'Unhide (x)' }).getAttribute('title')).toBe('Unhide (x)');
     group().focus(); fireEvent.keyDown(group(), { key: 'Enter' }); expect(row('1')).toBeNull();
     fireEvent.keyDown(group(), { key: 'Enter' }); row('1')!.focus(); fireEvent.keyDown(row('1')!, { key: 'x' });
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([]));

@@ -11,8 +11,9 @@ const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const dialog = () => browser.$('[role="dialog"]');
 async function archiveDiagnostics(failure) {
-  const tree = await browser.$('.tree-column').getText().catch(() => '(unavailable)');
-  const hasDialog = await dialog().isExisting().catch(() => '(unavailable)');
+  let tree = '(unavailable)', hasDialog = '(unavailable)';
+  try { tree = await browser.$('.tree-column').getText(); } catch { /* Keep the original archive failure. */ }
+  try { hasDialog = await dialog().isExisting(); } catch { /* Diagnostics may fail before returning a promise. */ }
   return new Error(`${failure.message}\nTree column text: ${tree}\nDialog exists: ${hasDialog}`, { cause: failure });
 }
 // The detail carries its canonical local item identity.

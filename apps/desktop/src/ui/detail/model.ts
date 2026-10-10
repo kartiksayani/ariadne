@@ -95,7 +95,7 @@ export interface DetailModel {
   readonly box: WordsKind | null;
   /** A waiting item whose input is in flight or queued: a reply queues behind it (owner FIFO). Named for what is sent: a reply. */
   readonly followUp: { readonly label: string; readonly hint: string; readonly disabled: boolean } | null;
-  readonly answer: (AnswerModel & { readonly heading: boolean }) | null;
+  readonly answer: AnswerModel | null;
   readonly outcome: { readonly label: string; readonly text: string; readonly color: string } | null;
   readonly note: string | null;
   readonly why: string | null;
@@ -389,7 +389,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     box: readOnly ? null : sentAs(status),
     followUp,
     // The chat carries the ask once; the composer only carries the answer control.
-    answer: answerable ? { heading: !showSteps, options: item.options, recommended, blocked } : null,
+    answer: answerable ? { options: item.options, recommended, blocked } : null,
     outcome: item.outcome ? { label: outLabel ?? 'Outcome', text: item.outcome, color: `var(--st-${status})` } : null,
     note: item.note && status === 'progress' ? item.note : null,
     why: item.why,

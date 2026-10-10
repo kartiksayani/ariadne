@@ -148,7 +148,7 @@ describe('detail actions while the owner view is stale', () => {
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send follow-up' }).disabled).toBe(true);
     await act(async () => { release(); });
     await waitFor(() => expect(store.getSnapshot().status).toBe('ready'));
-    fireEvent.click(screen.getByRole('button', { name: 'Review current target' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review this question' }));
     fireEvent.click(screen.getByRole('button', { name: 'Send follow-up' }));
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     expect(sends(transport)[0]).toMatchObject({ session: route, command: { params: { kind: 'followup', text: 'Please check this once more.' } } });

@@ -117,7 +117,7 @@ export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail,
             {onHide && <button type="button" className="btn btn-ghost" title={hiddenNotice ? 'Unhide this item and its hidden parents' : 'Unhide'} onClick={onHide}>Unhide</button>}
           </div>}
         </div>
-        {onHide && <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title={hidden ? 'Unhide' : 'Hide (x)'}
+        {onHide && <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title={hidden ? hiddenNotice ? 'Unhide this item and its hidden parents' : 'Unhide' : 'Hide (x)'}
           aria-label={hidden ? 'Unhide item' : 'Hide item'} aria-pressed={hidden} onClick={onHide}><HideIcon /></button>}
         <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Remove (⌫)" aria-label="Remove item" onClick={onRemove}>
           <i className="ph ph-trash" aria-hidden="true" /></button>

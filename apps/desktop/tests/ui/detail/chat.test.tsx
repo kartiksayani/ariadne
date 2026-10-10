@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
@@ -15,6 +15,68 @@ const opened: ReturnType<typeof setup>[] = [];
 afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.restoreAllMocks(); });
 
 describe('the single item chat', () => {
+  it('keeps a long title compact with a tooltip and expands it without changing the answer', async () => {
+    const value = setup(); opened.push(value);
+    const item = value.transport.session.items['2']!;
+    item.question = 'Choose how to handle the complete delivery conversation and preserve all earlier decisions. '.repeat(8);
+    await value.store.refresh();
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    const title = screen.getByRole('heading', { name: item.question.trim() });
+    expect(title.title).toBe(item.question);
+    const toggle = screen.getByRole('button', { name: 'Expand title' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+    expect(screen.getByRole('button', { name: 'Collapse title' }).getAttribute('aria-expanded')).toBe('true');
+    expect(title.closest('.detail-head-expanded')).not.toBeNull();
+    fireEvent.click(toggle);
+    expect(title.closest('.detail-head-expanded')).toBeNull();
+    expect(value.transport.calls.some(request => 'command' in request)).toBe(false);
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/detail/detail.css'), 'utf8');
+    expect(css).toMatch(/\.detail-head\s*\{[^}]*position:\s*sticky/s);
+    expect(css).toMatch(/\.detail-question\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap/s);
+    expect(css).toMatch(/\.detail-dock\s*\{[^}]*max-height:\s*40%;[^}]*overflow-y:\s*auto/s);
+  });
+
+  it('opens at the latest unanswered ask after a long earlier conversation and keeps the sticky title clear', async () => {
+    const value = setup(); opened.push(value);
+    const session = value.transport.session, item = session.items['2']!;
+    const first = session.rounds[item.current_round_id!]!;
+    const previous = session.messages.find(message => message.body === item.ask)!;
+    previous.body = 'Earlier delivery context. '.repeat(1000);
+    const second = { ...structuredClone(first), id: 'new-round', ordinal: 2, opened_message_id: 'new-opening',
+      owner_message_ids: [], agent_message_ids: ['new-opening'], result_input_ids: [], fork_item_ids: [] };
+    session.rounds[second.id] = second; item.current_round_id = second.id;
+    session.messages.push({ ...structuredClone(previous), id: second.opened_message_id, number: 30, round_id: second.id, body: 'Current delivery context.' });
+    session.messages.push({ ...structuredClone(previous), id: 'later-context', number: 31, round_id: second.id, body: 'A later update after the question.' });
+    vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(1800);
+    vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(400);
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      return { top: this.closest('[data-message-id="new-opening"]') ? 800 : 100,
+        height: this.classList.contains('detail-head') ? 36 : 0 } as DOMRect;
+    });
+    await value.store.refresh();
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    await screen.findByRole('region', { name: 'Conversation' });
+    await waitFor(() => expect(document.querySelector<HTMLElement>('.detail-body')!.scrollTop).toBe(664));
+    const current = document.querySelector<HTMLElement>('[data-message-id="new-opening"]')!;
+    expect(within(current).getByText('Waiting on you')).toBeTruthy();
+    expect(current.querySelectorAll('.detail-bubble-agent')).toHaveLength(2);
+    expect(within(current).getByText(item.ask!)).toBeTruthy();
+  });
+
+  it('shows the reason unavailable actions wait while the agent reconnects', async () => {
+    const value = setup(); opened.push(value);
+    const session = value.transport.session, binding = session.bindings[session.active_binding_id!]!;
+    binding.connection_state = 'reconnecting';
+    await value.store.refresh();
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1.1" later={false} onOpenItem={vi.fn()} />);
+    const dock = document.querySelector<HTMLElement>('.detail-dock')!;
+    expect(within(dock).getByText(/Reconnecting to .+These come back with the connection/).closest('[hidden], details')).toBeNull();
+    expect(within(dock).getByRole<HTMLButtonElement>('button', { name: 'Bring it up' }).disabled).toBe(true);
+    expect(within(dock).getByRole<HTMLButtonElement>('button', { name: 'Reply' }).disabled).toBe(true);
+    expect(within(dock).getByRole<HTMLButtonElement>('button', { name: 'Later' }).disabled).toBe(false);
+  });
+
   it('keeps the full reply once and shows both the choice and exact note in each owner bubble', async () => {
     const value = setup(); opened.push(value); await value.store.refresh();
     const session = value.transport.session, answer = session.answers[0]!;

@@ -86,10 +86,7 @@ pub fn capture(
     let (mut captured, bindings) = capture_for_tray(query)?;
     captured
         .diagnostics
-        .extend(bindings.iter().filter_map(|binding| {
-            binding_status(binding)
-                .map(|status| format!("{}: {status}", captured.labels[binding.id.as_str()]))
-        }));
+        .extend(super::diagnostics::Diagnostics::default().render(&captured.labels, &bindings));
     Ok(captured)
 }
 
@@ -362,7 +359,10 @@ fn item_order(a: &ItemRef, b: &ItemRef) -> std::cmp::Ordering {
 mod label_tests {
     use super::*;
 
-    fn paused_session(state: SessionState, archived: bool) -> WaitingCapture {
+    fn paused_session(
+        state: SessionState,
+        archived: bool,
+    ) -> (WaitingCapture, Vec<BindingSummary>) {
         let mut projects: Page<ProjectSummary> = serde_json::from_str(include_str!(
             "../../../../../../fixtures/domain/projections/projects.json"
         ))
@@ -385,7 +385,7 @@ mod label_tests {
             .as_mut()
             .unwrap()
             .owner_paused = true;
-        capture(|request| match request.request {
+        capture_for_tray(|request| match request.request {
             QueryRequest::ProjectList(_) => Ok(QueryResult::ProjectList(ProjectListResult {
                 projects: projects.clone(),
                 counts: counts.clone(),
@@ -405,19 +405,24 @@ mod label_tests {
     #[test]
     fn closed_and_archived_sessions_have_no_tray_targets_or_binding_notes() {
         for archived in [false, true] {
-            let captured = paused_session(SessionState::Closed, archived);
+            let (captured, bindings) = paused_session(SessionState::Closed, archived);
             assert!(captured.rows.is_empty());
             assert!(captured.labels.is_empty());
             assert!(captured.diagnostics.is_empty());
+            assert!(super::super::diagnostics::Diagnostics::default()
+                .render(&captured.labels, &bindings)
+                .is_empty());
         }
     }
 
     #[test]
     fn owner_paused_open_session_keeps_its_status_note() {
-        let captured = paused_session(SessionState::Active, false);
+        let (captured, bindings) = paused_session(SessionState::Active, false);
         assert_eq!(captured.labels.len(), 1);
-        assert_eq!(captured.diagnostics.len(), 1);
-        assert!(captured.diagnostics[0].ends_with(": paused"));
+        let diagnostics =
+            super::super::diagnostics::Diagnostics::default().render(&captured.labels, &bindings);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].ends_with(": paused"));
     }
 
     fn binding() -> BindingSummary {

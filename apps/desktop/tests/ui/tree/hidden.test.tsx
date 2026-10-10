@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { immutable } from '../../../src/data';
-import { hiddenGroupKey, hiddenItems, hiddenSource } from '../../../src/ui/tree/hidden';
+import { hiddenGroupKey, hiddenItems, hiddenParentSource, hiddenSource } from '../../../src/ui/tree/hidden';
 import { treeModel, type TreeInput } from '../../../src/ui/tree/model';
 import { AppTransport, route } from '../app/transport';
 import { FILTER_STATUSES } from '../../../src/selectors/tree/folds';
@@ -21,9 +21,21 @@ describe('hidden item tree projection', () => {
     expect(hiddenSource(current, new Set(['1.1']), '1.1')).toBe('1.1');
     expect(hiddenSource(current, new Set(['1']), '1.1.1')).toBe('1');
     expect(hiddenSource(current, new Set(['1', '1.1']), '1.1.1')).toBe('1.1');
+    expect(hiddenParentSource(current, new Set(['1', '1.1']), '1.1')).toBe('1');
+    expect(hiddenParentSource(current, new Set(['1', '1.1', '1.1.1']), '1.1.1')).toBe('1.1');
+    expect(hiddenParentSource(current, new Set(['1.1']), '1.1')).toBeNull();
+    expect(hiddenParentSource(current, new Set(['1']), '1')).toBeNull();
+    expect(hiddenParentSource(current, new Set(['1']), 'missing')).toBeNull();
     expect(hiddenSource(current, new Set([session.items['1']!.topic_id]), '1.1')).toBeNull();
     session.topics[session.items['1']!.topic_id]!.archived_at = '2026-10-07T12:00:00Z';
     expect(hiddenSource(immutable(session), new Set(), '1.1')).toBeNull();
+  });
+
+  it('does not mistake the selected item for its own hidden parent in a malformed cycle', () => {
+    const { session } = fixture();
+    session.items['1']!.parent = '1.1';
+    expect(hiddenParentSource(immutable(session), new Set(['1.1']), '1.1')).toBeNull();
+    expect(hiddenParentSource(immutable(session), new Set(), '1.1')).toBeNull();
   });
 
   it('retains saved item and topic folds when a full status set means All', () => {

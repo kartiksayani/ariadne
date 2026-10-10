@@ -6,30 +6,41 @@ use ariadne_domain::models::{
 
 #[test]
 fn launch_notes_follow_the_current_open_session_state() {
-    for (state, archived, connection, expected) in [
+    for (state, archived, connection, previous_connection, expected) in [
         (
             SessionState::Closed,
             false,
             ConnectionState::Disconnected,
+            false,
             vec![],
         ),
         (
             SessionState::Closed,
             true,
             ConnectionState::Disconnected,
+            false,
             vec![],
         ),
         (
             SessionState::Active,
             false,
             ConnectionState::Connected,
+            false,
             vec![],
         ),
         (
             SessionState::Active,
             false,
             ConnectionState::Disconnected,
+            false,
             vec!["Notes sync: could not start"],
+        ),
+        (
+            SessionState::Active,
+            false,
+            ConnectionState::Reconnecting,
+            true,
+            vec!["Notes sync: reconnecting"],
         ),
     ] {
         let mut projects: Page<ProjectSummary> = serde_json::from_str(include_str!(
@@ -55,8 +66,13 @@ fn launch_notes_follow_the_current_open_session_state() {
         binding.owner_paused = state == SessionState::Closed;
         let mut lifecycle = Diagnostics::default();
         lifecycle.replace(
-            vec![LifecycleNote::binding(
+            vec![LifecycleNote::connection(
                 binding.id.as_str(),
+                if previous_connection {
+                    "00000000-0000-4000-8000-000000000099"
+                } else {
+                    binding.generation.as_str()
+                },
                 "could not start",
             )],
             false,

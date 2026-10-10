@@ -251,14 +251,16 @@ for (const id of [...designFrames, ...variantIds]) {
   });
 }
 
-for (const width of [1920, 1600, 1280]) {
-  test(`failed-delivery layout at ${width}px`, async ({ page, origin }) => {
+for (const width of [1920, 1600, 1280]) for (const acceptedFailure of [false, true]) {
+  test(`${acceptedFailure ? 'delivered-stopped' : 'failed-delivery'} layout at ${width}px`, async ({ page, origin }) => {
     const denied: string[] = [];
     await route(page.context(), origin, denied);
-    await openApp(page, origin, { ...frameSpec('1m'), width });
+    await openApp(page, origin, { ...frameSpec(acceptedFailure ? 'delivery-stopped' : '1m'), width });
     for (const selector of ['.tree-item[data-item-id="3.1"]', '.shell-detail-scroll']) {
-      const note = page.locator(`${selector} .stuck-note[data-stuck="decision"]`).first();
+      const note = page.locator(`${selector} .stuck-note[data-stuck="${acceptedFailure ? 'stopped' : 'decision'}"]`).first();
       await expect(note).toBeVisible();
+      await expect(note.locator(':scope > [role="status"]')).toContainText(acceptedFailure ? 'got your message but stopped before answering' : 'Couldn’t deliver');
+      await expect(note.getByRole('button', { name: acceptedFailure ? 'Send again' : 'Retry', exact: true })).toBeVisible();
       const layout = await note.evaluate(element => {
         const status = element.querySelector<HTMLElement>(':scope > [role="status"]')!;
         const actions = element.querySelector<HTMLElement>(':scope > .stuck-actions')!;
@@ -279,10 +281,10 @@ for (const width of [1920, 1600, 1280]) {
       expect(layout.status.width, `${selector} status width`).toBeGreaterThanOrEqual(190);
       for (const word of layout.words) expect(word.lines, `${selector}: ${word.word}`).toBe(1);
       // Only the wider window has room for the reason and all four buttons beside it.
-      if (width === 1920 && selector.startsWith('.tree-item')) {
+      if (!acceptedFailure && width === 1920 && selector.startsWith('.tree-item')) {
         expect(layout.actions.x).toBeGreaterThan(layout.status.right);
         expect(layout.actions.y).toBeLessThan(layout.status.bottom);
-      } else expect(layout.actions.y).toBeGreaterThanOrEqual(layout.status.bottom);
+      } else if (!acceptedFailure) expect(layout.actions.y).toBeGreaterThanOrEqual(layout.status.bottom);
       for (const button of layout.buttons) {
         expect(button.x).toBeGreaterThanOrEqual(layout.note.x - 0.5);
         expect(button.right).toBeLessThanOrEqual(layout.note.right + 0.5);
@@ -291,6 +293,25 @@ for (const width of [1920, 1600, 1280]) {
     expect(denied).toEqual([]);
   });
 }
+
+test('a long waiting conversation opens at its latest ask and keeps the question visible', async ({ page, origin }) => {
+  const denied: string[] = [];
+  await route(page.context(), origin, denied);
+  await openApp(page, origin, { ...frameSpec('1u'), width: 1400, height: 830 });
+  const pane = page.locator('.item-detail'), body = pane.locator('.detail-body'), head = body.locator('.detail-head');
+  await expect(body.locator('.detail-turn-now .detail-waiting-tag')).toBeInViewport();
+  await expect(head.locator('.detail-question')).toBeInViewport();
+  await expect(head.locator('.detail-badge')).toBeInViewport();
+  await expect(head.locator('.detail-question')).toHaveAttribute('title', /\S+/);
+  expect(await body.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+  await body.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await expect(head.locator('.detail-question')).toBeInViewport();
+  await expect(head.locator('.detail-badge')).toBeInViewport();
+  await head.getByRole('button', { name: 'Expand title', exact: true }).click();
+  await expect(head.getByRole('button', { name: 'Collapse title', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  await expect(head.locator('.detail-meta')).toBeVisible();
+  expect(denied).toEqual([]);
+});
 
 for (const id of answerFrameIds) {
   test(`frame ${id}`, async ({ page, origin }, testInfo) => {
@@ -303,10 +324,12 @@ for (const id of answerFrameIds) {
     const detail = page.getByRole('complementary', { name: 'Item detail', exact: true });
     const notice = detail.locator('.shell-detail-hidden-notice');
     if (spec.hiddenItems) {
-      await expect(notice).toContainText(spec.hiddenItems.includes(spec.selected!) ? 'Hidden — this item is hidden from the list.' : 'Hidden with its parent “Review the shared examples”');
+      const inherited = spec.hiddenItems.includes('2.1');
+      const alsoHidden = spec.hiddenItems.includes(spec.selected!);
+      await expect(notice).toContainText(inherited ? `${alsoHidden ? 'Hidden, along with' : 'Hidden with'} its parent “Review the shared examples”${alsoHidden ? '.' : ''}` : 'Hidden — this item is hidden from the list.');
       await expect(notice).toBeInViewport();
       await expect(detail.getByRole('button', { name: 'Unhide item', exact: true })).toHaveAttribute('aria-pressed', 'true');
-      await expect(detail.getByRole('button', { name: 'Unhide item', exact: true })).toHaveAttribute('title', 'Unhide');
+      await expect(detail.getByRole('button', { name: 'Unhide item', exact: true })).toHaveAttribute('title', inherited ? 'Unhide this item and its hidden parents' : 'Unhide');
     }
     await composer.fill('Keep the captions with the examples.');
     const space = async () => {
@@ -323,9 +346,7 @@ for (const id of answerFrameIds) {
     };
     await space();
     if (spec.answerOptions) {
-      const choices = dock.locator('.answer-choices');
-      await choices.locator('summary').click();
-      await expect(choices).toHaveAttribute('open', '');
+      await expect(dock.locator('.answer-choices')).toBeVisible();
       const description = dock.locator('.answer-description').first(), more = dock.locator('.answer-more').first();
       const fullText = await description.textContent();
       const clamped = await description.evaluate(element => ({ height: element.getBoundingClientRect().height, line: parseFloat(getComputedStyle(element).lineHeight), scroll: element.scrollHeight }));
@@ -404,10 +425,9 @@ for (const id of dockFrameIds) {
     expect(lines.height, 'resting composer is one line').toBeLessThanOrEqual(Math.max(lines.minimum, Math.ceil(lines.line + lines.padding + lines.border)));
     if (spec.dockState === 'question') {
       const choices = dock.locator('.answer-choices');
-      await expect(choices.locator('summary')).toContainText('Choices');
-      await expect(choices).not.toHaveAttribute('open');
+      await expect(choices).toBeVisible();
       await expect(dock.locator('[data-answer-option]')).toHaveCount(2);
-      await expect(dock.locator('[data-answer-option]').first()).not.toBeVisible();
+      for (const option of await dock.locator('[data-answer-option]').all()) await expect(option).toBeInViewport();
     } else {
       await expect(dock.getByRole('button', { name: 'Ack → Decided', exact: true })).toBeInViewport();
       await expect(dock.getByRole('button', { name: 'Reply', exact: true })).toBeInViewport();
@@ -430,7 +450,7 @@ for (const id of dockFrameIds) {
       return { conversation: Math.max(0, bottom - top) / pane.height, dock: dock.height / pane.height,
         bodyBottom: body.bottom, dockTop: dock.top, dockBottom: dock.bottom, paneBottom: pane.bottom };
     });
-    expect(geometry.conversation, `visible resting Conversation at ${spec.width}×${spec.height}`).toBeGreaterThanOrEqual(0.70);
+    expect(geometry.conversation, `visible resting Conversation at ${spec.width}×${spec.height}`).toBeGreaterThanOrEqual(spec.dockState === 'question' ? 0.55 : 0.70);
     expect(geometry.dock, 'dock uses at most 40% of the pane').toBeLessThanOrEqual(0.40);
     if (spec.dockState === 'pending') expect(geometry.dock, 'pending Open dock uses at most 25% of the portrait pane').toBeLessThanOrEqual(0.25);
     expect(geometry.bodyBottom).toBeLessThanOrEqual(geometry.dockTop + 1);

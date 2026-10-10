@@ -28,7 +28,7 @@ impl ActivationHandoffs {
                     | ActivationOutcome::Failed { scope, .. }
                     | ActivationOutcome::Stopped { scope, .. } => scope,
                 };
-                seen.insert(scope.binding_id.clone())
+                seen.insert((scope.binding_id.clone(), scope.generation.clone()))
             })
             .filter_map(|outcome| {
                 let (scope, text) = match outcome {
@@ -43,7 +43,11 @@ impl ActivationHandoffs {
                         Ok(_) => return None,
                     },
                 };
-                Some(LifecycleNote::binding(scope.binding_id.as_str(), text))
+                Some(LifecycleNote::connection(
+                    scope.binding_id.as_str(),
+                    scope.generation.as_str(),
+                    text,
+                ))
             })
             .collect()
     }

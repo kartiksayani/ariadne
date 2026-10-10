@@ -135,7 +135,7 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
     items.find(item => item.id === '2.1.1')!.updated.push(19);
     submissions.push({ item: '2.1.1', choice: 0, stage: 'received', message: 19 });
   }
-  if (spec.scenario === 'failed') submissions.push({ item: '3.1', choice: 0, stage: 'failed' }, { item: '2.1.1', choice: 0, stage: 'checking' });
+  if (spec.scenario === 'failed') submissions.push({ item: '3.1', choice: 0, stage: spec.acceptedFailure ? 'stopped' : 'failed' }, { item: '2.1.1', choice: 0, stage: 'checking' });
   const sessions = project ? data.PROJECT_SESSIONS : [data.PROJECT_SESSIONS[0]];
   const projects = project ? data.PROJECTS : [data.PROJECTS[0]];
   // A topic lives in the last session it was worked in (TOPIC_SESSIONS); the
@@ -152,12 +152,13 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
 }
 
 /** One answer of the prototype's `subs`: the item, the option index, its delivery stage and the owner message it posted. */
-interface Submission { readonly item: string; readonly choice: number; readonly stage: 'received' | 'failed' | 'checking'; readonly message?: number }
+interface Submission { readonly item: string; readonly choice: number; readonly stage: 'received' | 'failed' | 'stopped' | 'checking'; readonly message?: number }
 
 /** The attempt facts that `deliveryEvidence` reads as each stage. */
 const attemptFacts = (stage: Submission['stage']): Pick<Attempt,'acceptance' | 'turn_state' | 'error'> => stage === 'received'
   ? { acceptance: 'accepted', turn_state: 'running', error: null }
-  : stage === 'failed' ? { acceptance: 'accepted', turn_state: 'failed', error: { code: 'turn_failed', reason: 'The host turn failed.', retryable: true, observed_at: at(0, '15:05') } }
+  : stage === 'failed' ? { acceptance: 'rejected', turn_state: 'unknown', error: { code: 'delivery_rejected', reason: 'The host refused the message.', retryable: true, observed_at: at(0, '15:05') } }
+    : stage === 'stopped' ? { acceptance: 'accepted', turn_state: 'failed', error: { code: 'turn_failed', reason: 'The host turn failed.', retryable: true, observed_at: at(0, '15:05') } }
     : { acceptance: 'uncertain', turn_state: 'unknown', error: { code: 'delivery_uncertain', reason: 'Bridge disconnected during acceptance.', retryable: false, observed_at: at(0, '15:05') } };
 
 const counts = (sessions: readonly Session[]): SummaryCounts => {
