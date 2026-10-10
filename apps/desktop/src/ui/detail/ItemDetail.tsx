@@ -238,15 +238,16 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   blankShown.current = slots.length === 1 && slots[0]?.id === null;
   const slotKey = (slot: Words) => slot.id === null || slot.id === lead.current ? 'blank' : slot.id;
 
-  // Opening the item, and sending, show the latest message, as chat apps do. A message that arrives
-  // while the owner reads further up leaves the view where it is. An item with nothing said yet (no conversation, or
-  // only the open ask, which the head already carries) opens at its head.
-  // Whether the owner is at the end is read from where the pane really is afterwards, so an item opened at its head (nothing
-  // said yet, a long head) stays there when its first message arrives.
+  // Open at the conversation: its start for an unanswered ask, its end after an exchange.
+  // The item's references remain above it in the same scroller. Arrivals leave a reader where they are.
   const showLatest = () => {
     const pane = body.current;
     if (!pane) return;
     if (pane.querySelector('.detail-chat [data-owner-said="true"], .detail-chat .detail-msg-result')) pane.scrollTop = pane.scrollHeight;
+    else {
+      const chat = pane.querySelector('.detail-chat');
+      if (chat) pane.scrollTop += chat.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+    }
     atEnd.current = nearEnd(pane);
   };
   const sentJustNow = () => { justSent.current = true; showLatest(); };

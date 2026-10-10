@@ -7,13 +7,19 @@ export function hiddenItems(session: Immutable<Session>, explicit: ReadonlySet<s
   const hidden = new Set<string>();
   for (const item of Object.values(session.items)) {
     if (!item) continue;
-    const seen = new Set<string>();
-    for (let id: string | null = item.id; id && !seen.has(id); id = session.items[id]?.parent ?? null) {
-      if (explicit.has(id)) { hidden.add(item.id); break; }
-      seen.add(id);
-    }
+    if (hiddenSource(session, explicit, item.id)) hidden.add(item.id);
   }
   return hidden;
+}
+
+/** The item whose preference hides this row: itself, or its nearest hidden ancestor. */
+export function hiddenSource(session: Immutable<Session>, explicit: ReadonlySet<string>, itemId: string): string | null {
+  const seen = new Set<string>();
+  for (let id: string | null = itemId; id && !seen.has(id); id = session.items[id]?.parent ?? null) {
+    if (explicit.has(id)) return id;
+    seen.add(id);
+  }
+  return null;
 }
 
 export const hiddenGroupKey = (topicId: string, parent: string | null) => `hidden:${topicId}:${parent ?? ''}`;

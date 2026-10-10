@@ -1979,8 +1979,8 @@ describe('the item detail reads like a chat', () => {
     for (const option of options) expect(order(option, box)).toBe(true);
     // Quick replies and composer are one group, the replies first.
     const group = dock!.querySelector('.answer')!;
-    expect([...group.children].map(child => child.className.split(' ')[0])).toEqual(['answer-options', 'answer-send-row', 'answer-reply']);
-    expect(group.lastElementChild!.contains(box)).toBe(true);
+    expect([...group.children].map(child => child.className.split(' ')[0])).toEqual(['answer-options', 'answer-send-row', 'answer-reply', 'answer-hint']);
+    expect(group.querySelector('.answer-reply')!.contains(box)).toBe(true);
   });
   it('shows no composer on a closed item, only its revisit actions, docked in the same place', async () => {
     const { dock, body } = await view('1');
@@ -1989,6 +1989,24 @@ describe('the item detail reads like a chat', () => {
     expect(within(dock!).getByRole('region', { name: 'Revisit' })).toBeTruthy();
     expect(within(dock!).getAllByRole('button').length).toBeGreaterThan(0);
     expect(body.contains(dock)).toBe(false);
+  });
+  it('keeps the saved choice and exact note through description toggles and resize', async () => {
+    const user = userEvent.setup(), { dock, value } = await view('2', session => {
+      for (const option of session.items['2']!.options) option.consequence = 'Read the examples and captions before deciding. '.repeat(12);
+    });
+    const box = within(dock!).getByRole('textbox', { name: 'Reply in your own words' });
+    const note = ' Keep the captions.\n  Include the examples. ';
+    fireEvent.change(box, { target: { value: note } });
+    const choice = dock!.querySelectorAll<HTMLButtonElement>('[data-answer-option]')[1]!;
+    await user.click(choice);
+    const more = within(dock!).getByRole('button', { name: 'More about Keep the design' });
+    await user.click(more); await user.keyboard('{Enter}');
+    fireEvent(window, new Event('resize'));
+    expect((box as HTMLTextAreaElement).value).toBe(note);
+    expect(choice.getAttribute('aria-pressed')).toBe('true');
+    const saved = Object.values(value.drafts.getSnapshot().entries).find(entry => entry.draft.target.item_id === '2')!.draft;
+    expect(saved.text).toBe(note); expect(saved.selected_option_id).toBe('no');
+    expect(value.calls).toHaveLength(0);
   });
   it('ends the conversation with a queued message as a pending bubble, once', async () => {
     const { chat } = await view('4');
@@ -2066,24 +2084,27 @@ describe('the item detail reads like a chat', () => {
       expect(within(turns(chat()!).filter(turn => turn.dataset.round).at(-1)!).getByText('Waiting on you')).toBeTruthy();
     });
   });
-  it('lets an item opened at its head stay there when its first message arrives; only a reader at the end follows', async () => {
+  it('opens an unanswered ask at the conversation and keeps a reader there when its first reply arrives', async () => {
     const height = vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(900);
     const client = vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(300);
+    const bounds = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      return { top: this.classList.contains('detail-chat') ? 340 : 100 } as DOMRect;
+    });
     try {
-      // Nothing said yet: the item opens at its head, with more below it.
+      // References take 240px before the conversation; opening scrolls past them.
       const { value, body } = await view('2', session => {
         const round = Object.values(session.rounds).find(entry => entry!.item_id === '2')!;
         round.owner_message_ids = []; round.agent_message_ids = []; round.result_input_ids = [];
         for (const input of Object.values(session.inputs)) if (input!.target.item_id === '2') input!.state = 'cancelled';
       });
-      expect(body.scrollTop).toBe(0);
-      // The owner's first message appears while they read the head: the view stays.
+      expect(body.scrollTop).toBe(240);
+      // The owner's first message appears while they read the ask: the view stays.
       const input = value.session.inputs[demoId('71')]!;
       input.state = 'queued'; input.kind = 'answer'; input.payload.text = 'Keep the design'; value.session.revision++;
       await act(async () => { await value.store.refresh(); });
       await waitFor(() => expect(document.querySelector('.detail-chat .detail-bubble-you')).toBeTruthy());
-      expect(body.scrollTop).toBe(0);
-    } finally { height.mockRestore(); client.mockRestore(); }
+      expect(body.scrollTop).toBe(240);
+    } finally { height.mockRestore(); client.mockRestore(); bounds.mockRestore(); }
   });
   it('shows where a copied item came from with the item’s references, not under the composer', async () => {
     const value = await setup(), item = value.session.items['8']!;

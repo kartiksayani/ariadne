@@ -14,6 +14,7 @@ export interface BodyProps {
   readonly onCloseDetail?: () => void;
   readonly onRemove?: () => void;
   readonly hidden?: boolean;
+  readonly hiddenNotice?: string;
   readonly onHide?: () => void;
   /** The owner's saved detail width; null or absent for the default. */
   readonly detailWidth?: number | null;
@@ -40,7 +41,7 @@ function useWidth(ref: RefObject<HTMLDivElement | null>): number | null {
   return width;
 }
 
-export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail, onRemove, hidden = false, onHide, detailWidth = null, onResizeDetail,
+export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail, onRemove, hidden = false, hiddenNotice, onHide, detailWidth = null, onResizeDetail,
   waitingFolded = false, onFoldWaiting }: BodyProps) {
   const ref = useRef<HTMLDivElement>(null);
   const history = useContext(ItemHistoryContext);
@@ -95,7 +96,7 @@ export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail,
     <div className={`shell-waiting${layout.folded ? ' shell-waiting-folded' : ''}`}>
       <WaitingFold.Provider value={fold}>{waiting}</WaitingFold.Provider></div>
     <main className="shell-center">{center}</main>
-    {detail && <aside className="shell-detail" aria-label="Item detail">
+    {detail && <aside className={`shell-detail${hidden ? ' shell-detail-hidden' : ''}`} aria-label="Item detail">
       {onResizeDetail && <div className="shell-detail-resize" role="separator" aria-orientation="vertical" aria-label="Resize detail panel"
         aria-valuemin={DETAIL_MIN} aria-valuemax={layout.detailMax} aria-valuenow={layout.detailWidth} tabIndex={0} title="Drag to resize; double-click for the default width"
         onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onKeyDown={keyDown}
@@ -107,9 +108,15 @@ export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail,
           <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Forward (⌘])" aria-label="Forward"
             disabled={!history.canForward} onClick={history.forward}><i className="ph ph-arrow-right" aria-hidden="true" /></button>
         </div>}
-        <div className="shell-detail-path">{detailPath}</div>
-        {onHide && <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title={hidden ? 'Unhide (x)' : 'Hide (x)'}
-          aria-label={hidden ? 'Unhide item' : 'Hide item'} onClick={onHide}><HideIcon hidden={hidden} /></button>}
+        <div className="shell-detail-path">
+          <div className="shell-detail-path-content" aria-hidden={hidden || undefined} inert={hidden || undefined}>{detailPath}</div>
+          {hidden && <div className="shell-detail-hidden-notice" role="status">
+            <span title={hiddenNotice ?? 'Hidden — this item is hidden from the list.'}>{hiddenNotice ?? 'Hidden — this item is hidden from the list.'}</span>
+            {onHide && <button type="button" className="btn btn-ghost" title={hiddenNotice ? 'Unhide this item and its hidden parents' : 'Unhide'} onClick={onHide}>Unhide</button>}
+          </div>}
+        </div>
+        {onHide && <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title={hidden ? 'Unhide' : 'Hide (x)'}
+          aria-label={hidden ? 'Unhide item' : 'Hide item'} aria-pressed={hidden} onClick={onHide}><HideIcon /></button>}
         <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Remove (⌫)" aria-label="Remove item" onClick={onRemove}>
           <i className="ph ph-trash" aria-hidden="true" /></button>
         <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Close (Esc)" aria-label="Close detail" onClick={onCloseDetail}>

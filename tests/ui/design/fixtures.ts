@@ -83,6 +83,24 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
     : review ? [...data.MSGS, ...data.REVIEW_MSGS, ...(thread ? data.THREAD_MSGS : [])] : data.MSGS);
   // The thread scenario: the backoff finding on its third round (Ariadne.dc.html:914).
   if (thread && !blank) Object.assign(items.find(item => item.id === '4.1')!, structuredClone(data.THREAD_PATCH));
+  if (spec.answerOptions !== undefined) {
+    const item = items.find(item => item.id === spec.selected)!;
+    item.q = 'How should we share the examples with the readers?';
+    item.ask = 'The examples are ready for a final read. Compare the choices before deciding.\n\n'
+      + 'Keep the `example.com` links and the short code samples together so readers can follow the explanation.\n\n'
+      + '- Read the introduction and check the examples.\n- Check the captions and the list of changes.\n- Add a note if a reader needs more context.\n\n'
+      + 'The conversation keeps the full explanation available while you consider the choices. '.repeat(8);
+    item.options = Array.from({ length: spec.answerOptions }, (_, index) => ({ id: `choice-${index + 1}`, rec: index === 0,
+      label: index === 0 ? 'Share the complete examples after checking the introduction and captions'
+        : `Choice ${index + 1}: share a shorter collection after reading the examples together`,
+      consequence: 'Readers get the introduction, examples and captions in one place. '
+        + 'Each example includes a short explanation and a link to example.com for the sample material. '.repeat(8)
+        + 'The final paragraph explains what to read next.' }));
+  }
+  for (const id of spec.hiddenItems ?? []) {
+    const item = items.find(item => item.id === id)!;
+    if (id !== spec.selected) item.q = 'Review the shared examples';
+  }
   let clock = 15 * 60 + 6;
   if (spec.state === 'clear') {
     items.filter(item => item.status === 'waiting').sort((a, b) => a.created - b.created).forEach(item => {
@@ -332,7 +350,8 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
     return { session: refs.get(id)!, tab_open: true, tab_order: order, selected_item_id: current ? spec.selected ?? null : null, expanded_item_ids: expanded(session),
       // The reveal scenario filters to Waiting (Ariadne.dc.html:938); the harness then reveals the selection through a route.
       filters: { search: '', statuses: current && spec.scenario === 'reveal' ? ['waiting_on_me'] : [], owners: [], topic_id: null, archived: current && spec.scenario === 'archive', hide_later: false },
-      rail: current && spec.rail ? 'activity' : 'hidden', scroll: null };
+      rail: current && spec.rail ? 'activity' : 'hidden', scroll: null,
+      ...(current && spec.hiddenItems ? { hidden_item_ids: [...spec.hiddenItems] } : {}) };
   });
   // 1y continues t5 from yesterday's codex session here; 1ad answers 5.3 in that session, whose agent isn't running (Ariadne.dc.html:955-957).
   const topicIn = (session: string, proto: string) => {

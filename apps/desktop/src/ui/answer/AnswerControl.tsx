@@ -1,7 +1,7 @@
 // The answer control (handoff "Answer Control.dc.html"): numbered options, the
 // Send row and, in the full variant, a reply box. Waiting cards (compact), the
 // tree's inline answer and the detail panel (full) all render this one control.
-import { useRef } from 'react';
+import { useId, useRef, useState } from 'react';
 import { useWorkspaceKeys } from '../keys';
 import { useGrow } from './useGrow';
 import './answer.css';
@@ -14,7 +14,7 @@ export interface AnswerOption {
 }
 
 /**
- * Props of the answer control. The control keeps no state: the caller owns the
+ * Props of the answer control. The caller owns the
  * selection and the draft (normally `useSubmit`, backed by the draft store).
  *
  * - `variant`: `compact` (Waiting card), `full` (tree row; adds the reply box
@@ -71,6 +71,7 @@ export function defaultSelection(options: readonly Pick<AnswerOption, 'id' | 're
 export function AnswerControl({ options, variant, selected, draft, warn, warnAction, blocked, locked = false, frozen = false, noText = false, label,
   onSelect, onDraft, onSendOption, onSendText, onEscape }: AnswerControlProps) {
   const root = useRef<HTMLDivElement>(null), text = useRef<HTMLTextAreaElement>(null);
+  const descriptionId = useId(), [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const chat = variant === 'chat', full = variant !== 'compact', picked = options[selected];
   useGrow(text, draft, chat);
   // `off` stops choosing and sending; only `locked` stops the owner typing.
@@ -117,13 +118,17 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
     },
   }, { scope: 'editor' });
   const hint = blocked ? '' : full && options.length > 1 ? `1–${Math.min(options.length, 9)} to select · Enter sends${withNote ? ' with your note' : ''} · Esc closes, keeps your draft` : `Enter sends${withNote ? ' with your note' : ''}`;
+  const chatHint = [!blocked && options.length > 1 ? `1–${Math.min(options.length, 9)} select` : '', !blocked && picked ? 'Enter sends' : '',
+    hasText ? '⌘↵ reply only' : '', 'Esc keeps draft'].filter(Boolean).join(' · ');
   return <div ref={root} className={`answer answer-${variant}${chat ? ' answer-full' : ''}`} role="group" aria-label={label} onKeyDown={keys}>
     {warn && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{warn}</span>
       {warnAction && <button type="button" className="btn btn-secondary answer-warn-action" onClick={event => { event.stopPropagation(); warnAction.onAction(); }}>{warnAction.label}</button>}</div>}
     <div className="answer-options">
       {options.map((option, index) => {
         const on = index === selected;
-        return <button type="button" key={option.id} data-answer-option={index} title={index < 9 ? `Press ${index + 1} to select, ⌥${index + 1} to send${draft.trim() ? ' with your note' : ''}` : 'Click to select, Enter to send'} aria-pressed={on} {...gate(locked, frozen)}
+        const open = expanded.has(option.id), id = `${descriptionId}-${index}`;
+        const shortcut = index < 9 ? `Press ${index + 1} to select, ⌥${index + 1} to send${draft.trim() ? ' with your note' : ''}` : 'Click to select, Enter to send';
+        const button = <button type="button" key={option.id} data-answer-option={index} title={chat ? `${option.label}\n${option.consequence}\n${shortcut}` : shortcut} aria-pressed={on} {...gate(locked, frozen)}
           className={`btn ${option.recommended ? 'btn-primary' : 'btn-secondary'} answer-option${on ? ' answer-option-on' : ''}${option.recommended ? ' answer-option-rec' : ''}`}
           onClick={event => { event.stopPropagation(); if (!off) onSelect(index); }}>
           <span className="answer-option-head">
@@ -131,8 +136,19 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
             <span className="answer-label">{option.label}</span>
             {on && <span className="answer-picked"><i className="ph ph-check" aria-hidden="true" /></span>}
           </span>
-          <span className="answer-consequence">{option.recommended && <span className="answer-recommended"><i className="ph-fill ph-star" aria-hidden="true" />Recommended</span>}{option.consequence}</span>
+          <span className="answer-consequence">{option.recommended && <span className="answer-recommended"><i className="ph-fill ph-star" aria-hidden="true" />Recommended</span>}{chat
+            ? <span id={id} className={`answer-description${open ? ' answer-description-open' : ''}`}>{option.consequence}</span> : option.consequence}</span>
         </button>;
+        return chat ? <div className="answer-card" key={option.id}>
+          {button}
+          {option.consequence && <button type="button" className="answer-more" aria-expanded={open} aria-controls={id}
+            aria-label={`${open ? 'Less' : 'More'} about ${option.label}`} onKeyDown={event => {
+              if (event.key === 'Enter' || event.key === ' ') event.stopPropagation();
+            }} onClick={event => {
+              event.stopPropagation();
+              setExpanded(current => { const next = new Set(current); if (next.has(option.id)) next.delete(option.id); else next.add(option.id); return next; });
+            }}>{open ? 'Less' : 'More'}</button>}
+        </div> : button;
       })}
     </div>
     {picked && <div className="answer-send-row">
@@ -141,7 +157,7 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
         <span className="answer-send-label">{full ? `Send “${picked.label}”${withNote ? ' with your note' : ''}` : 'Send answer'}</span>
         <span className="answer-enter" aria-hidden="true">↵</span>
       </button>
-      <span className="answer-hint">{hint}</span>
+      {!chat && <span className="answer-hint">{hint}</span>}
     </div>}
     {chat && !noText && <div className="answer-reply answer-composer">
       <div className="answer-composer-row">
@@ -150,8 +166,8 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
         <button type="button" className="btn btn-secondary answer-reply-send" {...gate(!draft.trim() || locked, frozen || !!blocked)}
           onClick={event => { event.stopPropagation(); sendText(); }}>Send as a reply only</button>
       </div>
-      <span className="answer-hint">⌘↵ sends as a reply only</span>
     </div>}
+    {chat && <span className="answer-hint">{chatHint}</span>}
     {full && !chat && !noText && <div className="answer-reply">
       <textarea className="input answer-text" aria-label="Reply in your own words" placeholder="Add a note to your choice, or reply on its own…" rows={2}
         value={draft} disabled={locked} onClick={event => event.stopPropagation()} onChange={event => onDraft(event.target.value)} />

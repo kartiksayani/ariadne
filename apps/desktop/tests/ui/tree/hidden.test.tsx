@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { immutable } from '../../../src/data';
-import { hiddenGroupKey, hiddenItems } from '../../../src/ui/tree/hidden';
+import { hiddenGroupKey, hiddenItems, hiddenSource } from '../../../src/ui/tree/hidden';
 import { treeModel, type TreeInput } from '../../../src/ui/tree/model';
 import { AppTransport, route } from '../app/transport';
 
@@ -13,6 +13,18 @@ function fixture(hidden: string[] = []) {
 }
 
 describe('hidden item tree projection', () => {
+  it('explains direct and inherited hiding, and keeps topic archive separate', () => {
+    const { session } = fixture();
+    session.items['1.1.1'] = { ...session.items['1.1']!, id: '1.1.1', parent: '1.1' };
+    const current = immutable(session);
+    expect(hiddenSource(current, new Set(['1.1']), '1.1')).toBe('1.1');
+    expect(hiddenSource(current, new Set(['1']), '1.1.1')).toBe('1');
+    expect(hiddenSource(current, new Set(['1', '1.1']), '1.1.1')).toBe('1.1');
+    expect(hiddenSource(current, new Set([session.items['1']!.topic_id]), '1.1')).toBeNull();
+    session.topics[session.items['1']!.topic_id]!.archived_at = '2026-10-07T12:00:00Z';
+    expect(hiddenSource(immutable(session), new Set(), '1.1')).toBeNull();
+  });
+
   it('hides a parent and its subtree without changing session data or its saved expansion', () => {
     const { session, view, model } = fixture(['1']), before = JSON.stringify(session);
     expect([...hiddenItems(immutable(session), new Set(['1']))]).toEqual(['1', '1.1']);

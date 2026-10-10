@@ -24,6 +24,10 @@ export interface FrameSpec {
   readonly hoverItem?: string;
   /** Topic names the frame shows folded (the review scenario folds t1-t3). */
   readonly collapseTopics?: readonly string[];
+  /** App-only answer frames exercise the dock independently of the immutable handoff. */
+  readonly answerOptions?: number;
+  readonly expandedAnswer?: number;
+  readonly hiddenItems?: readonly string[];
 }
 
 const wide = { width: 1600, height: 960 } as const, narrow = { width: 1280, height: 800 } as const;
@@ -61,10 +65,20 @@ const specs: readonly FrameSpec[] = [
   // 1b with the pointer on a row: a plain row gets the hover band; the selected row keeps its own band.
   { ...base, id: '1b-hover', design: '1b', selected: '1.3.1.2', detail: true, rail: true, hoverItem: '1.3.1' },
   { ...base, id: '1b-hover-selected', design: '1b', selected: '1.3.1.2', detail: true, rail: true, hoverItem: '1.3.1.2' },
+  { ...base, width: 1400, height: 830, id: 'answer-two-long', selected: '3.1', detail: true, answerOptions: 2 },
+  { ...base, width: 1400, height: 830, id: 'answer-two-expanded', selected: '3.1', detail: true, answerOptions: 2, expandedAnswer: 0 },
+  { ...base, width: 1400, height: 830, id: 'answer-nine', selected: '3.1', detail: true, answerOptions: 9 },
+  { ...base, width: 1400, height: 830, id: 'answer-one', selected: '3.1', detail: true, answerOptions: 1 },
+  { ...base, width: 1400, height: 830, id: 'answer-text', selected: '3.1', detail: true, answerOptions: 0 },
+  { ...base, width: 1400, height: 500, id: 'answer-short', selected: '3.1', detail: true, answerOptions: 2 },
+  { ...base, width: 1400, height: 830, id: 'detail-hidden', selected: '3.1', detail: true, answerOptions: 2, hiddenItems: ['3.1'] },
+  { ...base, width: 1400, height: 830, id: 'detail-hidden-parent', selected: '2.1.1', detail: true, answerOptions: 2, hiddenItems: ['2.1'] },
 ];
 
 /** Harness states drawn from another board frame's card (FrameSpec.design). */
 export const variantIds: readonly string[] = specs.filter(spec => spec.design).map(spec => spec.id);
+
+export const answerFrameIds: readonly string[] = specs.filter(spec => spec.answerOptions !== undefined).map(spec => spec.id);
 
 /** The fixed wall clock of the handoff page: 7 Oct 2026 15:10 UTC, after the last message of every frame (1i answers until 15:10). */
 export const designNow = Date.UTC(2026, 9, 7, 15, 10);

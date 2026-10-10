@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { AnswerControl, type AnswerControlProps } from '../../../src/ui/answer/AnswerControl';
 
 afterEach(cleanup);
@@ -12,8 +13,9 @@ describe('answer choice with an optional note', () => {
     const values = props({ variant }); render(<AnswerControl {...values} />);
     const send = screen.getByRole('button', { name: 'Send “Keep the design” with your note' });
     expect(send.classList.contains('btn-primary')).toBe(true);
-    expect(screen.getByTitle('Press 1 to select, ⌥1 to send with your note')).toBeTruthy();
-    expect(screen.getByText('Enter sends with your note')).toBeTruthy();
+    expect(screen.getByTitle(/Press 1 to select, ⌥1 to send with your note/).getAttribute('title')).toBe(variant === 'chat'
+      ? 'Keep the design\nKeep the current plan.\nPress 1 to select, ⌥1 to send with your note' : 'Press 1 to select, ⌥1 to send with your note');
+    expect(screen.getByText(variant === 'chat' ? 'Enter sends · ⌘↵ reply only · Esc keeps draft' : 'Enter sends with your note')).toBeTruthy();
     expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('Add a note to your choice, or reply on its own…');
     fireEvent.click(send);
     expect(values.onSendOption).toHaveBeenCalledExactlyOnceWith(0, values.draft);
@@ -42,5 +44,63 @@ describe('answer choice with an optional note', () => {
     expect(screen.getByRole('button', { name: 'Send “Keep the design”' })).toBeTruthy();
     expect(screen.getByTitle('Press 1 to select, ⌥1 to send')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Send as a reply only' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe('compact chat choices', () => {
+  const choices = [
+    { ...options[0]!, consequence: 'Keep the current plan and check each example before sending it. '.repeat(12) },
+    { id: 'no', label: 'Change the design after comparing the alternatives', consequence: 'Review the alternatives and explain the tradeoffs in the conversation. '.repeat(12), recommended: false },
+  ];
+  it('expands with a click or Enter while keeping the full accessible name, selection and draft', async () => {
+    const user = userEvent.setup(), values = props({ options: choices, variant: 'chat', selected: 1 });
+    const view = render(<AnswerControl {...values} />);
+    const choice = screen.getByRole('button', { name: `1${choices[0]!.label}Recommended${choices[0]!.consequence.trim()}` });
+    expect(choice.title).toContain(choices[0]!.consequence);
+    const more = screen.getByRole('button', { name: `More about ${choices[0]!.label}` });
+    const description = document.getElementById(more.getAttribute('aria-controls')!)!;
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    expect(description.textContent).toBe(choices[0]!.consequence);
+    await user.click(more);
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+    expect(description.classList.contains('answer-description-open')).toBe(true);
+    await user.keyboard('{Enter}');
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    expect(description.classList.contains('answer-description-open')).toBe(false);
+    expect(values.onSelect).not.toHaveBeenCalled(); expect(values.onDraft).not.toHaveBeenCalled();
+    expect(values.onSendOption).not.toHaveBeenCalled(); expect(values.onSendText).not.toHaveBeenCalled();
+    fireEvent(window, new Event('resize'));
+    view.rerender(<AnswerControl {...values} options={[...choices]} />);
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe(values.draft);
+    expect(screen.getByRole('button', { name: new RegExp(`2${choices[1]!.label}`) }).getAttribute('aria-pressed')).toBe('true');
+    expect(choice.getAttribute('aria-pressed')).toBe('false');
+    await user.click(more);
+    view.rerender(<AnswerControl {...values} selected={0} draft="Changed note" />);
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('Changed note');
+    choice.focus(); await user.keyboard('{Enter}');
+    expect(values.onSendOption).toHaveBeenCalledExactlyOnceWith(0, 'Changed note');
+  });
+  it('keeps 1–9 selection separate from sending and shows one shortcut line', async () => {
+    const user = userEvent.setup(), many = Array.from({ length: 9 }, (_, index) => ({ ...choices[1]!, id: `choice-${index}`, label: `Choice ${index + 1}` }));
+    const values = props({ options: many, variant: 'chat' });
+    const view = render(<AnswerControl {...values} />);
+    screen.getByRole('button', { name: 'More about Choice 1' }).focus();
+    await user.keyboard('9');
+    expect(values.onSelect).toHaveBeenCalledExactlyOnceWith(8);
+    expect(values.onSendOption).not.toHaveBeenCalled();
+    view.rerender(<AnswerControl {...values} selected={8} />);
+    expect(view.container.querySelectorAll('.answer-hint')).toHaveLength(1);
+    expect(screen.getByText('1–9 select · Enter sends · ⌘↵ reply only · Esc keeps draft')).toBeTruthy();
+    screen.getByRole('button', { name: /9Choice 9/ }).focus(); await user.keyboard('{Enter}');
+    expect(values.onSendOption).toHaveBeenCalledExactlyOnceWith(8, values.draft);
+  });
+  it('offers just the composer and its shortcuts for a free-text question', async () => {
+    const user = userEvent.setup(), values = props({ options: [], variant: 'chat', selected: -1 });
+    render(<AnswerControl {...values} />);
+    expect(screen.queryByRole('button', { name: /More about|Send “/ })).toBeNull();
+    expect(screen.getByText('⌘↵ reply only · Esc keeps draft')).toBeTruthy();
+    screen.getByRole('textbox').focus(); await user.keyboard('{Meta>}{Enter}{/Meta}');
+    expect(values.onSendText).toHaveBeenCalledExactlyOnceWith(values.draft);
   });
 });

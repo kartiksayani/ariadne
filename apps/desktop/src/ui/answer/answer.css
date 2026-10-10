@@ -207,16 +207,49 @@ textarea.answer-text {
 
 /* Chat variant (the detail's docked composer): quick replies above a one-line reply box that grows as you type. */
 .answer-chat .answer-options {
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  max-height: 30vh;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  align-items: start;
   padding: 2px;
   margin: -2px;
-  overflow-y: auto;
 }
 
 .answer-chat .answer-option {
   min-height: 0;
   padding: 7px 10px 8px;
+}
+
+.answer-card {
+  min-width: 0;
+}
+
+.answer-chat .answer-recommended {
+  display: flex;
+}
+
+.answer-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.answer-description-open {
+  display: block;
+}
+
+.answer-more {
+  margin: 3px 0 0 36px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--a-acc-text);
+  font: inherit;
+  font-size: calc(11.5px * var(--text-scale));
+  cursor: pointer;
+}
+
+.answer-more:hover {
+  text-decoration: underline;
 }
 
 .answer-composer {
