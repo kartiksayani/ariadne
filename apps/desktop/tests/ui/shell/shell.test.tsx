@@ -23,6 +23,19 @@ function props(patch: Partial<ShellProps> = {}): ShellProps {
   };
 }
 
+function measureBody(initialWidth: number): (width: number) => void {
+  let resize: ((width: number) => void) | undefined;
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(private readonly receive: ResizeObserverCallback) {}
+    observe() {
+      resize = width => this.receive([{ contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+      resize(initialWidth);
+    }
+    disconnect() {}
+  });
+  return width => act(() => resize?.(width));
+}
+
 describe('Paperwhite shell', () => {
   it('hides and unhides from the detail header next to Remove, and explains the key in the footer', () => {
     const hide = vi.fn();
@@ -177,6 +190,118 @@ describe('Paperwhite shell', () => {
       fireEvent.doubleClick(edge);
       expect(resize).toHaveBeenLastCalledWith(400);
     } finally { vi.useRealTimers(); }
+  });
+
+  it('drags beyond the open Waiting limit, folds it automatically, and fits the saved width when the window shrinks', () => {
+    const windowWidth = measureBody(2000), resize = vi.fn(), fold = vi.fn();
+    const value = props({ body: { waiting: <WaitingFrame count="2" />, center: null, detail: <p>Detail</p>,
+      onResizeDetail: resize, onFoldWaiting: fold } });
+    const { rerender } = render(<Shell {...value} />);
+    const edge = screen.getByRole('separator', { name: 'Resize detail panel' });
+    const grid = () => (document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns;
+    expect(grid()).toBe('300px minmax(560px,1fr) 400px');
+    expect(edge.getAttribute('aria-valuemax')).toBe('1576');
+    fireEvent.pointerDown(edge, { button: 0, clientX: 1600, pointerId: 1 });
+    fireEvent.pointerMove(edge, { clientX: 300, pointerId: 1 });
+    expect(grid()).toBe('44px minmax(380px,1fr) 1576px');
+    expect(screen.getByRole('button', { name: 'Show Waiting on me (2)' })).toBeTruthy();
+    expect(fold).not.toHaveBeenCalled();
+    fireEvent.pointerUp(edge, { pointerId: 1 });
+    expect(resize).toHaveBeenCalledExactlyOnceWith(1576);
+    rerender(<Shell {...value} body={{ ...value.body, detailWidth: 1576 }} />);
+    windowWidth(1200);
+    expect(grid()).toBe('44px minmax(380px,1fr) 776px');
+    expect(edge.getAttribute('aria-valuenow')).toBe('776');
+    expect(edge.getAttribute('aria-valuemax')).toBe('776');
+    windowWidth(2000);
+    expect(grid()).toBe('44px minmax(380px,1fr) 1576px');
+    expect(resize).toHaveBeenCalledOnce();
+  });
+
+  it('widens the detail panel to 976px in a 1400px window and restores the default tree and Waiting layout on reset', () => {
+    measureBody(1400);
+    const resize = vi.fn(), fold = vi.fn();
+    const value = props({ body: { waiting: <WaitingFrame count="2" />, center: <p>Centre column</p>, detail: <p>Detail</p>,
+      onResizeDetail: resize, onFoldWaiting: fold } });
+    const { rerender } = render(<Shell {...value} />);
+    const edge = screen.getByRole('separator', { name: 'Resize detail panel' });
+    const grid = () => (document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns;
+    expect(grid()).toBe('300px minmax(560px,1fr) 400px');
+    expect(edge.getAttribute('aria-valuemax')).toBe('976');
+    fireEvent.pointerDown(edge, { button: 0, clientX: 1000, pointerId: 1 });
+    fireEvent.pointerMove(edge, { clientX: 900, pointerId: 1 });
+    expect(grid()).toBe('300px minmax(560px,1fr) 500px');
+    fireEvent.pointerMove(edge, { clientX: 850, pointerId: 1 });
+    expect(grid()).toBe('44px minmax(560px,1fr) 550px');
+    fireEvent.pointerMove(edge, { clientX: 0, pointerId: 1 });
+    expect(grid()).toBe('44px minmax(380px,1fr) 976px');
+    expect(screen.getByRole('main').textContent).toBe('Centre column');
+    expect(screen.getByRole('button', { name: 'Show Waiting on me (2)' })).toBeTruthy();
+    expect(fold).not.toHaveBeenCalled();
+    fireEvent.pointerUp(edge, { pointerId: 1 });
+    expect(resize).toHaveBeenCalledExactlyOnceWith(976);
+    rerender(<Shell {...value} body={{ ...value.body, detailWidth: 976 }} />);
+    fireEvent.keyDown(edge, { key: 'ArrowRight' });
+    expect(grid()).toBe('44px minmax(396px,1fr) 960px');
+    fireEvent.keyDown(edge, { key: 'End' });
+    expect(grid()).toBe('44px minmax(380px,1fr) 976px');
+    fireEvent.blur(edge);
+    expect(resize).toHaveBeenLastCalledWith(976);
+    fireEvent.doubleClick(edge);
+    expect(resize).toHaveBeenLastCalledWith(400);
+    rerender(<Shell {...value} body={{ ...value.body, detailWidth: 400 }} />);
+    expect(grid()).toBe('300px minmax(560px,1fr) 400px');
+    expect(screen.getByRole('button', { name: 'Hide Waiting on me' })).toBeTruthy();
+  });
+
+  it('steps past the open Waiting limit and reaches the available width with End, while retaining minimum and default widths', () => {
+    vi.useFakeTimers();
+    try {
+      measureBody(2000);
+      const resize = vi.fn();
+      const value = props({ body: { waiting: null, center: null, detail: <p>Detail</p>, detailWidth: 1140, onResizeDetail: resize } });
+      const { rerender } = render(<Shell {...value} />);
+      const edge = screen.getByRole('separator', { name: 'Resize detail panel' });
+      const grid = () => (document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns;
+      expect(grid()).toBe('300px minmax(560px,1fr) 1140px');
+      fireEvent.keyDown(edge, { key: 'ArrowLeft' });
+      expect(grid()).toBe('44px minmax(560px,1fr) 1156px');
+      fireEvent.keyDown(edge, { key: 'End' });
+      expect(grid()).toBe('44px minmax(380px,1fr) 1576px');
+      act(() => { vi.advanceTimersByTime(600); });
+      expect(resize).toHaveBeenCalledExactlyOnceWith(1576);
+      rerender(<Shell {...value} body={{ ...value.body, detailWidth: 1576 }} />);
+      fireEvent.keyDown(edge, { key: 'End' });
+      fireEvent.keyDown(edge, { key: 'ArrowRight' });
+      expect(edge.getAttribute('aria-valuenow')).toBe('1560');
+      fireEvent.keyDown(edge, { key: 'Home' });
+      expect(grid()).toBe('300px minmax(560px,1fr) 320px');
+      act(() => { vi.advanceTimersByTime(600); });
+      expect(resize).toHaveBeenLastCalledWith(320);
+      fireEvent.doubleClick(edge);
+      expect(resize).toHaveBeenLastCalledWith(400);
+      rerender(<Shell {...value} body={{ ...value.body, detailWidth: 400 }} />);
+      expect(grid()).toBe('300px minmax(560px,1fr) 400px');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('reserves the rail when resizing, and keeps Waiting open when the owner peeks', () => {
+    measureBody(2000);
+    const resize = vi.fn(), fold = vi.fn();
+    render(<Shell {...props({ body: { waiting: <WaitingFrame count="2" />, center: null, detail: <p>Detail</p>, rail: <aside>Rail</aside>,
+      detailWidth: 1156, onResizeDetail: resize, onFoldWaiting: fold } })} />);
+    const edge = screen.getByRole('separator', { name: 'Resize detail panel' });
+    const grid = () => (document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns;
+    expect(grid()).toBe('44px minmax(560px,1fr) 1156px 240px');
+    expect(edge.getAttribute('aria-valuemax')).toBe('1336');
+    fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (2)' }));
+    expect(grid()).toBe('300px minmax(0,1fr) 1156px 240px');
+    expect(edge.getAttribute('aria-valuemax')).toBe('1460');
+    fireEvent.keyDown(edge, { key: 'End' });
+    expect(grid()).toBe('300px minmax(0,1fr) 1460px 240px');
+    expect(fold).not.toHaveBeenCalled();
+    fireEvent.blur(edge);
+    expect(resize).toHaveBeenCalledExactlyOnceWith(1460);
   });
 
   it('disables chrome controls while navigation writes', () => {

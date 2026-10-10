@@ -28,7 +28,7 @@
             "null"
           ],
           "format": "uint32",
-          "maximum": 720,
+          "maximum": 2400,
           "minimum": 320
         },
         "notification_ledger": {

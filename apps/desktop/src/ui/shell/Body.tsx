@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from 'react';
-import { bodyLayout, DETAIL_DEFAULT, DETAIL_MIN } from './model';
+import { bodyLayout, DETAIL_DEFAULT, DETAIL_MAX, DETAIL_MIN } from './model';
 import { WaitingFold } from './fold';
 import { ItemHistoryContext } from './itemHistory';
 import { HideIcon } from '../shared/HideIcon';
@@ -51,6 +51,8 @@ export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail,
   const start = useRef<{ x: number; width: number } | null>(null);
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const layout = bodyLayout({ width, detail: !!detail, rail: !!rail, detailWidth: drag ?? detailWidth, folded: waitingFolded, peek });
+  // Resizing can fold Waiting; the current open-column maximum must not stop that transition.
+  const resizeMax = bodyLayout({ width, detail: !!detail, rail: !!rail, detailWidth: DETAIL_MAX, folded: waitingFolded, peek }).detailMax;
   // Peeking ends once the window is wide enough again.
   useEffect(() => { if (!layout.narrow) setPeek(false); }, [layout.narrow]);
   useEffect(() => () => { if (settle.current) clearTimeout(settle.current); }, []);
@@ -64,7 +66,7 @@ export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail,
     setDrag(null);
     onResizeDetail?.(value);
   };
-  const clampWidth = (value: number) => Math.min(layout.detailMax, Math.max(DETAIL_MIN, Math.round(value)));
+  const clampWidth = (value: number) => Math.min(resizeMax, Math.max(DETAIL_MIN, Math.round(value)));
   const pointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -82,7 +84,7 @@ export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail,
   };
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const next = event.key === 'ArrowLeft' ? layout.detailWidth + STEP : event.key === 'ArrowRight' ? layout.detailWidth - STEP
-      : event.key === 'Home' ? DETAIL_MIN : event.key === 'End' ? layout.detailMax : null;
+      : event.key === 'Home' ? DETAIL_MIN : event.key === 'End' ? resizeMax : null;
     if (next === null) return;
     event.preventDefault();
     event.stopPropagation();
@@ -97,7 +99,7 @@ export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail,
     <main className="shell-center">{center}</main>
     {detail && <aside className="shell-detail" aria-label="Item detail">
       {onResizeDetail && <div className="shell-detail-resize" role="separator" aria-orientation="vertical" aria-label="Resize detail panel"
-        aria-valuemin={DETAIL_MIN} aria-valuemax={layout.detailMax} aria-valuenow={layout.detailWidth} tabIndex={0} title="Drag to resize; double-click for the default width"
+        aria-valuemin={DETAIL_MIN} aria-valuemax={resizeMax} aria-valuenow={layout.detailWidth} tabIndex={0} title="Drag to resize; double-click for the default width"
         onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onKeyDown={keyDown}
         onBlur={() => { if (settle.current && drag !== null) commit(drag); }} onDoubleClick={() => commit(DETAIL_DEFAULT)} />}
       <div className="shell-detail-head">

@@ -200,7 +200,8 @@ export const footerKeys: readonly { readonly k: string; readonly t: string }[] =
 
 /** Body column widths in CSS pixels. The detail bounds match the saved `detail_width` bounds. */
 export const WAITING_WIDTH = 300, WAITING_FOLDED = 44, CENTRE_MIN = 560, RAIL_WIDTH = 240;
-export const DETAIL_MIN = 320, DETAIL_MAX = 720, DETAIL_DEFAULT = 400;
+export const DETAIL_MIN = 320, DETAIL_MAX = 2400, DETAIL_DEFAULT = 400;
+const CENTRE_RESIZE_MIN = 380;
 
 export interface BodyLayoutInput {
   /** The body's width; null before it is measured. */
@@ -241,9 +242,13 @@ export function bodyLayout({ width, detail, rail, detailWidth, folded = false, p
   const strip = folded || (narrow && !peek);
   const waiting = strip ? WAITING_FOLDED : WAITING_WIDTH;
   // An owner-opened column in a narrow window squeezes the centre instead of scrolling the body.
-  const centreMin = narrow && !strip ? 0 : CENTRE_MIN;
-  const detailMax = clamp(Math.floor(room - waiting - centreMin - railWidth), DETAIL_MIN, DETAIL_MAX);
-  const shown = Math.min(wanted, detailMax);
+  const peekMin = narrow && !strip ? 0 : CENTRE_MIN;
+  const resizeMin = detail && peekMin ? CENTRE_RESIZE_MIN : peekMin;
+  const detailMax = clamp(Math.floor(room - waiting - resizeMin - railWidth), DETAIL_MIN, DETAIL_MAX);
+  // Only an owner-widened panel can borrow from the centre's usual minimum.
+  const widened = detail && wanted > DETAIL_DEFAULT;
+  const shown = Math.min(wanted, widened ? detailMax : clamp(Math.floor(room - waiting - peekMin - railWidth), DETAIL_MIN, DETAIL_MAX));
+  const centreMin = widened ? Math.min(peekMin, Math.max(resizeMin, Math.floor(room - waiting - shown - railWidth))) : peekMin;
   const centre = `minmax(${centreMin ? `${centreMin}px` : '0'},1fr)`;
   return { columns: `${waiting}px ${centre}${detail ? ` ${shown}px` : ''}${rail ? ` ${RAIL_WIDTH}px` : ''}`,
     folded: strip, auto: strip && !folded, narrow, detailWidth: shown, detailMax };
