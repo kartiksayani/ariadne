@@ -115,8 +115,8 @@ export function ItemRow({ row, selected, focused, disabled = false, highlight, n
   const details = preview(row, () => { if (row.replacedBy) onJump(row.replacedBy.id); }, unfolded);
   const muted = closed(item.status) || row.context || row.later || row.hidden;
   const actionButton = (action: RowAction) => <button key={action.title} type="button" tabIndex={action.persistent ? 0 : -1}
-    className={`tree-action${action.label ? ' tree-action-label' : ''}${action.persistent ? ' tree-action-ack' : ''}`} title={action.title} aria-label={action.title} disabled={action.disabled}
-    onClick={event => { event.stopPropagation(); action.run(); }}>{action.glyph ?? <i className={action.icon} />}{action.label}</button>;
+    className={`tree-action${action.persistent ? ' tree-action-ack' : ''}`} title={action.title} aria-label={action.title} disabled={action.disabled}
+    onClick={event => { event.stopPropagation(); action.run(); }}>{action.glyph ?? <i className={action.icon} />}{action.label && <span className="tree-action-label" aria-hidden="true">{action.label}</span>}</button>;
   const persistent = actions.filter(action => action.persistent), hover = actions.filter(action => !action.persistent);
   return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={row.depth + 1} aria-selected={selected} aria-disabled={disabled || undefined}
     aria-expanded={row.hasKids ? row.expanded : undefined} tabIndex={focused ? 0 : -1} className={`tree-row tree-item ${row.depth === 1 ? 'tree-item-root' : 'tree-item-child'}${row.hidden ? ' tree-item-hidden' : ''}`}
@@ -145,10 +145,12 @@ export function ItemRow({ row, selected, focused, disabled = false, highlight, n
       {row.relatedCount > 0 && <span className="tree-related" role="img" aria-label={`${row.relatedCount} related item${row.relatedCount === 1 ? '' : 's'}`}
         title={`${row.relatedCount} related item${row.relatedCount === 1 ? '' : 's'}`}><i className="ph ph-link" aria-hidden="true" />{row.relatedCount}</span>}
       {row.rounds >= 2 && <span className="tree-round" title="Rounds of back and forth"><i className="ph ph-arrows-clockwise" />Round {row.rounds}</span>}
-      {persistent.length > 0 && <span className="tree-ack-slot">{persistent.map(actionButton)}</span>}
-      {hover.length > 0 && <span className="tree-actions">{hover.map(actionButton)}</span>}
-      <span className="tree-id">{item.id}</span>
-      <StatusBadge status={status} label={row.badge} variant="text" />
+      {actions.length > 0 && <span className="tree-action-grid">
+        {persistent.length > 0 && <span className="tree-ack-slot">{persistent.map(actionButton)}</span>}
+        {hover.length > 0 && <span className="tree-actions">{hover.map(actionButton)}</span>}
+      </span>}
+      <span className="tree-row-status"><span className="tree-id">{item.id}</span>
+        <StatusBadge status={status} label={row.badge} variant="text" /></span>
     </div>
   </div>;
 }

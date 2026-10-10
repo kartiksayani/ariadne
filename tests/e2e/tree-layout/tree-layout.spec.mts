@@ -14,7 +14,8 @@ async function openTree(page: Page, origin: string) {
   await page.locator('.pw-project-open').first().click();
   const session = page.locator('button[data-session-id]').first();
   await expect(session).toBeEnabled(); await session.click();
-  await expect(page.locator('.tree-session-bar').getByRole('button', { name: 'Close session' })).toBeEnabled();
+  await expect(page.locator('.tree-session-bar').getByRole('button', { name: 'Session actions' })).toBeEnabled();
+  await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-status', 'ready');
 }
 
 test('folds a long preview to two lines, never rewraps on hover and never scrolls on a click', async ({ page }) => {
@@ -92,5 +93,46 @@ test('folds a long preview to two lines, never rewraps on hover and never scroll
     expect(rootPadding).toBeGreaterThan(await child.evaluate(element => parseFloat(getComputedStyle(element).paddingTop)));
     await expect(first).toHaveCSS('border-bottom-width', '1px');
     expect(errors).toEqual([]);
+  } finally { await server.close(); }
+});
+
+test('gives the title at least 60% of the row with all actions and keeps hover width stable', async ({ page }) => {
+  const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+    logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+  try {
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    const origin = `http://127.0.0.1:${address.port}`;
+    await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
+    await page.setViewportSize({ width: 1600, height: 960 });
+    await page.goto(`${origin}/tests/e2e/tree-layout/fixture.html?grid`);
+    await page.evaluate(async () => { await document.fonts.ready; });
+    const row = page.locator('.tree-item[data-item-id="1"]'), title = row.locator('.tree-question');
+    const bounds = (await row.boundingBox())!, text = (await title.boundingBox())!;
+    expect(text.width / bounds.width).toBeGreaterThanOrEqual(0.6);
+    const actions = row.locator('.tree-action');
+    await expect(actions).toHaveCount(8);
+    await row.hover();
+    expect((await title.boundingBox())!.width).toBe(text.width);
+    expect((await title.boundingBox())!.height).toBe(text.height);
+    const lines = new Set<number>();
+    for (const action of await actions.all()) {
+      await expect(action).toBeVisible();
+      const box = (await action.boundingBox())!;
+      expect(box.width).toBe(26); expect(box.height).toBe(24); lines.add(box.y);
+      const name = (await action.getAttribute('aria-label'))!;
+      await action.click(); await expect(page.getByLabel('Last action')).toHaveText(name);
+    }
+    expect(lines.size).toBe(2);
+    await row.locator('.tree-question').click(); await page.mouse.move(0, 0);
+    expect((await title.boundingBox())!.width).toBe(text.width);
+    const noActions = page.locator('.tree-item[data-item-id="2"]');
+    await expect(noActions.locator('.tree-action-grid')).toHaveCount(0);
+    expect((await noActions.locator('.tree-end').boundingBox())!.width).toBeLessThan((await row.locator('.tree-end').boundingBox())!.width);
+    await page.setViewportSize({ width: 320, height: 700 });
+    for (const item of [row, noActions]) {
+      expect(await item.evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(Math.ceil((await item.boundingBox())!.width));
+    }
   } finally { await server.close(); }
 });

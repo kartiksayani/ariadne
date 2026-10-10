@@ -138,9 +138,9 @@ describe('local acknowledgement', () => {
     expect(acks(transport)).toHaveLength(1);
     expect(item.status).toBe(target); expect(item.ack_to).toBeNull();
     expect(screen.queryByText('1 to ack')).toBeNull();
-    const band = row().closest('.tree-topic-group')!.querySelector<HTMLElement>('.tree-topic-end')!;
-    expect(band.textContent).toContain(target === 'open' ? '2 open' : '1 open');
-    expect(band.textContent).toContain(target === 'open' ? '1 in progress' : '2 in progress');
+    const counts = row().closest('.tree-topic-group')!.querySelector<HTMLElement>('.tree-topic-counts')!;
+    expect(counts.textContent).toContain(target === 'open' ? '2 open' : '1 open');
+    expect(counts.textContent).toContain(target === 'open' ? '1 in progress' : '2 in progress');
     expect(row().querySelector('.tree-outcome')?.textContent).toContain(item.outcome);
     expect(within(detail()).getByText(item.outcome)).toBeTruthy();
     expect(within(detail()).getByText(item.why)).toBeTruthy();
@@ -232,8 +232,9 @@ describe('local acknowledgement', () => {
     expect(document.querySelector('.shell-footer')?.textContent).toContain('ack / answer');
     const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
     expect(css).toMatch(/\.tree-actions\s*\{[^}]*visibility:\s*hidden/s);
-    expect(css).toMatch(/\.tree-ack-slot\s*\{[^}]*display:\s*flex;[^}]*flex:\s*none/s);
-    expect(css).toMatch(/\.tree-action-label\s*\{[^}]*white-space:\s*nowrap/s);
+    expect(button.closest('.tree-action-grid')).not.toBeNull();
+    expect(css).toMatch(/\.tree-ack-slot\s*\{[^}]*display:\s*contents/s);
+    expect(css).toMatch(/\.tree-action-label\s*\{[^}]*display:\s*none/s);
   });
 
   it.each(['done', 'decided', 'dropped'] as const)('names %s in the detail tooltip, refreshes and keeps Follow up and Back to Open', async target => {
