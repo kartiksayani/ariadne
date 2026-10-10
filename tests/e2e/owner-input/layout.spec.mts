@@ -244,7 +244,8 @@ test('keeps one sent answer with its delivery controls in the ordinary App', asy
       const headBox = (await head.boundingBox())!, receiptBox = (await receipt.boundingBox())!, sentBox = (await sent.boundingBox())!;
       expect(receiptBox.y, `receipt below the question at ${viewport.width}×${viewport.height}`).toBeGreaterThanOrEqual(headBox.y + headBox.height);
       expect(receiptBox.y, `delivery controls below their reply at ${viewport.width}×${viewport.height}`).toBeGreaterThanOrEqual(sentBox.y + sentBox.height);
-      for (const content of await head.locator('h2, .detail-status').all()) {
+      for (const content of await head.locator('h2, .detail-badge').all()) {
+        await expect(content).toBeVisible();
         const box = (await content.boundingBox())!;
         expect(box.y + box.height, `question head above receipt at ${viewport.width}×${viewport.height}`).toBeLessThanOrEqual(receiptBox.y);
       }
@@ -293,13 +294,10 @@ test('docks the composer under a scrolling detail body that grows it to a third 
       // Quick replies sit above the composer inside the dock.
       if (await dock.locator('[data-answer-option]').count()) {
         const choices = dock.locator('.answer-choices');
-        await choices.locator('summary').click();
-        await expect(choices).toHaveAttribute('open');
+        await expect(choices).toBeVisible();
         await expect(dock.locator('[data-answer-option]').first()).toBeVisible();
         const options = (await dock.locator('[data-answer-option]').first().boundingBox())!, box = (await composer.boundingBox())!;
         expect(options.y + options.height).toBeLessThanOrEqual(box.y);
-        await choices.locator('summary').click();
-        await expect(choices).not.toHaveAttribute('open');
       }
     }
     // One line when empty; grows with its text to about a third of the pane, then scrolls inside itself.
@@ -334,20 +332,17 @@ test('reads as a chat: oldest exchange first with no round headers, quick replie
     await ready(page);
     const pane = page.locator('.item-detail');
 
-    // A waiting item: Choices opens the quick replies above the composer.
+    // A waiting item shows every quick reply above the composer immediately.
     await page.locator('[data-item-id="2"]').click();
     const composer = pane.getByLabel('Reply in your own words');
     await expect(composer).toBeVisible();
     const options = pane.locator('.detail-dock [data-answer-option]');
     await expect(options).toHaveCount(2);
     const choices = pane.locator('.answer-choices');
-    await expect(choices).not.toHaveAttribute('open');
-    await expect(options.first()).not.toBeVisible();
-    await choices.locator('summary').click();
-    await expect(choices).toHaveAttribute('open');
+    await expect(choices).toBeVisible();
     const composerBox = (await composer.boundingBox())!;
     for (const option of await options.all()) {
-      await expect(option).toBeVisible();
+      await expect(option).toBeInViewport();
       const box = (await option.boundingBox())!;
       expect(box.y + box.height, 'quick reply above the composer').toBeLessThanOrEqual(composerBox.y);
     }

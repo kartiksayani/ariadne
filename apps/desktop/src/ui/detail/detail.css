@@ -52,11 +52,13 @@
   min-height: 0;
 }
 
-/* What the item is, ending in the conversation. It alone scrolls. */
+/* What the item is, ending in the conversation. It alone scrolls. The detail view follows the current
+   ask itself; browser anchoring must not move its chosen position. */
 .detail-body {
   flex: 1;
   min-height: 0;
   overflow: hidden auto;
+  overflow-anchor: none;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -145,6 +147,10 @@
   grid-column: 3;
   grid-row: 1;
   padding: 2px;
+}
+
+.detail-title-toggle:where([aria-expanded="true"]) > i {
+  transform: rotate(180deg);
 }
 
 .detail-section {

@@ -205,6 +205,8 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const handled = useRef<number | null>(null);
   // The scrolling body, and whether the owner is reading its end (the latest message) or has scrolled up.
   const body = useRef<HTMLDivElement>(null), atEnd = useRef(true), justSent = useRef(false);
+  // Following an ask is distinct from following the transcript's end: later context can follow the ask.
+  const followingAsk = useRef(false), positionedScroll = useRef<number | null>(null);
   const presence = session?.active_binding_id ? current.presence[session.active_binding_id] ?? null : null;
   // The session's write barrier, shared with the session bar: Resume, Cancel and Retry go through it.
   const actions = useMemo(() => sessionActionsFor(drafts.service, store), [drafts, store]);
@@ -247,18 +249,25 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     const pane = body.current;
     if (!pane) return;
     const waiting = pane.querySelector('.detail-turn-now');
-    const anchor = waiting?.querySelector('.detail-waiting-tag')?.closest('.detail-bubble-agent') ?? waiting;
+    const tag = waiting?.querySelector('.detail-waiting-tag');
+    const anchor = tag?.closest('.detail-bubble-agent') ?? waiting;
+    followingAsk.current = !!anchor;
     if (anchor) {
-      const headHeight = pane.querySelector('.detail-head')?.getBoundingClientRect().height ?? 0;
-      pane.scrollTop += anchor.getBoundingClientRect().top - pane.getBoundingClientRect().top - headHeight;
+      const bounds = pane.getBoundingClientRect(), headHeight = pane.querySelector('.detail-head')?.getBoundingClientRect().height ?? 0;
+      const top = anchor.getBoundingClientRect().top - bounds.top - headHeight;
+      // A long ask can exceed the available height. Keep its waiting marker visible and leave all its words scrollable.
+      const marker = tag?.getBoundingClientRect();
+      const bottom = marker && pane.clientHeight > 0 ? marker.top + marker.height - bounds.top - pane.clientHeight : top;
+      pane.scrollTop += Math.max(top, bottom);
     } else if (pane.querySelector('.detail-chat [data-owner-said="true"], .detail-chat .detail-msg-result')) pane.scrollTop = pane.scrollHeight;
     else {
       const chat = pane.querySelector('.detail-chat');
       if (chat) pane.scrollTop += chat.getBoundingClientRect().top - pane.getBoundingClientRect().top;
     }
+    positionedScroll.current = pane.scrollTop;
     atEnd.current = nearEnd(pane);
   };
-  useEffect(() => { atEnd.current = true; setTitleExpanded(false); }, [itemId]);
+  useEffect(() => { atEnd.current = true; followingAsk.current = false; positionedScroll.current = null; setTitleExpanded(false); }, [itemId]);
   const sentJustNow = () => { justSent.current = true; showLatest(); };
   const chatKey = model ? model.chat.map(entry => `${entry.id}:${entry.message.body}:${entry.result}:${entry.pending?.input.state}:${entry.asks.map(ask => `${ask.text}:${ask.now}`).join(',')}:${entry.forks.length}`).join('|') : null;
   useEffect(() => {
@@ -266,14 +275,20 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     if (atEnd.current || justSent.current) showLatest();
     justSent.current = false;
   }, [chatKey, itemId]);
-  // The composer growing shrinks the scrolling body; at the end of the chat, the end stays in view.
+  // Composer growth and late text/font reflow can move the ask without changing the body's own size.
+  // Reattach after renders so newly added sections and a replaced current turn are observed too.
   useEffect(() => {
     const element = body.current;
     if (!element || typeof ResizeObserver === 'undefined') return;
-    const watch = new ResizeObserver(() => { if (atEnd.current) showLatest(); });
+    const watch = new ResizeObserver(() => {
+      if (atEnd.current || followingAsk.current && element.querySelector('.detail-turn-now')) showLatest();
+    });
     watch.observe(element);
+    // A section above the conversation can change height while the chat only changes position.
+    for (const content of element.children) watch.observe(content);
+    for (const bubble of element.querySelectorAll('.detail-turn-now .detail-bubble-agent')) watch.observe(bubble);
     return () => watch.disconnect();
-  }, [chatKey === null]);
+  });
 
   // Words open in the box that fits the status, whichever box the action or a put-back names.
   const openBox = (next: OpenMode) => { setMode(next === 'drop' || !fit ? next : fit); setFocusBox(value => value + 1); };
@@ -370,7 +385,11 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     const target = session.items[id];
     return target && !itemRemoved(session, target.id) ? { label: shortLabel(target), status: displayStatus(session, target) } : null;
   }, onOpenItem }}><FileRefProject.Provider value={session.project_id}><article className="item-detail" data-detail-item-id={itemId} data-status={model.status} aria-label={`Detail of #${model.id}`}>
-    <div className="detail-body" ref={body} onScroll={event => { atEnd.current = nearEnd(event.currentTarget); }}>
+    <div className="detail-body" ref={body} onScroll={event => {
+      const pane = event.currentTarget;
+      if (pane.scrollTop !== positionedScroll.current) followingAsk.current = false;
+      atEnd.current = nearEnd(pane);
+    }}>
     <div className={`detail-head${titleExpanded ? ' detail-head-expanded' : ''}`}>
       {/* The handoff embeds the badge in a block host; its line box makes the row 23px. */}
       <div className="detail-status"><div className="detail-badge"><StatusBadge status={model.display} label={model.badgeLabel} /></div>
@@ -380,7 +399,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       <h2 className="detail-question" title={model.question}><Markdown text={model.question} inline compact={!titleExpanded} /></h2>
       <button type="button" className="btn btn-ghost detail-title-toggle" aria-label={titleExpanded ? 'Collapse title' : 'Expand title'}
         aria-expanded={titleExpanded} onClick={() => setTitleExpanded(value => !value)}>
-        <i className={titleExpanded ? 'ph ph-caret-up' : 'ph ph-caret-down'} aria-hidden="true" />
+        <i className="ph ph-caret-down" aria-hidden="true" />
       </button>
     </div>
 

@@ -280,11 +280,13 @@ for (const width of [1920, 1600, 1280]) for (const acceptedFailure of [false, tr
       // Enough room for ordinary words: recovery controls must never squeeze the reason to a sliver.
       expect(layout.status.width, `${selector} status width`).toBeGreaterThanOrEqual(190);
       for (const word of layout.words) expect(word.lines, `${selector}: ${word.word}`).toBe(1);
-      // Only the wider window has room for the reason and all four buttons beside it.
-      if (!acceptedFailure && width === 1920 && selector.startsWith('.tree-item')) {
-        expect(layout.actions.x).toBeGreaterThan(layout.status.right);
+      // Controls can sit beside the reason when they fit, or wrap completely below it.
+      const beside = layout.actions.x >= layout.status.right;
+      if (!acceptedFailure && width === 1920 && selector.startsWith('.tree-item')) expect(beside).toBe(true);
+      if (beside) {
         expect(layout.actions.y).toBeLessThan(layout.status.bottom);
-      } else if (!acceptedFailure) expect(layout.actions.y).toBeGreaterThanOrEqual(layout.status.bottom);
+        expect(layout.actions.bottom).toBeGreaterThan(layout.status.y);
+      } else expect(layout.actions.y).toBeGreaterThanOrEqual(layout.status.bottom);
       for (const button of layout.buttons) {
         expect(button.x).toBeGreaterThanOrEqual(layout.note.x - 0.5);
         expect(button.right).toBeLessThanOrEqual(layout.note.right + 0.5);
