@@ -11,9 +11,9 @@ async function setup(configure?: (transport: AppTransport) => void) {
   const open = await sessionButton(route);
   await act(async () => { fireEvent.click(open); });
   await screen.findByRole('tree', { name: 'Session items' });
-  // Restrict button lookup to the session bar; scanning every tree/queue action is costly in jsdom.
-  const sessionBar = within(screen.getByLabelText('Session'));
-  await waitFor(() => expect(sessionBar.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
+  // Check the bar trigger and session readiness without leaving a menu open.
+  expect(within(screen.getByLabelText('Session')).getByRole('button', { name: 'Session actions' })).toBeTruthy();
+  await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
   return transport;
 }
 it('focuses search with Cmd+F outside editors and suppresses workspace shortcuts inside modal controls', async () => {
@@ -28,7 +28,8 @@ it('focuses search with Cmd+F outside editors and suppresses workspace shortcuts
   const asking = screen.getByRole('alertdialog'); expect(within(asking).getByRole('button', { name: /^Remove/ })).toBeTruthy();
   fireEvent.click(within(asking).getByRole('button', { name: 'Cancel' })); expect(screen.queryByRole('alertdialog')).toBeNull();
   fireEvent.click(document.querySelector('[data-item-id="1"]')!); await screen.findByRole('group', { name: 'Item actions' });
-  const pause = screen.getByRole('button', { name: 'Close session' }); pause.focus(); fireEvent.click(pause);
+  const pause = screen.getByRole('button', { name: 'Session actions' }); pause.focus(); fireEvent.click(pause);
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Close session' }));
   const dialog = screen.getByRole('dialog'), cancel = within(dialog).getByRole('button', { name: 'Cancel' });
   fireEvent.keyDown(cancel, { key: 'g' }); fireEvent.keyDown(cancel, { key: 'm' }); fireEvent.keyDown(cancel, { key: '/' });
   expect(screen.getByRole('tree')).toBeTruthy(); expect(screen.queryByRole('log')).toBeNull(); expect(document.activeElement?.closest('[role="dialog"]')).toBe(dialog);

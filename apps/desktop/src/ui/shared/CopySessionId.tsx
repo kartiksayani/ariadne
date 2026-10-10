@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { copyText } from './clipboard';
 
 /** Copy the connection reference without showing it in the owner's view. */
-export function CopySessionId({ sessionId, className = 'btn btn-ghost' }: { readonly sessionId: string; readonly className?: string }) {
+export function CopySessionId({ sessionId, className = 'btn btn-ghost', role }: { readonly sessionId: string; readonly className?: string; readonly role?: 'menuitem' }) {
   const [feedback, setFeedback] = useState<'idle' | 'copied' | 'failed'>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attempt = useRef(0);
@@ -30,7 +30,7 @@ export function CopySessionId({ sessionId, className = 'btn btn-ghost' }: { read
   }
 
   const label = feedback === 'copied' ? 'Copied' : feedback === 'failed' ? 'Copy failed' : 'Copy ID';
-  return <button type="button" className={className}
+  return <button type="button" className={className} role={role}
     title="Copy this session's ID to connect another Claude conversation" onClick={() => { void copy(); }}>
     <i className={feedback === 'copied' ? 'ph ph-check' : 'ph ph-copy'} aria-hidden="true" /><span aria-live="polite">{label}</span>
   </button>;

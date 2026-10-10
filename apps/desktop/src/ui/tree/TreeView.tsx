@@ -1,6 +1,6 @@
 import { AgentBin } from '../remove/AgentBin';
 import { itemRemoved } from '../../selectors/removed';
-// The session tree column (handoff "Session tree"): session bar, status chips,
+// The session tree column (handoff "Session tree"): session bar, status menu,
 // banners, topic bands and item rows, with the tree keyboard, inline answering
 // and the empty and loading states. Selection, expansion, topic folds and filters
 // persist through navigation's preference writer.
@@ -234,7 +234,7 @@ export function TreeView(props: TreeViewProps) {
   };
   const toggleItem = (id: string) => {
     const row = latest.current.rows.find(value => value.key === id);
-    if (!row || row.kind !== 'item' || !row.hasKids || model?.filtering) return;
+    if (!row || row.kind !== 'item' || !row.hasKids) return;
     void saveView(next => {
       const expanded = new Set(next.expanded_item_ids);
       if (row.expanded) expanded.delete(id); else expanded.add(id);
@@ -253,7 +253,6 @@ export function TreeView(props: TreeViewProps) {
     onDismissReveal();
     void saveView(next => { next.filters.statuses = toggleChip(next.filters.statuses, chip); });
   };
-  const setTopic = (topicId: string | null) => { onDismissReveal(); void saveView(next => { next.filters.topic_id = topicId; }); };
   const resume = () => {
     const outsideSelected = selectedId !== null && selectedId === revealId;
     onResume();
@@ -337,7 +336,7 @@ export function TreeView(props: TreeViewProps) {
     fold: onRow(row => {
       if (row.kind === 'topic') { if (row.expanded) toggleTopic(row.topic.id); return true; }
       if (row.kind === 'hidden') { if (row.expanded) toggleHiddenGroup(row.key); else { const parent = parentKey(row); if (parent) focusRow(parent); } return true; }
-      if (row.hasKids && row.expanded && !model?.filtering) { toggleItem(row.item.id); return true; }
+      if (row.hasKids && row.expanded) { toggleItem(row.item.id); return true; }
       const parent = parentKey(row);
       if (parent && latest.current.rows.some(value => value.key === parent)) focusRow(parent);
       return true;
@@ -709,8 +708,8 @@ export function TreeView(props: TreeViewProps) {
       onRename={session ? lifecycle.rename : undefined}
       dispatch={<DispatchChip actions={actions} onDetails={() => setSending(true)} />} />}
     {sending && <DispatchDialog store={actions.session} actions={actions} agent={bar?.agent ?? 'the agent'} onClose={() => setSending(false)} />}
-    {filtersShown && <FilterBar chips={model?.chips ?? chipsOf([])} counts={counts} topics={model?.topics ?? []} topicId={view?.filters.topic_id ?? null}
-      showTopics={!(detailOpen && railOpen)} disabled={nav.writing || nav.pendingOperationId !== null} onChip={setChip} onTopic={setTopic} />}
+    {filtersShown && <FilterBar chips={model?.chips ?? chipsOf([])} counts={counts}
+      disabled={nav.writing || nav.pendingOperationId !== null} onChip={setChip} />}
     {model && !graph && (!!query || !model.chips.has('all')) && <Banner icon={query ? 'ph ph-magnifying-glass' : 'ph ph-funnel'} actions={<><span aria-hidden="true">·</span><button type="button" className="btn btn-ghost" disabled={nav.writing || nav.pendingOperationId !== null} onClick={query ? onClearSearch : onClearFilters}>{query ? 'Clear search' : 'Clear filters'}</button></>}>
       Showing {model.searchCount} of {model.itemCount} items{query ? ` matching “${query}”` : ''}{model.hiddenCount > 0 ? ` (${model.hiddenCount} hidden)` : ''}{!model.chips.has('all') ? ' in the statuses you picked' : ''}</Banner>}
     {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>

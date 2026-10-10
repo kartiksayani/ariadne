@@ -74,14 +74,14 @@ function receiptSession(removal = notice()): Session {
 async function openApp(transport: BinTransport) {
   render(<DesktopApp service={createDesktopService(transport)} />);
   fireEvent.click(await sessionButton(route));
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
+  await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
 }
 async function refreshApp(transport: BinTransport) {
   const queries = transport.queries.filter(request => request.request.command === 'session_get').length;
   ++transport.source.revision;
   await act(async () => { transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: transport.source.revision }); });
   await waitFor(() => expect(transport.queries.filter(request => request.request.command === 'session_get').length).toBeGreaterThan(queries));
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
+  await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
 }
 
 /** Extend the ordinary app fake with the two Core restore receipts. */
@@ -506,7 +506,7 @@ describe('agent removal bin', () => {
     const session = removedSession(), input = cancelledInput(session); session.inputs = { [input.id]: input };
     const transport = new BinTransport(session); render(<DesktopApp service={createDesktopService(transport)} />);
     fireEvent.click(await sessionButton(route)); await screen.findByRole('tree', { name: 'Session items' });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
     fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete forever' }));
     const confirm = within(await screen.findByRole('alertdialog'));
@@ -551,7 +551,7 @@ describe('agent removal bin', () => {
     await waitFor(() => expect(restore.hasAttribute('disabled')).toBe(false));
     fireEvent.click(restore);
     await waitFor(() => expect(transport.source.items['1']!.removed_at).toBeUndefined());
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
     await act(async () => { window.dispatchEvent(new Event('pagehide')); });
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull());
     await screen.findByRole('button', { name: 'Removed by agent · 2' });

@@ -59,7 +59,7 @@ async function mount(transport = new AckTransport()) {
   render(<DesktopApp service={createDesktopService(transport)} />);
   fireEvent.click(await sessionButton(route));
   await screen.findByRole('region', { name: 'Session tree' });
-  await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Close session' }).disabled).toBe(false));
+  await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
   return transport;
 }
 
@@ -187,7 +187,8 @@ describe('local acknowledgement', () => {
       return invoke(name, args);
     });
     if (source === 'graph') { fireEvent.keyDown(row(), { key: 'g' }); await screen.findByText('One graph per topic'); }
-    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
     fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Pending session name' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(saving).toBe(true));

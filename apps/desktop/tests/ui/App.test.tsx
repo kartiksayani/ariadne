@@ -36,7 +36,7 @@ const mutations = (transport: AppTransport, command: string) => transport.mutati
 async function openSession(id = route.session_id, pending = false) {
   fireEvent.click(await sessionButton({ project_id: route.project_id, session_id: id }));
   await screen.findByRole('region', { name: 'Session tree' });
-  if (!pending) await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
+  if (!pending) await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
 }
 async function allSessions() {
   const button = screen.getByRole('button', { name: /^All sessions/ });
@@ -352,7 +352,9 @@ describe('ordinary desktop composition', () => {
     expect(mutations(transport, 'binding_pause')[1].session?.session_id).toBe(secondId);
     await allSessions(); await openSession(route.session_id, true);
     expect(mutations(transport, 'binding_pause')).toHaveLength(2);
-    expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    expect(screen.getByRole('menuitem', { name: 'Close session' }).hasAttribute('disabled')).toBe(true);
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
     fireEvent.click(await screen.findByRole('button', { name: 'Check again' }));
     await waitFor(() => expect(mutations(transport, 'binding_pause')).toHaveLength(3));
     expect(mutations(transport, 'binding_pause')[2]).toEqual(original);

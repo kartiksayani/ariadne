@@ -12,7 +12,7 @@ import { normalizeSearch, sameOwner } from '../../selectors/tree/rows';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
 import { stuckInput, type Stuck } from '../../selectors/waiting/stuck';
 import { deliveryLine as deliveryText, deliveryStage } from '../answer/delivery';
-import { agentLine, agentName, dayWord, hostApp, ownerName, sessionLabel, sessionRange } from '../shell/model';
+import { agentLine, agentName, dayWord, hostApp, ownerName, sessionLabel } from '../shell/model';
 import { STATUS, statusKey, type StatusKey } from '../shared/status';
 import { displayStatus, type DisplayStatus } from '../../selectors/waiting/replied';
 import { continuedLabel } from '../shared/continued';
@@ -140,23 +140,22 @@ export interface SessionBar {
   readonly closed: boolean;
   readonly archived?: boolean;
 }
-/** "claude-code", "Today 14:02 – now · 3 topics", running or not (Ariadne.dc.html:1722). */
-export function sessionBar(session: Immutable<Session> | null, summary: Immutable<SessionSummary> | null, now: number,
+/** The session name, connection and active topic count for the compact bar. */
+export function sessionBar(session: Immutable<Session> | null, summary: Immutable<SessionSummary> | null, _now: number,
   presence: Immutable<PresenceObservation> | null = null): SessionBar | null {
   const bound = session?.active_binding_id ? session.bindings[session.active_binding_id] ?? null : null;
   const binding = session ? bound : summary?.active_binding ?? null;
-  const created = session?.created_at ?? summary?.created_at, ended = session ? session.closed_at ?? session.updated_at : summary?.closed_at ?? summary?.updated_at ?? null;
+  const created = session?.created_at ?? summary?.created_at;
   if (!created) return null;
   // A fresh presence observation outranks the binding's stored connection state; a stale one is "Reconnecting".
   const connection = connectionOf(binding, bound ? presence : null), running = agentRunning(connection);
   // Before the snapshot loads, the summary's topic count stands in (archived topics excluded, like the loaded count).
   const topics = session ? topicList(session).filter(topic => topic.archived_at === null).length
     : summary ? summary.topic_count - summary.counts.archived_topics : null;
-  const range = sessionRange(Date.parse(created), ended ? Date.parse(ended) : null, running, now);
   const agent = binding ? agentName(binding.adapter_id) : 'No agent', location = binding?.host_location ?? null;
   const label = sessionLabel(session ?? summary, agentLine(agent, location));
   return { sessionId: session?.id ?? summary!.session_id, title: label.title, secondary: label.secondary, description: label.description, named: label.named, agent, where: hostApp(location),
-    meta: topics === null ? range : `${range} · ${plural(topics, 'topic')}`,
+    meta: topics === null ? '' : plural(topics, 'topic'),
     running, connection, closed: (session?.state ?? summary?.state) === 'closed', archived: (session ?? summary)?.archived_at != null };
 }
 
@@ -344,7 +343,7 @@ export function treeModel(input: TreeInput): TreeModel {
     // A topic with no items yet (or none left) still shows its band; filters hide topics without a match.
     // A session with no items at all shows its empty state instead (frame 1g).
     if (filtering && !roots.some(item => include.has(item.id))) continue;
-    const open = filtering || topic.id === revealTopic || !input.collapsedTopics.has(topic.id);
+    const open = topic.id === revealTopic || !input.collapsedTopics.has(topic.id);
     const topicItems = all.filter(item => item.topic_id === topic.id), statuses = topicItems.map(display);
     const chipValue = topicChip(session, topic, input.summaries, input.now);
     const delivery = deliveryLine(session, { topicId: topic.id, itemId: null }, input.presence, input.health);
@@ -369,7 +368,7 @@ export function treeModel(input: TreeInput): TreeModel {
         }
         if (explicitHidden.has(item.id) && !groupOpen) continue;
         const children = kids(item.id);
-        const open = children.length > 0 && (filtering ? children.some(child => include.has(child.id)) : expanded.has(item.id));
+        const open = children.length > 0 && expanded.has(item.id);
         let collapsed: ItemRow['collapsed'] = null;
         if (children.length && !open) {
           const below: Immutable<Item>[] = [];

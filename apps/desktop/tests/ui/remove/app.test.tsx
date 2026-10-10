@@ -13,7 +13,7 @@ const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem
 it('removes an item from the detail trash or ⌫ after asking, with Undo, and runs it when the page goes', async () => {
   const transport = new AppTransport(); render(<DesktopApp service={createDesktopService(transport)} />);
   fireEvent.click(await sessionButton(route)); await screen.findByRole('tree', { name: 'Session items' });
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
+  await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
   fireEvent.click(row('4')!);
   const trash = await screen.findByRole('button', { name: 'Remove item' });
   fireEvent.click(trash);

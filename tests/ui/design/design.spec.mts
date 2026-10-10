@@ -146,6 +146,17 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
   // mouseover is React's mouseenter and leaves the rail's scroll position and the pointer alone.
   if (spec.hoverMsg) await railMessage(page, spec.hoverMsg).dispatchEvent('mouseover');
   await settle(page);
+  const sessionBar = page.locator('.tree-session-bar');
+  if (await sessionBar.count()) {
+    await expect(sessionBar.getByRole('button', { name: 'Session actions' })).toBeVisible();
+    await expect(sessionBar.getByRole('button', { name: 'Close session' })).toHaveCount(0);
+    await expect(sessionBar.locator('.tree-session-meta')).toHaveText(/^\d+ topics?$/);
+  }
+  const filters = page.getByRole('group', { name: 'Filter items' });
+  if (await filters.count()) {
+    await expect(filters.getByRole('button', { name: /^Filter/ })).toBeVisible();
+    await expect(filters.getByRole('combobox')).toHaveCount(0);
+  }
 }
 
 const railMessage = (page: Page, number: number) => page.locator('.pw-rail-list [data-message-id]').filter({

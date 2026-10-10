@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { AppTransport, route, secondId } from './transport';
@@ -21,7 +21,8 @@ it('explains a saved search and clears it in the box and saved view while keepin
   expect(screen.queryByText(/items matching/)).toBeNull();
   await waitFor(() => expect(transport.preferences.sessions[0]!.filters.search).toBe(''));
   expect(transport.preferences.sessions[0]!.filters.statuses).toEqual(['open']);
-  expect(within(screen.getByRole('group', { name: 'Filter items' })).getByRole('button', { name: /^Open/ }).getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(screen.getByRole('button', { name: 'Filter: Open' }));
+  expect(screen.getByRole('menuitemcheckbox', { name: /^Open/ }).getAttribute('aria-checked')).toBe('true');
 });
 
 it('saves an explicit clear before switching to another session and typing there', async () => {
