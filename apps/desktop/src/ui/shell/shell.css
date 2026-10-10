@@ -351,12 +351,62 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 14px 12px 0 18px;
+  padding: 4px 12px 0;
 }
 
 .shell-detail-path {
+  position: relative;
+  min-height: 28px;
   flex: 1;
   min-width: 0;
+}
+
+/* The notice replaces the breadcrumb without moving the pane or its scroll position. */
+.shell-detail-hidden .shell-detail-path-content {
+  visibility: hidden;
+}
+
+.shell-detail-hidden-notice {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  color: var(--a-label);
+  font-size: calc(11px * var(--text-scale));
+  line-height: 1.25;
+}
+
+.shell-detail-hidden-notice > span {
+  flex: 1;
+  min-width: 0;
+  max-height: 100%;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.shell-detail-hidden-notice > button {
+  flex: none;
+  padding: 3px 5px;
+  font-size: inherit;
+}
+
+.shell-detail-hidden .detail-question {
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.shell-detail-hidden .shell-detail-head {
+  box-shadow: inset 3px 0 var(--color-divider);
+}
+
+.shell-detail-action[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+  box-shadow: inset 0 0 0 1px var(--color-divider);
 }
 
 .shell-detail-history {

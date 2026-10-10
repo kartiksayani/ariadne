@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, extname, resolve, sep } from 'node:path';
-import { designNow, detailMask, detailMasked, frameNow, frameSpec, graphFrame, variantIds, type FrameSpec } from './frames';
+import { answerFrameIds, designNow, detailMask, detailMasked, dockFrameIds, frameNow, frameSpec, graphFrame, variantIds, type FrameSpec } from './frames';
 import { handoffMembers, prefix, repo, sourceRoot } from './source.mts';
 import thresholds from './thresholds.json' with { type: 'json' };
 
@@ -277,6 +277,155 @@ for (const width of [1920, 1600, 1280]) {
         expect(button.right).toBeLessThanOrEqual(layout.note.right + 0.5);
       }
     }
+    expect(denied).toEqual([]);
+  });
+}
+
+for (const id of answerFrameIds) {
+  test(`frame ${id}`, async ({ page, origin }, testInfo) => {
+    const spec = frameSpec(id), denied: string[] = [];
+    await route(page.context(), origin, denied);
+    await openApp(page, origin, spec);
+    const pane = page.locator('.item-detail'), dock = pane.locator('.detail-dock'), options = dock.locator('[data-answer-option]');
+    const composer = dock.getByRole('textbox', { name: 'Reply in your own words' });
+    await expect(options).toHaveCount(spec.answerOptions!);
+    const detail = page.getByRole('complementary', { name: 'Item detail', exact: true });
+    const notice = detail.locator('.shell-detail-hidden-notice');
+    if (spec.hiddenItems) {
+      await expect(notice).toContainText(spec.hiddenItems.includes(spec.selected!) ? 'Hidden — this item is hidden from the list.' : 'Hidden with its parent “Review the shared examples”');
+      await expect(notice).toBeInViewport();
+      await expect(detail.getByRole('button', { name: 'Unhide item', exact: true })).toHaveAttribute('aria-pressed', 'true');
+      await expect(detail.getByRole('button', { name: 'Unhide item', exact: true })).toHaveAttribute('title', 'Unhide');
+    }
+    await composer.fill('Keep the captions with the examples.');
+    const space = async () => {
+      const paneBox = (await pane.boundingBox())!, bodyBox = (await pane.locator('.detail-body').boundingBox())!, dockBox = (await dock.boundingBox())!;
+      expect(bodyBox.height / paneBox.height, 'conversation scroll region keeps most of the pane').toBeGreaterThanOrEqual(0.55);
+      expect(dockBox.height / paneBox.height, 'answer area uses at most 40% of the pane').toBeLessThanOrEqual(0.40);
+      expect(bodyBox.y + bodyBox.height).toBeLessThanOrEqual(dockBox.y + 1);
+      expect(dockBox.y + dockBox.height).toBeLessThanOrEqual(paneBox.y + paneBox.height + 1);
+      if (page.viewportSize()!.height === 830) {
+        const chatBox = (await pane.getByRole('region', { name: 'Conversation', exact: true }).boundingBox())!;
+        const visibleChat = Math.min(chatBox.y + chatBox.height, bodyBox.y + bodyBox.height) - Math.max(chatBox.y, bodyBox.y);
+        expect(visibleChat / paneBox.height, 'visible conversation at 1400×830').toBeGreaterThanOrEqual(0.55);
+      }
+    };
+    await space();
+    if (spec.answerOptions) {
+      const choices = dock.locator('.answer-choices');
+      await choices.locator('summary').click();
+      await expect(choices).toHaveAttribute('open', '');
+      const description = dock.locator('.answer-description').first(), more = dock.locator('.answer-more').first();
+      const fullText = await description.textContent();
+      const clamped = await description.evaluate(element => ({ height: element.getBoundingClientRect().height, line: parseFloat(getComputedStyle(element).lineHeight), scroll: element.scrollHeight }));
+      expect(clamped.height).toBeLessThanOrEqual(clamped.line * 2 + 1);
+      expect(clamped.scroll).toBeGreaterThan(clamped.height);
+      await expect(dock.locator('.answer-recommended').first()).toBeVisible();
+      await more.click();
+      await expect(more).toHaveAttribute('aria-expanded', 'true');
+      expect((await description.boundingBox())!.height).toBeGreaterThan(clamped.height);
+      expect(await description.textContent()).toBe(fullText);
+      const ending = await description.evaluate(element => {
+        const dock = element.closest<HTMLElement>('.detail-dock')!, range = document.createRange(), text = element.firstChild!;
+        range.setStart(text, text.textContent!.lastIndexOf('The final paragraph'));
+        range.setEnd(text, text.textContent!.length);
+        dock.scrollTop += range.getBoundingClientRect().bottom - dock.getBoundingClientRect().bottom + 8;
+        const line = range.getBoundingClientRect(), bounds = dock.getBoundingClientRect();
+        return { top: line.top, bottom: line.bottom, dockTop: bounds.top, dockBottom: bounds.bottom };
+      });
+      expect(ending.top).toBeGreaterThanOrEqual(ending.dockTop);
+      expect(ending.bottom).toBeLessThanOrEqual(ending.dockBottom);
+      await expect(options.first()).toHaveAttribute('aria-pressed', 'true');
+      await expect(composer).toHaveValue('Keep the captions with the examples.');
+      await space();
+      await more.focus(); await page.keyboard.press('Enter');
+      await expect(more).toHaveAttribute('aria-expanded', 'false');
+      await expect(composer).toHaveValue('Keep the captions with the examples.');
+      if (spec.expandedAnswer !== undefined) await dock.locator('.answer-more').nth(spec.expandedAnswer).click();
+      const send = dock.locator('.answer-send');
+      await send.scrollIntoViewIfNeeded(); await expect(send).toBeInViewport();
+    }
+    await composer.scrollIntoViewIfNeeded(); await expect(composer).toBeInViewport();
+    await expect(dock.getByRole('button', { name: 'Send as a reply only', exact: true })).toBeInViewport();
+    await space();
+    await page.screenshot({ path: testInfo.outputPath(`${id}.png`), animations: 'disabled' });
+    if (spec.hiddenItems) {
+      const before = await pane.boundingBox(), scrollTop = await pane.locator('.detail-body').evaluate(element => element.scrollTop);
+      await notice.getByRole('button', { name: 'Unhide', exact: true }).click();
+      await expect(notice).toHaveCount(0);
+      expect(await pane.boundingBox(), 'Unhide does not move or resize the detail body').toEqual(before);
+      expect(await pane.locator('.detail-body').evaluate(element => element.scrollTop)).toBe(scrollTop);
+      await expect(composer).toHaveValue('Keep the captions with the examples.');
+      await expect(detail.getByRole('button', { name: 'Hide item', exact: true })).toHaveAttribute('aria-pressed', 'false');
+      await space();
+    }
+    // A resize and an expansion never remount the owner's input or change the saved choice.
+    await page.setViewportSize({ width: 1400, height: 500 });
+    await composer.scrollIntoViewIfNeeded(); await expect(composer).toBeInViewport();
+    await expect(composer).toHaveValue('Keep the captions with the examples.');
+    if (spec.answerOptions) {
+      await expect(options.first()).toHaveAttribute('aria-pressed', 'true');
+      await dock.locator('.answer-send').scrollIntoViewIfNeeded(); await expect(dock.locator('.answer-send')).toBeInViewport();
+    }
+    await space();
+    expect(denied).toEqual([]);
+  });
+}
+
+for (const id of dockFrameIds) {
+  test(`frame ${id}`, async ({ page, origin }, testInfo) => {
+    const spec = frameSpec(id), denied: string[] = [];
+    await route(page.context(), origin, denied);
+    await openApp(page, origin, spec);
+    const pane = page.locator('.item-detail'), dock = pane.locator('.detail-dock');
+    const detail = page.getByRole('complementary', { name: 'Item detail', exact: true });
+    const detailBox = (await detail.boundingBox())!, headerAction = (await detail.getByRole('button', { name: 'Hide item', exact: true }).boundingBox())!;
+    expect(headerAction.y).toBeGreaterThanOrEqual(detailBox.y);
+    expect(headerAction.y - detailBox.y, 'detail header action starts within 5px of the pane top').toBeLessThanOrEqual(5);
+    const composer = dock.getByRole('textbox', { name: spec.dockState === 'question' ? 'Reply in your own words' : 'Reply message', exact: true });
+    await expect(composer).toHaveValue('');
+    await expect(composer).toBeInViewport();
+    const lines = await composer.evaluate(element => {
+      const style = getComputedStyle(element);
+      return { height: element.getBoundingClientRect().height, minimum: parseFloat(style.minHeight), line: parseFloat(style.lineHeight),
+        padding: parseFloat(style.paddingTop) + parseFloat(style.paddingBottom), border: parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth) };
+    });
+    expect(lines.height, 'resting composer is one line').toBeLessThanOrEqual(Math.max(lines.minimum, Math.ceil(lines.line + lines.padding + lines.border)));
+    if (spec.dockState === 'question') {
+      const choices = dock.locator('.answer-choices');
+      await expect(choices.locator('summary')).toContainText('Choices');
+      await expect(choices).not.toHaveAttribute('open');
+      await expect(dock.locator('[data-answer-option]')).toHaveCount(2);
+      await expect(dock.locator('[data-answer-option]').first()).not.toBeVisible();
+    } else {
+      await expect(dock.getByRole('button', { name: 'Ack → Decided', exact: true })).toBeInViewport();
+      await expect(dock.getByRole('button', { name: 'Reply', exact: true })).toBeInViewport();
+      await expect(dock.getByRole('button', { name: 'Later', exact: true })).toBeInViewport();
+    }
+    if (spec.dockState === 'pending') {
+      const pending = pane.getByRole('region', { name: 'Conversation', exact: true }).locator('li[data-pending]');
+      await expect(pending).toContainText('Keep the captions with the examples.');
+      await expect(pending).toContainText('On its way');
+      await expect(pending).toBeInViewport();
+      await expect(dock.locator('.detail-delivery-hint')).toHaveText('Your reply was received · waiting for the agent');
+      await expect(dock.getByRole('button', { name: 'Bring it up', exact: true })).toHaveCount(0);
+      await expect(dock.getByRole('button', { name: 'Drop', exact: true })).toHaveCount(0);
+    }
+    const geometry = await pane.evaluate(element => {
+      const pane = element.getBoundingClientRect(), body = element.querySelector('.detail-body')!.getBoundingClientRect();
+      const dock = element.querySelector('.detail-dock')!.getBoundingClientRect(), chat = element.querySelector('[aria-label="Conversation"]')!.getBoundingClientRect();
+      // Intersect the actual Conversation with its scroll clip, the pane and the viewport.
+      const top = Math.max(chat.top, body.top, pane.top, 0), bottom = Math.min(chat.bottom, body.bottom, pane.bottom, window.innerHeight);
+      return { conversation: Math.max(0, bottom - top) / pane.height, dock: dock.height / pane.height,
+        bodyBottom: body.bottom, dockTop: dock.top, dockBottom: dock.bottom, paneBottom: pane.bottom };
+    });
+    expect(geometry.conversation, `visible resting Conversation at ${spec.width}×${spec.height}`).toBeGreaterThanOrEqual(0.70);
+    expect(geometry.dock, 'dock uses at most 40% of the pane').toBeLessThanOrEqual(0.40);
+    if (spec.dockState === 'pending') expect(geometry.dock, 'pending Open dock uses at most 25% of the portrait pane').toBeLessThanOrEqual(0.25);
+    expect(geometry.bodyBottom).toBeLessThanOrEqual(geometry.dockTop + 1);
+    expect(geometry.dockBottom).toBeLessThanOrEqual(geometry.paneBottom + 1);
+    await testInfo.attach('dock geometry', { body: JSON.stringify({ viewport: { width: spec.width, height: spec.height }, ...geometry }, null, 2), contentType: 'application/json' });
+    await page.screenshot({ path: testInfo.outputPath(`${id}.png`), animations: 'disabled' });
     expect(denied).toEqual([]);
   });
 }

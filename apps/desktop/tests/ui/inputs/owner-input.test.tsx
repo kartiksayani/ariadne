@@ -339,9 +339,11 @@ describe('owner input component and durable draft controller', () => {
     await user.click(button);
     await waitFor(() => expect(document.activeElement).toBe(textarea));
     await user.keyboard('{Escape}');
-    // Words the owner typed stay on screen in either box (a status change could otherwise hide them); Esc only leaves the box.
+    // Esc leaves a one-line composer with the same words, ready to expand again.
     expect(document.activeElement).not.toBe(textarea); expect((screen.getByRole('textbox', { name: label }) as HTMLTextAreaElement).value).toBe('Retain this draft');
+    expect(textarea.closest('.detail-box')!.classList.contains('detail-box-collapsed')).toBe(true);
     await user.click(button);
+    expect(textarea.closest('.detail-box')!.classList.contains('detail-box-collapsed')).toBe(false);
     expect((screen.getByRole('textbox', { name: label }) as HTMLTextAreaElement).value).toBe('Retain this draft'); expect(value.calls).toHaveLength(0);
   });
   describe('the reply box is always docked on an open or in-progress item', () => {
@@ -707,12 +709,12 @@ describe('owner input component and durable draft controller', () => {
       await typer.keyboard('{Meta>}{Enter}{/Meta}');
       await waitFor(() => expect(online.calls.map(call => call.command)).toMatchObject([{ command: 'input_submit', params: { kind: 'reply', text: 'Go now' } }]));
     });
-    it('closes a Drop box left open when a message to the item becomes pending, and says another can be written', async () => {
+    it('closes a Drop box when a message to the item is queued and keeps its queue evidence', async () => {
       const value = await setup(), user = userEvent.setup(), item = value.session.items['8']!;
       show(value, '8');
       await user.click(await screen.findByRole('button', { name: /^Drop/ }));
       await user.type(await screen.findByRole('textbox', { name: 'Drop reason' }), 'the metric covers it');
-      // The owner presses Bring it up elsewhere (or a message was queued): a message to this item is now on its way.
+      // Bring was queued elsewhere; it is still behind an earlier message.
       const queued = structuredClone(value.session.inputs['00000000-0000-4000-8000-000000000076']!);
       queued.id = uuid(90); queued.seq = 50; queued.kind = 'bring'; queued.state = 'queued'; queued.message_id = uuid(91);
       queued.target = { ...queued.target, topic_id: item.topic_id, item_id: '8' }; queued.payload.target_snapshot.question_revision = item.question_revision;
@@ -721,7 +723,9 @@ describe('owner input component and durable draft controller', () => {
       await waitFor(() => expect(document.querySelector('[data-pending]')).toBeTruthy());
       expect(screen.queryByRole('textbox', { name: 'Drop reason' })).toBeNull();
       expect(screen.queryByRole('button', { name: /^Drop/ })).toBeNull();
-      expect(screen.getByText('Your message is on its way. You can write another; it goes out after.')).toBeTruthy();
+      expect(screen.getByText('Queued behind your message on “Implement receipt lookup”')).toBeTruthy();
+      expect(document.querySelector('.detail-dock .detail-delivery-hint')).toBeNull();
+      expect(screen.queryByText('Your message is on its way. You can write another; it goes out after.')).toBeNull();
       expect(screen.getByRole('textbox', { name: 'Reply message' })).toBeTruthy();
       expect(value.calls).toHaveLength(0);
     });
@@ -732,7 +736,7 @@ describe('owner input component and durable draft controller', () => {
     const drop = await screen.findByRole('button', { name: 'Drop' });
     await waitFor(() => expect(drop.hasAttribute('disabled')).toBe(false));
     await user.click(drop);
-    expect(screen.getByText('Tells the agent to drop it. It stays in the tree, marked Dropped.')).toBeTruthy();
+    expect(screen.getByTitle('Tells the agent to drop it. It stays in the tree, marked Dropped.')).toBeTruthy();
     await user.type(await screen.findByRole('textbox', { name: 'Drop reason' }), 'covered elsewhere{Enter}');
     await waitFor(() => expect(value.calls).toHaveLength(1));
     const sent = value.calls[0]!.command;
@@ -1011,6 +1015,25 @@ describe('owner input component and durable draft controller', () => {
     expect(await value.drafts.submit(id)).toBe(false); expect(value.calls).toHaveLength(0);
     expect(value.drafts.getSnapshot().entries[id]?.draft.text).toBe('Retained guard input');
   });
+  it.each([undefined, 1])('opens closed choices before focusing an answer request for option %s', async optionIndex => {
+    const value = await setup(), consumed = vi.fn(), user = userEvent.setup();
+    const props = { drafts: value.drafts, store: value.store, itemId: '2', onEscape: vi.fn(), onFocusRequestConsumed: consumed };
+    const view = render(<AnswerSlot {...props} />);
+    const details = view.container.querySelector<HTMLDetailsElement>('details.answer-choices')!;
+    expect(details.open).toBe(false);
+    view.rerender(<AnswerSlot {...props} focusRequest={{ intent: 'answer', token: 1, optionIndex }} />);
+    const selected = details.querySelectorAll<HTMLButtonElement>('[data-answer-option]')[optionIndex ?? 0]!;
+    await waitFor(() => expect(document.activeElement).toBe(selected));
+    expect(details.open).toBe(true);
+    expect(consumed).toHaveBeenCalledExactlyOnceWith(1);
+    expect(value.calls).toHaveLength(0);
+    if (optionIndex !== undefined) expect(value.drafts.find(route, '2', 'answer')!.draft.selected_option_id).toBe('no');
+    await user.keyboard('{Escape}'); expect(details.open).toBe(false);
+    view.rerender(<AnswerSlot {...props} focusRequest={{ intent: 'answer', token: 2, optionIndex }} />);
+    await waitFor(() => expect(document.activeElement).toBe(selected));
+    expect(details.open).toBe(true); expect(value.calls).toHaveLength(0);
+  });
+
   it.each(['saving', 'uncertain', 'preferences', 'stale'] as const)('consumes a disabled numeric request during %s without altering frozen choice/body or replaying it later', async guard => {
     const value = await setup(), id = value.drafts.begin(value.store.getSnapshot().snapshot!.session, '2', 'answer')!;
     value.drafts.edit(id, { text: 'Exact retained bytes  ', selected_option_id: 'yes' });
@@ -1908,6 +1931,82 @@ describe('the item detail reads like a chat', () => {
   const demoId = (suffix: string) => `00000000-0000-4000-8000-0000000000${suffix}`;
   const order = (a: Node, b: Node) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 
+  it('shares the action row between an inline Ack destination, Reply and Later', async () => {
+    const { dock } = await view('8', session => { session.items['8']!.status = 'open'; session.items['8']!.ask = null; session.items['8']!.ack_to = 'in_progress'; });
+    const ack = within(dock!).getByRole('button', { name: 'Ack → In progress' });
+    const reply = within(dock!).getByRole('button', { name: 'Reply' });
+    const later = within(dock!).getByRole('button', { name: 'Later' });
+    expect(ack.textContent).toContain('Ack → In progress');
+    expect(ack.closest('.detail-quick-actions')).toBeTruthy();
+    expect(ack.closest('.detail-quick-actions')).toBe(reply.closest('.detail-quick-actions'));
+    expect(later.closest('.detail-quick-actions')).toBe(reply.closest('.detail-quick-actions'));
+    const section = within(dock!).getByRole('region', { name: 'Not discussed yet' });
+    expect(within(section).queryByText('Not discussed yet')).toBeNull();
+    expect(reply.title).toBeTruthy();
+  });
+
+  it('keeps the words and Send in one row, with one short hint and Escape collapse', async () => {
+    const user = userEvent.setup(), { dock, value } = await view('8');
+    const box = within(dock!).getByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement;
+    const send = within(dock!).getByRole('button', { name: 'Send reply' });
+    expect(box.parentElement).toBe(send.parentElement);
+    const hints = dock!.querySelectorAll('.detail-box-hint');
+    expect(hints).toHaveLength(1); expect(hints[0]!.textContent).toBe('⌘↵ sends · Esc keeps draft');
+    await user.type(box, 'Keep these exact words.');
+    await user.keyboard('{Escape}');
+    expect(box.closest('.detail-box')!.classList.contains('detail-box-collapsed')).toBe(true);
+    expect(box.value).toBe('Keep these exact words.');
+    expect(value.drafts.find(route, '8', 'reply')!.draft.text).toBe(box.value);
+    await user.click(box);
+    expect(box.closest('.detail-box')!.classList.contains('detail-box-collapsed')).toBe(false);
+    await user.keyboard('{Escape}');
+    const revised = 'Keep these exact words.\n  Keep the final spaces  ';
+    fireEvent.change(box, { target: { value: revised } });
+    expect(box.closest('.detail-box')!.classList.contains('detail-box-collapsed')).toBe(false);
+    fireEvent.keyDown(box, { key: 'Escape' });
+    expect(box.closest('.detail-box')!.classList.contains('detail-box-collapsed')).toBe(true);
+    await user.click(send);
+    await waitFor(() => expect(value.calls).toHaveLength(1));
+    expect(value.calls[0]!.command).toMatchObject({ command: 'input_submit', params: { kind: 'reply', text: revised } });
+    await waitFor(() => expect((screen.getByRole('textbox', { name: 'Reply message' }) as HTMLTextAreaElement).value).toBe(''));
+    expect((screen.getByRole('button', { name: 'Send reply' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it.each([
+    { state: 'queued' as const, source: '76', caption: 'Not sent yet' },
+    { state: 'needs_attention' as const, source: '74', caption: 'Not delivered' },
+  ])('keeps an Open item’s $state message evidence without an on-the-way dock claim', async ({ state, source, caption }) => {
+    const { dock, chat } = await view('8', session => {
+      const input = structuredClone(session.inputs[demoId(source)]!);
+      input.id = uuid(90); input.seq = 50; input.message_id = uuid(91); input.state = state;
+      input.target.item_id = '8'; input.payload.target_snapshot.question_revision = session.items['8']!.question_revision;
+      session.inputs[input.id] = input;
+    });
+    const pending = chat()!.querySelector<HTMLElement>(`[data-pending="${uuid(90)}"]`)!;
+    expect(within(pending).getByText(caption)).toBeTruthy();
+    if (state === 'queued') expect(pending.textContent).toContain('Queued behind your message on “Implement receipt lookup”');
+    else expect(pending.textContent).toContain('Ariadne isn’t sure it reached');
+    expect(dock!.querySelector('.detail-delivery-hint')).toBeNull();
+    expect(dock!.textContent).not.toContain('Your message is on its way.');
+    expect(within(dock!).getByRole('textbox', { name: 'Reply message' })).toBeTruthy();
+  });
+
+  it.each([
+    { turn: 'unknown' as const, expected: 'Sending your reply…' },
+    { turn: 'running' as const, expected: 'Your reply was received · waiting for the agent' },
+  ])('uses the exact $turn attempt evidence for an in-flight reply’s dock hint', async ({ turn, expected }) => {
+    const { dock, chat } = await view('8', session => {
+      const input = structuredClone(session.inputs[demoId('72')]!);
+      input.id = uuid(90); input.seq = 50; input.message_id = uuid(91); input.target.item_id = '8';
+      input.attempts.find(attempt => attempt.id === input.active_attempt_id)!.turn_state = turn;
+      session.inputs[input.id] = input;
+    });
+    expect(chat()!.querySelector(`[data-pending="${uuid(90)}"]`)!.textContent).toContain('On its way');
+    const hint = dock!.querySelector<HTMLElement>('.detail-delivery-hint')!;
+    expect(hint.textContent).toBe(expected); expect(hint.title).toBe(expected);
+    expect(dock!.textContent).not.toContain('Your message is on its way. You can write another; it goes out after.');
+  });
+
   it('puts the reference on top, the conversation after it and the composer docked below the scrolling body', async () => {
     const { pane, body, dock } = await view('2');
     expect([...pane.children].map(element => element.className)).toEqual(['detail-body', 'detail-dock']);
@@ -1972,15 +2071,19 @@ describe('the item detail reads like a chat', () => {
     // Item 2's round already carries the owner’s message, so nothing is open in the conversation.
     expect(within(chat()!).queryByText('Waiting on you')).toBeNull();
   });
-  it('puts the quick replies directly above the composer, inside the dock', async () => {
+  it('rests with choices closed and the selected send beside their summary above the composer', async () => {
     const { dock } = await view('2');
     const options = [...dock!.querySelectorAll<HTMLElement>('[data-answer-option]')], box = within(dock!).getByRole('textbox', { name: 'Reply in your own words' });
     expect(options.map(option => option.textContent)).toEqual(expect.arrayContaining([expect.stringContaining('Keep the design'), expect.stringContaining('Change the design')]));
     for (const option of options) expect(order(option, box)).toBe(true);
-    // Quick replies and composer are one group, the replies first.
+    // Choices take space when opened; the selected send stays outside them.
     const group = dock!.querySelector('.answer')!;
-    expect([...group.children].map(child => child.className.split(' ')[0])).toEqual(['answer-options', 'answer-send-row', 'answer-reply']);
-    expect(group.lastElementChild!.contains(box)).toBe(true);
+    const details = group.querySelector<HTMLDetailsElement>('details.answer-choices')!;
+    expect(details.open).toBe(false);
+    const send = within(dock!).getByRole('button', { name: 'Send “Keep the design”' });
+    expect(details.contains(send)).toBe(false);
+    expect(details.parentElement).toBe(send.closest('.answer-quick-row'));
+    expect(group.querySelector('.answer-reply')!.contains(box)).toBe(true);
   });
   it('shows no composer on a closed item, only its revisit actions, docked in the same place', async () => {
     const { dock, body } = await view('1');
@@ -1989,6 +2092,26 @@ describe('the item detail reads like a chat', () => {
     expect(within(dock!).getByRole('region', { name: 'Revisit' })).toBeTruthy();
     expect(within(dock!).getAllByRole('button').length).toBeGreaterThan(0);
     expect(body.contains(dock)).toBe(false);
+  });
+  it('keeps the saved choice and exact note through description toggles and resize', async () => {
+    const user = userEvent.setup(), { dock, value } = await view('2', session => {
+      for (const option of session.items['2']!.options) option.consequence = 'Read the examples and captions before deciding. '.repeat(12);
+    });
+    const box = within(dock!).getByRole('textbox', { name: 'Reply in your own words' });
+    const note = ' Keep the captions.\n  Include the examples. ';
+    fireEvent.change(box, { target: { value: note } });
+    const details = dock!.querySelector<HTMLDetailsElement>('details.answer-choices')!;
+    if (!details.open) await user.click(details.querySelector('summary')!);
+    const choice = dock!.querySelectorAll<HTMLButtonElement>('[data-answer-option]')[1]!;
+    await user.click(choice);
+    const more = within(dock!).getByRole('button', { name: 'More about Keep the design' });
+    await user.click(more); await user.keyboard('{Enter}');
+    fireEvent(window, new Event('resize'));
+    expect((box as HTMLTextAreaElement).value).toBe(note);
+    expect(choice.getAttribute('aria-pressed')).toBe('true');
+    const saved = Object.values(value.drafts.getSnapshot().entries).find(entry => entry.draft.target.item_id === '2')!.draft;
+    expect(saved.text).toBe(note); expect(saved.selected_option_id).toBe('no');
+    expect(value.calls).toHaveLength(0);
   });
   it('ends the conversation with a queued message as a pending bubble, once', async () => {
     const { chat } = await view('4');
@@ -2066,24 +2189,27 @@ describe('the item detail reads like a chat', () => {
       expect(within(turns(chat()!).filter(turn => turn.dataset.round).at(-1)!).getByText('Waiting on you')).toBeTruthy();
     });
   });
-  it('lets an item opened at its head stay there when its first message arrives; only a reader at the end follows', async () => {
+  it('opens an unanswered ask at the conversation and keeps a reader there when its first reply arrives', async () => {
     const height = vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(900);
     const client = vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(300);
+    const bounds = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      return { top: this.classList.contains('detail-chat') ? 340 : 100 } as DOMRect;
+    });
     try {
-      // Nothing said yet: the item opens at its head, with more below it.
+      // References take 240px before the conversation; opening scrolls past them.
       const { value, body } = await view('2', session => {
         const round = Object.values(session.rounds).find(entry => entry!.item_id === '2')!;
         round.owner_message_ids = []; round.agent_message_ids = []; round.result_input_ids = [];
         for (const input of Object.values(session.inputs)) if (input!.target.item_id === '2') input!.state = 'cancelled';
       });
-      expect(body.scrollTop).toBe(0);
-      // The owner's first message appears while they read the head: the view stays.
+      expect(body.scrollTop).toBe(240);
+      // The owner's first message appears while they read the ask: the view stays.
       const input = value.session.inputs[demoId('71')]!;
       input.state = 'queued'; input.kind = 'answer'; input.payload.text = 'Keep the design'; value.session.revision++;
       await act(async () => { await value.store.refresh(); });
       await waitFor(() => expect(document.querySelector('.detail-chat .detail-bubble-you')).toBeTruthy());
-      expect(body.scrollTop).toBe(0);
-    } finally { height.mockRestore(); client.mockRestore(); }
+      expect(body.scrollTop).toBe(240);
+    } finally { height.mockRestore(); client.mockRestore(); bounds.mockRestore(); }
   });
   it('shows where a copied item came from with the item’s references, not under the composer', async () => {
     const value = await setup(), item = value.session.items['8']!;
@@ -2118,7 +2244,43 @@ describe('the item detail reads like a chat', () => {
       await waitFor(() => expect(body.scrollTop).toBe(900));
     } finally { height.mockRestore(); }
   });
-  it('grows the composer with its text up to a third of the pane, then scrolls inside it', async () => {
+  it.each([{ itemId: '2', label: 'Reply in your own words' }, { itemId: '8', label: 'Reply message' }])('keeps an empty $label one row despite its wrapped placeholder, and shrinks after clearing', async ({ itemId, label }) => {
+    const client = vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) { return this.classList.contains('item-detail') ? 600 : 0; });
+    let contentHeight = 75;
+    const height = vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) { return this instanceof HTMLTextAreaElement ? contentHeight : 0; });
+    try {
+      await view(itemId);
+      const box = screen.getByRole('textbox', { name: label }) as HTMLTextAreaElement;
+      expect(box.rows).toBe(1); expect(box.value).toBe('');
+      expect(box.style.height).toBe('auto'); expect(box.style.overflowY).toBe('hidden');
+      fireEvent(window, new Event('resize'));
+      expect(box.style.height).toBe('auto');
+      contentHeight = 900; fireEvent.change(box, { target: { value: 'A long draft\n'.repeat(30) } });
+      expect(box.style.height).toBe('200px'); expect(box.style.overflowY).toBe('auto');
+      contentHeight = 75; fireEvent.change(box, { target: { value: '' } });
+      expect(box.style.height).toBe('auto'); expect(box.style.overflowY).toBe('hidden');
+      fireEvent(window, new Event('resize'));
+      expect(box.style.height).toBe('auto');
+    } finally { height.mockRestore(); client.mockRestore(); }
+  });
+
+  it.each([{ itemId: '2', kind: 'answer' as const, label: 'Reply in your own words' }, { itemId: '8', kind: 'reply' as const, label: 'Reply message' }])('grows an existing $kind draft on the first render', async ({ itemId, kind, label }) => {
+    const client = vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) { return this.classList.contains('item-detail') ? 600 : 0; });
+    const height = vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) { return this instanceof HTMLTextAreaElement ? 80 : 0; });
+    try {
+      const value = await setup(), text = 'Saved first line\nSaved second line\nSaved third line\nSaved fourth line';
+      const id = value.drafts.begin(value.store.getSnapshot().snapshot!.session, itemId, kind)!;
+      expect(await value.drafts.editSaved(id, { text })).toBe(true);
+      render(<ItemDetail drafts={value.drafts} store={value.store} itemId={itemId} later={false} onOpenItem={() => {}} />);
+      const box = await screen.findByRole('textbox', { name: label }) as HTMLTextAreaElement;
+      expect(box.value).toBe(text); expect(box.style.height).toBe('80px');
+      expect(box.closest('.answer-collapsed, .detail-box-collapsed')).toBeNull();
+      if (kind === 'answer') expect(document.querySelector<HTMLDetailsElement>('details.answer-choices')!.open).toBe(true);
+      expect(value.calls).toHaveLength(0);
+    } finally { height.mockRestore(); client.mockRestore(); }
+  });
+
+  it('grows the composer to a third of the pane and collapses on Escape without losing the draft', async () => {
     const client = vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) { return this.classList.contains('item-detail') ? 600 : 0; });
     let lines = 3;
     const height = vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) { return this instanceof HTMLTextAreaElement ? lines * 20 : 0; });
@@ -2129,6 +2291,21 @@ describe('the item detail reads like a chat', () => {
       expect(box.style.height).toBe('60px'); expect(box.style.overflowY).toBe('hidden');
       lines = 30; fireEvent.change(box, { target: { value: 'x\n'.repeat(30) } });
       expect(box.style.height).toBe('200px'); expect(box.style.overflowY).toBe('auto');
+      box.focus(); fireEvent.keyDown(box, { key: 'Escape' });
+      const answer = box.closest('.answer')!;
+      expect(answer.classList.contains('answer-collapsed')).toBe(true);
+      expect(box.value).toBe('x\n'.repeat(30));
+      expect(answer.querySelector<HTMLDetailsElement>('.answer-choices')!.open).toBe(false);
+      lines = 5; fireEvent(window, new Event('resize'));
+      expect(answer.classList.contains('answer-collapsed')).toBe(true);
+      await userEvent.setup().click(box);
+      expect(answer.classList.contains('answer-collapsed')).toBe(false);
+      expect(box.style.height).toBe('100px');
+      expect(box.value).toBe('x\n'.repeat(30));
+      fireEvent.keyDown(box, { key: 'Escape' });
+      lines = 2; fireEvent.change(box, { target: { value: 'First line\nSecond line' } });
+      expect(answer.classList.contains('answer-collapsed')).toBe(false);
+      expect(box.style.height).toBe('40px');
     } finally { height.mockRestore(); client.mockRestore(); }
   });
 });

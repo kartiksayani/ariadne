@@ -49,8 +49,10 @@ describe('Paperwhite shell', () => {
     expect(document.querySelector('.shell-footer')?.textContent).toContain('xhide / unhide');
     rerender(<Shell {...value} body={{ ...value.body, hidden: true }} />);
     const unhide = screen.getByRole('button', { name: 'Unhide item' });
-    expect(unhide.title).toBe('Unhide (x)');
-    expect(unhide.querySelector('svg path[d="m3 3 18 18"]')).toBeNull();
+    expect(unhide.title).toBe('Unhide');
+    expect(unhide.getAttribute('aria-pressed')).toBe('true');
+    expect(unhide.querySelector('svg path[d="m3 3 18 18"]')).not.toBeNull();
+    expect(screen.getByRole('status').textContent).toContain('Hidden — this item is hidden from the list.');
     fireEvent.click(unhide); expect(hide).toHaveBeenCalledTimes(2);
   });
 

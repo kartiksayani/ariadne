@@ -22,7 +22,7 @@ import { SessionActionControllers } from './components/bindings/actions';
 import { RecoveryPanel, recoveryTargets } from './components/recovery/RecoveryPanel';
 import { CopiedProvenance } from './components/history-actions/CopiedProvenance';
 import { SessionNotice } from './components/edge-states/EdgeState';
-import { hiddenItems } from './ui/tree/hidden';
+import { hiddenItems, hiddenSource } from './ui/tree/hidden';
 import { TreeView, type RowIntent } from './ui/tree/TreeView';
 import { ArchivePage } from './ui/pages/ArchivePage';
 import { useSessionSnapshots } from './ui/pages/snapshots';
@@ -531,8 +531,11 @@ function Workspace({ application }: { application: Application }) {
     });
     return true;
   };
-  const selectedHidden = !!sessionState?.snapshot?.session && !!selectedId
-    && hiddenItems(sessionState.snapshot.session, new Set(view?.hidden_item_ids ?? [])).has(selectedId);
+  const selectedSession = sessionState?.snapshot?.session;
+  const hiddenBy = selectedSession && selectedId ? hiddenSource(selectedSession, new Set(view?.hidden_item_ids ?? []), selectedId) : null;
+  const selectedHidden = hiddenBy !== null;
+  const hiddenParent = hiddenBy && hiddenBy !== selectedId ? selectedSession?.items[hiddenBy]?.question : null;
+  const hiddenNotice = hiddenParent ? `Hidden with its parent “${hiddenParent}”` : undefined;
   const keys = useWorkspaceKeys<HTMLDivElement>(workspaceKeys({
     store: !!store, closeDetail, focusOwner, quickAnswer, queueBring, ack: (target, repeat) => {
       const store = navigation.opened.open(target), session = store.getSnapshot().snapshot?.session, item = session?.items[target.item_id];
@@ -590,7 +593,7 @@ function Workspace({ application }: { application: Application }) {
         onQueryChange: view ? text => { setSearchEdit({ route: key, text, attempted: false }); setDismissedReveal(currentReveal); } : undefined,
         onToggleRail: view ? toggleRail : undefined,
         onToggleTheme: () => { if (preferences) void navigation.saveTheme(themeToggle(shown).next, preferences.revision); } }}
-      hidden={selectedHidden} onHide={route && selectedId ? () => { toggleHidden({ ...route, item_id: selectedId }); } : undefined}
+      hidden={selectedHidden} hiddenNotice={hiddenNotice} onHide={route && selectedId ? () => { toggleHidden({ ...route, item_id: selectedId }); } : undefined}
       onRemove={() => { if (route && selectedId) askRemove({ kind: 'item', item: { ...route, item_id: selectedId } }); }}
       waitingContent={<WaitingColumn drafts={application.drafts} store={application.waiting} revealItem={revealItem} onAgentNotRunning={onAgentNotRunning}
         selected={route && selectedId ?{ ...route, item_id: selectedId } : null}

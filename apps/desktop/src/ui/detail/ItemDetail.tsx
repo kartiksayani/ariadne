@@ -101,8 +101,9 @@ interface WordsFieldProps {
  */
 function WordsField({ slot, sentAs, first, register, sendOff, closable, onEdit, onKeyDown, onSend, onCancel, onReview }: WordsFieldProps) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
   const attach = (element: HTMLTextAreaElement | null) => { ref.current = element; register(element); };
-  useGrow(ref, slot.text);
+  useGrow(ref, slot.text, !collapsed);
   // A locked draft (an attempt in flight or awaiting a retry) goes out as the kind it was saved with: its label, button and
   // hint name that kind, and it carries no note about a change.
   const kind = slot.locked ? slot.kind : sentAs, text = boxText[kind], noteId = useId();
@@ -110,16 +111,17 @@ function WordsField({ slot, sentAs, first, register, sendOff, closable, onEdit, 
   return <>
     {slot.changed && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
       <button type="button" className="btn btn-secondary answer-warn-action" disabled={slot.locked} onClick={onReview}>Review current target</button></div>}
-    <div className="detail-box">
+    <div className={`detail-box${collapsed ? ' detail-box-collapsed' : ''}`}>
       {note && <p className="detail-box-note" id={noteId}>{`This will be sent as a ${kindName[sentAs]}, which fits the item now. You wrote it as a ${kindName[slot.kind]}.`}</p>}
-      <textarea ref={attach} className="input" rows={1} aria-label={first ? text.label : `${text.label}, another draft`} aria-describedby={note ? noteId : undefined}
-        placeholder={text.placeholder} value={slot.text} disabled={slot.locked} onChange={event => onEdit(event.target.value)} onKeyDown={onKeyDown} />
-      <div className="detail-box-row">
+      <div className="detail-composer-row">
+        <textarea ref={attach} className="input" rows={1} aria-label={first ? text.label : `${text.label}, another draft`} aria-describedby={note ? noteId : undefined}
+          placeholder={text.placeholder} value={slot.text} disabled={slot.locked} onFocus={() => setCollapsed(false)}
+          onChange={event => { setCollapsed(false); onEdit(event.target.value); }} onKeyDown={event => { if (event.key === 'Escape') setCollapsed(true); onKeyDown(event); }} />
         <button type="button" className="btn btn-primary" disabled={sendOff} aria-label={first ? text.button : `${text.button}, another draft`} onClick={onSend}>
           <i className="ph ph-paper-plane-right" aria-hidden="true" />{text.button}</button>
         {closable && <button type="button" className="btn btn-ghost detail-cancel" onClick={onCancel}>Cancel</button>}
-        <span className="detail-box-hint">{closable ? text.hint : text.hint.replace('Esc cancels, keeps your draft', 'Esc leaves the box, keeps your draft')}</span>
       </div>
+      <span className="detail-box-hint" title={text.hint}>⌘↵ sends · Esc keeps draft</span>
     </div>
   </>;
 }
@@ -238,15 +240,16 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   blankShown.current = slots.length === 1 && slots[0]?.id === null;
   const slotKey = (slot: Words) => slot.id === null || slot.id === lead.current ? 'blank' : slot.id;
 
-  // Opening the item, and sending, show the latest message, as chat apps do. A message that arrives
-  // while the owner reads further up leaves the view where it is. An item with nothing said yet (no conversation, or
-  // only the open ask, which the head already carries) opens at its head.
-  // Whether the owner is at the end is read from where the pane really is afterwards, so an item opened at its head (nothing
-  // said yet, a long head) stays there when its first message arrives.
+  // Open at the conversation: its start for an unanswered ask, its end after an exchange.
+  // The item's references remain above it in the same scroller. Arrivals leave a reader where they are.
   const showLatest = () => {
     const pane = body.current;
     if (!pane) return;
     if (pane.querySelector('.detail-chat [data-owner-said="true"], .detail-chat .detail-msg-result')) pane.scrollTop = pane.scrollHeight;
+    else {
+      const chat = pane.querySelector('.detail-chat');
+      if (chat) pane.scrollTop += chat.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+    }
     atEnd.current = nearEnd(pane);
   };
   const sentJustNow = () => { justSent.current = true; showLatest(); };
@@ -353,6 +356,8 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     </div>}
   </div>;
   const docked = !!(model.open || model.followUp || showAnswer || savedAnswers.length > 0 || owner || ackTo || ack.error || submit.error);
+  const dockHint = model.chat.some(entry => entry.pending) ? model.delivery?.text
+    : current.status !== 'ready' || current.error ? model.open?.hint : null;
   return <ItemRefs.Provider value={{ lookup: id => {
     const target = session.items[id];
     return target && !itemRemoved(session, target.id) ? { label: shortLabel(target), status: displayStatus(session, target) } : null;
@@ -361,8 +366,8 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     <div className="detail-head">
       {/* The handoff embeds the badge in a block host; its line box makes the row 23px. */}
       <div className="detail-status"><div className="detail-badge"><StatusBadge status={model.display} label={model.badgeLabel} /></div>
-        <span className="detail-meta">{model.meta}</span>
-        <span className="detail-reference"><span>Agent reference</span><button type="button" className="btn btn-ghost detail-copy" onClick={copy}>
+        <span className="detail-meta" title={model.meta}>{model.meta}</span>
+        <span className="detail-reference"><button type="button" className="btn btn-ghost detail-copy" title="Copy the agent reference" onClick={copy}>
           <i className={copied ? 'ph ph-check' : 'ph ph-copy'} aria-hidden="true" />{copied ? 'Copied' : 'Copy reference'}</button></span></div>
       <h2 className="detail-question"><Markdown text={model.question} inline /></h2>
     </div>
@@ -467,18 +472,14 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     </div>
 
     {docked && <div className="detail-dock">
+    {(ackTo || model.open || model.followUp) && <div className="detail-quick-actions">
     {ackTo && <section className="detail-section detail-ack" aria-label="Acknowledge item">
       <button type="button" className="btn btn-secondary detail-action" title={ackTitle(ackTo, item.status)} aria-label={ackTitle(ackTo, item.status)}
         disabled={ack.busy} onClick={() => { void ack.run(item.id); }}>
-        <i className="ph ph-check" aria-hidden="true" />Ack<span className="detail-key" aria-hidden="true">a</span>
-      </button><span className="detail-hint">{ackTitle(ackTo, item.status)}</span>
+        <i className="ph ph-check" aria-hidden="true" />{ackTitle(ackTo, item.status)}<span className="detail-key" aria-hidden="true">a</span>
+      </button>
     </section>}
-    {ack.error && <p className="detail-error" role="alert">{ack.error}</p>}
-    {submit.error && !(showAnswer && submit.error === answerSlotError(draftState, retained)
-      || savedAnswers.some(entry => entry.error && submit.error === plainFailure(entry.error)))
-      && <p className="detail-error" role="alert">{submit.error}</p>}
-    {model.open && <section className="detail-section detail-open" aria-label={model.open.title}>
-      {sectionLabel(model.open.title)}
+    {model.open && <section className="detail-section detail-open" aria-label={model.open.title} title={dockHint ?? model.open.hint}>
       <div className="detail-actions" role="group" aria-label="Item actions">
         {model.open.actions.map(action => <button type="button" key={action.action} className={`btn ${action.primary ? 'btn-primary' : 'btn-secondary'} detail-action`}
           aria-pressed={action.primary ? undefined : action.pressed} disabled={action.disabled || (!draftState.ready && action.action !== 'later') || (!submit.ready && action.action === 'bring') || (action.action === 'reopen' && submit.locked('reopen'))} title={action.title}
@@ -486,20 +487,25 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
           <i className={action.icon} aria-hidden="true" />{action.label}<span className="detail-key" aria-hidden="true">{action.key}</span>
         </button>)}
       </div>
-      <div className="detail-hint">{model.open.hint}</div>
-      {!owner && <PausedNote actions={actions} />}
-      {laterError && <p className="detail-error" role="alert">Later was not saved. Keep the current view and try again.</p>}
     </section>}
 
-    {model.followUp && <section className="detail-section detail-open" aria-label="Reply">
+    {model.followUp && <section className="detail-section detail-open" aria-label="Reply" title={model.followUp.hint}>
       <div className="detail-actions" role="group" aria-label="Item actions">
         <button type="button" className="btn btn-secondary detail-action" aria-pressed={mode === 'reply'} disabled={model.followUp.disabled || !draftState.ready}
           title="Reply in your own words" onClick={() => openBox('reply')}>
           <i className="ph ph-chat-text" aria-hidden="true" />{model.followUp.label}<span className="detail-key" aria-hidden="true">r</span>
         </button>
       </div>
-      <div className="detail-hint">{model.followUp.hint}</div>
     </section>}
+    </div>}
+    {model.open && dockHint && <div className="detail-hint detail-delivery-hint" title={dockHint}>{dockHint}</div>}
+    {model.followUp && <div className="detail-hint detail-delivery-hint" title={model.followUp.hint}>{model.followUp.hint}</div>}
+    {model.open && !owner && <PausedNote actions={actions} />}
+    {laterError && <p className="detail-error" role="alert">Later was not saved. Keep the current view and try again.</p>}
+    {ack.error && <p className="detail-error" role="alert">{ack.error}</p>}
+    {submit.error && !(showAnswer && submit.error === answerSlotError(draftState, retained)
+      || savedAnswers.some(entry => entry.error && submit.error === plainFailure(entry.error)))
+      && <p className="detail-error" role="alert">{submit.error}</p>}
 
     {/* The one place the owner's boxes live: the same mount for every status, so typing and focus survive a status change. */}
     {owner && <section className="detail-section detail-open" aria-label="Your message">
@@ -507,7 +513,6 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     </section>}
 
     {showAnswer && <section className="detail-section detail-answer" aria-label="Your answer">
-      {model.answer?.heading && <div className="detail-label detail-label-accent">Your answer</div>}
       {model.answer && <PausedNote actions={actions} />}
       {/* While the follow-up box is open, it is the detail's one data-owner-input. */}
       <AnswerSlot drafts={drafts} store={store} itemId={itemId} blocked={model.answer?.blocked} focusRequest={answerFocus}

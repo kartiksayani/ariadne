@@ -46,6 +46,7 @@ export interface NavigationWorkspaceProps {
   /** The detail column's trash button: asks to remove the item it shows. */
   readonly onRemove?: () => void;
   readonly hidden?: boolean;
+  readonly hiddenNotice?: string;
   readonly onHide?: () => void;
   /** Runs after the owner confirms a project or session Remove on the pages. Required: the triggers always render. */
   readonly onRemoveTarget: RemoveHandler;
@@ -121,7 +122,7 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   </>;
 }
 
-export function NavigationWorkspace({ store, discovery, waitingContent, detail, detailPath, railContent, chrome, session, onCloseDetail, onRemove, hidden: hiddenItem, onHide, onRemoveTarget,
+export function NavigationWorkspace({ store, discovery, waitingContent, detail, detailPath, railContent, chrome, session, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
   actions: injectedActions, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
   const ownActions = useMemo(() => injectedActions ? null : new SessionActionControllers(store.service), [injectedActions, store]);
@@ -241,7 +242,7 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
   return <Shell header={{ ...defaultChrome,...chrome, text: headerText(headerInput, at), disabled }}
     tabs={{ tabs, disabled, onSelect: selectTab, onClose: closeTab }}
     body={{ waiting: waitingContent ?? <WaitingFrame count="–" loading />,
-      center, detail, detailPath, rail: railContent, onCloseDetail, onRemove, hidden: hiddenItem, onHide,
+      center, detail, detailPath, rail: railContent, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide,
       detailWidth: shown.detail_width ?? null, waitingFolded: shown.waiting_collapsed ?? false,
       onResizeDetail: width => saveLayout({ detail_width: width }), onFoldWaiting: folded => saveLayout({ waiting_collapsed: folded }) }}
     summary={footerSummary(global ? { items: Object.values(global.items_by_status).reduce((sum, count) => sum + count, 0), waiting: global.waiting_unanswered,
