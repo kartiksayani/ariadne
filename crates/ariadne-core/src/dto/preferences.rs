@@ -68,7 +68,7 @@ fn text_scale_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
 
 /// Bounds of `GlobalPreferences::detail_width`; the renderer clamps to the same range.
 pub const DETAIL_WIDTH_MIN: u32 = 320;
-pub const DETAIL_WIDTH_MAX: u32 = 720;
+pub const DETAIL_WIDTH_MAX: u32 = 2400;
 /// Most folded topic bands kept per session.
 pub const COLLAPSED_TOPICS_CAPACITY: usize = 256;
 pub const SESSION_ARCHIVE_EXPANSION_CAPACITY: usize = 256;

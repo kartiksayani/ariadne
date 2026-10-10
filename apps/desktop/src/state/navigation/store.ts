@@ -92,6 +92,7 @@ export class NavigationStore {
   private textScaleFlight: Promise<boolean> | null = null;
   // Reconciled reads recover their own errors, not the last rejected edit.
   private mutationFailure: Failure | null = null;
+  getMutationFailure(): Failure | null { return this.mutationFailure; }
   // Write operations that settled with a definite revision_conflict (already cleared and refreshed).
   // Keyed to the failure so a later, different rejection is not mistaken for it.
   private readonly conflicted = new WeakMap<Promise<boolean>, Failure>();
@@ -110,6 +111,7 @@ export class NavigationStore {
   // Observe only the already executing write; uncertain operations still need
   // explicit reconciliation. This neither schedules nor retries a mutation.
   readonly getWritingCompletion = () => !this.stopped && this.state.writing ? this.activeMutation : null;
+  readonly getRefreshCompletion = () => this.flight;
   readonly hasQueuedTextScale = () => this.textScaleTarget !== null;
   // True only when this exact write operation settled with a definite revision_conflict, which
   // the store has already cleared and refreshed. Uncertain and other rejections are never reported.
@@ -327,8 +329,9 @@ export class NavigationStore {
     if (preferences.revision === expectedRevision) return preferences;
     this.mutationFailure = new CoreFailure({ code: 'revision_conflict', message: 'These preferences changed after this view was rendered.',
       hint: 'Reload the view before choosing this edit again.', retryable: false, field_errors: [], current_revision: preferences.revision });
+    const refreshed = this.refresh();
     this.publish({ error: this.mutationFailure });
-    await this.refresh();
+    await refreshed;
     return null;
   }
   async saveTheme(theme: Theme, expectedPreferencesRevision: number): Promise<boolean> {
@@ -587,10 +590,11 @@ export class NavigationStore {
       // An unknown completion retains the exact command and operation ID.
       // Definitive typed rejection permits a new, explicitly chosen action.
       if (failure instanceof CoreFailure && !['commit_uncertain', 'delivery_uncertain'].includes(failure.error.code)) this.pending = null;
+      const refreshed = failure instanceof CoreFailure && failure.error.code === 'revision_conflict' ? this.refresh() : null;
       this.publish({ writing: false, pendingOperationId: this.pending?.request.command.op_id ?? null, error: failure });
       if (failure instanceof CoreFailure && failure.error.code === 'revision_conflict') {
         this.conflicted.set(operation(), failure);
-        await this.refresh();
+        await refreshed;
       }
       return false;
     }

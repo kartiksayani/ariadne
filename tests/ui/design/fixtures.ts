@@ -83,6 +83,41 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
     : review ? [...data.MSGS, ...data.REVIEW_MSGS, ...(thread ? data.THREAD_MSGS : [])] : data.MSGS);
   // The thread scenario: the backoff finding on its third round (Ariadne.dc.html:914).
   if (thread && !blank) Object.assign(items.find(item => item.id === '4.1')!, structuredClone(data.THREAD_PATCH));
+  if (spec.answerOptions !== undefined) {
+    const item = items.find(item => item.id === spec.selected)!;
+    item.q = 'How should we share the examples with the readers?';
+    item.ask = 'The examples are ready for a final read. Compare the choices before deciding.\n\n'
+      + 'Keep the `example.com` links and the short code samples together so readers can follow the explanation.\n\n'
+      + '- Read the introduction and check the examples.\n- Check the captions and the list of changes.\n- Add a note if a reader needs more context.\n\n'
+      + 'The conversation keeps the full explanation available while you consider the choices. '.repeat(8);
+    item.options = Array.from({ length: spec.answerOptions }, (_, index) => ({ id: `choice-${index + 1}`, rec: index === 0,
+      label: index === 0 ? 'Share the complete examples after checking the introduction and captions'
+        : `Choice ${index + 1}: share a shorter collection after reading the examples together`,
+      consequence: 'Readers get the introduction, examples and captions in one place. '
+        + 'Each example includes a short explanation and a link to example.com for the sample material. '.repeat(8)
+        + 'The final paragraph explains what to read next.' }));
+  }
+  if (spec.dockState) {
+    const item = items.find(item => item.id === spec.selected)!;
+    item.q = 'How should we share the examples with the readers?';
+    item.short = 'Share the examples';
+    item.status = spec.dockState === 'question' ? 'waiting' : 'open';
+    item.type = spec.dockState === 'question' ? 'question' : 'decision';
+    item.ask = spec.dockState === 'question' ? 'Choose how to share the examples, or write a reply.' : undefined;
+    item.options = spec.dockState === 'question' ? [
+      { id: 'complete', label: 'Share the complete examples', consequence: 'Readers see the introduction and captions together.', rec: true },
+      { id: 'short', label: 'Share a shorter collection', consequence: 'Readers begin with a few examples.' },
+    ] : [];
+    item.note = undefined; item.outcome = ''; item.why = ''; item.links = [];
+    const messageIndex = msgs.findIndex(message => message.number === item.created);
+    msgs[messageIndex] = { ...msgs[messageIndex],
+      excerpt: 'The examples are ready to share. Read the introduction, check the captions, and keep the sample links with the explanation.\n\n'
+        + 'Each example includes a short explanation for readers. The conversation keeps that context available while you consider the next step.\n\n'.repeat(12) };
+  }
+  for (const id of spec.hiddenItems ?? []) {
+    const item = items.find(item => item.id === id)!;
+    if (id !== spec.selected) item.q = 'Review the shared examples';
+  }
   let clock = 15 * 60 + 6;
   if (spec.state === 'clear') {
     items.filter(item => item.status === 'waiting').sort((a, b) => a.created - b.created).forEach(item => {
@@ -100,7 +135,7 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
     items.find(item => item.id === '2.1.1')!.updated.push(19);
     submissions.push({ item: '2.1.1', choice: 0, stage: 'received', message: 19 });
   }
-  if (spec.scenario === 'failed') submissions.push({ item: '3.1', choice: 0, stage: 'failed' }, { item: '2.1.1', choice: 0, stage: 'checking' });
+  if (spec.scenario === 'failed') submissions.push({ item: '3.1', choice: 0, stage: spec.acceptedFailure ? 'stopped' : 'failed' }, { item: '2.1.1', choice: 0, stage: 'checking' });
   const sessions = project ? data.PROJECT_SESSIONS : [data.PROJECT_SESSIONS[0]];
   const projects = project ? data.PROJECTS : [data.PROJECTS[0]];
   // A topic lives in the last session it was worked in (TOPIC_SESSIONS); the
@@ -117,12 +152,13 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
 }
 
 /** One answer of the prototype's `subs`: the item, the option index, its delivery stage and the owner message it posted. */
-interface Submission { readonly item: string; readonly choice: number; readonly stage: 'received' | 'failed' | 'checking'; readonly message?: number }
+interface Submission { readonly item: string; readonly choice: number; readonly stage: 'received' | 'failed' | 'stopped' | 'checking'; readonly message?: number }
 
 /** The attempt facts that `deliveryEvidence` reads as each stage. */
 const attemptFacts = (stage: Submission['stage']): Pick<Attempt,'acceptance' | 'turn_state' | 'error'> => stage === 'received'
   ? { acceptance: 'accepted', turn_state: 'running', error: null }
-  : stage === 'failed' ? { acceptance: 'accepted', turn_state: 'failed', error: { code: 'turn_failed', reason: 'The host turn failed.', retryable: true, observed_at: at(0, '15:05') } }
+  : stage === 'failed' ? { acceptance: 'rejected', turn_state: 'unknown', error: { code: 'delivery_rejected', reason: 'The host refused the message.', retryable: true, observed_at: at(0, '15:05') } }
+    : stage === 'stopped' ? { acceptance: 'accepted', turn_state: 'failed', error: { code: 'turn_failed', reason: 'The host turn failed.', retryable: true, observed_at: at(0, '15:05') } }
     : { acceptance: 'uncertain', turn_state: 'unknown', error: { code: 'delivery_uncertain', reason: 'Bridge disconnected during acceptance.', retryable: false, observed_at: at(0, '15:05') } };
 
 const counts = (sessions: readonly Session[]): SummaryCounts => {
@@ -245,7 +281,8 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
       const waiting = status === 'waiting_on_me' ? messageTimes.get(proto.waitingSince ?? -1) ?? created : null;
       return [proto.id, { id: proto.id, ordinal: siblings.indexOf(proto) + 1, topic_id: topicIds.get(proto.topic)!, parent: proto.parent, question: proto.q,
         short: proto.short,
-        type: proto.type, status, owner: proto.owner === 'me' ? { kind: 'me' } : proto.owner === 'agent' ? { kind: 'agent', binding_id: bindingId } : { kind: 'other', name: proto.owner },
+        type: proto.type, status, ...(spec.dockState && spec.dockState !== 'question' && proto.id === spec.selected ? { ack_to: 'decided' as const } : {}),
+        owner: proto.owner === 'me' ? { kind: 'me' } : proto.owner === 'agent' ? { kind: 'agent', binding_id: bindingId } : { kind: 'other', name: proto.owner },
         revision: 1 + proto.updated.length, question_revision: 1, next_child: protoItems.filter(item => item.parent === proto.id).length + 1,
         ask: proto.ask || null, note: proto.note || null,
         options: (proto.options ?? []).map(option => ({ id: option.id, label: option.label, consequence: option.consequence, recommended: !!option.rec })),
@@ -298,6 +335,28 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
         short: topic.short, order: order + 1, revision: 1, created_at: times.created, archived_at: topic.archived ? archivedAt(topic.archivedAt, times.created) : null, origin: null }])),
       items, messages, rounds, answers, bindings: { [bindingId]: binding }, inputs, operation_receipts: {}, continuations: {} };
   });
+  if (spec.dockState === 'pending') {
+    const session = sessions.find(session => session.items[spec.selected!])!, item = session.items[spec.selected!]!;
+    const binding = session.bindings[session.active_binding_id!]!, inputId = uuid('f', 900), attemptId = uuid('f', 901), messageId = uuid('d', 900);
+    const created = at(0, '15:06'), text = 'Keep the captions with the examples.', marker = `[ARIADNE_INPUT:${inputId}:${attemptId}]`;
+    const number = session.counters.next_message++;
+    session.messages.push({ id: messageId, number, author: 'owner', kind: 'owner_input', body: text, created_at: created,
+      item_id: item.id, topic_id: item.topic_id, items_touched: [item.id], binding_id: binding.id, input_id: inputId,
+      attempt_id: attemptId, host_turn_id: null, round_id: null, origin: null });
+    item.updated_message_ids.push(messageId);
+    session.inputs[inputId] = { id: inputId, seq: session.counters.next_input++, binding_id: binding.id, kind: 'reply',
+      target: { topic_id: item.topic_id, item_id: item.id }, message_id: messageId, answer_id: null, created_at: created, expected_question_revision: null,
+      payload: { text, intent: 'reply', selected_option_id: null,
+        target_snapshot: { topic_name: session.topics[item.topic_id]!.name, item_question: item.question,
+          question_revision: item.question_revision, ask: null, options: [] },
+        context: { message_ids: [], item_ids: [item.id], round_id: null, continuation_operation_id: null } },
+      state: 'in_flight', attempts: [{ id: attemptId, purpose: 'work', repair_for_attempt_id: null, claim_request_id: uuid('f', 902),
+        binding_generation: binding.generation, prepared_at: created, formatted_payload: `${marker}\n${text}`, payload_sha256: '0'.repeat(64),
+        wire_marker: marker, ...attemptFacts('received'), acceptance_receipt: null, acceptance_observed_at: created,
+        host_turn_id: 'examples-turn', turn_observed_at: null, domain_result: null, result_state: 'pending', sealed_at: null, reconciliation_checkpoint: null }],
+      active_attempt_id: attemptId, resolution_history: [] };
+    binding.active_input_id = inputId;
+  }
   const summaries = sessions.map((session, index): SessionSummary => {
     const binding = session.bindings[session.active_binding_id!]!, running = world.sessions[index].running;
     return { project_id: session.project_id, session_id: session.id, title: session.title, state: session.state, revision: session.revision,
@@ -332,7 +391,8 @@ export function designFixture(frame: string, data: PrototypeData): DesignFixture
     return { session: refs.get(id)!, tab_open: true, tab_order: order, selected_item_id: current ? spec.selected ?? null : null, expanded_item_ids: expanded(session),
       // The reveal scenario filters to Waiting (Ariadne.dc.html:938); the harness then reveals the selection through a route.
       filters: { search: '', statuses: current && spec.scenario === 'reveal' ? ['waiting_on_me'] : [], owners: [], topic_id: null, archived: current && spec.scenario === 'archive', hide_later: false },
-      rail: current && spec.rail ? 'activity' : 'hidden', scroll: null };
+      rail: current && spec.rail ? 'activity' : 'hidden', scroll: null,
+      ...(current && spec.hiddenItems ? { hidden_item_ids: [...spec.hiddenItems] } : {}) };
   });
   // 1y continues t5 from yesterday's codex session here; 1ad answers 5.3 in that session, whose agent isn't running (Ariadne.dc.html:955-957).
   const topicIn = (session: string, proto: string) => {

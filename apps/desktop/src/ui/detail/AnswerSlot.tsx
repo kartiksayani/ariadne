@@ -100,7 +100,7 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
   const draft = entry.draft, options = item.options;
   // The frozen choice of an attempted answer, else the draft's or the recommended one.
   const selected = entry.uncertain ? options.findIndex(option => option.id === draft.selected_option_id) : defaultSelection(options, draft.selected_option_id);
-  const review = { label: 'Review current target', onAction: () => { setShortcutStatus(null); submit.review(); } };
+  const review = { label: 'Review this question', onAction: () => { setShortcutStatus(null); submit.review(); } };
   return <div ref={root} className="detail-answer-slot" data-owner-input={mark}>
     {shortcutStatus && <p role="alert">{shortcutStatus}</p>}
     <AnswerControl variant="chat" options={options} selected={selected} draft={draft.text} label="Answer"

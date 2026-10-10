@@ -5,6 +5,7 @@ import { OpenSessions } from '../../../src/data/session-store';
 import { SessionActionControllers } from '../../../src/components/bindings/actions';
 import { CloseSessionDialog } from '../../../src/ui/pages/SessionDialogs';
 import { notices } from '../../../src/ui/pages/notices';
+import { sessionWhen } from '../../../src/ui/shell/model';
 import { route } from '../app/transport';
 import { HistoryTransport } from './fixture';
 
@@ -54,7 +55,8 @@ describe('Close session dialog from the session pages', () => {
     expect(closeButton().disabled).toBe(false);
     await act(async () => { fireEvent.click(closeButton()); });
     expect(transport.source.state).toBe('closed'); expect(closed()).toBe(1);
+    const when = sessionWhen(Date.parse(transport.source.created_at), Date.now()).toLowerCase();
     expect(notices.getSnapshot().map(notice => notice.text)).toContain(
-      `Closed the codex session. ${unsent} unsent message${unsent === 1 ? ' was' : 's were'} cancelled.`);
+      `Closed the codex session from ${when}. ${unsent} unsent message${unsent === 1 ? ' was' : 's were'} cancelled.`);
   });
 });

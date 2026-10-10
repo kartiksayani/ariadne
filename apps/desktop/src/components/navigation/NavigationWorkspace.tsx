@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AdapterConfig, ProjectSummary, SummaryCounts } from '../../generated/domain/models';
 import type { NavigationSelection, SessionPreferences, SessionRef } from '../../generated/core';
 import { plainFailure } from '../../data/plain';
+import { CoreFailure } from '../../data/service';
 import { useSession, type Immutable, type SessionStore } from '../../data/session-store';
 import { NavigationStore, useNavigation, type LayoutChange, type NavigationState } from '../../state/navigation/store';
 import { WaitingFrame } from '../../ui/waiting/WaitingColumn';
@@ -15,7 +16,8 @@ import type { RemoveHandler } from '../../ui/dialogs/remove';
 import { ProjectsPage } from '../../ui/pages/ProjectsPage';
 import { SessionLists, type SessionGroup } from '../../ui/pages/SessionLists';
 import { LoadingSession } from '../../ui/pages/SessionStates';
-import { Notices } from '../../ui/pages/notices';
+import { notices } from '../../ui/pages/notices';
+import { conflictNotice, isViewConflict } from '../../ui/shared/conflictNotice';
 import { useSessionSnapshots } from '../../ui/pages/snapshots';
 import { useHidden } from '../../ui/remove/queue';
 import { isRunning } from '../../ui/pages/model';
@@ -46,6 +48,7 @@ export interface NavigationWorkspaceProps {
   /** The detail column's trash button: asks to remove the item it shows. */
   readonly onRemove?: () => void;
   readonly hidden?: boolean;
+  readonly hiddenNotice?: string;
   readonly onHide?: () => void;
   /** Runs after the owner confirms a project or session Remove on the pages. Required: the triggers always render. */
   readonly onRemoveTarget: RemoveHandler;
@@ -64,21 +67,23 @@ const defaultChrome: Omit<HeaderProps, 'text' | 'disabled'> ={ query: '', views:
 
 /** Saved binding-connect receipt: what to give the host, plus capabilities the owner cannot rely on. */
 function SetupCard({ setup, adapterId, onDismiss }: { setup: NonNullable<NavigationState['setup']>; adapterId: string | null; onDismiss: () => void }) {
-  const [copied, setCopied] = useState<'idle' | 'copied' | 'failed'>('idle');
-  useEffect(() => {
-    if (copied === 'idle') return undefined;
-    const timer = setTimeout(() => setCopied('idle'), 3000);
-    return () => clearTimeout(timer);
-  }, [copied]);
+  const attempt = useRef(0);
+  useEffect(() => () => { ++attempt.current; }, [setup]);
   if (setup.data.kind !== 'binding_connect') return null;
   const instruction = setup.data.setup_instruction;
   const unavailable = Object.entries(setup.data.capabilities)
     .filter(([, value]) => typeof value === 'object' && !value.supported).map(([name]) => name.replace(/_/g, ' '));
   const copy = () => {
+    const current = ++attempt.current;
+    const feedback = (copied: boolean) => {
+      if (current !== attempt.current) return;
+      notices.push({ icon: copied ? 'ph ph-check-circle' : 'ph ph-warning-circle',
+        iconColor: copied ? undefined : 'var(--a-warn)', text: copied ? 'Instruction copied.' : 'Copy failed. Try again.' });
+    };
     try {
-      void navigator.clipboard.writeText(instruction).then(() => setCopied('copied'), () => setCopied('failed'));
+      void navigator.clipboard.writeText(instruction).then(() => feedback(true), () => feedback(false));
     } catch {
-      setCopied('failed');
+      feedback(false);
     }
   };
   return <section className="nav-banner nav-setup" aria-label="Session setup">
@@ -91,8 +96,7 @@ function SetupCard({ setup, adapterId, onDismiss }: { setup: NonNullable<Navigat
         : 'Paste this setup instruction into the selected host conversation once per binding so the agent connects and uses the Ariadne skill.'}</p>
     {adapterId !== 'claude_code_mod' && <div className="nav-setup-code">
       <details><summary>Show instruction</summary><pre>{instruction}</pre></details>
-      <div className="nav-setup-copy"><button type="button" className="btn btn-secondary" onClick={copy}>Copy instruction</button>
-        <span role="status" className="nav-copied">{copied === 'copied' ? 'Copied' : copied === 'failed' ? 'Copy failed' : ''}</span></div>
+      <div className="nav-setup-copy"><button type="button" className="btn btn-secondary" onClick={copy}>Copy instruction</button></div>
     </div>}
     {unavailable.length > 0 && <p>Unavailable capabilities: {unavailable.join(', ')}.</p>}
   </section>;
@@ -121,9 +125,35 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   </>;
 }
 
-export function NavigationWorkspace({ store, discovery, waitingContent, detail, detailPath, railContent, chrome, session, onCloseDetail, onRemove, hidden: hiddenItem, onHide, onRemoveTarget,
+export function NavigationWorkspace({ store, discovery, waitingContent, detail, detailPath, railContent, chrome, session, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
   actions: injectedActions, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
+  const transientError = !state.pendingOperationId && state.error === store.getMutationFailure() ? state.error : null;
+  useEffect(() => () => notices.dismiss('navigation-action-failed'), [store]);
+  useEffect(() => {
+    const id = 'navigation-action-failed';
+    let current = true;
+    if (transientError) {
+      if (isViewConflict(transientError)) void conflictNotice(transientError, { id, draftAtRisk: false,
+        isCurrent: () => current, autoRefresh: async () => {
+          if (transientError instanceof CoreFailure && transientError.error.code === 'revision_conflict') {
+            // Navigation has already refreshed this rejection. Join that read rather than starting another.
+            await store.getRefreshCompletion();
+          } else await store.refresh();
+          return store.getSnapshot().status === 'ready';
+        }, refresh: async () => { await refresh(); return store.getSnapshot().status === 'ready'; } });
+      else {
+        notices.push({ id, icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)', text: plainFailure(transientError),
+          actions: [{ label: 'Refresh', run: () => {
+            const notice = notices.getSnapshot().find(entry => entry.id === id);
+            void refresh().then(() => {
+              if (current && store.getSnapshot().status === 'ready' && notice && notices.getSnapshot().includes(notice)) notices.dismiss(id);
+            });
+          } }] });
+      }
+    } else notices.dismiss(id);
+    return () => { current = false; };
+  }, [store, transientError]);
   const ownActions = useMemo(() => injectedActions ? null : new SessionActionControllers(store.service), [injectedActions, store]);
   const actions = injectedActions ?? ownActions!;
   const [registering, setRegistering] = useState(false);
@@ -209,7 +239,7 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
         onClick={() => setBinding(selectedProject)}><i className="ph ph-plugs-connected" aria-hidden="true" />Connect existing session</button> }] : []
     : openProjectIds.flatMap(id => { const project = projects.find(value => value.project_id === id); return project ? [{ project, openLink: true }] : []; });
   const notes = <>
-    {state.error && <div className="nav-banner" role="alert"><p>{plainFailure(state.error)}</p>
+    {state.error && !transientError && <div className="nav-banner" role="alert"><p>{plainFailure(state.error)}</p>
       {state.pendingOperationId ? <><p>Ariadne isn’t sure your last change was saved. Check before changing anything else.</p>
         <button type="button" className="btn btn-secondary" disabled={state.writing} onClick={() => { void store.retryMutation(); }}>Check again</button></>
         : <button type="button" className="btn btn-secondary" disabled={mutationDisabled} onClick={() => { void refresh(); }}>{refreshPending ? 'Refreshing…' : 'Refresh'}</button>}
@@ -234,14 +264,13 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
       {selection.kind === 'project' && !selectedProject && state.status === 'ready' && <p className="pw-page-note">This project is no longer registered.</p>}
     </SessionLists>;
   const center = <>
-    <Notices />
     {page && <div className="pw-page-notes">{notes}</div>}
     {page ?? <div className="nav-content nav-session-content">{notes}<SelectedSession navigation={store} renderSession={renderSession} /></div>}
   </>;
   return <Shell header={{ ...defaultChrome,...chrome, text: headerText(headerInput, at), disabled }}
     tabs={{ tabs, disabled, onSelect: selectTab, onClose: closeTab }}
     body={{ waiting: waitingContent ?? <WaitingFrame count="–" loading />,
-      center, detail, detailPath, rail: railContent, onCloseDetail, onRemove, hidden: hiddenItem, onHide,
+      center, detail, detailPath, rail: railContent, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide,
       detailWidth: shown.detail_width ?? null, waitingFolded: shown.waiting_collapsed ?? false,
       onResizeDetail: width => saveLayout({ detail_width: width }), onFoldWaiting: folded => saveLayout({ waiting_collapsed: folded }) }}
     summary={footerSummary(global ? { items: Object.values(global.items_by_status).reduce((sum, count) => sum + count, 0), waiting: global.waiting_unanswered,

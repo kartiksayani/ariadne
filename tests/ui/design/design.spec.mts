@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, extname, resolve, sep } from 'node:path';
-import { designNow, detailMask, detailMasked, frameNow, frameSpec, graphFrame, variantIds, type FrameSpec } from './frames';
+import { answerFrameIds, designNow, detailMask, detailMasked, dockFrameIds, frameNow, frameSpec, graphFrame, toastFrameIds, variantIds, type FrameSpec } from './frames';
 import { handoffMembers, prefix, repo, sourceRoot } from './source.mts';
 import thresholds from './thresholds.json' with { type: 'json' };
 
@@ -146,6 +146,17 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
   // mouseover is React's mouseenter and leaves the rail's scroll position and the pointer alone.
   if (spec.hoverMsg) await railMessage(page, spec.hoverMsg).dispatchEvent('mouseover');
   await settle(page);
+  const sessionBar = page.locator('.tree-session-bar');
+  if (await sessionBar.count()) {
+    await expect(sessionBar.getByRole('button', { name: 'Session actions' })).toBeVisible();
+    await expect(sessionBar.getByRole('button', { name: 'Close session' })).toHaveCount(0);
+    await expect(sessionBar.locator('.tree-session-meta')).toHaveText(/^\d+ topics?$/);
+  }
+  const filters = page.getByRole('group', { name: 'Filter items' });
+  if (await filters.count()) {
+    await expect(filters.getByRole('button', { name: /^Filter/ })).toBeVisible();
+    await expect(filters.getByRole('combobox')).toHaveCount(0);
+  }
 }
 
 const railMessage = (page: Page, number: number) => page.locator('.pw-rail-list [data-message-id]').filter({
@@ -237,6 +248,326 @@ for (const id of [...designFrames, ...variantIds]) {
       await settle(page); await settle(designPage);
     }
     try { await capture(page, designPage, spec, id, card, denied); } finally { if (spec.hoverItem) await designPage.mouse.move(0, 0); }
+  });
+}
+
+for (const width of [1920, 1600, 1280]) for (const acceptedFailure of [false, true]) {
+  test(`${acceptedFailure ? 'delivered-stopped' : 'failed-delivery'} layout at ${width}px`, async ({ page, origin }) => {
+    const denied: string[] = [];
+    await route(page.context(), origin, denied);
+    await openApp(page, origin, { ...frameSpec(acceptedFailure ? 'delivery-stopped' : '1m'), width });
+    for (const selector of ['.tree-item[data-item-id="3.1"]', '.shell-detail-scroll']) {
+      const note = page.locator(`${selector} .stuck-note[data-stuck="${acceptedFailure ? 'stopped' : 'decision'}"]`).first();
+      await expect(note).toBeVisible();
+      await expect(note.locator(':scope > [role="status"]')).toContainText(acceptedFailure ? 'got your message but stopped before answering' : 'Couldn’t deliver');
+      await expect(note.getByRole('button', { name: acceptedFailure ? 'Send again' : 'Retry', exact: true })).toBeVisible();
+      const layout = await note.evaluate(element => {
+        const status = element.querySelector<HTMLElement>(':scope > [role="status"]')!;
+        const actions = element.querySelector<HTMLElement>(':scope > .stuck-actions')!;
+        const text = status.firstChild!, content = text.textContent!;
+        const words = [...content.matchAll(/\S+/g)].map(word => {
+          const range = document.createRange();
+          range.setStart(text, word.index); range.setEnd(text, word.index + word[0].length);
+          return { word: word[0], lines: range.getClientRects().length };
+        });
+        const box = (node: Element) => {
+          const { x, y, width, right, bottom } = node.getBoundingClientRect();
+          return { x, y, width, right, bottom };
+        };
+        return { note: box(element), status: box(status), actions: box(actions), words,
+          buttons: [...actions.querySelectorAll('button')].map(box) };
+      });
+      // Enough room for ordinary words: recovery controls must never squeeze the reason to a sliver.
+      expect(layout.status.width, `${selector} status width`).toBeGreaterThanOrEqual(190);
+      for (const word of layout.words) expect(word.lines, `${selector}: ${word.word}`).toBe(1);
+      // Controls can sit beside the reason when they fit, or wrap completely below it.
+      const beside = layout.actions.x >= layout.status.right;
+      if (!acceptedFailure && width === 1920 && selector.startsWith('.tree-item')) expect(beside).toBe(true);
+      if (beside) {
+        expect(layout.actions.y).toBeLessThan(layout.status.bottom);
+        expect(layout.actions.bottom).toBeGreaterThan(layout.status.y);
+      } else expect(layout.actions.y).toBeGreaterThanOrEqual(layout.status.bottom);
+      for (const button of layout.buttons) {
+        expect(button.x).toBeGreaterThanOrEqual(layout.note.x - 0.5);
+        expect(button.right).toBeLessThanOrEqual(layout.note.right + 0.5);
+      }
+    }
+    expect(denied).toEqual([]);
+  });
+}
+
+test('a long waiting conversation opens at its latest ask and keeps the question visible', async ({ page, origin }) => {
+  const denied: string[] = [];
+  await route(page.context(), origin, denied);
+  await openApp(page, origin, { ...frameSpec('1u'), width: 1400, height: 830 });
+  const pane = page.locator('.item-detail'), body = pane.locator('.detail-body'), head = body.locator('.detail-head');
+  await expect(body.locator('.detail-turn-now .detail-waiting-tag')).toBeInViewport();
+  await expect(head.locator('.detail-question')).toBeInViewport();
+  await expect(head.locator('.detail-badge')).toBeInViewport();
+  await expect(head.locator('.detail-question')).toHaveAttribute('title', /\S+/);
+  expect(await body.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+  await body.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await expect(head.locator('.detail-question')).toBeInViewport();
+  await expect(head.locator('.detail-badge')).toBeInViewport();
+  await head.getByRole('button', { name: 'Expand title', exact: true }).click();
+  await expect(head.getByRole('button', { name: 'Collapse title', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  await expect(head.locator('.detail-meta')).toBeVisible();
+  expect(denied).toEqual([]);
+});
+
+for (const id of answerFrameIds) {
+  test(`frame ${id}`, async ({ page, origin }, testInfo) => {
+    const spec = frameSpec(id), denied: string[] = [];
+    await route(page.context(), origin, denied);
+    await openApp(page, origin, spec);
+    const pane = page.locator('.item-detail'), dock = pane.locator('.detail-dock'), options = dock.locator('[data-answer-option]');
+    const composer = dock.getByRole('textbox', { name: 'Reply in your own words' });
+    await expect(options).toHaveCount(spec.answerOptions!);
+    const detail = page.getByRole('complementary', { name: 'Item detail', exact: true });
+    const notice = detail.locator('.shell-detail-hidden-notice');
+    if (spec.hiddenItems) {
+      const inherited = spec.hiddenItems.includes('2.1');
+      const alsoHidden = spec.hiddenItems.includes(spec.selected!);
+      await expect(notice).toContainText(inherited ? `${alsoHidden ? 'Hidden, along with' : 'Hidden with'} its parent “Review the shared examples”${alsoHidden ? '.' : ''}` : 'Hidden — this item is hidden from the list.');
+      await expect(notice).toBeInViewport();
+      await expect(detail.getByRole('button', { name: 'Unhide item', exact: true })).toHaveAttribute('aria-pressed', 'true');
+      await expect(detail.getByRole('button', { name: 'Unhide item', exact: true })).toHaveAttribute('title', inherited ? 'Unhide this item and its hidden parents' : 'Unhide');
+    }
+    await composer.fill('Keep the captions with the examples.');
+    const space = async () => {
+      const paneBox = (await pane.boundingBox())!, bodyBox = (await pane.locator('.detail-body').boundingBox())!, dockBox = (await dock.boundingBox())!;
+      expect(bodyBox.height / paneBox.height, 'conversation scroll region keeps most of the pane').toBeGreaterThanOrEqual(0.55);
+      expect(dockBox.height / paneBox.height, 'answer area uses at most 40% of the pane').toBeLessThanOrEqual(0.40);
+      expect(bodyBox.y + bodyBox.height).toBeLessThanOrEqual(dockBox.y + 1);
+      expect(dockBox.y + dockBox.height).toBeLessThanOrEqual(paneBox.y + paneBox.height + 1);
+      if (page.viewportSize()!.height === 830) {
+        const chatBox = (await pane.getByRole('region', { name: 'Conversation', exact: true }).boundingBox())!;
+        const visibleChat = Math.min(chatBox.y + chatBox.height, bodyBox.y + bodyBox.height) - Math.max(chatBox.y, bodyBox.y);
+        expect(visibleChat / paneBox.height, 'visible conversation at 1400×830').toBeGreaterThanOrEqual(0.55);
+      }
+    };
+    await space();
+    if (spec.answerOptions) {
+      await expect(dock.locator('.answer-choices')).toBeVisible();
+      const description = dock.locator('.answer-description').first(), more = dock.locator('.answer-more').first();
+      const fullText = await description.textContent();
+      const clamped = await description.evaluate(element => ({ height: element.getBoundingClientRect().height, line: parseFloat(getComputedStyle(element).lineHeight), scroll: element.scrollHeight }));
+      expect(clamped.height).toBeLessThanOrEqual(clamped.line * 2 + 1);
+      expect(clamped.scroll).toBeGreaterThan(clamped.height);
+      await expect(dock.locator('.answer-recommended').first()).toBeVisible();
+      await more.click();
+      await expect(more).toHaveAttribute('aria-expanded', 'true');
+      expect((await description.boundingBox())!.height).toBeGreaterThan(clamped.height);
+      expect(await description.textContent()).toBe(fullText);
+      const ending = await description.evaluate(element => {
+        const dock = element.closest<HTMLElement>('.detail-dock')!, range = document.createRange(), text = element.firstChild!;
+        range.setStart(text, text.textContent!.lastIndexOf('The final paragraph'));
+        range.setEnd(text, text.textContent!.length);
+        dock.scrollTop += range.getBoundingClientRect().bottom - dock.getBoundingClientRect().bottom + 8;
+        const line = range.getBoundingClientRect(), bounds = dock.getBoundingClientRect();
+        return { top: line.top, bottom: line.bottom, dockTop: bounds.top, dockBottom: bounds.bottom };
+      });
+      expect(ending.top).toBeGreaterThanOrEqual(ending.dockTop);
+      expect(ending.bottom).toBeLessThanOrEqual(ending.dockBottom);
+      await expect(options.first()).toHaveAttribute('aria-pressed', 'true');
+      await expect(composer).toHaveValue('Keep the captions with the examples.');
+      await space();
+      await more.focus(); await page.keyboard.press('Enter');
+      await expect(more).toHaveAttribute('aria-expanded', 'false');
+      await expect(composer).toHaveValue('Keep the captions with the examples.');
+      if (spec.expandedAnswer !== undefined) await dock.locator('.answer-more').nth(spec.expandedAnswer).click();
+      const send = dock.locator('.answer-send');
+      await send.scrollIntoViewIfNeeded(); await expect(send).toBeInViewport();
+    }
+    await composer.scrollIntoViewIfNeeded(); await expect(composer).toBeInViewport();
+    await expect(dock.getByRole('button', { name: 'Send as a reply only', exact: true })).toBeInViewport();
+    await space();
+    await page.screenshot({ path: testInfo.outputPath(`${id}.png`), animations: 'disabled' });
+    if (spec.hiddenItems) {
+      const before = await pane.boundingBox(), scrollTop = await pane.locator('.detail-body').evaluate(element => element.scrollTop);
+      await notice.getByRole('button', { name: 'Unhide', exact: true }).click();
+      await expect(notice).toHaveCount(0);
+      expect(await pane.boundingBox(), 'Unhide does not move or resize the detail body').toEqual(before);
+      expect(await pane.locator('.detail-body').evaluate(element => element.scrollTop)).toBe(scrollTop);
+      await expect(composer).toHaveValue('Keep the captions with the examples.');
+      await expect(detail.getByRole('button', { name: 'Hide item', exact: true })).toHaveAttribute('aria-pressed', 'false');
+      await space();
+    }
+    // A resize and an expansion never remount the owner's input or change the saved choice.
+    await page.setViewportSize({ width: 1400, height: 500 });
+    await composer.scrollIntoViewIfNeeded(); await expect(composer).toBeInViewport();
+    await expect(composer).toHaveValue('Keep the captions with the examples.');
+    if (spec.answerOptions) {
+      await expect(options.first()).toHaveAttribute('aria-pressed', 'true');
+      await dock.locator('.answer-send').scrollIntoViewIfNeeded(); await expect(dock.locator('.answer-send')).toBeInViewport();
+    }
+    await space();
+    expect(denied).toEqual([]);
+  });
+}
+
+for (const id of toastFrameIds) {
+  test(`frame ${id}`, async ({ page, origin }, testInfo) => {
+    const spec = frameSpec(id), denied: string[] = [];
+    await route(page.context(), origin, denied);
+    await openApp(page, origin, spec);
+    if (spec.detailWidth !== undefined) {
+      const separator = page.getByRole('separator', { name: 'Resize detail panel' });
+      await expect(separator).toHaveAttribute('aria-valuenow', '400');
+      await separator.focus();
+      for (let width = 400; width < spec.detailWidth; width += 16) await page.keyboard.press('ArrowLeft');
+      await expect(separator).toHaveAttribute('aria-valuenow', String(spec.detailWidth));
+      await separator.evaluate(element => (element as HTMLElement).blur());
+      await settle(page);
+    }
+    if (spec.peekWaiting) {
+      await page.getByRole('button', { name: /^Show Waiting on me/ }).click();
+      await settle(page);
+    }
+    const bar = page.locator('.tree-session-bar'), title = bar.locator('.tree-session-title');
+    const overlay = page.locator('.pw-notices'), toast = overlay.locator('.pw-note');
+    await expect(bar).toBeVisible();
+    await expect(title).toBeVisible();
+    await expect(toast).toHaveCount(0);
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const geometry = async () => ({ bar: await bar.boundingBox(), title: await title.boundingBox(),
+      center: await page.locator('.shell-center').boundingBox(), waiting: await page.locator('.shell-waiting').boundingBox(),
+      detail: await page.locator('.shell-detail').count() ? await page.locator('.shell-detail').boundingBox() : null,
+      dock: await page.locator('.detail-dock').count() ? await page.locator('.detail-dock').boundingBox() : null,
+      tabs: await page.locator('.shell-tabs').boundingBox(), footer: await page.locator('.shell-footer').boundingBox() });
+    const before = await geometry();
+    if (spec.detail) {
+      expect(before.detail!.width, 'fixture uses the requested actual detail-pane width').toBe(spec.detailWidth ?? 400);
+      if (spec.detailWidth !== undefined) expect(before.detail!.width, 'wide detail pane is wider than the 400px default').toBeGreaterThan(400);
+    }
+    const monitor = await page.evaluateHandle(() => {
+      type Shift = PerformanceEntry & { value: number };
+      const shifts: number[] = [];
+      const record = (entries: PerformanceEntry[]) => {
+        for (const entry of entries) shifts.push((entry as Shift).value);
+      };
+      if (!PerformanceObserver.supportedEntryTypes.includes('layout-shift')) throw new Error('Layout shift observation is unavailable');
+      const observer = new PerformanceObserver(list => record(list.getEntries()));
+      observer.observe({ type: 'layout-shift' });
+      return { finish: () => { record(observer.takeRecords()); observer.disconnect(); return shifts; } };
+    });
+    await page.evaluate(() => window.__designToast!.show());
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText('Reference copied.');
+    await expect(overlay).toHaveCSS('position', 'absolute');
+    await settle(page);
+    const visible = await geometry();
+    expect(visible, 'toast appearance moves the session bar and title by 0px').toEqual(before);
+    const toastBox = (await toast.boundingBox())!, overlayBox = (await overlay.boundingBox())!, centerBox = before.center!;
+    expect(toastBox.x, 'toast stays inside the centre left edge').toBeGreaterThanOrEqual(centerBox.x + 16);
+    expect(toastBox.x + toastBox.width, 'toast stays inside the centre right edge').toBeLessThanOrEqual(centerBox.x + centerBox.width - 16);
+    expect(toastBox.width, 'toast is bounded by the centre width and 480px').toBeLessThanOrEqual(Math.min(480, centerBox.width - 32));
+    for (const [name, box] of Object.entries({ waiting: before.waiting, detail: before.detail, dock: before.dock, footer: before.footer })) {
+      if (!box) continue;
+      const intersects = toastBox.x < box.x + box.width && toastBox.x + toastBox.width > box.x
+        && toastBox.y < box.y + box.height && toastBox.y + toastBox.height > box.y;
+      expect(intersects, `toast does not intersect ${name}`).toBe(false);
+    }
+    if (spec.peekWaiting) {
+      expect(centerBox.width, 'fixture exercises the narrow-centre fallback').toBeLessThanOrEqual(400);
+      expect(overlayBox.y, 'narrow toast starts just below the tab bar').toBe(before.tabs!.y + before.tabs!.height + 8);
+    } else {
+      expect(centerBox.width, 'fixture exercises the bottom anchor').toBeGreaterThan(400);
+      expect(overlayBox.y + overlayBox.height, 'toast overlay ends 16px above the footer').toBe(before.footer!.y - 16);
+      expect(toastBox.y, 'toast stays below the session header').toBeGreaterThanOrEqual(before.bar!.y + before.bar!.height);
+    }
+    await page.screenshot({ path: testInfo.outputPath(`${id}.png`), animations: 'disabled' });
+    await page.evaluate(() => window.__designToast!.clear());
+    await expect(toast).toHaveCount(0);
+    await settle(page);
+    const cleared = await geometry();
+    expect(cleared, 'toast clearance moves the session bar and title by 0px').toEqual(before);
+    const shifts = await monitor.evaluate(value => value.finish());
+    await monitor.dispose();
+    expect(shifts.reduce((sum, value) => sum + value, 0), 'toast appearance and clearance cause 0 layout shift, including the overlay').toBe(0);
+    await testInfo.attach('session toast geometry', { body: JSON.stringify({ before, visible, cleared, layoutShifts: shifts }, null, 2), contentType: 'application/json' });
+    expect(denied).toEqual([]);
+  });
+}
+
+test('catalogue scrolling keeps the toast anchored above the footer', async ({ page, origin }) => {
+  const denied: string[] = [];
+  await route(page.context(), origin, denied);
+  await openApp(page, origin, frameSpec('session-toast-light'));
+  await page.getByRole('navigation', { name: 'Projects and sessions' }).getByRole('button', { name: 'Projects', exact: true }).click();
+  await page.setViewportSize({ width: 1280, height: 300 });
+  await settle(page);
+  const scroll = page.locator('.shell-center-content'), overlay = page.locator('.pw-notices');
+  const range = await scroll.evaluate(element => element.scrollHeight - element.clientHeight);
+  expect(range, 'catalogue fixture has scrollable content').toBeGreaterThan(0);
+  await page.evaluate(() => window.__designToast!.show());
+  await expect(overlay.locator('.pw-note')).toBeVisible();
+  await settle(page);
+  const before = await overlay.boundingBox();
+  await scroll.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await settle(page);
+  expect(await scroll.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  expect(await overlay.boundingBox(), 'scrolling the catalogue moves the toast by 0px').toEqual(before);
+  const footer = (await page.locator('.shell-footer').boundingBox())!;
+  expect(before!.y + before!.height).toBe(footer.y - 16);
+  await page.evaluate(() => window.__designToast!.clear());
+  expect(denied).toEqual([]);
+});
+
+for (const id of dockFrameIds) {
+  test(`frame ${id}`, async ({ page, origin }, testInfo) => {
+    const spec = frameSpec(id), denied: string[] = [];
+    await route(page.context(), origin, denied);
+    await openApp(page, origin, spec);
+    const pane = page.locator('.item-detail'), dock = pane.locator('.detail-dock');
+    const detail = page.getByRole('complementary', { name: 'Item detail', exact: true });
+    const detailBox = (await detail.boundingBox())!, headerAction = (await detail.getByRole('button', { name: 'Hide item', exact: true }).boundingBox())!;
+    expect(headerAction.y).toBeGreaterThanOrEqual(detailBox.y);
+    expect(headerAction.y - detailBox.y, 'detail header action starts within 5px of the pane top').toBeLessThanOrEqual(5);
+    const composer = dock.getByRole('textbox', { name: spec.dockState === 'question' ? 'Reply in your own words' : 'Reply message', exact: true });
+    await expect(composer).toHaveValue('');
+    await expect(composer).toBeInViewport();
+    const lines = await composer.evaluate(element => {
+      const style = getComputedStyle(element);
+      return { height: element.getBoundingClientRect().height, minimum: parseFloat(style.minHeight), line: parseFloat(style.lineHeight),
+        padding: parseFloat(style.paddingTop) + parseFloat(style.paddingBottom), border: parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth) };
+    });
+    expect(lines.height, 'resting composer is one line').toBeLessThanOrEqual(Math.max(lines.minimum, Math.ceil(lines.line + lines.padding + lines.border)));
+    if (spec.dockState === 'question') {
+      const choices = dock.locator('.answer-choices');
+      await expect(choices).toBeVisible();
+      await expect(dock.locator('[data-answer-option]')).toHaveCount(2);
+      for (const option of await dock.locator('[data-answer-option]').all()) await expect(option).toBeInViewport();
+    } else {
+      await expect(dock.getByRole('button', { name: 'Ack → Decided', exact: true })).toBeInViewport();
+      await expect(dock.getByRole('button', { name: 'Reply', exact: true })).toBeInViewport();
+      await expect(dock.getByRole('button', { name: 'Later', exact: true })).toBeInViewport();
+    }
+    if (spec.dockState === 'pending') {
+      const pending = pane.getByRole('region', { name: 'Conversation', exact: true }).locator('li[data-pending]');
+      await expect(pending).toContainText('Keep the captions with the examples.');
+      await expect(pending).toContainText('On its way');
+      await expect(pending).toBeInViewport();
+      await expect(dock.locator('.detail-delivery-hint')).toHaveText('Your reply was received · waiting for the agent');
+      await expect(dock.getByRole('button', { name: 'Bring it up', exact: true })).toHaveCount(0);
+      await expect(dock.getByRole('button', { name: 'Drop', exact: true })).toHaveCount(0);
+    }
+    const geometry = await pane.evaluate(element => {
+      const pane = element.getBoundingClientRect(), body = element.querySelector('.detail-body')!.getBoundingClientRect();
+      const dock = element.querySelector('.detail-dock')!.getBoundingClientRect(), chat = element.querySelector('[aria-label="Conversation"]')!.getBoundingClientRect();
+      // Intersect the actual Conversation with its scroll clip, the pane and the viewport.
+      const top = Math.max(chat.top, body.top, pane.top, 0), bottom = Math.min(chat.bottom, body.bottom, pane.bottom, window.innerHeight);
+      return { conversation: Math.max(0, bottom - top) / pane.height, dock: dock.height / pane.height,
+        bodyBottom: body.bottom, dockTop: dock.top, dockBottom: dock.bottom, paneBottom: pane.bottom };
+    });
+    expect(geometry.conversation, `visible resting Conversation at ${spec.width}×${spec.height}`).toBeGreaterThanOrEqual(spec.dockState === 'question' ? 0.55 : 0.70);
+    expect(geometry.dock, 'dock uses at most 40% of the pane').toBeLessThanOrEqual(0.40);
+    if (spec.dockState === 'pending') expect(geometry.dock, 'pending Open dock uses at most 25% of the portrait pane').toBeLessThanOrEqual(0.25);
+    expect(geometry.bodyBottom).toBeLessThanOrEqual(geometry.dockTop + 1);
+    expect(geometry.dockBottom).toBeLessThanOrEqual(geometry.paneBottom + 1);
+    await testInfo.attach('dock geometry', { body: JSON.stringify({ viewport: { width: spec.width, height: spec.height }, ...geometry }, null, 2), contentType: 'application/json' });
+    await page.screenshot({ path: testInfo.outputPath(`${id}.png`), animations: 'disabled' });
+    expect(denied).toEqual([]);
   });
 }
 

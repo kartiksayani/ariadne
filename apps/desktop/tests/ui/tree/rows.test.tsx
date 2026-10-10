@@ -30,6 +30,27 @@ describe('saved status filter chips', () => {
   });
 });
 
+describe('saved topic and explicit filter folds', () => {
+  it('ignores the retired topic filter while allowing a deliberate reveal', () => {
+    const session = immutable(seed()), preferences = view(seed());
+    const normal = sentenceRows(session, preferences, new Set());
+    preferences.filters.topic_id = 'no-longer-visible-in-the-menu';
+    expect(sentenceRows(session, preferences, new Set())).toEqual(normal);
+    preferences.filters.search = 'no matches';
+    expect(sentenceRows(session, preferences, new Set(), [], '1.1').rows.map(row => row.item.id)).toEqual(['1', '1.1']);
+  });
+  it('opens matching ancestors until explicitly folded and lets a deliberate reveal reopen them', () => {
+    const session = seed(), preferences = view(session);
+    session.items['1.1']!.question = 'Unique matching descendant';
+    preferences.filters.search = 'unique matching descendant';
+    const frozen = immutable(session);
+    expect(sentenceRows(frozen, preferences, new Set()).rows.map(row => row.item.id)).toEqual(['1', '1.1']);
+    expect(sentenceRows(frozen, preferences, new Set(), [], null, new Set(['1'])).rows.map(row => row.item.id)).toEqual(['1']);
+    expect(sentenceRows(frozen, preferences, new Set(), [], '1.1', new Set(['1'])).rows.map(row => row.item.id)).toEqual(['1', '1.1']);
+    expect(preferences.expanded_item_ids).toEqual([]);
+  });
+});
+
 describe('canonical sentence tree projection', () => {
   it('orders numeric siblings and topics without changing domain IDs or stored text', () => {
     const session = seed(), preferences = view(session);

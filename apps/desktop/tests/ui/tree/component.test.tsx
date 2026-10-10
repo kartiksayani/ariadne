@@ -20,7 +20,8 @@ import { AppTransport, route } from '../app/transport';
 import { HistoryTransport } from '../history-actions/fixture';
 import { LinkOpener } from '../../../src/ui/shared/MarkdownText';
 import { RecoveryPanel } from '../../../src/components/recovery/RecoveryPanel';
-import { notices } from '../../../src/ui/pages/notices';
+import { Notices, notices } from '../../../src/ui/pages/notices';
+import { NavigationGraph } from '../../../src/ui/graph/NavigationGraph';
 
 const stores: NavigationStore[] = [];
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); notices.clear(); vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -61,7 +62,18 @@ const topicRow = (name: string) => screen.getByRole('treeitem', { name });
 const ids = () => [...document.querySelectorAll('[role="treeitem"][data-item-id]')].map(element => element.getAttribute('data-item-id'));
 const viewOf = (transport: AppTransport) => transport.preferences.sessions.find(value => value.session.session_id === route.session_id)!;
 const patches = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'preferences_patch');
-const chip = (label: string) => within(screen.getByRole('group', { name: 'Filter items' })).getByRole('button', { name: new RegExp(`^${label}`) });
+const filterButton = () => within(screen.getByRole('group', { name: 'Filter items' })).getByRole('button', { name: /^Filter/ });
+const chip = (label: string) => {
+  const group = within(screen.getByRole('group', { name: 'Filter items' }));
+  if (filterButton().getAttribute('aria-expanded') !== 'true') fireEvent.click(filterButton());
+  return group.getByRole(label === 'All' ? 'menuitem' : 'menuitemcheckbox', { name: new RegExp(`^${label === 'All' ? 'Show all' : label}`) });
+};
+const statusSelected = (label: string) => label === 'All' ? !filterButton().hasAttribute('data-active') : chip(label).getAttribute('aria-checked') === 'true';
+const sessionAction = (name: string) => {
+  const trigger = screen.getByRole('button', { name: 'Session actions' });
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger);
+  return screen.getByRole('menuitem', { name });
+};
 async function staleTree(value: Awaited<ReturnType<typeof mount>>) {
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
@@ -127,7 +139,7 @@ describe('session tree rows', () => {
     ++transport.source.revision;
     act(() => { transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: transport.source.revision }); });
     expect(store.getSnapshot().status).toBe('stale');
-    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    fireEvent.click(sessionAction('Rename'));
     fireEvent.change(screen.getByRole('textbox', { name: 'Session name' }), { target: { value: 'Fresh session name' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -153,7 +165,7 @@ describe('session tree rows', () => {
   it('keeps a rename timeout in the editor and clears it on Cancel without a column banner or late save', async () => {
     const value = await mount({ transport: new HistoryTransport() });
     const { release } = await staleTree(value);
-    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    fireEvent.click(sessionAction('Rename'));
     fireEvent.change(screen.getByRole('textbox', { name: 'Session name' }), { target: { value: 'Timed out name' } });
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -170,7 +182,7 @@ describe('session tree rows', () => {
   it('explains an uncertain change that appeared while Rename waited for the ready session', async () => {
     const value = await mount();
     const { release } = await staleTree(value);
-    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    fireEvent.click(sessionAction('Rename'));
     fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Keep this pending name' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     const state = value.actions.getSnapshot();
@@ -193,7 +205,7 @@ describe('session tree rows', () => {
   ] as const)('uses specific plain words for a %s rename refusal', async (code, words) => {
     const transport = new HistoryTransport(); await mount({ transport });
     transport.replies.push({ api_version: 1, ok: false, error: { code, message: `Rejected ${code}`, hint: 'Internal details', retryable: false, field_errors: [] } });
-    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    fireEvent.click(sessionAction('Rename'));
     fireEvent.change(screen.getByRole('textbox', { name: 'Session name' }), { target: { value: 'Refused name' } });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })); });
     expect(screen.getByRole('alert').textContent).toBe(words);
@@ -274,12 +286,12 @@ describe('session tree rows', () => {
     expect(screen.getAllByRole('treeitem').filter(element => element.tabIndex === 0)).toHaveLength(1);
     // The bar names the agent (the binding's adapter); the session title is the tab's.
     expect(document.querySelector('.tree-session-title')?.textContent).toBe('demo.local');
-    expect(document.querySelector('.tree-session-meta')?.textContent).toMatch(/· 2 topics$/);
+    expect(document.querySelector('.tree-session-meta')?.textContent).toBe('2 topics');
     expect(document.querySelector('.tree-run .dispatch-label')?.textContent).toBe('Sending');
     expect(within(screen.getByRole('group', { name: 'Sending to the agent' })).getByRole('button', { name: 'Pause' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Close session' })).toBeTruthy();
+    expect(sessionAction('Close session')).toBeTruthy();
     expect(chip('All').textContent).toContain('9'); expect(chip('Open').textContent).toContain('3');
-    expect(chip('Closed').textContent).toContain('4'); expect(chip('All').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('Closed').textContent).toContain('4'); expect(statusSelected('All')).toBe(true);
     expect(row('1').querySelector('.tree-outcome')).not.toBeNull();
     expect(within(topicRow('Continued context')).getByText(/^Continued from/)).toBeTruthy();
   });
@@ -440,6 +452,58 @@ describe('session tree rows', () => {
 });
 
 describe('session tree filters', () => {
+  it('preserves graph folds and both status edits when the composed writers contend', async () => {
+    const value = await mount(), { transport, navigation, store } = value;
+    value.rerender({ graph: <NavigationGraph navigation={navigation} store={store} tight={false} query="" onReveal={() => {}} /> });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'preferences_patch') await gate;
+      return invoke(name, args);
+    });
+    try {
+      const open = chip('Open'), progress = chip('In progress');
+      act(() => {
+        const parent = document.querySelector<HTMLElement>('.graph-node[data-item-id="1"]')!;
+        fireEvent.click(within(parent).getByRole('button', { name: 'Collapse branches' }));
+        fireEvent.click(open); fireEvent.click(progress);
+      });
+      await waitFor(() => expect(navigation.getSnapshot().writing).toBe(true));
+      expect(statusSelected('Open')).toBe(true); expect(statusSelected('In progress')).toBe(true);
+      expect(chip('Open').hasAttribute('disabled')).toBe(false);
+      await act(async () => { release(); });
+      await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'in_progress']));
+      await waitFor(() => expect(navigation.getSnapshot().writing).toBe(false));
+      expect(viewOf(transport).expanded_item_ids).not.toContain('1');
+      expect(statusSelected('Open')).toBe(true); expect(statusSelected('In progress')).toBe(true);
+      expect(notices.getSnapshot().some(notice => notice.id === 'tree-view-save-failed')).toBe(false);
+      expect(screen.queryByText('Ariadne isn’t sure that view change was saved. Try it again.')).toBeNull();
+    } finally { release(); }
+  });
+  it('queues rapid status toggles while keeping the menu enabled and focused during writes', async () => {
+    const { transport, navigation } = await mount();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'preferences_patch') await gate;
+      return invoke(name, args);
+    });
+    const open = chip('Open'); open.focus(); fireEvent.click(open);
+    await waitFor(() => expect(navigation.getSnapshot().writing).toBe(true));
+    expect(chip('In progress').hasAttribute('disabled')).toBe(false);
+    expect(document.activeElement).toBe(open);
+    fireEvent.click(chip('In progress'));
+    expect(statusSelected('Open')).toBe(true);
+    expect(statusSelected('In progress')).toBe(true);
+    await act(async () => { release(); });
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'in_progress']));
+    await waitFor(() => expect(navigation.getSnapshot().writing).toBe(false));
+    expect(statusSelected('Open')).toBe(true);
+    expect(statusSelected('In progress')).toBe(true);
+    expect(patches(transport)).toHaveLength(2);
+  });
   it('counts the matches themselves, excluding context and forced selections', async () => {
     const { rerender } = await mount({ props: { query: 'receipt', selectedId: '4' } });
     expect(screen.getByText('Showing 2 of 9 items matching “receipt”')).toBeTruthy();
@@ -459,7 +523,7 @@ describe('session tree filters', () => {
     view.rerender({ query: currentQuery });
     expect(clear).toHaveBeenCalledOnce();
     expect(viewOf(view.transport).filters.statuses).toEqual(['open']);
-    expect(chip('Open').getAttribute('aria-pressed')).toBe('true');
+    expect(statusSelected('Open')).toBe(true);
     expect(screen.queryByText(/items matching/)).toBeNull();
   });
   it('excludes archived sessions from Ack buttons and topic counts', async () => {
@@ -486,21 +550,21 @@ describe('session tree filters', () => {
     const { transport } = await mount({ configure: value => {
       viewOf(value).filters.statuses = ['done', 'open', 'waiting_on_me', 'replaced', 'decided', 'in_progress', 'dropped', 'open', 'done'];
     } });
-    expect(chip('All').getAttribute('aria-pressed')).toBe('true');
+    expect(statusSelected('All')).toBe(true);
     for (const label of ['Waiting on me', 'Open', 'In progress', 'Closed']) {
-      expect(chip(label).getAttribute('aria-pressed')).toBe('false');
+      expect(statusSelected(label)).toBe(false);
     }
     expect(ids()).toHaveLength(9);
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
-    expect(chip('Open').getAttribute('aria-pressed')).toBe('true');
-    expect(chip('All').getAttribute('aria-pressed')).toBe('false');
+    expect(statusSelected('Open')).toBe(true);
+    expect(statusSelected('All')).toBe(false);
     expect(ids()).toEqual(['1', '1.1', '4', '8']);
   });
   it('keeps a saved partial Closed group narrow when another chip is added', async () => {
     const { transport } = await mount({ configure: value => { viewOf(value).filters.statuses = ['done']; } });
-    expect(chip('Closed').getAttribute('aria-pressed')).toBe('true');
-    expect(chip('All').getAttribute('aria-pressed')).toBe('false');
+    expect(statusSelected('Closed')).toBe(true);
+    expect(statusSelected('All')).toBe(false);
     expect(ids()).toEqual(['1']);
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'done']));
@@ -516,10 +580,10 @@ describe('session tree filters', () => {
     chip('In progress').focus();
     await userEvent.keyboard('{Enter}');
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'in_progress']));
-    expect(chip('Open').getAttribute('aria-pressed')).toBe('true');
-    expect(chip('In progress').getAttribute('aria-pressed')).toBe('true');
-    expect(chip('All').getAttribute('aria-pressed')).toBe('false');
-    expect(chip('Closed').getAttribute('aria-pressed')).toBe('false');
+    expect(statusSelected('Open')).toBe(true);
+    expect(statusSelected('In progress')).toBe(true);
+    expect(statusSelected('All')).toBe(false);
+    expect(statusSelected('Closed')).toBe(false);
     expect(ids()).toEqual(['1', '1.1', '3', '4', '8']);
     expect(labels.map(label => chip(label).textContent)).toEqual(counts);
     rerender({ query: 'receipt' });
@@ -529,15 +593,15 @@ describe('session tree filters', () => {
     expect(chip('In progress').textContent).toContain('1');
     cleanup(); navigation.stop();
     await mount({ transport });
-    expect(chip('Open').getAttribute('aria-pressed')).toBe('true');
-    expect(chip('In progress').getAttribute('aria-pressed')).toBe('true');
+    expect(statusSelected('Open')).toBe(true);
+    expect(statusSelected('In progress')).toBe(true);
     expect(ids()).toEqual(['1', '1.1', '3', '4', '8']);
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['in_progress']));
     expect(ids()).toEqual(['3']);
     fireEvent.click(chip('In progress'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
-    expect(chip('All').getAttribute('aria-pressed')).toBe('true');
+    expect(statusSelected('All')).toBe(true);
     expect(ids()).toHaveLength(9);
   });
   it('collapses every selected status to All and clears a combination with All', async () => {
@@ -549,9 +613,9 @@ describe('session tree filters', () => {
       fireEvent.click(chip(label));
       await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(expected));
     }
-    expect(chip('All').getAttribute('aria-pressed')).toBe('true');
+    expect(statusSelected('All')).toBe(true);
     for (const label of ['Waiting on me', 'Open', 'In progress', 'Closed']) {
-      expect(chip(label).getAttribute('aria-pressed')).toBe('false');
+      expect(statusSelected(label)).toBe(false);
     }
     expect(ids()).toHaveLength(9);
     fireEvent.click(chip('Closed'));
@@ -560,33 +624,69 @@ describe('session tree filters', () => {
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'decided', 'done', 'dropped', 'replaced']));
     fireEvent.click(chip('All'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
-    expect(chip('All').getAttribute('aria-pressed')).toBe('true');
+    expect(statusSelected('All')).toBe(true);
   });
-  it('writes the status chip and the topic, and counts follow the search and topic', async () => {
+  it('counts follow search and keeps the topic dropdown out of every layout', async () => {
     const { transport, rerender } = await mount();
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
-    expect(chip('Open').getAttribute('aria-pressed')).toBe('true'); expect(ids()).toEqual(['1', '1.1', '4', '8']);
-    expect(row('1').querySelector('.tree-question')?.getAttribute('style')).toContain('64%');
+    expect(ids()).toEqual(['1', '1.1', '4', '8']);
     rerender({ query: 'receipt' });
     expect(chip('All').textContent).toContain('2'); expect(chip('Open').textContent).toContain('1');
     expect(row('1.1').querySelector('.tree-hit')?.textContent?.toLowerCase()).toBe('receipt');
-    rerender({ query: '' });
-    const topic = Object.values(transport.sessions.get(route.session_id)!.topics).find(value => value?.name === 'Continued context')!;
-    fireEvent.change(screen.getByRole('combobox', { name: 'Topic' }), { target: { value: topic.id } });
-    await waitFor(() => expect(viewOf(transport).filters.topic_id).toBe(topic.id));
-    expect(chip('All').textContent).toContain('1'); expect(ids()).toEqual(['8']);
-    fireEvent.change(screen.getByRole('combobox', { name: 'Topic' }), { target: { value: 'all' } });
-    await waitFor(() => expect(viewOf(transport).filters.topic_id).toBeNull());
+    for (const props of [{}, { detailOpen: true }, { detailOpen: true, railOpen: true }]) {
+      rerender(props);
+      expect(screen.queryByRole('combobox', { name: 'Topic' })).toBeNull();
+    }
+  });
+  it('shows a single filter icon and names its selected statuses with a dot', async () => {
+    const { transport } = await mount();
+    expect(filterButton().getAttribute('aria-label')).toBe('Filter');
+    expect(filterButton().querySelector('.tree-filter-dot')).toBeNull();
+    expect(screen.queryByRole('menu')).toBeNull();
+    fireEvent.click(chip('Open'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
+    fireEvent.click(chip('In progress'));
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'in_progress']));
+    expect(filterButton().getAttribute('aria-label')).toBe('Filter: Open, In progress');
+    expect(filterButton().getAttribute('data-active')).toBe('true');
+    expect(filterButton().querySelector('.tree-filter-dot')).not.toBeNull();
+    expect(ids()).toEqual(['1', '1.1', '3', '4', '8']);
     fireEvent.click(chip('All'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
+    expect(filterButton().getAttribute('aria-label')).toBe('Filter');
+    expect(document.activeElement).toBe(filterButton());
+    expect(screen.queryByRole('menu')).toBeNull();
   });
-  it('hides the topic select while detail and rail are both open', async () => {
-    const { rerender } = await mount();
-    rerender({ detailOpen: true });
-    expect(screen.getByRole('combobox', { name: 'Topic' })).toBeTruthy();
-    rerender({ detailOpen: true, railOpen: true });
-    expect(screen.queryByRole('combobox', { name: 'Topic' })).toBeNull();
+  it.each(['status', 'search'] as const)('keeps item and topic folds shared with the normal view under %s filtering', async mode => {
+    const { transport, rerender } = await mount();
+    if (mode === 'status') {
+      fireEvent.click(chip('Open'));
+      await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
+      fireEvent.keyDown(chip('Open'), { key: 'Escape' });
+    } else rerender({ query: 'receipt' });
+    expect(ids()).toContain('1.1');
+    row('1').focus(); fireEvent.keyDown(row('1'), { key: 'ArrowLeft' });
+    await waitFor(() => expect(ids()).not.toContain('1.1'));
+    expect(viewOf(transport).expanded_item_ids).not.toContain('1');
+    fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' }));
+    await waitFor(() => expect(ids()).toContain('1.1'));
+    expect(viewOf(transport).expanded_item_ids).toContain('1');
+    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Expand or collapse topic' }));
+    await waitFor(() => expect(ids()).not.toContain('1'));
+    expect(viewOf(transport).collapsed_topic_ids).toContain(transport.sessions.get(route.session_id)!.items['1']!.topic_id);
+    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Expand or collapse topic' }));
+    await waitFor(() => expect(ids()).toContain('1.1'));
+    expect(viewOf(transport).collapsed_topic_ids).not.toContain(transport.sessions.get(route.session_id)!.items['1']!.topic_id);
+    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Expand or collapse topic' }));
+    await waitFor(() => expect(ids()).not.toContain('1'));
+    if (mode === 'status') {
+      fireEvent.click(chip('All'));
+      await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
+    } else rerender({ query: '' });
+    expect(ids()).not.toContain('1');
+    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Expand or collapse topic' }));
+    await waitFor(() => expect(ids()).toContain('1.1'));
   });
   it('offers one clear action when nothing matches', async () => {
     const { calls, rerender } = await mount();
@@ -601,8 +701,8 @@ describe('session tree filters', () => {
       session.items['2']!.status = 'open'; session.items['3']!.status = 'open';
     } });
     expect(screen.getByText('No items match these filters.')).toBeTruthy();
-    expect(chip('Waiting on me').getAttribute('aria-pressed')).toBe('true');
-    expect(chip('In progress').getAttribute('aria-pressed')).toBe('true');
+    expect(statusSelected('Waiting on me')).toBe(true);
+    expect(statusSelected('In progress')).toBe(true);
   });
   it('shows a reveal outside the filters, keeps its ancestry open and resumes the filtered view', async () => {
     const { transport, store, calls, rerender } = await mount({ configure: transport => {
@@ -721,7 +821,7 @@ describe('session tree lifecycle', () => {
     fireEvent.click(prompt); fireEvent.click(prompt);
     expect(transport.mutations.filter(request => request.command.command === 'topic_archive')).toHaveLength(0);
     await act(async () => { releasePresence(); await pause; await store.refresh(); });
-    await waitFor(() => expect(screen.getByText(`Archived “${topic.name}”.`)).toBeTruthy());
+    await waitFor(() => expect(notices.getSnapshot().some(notice => notice.text === `Archived “${topic.name}”.`)).toBe(true));
     expect(transport.mutations.filter(request => request.command.command === 'topic_archive')).toHaveLength(1);
     expect(topic.archived_at).not.toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -732,17 +832,38 @@ describe('session tree lifecycle', () => {
       const session = value.sessions.get(route.session_id)!; session.items['8']!.status = 'done';
       for (const input of Object.values(session.inputs)) if (input && input.target.topic_id === session.items['8']!.topic_id) input.state = 'handled';
     } });
+    render(<Notices />);
     const band = topicRow('Continued context');
     expect(within(band.parentElement!).getByText('Everything here is closed.')).toBeTruthy();
     await act(async () => { fireEvent.click(within(band.parentElement!).getByRole('button', { name: 'Archive topic' })); });
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(await screen.findByText('Archived “Continued context”.')).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Session tree' }).textContent).not.toContain('Archived “Continued context”.');
+    vi.useFakeTimers();
+    await act(async () => { await vi.advanceTimersByTimeAsync(6500); });
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy();
+    vi.useRealTimers();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); });
     await waitFor(() => expect(screen.queryByText('Archived “Continued context”.')).toBeNull());
     expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive', 'topic_restore']);
     await act(async () => { fireEvent.click(within(topicRow('Continued context')).getByRole('button', { name: 'Archive' })); });
     fireEvent.click(await screen.findByRole('button', { name: 'View archive' }));
     expect(calls.archive).toBe(1); expect(screen.queryByText('Archived “Continued context”.')).toBeNull();
+    expect(notices.getSnapshot().some(notice => notice.actions?.some(action => action.label === 'Undo'))).toBe(false);
+  });
+  it('dismisses an archive outcome without replaying it on an unrelated tree update', async () => {
+    const transport = new HistoryTransport();
+    const view = await mount({ transport, configure: value => {
+      const session = value.sessions.get(route.session_id)!; session.items['8']!.status = 'done';
+      for (const input of Object.values(session.inputs)) if (input && input.target.topic_id === session.items['8']!.topic_id) input.state = 'handled';
+    } });
+    render(<Notices />);
+    await act(async () => { fireEvent.click(within(topicRow('Continued context')).getByRole('button', { name: 'Archive' })); });
+    await screen.findByText('Archived “Continued context”.');
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    view.rerender({ detailOpen: true });
+    expect(notices.getSnapshot()).toEqual([]);
+    expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive']);
   });
   it('archives a topic with open work after one confirmation, leaving its items and cancelling its unsent messages', async () => {
     const transport = new HistoryTransport();
@@ -758,9 +879,21 @@ describe('session tree lifecycle', () => {
     expect(dialog.getByText(/open items? stays? as (it is|they are)\. .*archiving cancels them\. You can restore it any time\.$/)).toBeTruthy();
     await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
     expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive']);
-    expect(await screen.findByText(new RegExp(`${unsent.length} unsent messages were cancelled\\.`))).toBeTruthy();
+    await waitFor(() => expect(notices.getSnapshot().some(notice => notice.text.includes(`${unsent.length} unsent messages were cancelled.`))).toBe(true));
     expect(unsent.every(id => session.inputs[id]!.state === 'cancelled')).toBe(true);
     expect(Object.values(session.items).map(item => item!.status)).toEqual(statuses);
+  });
+  it('keeps a refused archive confirmation error in its dialog without a duplicate toast', async () => {
+    const transport = new HistoryTransport(); await mount({ transport });
+    transport.replies.push({ api_version: 1, ok: false,
+      error: { code: 'invalid_argument', message: 'Refused archive.', hint: '', retryable: false, field_errors: [] } });
+    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Archive' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' }));
+    await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('Something in that isn’t valid. Check it and try again.');
+    expect(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' }).contains(alert)).toBe(true);
+    expect(notices.getSnapshot()).toEqual([]);
   });
   it('archives the focused row’s topic with e', async () => {
     const transport = new HistoryTransport();
@@ -798,11 +931,11 @@ describe('session tree lifecycle', () => {
       Object.values(session.items).forEach(item => { if (item) { item.status = 'done'; item.waiting_since = null; } });
     } });
     transport.replies.push(new Error('Lost acknowledgement'));
-    fireEvent.click(screen.getByRole('button', { name: 'Close session' }));
+    fireEvent.click(sessionAction('Close session'));
     await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close session' })); });
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
     expect(screen.getByText('Closing the session isn’t confirmed yet. Check whether your last change was saved before making another.')).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Close session' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((sessionAction('Close session') as HTMLButtonElement).disabled).toBe(true);
     const request = structuredClone(transport.mutations[0]);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Check again' })); });
     expect(transport.mutations).toEqual([request, request]);
@@ -815,6 +948,23 @@ describe('stopped deliveries in the tree', () => {
   // Input 74 (item 7) stopped mid-delivery; on the active binding it is a recovery target.
   const active = (transport: AppTransport) => { const session = transport.sessions.get(route.session_id)!; session.inputs[stopped]!.binding_id = session.active_binding_id!; };
   const banner = () => screen.queryByRole('region', { name: 'Delivery recovery' });
+  it('keeps a delivered topic reply neutral in both the sticky line and its recovery note', async () => {
+    let topicName = '';
+    await mount({ configure: transport => {
+      const session = transport.sessions.get(route.session_id)!, input = session.inputs[stopped]!, attempt = input.attempts[0]!;
+      topicName = session.topics[input.target.topic_id]!.name;
+      input.target.item_id = null; input.kind = 'topic_reply';
+      attempt.acceptance = 'accepted'; attempt.host_turn_id = 'turn-example'; attempt.turn_state = 'completed'; attempt.result_state = 'missing';
+      attempt.error = { code: 'result_missing', reason: 'No saved result.', retryable: false, observed_at: session.updated_at };
+    } });
+    const band = topicRow(topicName), line = band.querySelector<HTMLElement>('.tree-topic-status')!;
+    expect(line.textContent).toBe('demo.local has your message but hasn’t saved its answer yet. It may still be working.');
+    expect(line.style.color).not.toBe('var(--a-warn)');
+    const fix = band.parentElement!.querySelector<HTMLElement>('.stuck-note[data-stuck="answer"]')!;
+    expect(fix.textContent).not.toMatch(/Couldn’t deliver|Not delivered/);
+    expect(within(fix).getByRole('button', { name: 'Ask for the answer' })).toBeTruthy();
+    expect(within(fix).queryByRole('button', { name: 'Cancel message' })).toBeNull();
+  });
   it('answers it on the item row: Couldn’t deliver, Retry in one click, without selecting the row', async () => {
     // On its own (old) binding there is no presence: Retry is the owner's word that the agent is idle.
     const { transport, calls } = await mount();
@@ -859,6 +1009,7 @@ describe('stopped deliveries in the tree', () => {
     expect((within(fix).getByRole('button', { name: 'Mark as done' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(ids()).toEqual(['1', '1.1', '4', '8']));
+    await waitFor(() => expect(banner()).not.toBeNull());
     expect(within(banner()!).getByText('A message needs your decision')).toBeTruthy();
     fireEvent.click(chip('All'));
     await waitFor(() => expect(banner()).toBeNull());
@@ -1353,7 +1504,7 @@ describe('scrolling the tree', () => {
     expect(scroller().scrollTop).toBe(150);
   });
 
-  it.each(['fold topic', 'collapse item', 'status chip', 'topic filter', 'Resume filtered view'])(
+  it.each(['fold topic', 'collapse item', 'status chip', 'Resume filtered view'])(
   'never scrolls when %s dismisses the active tree reveal', async path => {
     const view = await opened();
     fireEvent.click(row('8'));
@@ -1373,11 +1524,6 @@ describe('scrolling the tree', () => {
         break;
       case 'status chip':
         fireEvent.click(chip('All'));
-        break;
-      case 'topic filter':
-        fireEvent.change(screen.getByRole('combobox', { name: 'Topic' }), {
-          target: { value: view.transport.sessions.get(route.session_id)!.items['8']!.topic_id },
-        });
         break;
       case 'Resume filtered view':
         fireEvent.click(screen.getByRole('button', { name: 'Resume filtered view' }));

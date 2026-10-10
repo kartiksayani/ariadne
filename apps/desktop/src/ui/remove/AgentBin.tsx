@@ -10,6 +10,8 @@ import type { RemoveTarget } from '../dialogs/remove';
 import './agent-bin.css';
 import { STATUS, statusKey } from '../shared/status';
 import { Dialog } from '../dialogs/Dialog';
+import { notices } from '../pages/notices';
+import { isViewConflict } from '../shared/conflictNotice';
 
 const keyOf = (route: SessionRef, topicId: string | null) => JSON.stringify([route.project_id, route.session_id, topicId]);
 /** A View notice can open a bin after navigation mounts its session. */
@@ -96,6 +98,13 @@ export function AgentBin({ session, actions, topicId = null, onRemove }: {
   const restoreConfirmation = useRestoreConfirmation(actions);
   useEffect(() => () => { if (pending.current) { pending.current.cancelled = true; pending.current.cancel(); } }, [actions]);
   const route = { project_id: session.project_id, session_id: session.id }, key = keyOf(route, topicId);
+  const immediateError = operation.pending || isViewConflict(operation.error) && error === plainFailure(operation.error) ? null : error;
+  const errorNoticeId = `agent-bin-action:${key}`;
+  useEffect(() => () => notices.dismiss(errorNoticeId), [errorNoticeId]);
+  useEffect(() => {
+    if (!immediateError) { notices.dismiss(errorNoticeId); return; }
+    notices.push({ id: errorNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: immediateError });
+  }, [errorNoticeId, immediateError]);
   useEffect(() => { if (request.key === key) setOpen(true); }, [request, key]);
   const entries = topicId ? removedRoots(session, topicId).map(item => ({ topicId, itemId: item.id, name: shortLabel(item), items: removedSubtree(session, item.id) }))
     : Object.values(session.topics).filter(topic => !!topic?.removed_at).map(topic => ({ topicId: topic!.id, itemId: null, name: topic!.name,
@@ -132,7 +141,7 @@ export function AgentBin({ session, actions, topicId = null, onRemove }: {
   return <div className="agent-bin" data-agent-bin={topicId ?? 'topics'}>
     <button type="button" className="btn btn-ghost agent-bin-fold" aria-expanded={open} onClick={() => setOpen(value => !value)}>
       <i className={open ? 'ph ph-caret-down' : 'ph ph-caret-right'} aria-hidden="true" />Removed by agent · {count}</button>
-    {error && <p role="alert">{error}</p>}
+    {operation.pending && error && <p role="alert">{error}</p>}
     {open && <div className="agent-bin-entries">{entries.map(entry => {
       const ids = new Set(entry.items.map(item => item?.id));
       const cancelled = Object.values(session.inputs).filter(input => input?.kind !== 'removed' && input?.state === 'cancelled' && input.cancel_cause === 'agent_removed'

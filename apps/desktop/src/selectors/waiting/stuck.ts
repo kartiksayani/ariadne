@@ -13,9 +13,10 @@ import type { Immutable } from '../../data';
 import type { SupervisorHealth } from '../../data/service';
 import { dispatchStatus } from '../../components/bindings/dispatch';
 import { agentName } from '../../ui/shell/model';
+import { targetRemoved } from '../removed';
 
-/** `sent` is not stuck at all: the message is on its way, and only Cancel applies (no text). */
-export type StuckKind = 'held' | 'paused' | 'blocked' | 'behind' | 'busy' | 'waiting' | 'decision' | 'sent';
+/** `sent` is on its way; `answer` waits for the agent to save an answer it already received. */
+export type StuckKind = 'held' | 'paused' | 'blocked' | 'behind' | 'busy' | 'waiting' | 'answer' | 'stopped' | 'checking' | 'decision' | 'sent';
 export interface Stuck {
   readonly kind: StuckKind;
   readonly text: string;
@@ -31,7 +32,7 @@ const quoted = (text: string) => `“${text.length > 40 ? `${text.slice(0, 38).t
 /** What the message was about: its question, else its topic. */
 export const inputAbout = (input: Immutable<Input>) => input.payload.target_snapshot.item_question ?? input.payload.target_snapshot.topic_name;
 /** What the owner sent, on one line: the chosen option, else the text. */
-const sentLabel = (input: Immutable<Input>) => input.payload.target_snapshot.options.find(option => option.id === input.payload.selected_option_id)?.label
+export const sentLabel = (input: Immutable<Input>) => input.payload.target_snapshot.options.find(option => option.id === input.payload.selected_option_id)?.label
   ?? input.payload.text.replace(/\s+/gu, ' ').trim();
 
 /** Held: a queued message written for an older revision of its question; it waits for the owner to review it. */
@@ -98,13 +99,40 @@ export function notSent(session: Immutable<Session>, message: Immutable<Message>
 export const counted = (session: Immutable<Session>, message: Immutable<Message>): boolean => !cancelledInput(session, message);
 
 /** What went wrong with a stopped delivery, in one plain sentence. */
-export function recoveryProblem(attempt: Immutable<Attempt>, agent: string): string {
+export function recoveryProblem(attempt: Immutable<Attempt>, agent: string, label?: string): string {
   if (attempt.result_state === 'committed') return `${agent} saved its answer, but the message wasn’t marked handled.`;
+  if (attempt.acceptance === 'uncertain' && attempt.host_turn_id) return `Checking whether ${label ? quoted(label) : 'your message'} was delivered…`;
+  if (agentReceived(attempt) && (attempt.turn_state === 'failed' || attempt.turn_state === 'interrupted')) return `${agent} got your message but stopped before answering.`;
+  if (agentReceived(attempt)) return `${agent} has your message but hasn’t saved its answer yet. It may still be working.`;
   if (attempt.acceptance === 'uncertain') return `Ariadne isn’t sure it reached ${agent}.`;
   if (attempt.turn_state === 'completed') return `${agent} finished without saving its answer.`;
   if (attempt.turn_state === 'failed' || attempt.turn_state === 'interrupted') return `${agent}’s turn stopped before it answered.`;
   if (attempt.acceptance === 'rejected') return `${agent} didn’t take it.`;
   return 'It needs your decision.';
+}
+
+/** Persisted claim evidence: the agent already has these words. */
+export const agentReceived = (attempt: Immutable<Attempt> | null | undefined): boolean =>
+  !!attempt && attempt.acceptance !== 'uncertain' && attempt.acceptance !== 'rejected'
+    && (attempt.acceptance === 'accepted' || !!attempt.host_turn_id);
+
+export function awaitingAnswer(input: Immutable<Input>): boolean {
+  const attempt = stoppedAttempt(input);
+  return agentReceived(attempt) && attempt?.result_state !== 'committed'
+    && attempt?.turn_state !== 'failed' && attempt?.turn_state !== 'interrupted';
+}
+
+/** Stop waiting for an expired answer sends nothing, so it needs no idle evidence. */
+export const skipWithoutIdle = (attempt: Immutable<Attempt> | null | undefined): boolean =>
+  attempt?.turn_state === 'completed' && attempt.result_state === 'missing' && attempt.error?.code === 'result_missing';
+
+/** The late-result exception applies only to Stop waiting after missing-result expiry. */
+export function keepsLateAnswer(session: Immutable<Session>, input: Immutable<Input>): boolean {
+  const attempt = stoppedAttempt(input);
+  return awaitingAnswer(input) && attempt?.turn_state === 'completed' && attempt.result_state === 'missing'
+    && attempt.error?.code === 'result_missing' && attempt.acceptance !== 'uncertain' && attempt.acceptance !== 'rejected'
+    && input.binding_id === session.active_binding_id && attempt.binding_generation === session.bindings[input.binding_id]?.generation
+    && session.state === 'active' && session.archived_at == null && !targetRemoved(session, input.target);
 }
 
 /** The current, unsealed attempt of a stopped delivery: the one a decision applies to. */
@@ -116,18 +144,21 @@ export function stoppedAttempt(input: Immutable<Input>): Immutable<Attempt> | nu
 const stuck = (kind: StuckKind, text: string, { resume = false, retry = false, settle = null }:
   Partial<Pick<Stuck, 'resume' | 'retry' | 'settle'>> = {}): Stuck => Object.freeze({ kind, text, resume, retry, settle });
 
-/** Why `input` hasn't reached the agent; a `sent` note (Cancel only) while it is in flight; null once settled. */
+/** Why `input` is waiting; a quiet `sent` note while it is in flight; null once settled. */
 export function stuckInput(session: Immutable<Session>, input: Immutable<Input>,
   presence: Immutable<PresenceObservation> | null = null, health: SupervisorHealth | null = null): Stuck | null {
   const binding = session.bindings[input.binding_id] ?? null, agent = binding ? agentName(binding.adapter_id) : 'the agent';
   if (input.state === 'needs_attention') {
     const attempt = stoppedAttempt(input), label = sentLabel(input);
     if (attempt?.result_state === 'committed') return stuck('decision', recoveryProblem(attempt, agent), { settle: 'accept_result' });
+    if (awaitingAnswer(input)) return stuck('answer', recoveryProblem(attempt!, agent), { retry: true, settle: 'skip' });
+    if (agentReceived(attempt)) return stuck('stopped', recoveryProblem(attempt!, agent), { retry: true, settle: 'skip' });
+    if (attempt?.acceptance === 'uncertain' && attempt.host_turn_id) return stuck('checking', recoveryProblem(attempt, agent, label), { retry: true, settle: 'skip' });
     const lead = label ? `Couldn’t deliver ${quoted(label)}.` : 'Couldn’t deliver your message.';
     return stuck('decision', `${lead} ${attempt ? recoveryProblem(attempt, agent) : 'It needs your decision.'}`,
       { retry: !!attempt, settle: attempt ? 'skip' : null });
   }
-  // On its way: nothing to explain, but the owner can still call it back (core cancels in-flight inputs too).
+  // On its way: the action component reads claim evidence before offering Cancel.
   if (input.state === 'in_flight') return stuck('sent', '');
   if (input.state !== 'queued') return null;
   if (heldInput(session, input)) return stuck('held', 'The question changed — review and send again');

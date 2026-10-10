@@ -23,13 +23,14 @@ const failureEvidence = (label, action, expected = null) => withFailureEvidence(
   } catch (reading) { canonical = { unreadable: String(reading) }; }
   await writeFile(join(evidence(), `history-failure-${label}.json`), JSON.stringify({ failedWait: label, error: String(error?.message ?? error), expected, dom, canonical }, null, 2));
 });
-// The detail's canonical item ID and complete question identify selection;
+// The detail's canonical item ID and complete title tooltip identify selection;
 // a fork's source round is proved by its link on the originating message.
 export async function waitForHistoryItem(item, label = 'history-item') {
   await failureEvidence(label, () => wait(() => browser.execute(expected => {
     const article = document.querySelector('article.item-detail[data-detail-item-id]');
     const question = article?.querySelector('.detail-question');
-    return article?.dataset.detailItemId === expected.id && question?.textContent === expected.question;
+    return article?.dataset.detailItemId === expected.id && question?.getAttribute('title') === expected.question
+      && !!question.textContent?.trim();
   }, { id: item.id, question: item.question }),
   'Native detail did not reveal the registered item and its complete question'),
   { id: item.id, question: item.question, source_round_id: item.source_round_id });
@@ -146,7 +147,7 @@ async function seed(configuration) {
 }
 // A draft marked changed by a newer saved target stays locked until the owner reviews it explicitly.
 async function reviewCurrentTarget() {
-  const review = await browser.$(ownerInput()).$('button=Review current target');
+  const review = await browser.$(ownerInput()).$('button=Review this question');
   if (!await review.isExisting()) return false;
   await review.waitForEnabled(); await review.scrollIntoView(); await review.click();
   return true;
@@ -160,12 +161,12 @@ export async function waitForHistoryControl(control, label) {
 async function answer(history, ordinal, text) {
   const another = await browser.$(ownerInput('1')).$('button=Write another input');
   if (await another.isExisting()) { await another.waitForEnabled(); await another.scrollIntoView(); await another.click(); }
-  // The answer slot locks a draft written against an older target until "Review current target" re-bases it.
+  // The answer slot locks a draft written against an older question until "Review this question" updates it.
   const editor = await browser.$(`${ownerInput('1')} textarea`);
   await failureEvidence(`owner-input-editor-round-${ordinal}`, async () => {
     try { await editor.waitForDisplayed(); } catch (error) { await browser.saveScreenshot(join(evidence(), `owner-input-editor-round-${ordinal}.png`)); throw error; }
   }, { ordinal, text });
-  await wait(async () => await editor.isEnabled() || await reviewCurrentTarget(), 'The answer editor neither enabled nor offered Review current target');
+  await wait(async () => await editor.isEnabled() || await reviewCurrentTarget(), 'The answer editor neither enabled nor offered Review this question');
   await editor.waitForEnabled();
   // Odd rounds send the chosen option alone; even rounds send a reply in the owner's own words.
   if (ordinal % 2) { const choice = await browser.$(ownerInput('1')).$(`button*=${option(ordinal).label}`); await waitForHistoryControl(choice, `round ${ordinal} choice`); await choice.scrollIntoView(); await choice.click(); }

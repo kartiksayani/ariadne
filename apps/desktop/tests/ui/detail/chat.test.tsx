@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
@@ -12,9 +12,144 @@ import { setup } from '../history/fixtures';
 
 const model = (session: Session, itemId = '1') => detailModel({ session: immutable(session), itemId, now: Date.parse(session.updated_at), mode: null, later: false, saving: null })!;
 const opened: ReturnType<typeof setup>[] = [];
-afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('the single item chat', () => {
+  it('keeps a long title compact with a tooltip and expands it without changing the answer', async () => {
+    const value = setup(); opened.push(value);
+    const item = value.transport.session.items['2']!;
+    item.question = 'Choose how to handle the complete delivery conversation and preserve all earlier decisions. '.repeat(8);
+    await value.store.refresh();
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    const title = screen.getByRole('heading', { name: item.question.trim() });
+    expect(title.title).toBe(item.question);
+    const toggle = screen.getByRole('button', { name: 'Expand title' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+    expect(screen.getByRole('button', { name: 'Collapse title' }).getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.querySelector('.ph-caret-down')).not.toBeNull();
+    expect(title.closest('.detail-head-expanded')).not.toBeNull();
+    fireEvent.click(toggle);
+    expect(title.closest('.detail-head-expanded')).toBeNull();
+    expect(value.transport.calls.some(request => 'command' in request)).toBe(false);
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/detail/detail.css'), 'utf8');
+    expect(css).toMatch(/\.detail-head\s*\{[^}]*position:\s*sticky/s);
+    // Browser anchoring must not change an app-selected position and imitate an owner scroll away.
+    expect(css).toMatch(/\.detail-body\s*\{[^}]*overflow-anchor:\s*none/s);
+    expect(css).toMatch(/\.detail-question\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap/s);
+    expect(css).toMatch(/\.detail-dock\s*\{[^}]*max-height:\s*40%;[^}]*overflow-y:\s*auto/s);
+  });
+
+  it('opens at the latest unanswered ask after a long earlier conversation and keeps the sticky title clear', async () => {
+    const value = setup(); opened.push(value);
+    const session = value.transport.session, item = session.items['2']!;
+    const first = session.rounds[item.current_round_id!]!;
+    const previous = session.messages.find(message => message.body === item.ask)!;
+    previous.body = 'Earlier delivery context. '.repeat(1000);
+    const second = { ...structuredClone(first), id: 'new-round', ordinal: 2, opened_message_id: 'new-opening',
+      owner_message_ids: [], agent_message_ids: ['new-opening'], result_input_ids: [], fork_item_ids: [] };
+    session.rounds[second.id] = second; item.current_round_id = second.id;
+    session.messages.push({ ...structuredClone(previous), id: second.opened_message_id, number: 30, round_id: second.id, body: 'Current delivery context.' });
+    session.messages.push({ ...structuredClone(previous), id: 'later-context', number: 31, round_id: second.id, body: 'A later update after the question.' });
+    vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(1800);
+    vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(400);
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      return { top: this.closest('[data-message-id="new-opening"]') ? 800 : 100,
+        height: this.classList.contains('detail-head') ? 36 : 0 } as DOMRect;
+    });
+    await value.store.refresh();
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    await screen.findByRole('region', { name: 'Conversation' });
+    await waitFor(() => expect(document.querySelector<HTMLElement>('.detail-body')!.scrollTop).toBe(664));
+    const current = document.querySelector<HTMLElement>('[data-message-id="new-opening"]')!;
+    expect(within(current).getByText('Waiting on you')).toBeTruthy();
+    expect(current.querySelectorAll('.detail-bubble-agent')).toHaveLength(2);
+    expect(within(current).getByText(item.ask!)).toBeTruthy();
+  });
+
+  it.each([
+    { askHeight: 120, opening: 764, smaller: 764, reflowed: 884 },
+    { askHeight: 700, opening: 1078, smaller: 1228, reflowed: 1348 },
+  ])('keeps a $askHeight px current ask visible through composer growth and content reflow until the owner scrolls away', async ({ askHeight, opening, smaller, reflowed }) => {
+    const value = setup(); opened.push(value);
+    const session = value.transport.session, item = session.items['2']!, round = session.rounds[item.current_round_id!]!;
+    round.owner_message_ids = []; round.result_input_ids = [];
+    for (const input of Object.values(session.inputs)) if (input?.target.item_id === item.id) input.state = 'cancelled';
+    item.why = null;
+    item.ask = round.ask_snapshot = 'Read the complete proposed delivery plan. '.repeat(100);
+    const observed: Element[] = [], resize = vi.fn();
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) { resize.mockImplementation(() => callback([], this as unknown as ResizeObserver)); }
+      observe(element: Element) { observed.push(element); }
+      disconnect() {}
+    });
+    let viewportHeight = 400, askTop = 800;
+    vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(2500);
+    vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) {
+      return this.classList.contains('detail-body') ? viewportHeight : 0;
+    });
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const pane = document.querySelector<HTMLElement>('.detail-body'), scroll = pane?.scrollTop ?? 0;
+      let top = 100, height = 0;
+      if (this.classList.contains('detail-body')) height = viewportHeight;
+      else if (this.classList.contains('detail-head')) height = 36;
+      else if (this.classList.contains('detail-waiting-tag')) { top += askTop + askHeight - 42 - scroll; height = 20; }
+      else if (this.classList.contains('detail-bubble-agent') && this.querySelector('.detail-waiting-tag')) { top += askTop - scroll; height = askHeight; }
+      return { top, bottom: top + height, height } as DOMRect;
+    });
+    await value.store.refresh();
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    await screen.findByRole('region', { name: 'Conversation' });
+    const pane = document.querySelector<HTMLElement>('.detail-body')!, marker = pane.querySelector('.detail-waiting-tag')!;
+    const visible = () => {
+      const question = marker.getBoundingClientRect(), bounds = pane.getBoundingClientRect();
+      expect(question.top).toBeGreaterThanOrEqual(bounds.top + 36);
+      expect(question.bottom).toBeLessThanOrEqual(bounds.bottom);
+      if (askHeight === 120) {
+        const bubble = marker.closest('.detail-bubble-agent')!.getBoundingClientRect();
+        expect(bubble.top).toBeGreaterThanOrEqual(bounds.top + 36);
+        expect(bubble.bottom).toBeLessThanOrEqual(bounds.bottom);
+      }
+    };
+    expect(pane.scrollTop).toBe(opening); visible();
+    expect(pane.scrollHeight - pane.scrollTop - pane.clientHeight).toBeGreaterThan(80);
+    expect(observed).toContain(pane.querySelector('.detail-chat'));
+    expect(observed).toContain(pane.querySelector('.detail-head'));
+    for (const section of pane.children) expect(observed).toContain(section);
+    expect(observed).toContain(marker.closest('.detail-bubble-agent'));
+    // A programmatic scroll event must not turn off following the current ask.
+    fireEvent.scroll(pane);
+    viewportHeight = 250;
+    act(() => resize());
+    expect(pane.scrollTop).toBe(smaller); visible();
+    // New context above the chat moves the ask without changing the viewport or the chat key.
+    item.why = 'Earlier context before the current delivery question.';
+    askTop += 120;
+    session.revision++;
+    await act(async () => { await value.store.refresh(); });
+    expect(pane.querySelector('.detail-why')).not.toBeNull();
+    expect(observed).toContain(pane.querySelector('.detail-why'));
+    act(() => resize());
+    expect(pane.scrollTop).toBe(reflowed); visible();
+    pane.scrollTop = 100; fireEvent.scroll(pane);
+    askTop += 120;
+    act(() => resize());
+    expect(pane.scrollTop).toBe(100);
+  });
+
+  it('shows the reason unavailable actions wait while the agent reconnects', async () => {
+    const value = setup(); opened.push(value);
+    const session = value.transport.session, binding = session.bindings[session.active_binding_id!]!;
+    binding.connection_state = 'reconnecting';
+    await value.store.refresh();
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1.1" later={false} onOpenItem={vi.fn()} />);
+    const dock = document.querySelector<HTMLElement>('.detail-dock')!;
+    expect(within(dock).getByText(/Reconnecting to .+These come back with the connection/).closest('[hidden], details')).toBeNull();
+    expect(within(dock).getByRole<HTMLButtonElement>('button', { name: 'Bring it up' }).disabled).toBe(true);
+    expect(within(dock).getByRole<HTMLButtonElement>('button', { name: 'Reply' }).disabled).toBe(true);
+    expect(within(dock).getByRole<HTMLButtonElement>('button', { name: 'Later' }).disabled).toBe(false);
+  });
+
   it('keeps the full reply once and shows both the choice and exact note in each owner bubble', async () => {
     const value = setup(); opened.push(value); await value.store.refresh();
     const session = value.transport.session, answer = session.answers[0]!;

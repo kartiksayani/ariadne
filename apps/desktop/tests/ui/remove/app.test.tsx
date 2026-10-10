@@ -13,7 +13,10 @@ const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem
 it('removes an item from the detail trash or ⌫ after asking, with Undo, and runs it when the page goes', async () => {
   const transport = new AppTransport(); render(<DesktopApp service={createDesktopService(transport)} />);
   fireEvent.click(await sessionButton(route)); await screen.findByRole('tree', { name: 'Session items' });
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
+  await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    });
   fireEvent.click(row('4')!);
   const trash = await screen.findByRole('button', { name: 'Remove item' });
   fireEvent.click(trash);
@@ -21,7 +24,7 @@ it('removes an item from the detail trash or ⌫ after asking, with Undo, and ru
   expect(within(dialog).getByText(/This item is removed from Ariadne\. .+ is told, so it stops working on it/)).toBeTruthy();
   fireEvent.click(within(dialog).getByRole('button', { name: 'Remove item' }));
   await waitFor(() => expect(row('4')).toBeNull());
-  expect(screen.getByText(/is told in 5 seconds unless you undo\.$/)).toBeTruthy();
+  expect(await screen.findByText(/is told in 5 seconds unless you undo\.$/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
   await waitFor(() => expect(row('4')).not.toBeNull());
   expect(transport.mutations.some(request => request.command.command === 'item_remove')).toBe(false);

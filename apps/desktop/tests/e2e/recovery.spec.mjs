@@ -132,17 +132,22 @@ export async function runRecoveryAcceptance(configuration) {
   await wait(async () => (await snapshot(configuration)).inputs[input.id].attempts[0].result_state === 'missing', 'Native five-second missing-result expiry did not run');
   const expired = await snapshot(configuration), originalAttempt = expired.inputs[input.id].attempts[0];
   assert.equal(expired.inputs[input.id].state, 'needs_attention'); assert.equal(originalAttempt.error.code, 'result_missing');
+  assert.equal(originalAttempt.binding_generation, original.generation);
+  assert.equal(original.generation, configuration.generation);
+  assert.equal(originalAttempt.binding_generation, expired.bindings[configuration.bindingId].generation);
   assert.ok(Date.parse(originalAttempt.error.observed_at) - Date.parse(originalAttempt.turn_observed_at) >= 5000, 'Missing result must wait the natural grace period');
   assert.equal(expired.bindings[configuration.bindingId].dispatch_state, 'recovery_required');
   assert.equal(expired.bindings[configuration.bindingId].pause_reason, 'result_missing');
-  // The stopped delivery is answered on its tree row; with that row visible there is no recovery banner.
-  const recoveryRow = () => browser.$(`[role="tree"] .stuck-note[data-stuck="decision"][data-stuck-input="${input.id}"]`);
+  // The delivered message needs an answer; with its row visible there is no recovery banner.
+  const recoveryRow = () => browser.$(`[role="tree"] .stuck-note[data-stuck="answer"][data-stuck-input="${input.id}"]`);
   const row = await recoveryRow();
-  await wait(async () => await row.isExisting() && (await row.getText()).includes('finished without saving its answer'), 'Missing result was not visible on its tree row');
-  assert.ok((await row.getText()).includes('Couldn’t deliver'), 'The tree row must say the message could not be delivered');
+  await wait(async () => await row.isExisting() && (await row.getText()).includes('codex has your message but hasn’t saved its answer yet. It may still be working.'), 'Missing answer was not visible on its tree row');
+  assert.doesNotMatch(await row.getText(), /Couldn’t deliver|Not delivered/, 'An accepted message cannot be described as undelivered');
+  await wait(async () => (await browser.$(`.item-detail [data-pending="${input.id}"]`).getText()).includes('Delivered · no answer yet'), 'Delivered message did not retain its truthful pending caption');
   assert.equal(await browser.$('[aria-label="Delivery recovery"]').isExisting(), false, 'A decision on a visible row must not also raise a banner');
-  // The session bar says why nothing is sent, with no Resume while a decision is open.
-  await wait(async () => (await sendingLabel().getText()) === 'Not sending: the agent finished without saving its answer', 'Session bar did not explain the missing result');
+  // This accepted attempt belongs to the current binding generation: the bar waits for its answer.
+  const waitingLabel = `Waiting for codex to answer “${folded(workText).slice(0, 38).trimEnd()}…”`;
+  await wait(async () => (await sendingLabel().getText()) === waitingLabel, 'Session bar did not wait for the accepted message’s answer');
   assert.equal(await browser.$('.tree-session-bar .dispatch-chip').$('button[aria-label="Resume"]').isExisting(), false, 'Missing result must not offer Resume');
   await openDispatch(configuration);
   assert.equal(await dialog().$('button=Resume sending').isEnabled(), false, 'Missing result must block Resume');
@@ -150,9 +155,20 @@ export async function runRecoveryAcceptance(configuration) {
   await click(await dialog().$('button=Done'));
   await wait(async () => !(await dialog().isExisting()), 'Dispatch dialog remained open');
   await openPrimary(configuration);
-  // The row offers Retry / Mark as done in one click; the result-only repair sits behind More options.
-  assert.ok(await (await recoveryRow()).$('button=Retry').isExisting(), 'The tree row must offer Retry');
-  assert.ok(await (await recoveryRow()).$('button=Mark as done').isExisting(), 'The tree row must offer Mark as done');
+  // Stopping the wait is primary; asking for the answer is a separate result-only turn.
+  const recoveryButtons = await (await recoveryRow()).$$('button');
+  assert.deepEqual(await Promise.all(recoveryButtons.map(button => button.getText())), ['Stop waiting', 'Ask for the answer', 'Send again', 'More options']);
+  assert.ok((await (await recoveryRow()).$('button=Stop waiting').getAttribute('class')).includes('btn-primary'));
+  const ask = await (await recoveryRow()).$('button=Ask for the answer');
+  assert.ok((await ask.getAttribute('class')).includes('btn-secondary'));
+  assert.equal(await ask.getAttribute('title'), 'Asks codex to save its answer now. An answer it’s still working on won’t be linked to this message.');
+  const again = await (await recoveryRow()).$('button=Send again');
+  assert.ok((await again.getAttribute('class')).includes('btn-ghost'));
+  assert.equal(await (await recoveryRow()).$('button=Cancel message').isExisting(), false, 'A received message cannot be cancelled');
+  await click(again);
+  assert.ok((await dialog().getText()).includes('codex already has this message. Send it again anyway?'));
+  await click(await dialog().$('button=Cancel'));
+  await wait(async () => !(await dialog().isExisting()), 'Resend confirmation remained open');
   await click(await (await recoveryRow()).$('button=More options'));
   const reviewed = await dialog().getText();
   assert.ok(reviewed.includes(workText.split('\n')[0]), 'Recovery dialog must show the owner’s message');
@@ -208,21 +224,56 @@ export async function runRecoveryAcceptance(configuration) {
   const successorPublication = await publishResult(configuration, next, successorReply);
   await completeTurn(configuration, next);
   await wait(async () => (await snapshot(configuration)).inputs[successor.id].state === 'handled', 'Recovery successor did not finish its ordinary result/completion join');
+  // Stop waiting releases the queue without closing the original attempt to its late answer.
+  const lateWorkText = `native-stop-waiting-work-${nonce}\nSave the original answer when it becomes available.`;
+  await ownerReply(configuration, lateWorkText, true);
+  await wait(async () => (await admissions(configuration)).length === queuedBefore.length + 4, 'Stop-waiting input did not reach the real provider');
+  const lateAdmission = (await admissions(configuration)).at(-1);
+  await completeTurn(configuration, lateAdmission);
+  await wait(async () => (await snapshot(configuration)).inputs[lateAdmission.inputId].attempts[0].result_state === 'missing', 'Stop-waiting input did not reach the natural missing-result expiry');
+  const lateMissing = await snapshot(configuration), lateInput = lateMissing.inputs[lateAdmission.inputId];
+  assert.equal(lateInput.attempts[0].acceptance, 'accepted');
+  assert.equal(lateInput.attempts[0].host_turn_id, lateAdmission.turnId);
+  const lateRow = () => browser.$(`[role="tree"] .stuck-note[data-stuck="answer"][data-stuck-input="${lateInput.id}"]`);
+  await wait(async () => await lateRow().isExisting(), 'Stop-waiting decision did not appear on its tree row');
+  await click(await lateRow().$('button=Stop waiting'));
+  await wait(async () => (await snapshot(configuration)).inputs[lateInput.id].state === 'skipped', 'Stop waiting did not save the real owner decision');
+  const stoppedWaiting = await snapshot(configuration), skippedInput = stoppedWaiting.inputs[lateInput.id];
+  const stopResolution = skippedInput.resolution_history.at(-1);
+  assert.equal(stopResolution.kind, 'skip'); assert.equal(stopResolution.attempt_id, lateAdmission.attemptId);
+  assert.equal(stopResolution.evidence, null, 'Stop waiting must not attest that the host is idle');
+  assert.equal(skippedInput.active_attempt_id, null);
+  assert.ok(skippedInput.attempts[0].sealed_at);
+  assert.equal(stoppedWaiting.bindings[configuration.bindingId].pause_reason, null);
+  const lateReplyText = `native-stop-waiting-late-answer-${nonce}\nThe original answer still appears after the owner stops waiting.`;
+  const latePublication = await publishResult(configuration, lateAdmission, lateReplyText);
+  assert.equal(latePublication.request.source_input_id, lateAdmission.inputId);
+  assert.equal(latePublication.request.attempt_id, lateAdmission.attemptId, 'Late publication must identify the original admission after its active pointer clears');
+  await wait(async () => (await snapshot(configuration)).inputs[lateInput.id].state === 'handled', 'Original late result was not accepted after Stop waiting');
   const finalSession = await snapshot(configuration), finalAdmissions = await admissions(configuration);
   assert.deepEqual(finalAdmissions.slice(0, queuedBefore.length), queuedBefore);
-  assert.deepEqual(finalAdmissions.slice(queuedBefore.length).map(entry => entry.inputId), [input.id, input.id, successor.id]);
+  assert.deepEqual(finalAdmissions.slice(queuedBefore.length).map(entry => entry.inputId), [input.id, input.id, successor.id, lateInput.id]);
   assert.equal(finalSession.inputs[input.id].attempts.length, 2); assert.equal(finalSession.inputs[successor.id].attempts.length, 1);
   assert.deepEqual(finalSession.inputs[input.id].attempts[0], preparedInput.attempts[0]);
   assert.deepEqual(finalSession.messages.find(message => message.id === reply.id), reply);
+  const handledLateInput = finalSession.inputs[lateInput.id], handledLateAttempt = handledLateInput.attempts[0];
+  assert.equal(handledLateInput.attempts.length, 1, 'Stop waiting must not redeliver the original work');
+  assert.deepEqual(handledLateInput.resolution_history.at(-1), stopResolution);
+  assert.equal(handledLateAttempt.sealed_at, skippedInput.attempts[0].sealed_at);
+  assert.equal(handledLateAttempt.result_state, 'committed');
+  assert.equal(handledLateAttempt.error.code, 'result_missing', 'Late answer must retain the missing-result warning');
+  assert.ok(finalSession.messages.some(message => message.input_id === lateInput.id && message.attempt_id === lateAdmission.attemptId
+    && message.kind === 'reply' && message.body === lateReplyText && handledLateAttempt.domain_result.reply_message_ids.includes(message.id)));
   for (const [id, prior] of Object.entries(baseline.inputs)) assert.deepEqual(finalSession.inputs[id], prior, 'Recovery cannot rewrite the restored golden inputs');
   assert.deepEqual(await readFile(configuration.demo.sessionPath), demoBefore);
   await (await browser.$('.item-detail [aria-label="Conversation"]')).waitForDisplayed();
   await wait(async () => {
     // The timeline lays a multi-line body out as one paragraph: compare with white space folded.
     const text = folded(await browser.$('[aria-label="Item detail"]').getText());
-    return [workText, replyText, successorText, successorReply].every(body => text.includes(folded(body)));
-  }, 'Native detail lost retained original work/reply or the FIFO successor');
+    return [workText, replyText, successorText, successorReply, lateWorkText, lateReplyText].every(body => text.includes(folded(body)));
+  }, 'Native detail lost the retained recovery work, FIFO successor or original late answer');
   await browser.saveScreenshot(join(evidence, 'native-recovery-completed.png'));
   await json(join(evidence, 'recovery-acceptance.json'), { original, successor, reply, completed, expired, prepared, resolution, receipt,
-    repair, repairBody, resultOnly, finalSession, finalAdmissions, replyPublication, repairPublication, successorPublication });
+    repair, repairBody, resultOnly, finalSession, finalAdmissions, replyPublication, repairPublication, successorPublication,
+    lateAdmission, lateMissing, stoppedWaiting, stopResolution, latePublication });
 }

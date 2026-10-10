@@ -54,8 +54,13 @@ export async function runAccessibilityAcceptance(configuration) {
   await focus(row); await browser.keys('r'); await wait(() => active(editor), 'Repeated Reply did not refocus');
   assert.equal(await (await browser.$(editor)).getValue(), `${draft}g`);
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-keyboard-retained-editor.png'));
-  // Close session in the session bar opens its one confirmation.
-  const closeButton = await browser.$('.tree-session-bar').$('button*=Close session'); await closeButton.waitForEnabled(); await closeButton.click();
+  // Close session in Session actions opens its one confirmation.
+  await wait(async () => await browser.$('.tree-column').getAttribute('data-session-status') === 'ready'
+    && await browser.$('.tree-session-bar').getAttribute('aria-busy') === 'false', 'Session was not ready for Close session');
+  const actions = await browser.$('.tree-session-bar button[aria-label="Session actions"]');
+  await actions.waitForEnabled(); await actions.click();
+  const closeButton = await browser.$('.tree-session-bar [role="menuitem"]*=Close session');
+  await closeButton.waitForEnabled(); await closeButton.click();
   await (await browser.$('[role="dialog"]')).waitForDisplayed();
   await focus('[role="dialog"] button');
   await browser.keys(['Shift', 'Tab']);
@@ -66,7 +71,7 @@ export async function runAccessibilityAcceptance(configuration) {
   await browser.keys('Escape');
   await wait(async () => !(await browser.$('[role="dialog"]').isExisting()), 'Dialog Escape did not close overlay');
   assert.equal(await (await browser.$('.shell-detail')).isExisting(), true, 'Dialog Escape must preserve selected detail');
-  assert.equal(await browser.execute(() => document.activeElement?.textContent === 'Close session'), true, 'Dialog restores opener');
+  assert.equal(await browser.execute(() => document.activeElement?.getAttribute('aria-label') === 'Session actions'), true, 'Dialog restores opener');
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-keyboard-dialog-return.png'));
   assert.deepEqual(await readFile(configuration.demo.sessionPath), before, 'Keyboard focus/draft/modal checks leave durable demo domain unchanged');
   await json(join(process.env.ARIADNE_E2E_EVIDENCE, 'keyboard-accessibility.json'), { ordinaryApp: true, actualCoreStore: true,
