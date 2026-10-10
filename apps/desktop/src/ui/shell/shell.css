@@ -312,7 +312,19 @@
 
 .shell-center {
   position: relative;
+  container: shell-center / inline-size;
   display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Catalogue pages scroll here; session trees and Graph keep their own inner scroll regions.
+   Notifications are a sibling, so scrolling content cannot move their centre-column anchor. */
+.shell-center-content {
+  display: flex;
+  flex: 1;
   flex-direction: column;
   min-width: 0;
   min-height: 0;

@@ -23,6 +23,7 @@ import { SessionActionControllers } from './components/bindings/actions';
 import { RecoveryPanel, recoveryTargets } from './components/recovery/RecoveryPanel';
 import { CopiedProvenance } from './components/history-actions/CopiedProvenance';
 import { SessionNotice } from './components/edge-states/EdgeState';
+import { DraftConflictNotices } from './components/edge-states/DraftConflictNotices';
 import { hiddenItems, hiddenParentSource, hiddenSource } from './ui/tree/hidden';
 import { TreeView, type RowIntent } from './ui/tree/TreeView';
 import { ArchivePage } from './ui/pages/ArchivePage';
@@ -32,6 +33,7 @@ import { ContinueTopicHost } from './ui/dialogs/ContinueTopicDialog';
 import type { RemoveHandler, RemoveSubject, RemoveTarget } from './ui/dialogs/remove';
 import { RemoveDialog } from './ui/dialogs/RemoveDialog';
 import { notices } from './ui/pages/notices';
+import { isViewConflict } from './ui/shared/conflictNotice';
 import { RemovalContext, RemovalQueue } from './ui/remove/queue';
 import { nextSelection, removeSubject, subtree, targetSession } from './ui/remove/model';
 import { agentName, hostApp, themeToggle, type SessionFacts } from './ui/shell/model';
@@ -219,6 +221,11 @@ function Workspace({ application }: { application: Application }) {
   const [highlightedMessages, setHighlightedMessages] = useState<ReadonlySet<string>>(new Set());
   const [searchEdit, setSearchEdit] = useState<{ route: string; text: string; attempted: boolean } | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
+  useEffect(() => () => notices.dismiss('route-open-failed'), []);
+  useEffect(() => {
+    if (routeError) notices.push({ id: 'route-open-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)', text: routeError });
+    else notices.dismiss('route-open-failed');
+  }, [routeError]);
   useEffect(() => {
     if (ownerReady) {
       setRouteError(error => error === "Ariadne is still loading this session's latest changes. Try again." ? null : error);
@@ -230,20 +237,25 @@ function Workspace({ application }: { application: Application }) {
   const candidateId = currentReveal?.kind === 'item' ? currentReveal.route.item_id : view?.selected_item_id ?? null;
   const selectedId = candidateId && sessionState?.snapshot?.session.items[candidateId] && !itemRemoved(sessionState.snapshot.session, candidateId) ? candidateId : null;
   const ackRequest = useRef(0);
+  const ackNoticeId = useRef<string | null>(null);
   const ackActions = store ? application.actions.forSession(store) : null;
   const ackState = useSyncExternalStore(ackActions?.subscribe ?? noSubscription, ackActions?.getSnapshot ?? noSession, ackActions?.getSnapshot ?? noSession);
   useEffect(() => {
     ++ackRequest.current;
-    notices.dismiss('ack-save-failed');
-    return () => { ++ackRequest.current; };
+    if (ackNoticeId.current) notices.dismiss(ackNoticeId.current);
+    return () => {
+      ++ackRequest.current;
+      if (ackNoticeId.current) notices.dismiss(ackNoticeId.current);
+    };
   }, [key, selectedId]);
   useEffect(() => {
     const receipt = ackState?.receipt;
     if (receipt && 'data' in receipt && receipt.data.kind === 'item_ack') {
       ++ackRequest.current;
-      notices.dismiss('ack-save-failed');
+      const route = ackActions?.session.getSnapshot().route;
+      if (route) notices.dismiss(JSON.stringify(['item-ack', route.project_id, route.session_id, receipt.data.item_id]));
     }
-  }, [ackState?.receipt]);
+  }, [ackState?.receipt, ackActions]);
   const historyReveal = useRef<RevealedItem | null>(null);
   const historySession = sessionState?.snapshot?.session;
   const existsInHistory = useCallback((id: string) => !!route && !!historySession?.items[id] && !itemRemoved(historySession, id) && !hidden.item(route, historySession, id),
@@ -545,18 +557,20 @@ function Workspace({ application }: { application: Application }) {
       if (!session || !item || !ackTarget(session, item)) return false;
       const actions = application.actions.forSession(store);
       if (repeat) return true;
+      const id = JSON.stringify(['item-ack', target.project_id, target.session_id, target.item_id]);
+      ackNoticeId.current = id;
       const blocked = ackBlocked(actions);
       if (blocked) {
-        notices.push({ id: 'ack-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: blocked });
+        notices.push({ id, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: blocked });
         return true;
       }
       const attempted = ++ackRequest.current;
-      notices.dismiss('ack-save-failed');
+      notices.dismiss(id);
       void acknowledge(actions, item.id, () => attempted !== ackRequest.current).then(saved => {
         const error = actions.getSnapshot().error;
-        if (attempted === ackRequest.current && !saved && error) notices.push({ id: 'ack-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: ackFailure(error) });
+        if (attempted === ackRequest.current && !saved && error && !isViewConflict(error)) notices.push({ id, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: ackFailure(error) });
       }).catch(error => {
-        if (attempted === ackRequest.current) notices.push({ id: 'ack-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: ackFailure(error) });
+        if (attempted === ackRequest.current) notices.push({ id, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: ackFailure(error) });
       });
       return true;
     }, archiveTopic: topicId => {
@@ -585,6 +599,7 @@ function Workspace({ application }: { application: Application }) {
   const appRoot = useRef<HTMLDivElement>(null);
   useWindowKeys(appRoot, historyControls, intent => changeTextSize(nextTextSize(textSizeIntent.current ?? navigation.getSnapshot().preferences?.global.text_scale, intent)));
   return <ItemHistoryContext.Provider value={historyControls}><RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys}>
+    <DraftConflictNotices drafts={application.drafts} opened={navigation.opened} selectedSession={route ?? null} />
     <AgentRemovalNotices waiting={application.waiting} controllers={application.actions} navigation={navigation}
       selectedSession={sessionState?.snapshot?.session ?? null} onTree={showBinTree} />
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
@@ -600,7 +615,6 @@ function Workspace({ application }: { application: Application }) {
       onRemove={() => { if (route && selectedId) askRemove({ kind: 'item', item: { ...route, item_id: selectedId } }); }}
       waitingContent={<WaitingColumn drafts={application.drafts} store={application.waiting} revealItem={revealItem} onAgentNotRunning={onAgentNotRunning}
         selected={route && selectedId ?{ ...route, item_id: selectedId } : null}
-        notice={routeError && <p className="waiting-notice waiting-notice-warn" role="alert">{routeError}</p>}
         openSession={target => { void navigation.navigate({ kind: 'session', session: target }); }} />}
       detailPath={store && selectedId && detailOpen && route ? <DetailPath store={store} itemId={selectedId} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} /> : undefined}
       detail={store && selectedId && detailOpen && route ? <ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}

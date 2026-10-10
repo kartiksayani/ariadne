@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, extname, resolve, sep } from 'node:path';
-import { answerFrameIds, designNow, detailMask, detailMasked, dockFrameIds, frameNow, frameSpec, graphFrame, variantIds, type FrameSpec } from './frames';
+import { answerFrameIds, designNow, detailMask, detailMasked, dockFrameIds, frameNow, frameSpec, graphFrame, toastFrameIds, variantIds, type FrameSpec } from './frames';
 import { handoffMembers, prefix, repo, sourceRoot } from './source.mts';
 import thresholds from './thresholds.json' with { type: 'json' };
 
@@ -405,6 +405,114 @@ for (const id of answerFrameIds) {
     expect(denied).toEqual([]);
   });
 }
+
+for (const id of toastFrameIds) {
+  test(`frame ${id}`, async ({ page, origin }, testInfo) => {
+    const spec = frameSpec(id), denied: string[] = [];
+    await route(page.context(), origin, denied);
+    await openApp(page, origin, spec);
+    if (spec.detailWidth !== undefined) {
+      const separator = page.getByRole('separator', { name: 'Resize detail panel' });
+      await expect(separator).toHaveAttribute('aria-valuenow', '400');
+      await separator.focus();
+      for (let width = 400; width < spec.detailWidth; width += 16) await page.keyboard.press('ArrowLeft');
+      await expect(separator).toHaveAttribute('aria-valuenow', String(spec.detailWidth));
+      await separator.evaluate(element => (element as HTMLElement).blur());
+      await settle(page);
+    }
+    if (spec.peekWaiting) {
+      await page.getByRole('button', { name: /^Show Waiting on me/ }).click();
+      await settle(page);
+    }
+    const bar = page.locator('.tree-session-bar'), title = bar.locator('.tree-session-title');
+    const overlay = page.locator('.pw-notices'), toast = overlay.locator('.pw-note');
+    await expect(bar).toBeVisible();
+    await expect(title).toBeVisible();
+    await expect(toast).toHaveCount(0);
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const geometry = async () => ({ bar: await bar.boundingBox(), title: await title.boundingBox(),
+      center: await page.locator('.shell-center').boundingBox(), waiting: await page.locator('.shell-waiting').boundingBox(),
+      detail: await page.locator('.shell-detail').count() ? await page.locator('.shell-detail').boundingBox() : null,
+      dock: await page.locator('.detail-dock').count() ? await page.locator('.detail-dock').boundingBox() : null,
+      tabs: await page.locator('.shell-tabs').boundingBox(), footer: await page.locator('.shell-footer').boundingBox() });
+    const before = await geometry();
+    if (spec.detail) {
+      expect(before.detail!.width, 'fixture uses the requested actual detail-pane width').toBe(spec.detailWidth ?? 400);
+      if (spec.detailWidth !== undefined) expect(before.detail!.width, 'wide detail pane is wider than the 400px default').toBeGreaterThan(400);
+    }
+    const monitor = await page.evaluateHandle(() => {
+      type Shift = PerformanceEntry & { value: number };
+      const shifts: number[] = [];
+      const record = (entries: PerformanceEntry[]) => {
+        for (const entry of entries) shifts.push((entry as Shift).value);
+      };
+      if (!PerformanceObserver.supportedEntryTypes.includes('layout-shift')) throw new Error('Layout shift observation is unavailable');
+      const observer = new PerformanceObserver(list => record(list.getEntries()));
+      observer.observe({ type: 'layout-shift' });
+      return { finish: () => { record(observer.takeRecords()); observer.disconnect(); return shifts; } };
+    });
+    await page.evaluate(() => window.__designToast!.show());
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText('Reference copied.');
+    await expect(overlay).toHaveCSS('position', 'absolute');
+    await settle(page);
+    const visible = await geometry();
+    expect(visible, 'toast appearance moves the session bar and title by 0px').toEqual(before);
+    const toastBox = (await toast.boundingBox())!, overlayBox = (await overlay.boundingBox())!, centerBox = before.center!;
+    expect(toastBox.x, 'toast stays inside the centre left edge').toBeGreaterThanOrEqual(centerBox.x + 16);
+    expect(toastBox.x + toastBox.width, 'toast stays inside the centre right edge').toBeLessThanOrEqual(centerBox.x + centerBox.width - 16);
+    expect(toastBox.width, 'toast is bounded by the centre width and 480px').toBeLessThanOrEqual(Math.min(480, centerBox.width - 32));
+    for (const [name, box] of Object.entries({ waiting: before.waiting, detail: before.detail, dock: before.dock, footer: before.footer })) {
+      if (!box) continue;
+      const intersects = toastBox.x < box.x + box.width && toastBox.x + toastBox.width > box.x
+        && toastBox.y < box.y + box.height && toastBox.y + toastBox.height > box.y;
+      expect(intersects, `toast does not intersect ${name}`).toBe(false);
+    }
+    if (spec.peekWaiting) {
+      expect(centerBox.width, 'fixture exercises the narrow-centre fallback').toBeLessThanOrEqual(400);
+      expect(overlayBox.y, 'narrow toast starts just below the tab bar').toBe(before.tabs!.y + before.tabs!.height + 8);
+    } else {
+      expect(centerBox.width, 'fixture exercises the bottom anchor').toBeGreaterThan(400);
+      expect(overlayBox.y + overlayBox.height, 'toast overlay ends 16px above the footer').toBe(before.footer!.y - 16);
+      expect(toastBox.y, 'toast stays below the session header').toBeGreaterThanOrEqual(before.bar!.y + before.bar!.height);
+    }
+    await page.screenshot({ path: testInfo.outputPath(`${id}.png`), animations: 'disabled' });
+    await page.evaluate(() => window.__designToast!.clear());
+    await expect(toast).toHaveCount(0);
+    await settle(page);
+    const cleared = await geometry();
+    expect(cleared, 'toast clearance moves the session bar and title by 0px').toEqual(before);
+    const shifts = await monitor.evaluate(value => value.finish());
+    await monitor.dispose();
+    expect(shifts.reduce((sum, value) => sum + value, 0), 'toast appearance and clearance cause 0 layout shift, including the overlay').toBe(0);
+    await testInfo.attach('session toast geometry', { body: JSON.stringify({ before, visible, cleared, layoutShifts: shifts }, null, 2), contentType: 'application/json' });
+    expect(denied).toEqual([]);
+  });
+}
+
+test('catalogue scrolling keeps the toast anchored above the footer', async ({ page, origin }) => {
+  const denied: string[] = [];
+  await route(page.context(), origin, denied);
+  await openApp(page, origin, frameSpec('session-toast-light'));
+  await page.getByRole('navigation', { name: 'Projects and sessions' }).getByRole('button', { name: 'Projects', exact: true }).click();
+  await page.setViewportSize({ width: 1280, height: 300 });
+  await settle(page);
+  const scroll = page.locator('.shell-center-content'), overlay = page.locator('.pw-notices');
+  const range = await scroll.evaluate(element => element.scrollHeight - element.clientHeight);
+  expect(range, 'catalogue fixture has scrollable content').toBeGreaterThan(0);
+  await page.evaluate(() => window.__designToast!.show());
+  await expect(overlay.locator('.pw-note')).toBeVisible();
+  await settle(page);
+  const before = await overlay.boundingBox();
+  await scroll.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await settle(page);
+  expect(await scroll.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  expect(await overlay.boundingBox(), 'scrolling the catalogue moves the toast by 0px').toEqual(before);
+  const footer = (await page.locator('.shell-footer').boundingBox())!;
+  expect(before!.y + before!.height).toBe(footer.y - 16);
+  await page.evaluate(() => window.__designToast!.clear());
+  expect(denied).toEqual([]);
+});
 
 for (const id of dockFrameIds) {
   test(`frame ${id}`, async ({ page, origin }, testInfo) => {

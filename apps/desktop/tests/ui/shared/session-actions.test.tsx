@@ -1,13 +1,14 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SessionBar } from '../../../src/ui/tree/SessionBar';
 import type { SessionBar as Bar } from '../../../src/ui/tree/model';
 import { ActionMenu } from '../../../src/ui/shared/ActionMenu';
 import { copyText } from '../../../src/ui/shared/clipboard';
+import { Notices, notices } from '../../../src/ui/pages/notices';
 
 vi.mock('../../../src/ui/shared/clipboard', () => ({ copyText: vi.fn() }));
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
+afterEach(() => { cleanup(); notices.clear(); vi.resetAllMocks(); });
 
 const bar: Bar = {
   sessionId: '00000000-0000-4000-8000-0000000000ab', title: 'Review the full reply history and follow-up questions',
@@ -39,7 +40,8 @@ describe('session actions', () => {
     await act(async () => { fireEvent.click(target, { detail: 1 }); });
     if (name === 'Copy ID') {
       expect(copyText).toHaveBeenCalledExactlyOnceWith(bar.sessionId);
-      expect(screen.getByRole('menuitem', { name: 'Copied' })).toBeTruthy();
+      expect(screen.getByRole('menuitem', { name: 'Copy ID' })).toBeTruthy();
+      expect(notices.getSnapshot().map(notice => notice.text)).toEqual(['Connection reference copied.']);
     } else if (name === 'Rename') {
       expect(screen.getByRole('textbox', { name: 'Session name' })).toBe(document.activeElement);
       expect(screen.queryByRole('menu')).toBeNull();
@@ -71,15 +73,16 @@ describe('session actions', () => {
     expect(document.activeElement).not.toBe(option('Copy ID'));
   });
 
-  it('copies without closing the menu so feedback remains available', async () => {
+  it('copies without closing the menu or moving focus when the notice appears', async () => {
     vi.mocked(copyText).mockResolvedValue(undefined);
     const user = userEvent.setup();
-    const { container } = render(<SessionBar bar={bar} busy={false} onClose={() => {}} />);
+    const { container } = render(<><SessionBar bar={bar} busy={false} onClose={() => {}} /><Notices /></>);
     await user.click(trigger());
     await user.click(option('Copy ID'));
     expect(copyText).toHaveBeenCalledExactlyOnceWith(bar.sessionId);
     expect(screen.getByRole('menu')).toBeTruthy();
-    expect(document.activeElement).toBe(option('Copied'));
+    await waitFor(() => { expect(screen.getByText('Connection reference copied.')).toBeTruthy(); });
+    expect(document.activeElement).toBe(option('Copy ID'));
     expect(container.innerHTML).not.toContain(bar.sessionId);
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('menu')).toBeNull();

@@ -7,6 +7,7 @@ import { resolveTheme, useAppliedTheme } from '../../../src/ui/shell/theme';
 import { tabModels } from '../../../src/ui/shell/model';
 import { WaitingFrame } from '../../../src/ui/waiting/WaitingColumn';
 import { ItemHistoryContext } from '../../../src/ui/shell/itemHistory';
+import { notices } from '../../../src/ui/pages/notices';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); delete document.documentElement.dataset.theme; });
 
@@ -37,6 +38,47 @@ function measureBody(initialWidth: number): (width: number) => void {
 }
 
 describe('Paperwhite shell', () => {
+  it('bounds the overlay in a named centre container while its content owns scrolling', () => {
+    // jsdom does not lay out CSS; these ownership rules complement the design geometry assertions.
+    const shell = readFileSync(resolve(__dirname, '../../../src/ui/shell/shell.css'), 'utf8');
+    const notes = readFileSync(resolve(__dirname, '../../../src/ui/pages/notices.css'), 'utf8');
+    const rules = (css: string, selector: string) => css.split(`${selector} {`)[1]!.split('}')[0];
+    expect(rules(shell, '.shell-center')).toContain('position: relative;');
+    expect(rules(shell, '.shell-center')).toContain('container: shell-center / inline-size;');
+    expect(rules(shell, '.shell-center')).toContain('overflow: hidden;');
+    expect(rules(shell, '.shell-center-content')).toContain('overflow: auto;');
+    expect(rules(notes, '.pw-notices')).toContain('position: absolute;');
+    expect(rules(notes, '.pw-notices')).toContain('width: min(480px, calc(100% - 32px));');
+    expect(notes).toContain('@container shell-center (max-width: 400px)');
+  });
+
+  it('keeps one notification region inside the centre while adjacent panes change, and preserves input focus', () => {
+    vi.useFakeTimers();
+    try {
+      const value = props({ body: { waiting: <p>Waiting column</p>, center: <input aria-label="Centre draft" defaultValue="Draft" />,
+        detail: <p>Detail</p>, rail: <aside aria-label="Messages">Messages</aside> } });
+      const { rerender } = render(<Shell {...value} />);
+      const center = screen.getByRole('main'), region = screen.getByRole('region', { name: 'Notifications' });
+      const draft = screen.getByRole<HTMLInputElement>('textbox', { name: 'Centre draft' });
+      expect(region.parentElement).toBe(center);
+      const scroll = center.querySelector('.shell-center-content')!;
+      expect(scroll.contains(draft)).toBe(true);
+      expect(scroll.contains(region)).toBe(false);
+      act(() => { draft.focus(); notices.push({ id: 'shell-anchor', icon: 'ph ph-check', text: 'Reference copied.' }); vi.advanceTimersByTime(300); });
+      expect(within(region).getByText('Reference copied.')).toBeTruthy();
+      expect(document.activeElement).toBe(draft);
+      rerender(<Shell {...value} body={{ ...value.body, waitingFolded: true, detailWidth: 976, rail: undefined }} />);
+      expect(screen.getAllByRole('region', { name: 'Notifications' })).toEqual([region]);
+      expect(region.parentElement).toBe(center);
+      expect(center.querySelector('.shell-center-content')).toBe(scroll);
+      expect(document.activeElement).toBe(draft);
+      act(() => { notices.dismiss('shell-anchor'); });
+      expect(within(region).queryByText('Reference copied.')).toBeNull();
+      expect(document.activeElement).toBe(draft);
+      expect(draft.value).toBe('Draft');
+    } finally { notices.clear(); vi.useRealTimers(); }
+  });
+
   it('hides and unhides from the detail header next to Remove, and explains the key in the footer', () => {
     const hide = vi.fn();
     const value = props({ body: { waiting: null, center: null, detail: <p>Detail</p>, onHide: hide } });

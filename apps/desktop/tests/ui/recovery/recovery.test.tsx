@@ -14,6 +14,7 @@ import { immutable } from '../../../src/data';
 import { stuckInput } from '../../../src/selectors/waiting/stuck';
 import { StuckNote } from '../../../src/ui/answer/StuckNote';
 import { DispatchChip } from '../../../src/components/bindings/DispatchChip';
+import { notices } from '../../../src/ui/pages/notices';
 
 const opId = '00000000-0000-4000-8000-000000000099';
 const route = { project_id: demo.project_id, session_id: demo.id };
@@ -78,7 +79,7 @@ async function setup() {
   const actions = new SessionActions(service, store, () => opId);
   return { transport, sessions, store, actions };
 }
-afterEach(() => { cleanup(); opened.splice(0).forEach(sessions => sessions.closeAll()); vi.useRealTimers(); });
+afterEach(() => { cleanup(); opened.splice(0).forEach(sessions => sessions.closeAll()); notices.clear(); vi.useRealTimers(); });
 function dialog() { return within(screen.getByRole('dialog')); }
 /** The detailed audited form sits behind "Advanced". */
 function chooseRecovery(choice: string) {
@@ -500,6 +501,25 @@ describe('receipt uncertainty across navigation', () => {
     expect(transport.mutations[1].command.op_id).not.toBe(transport.mutations[0].command.op_id);
     expect(corrected.getSnapshot().pending).toEqual(transport.mutations[1]);
     expect(transport.mutations[1].command).toMatchObject({ params: { evidence: { owner_attested_idle: true } } });
+  });
+  it('keeps a typed recovery revision conflict and reason in its form without a global toast', async () => {
+    const { actions, transport, store } = await setup(); const input = currentInput(transport.session);
+    const revision = transport.session.revision; const reason = '  Reviewed café terminal work. Keep prior effects.  ';
+    transport.presence(); render(<RecoveryPanel actions={actions} />); chooseRecovery('skip');
+    fireEvent.change(dialog().getByLabelText('Reason'), { target: { value: reason } });
+    transport.session.revision += 1; transport.replies.push(failure('revision_conflict'));
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Save recovery decision' })); });
+    expect(transport.mutations).toHaveLength(1);
+    expect(transport.mutations[0]).toEqual({ session: route, command: { command: 'input_resolve', api_version: 1, op_id: opId,
+      params: { input_id: input.id, attempt_id: input.active_attempt_id, expected_revision: revision, decision: 'skip', reason, evidence: null } } });
+    expect(actions.getSnapshot()).toMatchObject({ writing: false, pending: null, error: { error: { code: 'revision_conflict' } } });
+    expect(dialog().getByText('This changed while you were working. Look at it as it is now, then try again.')).toBeTruthy();
+    expect((dialog().getByLabelText('Reason') as HTMLInputElement).value).toBe(reason);
+    expect((dialog().getByLabelText('Recovery choice') as HTMLSelectElement).value).toBe('skip');
+    expect(store.getSnapshot().snapshot?.session.revision).toBe(revision + 1);
+    expect(dialog().getByRole('button', { name: 'Review current snapshot' })).toBeTruthy();
+    expect((dialog().getByRole('button', { name: 'Save recovery decision' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(notices.getSnapshot()).toEqual([]);
   });
   it('new app controller reloads persisted pause and uncertain attempt without automatic retry/resume', async () => {
     const { actions, transport, store } = await setup(); currentBinding(transport.session).owner_paused = true; transport.session.revision += 1; await store.refresh();

@@ -7,12 +7,13 @@ import inventory from '../../../../../fixtures/contracts/core/inventory.json';
 import type { CoreError, MutationEnvelope, OwnerMutationRequest, PreferencesSnapshot, ProjectListResult,
   QueryEnvelope, SessionListResult, SessionPreferences, SessionRef } from '../../../src/generated/core';
 import type { ItemStatus, Page, ProjectSummary, QueryCursor, Session, SessionSummary, SummaryCounts } from '../../../src/generated/domain/models';
-import { createDesktopService, type DesktopTransport, type HintPayloads } from '../../../src/data/service';
+import { CoreFailure, createDesktopService, type DesktopTransport, type HintPayloads } from '../../../src/data/service';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import * as catalogue from '../../../src/state/navigation/catalogue';
 import { NavigationWorkspace, type AdapterChoice } from '../../../src/components/navigation/NavigationWorkspace';
 import { sessionCardText } from '../../../src/ui/pages/model';
 import { BindSession, RegisterProject } from '../../../src/components/navigation/Registration';
+import { notices } from '../../../src/ui/pages/notices';
 
 const projectId = demo.project_id;
 const route: SessionRef = { project_id: projectId, session_id: demo.id };
@@ -93,7 +94,7 @@ async function deferredStartup(transport: Transport, store: NavigationStore) {
 const cursor = (view: 'projects' | 'sessions', revision = 21): QueryCursor => ({ schema: 1, view,
   revision, filter_digest: 'a'.repeat(64), after: view === 'projects' ? { kind: 'project', canonical_root: '/fixtures/ariadne-demo', id: projectId }
     : { kind: 'session', project_id: projectId, id: demo.id, updated_at: demo.updated_at } });
-afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); vi.useRealTimers(); });
+afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); notices.clear(); vi.useRealTimers(); });
 
 describe('complete registered navigation reads', () => {
   it.each([false, true])('normalizes every loaded full status set to All with duplicates=%s', async duplicates => {
@@ -209,6 +210,41 @@ describe('complete registered navigation reads', () => {
 });
 
 describe('canonical preference mutations', () => {
+  it('updates a visible mutation failure without a delay and dismisses it on clear or unmount', async () => {
+    const { transport, store } = setup(); read(transport); await store.start();
+    transport.enqueue('session_get', loaded());
+    const ready = store.getSnapshot();
+    const first = new CoreFailure({ ...error, code: 'invalid_argument' });
+    const second = new CoreFailure({ ...error, code: 'not_found' });
+    const snapshot = vi.spyOn(store, 'getSnapshot').mockReturnValue({ ...ready, error: first });
+    const mutationFailure = vi.spyOn(store, 'getMutationFailure').mockReturnValue(first);
+    const renderSession = () => null;
+    const workspace = () => <NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={renderSession} />;
+    vi.useFakeTimers();
+    const view = render(workspace());
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    const initial = 'Something in that isn’t valid. Check it and try again.';
+    const card = screen.getByText(initial).closest('.pw-note');
+    const visibleStates: string[][] = [];
+    const unsubscribe = notices.subscribe(() => { visibleStates.push(notices.getVisibleSnapshot().map(notice => notice.text)); });
+    snapshot.mockReturnValue({ ...ready, error: second }); mutationFailure.mockReturnValue(second);
+    view.rerender(workspace());
+    const changed = 'Ariadne can’t find that any more. It may have been removed.';
+    expect(screen.getByText(changed).closest('.pw-note')).toBe(card);
+    expect(visibleStates).toEqual([[changed]]);
+    unsubscribe();
+    snapshot.mockReturnValue(ready); mutationFailure.mockReturnValue(null);
+    view.rerender(workspace());
+    expect(notices.getSnapshot()).toEqual([]);
+    expect(screen.queryByText(changed)).toBeNull();
+    snapshot.mockReturnValue({ ...ready, error: first }); mutationFailure.mockReturnValue(first);
+    view.rerender(workspace());
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(screen.getByText(initial)).toBeTruthy();
+    view.unmount();
+    expect(notices.getSnapshot()).toEqual([]);
+    snapshot.mockRestore(); mutationFailure.mockRestore();
+  });
   it.each(['confirmed', 'uncertain', 'rejected', 'stopped'] as const)('exposes only the executing write completion when it is %s', async outcome => {
     const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs); await store.start();
     const held = deferred<MutationEnvelope>(); transport.enqueue('preferences_patch', held.promise);
@@ -534,25 +570,100 @@ describe('canonical preference mutations', () => {
 
 const adapter: AdapterChoice = { adapter_id: 'demo.local', label: 'Installed adapter', configuration: { namespace: 'demo.local', values: {} } };
 describe('source-backed navigation views and explicit registration', () => {
+  it.each(['succeeds', 'fails'] as const)('waits for a deferred revision-conflict refresh before reporting that it %s', async outcome => {
+    const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'projects' };
+    read(transport, prefs); transport.enqueue('session_get', loaded());
+    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => null} />);
+    const allSessions = screen.getByRole('button', { name: /^All sessions/ });
+    await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
+    const conflict: CoreError = { ...error, code: 'revision_conflict', current_revision: 3 };
+    transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: { ...conflict, current_revision: 2 } },
+      { api_version: 1, ok: false, error: conflict });
+    const first = structuredClone(prefs); first.revision = 2; read(transport, first);
+    const latest = structuredClone(first); latest.revision = 3;
+    latest.global.window = { x: 40, y: 50, width: 1100, height: 750, monitor_id: 'main' };
+    const pendingRead = deferred<QueryEnvelope>(); transport.enqueue('preferences_get', pendingRead.promise);
+    if (outcome === 'succeeds') {
+      transport.enqueue('project_list', success('project_list', projectResult()));
+      transport.enqueue('session_list', success('session_list', sessionResult()));
+    }
+    await act(async () => { fireEvent.click(allSessions); });
+    await waitFor(() => expect(transport.calls.filter(call => call.name === 'preferences_get')).toHaveLength(3));
+    expect(store.getSnapshot().preferences).toEqual(first);
+    expect(notices.getSnapshot().some(notice => notice.text === 'Updated to the latest. Try again if needed.')).toBe(false);
+    expect(screen.queryByText('Updated to the latest. Try again if needed.')).toBeNull();
+    await act(async () => { pendingRead.resolve(outcome === 'succeeds'
+      ? success('preferences_get', latest) : { api_version: 1, ok: false, error }); });
+    if (outcome === 'succeeds') {
+      expect(await within(screen.getByRole('region', { name: 'Notifications' })).findByText('Updated to the latest. Try again if needed.')).toBeTruthy();
+      expect(store.getSnapshot().preferences).toEqual(latest);
+      expect(store.getSnapshot().status).toBe('ready');
+      expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+    } else {
+      const warning = await screen.findByRole('alert');
+      expect(within(warning).getByRole('button', { name: 'Refresh' })).toBeTruthy();
+      expect(warning.textContent).toContain('This changed while you were working. Look at it as it is now, then try again.');
+      expect(store.getSnapshot().status).toBe('stale');
+      expect(store.getSnapshot().preferences).toEqual(first);
+      expect(notices.getSnapshot().some(notice => notice.text === 'Updated to the latest. Try again if needed.')).toBe(false);
+      expect(screen.queryByText('Updated to the latest. Try again if needed.')).toBeNull();
+    }
+    expect(transport.calls.filter(call => call.name === 'preferences_get')).toHaveLength(3);
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(2);
+    expect(store.getSnapshot().pendingOperationId).toBeNull();
+  });
+  it('automatically refreshes a rejected navigation snapshot without retrying the write or losing saved text', async () => {
+    const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'projects' };
+    read(transport, prefs);
+    transport.enqueue('session_get', loaded());
+    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => null} />);
+    const allSessions = screen.getByRole('button', { name: /^All sessions/ });
+    await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
+    const latest = structuredClone(prefs); latest.revision = 2;
+    latest.global.window = { x: 25, y: 30, width: 1100, height: 750, monitor_id: 'main' };
+    transport.enqueue('preferences_patch', { api_version: 1, ok: false, error });
+    read(transport, latest);
+    await act(async () => { fireEvent.click(allSessions); });
+    const region = screen.getByRole('region', { name: 'Notifications' });
+    expect(await within(region).findByText('Updated to the latest. Try again if needed.')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+    expect(store.getSnapshot().preferences).toEqual(latest);
+    expect(store.getSnapshot().preferences?.drafts).toEqual(prefs.drafts);
+    expect(store.getSnapshot().preferences?.sessions[0].filters.search).toBe(prefs.sessions[0].filters.search);
+    expect(store.getSnapshot()).toMatchObject({ status: 'ready', writing: false, pendingOperationId: null });
+    expect(transport.calls.filter(call => call.name === 'preferences_get')).toHaveLength(2);
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: 'Projects', level: 1 })).toBeTruthy();
+    expect((allSessions as HTMLButtonElement).disabled).toBe(false);
+  });
   it.each(['projects', 'project', 'all_sessions'] as const)('blocks %s navigation during explicit Refresh until fresh preferences are published', async kind => {
     const { transport, store } = setup(); const prefs = preferences();
     prefs.global.selected_navigation = kind === 'project' ? { kind, project_id: projectId } : { kind };
     read(transport, prefs);
+    transport.enqueue('session_get', loaded());
     render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => null} />);
     const allSessions = screen.getByRole('button', { name: /^All sessions/ });
     await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
     const conflict: CoreError = { ...error, code: 'revision_conflict', message: 'Preferences revision changed.', current_revision: 3 };
     const native = structuredClone(prefs); native.revision = 3;
     native.global.window = { x: 100, y: 100, width: 1000, height: 700, monitor_id: 'main' };
-    // The single re-apply against the refreshed revision conflicts too, so the banner surfaces.
+    // The single re-apply against the refreshed revision conflicts too, so the refreshed view gets an informational notice.
     // A foreign write bumps the revision to 2 before the first attempt lands, and again to 3 before the retry lands.
     const first = structuredClone(prefs); first.revision = 2;
     transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: { ...conflict, current_revision: 2 } }, { api_version: 1, ok: false, error: conflict });
     read(transport, first); read(transport, native);
     await act(async () => { fireEvent.click(allSessions); });
     expect(store.getSnapshot().preferences).toEqual(native);
-    expect(screen.getByRole('alert').textContent).toContain('This changed while you were working. Look at it as it is now, then try again.');
+    expect(await within(screen.getByRole('region', { name: 'Notifications' })).findByText('Updated to the latest. Try again if needed.')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
     expect((allSessions as HTMLButtonElement).disabled).toBe(false);
+
+    // Read failures keep a persistent recovery banner even after a conflict was automatically refreshed.
+    transport.enqueue('preferences_get', { api_version: 1, ok: false, error });
+    await act(async () => { await store.refresh(); });
+    expect(screen.getByRole('alert').textContent).toContain('This changed while you were working. Look at it as it is now, then try again.');
 
     const fresh = structuredClone(native); fresh.revision = 4; fresh.global.notification_watermark = demo.updated_at;
     const preferenceRead = deferred<QueryEnvelope>(); const projectRead = deferred<QueryEnvelope>();
@@ -588,9 +699,9 @@ describe('source-backed navigation views and explicit registration', () => {
     expect(screen.getByRole('button', { name: 'Refreshing…' })).toBeTruthy();
     await act(async () => { projectRead.resolve(success('project_list', projectResult())); });
     expect(store.getSnapshot().preferences).toEqual(fresh);
-    expect((screen.getByRole('button', { name: 'Refresh' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
     expect((allSessions as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.getByRole('alert').textContent).toContain('This changed while you were working. Look at it as it is now, then try again.');
+    expect(screen.queryByRole('alert')).toBeNull();
     expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(2);
     expect(transport.calls.filter(call => call.name === 'preferences_get')).toHaveLength(readCount + 1);
 
@@ -607,11 +718,18 @@ describe('source-backed navigation views and explicit registration', () => {
   it('clears explicit Refresh progress after a failed read and keeps failure visible without changing navigation', async () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'projects' };
     read(transport, prefs);
+    transport.enqueue('session_get', loaded());
     render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => null} />);
     const allSessions = screen.getByRole('button', { name: /^All sessions/ });
     await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
     transport.enqueue('preferences_patch', { api_version: 1, ok: false, error });
+    read(transport, prefs);
     await act(async () => { fireEvent.click(allSessions); });
+    expect(await within(screen.getByRole('region', { name: 'Notifications' })).findByText('Updated to the latest. Try again if needed.')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+    transport.enqueue('preferences_get', { api_version: 1, ok: false, error });
+    await act(async () => { await store.refresh(); });
     const before = store.getSnapshot(); const pending = deferred<QueryEnvelope>();
     transport.enqueue('preferences_get', pending.promise);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
@@ -732,7 +850,9 @@ describe('source-backed navigation views and explicit registration', () => {
     expect(within(card).getByText('Unavailable capabilities: domain mcp, streaming output.')).toBeTruthy();
     await act(async () => { fireEvent.click(within(card).getByRole('button', { name: 'Copy instruction' })); });
     expect(writeText).toHaveBeenCalledWith('Run /opt/ariadne read --binding B.');
-    expect(within(card).getByText('Copied')).toBeTruthy();
+    expect(within(card).getByRole('button', { name: 'Copy instruction' })).toBeTruthy();
+    expect(within(card).queryByText('Instruction copied.')).toBeNull();
+    expect(await within(screen.getByRole('region', { name: 'Notifications' })).findByText('Instruction copied.')).toBeTruthy();
   });
   it('omits the unavailable line when every capability is supported and keeps the Claude Mod variant free of an instruction', async () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'project', project_id: projectId };

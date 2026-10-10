@@ -34,6 +34,7 @@ const decisionWords: Readonly<Record<string, string>> = { resend: 'send again', 
 export function ActionFailure({ actions }: { actions: SessionActions }) {
   const state = useSessionActions(actions);
   const command = state.pending?.command;
+  if (!command && actions.isTransientFailure(state.error)) return null;
   return state.error && <EdgeState kind="write_failure" detail={<><p>{plainFailure(state.error)}</p>
     {command?.command === 'input_resolve' && <p>Ariadne isn’t sure your decision ({decisionWords[command.params.decision] ?? 'recovery'}) was saved.</p>}
     {command && (command.command === 'binding_pause' || command.command === 'binding_resume' || command.command === 'binding_disconnect')

@@ -43,6 +43,7 @@ import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
 import { reconnectingNote } from '../shared/connection';
 import { useFilterFolds } from '../shared/filterFolds';
+import { isViewConflict } from '../shared/conflictNotice';
 import './tree.css';
 
 export type RowIntent = 'bring' | 'reply' | 'drop' | 'note' | 'followup' | 'reopen' | 'later' | 'hide';
@@ -136,6 +137,44 @@ export function TreeView(props: TreeViewProps) {
   useOwnerDrafts(drafts, raw);
   const lifecycle = useLifecycle(actions);
   const ack = useAck(actions, selectedId);
+  const [ackItemId, setAckItemId] = useState<string | null>(null);
+  const runAck = (itemId: string) => { setAckItemId(itemId); return ack.run(itemId); };
+  const noticeCallbacks = useRef({ lifecycle, onShowArchive });
+  noticeCallbacks.current = { lifecycle, onShowArchive };
+  const archivedNotice = lifecycle.archived;
+  const archiveNoticeId = JSON.stringify(['tree-archived', route.project_id, route.session_id, archivedNotice?.topicId]);
+  useEffect(() => () => noticeStore.dismiss(archiveNoticeId), [archiveNoticeId]);
+  useEffect(() => {
+    if (!archivedNotice) { noticeStore.dismiss(archiveNoticeId); return; }
+    noticeStore.push({ id: archiveNoticeId, icon: 'ph ph-archive', dismissible: true,
+      text: `Archived “${archivedNotice.name}”.`
+        + (archivedNotice.waiting ? ` Its ${archivedNotice.waiting} waiting question${archivedNotice.waiting > 1 ? 's' : ''} left your panel.` : '')
+        + (archivedNotice.cancelled ? ` ${archivedNotice.cancelled} unsent message${archivedNotice.cancelled > 1 ? 's were' : ' was'} cancelled.` : ''),
+      onDismiss: () => noticeCallbacks.current.lifecycle.dismiss(),
+      actions: [{ label: 'Undo', disabled: lifecycle.busy, run: () => { if (!noticeCallbacks.current.lifecycle.busy) noticeCallbacks.current.lifecycle.undo(); } },
+        { label: 'View archive', dismissOnRun: true, run: () => { noticeCallbacks.current.lifecycle.dismiss(); noticeCallbacks.current.onShowArchive(); } }] });
+  }, [archiveNoticeId, archivedNotice]);
+  useEffect(() => {
+    const notice = noticeStore.getSnapshot().find(value => value.id === archiveNoticeId);
+    if (notice && notice.actions?.[0]?.disabled !== lifecycle.busy) noticeStore.push({ ...notice,
+      actions: notice.actions?.map(action => action.label === 'Undo' ? { ...action, disabled: lifecycle.busy } : action) });
+  }, [archiveNoticeId, lifecycle.busy]);
+  const actionState = actions.getSnapshot();
+  const controllerFailure = !actionState.pending && isViewConflict(actionState.error) ? plainFailure(actionState.error) : null;
+  const ackNotice = ack.error === controllerFailure ? null : ack.error;
+  const lifecycleNotice = lifecycle.dialog || lifecycle.error === controllerFailure ? null : lifecycle.error;
+  const ackNoticeId = JSON.stringify(['item-ack', route.project_id, route.session_id, ackItemId]);
+  const lifecycleNoticeId = JSON.stringify(['tree-lifecycle', route.project_id, route.session_id]);
+  useEffect(() => () => noticeStore.dismiss(ackNoticeId), [ackNoticeId]);
+  useEffect(() => {
+    if (!ackNotice) { noticeStore.dismiss(ackNoticeId); return; }
+    noticeStore.push({ id: ackNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: ackNotice });
+  }, [ackNoticeId, ackNotice]);
+  useEffect(() => () => noticeStore.dismiss(lifecycleNoticeId), [lifecycleNoticeId]);
+  useEffect(() => {
+    if (!lifecycleNotice) { noticeStore.dismiss(lifecycleNoticeId); return; }
+    noticeStore.push({ id: lifecycleNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: lifecycleNotice });
+  }, [lifecycleNoticeId, lifecycleNotice]);
   const elements = useRef(new Map<string, HTMLDivElement>()), scroller = useRef<HTMLDivElement>(null);
   const mounted = useRef(true), request = useRef(0);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, [store]);
@@ -382,7 +421,7 @@ export function TreeView(props: TreeViewProps) {
         if (!event.repeat) {
           if (viewBusy) noticeStore.push({ id: 'tree-ack-view-saving', icon: 'ph ph-warning-circle', dismissible: true,
             text: 'Another view change is being saved. Wait for it, then try Ack again.' });
-          else void ack.run(row.item.id);
+          else void runAck(row.item.id);
         }
         return true;
       }
@@ -631,7 +670,7 @@ export function TreeView(props: TreeViewProps) {
   const itemActions = (row: ItemRowModel): RowAction[] => {
     const item = row.item, target = { ...route, item_id: item.id }, list: RowAction[] = [];
     const ackTo = row.ack;
-    if (ackTo) list.push({ icon: 'ph ph-check', title: ackTitle(ackTo, item.status), persistent: true, disabled: viewBusy || ack.busy, run: () => { void ack.run(item.id); } });
+    if (ackTo) list.push({ icon: 'ph ph-check', title: ackTitle(ackTo, item.status), persistent: true, disabled: viewBusy || ack.busy, run: () => { void runAck(item.id); } });
     const act = (intent: RowIntent) => () => onAct(intent, target, result => { clickedReveal.current = result; });
     if (item.status !== 'waiting_on_me' && (!row.delivery || row.delivery.failed || closed(item.status)) && running && !archivedMode && session?.state === 'active') {
       const bring = { icon: 'ph ph-megaphone-simple', title: 'Bring it up (b)', run: act('bring') };
@@ -703,7 +742,6 @@ export function TreeView(props: TreeViewProps) {
   const inline: ReadonlySet<string> = new Set(graph && !loading ? [] : rows.flatMap(row => row.delivery?.stuck ? [row.delivery.stuck.input.id] : []));
   const filtersShown = !archivedMode;
   const counts = model?.counts ?? { all: 0, waiting: 0, open: 0, progress: 0, closed: 0 };
-  const archived = lifecycle.archived;
   const queryText = query.trim();
   let body: ReactNode;
   if (loading) {
@@ -744,15 +782,8 @@ export function TreeView(props: TreeViewProps) {
       Showing {model.searchCount} of {model.itemCount} items{query ? ` matching “${query}”` : ''}{model.hiddenCount > 0 ? ` (${model.hiddenCount} hidden)` : ''}{!model.chips.has('all') ? ' in the statuses you picked' : ''}</Banner>}
     {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>
       Showing an item outside your current filters.</Banner>}
-    {archived && <Banner icon="ph ph-archive" actions={<>
-      <button type="button" className="btn btn-ghost" disabled={lifecycle.busy} onClick={lifecycle.undo}>Undo</button>
-      <button type="button" className="btn btn-ghost" onClick={() => { lifecycle.dismiss(); onShowArchive(); }}>View archive</button></>}>
-      Archived “{archived.name}”.{archived.waiting ? ` Its ${archived.waiting} waiting question${archived.waiting > 1 ? 's' : ''} left your panel.` : ''}
-      {archived.cancelled ? ` ${archived.cancelled} unsent message${archived.cancelled > 1 ? 's were' : ' was'} cancelled.` : ''}</Banner>}
     {lifecycle.pending && <Banner icon="ph ph-warning" alert actions={<button type="button" className="btn btn-ghost" onClick={lifecycle.reconcile}>Check again</button>}>
       {lifecycle.pending}. Check whether your last change was saved before making another.</Banner>}
-    {ack.error && <Banner icon="ph ph-warning-circle" alert>{ack.error}</Banner>}
-    {lifecycle.error && <Banner icon="ph ph-warning-circle" alert>{lifecycle.error}</Banner>}
     <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
     {/* The graph keeps its own scroller so its legend stays sticky (ui/graph/graph.css). */}
     {graph && !loading ? graph : <div ref={scroller} className="tree-scroll" onScroll={remembering}>{body}</div>}

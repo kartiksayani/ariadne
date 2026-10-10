@@ -23,6 +23,8 @@ import { AnswerSlot, answerSlotError, changedText } from './AnswerSlot';
 import { FileRefProject, fileLinkProps, ItemReference, ItemRefs, LinkOpener, Markdown, singleParagraph, useProjectFile } from '../shared/MarkdownText';
 import { fileLinkTitle, fileReference, safeHref } from '../shared/markdown';
 import { copyText } from '../shared/clipboard';
+import { notices } from '../pages/notices';
+import { isViewConflict } from '../shared/conflictNotice';
 import { shortLabel } from '../shared/short';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { CopyMessage } from './CopyMessage';
@@ -195,7 +197,6 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const retained = session && draftState.ready ? drafts.find({ project_id: session.project_id, session_id: session.id }, itemId, 'answer') : undefined;
   const [mode, setMode] = useState<OpenMode | null>(null);
   const [focusBox, setFocusBox] = useState(0);
-  const [copied, setCopied] = useState(false);
   const [titleExpanded, setTitleExpanded] = useState(false);
   const [laterError, setLaterError] = useState(false);
   // The drop reason is local; the sent text wraps it (Ariadne.dc.html:1207).
@@ -211,6 +212,26 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   // The session's write barrier, shared with the session bar: Resume, Cancel and Retry go through it.
   const actions = useMemo(() => sessionActionsFor(drafts.service, store), [drafts, store]);
   const ack = useAck(actions, itemId);
+  const noticeKey = JSON.stringify([current.route.project_id, current.route.session_id, itemId]);
+  const copyAttempt = useRef(0), copyMounted = useRef(true);
+  useEffect(() => {
+    copyMounted.current = true;
+    return () => { copyMounted.current = false; ++copyAttempt.current; };
+  }, [noticeKey]);
+  const ackNoticeId = JSON.stringify(['item-ack', current.route.project_id, current.route.session_id, itemId]);
+  const actionState = actions.getSnapshot();
+  const ackError = !actionState.pending && isViewConflict(actionState.error) && ack.error === plainFailure(actionState.error) ? null : ack.error;
+  useEffect(() => () => notices.dismiss(ackNoticeId), [ackNoticeId]);
+  useEffect(() => {
+    if (!ackError) { notices.dismiss(ackNoticeId); return; }
+    notices.push({ id: ackNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: ackError });
+  }, [ackNoticeId, ackError]);
+  const laterNoticeId = `detail-later:${noticeKey}`;
+  useEffect(() => () => notices.dismiss(laterNoticeId), [laterNoticeId]);
+  useEffect(() => {
+    if (!laterError) { notices.dismiss(laterNoticeId); return; }
+    notices.push({ id: laterNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: 'Later was not saved. Keep the current view and try again.' });
+  }, [laterNoticeId, laterError]);
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : undefined;
   const health = useSupervisorHealth(drafts.service, binding?.id, binding?.generation);
   const model = session ? detailModel({ session, itemId, now: Date.now(), mode, later, saving: submit.saving, presence, health, earlierAgent,
@@ -315,11 +336,6 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     const keys = slots.map(slotKey), key = edited.current !== null && keys.includes(edited.current) ? edited.current : keys.at(-1);
     if (key !== undefined) boxes.current.get(key)?.focus();
   }, [focusBox]);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 1600);
-    return () => clearTimeout(timer);
-  }, [copied]);
   // Keyboard actions arrive from the workspace keymap as focus requests.
   useEffect(() => {
     if (!focusRequest || handled.current === focusRequest.token || !model || !item) return;
@@ -339,7 +355,13 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const reopenStale = !!model.open && submit.changed('reopen');
   const answerFocus = focusRequest && model.status === 'waiting' && !model.followUp && focusRequest.intent === 'reply' ? { ...focusRequest, intent: 'answer' as const } : focusRequest;
   const copy = () => {
-    void copyText(`${model.id} — ${model.question}`).then(() => setCopied(true), () => {});
+    const attempt = ++copyAttempt.current;
+    const currentCopy = () => copyMounted.current && attempt === copyAttempt.current;
+    void copyText(`${model.id} — ${model.question}`).then(() => {
+      if (currentCopy()) notices.push({ id: `detail-copy:${noticeKey}`, icon: 'ph ph-check', dismissible: true, text: 'Item copied.' });
+    }, () => {
+      if (currentCopy()) notices.push({ id: `detail-copy:${noticeKey}`, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: 'Copy failed. Try again.' });
+    });
   };
   // The owner's boxes, docked in one place whatever section the item's status shows above them, so a box keeps its mount (and
   // the owner's focus and caret) when the status changes. data-owner-input marks them with their changed-target warnings, like the
@@ -377,7 +399,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       </div>
     </div>}
   </div>;
-  const docked = !!(model.open || model.followUp || showAnswer || savedAnswers.length > 0 || owner || ackTo || ack.error || submit.error);
+  const docked = !!(model.open || model.followUp || showAnswer || savedAnswers.length > 0 || owner || ackTo || submit.error);
   const disabledActions = model.open?.actions.some(action => action.disabled);
   const dockHint = current.status !== 'ready' || current.error || disabledActions ? model.open?.hint
     : model.chat.some(entry => entry.pending) ? model.delivery?.text : null;
@@ -395,7 +417,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       <div className="detail-status"><div className="detail-badge"><StatusBadge status={model.display} label={model.badgeLabel} /></div>
         <span className="detail-meta" title={model.meta}>{model.meta}</span>
         <span className="detail-reference"><button type="button" className="btn btn-ghost detail-copy" title="Copy the agent reference" onClick={copy}>
-          <i className={copied ? 'ph ph-check' : 'ph ph-copy'} aria-hidden="true" />{copied ? 'Copied' : 'Copy reference'}</button></span></div>
+          <i className="ph ph-copy" aria-hidden="true" />Copy reference</button></span></div>
       <h2 className="detail-question" title={model.question}><Markdown text={model.question} inline compact={!titleExpanded} /></h2>
       <button type="button" className="btn btn-ghost detail-title-toggle" aria-label={titleExpanded ? 'Collapse title' : 'Expand title'}
         aria-expanded={titleExpanded} onClick={() => setTitleExpanded(value => !value)}>
@@ -532,8 +554,6 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     {model.open && dockHint && <div className="detail-hint detail-delivery-hint" title={dockHint}>{dockHint}</div>}
     {model.followUp && <div className="detail-hint detail-delivery-hint" title={model.followUp.hint}>{model.followUp.hint}</div>}
     {model.open && !owner && <PausedNote actions={actions} />}
-    {laterError && <p className="detail-error" role="alert">Later was not saved. Keep the current view and try again.</p>}
-    {ack.error && <p className="detail-error" role="alert">{ack.error}</p>}
     {submit.error && !(showAnswer && submit.error === answerSlotError(draftState, retained)
       || savedAnswers.some(entry => entry.error && submit.error === plainFailure(entry.error)))
       && <p className="detail-error" role="alert">{submit.error}</p>}

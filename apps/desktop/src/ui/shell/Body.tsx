@@ -3,6 +3,7 @@ import { bodyLayout, DETAIL_DEFAULT, DETAIL_MAX, DETAIL_MIN } from './model';
 import { WaitingFold } from './fold';
 import { ItemHistoryContext } from './itemHistory';
 import { HideIcon } from '../shared/HideIcon';
+import { Notices } from '../pages/notices';
 
 export interface BodyProps {
   readonly waiting: ReactNode;
@@ -97,7 +98,7 @@ export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail,
   return <div ref={ref} className="shell-body" style={{ gridTemplateColumns: layout.columns }}>
     <div className={`shell-waiting${layout.folded ? ' shell-waiting-folded' : ''}`}>
       <WaitingFold.Provider value={fold}>{waiting}</WaitingFold.Provider></div>
-    <main className="shell-center">{center}</main>
+    <main className="shell-center"><div className="shell-center-content">{center}</div><Notices /></main>
     {detail && <aside className={`shell-detail${hidden ? ' shell-detail-hidden' : ''}`} aria-label="Item detail">
       {onResizeDetail && <div className="shell-detail-resize" role="separator" aria-orientation="vertical" aria-label="Resize detail panel"
         aria-valuemin={DETAIL_MIN} aria-valuemax={resizeMax} aria-valuenow={layout.detailWidth} tabIndex={0} title="Drag to resize; double-click for the default width"

@@ -11,7 +11,7 @@ import { useSessionActions, type SessionActions } from '../../components/binding
 import { useDispatch } from '../../components/bindings/DispatchChip';
 import { closeImpact, closeWarning } from '../../components/history-actions/selectors';
 import { connectionOf } from '../shared/connection';
-import { sessionPhrase } from '../shell/model';
+import { sessionPhrase, sessionWhen } from '../shell/model';
 import { Dialog } from '../dialogs/Dialog';
 import { notices } from './notices';
 import { waitForLifecycleReady } from '../shared/lifecycleReady';
@@ -117,8 +117,10 @@ export function announceClosed(actions: SessionActions, agent: string, name: str
   const receipt = actions.getSnapshot().receipt;
   const data = receipt && 'data' in receipt ? receipt.data : undefined;
   const cancelled = data?.kind === 'session_lifecycle' ? data.cancelled_input_ids?.length ?? 0 : 0;
-  if (cancelled) notices.push({ icon: 'ph ph-x-circle', dismissible: true,
-    text: `Closed ${name ? `the “${name}”` : `the ${agent}`} session. ${cancelled} unsent message${cancelled === 1 ? ' was' : 's were'} cancelled.` }, 8000);
+  const state = actions.session.getSnapshot(), route = state.route;
+  const when = state.snapshot ? sessionWhen(Date.parse(state.snapshot.session.created_at), Date.now()) : 'earlier';
+  if (cancelled) notices.push({ id: `session-closed:${route.project_id}:${route.session_id}`, icon: 'ph ph-x-circle', dismissible: true,
+    text: `Closed ${sessionPhrase({ name }, agent, when)}. ${cancelled} unsent message${cancelled === 1 ? ' was' : 's were'} cancelled.` }, 8000);
 }
 
 /** Close session: one confirmation in plain words, then close. Nothing has to be paused or settled first. */

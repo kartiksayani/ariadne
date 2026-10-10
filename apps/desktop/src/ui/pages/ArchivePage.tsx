@@ -16,6 +16,8 @@ import { useHidden } from '../remove/queue';
 import './pages.css';
 import { AgentBin } from '../remove/AgentBin';
 import { removeSubject, visibleSession } from '../remove/model';
+import { isViewConflict } from '../shared/conflictNotice';
+import { sessionPhrase, sessionWhen } from '../shell/model';
 
 export interface ArchivePageProps {
   readonly navigation: NavigationStore;
@@ -48,9 +50,13 @@ export function ArchivePage({ navigation, actions, projectName, sessions, snapsh
       if (!await controller.execute({ command: 'topic_restore', api_version: 1, op_id: '', params: { topic_id: current.id, expected_revision: current.revision } }, session.revision)) {
         throw controller.getSnapshot().error ?? new Error('The topic could not be restored.');
       }
+      notices.dismiss(`topic-restore-failed:${sessionKey(topic.source)}:${topic.topic.id}`);
       await navigation.refresh();
     } catch (error: unknown) {
-      notices.push({ icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: plainFailure(error, 'The topic could not be restored. Try again.') });
+      const summary = sessions.find(session => sessionKey(session) === sessionKey(topic.source));
+      const subject = sessionPhrase(summary, topic.sourceAgent, summary ? sessionWhen(Date.parse(summary.created_at), now) : 'earlier');
+      if (!isViewConflict(error)) notices.push({ id: `topic-restore-failed:${sessionKey(topic.source)}:${topic.topic.id}`, icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)', dismissible: true,
+        text: `For “${topic.name}” in ${subject}: ${plainFailure(error, 'The topic could not be restored. Try again.')}` });
     } finally { setBusy(null); }
   };
   const remove = (topic: ArchivedTopic) => {

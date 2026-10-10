@@ -24,7 +24,7 @@ it('removes an item from the detail trash or ⌫ after asking, with Undo, and ru
   expect(within(dialog).getByText(/This item is removed from Ariadne\. .+ is told, so it stops working on it/)).toBeTruthy();
   fireEvent.click(within(dialog).getByRole('button', { name: 'Remove item' }));
   await waitFor(() => expect(row('4')).toBeNull());
-  expect(screen.getByText(/is told in 5 seconds unless you undo\.$/)).toBeTruthy();
+  expect(await screen.findByText(/is told in 5 seconds unless you undo\.$/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
   await waitFor(() => expect(row('4')).not.toBeNull());
   expect(transport.mutations.some(request => request.command.command === 'item_remove')).toBe(false);
