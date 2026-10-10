@@ -2,6 +2,8 @@ import type { Item, ItemOwner, Session } from '../../generated/domain/models';
 import type { SessionPreferences } from '../../generated/core';
 import { indexSession, type Immutable } from '../../data';
 import { itemRemoved } from '../removed';
+import { hasStatusFilter, matchExpansion, matchesStatus } from './folds';
+import { displayStatus } from '../waiting/replied';
 
 export interface SentenceRow {
   readonly item: Immutable<Item>;
@@ -37,24 +39,24 @@ export function initialExpansion(session: Immutable<Session>): readonly string[]
 }
 
 export function sentenceRows(session: Immutable<Session>, view: Immutable<SessionPreferences>,
-  later: ReadonlySet<string>, temporaryAncestors: readonly string[] = [], revealedItemId: string | null = null): SentenceRows {
+  later: ReadonlySet<string>, temporaryAncestors: readonly string[] = [], revealedItemId: string | null = null,
+  filterCollapsedItemIds: ReadonlySet<string> = new Set()): SentenceRows {
   if (view.session.project_id !== session.project_id || view.session.session_id !== session.id) throw new Error('Tree view route differs from its registered session.');
-  const key = JSON.stringify([view.filters, view.expanded_item_ids, [...later].sort(), temporaryAncestors, revealedItemId]);
+  const key = JSON.stringify([view.filters, view.expanded_item_ids, [...later].sort(), temporaryAncestors, revealedItemId, [...filterCollapsedItemIds].sort()]);
   const known = selectedBySession.get(session);
   if (known?.key === key) return known.value;
   const indexes = indexSession(session), filters = view.filters;
   const tokens = normalizeSearch(filters.search).split(/\s+/u).filter(Boolean);
-  const filtering = tokens.length > 0 || filters.statuses.length > 0 || filters.owners.length > 0 || filters.hide_later;
+  const filtering = tokens.length > 0 || hasStatusFilter(filters.statuses) || filters.owners.length > 0 || filters.hide_later;
   const inScope = new Set(Object.values(session.items).filter((item): item is Immutable<Item> => !!item && !itemRemoved(session, item.id))
     .filter(item => {
       const topic = session.topics[item.topic_id];
-      return !!topic && (filters.topic_id === null || item.topic_id === filters.topic_id)
-        && (filters.archived ? topic.archived_at !== null : topic.archived_at === null);
+      return !!topic && (filters.archived ? topic.archived_at !== null : topic.archived_at === null);
     }).map(item => item.id));
   const matching = new Set<string>();
   for (const id of inScope) {
     const item = session.items[id]!;
-    if (filters.statuses.length && !filters.statuses.includes(item.status)) continue;
+    if (!matchesStatus(filters.statuses, displayStatus(session, item))) continue;
     if (filters.owners.length && !filters.owners.some(owner => sameOwner(owner, item.owner))) continue;
     if (filters.hide_later && later.has(id)) continue;
     if (tokens.length) {
@@ -73,10 +75,10 @@ export function sentenceRows(session: Immutable<Session>, view: Immutable<Sessio
     }
     matching.add(id);
   }
-  const included = new Set(matching), expanded = new Set([...view.expanded_item_ids, ...temporaryAncestors]);
+  const included = new Set(matching), expanded = matchExpansion(view.expanded_item_ids, temporaryAncestors, [], filtering, filterCollapsedItemIds);
   const addAncestors = (id: string, open: boolean): void => {
     let parent = session.items[id]?.parent;
-    while (parent) { included.add(parent); if (open) expanded.add(parent); parent = session.items[parent]?.parent; }
+    while (parent) { included.add(parent); if (open && (!filterCollapsedItemIds.has(parent) || id === revealedItemId)) expanded.add(parent); parent = session.items[parent]?.parent; }
   };
   matching.forEach(id => addAncestors(id, filtering));
   if (revealedItemId && session.items[revealedItemId] && !itemRemoved(session, revealedItemId)) {

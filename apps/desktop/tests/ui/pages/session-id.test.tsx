@@ -15,12 +15,13 @@ describe('session ID actions', () => {
   it.each(['active', 'closed'] as const)('copies from the %s session bar without displaying the ID', async state => {
     const session = new AppTransport().sessions.get(route.session_id)!;
     session.state = state;
-    const { container } = render(<SessionBar bar={sessionBar(session, null, Date.now())!} busy={false} onClose={() => {}} />);
+    const { container } = render(<SessionBar bar={sessionBar(session, null)!} busy={false} onClose={() => {}} />);
     expect(container.innerHTML).not.toContain(route.session_id);
     vi.mocked(copyText).mockResolvedValue(undefined);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy ID' })); });
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: 'Copy ID' })); });
     expect(copyText).toHaveBeenCalledExactlyOnceWith(route.session_id);
-    expect(screen.getByRole('button', { name: 'Copied' }).querySelector('.ph-check')).not.toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Copied' }).querySelector('.ph-check')).not.toBeNull();
     expect(container.innerHTML).not.toContain(route.session_id);
   });
 
@@ -37,10 +38,11 @@ describe('session ID actions', () => {
     await screen.findByRole('region', { name: 'Session tree' });
     const bar = screen.getByLabelText('Session');
     expect(bar.textContent).not.toContain(route.session_id);
-    await act(async () => { fireEvent.click(within(bar).getByRole('button', { name: 'Copy ID' })); });
+    fireEvent.click(within(bar).getByRole('button', { name: 'Session actions' }));
+    await act(async () => { fireEvent.click(within(bar).getByRole('menuitem', { name: 'Copy ID' })); });
     expect(copyText).toHaveBeenCalledTimes(2);
     expect(copyText).toHaveBeenLastCalledWith(route.session_id);
-    expect(within(bar).getByRole('button', { name: 'Copied' }).querySelector('.ph-check')).not.toBeNull();
+    expect(within(bar).getByRole('menuitem', { name: 'Copied' }).querySelector('.ph-check')).not.toBeNull();
     expect(bar.textContent).not.toContain(route.session_id);
   });
 });

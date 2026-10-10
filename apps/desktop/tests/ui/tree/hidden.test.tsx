@@ -3,6 +3,7 @@ import { immutable } from '../../../src/data';
 import { hiddenGroupKey, hiddenItems, hiddenSource } from '../../../src/ui/tree/hidden';
 import { treeModel, type TreeInput } from '../../../src/ui/tree/model';
 import { AppTransport, route } from '../app/transport';
+import { FILTER_STATUSES } from '../../../src/selectors/tree/folds';
 
 function fixture(hidden: string[] = []) {
   const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
@@ -25,6 +26,31 @@ describe('hidden item tree projection', () => {
     expect(hiddenSource(immutable(session), new Set(), '1.1')).toBeNull();
   });
 
+  it('retains saved item and topic folds when a full status set means All', () => {
+    const { session, view, model } = fixture();
+    view.filters.statuses = [...FILTER_STATUSES, 'open'];
+    view.expanded_item_ids = [];
+    const normal = model();
+    expect(normal.filtering).toBe(false);
+    expect(normal.rows.some(row => row.key === '1.1')).toBe(false);
+    const topic = session.items['1']!.topic_id;
+    expect(model({ collapsedTopics: new Set([topic]) }).rows.some(row => row.key === '1')).toBe(false);
+  });
+  it('ignores saved topic scope and autoopens filter ancestors while honoring explicit filter folds', () => {
+    const { session, view, model } = fixture();
+    const normal = model();
+    view.filters.topic_id = 'retired-topic-filter';
+    expect(model()).toEqual(normal);
+    view.expanded_item_ids = [];
+    const topicId = session.items['1']!.topic_id;
+    const input = { search: session.items['1.1']!.question, collapsedTopics: new Set([topicId]) };
+    expect(model(input).rows.find(row => row.key === '1.1')).toBeDefined();
+    expect(model({ ...input, filterCollapsedItemIds: new Set(['1']) }).rows.some(row => row.key === '1.1')).toBe(false);
+    expect(model({ ...input, filterCollapsedTopicIds: new Set([topicId]) }).rows.map(row => row.key)).toEqual([topicId]);
+    expect(model({ ...input, filterCollapsedItemIds: new Set(['1']), filterCollapsedTopicIds: new Set([topicId]), revealId: '1.1' })
+      .rows.find(row => row.key === '1.1')).toBeDefined();
+    expect(view.expanded_item_ids).toEqual([]);
+  });
   it('hides a parent and its subtree without changing session data or its saved expansion', () => {
     const { session, view, model } = fixture(['1']), before = JSON.stringify(session);
     expect([...hiddenItems(immutable(session), new Set(['1']))]).toEqual(['1', '1.1']);

@@ -8,8 +8,19 @@ afterEach(cleanup);
 const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`);
 const saved = (transport: AppTransport) => transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!;
 const group = (count = 1) => screen.getByRole('treeitem', { name: new RegExp(`^${count} items? hidden`) });
-const chip = (name: string) => within(screen.getByRole('group', { name: 'Filter items' })).getByRole('button', { name: new RegExp(`^${name}`) });
-async function ready() { await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Close session' }).disabled).toBe(false)); }
+const filterButton = () => within(screen.getByRole('group', { name: 'Filter items' })).getByRole('button', { name: /^Filter/ });
+const chip = (name: string) => {
+  if (filterButton().getAttribute('aria-expanded') !== 'true') fireEvent.click(filterButton());
+  return screen.getByRole(name === 'All' ? 'menuitem' : 'menuitemcheckbox', { name: new RegExp(`^${name === 'All' ? 'Show all' : name}`) });
+};
+async function ready() {
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Session actions' })).toBeTruthy());
+  await waitFor(() => expect(filterButton().hasAttribute('disabled')).toBe(false));
+  await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    });
+}
 async function mount(transport = new AppTransport()) {
   transport.preferences.global.selected_navigation = { kind: 'session', session: route };
   saved(transport).tab_open = true;
@@ -229,7 +240,7 @@ describe('owner hide and unhide actions', () => {
     expect(await screen.findByText('Showing 2 of 8 items (1 hidden) in the statuses you picked')).toBeTruthy();
     expect(chip('Open').textContent).toContain('2');
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
-    await waitFor(() => expect(chip('All').getAttribute('aria-pressed')).toBe('true'));
+    await waitFor(() => expect(filterButton().hasAttribute('data-active')).toBe(false));
     expect(screen.queryByText('Showing 2 of 8 items (1 hidden) in the statuses you picked')).toBeNull();
     expect(group()).toBeTruthy();
   });

@@ -12,7 +12,7 @@ import { normalizeSearch, sameOwner } from '../../selectors/tree/rows';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
 import { agentReceived, stoppedAttempt, stuckInput, type Stuck } from '../../selectors/waiting/stuck';
 import { deliveryLine as deliveryText, deliveryStage } from '../answer/delivery';
-import { agentLine, agentName, dayWord, hostApp, ownerName, sessionLabel, sessionRange } from '../shell/model';
+import { agentLine, agentName, dayWord, hostApp, ownerName, sessionLabel } from '../shell/model';
 import { STATUS, statusKey, type StatusKey } from '../shared/status';
 import { displayStatus, type DisplayStatus } from '../../selectors/waiting/replied';
 import { continuedLabel } from '../shared/continued';
@@ -20,6 +20,7 @@ import { hiddenGroupKey, hiddenGroupsFor, hiddenItems } from './hidden';
 import { agentRunning, connectionOf, type Connection } from '../shared/connection';
 import { relatedItems } from '../../selectors/related';
 import { ackTarget } from '../../selectors/ack';
+import { FILTER_STATUSES, hasStatusFilter, matchExpansion } from '../../selectors/tree/folds';
 
 export const visual = (status: DisplayStatus): StatusKey => statusKey[status];
 const CLOSED: ReadonlySet<ItemStatus> = new Set(['decided', 'done', 'dropped', 'replaced']);
@@ -39,8 +40,7 @@ export const CHIPS: readonly { readonly chip: Chip; readonly label: string; read
   { chip: 'progress', label: 'In progress', icon: STATUS.progress.icon, iconColor: 'var(--st-progress)', statuses: ['in_progress'] },
   { chip: 'closed', label: 'Closed', icon: STATUS.decided.icon, iconColor: 'var(--st-decided)', statuses: ['decided', 'done', 'dropped', 'replaced'] },
 ];
-const FILTER_STATUSES = CHIPS.flatMap(value => value.statuses);
-const fullStatusFilter = (statuses: readonly ItemStatus[]) => FILTER_STATUSES.every(status => statuses.includes(status));
+const fullStatusFilter = (statuses: readonly ItemStatus[]) => statuses.length > 0 && !hasStatusFilter(statuses);
 /** The selected chips represented by the saved status set; empty and full sets mean All. */
 export function chipsOf(statuses: readonly ItemStatus[]): ReadonlySet<Chip> {
   return new Set(statuses.length && !fullStatusFilter(statuses)
@@ -145,23 +145,22 @@ export interface SessionBar {
   readonly closed: boolean;
   readonly archived?: boolean;
 }
-/** "claude-code", "Today 14:02 – now · 3 topics", running or not (Ariadne.dc.html:1722). */
-export function sessionBar(session: Immutable<Session> | null, summary: Immutable<SessionSummary> | null, now: number,
+/** The session name, connection and active topic count for the compact bar. */
+export function sessionBar(session: Immutable<Session> | null, summary: Immutable<SessionSummary> | null,
   presence: Immutable<PresenceObservation> | null = null): SessionBar | null {
   const bound = session?.active_binding_id ? session.bindings[session.active_binding_id] ?? null : null;
   const binding = session ? bound : summary?.active_binding ?? null;
-  const created = session?.created_at ?? summary?.created_at, ended = session ? session.closed_at ?? session.updated_at : summary?.closed_at ?? summary?.updated_at ?? null;
+  const created = session?.created_at ?? summary?.created_at;
   if (!created) return null;
   // A fresh presence observation outranks the binding's stored connection state; a stale one is "Reconnecting".
   const connection = connectionOf(binding, bound ? presence : null), running = agentRunning(connection);
   // Before the snapshot loads, the summary's topic count stands in (archived topics excluded, like the loaded count).
   const topics = session ? topicList(session).filter(topic => topic.archived_at === null).length
     : summary ? summary.topic_count - summary.counts.archived_topics : null;
-  const range = sessionRange(Date.parse(created), ended ? Date.parse(ended) : null, running, now);
   const agent = binding ? agentName(binding.adapter_id) : 'No agent', location = binding?.host_location ?? null;
   const label = sessionLabel(session ?? summary, agentLine(agent, location));
   return { sessionId: session?.id ?? summary!.session_id, title: label.title, secondary: label.secondary, description: label.description, named: label.named, agent, where: hostApp(location),
-    meta: topics === null ? range : `${range} · ${plural(topics, 'topic')}`,
+    meta: topics === null ? '' : plural(topics, 'topic'),
     running, connection, closed: (session?.state ?? summary?.state) === 'closed', archived: (session ?? summary)?.archived_at != null };
 }
 
@@ -234,6 +233,8 @@ export interface TreeInput {
   readonly later: ReadonlySet<string>;
   readonly expandedHiddenGroups?: ReadonlySet<string>;
   readonly collapsedTopics: ReadonlySet<string>;
+  readonly filterCollapsedItemIds?: ReadonlySet<string>;
+  readonly filterCollapsedTopicIds?: ReadonlySet<string>;
   readonly selectedId: string | null;
   /** An item revealed from elsewhere (a link, the waiting panel). */
   readonly revealId: string | null;
@@ -258,7 +259,6 @@ export interface TreeModel {
   readonly empty: boolean;
   readonly chips: ReadonlySet<Chip>;
   readonly counts: Readonly<Record<Chip, number>>;
-  readonly topics: readonly { readonly id: string; readonly name: string }[];
 }
 
 function topicChip(session: Immutable<Session>, topic: Immutable<Topic>, summaries: readonly Immutable<SessionSummary>[], now: number) {
@@ -322,7 +322,7 @@ export function treeModel(input: TreeInput): TreeModel {
   const statusFiltered = !chips.has('all');
   const statusMatch = (item: Immutable<Item>) => !statusFiltered || statusIn(filters.statuses, display(item));
   const filtering = terms.length > 0 || statusFiltered || filters.owners.length > 0 || filters.hide_later;
-  const scoped = live.filter(item => base(item) && (filters.topic_id === null || item.topic_id === filters.topic_id));
+  const scoped = live.filter(item => base(item));
   const counts = Object.fromEntries(CHIPS.map(({ chip: key }) => [key, scoped.filter(item => (!hidden.has(item.id) || key === 'waiting') && inChip(key, display(item))).length])) as Record<Chip, number>;
 
   // includeSets: matches, the forced reveal and selection, and their ancestors.
@@ -336,7 +336,8 @@ export function treeModel(input: TreeInput): TreeModel {
       if (match || forced.has(item.id)) { include.add(item.id); ancestors(item.id).forEach(id => include.add(id)); }
     }
   }
-  const expanded = new Set([...view.expanded_item_ids, ...input.temporaryExpanded]);
+  const expanded = matchExpansion(view.expanded_item_ids, input.temporaryExpanded,
+    [...include].flatMap(ancestors), filtering, input.filterCollapsedItemIds);
   const revealTopic = revealId ? session.items[revealId]?.topic_id : undefined;
   if (revealId) ancestors(revealId).forEach(id => expanded.add(id));
   const kids = (id: string | null) => indexes.childrenByParent.get(id) ?? [];
@@ -344,12 +345,11 @@ export function treeModel(input: TreeInput): TreeModel {
 
   const built: (Omit<TopicRow, 'guides'> | Omit<ItemRow, 'guides'> | Omit<HiddenRow, 'guides'>)[] = [];
   for (const topic of topics) {
-    if (filters.topic_id !== null && filters.topic_id !== topic.id) continue;
     const roots = rootsOf(topic.id);
     // A topic with no items yet (or none left) still shows its band; filters hide topics without a match.
     // A session with no items at all shows its empty state instead (frame 1g).
     if (filtering && !roots.some(item => include.has(item.id))) continue;
-    const open = filtering || topic.id === revealTopic || !input.collapsedTopics.has(topic.id);
+    const open = topic.id === revealTopic || (filtering ? !input.filterCollapsedTopicIds?.has(topic.id) : !input.collapsedTopics.has(topic.id));
     const topicItems = all.filter(item => item.topic_id === topic.id), statuses = topicItems.map(display);
     const chipValue = topicChip(session, topic, input.summaries, input.now);
     const delivery = deliveryLine(session, { topicId: topic.id, itemId: null }, input.presence, input.health);
@@ -374,7 +374,7 @@ export function treeModel(input: TreeInput): TreeModel {
         }
         if (explicitHidden.has(item.id) && !groupOpen) continue;
         const children = kids(item.id);
-        const open = children.length > 0 && (filtering ? children.some(child => include.has(child.id)) : expanded.has(item.id));
+        const open = children.length > 0 && expanded.has(item.id);
         let collapsed: ItemRow['collapsed'] = null;
         if (children.length && !open) {
           const below: Immutable<Item>[] = [];
@@ -425,8 +425,7 @@ export function treeModel(input: TreeInput): TreeModel {
 
   // hasReveal (Ariadne.dc.html:2169): only a reveal raises the banner, not a plain selection.
   const outside = filtering && rows.length > 0 && !!revealId && forced.has(revealId) && !matched.has(revealId);
-  return { rows, filtering, searchCount: scoped.filter(item => !hidden.has(item.id) && statusMatch(item)).length, hiddenCount: scoped.filter(item => hidden.has(item.id) && statusMatch(item)).length, itemCount: live.filter(item => !hidden.has(item.id)).length, outside, noMatch: live.length > 0 && rows.length === 0, empty: Object.keys(session.items).length === 0 && !Object.values(session.topics).some(topic => topic?.removed_at), chips, counts,
-    topics: topics.map(topic => ({ id: topic.id, name: topic.name })) };
+  return { rows, filtering, searchCount: scoped.filter(item => !hidden.has(item.id) && statusMatch(item)).length, hiddenCount: scoped.filter(item => hidden.has(item.id) && statusMatch(item)).length, itemCount: live.filter(item => !hidden.has(item.id)).length, outside, noMatch: live.length > 0 && rows.length === 0, empty: Object.keys(session.items).length === 0 && !Object.values(session.topics).some(topic => topic?.removed_at), chips, counts };
 }
 
 /** The row ← moves to: the parent item, or the topic of a root item. */

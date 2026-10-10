@@ -30,11 +30,17 @@ function setup(options = 9, connection: 'connected' | 'disconnected' | 'reconnec
 async function openQuestion() {
   fireEvent.click(await sessionButton(route));
   await screen.findByRole('region', { name: 'Session tree' });
-  await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Close session' }).disabled).toBe(false));
+  await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    });
   fireEvent.click(row());
   await screen.findByLabelText('Detail of #2');
   await waitFor(() => expect(within(detail()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').disabled).toBe(false));
-  await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Close session' }).disabled).toBe(false));
+  await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    });
 }
 
 describe('quick owner answers from the desktop', () => {
@@ -243,7 +249,10 @@ describe('quick owner answers from the desktop', () => {
     if (change === 'options reorder') await waitFor(() => expect(detail().querySelector('[data-answer-option="0"]')?.textContent).toContain('Window 2'));
     else await waitFor(() => expect(within(detail()).getByText('This item changed. Review the current question and options; your text is retained.')).toBeTruthy());
     await act(async () => { release(); });
-    await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Close session' }).disabled).toBe(false));
+    await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+        expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      });
     expect((await within(detail()).findByText('This item changed. Review it before sending. Your note is kept.')).getAttribute('role')).toBe('alert');
     expect(sends(transport)).toHaveLength(0);
     expect(within(detail()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe(note);

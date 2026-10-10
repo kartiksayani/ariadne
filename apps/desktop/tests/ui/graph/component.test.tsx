@@ -33,9 +33,9 @@ async function setup(session: Session = graphSession(), view = preferences()) {
   const routes = new RegisteredRoutes(service, sessions), saved: SessionPreferences[] = [], reveals: [string, boolean][] = [];
   const hovered: (string | null)[] = [];
   let write: (next: SessionPreferences) => Promise<boolean> = async () => true;
-  function Composition({ reveal = null, tight = false }: { reveal?: RevealedItem | null; tight?: boolean }) {
+  function Composition({ reveal = null, tight = false, search }: { reveal?: RevealedItem | null; tight?: boolean; search?: string }) {
     const [current, setCurrent] = useState(view);
-    return <GraphView store={store} routes={routes} view={immutable(current)} later={new Set()} reveal={reveal} tight={tight} sessionLabel="codex · yesterday"
+    return <GraphView store={store} routes={routes} view={immutable(current)} later={new Set()} search={search} reveal={reveal} tight={tight} sessionLabel="codex · yesterday"
       continuedFrom={topic => topic.name === 'Continued context' ? 'Continued from claude-code · yesterday' : null}
       saveView={async next => { saved.push(structuredClone(next)); const ok = await write(next); if (ok) setCurrent(next); return ok; }}
       onReveal={(result, openDetail) => { if (result.kind === 'item') reveals.push([result.route.item_id, openDetail]); }}
@@ -49,6 +49,33 @@ const ids = () => [...document.querySelectorAll<HTMLElement>('.graph-node')].map
 const selected = () => document.querySelector<HTMLElement>('.graph-node[aria-selected="true"]')?.dataset.itemId;
 
 describe('session graph view', () => {
+  it('filters with the live header search and clears scoped folds when that search changes', async () => {
+    const value = await setup(undefined, preferences({ expanded_item_ids: [], selected_item_id: '1' }));
+    const { rerender } = render(<value.Composition search="morning or evening" />);
+    expect(ids()).toEqual(['1', '1.1', '1.1.1']);
+    fireEvent.click(within(node('1')).getByRole('button', { name: 'Collapse branches' }));
+    expect(ids()).toEqual(['1']);
+    rerender(<value.Composition search="delivery window" />);
+    expect(ids()).toEqual(['1', '1.1', '1.1.1', '2']);
+  });
+  it('folds and unfolds search ancestors with the existing mouse and keyboard controls', async () => {
+    const value = await setup(undefined, preferences({ expanded_item_ids: [], selected_item_id: '1',
+      filters: { ...preferences().filters, search: 'morning or evening' } }));
+    render(<value.Composition />);
+    expect(ids()).toEqual(['1', '1.1', '1.1.1']);
+    fireEvent.click(within(node('1')).getByRole('button', { name: 'Collapse branches' }));
+    expect(ids()).toEqual(['1']);
+    // The saved branch was already folded; only the scoped override needs to change.
+    await act(async () => {});
+    expect(value.saved).toEqual([]);
+    fireEvent.keyDown(node('1'), { key: 'ArrowRight' });
+    expect(ids()).toEqual(['1', '1.1', '1.1.1']);
+    await waitFor(() => expect(value.saved.at(-1)?.expanded_item_ids).toEqual(['1']));
+    fireEvent.keyDown(node('1'), { key: 'ArrowLeft' });
+    expect(ids()).toEqual(['1']);
+    fireEvent.click(node('1'));
+    expect(ids()).toEqual(['1', '1.1', '1.1.1']);
+  });
   it('draws same-topic connections beneath hierarchy paths and measured cross-topic connections for either selection', async () => {
     const session = graphSession(); session.items['1']!.related = ['2', '8'];
     let measurable = true;

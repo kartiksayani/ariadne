@@ -33,13 +33,13 @@ export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onK
         onClick={event => { event.stopPropagation(); onToggle(topic.id); }}><i className={row.expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} /></button>
       <span className="tree-topic-name" data-earlier={row.earlier || undefined}>{topic.name}</span>
       {row.chip && <span className="tree-session-chip" title={row.chip.title}><i className="ph ph-clock-counter-clockwise" />{row.chip.label}</span>}
-      <span className="tree-topic-end">
-        {actions.length > 0 && <span className="tree-topic-actions">{actions.map(action => <button key={action.label} type="button" tabIndex={-1}
+      {actions.length > 0 && <span className="tree-topic-end">
+        <span className="tree-topic-actions">{actions.map(action => <button key={action.label} type="button" tabIndex={-1}
           className="tree-topic-action" title={action.title} aria-label={action.label} data-shortcut-archive-topic={action.archive ? topic.id : undefined}
-          onClick={event => { event.stopPropagation(); action.run(); }}><i className={action.icon} /></button>)}</span>}
-        {row.counts.map(count => <span key={count.text} className="tree-count"><i className={count.icon} style={{ color: count.color }} />{count.text}</span>)}
-      </span>
+          onClick={event => { event.stopPropagation(); action.run(); }}><i className={action.icon} /></button>)}</span>
+      </span>}
     </div>
+    {row.counts.length > 0 && <div className="tree-topic-counts">{row.counts.map(count => <span key={count.text} className="tree-count"><i className={count.icon} style={{ color: count.color }} />{count.text}</span>)}</div>}
     {row.delivery && <div className="tree-topic-line tree-topic-status" style={{ color: row.delivery.color }}><i className={row.delivery.icon} /><span>{row.delivery.text}</span></div>}
   </div>
   {(fix || prompt || reply) && <div className="tree-topic-content">

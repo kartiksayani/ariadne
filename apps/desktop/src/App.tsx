@@ -1,10 +1,11 @@
 import { waitForLifecycleReady } from './ui/shared/lifecycleReady';
 import { itemRemoved } from './selectors/removed';
+import { hasStatusFilter } from './selectors/tree/folds';
 import { AgentRemovalNotices } from './ui/remove/AgentRemovalNotices';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import { createDesktopService, type RendererService } from './data/service';
 import { DiscoveryController } from './data/discovery';
-import { useSession, type SessionState, type SessionStore } from './data/session-store';
+import { useSession, type Immutable, type SessionState, type SessionStore } from './data/session-store';
 import type { RevealedItem } from './data/routes';
 import { plainFailure } from './data/plain';
 import type { ItemRoute, SessionPreferences, SessionRef } from './generated/core';
@@ -78,9 +79,8 @@ function sessionFacts(state: SessionState | null, projectName: (projectId: strin
 }
 const clearedFilters = (filters: { readonly archived: boolean }): SessionPreferences['filters'] =>
   ({ search: '', statuses: [], owners: [], topic_id: null, hide_later: false, archived: filters.archived });
-const filtering = (filters: { readonly search: string; readonly statuses: readonly unknown[]; readonly owners: readonly unknown[];
-  readonly topic_id: string | null; readonly hide_later: boolean }) => !!filters.search || filters.statuses.length > 0 || filters.owners.length > 0
-  || filters.topic_id !== null || filters.hide_later;
+const filtering = (filters: Immutable<SessionPreferences['filters']>) => !!filters.search.trim() || hasStatusFilter(filters.statuses)
+  || filters.owners.length > 0 || filters.hide_later;
 interface FocusedItem { readonly item: { readonly id: string; readonly status: string; readonly topic_id: string }; readonly target: ItemRoute }
 /** The App's share of the workspace keymap: actions on the focused or selected item, views and Esc. */
 function workspaceKeys(app: {
@@ -180,7 +180,7 @@ function SessionCenter({ application, view, graph, reveal, onRemoveTarget, ...pr
   return <TreeView {...props} navigation={application.navigation} store={view.store} actions={actions} drafts={application.drafts}
     reveal={reveal?.store === view.store ? reveal : null} summaries={summaries}
     notices={notice || recovering ? <div className="tree-notices">{notice}{recovering && <RecoveryPanel actions={actions} />}</div> : null}
-    graph={graph && !view.preferences?.filters.archived ? <NavigationGraph navigation={application.navigation} store={view.store}
+    graph={graph && !view.preferences?.filters.archived ? <NavigationGraph navigation={application.navigation} store={view.store} query={props.query}
       tight={props.detailOpen || props.railOpen} onReveal={props.onSelected} onHoverItem={props.onHoverItem} /> : null} />;
 }
 function Workspace({ application }: { application: Application }) {
