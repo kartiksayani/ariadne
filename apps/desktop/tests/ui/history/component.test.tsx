@@ -7,6 +7,7 @@ import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { withdrawn } from '../../../src/selectors/waiting/stuck';
 import { immutable } from '../../../src/data';
 import { extraMessage, setup } from './fixtures';
+import { notices } from '../../../src/ui/pages/notices';
 
 const copy = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
 vi.mock('../../../src/ui/shared/clipboard', () => ({ copyText: (text: string) => copy(text) }));
@@ -14,7 +15,7 @@ const opened: ReturnType<typeof setup>[] = [];
 async function ready(change?: (session: ReturnType<typeof setup>['transport']['session']) => void) {
   const value = setup(); opened.push(value); change?.(value.transport.session); await value.store.refresh(); return value;
 }
-afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.restoreAllMocks(); copy.mockClear(); });
+afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); notices.clear(); vi.restoreAllMocks(); copy.mockClear(); });
 type FixtureSession = ReturnType<typeof setup>['transport']['session'];
 /** The rail keeps cancellations; only an edited message sent again leaves the history. */
 const shown = (session: FixtureSession) => session.messages.filter(message => !withdrawn(immutable(session), immutable(message))).length;

@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 import type { MutationReceipt, OwnerCommand, OwnerMutationRequest, SessionRef } from '../../generated/core';
 import { CoreFailure, immutable, ServiceFailure, type Immutable, type RendererService, type SessionStore } from '../../data';
 import type { ContinuationReceipt } from '../../generated/domain/models';
+import { conflictNotice } from '../../ui/shared/conflictNotice';
 
 const uuid = (value: unknown): value is string => typeof value === 'string'
   && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
@@ -73,6 +74,8 @@ export class SessionActions {
   private readonly listeners = new Set<() => void>();
   private currentSession: SessionStore;
   private readonly route: Immutable<SessionRef>;
+  private transientFailure: CoreFailure | ServiceFailure | null = null;
+  readonly isTransientFailure = (error: unknown) => error === this.transientFailure;
   constructor(readonly service: RendererService, session: SessionStore,
     private readonly operationId: () => string = () => crypto.randomUUID()) {
     this.currentSession = session;
@@ -166,8 +169,19 @@ export class SessionActions {
       // A transport failure or ambiguous commit can have persisted. Keep every
       // byte, including attestation time and revision, for exact receipt replay.
       const rejected = definitiveRejection(failure, request.command);
+      const delivery = request.command.command === 'input_resolve' || request.command.command === 'input_cancel';
+      this.transientFailure = rejected && !delivery && request.command.command !== 'session_label_set'
+        && request.command.command !== 'topic_continue' ? failure : null;
       this.publish({ error: failure, ...(rejected ? { pending: null } : {}) });
-      if (rejected) await this.session.refresh();
+      if (rejected) {
+        const notified = !delivery && await conflictNotice(failure, { id: `action-conflict:${this.route.project_id}:${this.route.session_id}`,
+          draftAtRisk: false, refresh: async () => {
+            await this.session.refresh(true);
+            const current = this.session.getSnapshot();
+            return current.status === 'ready' && !current.error;
+          } });
+        if (!notified) await this.session.refresh();
+      }
       return false;
     } finally { this.publish({ writing: false }); }
   }

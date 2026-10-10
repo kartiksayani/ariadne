@@ -19,6 +19,7 @@ import { notices } from './notices';
 import { ArchiveSessionDialog, CloseSessionDialog, DispatchDialog } from './SessionDialogs';
 import { closeImpact } from '../../components/history-actions/selectors';
 import { waitForLifecycleReady } from '../shared/lifecycleReady';
+import { isViewConflict } from '../shared/conflictNotice';
 import './pages.css';
 
 export interface SessionGroup {
@@ -99,7 +100,7 @@ export function SessionLists(props: SessionListsProps) {
     const cancelled = data?.kind === 'session_lifecycle' ? data.cancelled_input_ids?.length ?? 0 : 0;
     const name = ownerName(summary), subject = name ? `“${name}”` : 'the session';
     let used = false;
-    const id = notices.push({ icon: 'ph ph-archive', text: `Archived${wasActive ? ' and closed' : ''} ${subject}.${cancelled ? ` ${cancelled} unsent message${cancelled === 1 ? ' was' : 's were'} cancelled.${wasActive ? ' Undo resumes sending, even if you paused it.' : ''} Cancelled messages stay cancelled.` : ''}`, dismissible: true,
+    const id = notices.push({ id: `session-archive:${summary.project_id}:${summary.session_id}`, icon: 'ph ph-archive', text: `Archived${wasActive ? ' and closed' : ''} ${subject}.${cancelled ? ` ${cancelled} unsent message${cancelled === 1 ? ' was' : 's were'} cancelled.${wasActive ? ' Undo resumes sending, even if you paused it.' : ''} Cancelled messages stay cancelled.` : ''}`, dismissible: true,
       actions: [{ label: 'Undo', run: () => {
         if (used) return;
         used = true;
@@ -138,7 +139,7 @@ export function SessionLists(props: SessionListsProps) {
       if (!done) {
         if (controller.getSnapshot().pending) setDialog({ kind: kind === 'session_archive' ? 'archive' : 'dispatch', store, agent, when, name: ownerName(session), summary,
           onSaved: kind === 'session_restore' ? () => { setDialog(null); announceRestored(summary, reopen); void navigation.refresh(); } : undefined });
-        else failed(controller.getSnapshot().error ?? new Error('The session could not be changed.'));
+        else if (!isViewConflict(controller.getSnapshot().error)) failed(controller.getSnapshot().error ?? new Error('The session could not be changed.'));
       }
       if (done && kind === 'session_archive') announceArchive(summary, session.state === 'active', controller);
       if (done && kind === 'session_restore') announceRestored(summary, reopen);

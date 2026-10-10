@@ -14,6 +14,7 @@ import { visibleSession } from '../remove/model';
 import { applyChange, mergeChange, relatedEdgePath, sessionGraph, statusVisual, type GraphNode, type RelatedEdge, type TopicGraph, type ViewChange } from './model';
 import './graph.css';
 import { useFilterFolds } from '../shared/filterFolds';
+import { notices } from '../pages/notices';
 
 export interface GraphViewProps {
   readonly store: SessionStore;
@@ -151,6 +152,12 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   const [pending, setPending] = useState<ViewChange | null>(null);
   const [inflight, setInflight] = useState<ViewChange | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const errorNoticeId = JSON.stringify(['graph-action', state.route.project_id, state.route.session_id]);
+  useEffect(() => {
+    if (!error) return;
+    notices.push({ id: errorNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: error });
+    return () => notices.dismiss(errorNoticeId);
+  }, [errorNoticeId, error]);
   const [scrollTarget, setScrollTarget] = useState<{ id: string; center: boolean } | null>(null);
   const mounted = useRef(true), request = useRef(0);
   const offered = localReveal ?? reveal;
@@ -284,7 +291,6 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   const focusId = selectedId && graph?.nodes.has(selectedId) ? selectedId : graph?.order[0] ?? null;
   // Like the prototype, the graph and its legend show only when a topic has nodes (Ariadne.dc.html:2177).
   return <div className="graph-view">
-    {error && <p className="graph-error" role="alert">{error}</p>}
     <div ref={scroller} className="graph-scroll" tabIndex={-1} onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
       // A focused button keeps its own Enter and Space (Ariadne.dc.html:1471).
       if (!(event.target instanceof HTMLButtonElement)) keys(event);

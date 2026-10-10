@@ -1,0 +1,70 @@
+/* Persistent overlay above the Paperwhite shell's 30px footer. */
+.pw-notices {
+  position: fixed;
+  z-index: 25;
+  right: 16px;
+  bottom: 46px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100vh - 110px);
+  overflow: auto;
+  padding: 0;
+  pointer-events: none;
+}
+
+.pw-notice-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pw-notices .pw-note {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+  background: var(--a-card);
+  box-shadow: inset 0 0 0 1px var(--color-divider), var(--a-lift);
+  pointer-events: auto;
+  animation: pw-notice-arrive 150ms ease-out;
+}
+
+.pw-notices .pw-note[data-tone="problem"] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a-warn) 50%, var(--color-divider)), var(--a-lift);
+}
+
+.pw-notices .pw-note > i { margin-top: 3px; }
+.pw-notices .pw-note[data-tone="problem"] > i { color: var(--a-warn); }
+
+.pw-notices .pw-note-text {
+  flex-basis: 240px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.pw-notices .pw-note:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.pw-notices .pw-note-action { align-self: center; }
+.pw-notices .pw-note-dismiss { margin-left: auto; }
+
+@keyframes pw-notice-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pw-notices .pw-note { animation: none; }
+}

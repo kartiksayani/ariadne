@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, extname, resolve, sep } from 'node:path';
-import { answerFrameIds, designNow, detailMask, detailMasked, dockFrameIds, frameNow, frameSpec, graphFrame, variantIds, type FrameSpec } from './frames';
+import { answerFrameIds, designNow, detailMask, detailMasked, dockFrameIds, frameNow, frameSpec, graphFrame, toastFrameIds, variantIds, type FrameSpec } from './frames';
 import { handoffMembers, prefix, repo, sourceRoot } from './source.mts';
 import thresholds from './thresholds.json' with { type: 'json' };
 
@@ -379,6 +379,55 @@ for (const id of answerFrameIds) {
       await dock.locator('.answer-send').scrollIntoViewIfNeeded(); await expect(dock.locator('.answer-send')).toBeInViewport();
     }
     await space();
+    expect(denied).toEqual([]);
+  });
+}
+
+for (const id of toastFrameIds) {
+  test(`frame ${id}`, async ({ page, origin }, testInfo) => {
+    const spec = frameSpec(id), denied: string[] = [];
+    await route(page.context(), origin, denied);
+    await openApp(page, origin, spec);
+    const bar = page.locator('.tree-session-bar'), title = bar.locator('.tree-session-title');
+    const overlay = page.locator('.pw-notices'), toast = overlay.locator('.pw-note');
+    await expect(bar).toBeVisible();
+    await expect(title).toBeVisible();
+    await expect(toast).toHaveCount(0);
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const geometry = async () => ({ bar: await bar.boundingBox(), title: await title.boundingBox() });
+    const before = await geometry();
+    const monitor = await page.evaluateHandle(() => {
+      type Shift = PerformanceEntry & { value: number };
+      const shifts: number[] = [];
+      const record = (entries: PerformanceEntry[]) => {
+        for (const entry of entries) shifts.push((entry as Shift).value);
+      };
+      if (!PerformanceObserver.supportedEntryTypes.includes('layout-shift')) throw new Error('Layout shift observation is unavailable');
+      const observer = new PerformanceObserver(list => record(list.getEntries()));
+      observer.observe({ type: 'layout-shift' });
+      return { finish: () => { record(observer.takeRecords()); observer.disconnect(); return shifts; } };
+    });
+    await page.evaluate(() => window.__designToast!.show());
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText('Reference copied.');
+    await expect(overlay).toHaveCSS('position', 'fixed');
+    await settle(page);
+    const visible = await geometry();
+    expect(visible, 'toast appearance moves the session bar and title by 0px').toEqual(before);
+    const toastBox = (await toast.boundingBox())!, barBox = before.bar!;
+    expect(toastBox.y, 'toast stays below the session header').toBeGreaterThanOrEqual(barBox.y + barBox.height);
+    expect(toastBox.x).toBeGreaterThanOrEqual(0);
+    expect(toastBox.x + toastBox.width).toBeLessThanOrEqual(spec.width);
+    await page.screenshot({ path: testInfo.outputPath(`${id}.png`), animations: 'disabled' });
+    await page.evaluate(() => window.__designToast!.clear());
+    await expect(toast).toHaveCount(0);
+    await settle(page);
+    const cleared = await geometry();
+    expect(cleared, 'toast clearance moves the session bar and title by 0px').toEqual(before);
+    const shifts = await monitor.evaluate(value => value.finish());
+    await monitor.dispose();
+    expect(shifts.reduce((sum, value) => sum + value, 0), 'toast appearance and clearance cause 0 layout shift, including the overlay').toBe(0);
+    await testInfo.attach('session toast geometry', { body: JSON.stringify({ before, visible, cleared, layoutShifts: shifts }, null, 2), contentType: 'application/json' });
     expect(denied).toEqual([]);
   });
 }

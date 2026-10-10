@@ -20,7 +20,7 @@ import { AppTransport, route } from '../app/transport';
 import { HistoryTransport } from '../history-actions/fixture';
 import { LinkOpener } from '../../../src/ui/shared/MarkdownText';
 import { RecoveryPanel } from '../../../src/components/recovery/RecoveryPanel';
-import { notices } from '../../../src/ui/pages/notices';
+import { Notices, notices } from '../../../src/ui/pages/notices';
 import { NavigationGraph } from '../../../src/ui/graph/NavigationGraph';
 
 const stores: NavigationStore[] = [];
@@ -821,7 +821,7 @@ describe('session tree lifecycle', () => {
     fireEvent.click(prompt); fireEvent.click(prompt);
     expect(transport.mutations.filter(request => request.command.command === 'topic_archive')).toHaveLength(0);
     await act(async () => { releasePresence(); await pause; await store.refresh(); });
-    await waitFor(() => expect(screen.getByText(`Archived “${topic.name}”.`)).toBeTruthy());
+    await waitFor(() => expect(notices.getSnapshot().some(notice => notice.text === `Archived “${topic.name}”.`)).toBe(true));
     expect(transport.mutations.filter(request => request.command.command === 'topic_archive')).toHaveLength(1);
     expect(topic.archived_at).not.toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -832,17 +832,38 @@ describe('session tree lifecycle', () => {
       const session = value.sessions.get(route.session_id)!; session.items['8']!.status = 'done';
       for (const input of Object.values(session.inputs)) if (input && input.target.topic_id === session.items['8']!.topic_id) input.state = 'handled';
     } });
+    render(<Notices />);
     const band = topicRow('Continued context');
     expect(within(band.parentElement!).getByText('Everything here is closed.')).toBeTruthy();
     await act(async () => { fireEvent.click(within(band.parentElement!).getByRole('button', { name: 'Archive topic' })); });
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(await screen.findByText('Archived “Continued context”.')).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Session tree' }).textContent).not.toContain('Archived “Continued context”.');
+    vi.useFakeTimers();
+    await act(async () => { await vi.advanceTimersByTimeAsync(6500); });
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy();
+    vi.useRealTimers();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); });
     await waitFor(() => expect(screen.queryByText('Archived “Continued context”.')).toBeNull());
     expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive', 'topic_restore']);
     await act(async () => { fireEvent.click(within(topicRow('Continued context')).getByRole('button', { name: 'Archive' })); });
     fireEvent.click(await screen.findByRole('button', { name: 'View archive' }));
     expect(calls.archive).toBe(1); expect(screen.queryByText('Archived “Continued context”.')).toBeNull();
+    expect(notices.getSnapshot().some(notice => notice.actions?.some(action => action.label === 'Undo'))).toBe(false);
+  });
+  it('dismisses an archive outcome without replaying it on an unrelated tree update', async () => {
+    const transport = new HistoryTransport();
+    const view = await mount({ transport, configure: value => {
+      const session = value.sessions.get(route.session_id)!; session.items['8']!.status = 'done';
+      for (const input of Object.values(session.inputs)) if (input && input.target.topic_id === session.items['8']!.topic_id) input.state = 'handled';
+    } });
+    render(<Notices />);
+    await act(async () => { fireEvent.click(within(topicRow('Continued context')).getByRole('button', { name: 'Archive' })); });
+    await screen.findByText('Archived “Continued context”.');
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    view.rerender({ detailOpen: true });
+    expect(notices.getSnapshot()).toEqual([]);
+    expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive']);
   });
   it('archives a topic with open work after one confirmation, leaving its items and cancelling its unsent messages', async () => {
     const transport = new HistoryTransport();
@@ -858,9 +879,21 @@ describe('session tree lifecycle', () => {
     expect(dialog.getByText(/open items? stays? as (it is|they are)\. .*archiving cancels them\. You can restore it any time\.$/)).toBeTruthy();
     await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
     expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive']);
-    expect(await screen.findByText(new RegExp(`${unsent.length} unsent messages were cancelled\\.`))).toBeTruthy();
+    await waitFor(() => expect(notices.getSnapshot().some(notice => notice.text.includes(`${unsent.length} unsent messages were cancelled.`))).toBe(true));
     expect(unsent.every(id => session.inputs[id]!.state === 'cancelled')).toBe(true);
     expect(Object.values(session.items).map(item => item!.status)).toEqual(statuses);
+  });
+  it('keeps a refused archive confirmation error in its dialog without a duplicate toast', async () => {
+    const transport = new HistoryTransport(); await mount({ transport });
+    transport.replies.push({ api_version: 1, ok: false,
+      error: { code: 'invalid_argument', message: 'Refused archive.', hint: '', retryable: false, field_errors: [] } });
+    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Archive' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' }));
+    await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('Something in that isn’t valid. Check it and try again.');
+    expect(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' }).contains(alert)).toBe(true);
+    expect(notices.getSnapshot()).toEqual([]);
   });
   it('archives the focused row’s topic with e', async () => {
     const transport = new HistoryTransport();

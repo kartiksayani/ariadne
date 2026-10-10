@@ -9,6 +9,8 @@ import { useSessionActions, type SessionActions } from './actions';
 import { dispatchStatus, pausedNote, type DispatchStatus } from './dispatch';
 import { useSupervisorHealth } from './health';
 import { awaitingAnswer, sentLabel, stoppedAttempt } from '../../selectors/waiting/stuck';
+import { notices } from '../../ui/pages/notices';
+import { isViewConflict } from '../../ui/shared/conflictNotice';
 import './controls.css';
 
 export interface DispatchControl {
@@ -49,7 +51,12 @@ export function useDispatch(actions: SessionActions): DispatchControl {
     const command: OwnerCommand = { command: kind, api_version: 1, op_id: '', params: { binding_id: binding.id, expected_generation: binding.generation } };
     const saved = await actions.execute(command, session.revision);
     // An unconfirmed save says so itself ("Your last change wasn’t confirmed"); only a refusal is a failure.
-    if (!saved && !actions.getSnapshot().pending) setError(kind === 'binding_pause' ? 'Pausing didn’t go through. Try again.' : 'Resuming didn’t go through. Try again.');
+    const id = `dispatch-failed:${session.project_id}:${session.id}`;
+    if (!saved && !actions.getSnapshot().pending) {
+      const error = kind === 'binding_pause' ? 'Pausing didn’t go through. Try again.' : 'Resuming didn’t go through. Try again.';
+      setError(error);
+      if (!isViewConflict(actions.getSnapshot().error)) notices.push({ id, icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)', text: error });
+    } else notices.dismiss(id);
     return saved;
   };
   // A saved action whose completion is unknown holds every session write; its exact replay frees them.
@@ -83,7 +90,7 @@ export function DispatchChip({ actions, onDetails }: { readonly actions: Session
     {status.action === 'resume' && <button type="button" className="btn btn-secondary dispatch-action dispatch-icon" disabled={control.busy}
       aria-label="Resume" title={`Resume: send to ${control.agent} again`}
       onClick={() => { void control.resume(); }}><Glyph kind="play" /></button>}
-    {control.error && <span className="dispatch-error" role="alert">{control.error}</span>}
+    {control.unconfirmed && <span className="dispatch-error" role="alert">{control.error}</span>}
     {control.unconfirmed && <button type="button" className="btn btn-ghost dispatch-action" onClick={() => { void control.retry(); }}>Try again</button>}
   </span>;
 }

@@ -30,6 +30,8 @@ export interface FrameSpec {
   readonly hiddenItems?: readonly string[];
   /** Compact dock states are app-only, independent of immutable handoff comparisons. */
   readonly dockState?: 'question' | 'open' | 'pending';
+  /** App-only Paperwhite session frame with a controlled transient toast. */
+  readonly toast?: boolean;
 }
 
 const wide = { width: 1600, height: 960 } as const, narrow = { width: 1280, height: 800 } as const;
@@ -78,6 +80,7 @@ const specs: readonly FrameSpec[] = [
   { ...base, width: 1400, height: 830, id: 'question-resting', selected: '3.1', detail: true, dockState: 'question' },
   { ...base, width: 1400, height: 830, id: 'nonquestion-resting', selected: '3.1', detail: true, dockState: 'open' },
   { ...base, width: 1280, height: 1240, id: 'nonquestion-pending', selected: '3.1', detail: true, dockState: 'pending' },
+  { ...base, ...narrow, id: 'session-toast-light', theme: 'light', toast: true },
 ];
 
 /** Harness states drawn from another board frame's card (FrameSpec.design). */
@@ -86,6 +89,8 @@ export const variantIds: readonly string[] = specs.filter(spec => spec.design).m
 export const answerFrameIds: readonly string[] = specs.filter(spec => spec.answerOptions !== undefined).map(spec => spec.id);
 
 export const dockFrameIds: readonly string[] = specs.filter(spec => spec.dockState !== undefined).map(spec => spec.id);
+
+export const toastFrameIds: readonly string[] = specs.filter(spec => spec.toast).map(spec => spec.id);
 
 /** The fixed wall clock of the handoff page: 7 Oct 2026 15:10 UTC, after the last message of every frame (1i answers until 15:10). */
 export const designNow = Date.UTC(2026, 9, 7, 15, 10);

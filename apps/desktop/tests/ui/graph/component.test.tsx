@@ -10,9 +10,10 @@ import { RegisteredRoutes, type RevealedItem } from '../../../src/data/routes';
 import { createDesktopService, type DesktopTransport } from '../../../src/data/service';
 import { GraphView } from '../../../src/ui/graph/GraphView';
 import { graphSession, preferences } from './fixture';
+import { notices } from '../../../src/ui/pages/notices';
 
 const opened: OpenSessions[] = [];
-afterEach(() => { cleanup(); opened.splice(0).forEach(sessions => sessions.closeAll()); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); opened.splice(0).forEach(sessions => sessions.closeAll()); notices.clear(); vi.restoreAllMocks(); });
 
 async function setup(session: Session = graphSession(), view = preferences()) {
   const route = { project_id: session.project_id, session_id: session.id };
@@ -343,13 +344,19 @@ describe('session graph view', () => {
     const value = await setup(); render(<value.Composition />);
     value.writeWith(async () => false);
     fireEvent.click(node('2'));
-    expect((await screen.findByRole('alert')).textContent).toBe('Ariadne isn’t sure that view change was saved. Try it again.');
+    await waitFor(() => expect(notices.getSnapshot().map(notice => notice.text)).toEqual(['Ariadne isn’t sure that view change was saved. Try it again.']));
+    expect(screen.queryByRole('alert')).toBeNull();
+    const notice = notices.getSnapshot()[0]!;
+    act(() => notices.dismiss(notice.id));
+    fireEvent.mouseEnter(node('2'));
+    expect(notices.getSnapshot()).toEqual([]);
     value.writeWith(async () => { throw new Error('Preferences are read-only.'); });
     fireEvent.click(node('8'));
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('The view change could not be saved. Try again.'));
+    await waitFor(() => expect(notices.getSnapshot().map(notice => notice.text)).toEqual(['The view change could not be saved. Try again.']));
     value.writeWith(async () => true); value.failReveal();
     fireEvent.click(node('3'));
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('This item could not be opened.'));
+    await waitFor(() => expect(notices.getSnapshot().map(notice => notice.text)).toEqual(['This item could not be opened.']));
+    expect(document.querySelector('.graph-error')).toBeNull();
   });
 
   it('reports hover and clears it on unmount; shows nothing for an empty session', async () => {

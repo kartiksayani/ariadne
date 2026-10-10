@@ -468,6 +468,39 @@ describe('agent removal bin', () => {
     expect(itemRemoved(restored, '1')).toBe(false); expect(itemRemoved(restored, '1.2')).toBe(false);
     expect(restored.items['1.1']!.removed_at).toBeTruthy(); expect(itemRemoved(restored, '1.1.1')).toBe(true);
   });
+  it('publishes immediate restore failure as a toast while keeping the bin available', async () => {
+    const value = await setup(), invoke = value.transport.invoke.bind(value.transport);
+    vi.spyOn(value.transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'item_restore') return { api_version: 1, ok: false,
+        error: { code: 'invalid_argument', message: 'Restore was refused.', hint: '', retryable: false, field_errors: [] } };
+      return invoke(name, args);
+    });
+    const view = render(<LiveBin actions={value.actions} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    await waitFor(() => expect(notices.getSnapshot().map(notice => notice.text)).toEqual(['Something in that isn’t valid. Check it and try again.']));
+    expect(screen.queryByRole('alert')).toBeNull();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Restore' })).toHaveProperty('disabled', false));
+    act(() => notices.dismiss(notices.getSnapshot()[0]!.id));
+    view.rerender(<LiveBin actions={value.actions} onRemove={vi.fn()} />);
+    expect(notices.getSnapshot()).toEqual([]);
+  });
+  it('keeps an unresolved restore error in the bin and locks further changes', async () => {
+    const value = await setup(), invoke = value.transport.invoke.bind(value.transport);
+    vi.spyOn(value.transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'item_restore') return { api_version: 1, ok: false,
+        error: { code: 'not_found', message: 'Removed work disappeared.', hint: '', retryable: false, field_errors: [] } };
+      return invoke(name, args);
+    });
+    render(<LiveBin actions={value.actions} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('Ariadne can’t find that any more. It may have been removed.');
+    expect(value.actions.getSnapshot().pending).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Restore' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Delete forever' })).toHaveProperty('disabled', true);
+    expect(notices.getSnapshot()).toEqual([]);
+  });
 
   it('restores a topic using its fresh revision while leaving cancelled owner messages cancelled', async () => {
     const session = removedSession(), input = cancelledInput(session, '8'); session.inputs = { [input.id]: input };

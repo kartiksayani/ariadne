@@ -241,6 +241,41 @@ describe('Session lifecycle write readiness', () => {
 });
 
 describe('Session archive cards', () => {
+  it.each([undefined, 'Shared name'])('keeps separate Undo notices for two archived sessions named %s', async name => {
+    const transport = new AppTransport(), ids = [route.session_id, secondId];
+    for (const id of ids) {
+      const session = transport.sessions.get(id)!;
+      session.name = name; session.state = 'closed'; session.closed_at = session.updated_at; session.inputs = {};
+      for (const item of Object.values(session.items)) if (item?.status === 'waiting_on_me') item.status = 'open';
+    }
+    transport.preferences.global.selected_navigation = { kind: 'project', project_id: route.project_id };
+    render(<DesktopApp service={createDesktopService(transport)} />);
+    const sessionCard = (id: string) => document.querySelector<HTMLElement>(`[data-session-card="${id}"]`)!;
+    for (const id of ids) {
+      await waitFor(() => expect((within(sessionCard(id)).getByRole('button', { name: 'Archive' }) as HTMLButtonElement).disabled).toBe(false));
+      await act(async () => { fireEvent.click(within(sessionCard(id)).getByRole('button', { name: 'Archive' })); });
+      await waitFor(() => expect(transport.sessions.get(id)!.archived_at).toBeTruthy());
+      expect(screen.queryByRole('dialog')).toBeNull();
+    }
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Undo' })).toHaveLength(2));
+    const text = name ? `Archived “${name}”.` : 'Archived the session.';
+    expect(screen.getAllByText(text)).toHaveLength(2);
+    const undoFor = (id: string) => within(document.querySelector<HTMLElement>(`[data-notice-id="session-archive:${route.project_id}:${id}"]`)!)
+      .getByRole('button', { name: 'Undo' });
+    await act(async () => { fireEvent.click(undoFor(route.session_id)); });
+    await waitFor(() => expect((within(sessionCard(route.session_id)).getByRole('button', { name: 'Archive' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(transport.sessions.get(route.session_id)!.archived_at).toBeUndefined();
+    expect(transport.sessions.get(secondId)!.archived_at).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Undo' })).toHaveLength(1);
+    expect(transport.mutations.filter(request => request.command.command === 'session_restore').map(request => request.session)).toEqual([route]);
+    await act(async () => { fireEvent.click(undoFor(secondId)); });
+    await waitFor(() => expect((within(sessionCard(secondId)).getByRole('button', { name: 'Archive' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(transport.sessions.get(secondId)!.archived_at).toBeUndefined();
+    expect(transport.mutations.filter(request => request.command.command === 'session_restore').map(request => request.session))
+      .toEqual([route, { ...route, session_id: secondId }]);
+    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+  });
+
   it('keeps session archive confirmation counts unchanged by Open Ack proposals', async () => {
     const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
     const before = closeImpact(session);
@@ -300,8 +335,8 @@ describe('Session archive cards', () => {
     await archive();
     await screen.findByRole('button', { name: 'Archived · 1' });
     expect(Object.values(session.inputs).every(input => input?.state === 'cancelled')).toBe(true);
-    expect(screen.getByText('Archived and closed “Review notes”. 2 unsent messages were cancelled. Undo resumes sending, even if you paused it. Cancelled messages stay cancelled.')).toBeTruthy();
-    const undo = screen.getByRole('button', { name: 'Undo' });
+    expect((await screen.findByText('Archived and closed “Review notes”. 2 unsent messages were cancelled. Undo resumes sending, even if you paused it. Cancelled messages stay cancelled.'))).toBeTruthy();
+    const undo = (await screen.findByRole('button', { name: 'Undo' }));
     const staleUndo = notices.getSnapshot().find(notice => notice.actions?.[0]?.label === 'Undo')!.actions![0].run;
     await act(async () => { fireEvent.click(undo); staleUndo(); });
     await waitFor(() => expect(within(card()).getByRole('button', { name: 'Close session' })).toBeTruthy());
@@ -329,8 +364,8 @@ describe('Session archive cards', () => {
       await archive();
       await screen.findByText('Archived “Review notes”.');
       const undo = notices.getSnapshot().find(notice => notice.actions?.[0]?.label === 'Undo')!.actions![0].run;
-      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); undo(); });
-      expect(screen.getByText('The session could not be restored while another change is finishing. Find it under Archived and try Restore again.')).toBeTruthy();
+      await act(async () => { fireEvent.click((await screen.findByRole('button', { name: 'Undo' }))); undo(); });
+      expect(await screen.findByText('The session could not be restored while another change is finishing. Find it under Archived and try Restore again.')).toBeTruthy();
       expect(commands(transport)).toEqual(['session_archive']);
       expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
       expect(session.archived_at).toBeTruthy();
@@ -367,7 +402,7 @@ describe('Session archive cards', () => {
     fireEvent.click(within(card()).getByRole('button', { name: 'Remove' }));
     await act(async () => { fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove session' })); });
     await waitFor(() => expect(card()).toBeNull());
-    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    fireEvent.click((await screen.findByRole('button', { name: 'Undo' })));
     await waitFor(() => expect(card()).not.toBeNull());
     expect(within(card()).getByRole('button', { name: 'Restore' })).toBeTruthy();
     expect(commands(transport)).toEqual(['session_archive']);
@@ -392,7 +427,7 @@ describe('Session archive cards', () => {
     } else {
       await screen.findByRole('button', { name: 'Archived · 1' });
       expect(screen.queryByRole('dialog')).toBeNull();
-      expect(screen.getByText('Archived “Review notes”.')).toBeTruthy();
+      expect(await screen.findByText('Archived “Review notes”.')).toBeTruthy();
     }
   });
 
@@ -403,8 +438,8 @@ describe('Session archive cards', () => {
     await setup(false, false, fixture);
     await archive();
     await screen.findByRole('button', { name: 'Archived · 1' });
-    expect(screen.getByText('Archived “Review notes”.')).toBeTruthy();
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); });
+    expect(await screen.findByText('Archived “Review notes”.')).toBeTruthy();
+    await act(async () => { fireEvent.click((await screen.findByRole('button', { name: 'Undo' }))); });
     await waitFor(() => expect(within(card()).getByRole('button', { name: 'Reopen' })).toBeTruthy());
     expect(session).toMatchObject({ state: 'closed', closed_at: closedAt });
     expect(session.bindings[session.active_binding_id!]!).toMatchObject({ owner_paused: true });
@@ -425,7 +460,7 @@ describe('Session archive cards', () => {
     expect(screen.queryByText(/being delivered/)).toBeNull();
     await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Archive session' })); });
     await screen.findByRole('button', { name: 'Archived · 1' });
-    expect(screen.getByText('Archived and closed “Review notes”.')).toBeTruthy();
+    expect(await screen.findByText('Archived and closed “Review notes”.')).toBeTruthy();
     expect(screen.queryByText(/unsent message.*cancelled/)).toBeNull();
   });
 
@@ -445,8 +480,8 @@ describe('Session archive cards', () => {
     await waitFor(() => expect(within(dialog).queryByText(/Archiving closes this session/, { exact: false }) !== null).toBe(submitted === 'active'));
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Archive session' })); });
     await screen.findByRole('button', { name: 'Archived · 1' });
-    expect(screen.getByText(submitted === 'active' ? 'Archived and closed “Review notes”.' : 'Archived “Review notes”.')).toBeTruthy();
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); });
+    expect(await screen.findByText(submitted === 'active' ? 'Archived and closed “Review notes”.' : 'Archived “Review notes”.')).toBeTruthy();
+    await act(async () => { fireEvent.click((await screen.findByRole('button', { name: 'Undo' }))); });
     await waitFor(() => expect(within(card()).getByRole('button', { name: submitted === 'active' ? 'Close session' : 'Reopen' })).toBeTruthy());
     await waitFor(() => expect(session.state).toBe(submitted));
     expect(transport.mutations.find(request => request.command.command === 'session_restore')?.command).toMatchObject({ params: { expected_revision: session.revision - 1 } });
@@ -489,7 +524,7 @@ describe('Session archive cards', () => {
     expect(transport.requests).toHaveLength(2);
     expect(transport.requests[1]).toEqual(transport.requests[0]);
     expect(transport.sessions.get(route.session_id)!.state).toBe('active');
-    expect(screen.getByText('Restored and reopened “Review notes”.')).toBeTruthy();
+    expect(await screen.findByText('Restored and reopened “Review notes”.')).toBeTruthy();
     expect(screen.queryByRole('dialog')).toBeNull();
   }, 15000);
 
@@ -518,9 +553,9 @@ describe('Session archive cards', () => {
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Check again' })); });
     await screen.findByRole('button', { name: 'Archived · 1' });
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy();
+    expect((await screen.findByRole('button', { name: 'Undo' }))).toBeTruthy();
     expect(commands(transport)).toEqual(['session_archive']);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); });
+    await act(async () => { fireEvent.click((await screen.findByRole('button', { name: 'Undo' }))); });
     await waitFor(() => expect(within(card()).getByRole('button', { name: initial === 'active' ? 'Close session' : 'Reopen' })).toBeTruthy());
     expect(session.state).toBe(initial);
     const restore = transport.mutations.find(request => request.command.command === 'session_restore')!.command;

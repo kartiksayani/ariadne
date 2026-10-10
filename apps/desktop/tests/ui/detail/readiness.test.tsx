@@ -8,9 +8,10 @@ import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { AnswerSlot } from '../../../src/ui/detail/AnswerSlot';
 import { useDetailSubmit } from '../../../src/ui/detail/submit';
 import { AppTransport, route } from '../app/transport';
+import { notices } from '../../../src/ui/pages/notices';
 
 const stores: SessionStore[] = [];
-afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.close()); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.close()); notices.clear(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const loadingError = "Ariadne is still loading this session's latest changes. Try again.";
 const sends = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'input_submit');
 
@@ -23,6 +24,87 @@ async function setup() {
 }
 
 describe('detail actions while the owner view is stale', () => {
+  it('copies an item with generic toast feedback and a stable copy button', async () => {
+    const { store, drafts } = await setup();
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    render(<ItemDetail store={store} drafts={drafts} itemId="1.1" later={false} onOpenItem={vi.fn()} />);
+    const button = screen.getByRole('button', { name: 'Copy reference' }), before = button.innerHTML;
+    fireEvent.click(button);
+    await waitFor(() => expect(notices.getSnapshot().map(notice => notice.text)).toEqual(['Item copied.']));
+    expect(writeText).toHaveBeenCalledOnce();
+    expect(button.innerHTML).toBe(before);
+    expect(screen.queryByText('Copied')).toBeNull();
+  });
+  it('reports a copy failure with generic toast feedback and leaves the copy button stable', async () => {
+    const { store, drafts } = await setup();
+    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn(async () => { throw new Error('Clipboard failed with private item text.'); }) } });
+    render(<ItemDetail store={store} drafts={drafts} itemId="1.1" later={false} onOpenItem={vi.fn()} />);
+    const button = screen.getByRole('button', { name: 'Copy reference' }), before = button.innerHTML;
+    fireEvent.click(button);
+    await waitFor(() => expect(notices.getSnapshot().map(notice => [notice.text, notice.tone])).toEqual([['Copy failed. Try again.', 'problem']]));
+    expect(button.innerHTML).toBe(before);
+  });
+  it.each(['item', 'unmount'] as const)('ignores a copy completion after the detail changes by %s', async change => {
+    const { store, drafts } = await setup();
+    let finish!: () => void;
+    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn(() => new Promise<void>(resolve => { finish = resolve; })) } });
+    const props = { store, drafts, itemId: '1.1', later: false, onOpenItem: vi.fn() };
+    const view = render(<ItemDetail {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy reference' }));
+    if (change === 'item') view.rerender(<ItemDetail {...props} itemId="1" />);
+    else view.unmount();
+    await act(async () => { finish(); });
+    expect(notices.getSnapshot()).toEqual([]);
+  });
+
+  it('moves Later refusal to a toast, preserves dismissed state through rerenders and clears it on success', async () => {
+    const { store, drafts } = await setup(), onLater = vi.fn(async () => false);
+    const props = { store, drafts, itemId: '1.1', later: false, onLater, onOpenItem: vi.fn() };
+    const view = render(<ItemDetail {...props} />);
+    const message = 'Later was not saved. Keep the current view and try again.';
+    fireEvent.click(screen.getByRole('button', { name: 'Later' }));
+    await waitFor(() => expect(notices.getSnapshot().map(notice => notice.text)).toEqual([message]));
+    expect(screen.queryByText(message)).toBeNull();
+    act(() => notices.dismiss(notices.getSnapshot()[0]!.id));
+    view.rerender(<ItemDetail {...props} onOpenItem={vi.fn()} />);
+    expect(notices.getSnapshot()).toEqual([]);
+    onLater.mockResolvedValue(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Later' }));
+    await waitFor(() => expect(onLater).toHaveBeenCalledTimes(2));
+    expect(notices.getSnapshot()).toEqual([]);
+  });
+
+  it('moves Ack refusal to a toast and clears it when the item is acknowledged', async () => {
+    const { transport, store, drafts } = await setup();
+    const source = transport.sessions.get(route.session_id)!;
+    source.items['1.1']!.ack_to = 'done'; source.items['1.1']!.ask = null; ++source.revision;
+    await store.refresh();
+    const invoke = transport.invoke.bind(transport);
+    let refuse = true;
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'ack') {
+        if (refuse) return { api_version: 1, ok: false,
+          error: { code: 'invalid_transition', message: 'Predicate changed.', hint: '', retryable: false, field_errors: [] } };
+        const session = transport.sessions.get(route.session_id)!, item = session.items['1.1']!;
+        item.status = 'done'; item.ack_to = null; ++item.revision; ++session.revision;
+        return { api_version: 1, ok: true, data: { operation_id: args.request.command.op_id, session_id: session.id, revision: session.revision,
+          data: { kind: 'item_ack', item_id: item.id, item_revision: item.revision, status: 'done', message_id: crypto.randomUUID() } } };
+      }
+      return invoke(name, args);
+    });
+    render(<ItemDetail store={store} drafts={drafts} itemId="1.1" later={false} onOpenItem={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Ack → Done' }));
+    const message = 'This item can’t be acknowledged now. Check its current status and any question waiting for you.';
+    await waitFor(() => expect(notices.getSnapshot().some(notice => notice.text === message)).toBe(true));
+    expect(notices.getSnapshot()[0]!.id).toBe(JSON.stringify(['item-ack', route.project_id, route.session_id, '1.1']));
+    expect(screen.queryByText(message)).toBeNull();
+    refuse = false;
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Ack → Done' })).toHaveProperty('disabled', false));
+    fireEvent.click(screen.getByRole('button', { name: 'Ack → Done' }));
+    await waitFor(() => expect(notices.getSnapshot()).toEqual([]));
+  });
+
   it('clears a refused send notice when saved drafts finish loading in an already ready session', async () => {
     const transport = new AppTransport(), service = createDesktopService(transport);
     const store = new SessionStore(service, route), drafts = new OwnerDraftStore(service);

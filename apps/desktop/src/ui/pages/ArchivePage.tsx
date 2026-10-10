@@ -16,6 +16,7 @@ import { useHidden } from '../remove/queue';
 import './pages.css';
 import { AgentBin } from '../remove/AgentBin';
 import { removeSubject, visibleSession } from '../remove/model';
+import { isViewConflict } from '../shared/conflictNotice';
 
 export interface ArchivePageProps {
   readonly navigation: NavigationStore;
@@ -50,7 +51,7 @@ export function ArchivePage({ navigation, actions, projectName, sessions, snapsh
       }
       await navigation.refresh();
     } catch (error: unknown) {
-      notices.push({ icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: plainFailure(error, 'The topic could not be restored. Try again.') });
+      if (!isViewConflict(error)) notices.push({ icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)', dismissible: true, text: plainFailure(error, 'The topic could not be restored. Try again.') });
     } finally { setBusy(null); }
   };
   const remove = (topic: ArchivedTopic) => {
