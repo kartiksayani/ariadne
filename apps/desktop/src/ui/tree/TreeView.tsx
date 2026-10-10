@@ -143,8 +143,9 @@ export function TreeView(props: TreeViewProps) {
   noticeCallbacks.current = { lifecycle, onShowArchive };
   const archivedNotice = lifecycle.archived;
   const archiveNoticeId = JSON.stringify(['tree-archived', route.project_id, route.session_id, archivedNotice?.topicId]);
+  useEffect(() => () => noticeStore.dismiss(archiveNoticeId), [archiveNoticeId]);
   useEffect(() => {
-    if (!archivedNotice) return;
+    if (!archivedNotice) { noticeStore.dismiss(archiveNoticeId); return; }
     noticeStore.push({ id: archiveNoticeId, icon: 'ph ph-archive', dismissible: true,
       text: `Archived “${archivedNotice.name}”.`
         + (archivedNotice.waiting ? ` Its ${archivedNotice.waiting} waiting question${archivedNotice.waiting > 1 ? 's' : ''} left your panel.` : '')
@@ -152,7 +153,6 @@ export function TreeView(props: TreeViewProps) {
       onDismiss: () => noticeCallbacks.current.lifecycle.dismiss(),
       actions: [{ label: 'Undo', disabled: lifecycle.busy, run: () => { if (!noticeCallbacks.current.lifecycle.busy) noticeCallbacks.current.lifecycle.undo(); } },
         { label: 'View archive', dismissOnRun: true, run: () => { noticeCallbacks.current.lifecycle.dismiss(); noticeCallbacks.current.onShowArchive(); } }] });
-    return () => noticeStore.dismiss(archiveNoticeId);
   }, [archiveNoticeId, archivedNotice]);
   useEffect(() => {
     const notice = noticeStore.getSnapshot().find(value => value.id === archiveNoticeId);
@@ -165,15 +165,15 @@ export function TreeView(props: TreeViewProps) {
   const lifecycleNotice = lifecycle.dialog || lifecycle.error === controllerFailure ? null : lifecycle.error;
   const ackNoticeId = JSON.stringify(['item-ack', route.project_id, route.session_id, ackItemId]);
   const lifecycleNoticeId = JSON.stringify(['tree-lifecycle', route.project_id, route.session_id]);
+  useEffect(() => () => noticeStore.dismiss(ackNoticeId), [ackNoticeId]);
   useEffect(() => {
-    if (!ackNotice) return;
+    if (!ackNotice) { noticeStore.dismiss(ackNoticeId); return; }
     noticeStore.push({ id: ackNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: ackNotice });
-    return () => noticeStore.dismiss(ackNoticeId);
   }, [ackNoticeId, ackNotice]);
+  useEffect(() => () => noticeStore.dismiss(lifecycleNoticeId), [lifecycleNoticeId]);
   useEffect(() => {
-    if (!lifecycleNotice) return;
+    if (!lifecycleNotice) { noticeStore.dismiss(lifecycleNoticeId); return; }
     noticeStore.push({ id: lifecycleNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: lifecycleNotice });
-    return () => noticeStore.dismiss(lifecycleNoticeId);
   }, [lifecycleNoticeId, lifecycleNotice]);
   const elements = useRef(new Map<string, HTMLDivElement>()), scroller = useRef<HTMLDivElement>(null);
   const mounted = useRef(true), request = useRef(0);

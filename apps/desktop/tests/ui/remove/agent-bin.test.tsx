@@ -17,7 +17,7 @@ import { sentRows, waitingRows } from '../../../src/selectors/waiting/rows';
 import { sessionGraph } from '../../../src/ui/graph/model';
 import { treeModel } from '../../../src/ui/tree/model';
 import { projectRemoval, sessionRemoval, topicChips } from '../../../src/ui/pages/model';
-import { notices } from '../../../src/ui/pages/notices';
+import { Notices, notices } from '../../../src/ui/pages/notices';
 import { AgentBin, binView, removalNotice, restoreRemoved } from '../../../src/ui/remove/AgentBin';
 import type { RemoveTarget } from '../../../src/ui/dialogs/remove';
 import { AppTransport, route } from '../app/transport';
@@ -484,6 +484,12 @@ describe('agent removal bin', () => {
     act(() => notices.dismiss(notices.getSnapshot()[0]!.id));
     view.rerender(<LiveBin actions={value.actions} onRemove={vi.fn()} />);
     expect(notices.getSnapshot()).toEqual([]);
+    render(<Notices />);
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    expect(await screen.findByText('Something in that isn’t valid. Check it and try again.')).toBeTruthy();
+    view.unmount();
+    expect(notices.getSnapshot()).toEqual([]);
+    expect(screen.queryByText('Something in that isn’t valid. Check it and try again.')).toBeNull();
   });
   it('keeps an unresolved restore error in the bin and locks further changes', async () => {
     const value = await setup(), invoke = value.transport.invoke.bind(value.transport);

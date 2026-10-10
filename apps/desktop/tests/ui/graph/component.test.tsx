@@ -10,10 +10,10 @@ import { RegisteredRoutes, type RevealedItem } from '../../../src/data/routes';
 import { createDesktopService, type DesktopTransport } from '../../../src/data/service';
 import { GraphView } from '../../../src/ui/graph/GraphView';
 import { graphSession, preferences } from './fixture';
-import { notices } from '../../../src/ui/pages/notices';
+import { Notices, notices } from '../../../src/ui/pages/notices';
 
 const opened: OpenSessions[] = [];
-afterEach(() => { cleanup(); opened.splice(0).forEach(sessions => sessions.closeAll()); notices.clear(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); opened.splice(0).forEach(sessions => sessions.closeAll()); notices.clear(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 async function setup(session: Session = graphSession(), view = preferences()) {
   const route = { project_id: session.project_id, session_id: session.id };
@@ -357,6 +357,40 @@ describe('session graph view', () => {
     fireEvent.click(node('3'));
     await waitFor(() => expect(notices.getSnapshot().map(notice => notice.text)).toEqual(['This item could not be opened.']));
     expect(document.querySelector('.graph-error')).toBeNull();
+  });
+
+  it('updates a visible failure in place, then clears it on success or unmount', async () => {
+    const value = await setup();
+    let refuseReveal!: (reason: Error) => void;
+    const reveal = new Promise<never>((_resolve, reject) => { refuseReveal = reject; });
+    vi.spyOn(value.routes, 'revealItem').mockReturnValueOnce(reveal);
+    value.writeWith(async () => false);
+    vi.useFakeTimers();
+    const view = render(<><value.Composition /><Notices /></>);
+    await act(async () => { fireEvent.click(node('2')); });
+    const initial = 'Ariadne isn’t sure that view change was saved. Try it again.';
+    expect(notices.getSnapshot()[0]?.text).toBe(initial);
+    expect(screen.queryByText(initial)).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    const card = screen.getByText(initial).closest('.pw-note');
+    const visibleStates: string[][] = [];
+    const unsubscribe = notices.subscribe(() => { visibleStates.push(notices.getVisibleSnapshot().map(notice => notice.text)); });
+    await act(async () => { refuseReveal(new Error('Reveal failed.')); });
+    const changed = 'This item could not be opened.';
+    expect(screen.getByText(changed).closest('.pw-note')).toBe(card);
+    expect(visibleStates).toEqual([[changed]]);
+    unsubscribe();
+    value.writeWith(async () => true);
+    await act(async () => { fireEvent.click(node('3')); });
+    expect(notices.getSnapshot()).toEqual([]);
+    expect(screen.queryByText(changed)).toBeNull();
+    value.writeWith(async () => false);
+    await act(async () => { fireEvent.click(node('8')); await vi.advanceTimersByTimeAsync(300); });
+    expect(screen.getByText(initial)).toBeTruthy();
+    view.unmount();
+    expect(notices.getSnapshot()).toEqual([]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(notices.getVisibleSnapshot()).toEqual([]);
   });
 
   it('reports hover and clears it on unmount; shows nothing for an empty session', async () => {

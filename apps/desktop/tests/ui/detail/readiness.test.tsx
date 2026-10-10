@@ -8,7 +8,7 @@ import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { AnswerSlot } from '../../../src/ui/detail/AnswerSlot';
 import { useDetailSubmit } from '../../../src/ui/detail/submit';
 import { AppTransport, route } from '../app/transport';
-import { notices } from '../../../src/ui/pages/notices';
+import { Notices, notices } from '../../../src/ui/pages/notices';
 
 const stores: SessionStore[] = [];
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.close()); notices.clear(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -73,6 +73,20 @@ describe('detail actions while the owner view is stale', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Later' }));
     await waitFor(() => expect(onLater).toHaveBeenCalledTimes(2));
     expect(notices.getSnapshot()).toEqual([]);
+  });
+
+  it('clears a visible Later refusal when the detail unmounts without showing it again', async () => {
+    const { store, drafts } = await setup();
+    vi.useFakeTimers();
+    const view = render(<><ItemDetail store={store} drafts={drafts} itemId="1.1" later={false}
+      onLater={async () => false} onOpenItem={vi.fn()} /><Notices /></>);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Later' })); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(screen.getByText('Later was not saved. Keep the current view and try again.')).toBeTruthy();
+    view.unmount();
+    expect(notices.getSnapshot()).toEqual([]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(notices.getVisibleSnapshot()).toEqual([]);
   });
 
   it('moves Ack refusal to a toast and clears it when the item is acknowledged', async () => {

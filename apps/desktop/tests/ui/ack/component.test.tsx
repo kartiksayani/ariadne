@@ -479,6 +479,16 @@ describe('local acknowledgement', () => {
     expect(screen.queryByText(refusal)).toBeNull();
   });
 
+  it('removes the app keyboard Ack refusal when the workspace unmounts', async () => {
+    const transport = new AckTransport(); transport.refuse = true;
+    await mount(transport);
+    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    await act(async () => { detail().focus(); fireEvent.keyDown(detail(), { key: 'a' }); });
+    expect(await screen.findByText(refusal, { selector: '.pw-note-text' })).toBeTruthy();
+    cleanup();
+    expect(notices.getSnapshot().some(notice => notice.id === JSON.stringify(['item-ack', route.project_id, route.session_id, '1.1']))).toBe(false);
+  });
+
   it('keeps a lifecycle failure visible alongside an Ack refusal', async () => {
     const transport = new AckTransport(); transport.refuse = true; transport.refuseArchive = true;
     const session = transport.sessions.get(route.session_id)!, template = Object.values(session.topics).find(topic => topic)!;

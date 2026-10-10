@@ -129,6 +129,7 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
   actions: injectedActions, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
   const transientError = !state.pendingOperationId && state.error === store.getMutationFailure() ? state.error : null;
+  useEffect(() => () => notices.dismiss('navigation-action-failed'), [store]);
   useEffect(() => {
     const id = 'navigation-action-failed';
     let current = true;
@@ -151,7 +152,7 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
           } }] });
       }
     } else notices.dismiss(id);
-    return () => { current = false; notices.dismiss(id); };
+    return () => { current = false; };
   }, [store, transientError]);
   const ownActions = useMemo(() => injectedActions ? null : new SessionActionControllers(store.service), [injectedActions, store]);
   const actions = injectedActions ?? ownActions!;

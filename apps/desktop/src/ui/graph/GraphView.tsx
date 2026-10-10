@@ -153,10 +153,10 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   const [inflight, setInflight] = useState<ViewChange | null>(null);
   const [error, setError] = useState<string | null>(null);
   const errorNoticeId = JSON.stringify(['graph-action', state.route.project_id, state.route.session_id]);
+  useEffect(() => () => notices.dismiss(errorNoticeId), [errorNoticeId]);
   useEffect(() => {
-    if (!error) return;
+    if (!error) { notices.dismiss(errorNoticeId); return; }
     notices.push({ id: errorNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: error });
-    return () => notices.dismiss(errorNoticeId);
   }, [errorNoticeId, error]);
   const [scrollTarget, setScrollTarget] = useState<{ id: string; center: boolean } | null>(null);
   const mounted = useRef(true), request = useRef(0);

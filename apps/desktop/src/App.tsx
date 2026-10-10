@@ -221,10 +221,10 @@ function Workspace({ application }: { application: Application }) {
   const [highlightedMessages, setHighlightedMessages] = useState<ReadonlySet<string>>(new Set());
   const [searchEdit, setSearchEdit] = useState<{ route: string; text: string; attempted: boolean } | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
+  useEffect(() => () => notices.dismiss('route-open-failed'), []);
   useEffect(() => {
     if (routeError) notices.push({ id: 'route-open-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)', text: routeError });
     else notices.dismiss('route-open-failed');
-    return () => notices.dismiss('route-open-failed');
   }, [routeError]);
   useEffect(() => {
     if (ownerReady) {
@@ -243,7 +243,10 @@ function Workspace({ application }: { application: Application }) {
   useEffect(() => {
     ++ackRequest.current;
     if (ackNoticeId.current) notices.dismiss(ackNoticeId.current);
-    return () => { ++ackRequest.current; };
+    return () => {
+      ++ackRequest.current;
+      if (ackNoticeId.current) notices.dismiss(ackNoticeId.current);
+    };
   }, [key, selectedId]);
   useEffect(() => {
     const receipt = ackState?.receipt;
@@ -593,7 +596,7 @@ function Workspace({ application }: { application: Application }) {
   const appRoot = useRef<HTMLDivElement>(null);
   useWindowKeys(appRoot, historyControls, intent => changeTextSize(nextTextSize(textSizeIntent.current ?? navigation.getSnapshot().preferences?.global.text_scale, intent)));
   return <ItemHistoryContext.Provider value={historyControls}><RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys}>
-    <DraftConflictNotices drafts={application.drafts} opened={navigation.opened} />
+    <DraftConflictNotices drafts={application.drafts} opened={navigation.opened} selectedSession={route ?? null} />
     <AgentRemovalNotices waiting={application.waiting} controllers={application.actions} navigation={navigation}
       selectedSession={sessionState?.snapshot?.session ?? null} onTree={showBinTree} />
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}

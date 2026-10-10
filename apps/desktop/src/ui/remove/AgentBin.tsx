@@ -99,12 +99,12 @@ export function AgentBin({ session, actions, topicId = null, onRemove }: {
   useEffect(() => () => { if (pending.current) { pending.current.cancelled = true; pending.current.cancel(); } }, [actions]);
   const route = { project_id: session.project_id, session_id: session.id }, key = keyOf(route, topicId);
   const immediateError = operation.pending || isViewConflict(operation.error) && error === plainFailure(operation.error) ? null : error;
+  const errorNoticeId = `agent-bin-action:${key}`;
+  useEffect(() => () => notices.dismiss(errorNoticeId), [errorNoticeId]);
   useEffect(() => {
-    if (!immediateError) return;
-    const id = `agent-bin-action:${key}`;
-    notices.push({ id, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: immediateError });
-    return () => notices.dismiss(id);
-  }, [key, immediateError]);
+    if (!immediateError) { notices.dismiss(errorNoticeId); return; }
+    notices.push({ id: errorNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: immediateError });
+  }, [errorNoticeId, immediateError]);
   useEffect(() => { if (request.key === key) setOpen(true); }, [request, key]);
   const entries = topicId ? removedRoots(session, topicId).map(item => ({ topicId, itemId: item.id, name: shortLabel(item), items: removedSubtree(session, item.id) }))
     : Object.values(session.topics).filter(topic => !!topic?.removed_at).map(topic => ({ topicId: topic!.id, itemId: null, name: topic!.name,

@@ -218,17 +218,17 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const ackNoticeId = JSON.stringify(['item-ack', current.route.project_id, current.route.session_id, itemId]);
   const actionState = actions.getSnapshot();
   const ackError = !actionState.pending && isViewConflict(actionState.error) && ack.error === plainFailure(actionState.error) ? null : ack.error;
+  useEffect(() => () => notices.dismiss(ackNoticeId), [ackNoticeId]);
   useEffect(() => {
-    if (!ackError) return;
+    if (!ackError) { notices.dismiss(ackNoticeId); return; }
     notices.push({ id: ackNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: ackError });
-    return () => notices.dismiss(ackNoticeId);
   }, [ackNoticeId, ackError]);
+  const laterNoticeId = `detail-later:${noticeKey}`;
+  useEffect(() => () => notices.dismiss(laterNoticeId), [laterNoticeId]);
   useEffect(() => {
-    if (!laterError) return;
-    const id = `detail-later:${noticeKey}`;
-    notices.push({ id, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: 'Later was not saved. Keep the current view and try again.' });
-    return () => notices.dismiss(id);
-  }, [noticeKey, laterError]);
+    if (!laterError) { notices.dismiss(laterNoticeId); return; }
+    notices.push({ id: laterNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: 'Later was not saved. Keep the current view and try again.' });
+  }, [laterNoticeId, laterError]);
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : undefined;
   const health = useSupervisorHealth(drafts.service, binding?.id, binding?.generation);
   const model = session ? detailModel({ session, itemId, now: Date.now(), mode, later, saving: submit.saving, presence, health, earlierAgent,

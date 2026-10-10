@@ -2,7 +2,9 @@ import { useSyncExternalStore } from 'react';
 import type { MutationReceipt, OwnerCommand, OwnerMutationRequest, SessionRef } from '../../generated/core';
 import { CoreFailure, immutable, ServiceFailure, type Immutable, type RendererService, type SessionStore } from '../../data';
 import type { ContinuationReceipt } from '../../generated/domain/models';
-import { conflictNotice } from '../../ui/shared/conflictNotice';
+import { conflictNotice, isViewConflict } from '../../ui/shared/conflictNotice';
+import { notices } from '../../ui/pages/notices';
+import { agentName, sessionPhrase, sessionWhen } from '../../ui/shell/model';
 
 const uuid = (value: unknown): value is string => typeof value === 'string'
   && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
@@ -75,6 +77,8 @@ export class SessionActions {
   private currentSession: SessionStore;
   private readonly route: Immutable<SessionRef>;
   private transientFailure: CoreFailure | ServiceFailure | null = null;
+  private conflictGeneration = 0;
+  private unlistenConflict: (() => void) | null = null;
   readonly isTransientFailure = (error: unknown) => error === this.transientFailure;
   constructor(readonly service: RendererService, session: SessionStore,
     private readonly operationId: () => string = () => crypto.randomUUID()) {
@@ -88,7 +92,18 @@ export class SessionActions {
     if (route.project_id !== this.route.project_id || route.session_id !== this.route.session_id) {
       throw new Error('A session action controller cannot change its registered route.');
     }
+    if (this.currentSession !== session) this.dismissConflict();
     this.currentSession = session;
+  }
+  private get conflictId(): string { return `action-conflict:${this.route.project_id}:${this.route.session_id}`; }
+  private invalidateConflict(): void {
+    ++this.conflictGeneration;
+    this.unlistenConflict?.();
+    this.unlistenConflict = null;
+  }
+  private dismissConflict(): void {
+    this.invalidateConflict();
+    notices.dismiss(this.conflictId);
   }
   readonly getSnapshot = () => this.state;
   readonly subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -109,6 +124,7 @@ export class SessionActions {
   async retry(): Promise<boolean> {
     if (this.state.writing || !this.state.pending) return false;
     const request = structuredClone(this.state.pending) as OwnerMutationRequest;
+    const reader = this.session;
     this.publish({ writing: true, error: null });
     try {
       const receipt = await this.service.executeOwner(request);
@@ -174,12 +190,36 @@ export class SessionActions {
         && request.command.command !== 'topic_continue' ? failure : null;
       this.publish({ error: failure, ...(rejected ? { pending: null } : {}) });
       if (rejected) {
-        const notified = !delivery && await conflictNotice(failure, { id: `action-conflict:${this.route.project_id}:${this.route.session_id}`,
-          draftAtRisk: false, refresh: async () => {
-            await this.session.refresh(true);
-            const current = this.session.getSnapshot();
+        let generation = this.conflictGeneration;
+        if (!delivery && isViewConflict(failure) && reader === this.session && reader.getSnapshot().status !== 'closed') {
+          this.invalidateConflict();
+          generation = this.conflictGeneration;
+          this.unlistenConflict = reader.subscribe(() => {
+            if (reader.getSnapshot().status === 'closed') this.dismissConflict();
+          });
+        }
+        const isCurrent = () => generation === this.conflictGeneration && reader === this.session && reader.getSnapshot().status !== 'closed';
+        const session = reader.getSnapshot().snapshot?.session;
+        const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : null;
+        const sessionLabel = session ? sessionPhrase(session, binding ? agentName(binding.adapter_id) : 'agent',
+          sessionWhen(Date.parse(session.created_at), Date.now())) : undefined;
+        const notified = !delivery && await conflictNotice(failure, { id: this.conflictId,
+          draftAtRisk: false, sessionLabel, isCurrent, refresh: async () => {
+            if (!isCurrent()) return false;
+            await reader.refresh(true);
+            const current = reader.getSnapshot();
             return current.status === 'ready' && !current.error;
           } });
+        if (notified && isCurrent()) {
+          const notice = notices.getSnapshot().find(entry => entry.id === this.conflictId);
+          const unlistenReader = this.unlistenConflict;
+          if (notice && unlistenReader) {
+            const unlistenNotice = notices.subscribe(() => {
+              if (!notices.getSnapshot().includes(notice)) this.invalidateConflict();
+            });
+            this.unlistenConflict = () => { unlistenReader(); unlistenNotice(); };
+          } else this.invalidateConflict();
+        }
         if (!notified) await this.session.refresh();
       }
       return false;

@@ -7,7 +7,7 @@ import inventory from '../../../../../fixtures/contracts/core/inventory.json';
 import type { CoreError, MutationEnvelope, OwnerMutationRequest, PreferencesSnapshot, ProjectListResult,
   QueryEnvelope, SessionListResult, SessionPreferences, SessionRef } from '../../../src/generated/core';
 import type { ItemStatus, Page, ProjectSummary, QueryCursor, Session, SessionSummary, SummaryCounts } from '../../../src/generated/domain/models';
-import { createDesktopService, type DesktopTransport, type HintPayloads } from '../../../src/data/service';
+import { CoreFailure, createDesktopService, type DesktopTransport, type HintPayloads } from '../../../src/data/service';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import * as catalogue from '../../../src/state/navigation/catalogue';
 import { NavigationWorkspace, type AdapterChoice } from '../../../src/components/navigation/NavigationWorkspace';
@@ -210,6 +210,41 @@ describe('complete registered navigation reads', () => {
 });
 
 describe('canonical preference mutations', () => {
+  it('updates a visible mutation failure without a delay and dismisses it on clear or unmount', async () => {
+    const { transport, store } = setup(); read(transport); await store.start();
+    transport.enqueue('session_get', loaded());
+    const ready = store.getSnapshot();
+    const first = new CoreFailure({ ...error, code: 'invalid_argument' });
+    const second = new CoreFailure({ ...error, code: 'not_found' });
+    const snapshot = vi.spyOn(store, 'getSnapshot').mockReturnValue({ ...ready, error: first });
+    const mutationFailure = vi.spyOn(store, 'getMutationFailure').mockReturnValue(first);
+    const renderSession = () => null;
+    const workspace = () => <NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={renderSession} />;
+    vi.useFakeTimers();
+    const view = render(workspace());
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    const initial = 'Something in that isn’t valid. Check it and try again.';
+    const card = screen.getByText(initial).closest('.pw-note');
+    const visibleStates: string[][] = [];
+    const unsubscribe = notices.subscribe(() => { visibleStates.push(notices.getVisibleSnapshot().map(notice => notice.text)); });
+    snapshot.mockReturnValue({ ...ready, error: second }); mutationFailure.mockReturnValue(second);
+    view.rerender(workspace());
+    const changed = 'Ariadne can’t find that any more. It may have been removed.';
+    expect(screen.getByText(changed).closest('.pw-note')).toBe(card);
+    expect(visibleStates).toEqual([[changed]]);
+    unsubscribe();
+    snapshot.mockReturnValue(ready); mutationFailure.mockReturnValue(null);
+    view.rerender(workspace());
+    expect(notices.getSnapshot()).toEqual([]);
+    expect(screen.queryByText(changed)).toBeNull();
+    snapshot.mockReturnValue({ ...ready, error: first }); mutationFailure.mockReturnValue(first);
+    view.rerender(workspace());
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(screen.getByText(initial)).toBeTruthy();
+    view.unmount();
+    expect(notices.getSnapshot()).toEqual([]);
+    snapshot.mockRestore(); mutationFailure.mockRestore();
+  });
   it.each(['confirmed', 'uncertain', 'rejected', 'stopped'] as const)('exposes only the executing write completion when it is %s', async outcome => {
     const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs); await store.start();
     const held = deferred<MutationEnvelope>(); transport.enqueue('preferences_patch', held.promise);

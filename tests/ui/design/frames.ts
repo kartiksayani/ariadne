@@ -14,6 +14,8 @@ export interface FrameSpec {
   readonly rail: boolean;
   readonly selected?: string;
   readonly detail?: boolean;
+  /** App-only saved detail width, exercised through the resize separator. */
+  readonly detailWidth?: number;
   readonly answering?: string;
   readonly view?: 'graph';
   readonly openMode?: 'reply' | 'followup';
@@ -32,6 +34,8 @@ export interface FrameSpec {
   readonly dockState?: 'question' | 'open' | 'pending';
   /** App-only Paperwhite session frame with a controlled transient toast. */
   readonly toast?: boolean;
+  /** Opens Waiting even when the window squeezes the centre column. */
+  readonly peekWaiting?: boolean;
 }
 
 const wide = { width: 1600, height: 960 } as const, narrow = { width: 1280, height: 800 } as const;
@@ -81,6 +85,9 @@ const specs: readonly FrameSpec[] = [
   { ...base, width: 1400, height: 830, id: 'nonquestion-resting', selected: '3.1', detail: true, dockState: 'open' },
   { ...base, width: 1280, height: 1240, id: 'nonquestion-pending', selected: '3.1', detail: true, dockState: 'pending' },
   { ...base, ...narrow, id: 'session-toast-light', theme: 'light', toast: true },
+  { ...base, ...narrow, id: 'session-toast-detail', selected: '3.1', detail: true, toast: true },
+  { ...base, width: 1920, id: 'session-toast-detail-wide', selected: '3.1', detail: true, detailWidth: 800, toast: true },
+  { ...base, width: 1080, height: 800, id: 'session-toast-narrow', selected: '3.1', detail: true, peekWaiting: true, toast: true },
 ];
 
 /** Harness states drawn from another board frame's card (FrameSpec.design). */

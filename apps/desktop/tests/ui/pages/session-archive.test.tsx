@@ -6,12 +6,13 @@ import { blockedDraft } from '../../../src/state/drafts/store';
 import { notices } from '../../../src/ui/pages/notices';
 import { AppTransport, route, secondId } from '../app/transport';
 import { sessionButton } from '../app/open';
-import { projectCard } from '../../../src/ui/pages/model';
+import { projectCard, sessionKey } from '../../../src/ui/pages/model';
+import { ArchivePage } from '../../../src/ui/pages/ArchivePage';
 import { continueTargets } from '../../../src/ui/dialogs/ContinueTopicDialog';
 import { BindSession } from '../../../src/components/navigation/Registration';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { waitingRows, sentRows } from '../../../src/selectors/waiting/rows';
-import { tabModels } from '../../../src/ui/shell/model';
+import { sessionWhen, tabModels } from '../../../src/ui/shell/model';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import { DiscoveryController } from '../../../src/data/discovery';
 import { archivedCandidate, CandidateList } from '../../../src/components/navigation/Discovery';
@@ -23,7 +24,7 @@ import type { ProjectSummary, Session, SessionSummary } from '../../../src/gener
 import { SessionActionControllers } from '../../../src/components/bindings/actions';
 import { SessionLists } from '../../../src/ui/pages/SessionLists';
 import { ArchiveSessionDialog, CloseSessionDialog } from '../../../src/ui/pages/SessionDialogs';
-import { pendingError, savingError } from '../../../src/ui/shared/lifecycleReady';
+import { loadingError, pendingError, savingError } from '../../../src/ui/shared/lifecycleReady';
 
 const barrierNavigations: NavigationStore[] = [];
 afterEach(() => { cleanup(); notices.clear(); barrierNavigations.splice(0).forEach(navigation => navigation.stop()); vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -74,7 +75,7 @@ async function barrierSetup(archived = false, confirmation = false) {
     : render(<SessionLists navigation={navigation} actions={controllers} groups={[{ project: navigation.getSnapshot().projects!.projects.items[0], openLink: false }]}
       sessions={navigation.getSnapshot().sessions!.sessions.items} snapshots={new Map()} openTabs={new Set()} now={Date.now()} disabled={false}
       onOpenProject={() => undefined} onOpenSession={() => undefined} onRemove={async () => true} />);
-  return { transport, session, store, actions, onSaved, onClose, ...view };
+  return { transport, session, store, actions, controllers, navigation, onSaved, onClose, ...view };
 }
 
 /** Hold both the actual save and its reader's volatile-presence refresh. */
@@ -130,7 +131,7 @@ describe('Session lifecycle write readiness', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(commands(fixture.transport)).toEqual(['binding_pause']);
     expect(fixture.actions.getSnapshot().pending).toBe(pending);
-    expect(notices.getSnapshot().map(notice => notice.text)).toContain(pendingError);
+    expect(notices.getSnapshot().map(notice => notice.text)).toContain(`For the “Review notes” session: ${pendingError}`);
   });
 
   it('times out Restore in plain words and never submits it when the old write eventually finishes', async () => {
@@ -139,7 +140,7 @@ describe('Session lifecycle write readiness', () => {
     let write!: Promise<boolean>;
     await act(async () => { write = pause(fixture); fireEvent.click(within(card()).getByRole('button', { name: 'Restore' })); });
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-    expect(notices.getSnapshot().map(notice => notice.text)).toContain(savingError);
+    expect(notices.getSnapshot().map(notice => notice.text)).toContain(`For the “Review notes” session: ${savingError}`);
     await act(async () => { gates.save(); gates.presence(); await write; });
     expect(commands(fixture.transport)).toEqual(['binding_pause']);
     expect(fixture.session.archived_at).toBeTruthy();
@@ -221,7 +222,7 @@ describe('Session lifecycle write readiness', () => {
     expect(notices.getSnapshot()).toEqual([]);
   });
 
-  it('Undo waits for a different save to settle and preserves its original revision guard', async () => {
+  it('Undo waits for a different save to settle and restores with the current revision', async () => {
     const fixture = await barrierSetup();
     await archive();
     await waitFor(() => expect((within(card()).getByRole('button', { name: 'Archive' }) as HTMLButtonElement).disabled).toBe(false));
@@ -234,13 +235,114 @@ describe('Session lifecycle write readiness', () => {
     await waitFor(() => expect(fixture.actions.getSnapshot()).toMatchObject({ writing: true, pending: null }));
     expect(commands(fixture.transport)).toEqual(['session_archive', 'binding_pause']);
     await act(async () => { gates.presence(); await write; });
-    expect(commands(fixture.transport)).toEqual(['session_archive', 'binding_pause']);
-    expect(fixture.session.archived_at).toBeTruthy();
-    await waitFor(() => expect(notices.getSnapshot().map(notice => notice.text)).toContain('The session could not be changed. Try again.'));
+    await waitFor(() => expect(commands(fixture.transport)).toEqual(['session_archive', 'binding_pause', 'session_restore']));
+    expect(fixture.session.archived_at).toBeUndefined();
+    expect(fixture.transport.mutations.at(-1)?.command).toMatchObject({ params: { expected_revision: fixture.session.revision - 1, reopen: true } });
+    expect(notices.getSnapshot().some(notice => notice.actions?.some(action => action.label === 'Undo'))).toBe(false);
   });
 });
 
 describe('Session archive cards', () => {
+  it('Undo reads changes made after archive before submitting Restore', async () => {
+    const transport = await setup(), session = transport.sessions.get(route.session_id)!;
+    await archive(); await screen.findByRole('button', { name: 'Archived · 1' });
+    const archivedRevision = session.revision;
+    // No hint: Undo itself must read the authoritative session at click time.
+    session.description = 'Updated while archived'; ++session.revision;
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Undo' })); });
+    await waitFor(() => expect(session.archived_at).toBeUndefined());
+    expect(transport.mutations.find(request => request.command.command === 'session_restore')?.command)
+      .toMatchObject({ params: { expected_revision: archivedRevision + 1, reopen: true } });
+    expect(session.description).toBe('Updated while archived');
+    expect(session.state).toBe('active');
+  });
+
+  it('dismisses an archive receipt after an authoritative external restore, even after leaving the page', async () => {
+    const transport = await setup(), session = transport.sessions.get(route.session_id)!;
+    await archive(); await screen.findByRole('button', { name: 'Archived · 1' });
+    const staleUndo = notices.getSnapshot().find(notice => notice.actions?.[0]?.label === 'Undo')!.actions![0].run;
+    fireEvent.click(document.querySelector('[data-shell-tab="projects"]')!);
+    await screen.findByRole('heading', { name: 'Projects' });
+    await act(async () => {
+      delete session.archived_at; ++session.revision;
+      transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+    });
+    await waitFor(() => expect(notices.getSnapshot().some(notice => notice.id.startsWith('session-archive:'))).toBe(false));
+    await act(async () => { staleUndo(); });
+    expect(commands(transport)).toEqual(['session_archive']);
+    expect(session.state).toBe('closed');
+  });
+
+  it('keeps the receipt through an incomplete catalogue and clears it after restore with its reader closed', async () => {
+    const fixture = await barrierSetup();
+    await archive();
+    await waitFor(() => expect((within(card()).getByRole('button', { name: 'Archive' }) as HTMLButtonElement).disabled).toBe(false));
+    fixture.navigation.opened.close(route); fixture.unmount();
+    fixture.transport.sessions.delete(route.session_id);
+    await act(async () => { await fixture.navigation.refresh(); });
+    expect(notices.getSnapshot().some(notice => notice.id.startsWith('session-archive:'))).toBe(true);
+    fixture.transport.sessions.set(route.session_id, fixture.session);
+    delete fixture.session.archived_at; ++fixture.session.revision;
+    await act(async () => { await fixture.navigation.refresh(); });
+    expect(notices.getSnapshot().some(notice => notice.id.startsWith('session-archive:'))).toBe(false);
+    expect(commands(fixture.transport)).toEqual(['session_archive']);
+  });
+
+  it('keeps a rejected Undo actionable and uses a fresh revision and operation on retry', async () => {
+    class RejectedUndo extends AppTransport {
+      requests: OwnerMutationRequest[] = [];
+      override async invoke<T>(name: string, args: { request: OwnerQueryRequest | OwnerMutationRequest }): Promise<T> {
+        if ('command' in args.request && args.request.command.command === 'session_restore') {
+          this.requests.push(structuredClone(args.request));
+          if (this.requests.length === 1) return { api_version: 1, ok: false,
+            error: { code: 'invalid_transition', message: 'Fixture refusal', hint: '', retryable: true, field_errors: [] } } as T;
+        }
+        return super.invoke<T>(name, args);
+      }
+    }
+    const transport = new RejectedUndo(), session = transport.sessions.get(route.session_id)!;
+    await setup(false, false, transport);
+    await archive(); await screen.findByRole('button', { name: 'Archived · 1' });
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Undo' })); });
+    expect(session.archived_at).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy();
+    expect(notices.getSnapshot().find(notice => notice.id.startsWith('session-archive:'))!.text).toContain('try again');
+    expect(notices.getSnapshot().find(notice => notice.id.startsWith('session-archive:'))!.text).toContain('For the “Review notes” session:');
+    fireEvent.click(document.querySelector('[data-shell-tab="projects"]')!);
+    await screen.findByRole('heading', { name: 'Projects' });
+    expect(within(screen.getByRole('region', { name: 'Notifications' })).getByText(/^For the “Review notes” session:/)).toBeTruthy();
+    ++session.revision;
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); });
+    await waitFor(() => expect(session.archived_at).toBeUndefined());
+    expect(transport.requests).toHaveLength(2);
+    expect(transport.requests[1]!.command).toMatchObject({ params: { expected_revision: session.revision - 1, reopen: true } });
+    expect(transport.requests[1]!.command.op_id).not.toBe(transport.requests[0]!.command.op_id);
+  });
+
+  it('retries an uncertain Undo from its notice with the exact pending request', async () => {
+    class UncertainUndo extends AppTransport {
+      requests: OwnerMutationRequest[] = [];
+      override async invoke<T>(name: string, args: { request: OwnerQueryRequest | OwnerMutationRequest }): Promise<T> {
+        if ('command' in args.request && args.request.command.command === 'session_restore') {
+          this.requests.push(structuredClone(args.request));
+          if (this.requests.length === 1) throw new Error('Fixture transport failure');
+        }
+        return super.invoke<T>(name, args);
+      }
+    }
+    const transport = new UncertainUndo();
+    await setup(false, false, transport);
+    await archive(); await screen.findByRole('button', { name: 'Archived · 1' });
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Undo' })); });
+    const notification = screen.getByRole('region', { name: 'Notifications' });
+    await act(async () => { fireEvent.click(within(notification).getByRole('button', { name: 'Check again' })); });
+    expect(transport.requests).toHaveLength(2);
+    expect(transport.requests[1]).toEqual(transport.requests[0]);
+    expect(transport.sessions.get(route.session_id)!.archived_at).toBeUndefined();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(await screen.findByText('Restored and reopened “Review notes”.')).toBeTruthy();
+  });
+
   it.each([undefined, 'Shared name'])('keeps separate Undo notices for two archived sessions named %s', async name => {
     const transport = new AppTransport(), ids = [route.session_id, secondId];
     for (const id of ids) {
@@ -258,7 +360,8 @@ describe('Session archive cards', () => {
       expect(screen.queryByRole('dialog')).toBeNull();
     }
     await waitFor(() => expect(screen.getAllByRole('button', { name: 'Undo' })).toHaveLength(2));
-    const text = name ? `Archived “${name}”.` : 'Archived the session.';
+    const when = sessionWhen(Date.parse(transport.sessions.get(route.session_id)!.created_at), Date.now()).toLowerCase();
+    const text = name ? `Archived “${name}”.` : `Archived the demo.local session from ${when}.`;
     expect(screen.getAllByText(text)).toHaveLength(2);
     const undoFor = (id: string) => within(document.querySelector<HTMLElement>(`[data-notice-id="session-archive:${route.project_id}:${id}"]`)!)
       .getByRole('button', { name: 'Undo' });
@@ -274,6 +377,76 @@ describe('Session archive cards', () => {
     expect(transport.mutations.filter(request => request.command.command === 'session_restore').map(request => request.session))
       .toEqual([route, { ...route, session_id: secondId }]);
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+    await waitFor(() => expect(screen.getAllByText(name ? `Restored “${name}”; it stays closed.` : `Restored the demo.local session from ${when}; it stays closed.`)).toHaveLength(2));
+  });
+
+  it('keeps identical Restore failures separate for two sessions', async () => {
+    const fixture = await barrierSetup(true), second = fixture.transport.sessions.get(secondId)!;
+    second.name = fixture.session.name; second.state = 'closed'; second.closed_at = second.updated_at; second.archived_at = second.updated_at;
+    await fixture.navigation.refresh();
+    fixture.rerender(<SessionLists navigation={fixture.navigation} actions={fixture.controllers}
+      groups={[{ project: fixture.navigation.getSnapshot().projects!.projects.items[0], openLink: false }]}
+      sessions={fixture.navigation.getSnapshot().sessions!.sessions.items} snapshots={new Map()} openTabs={new Set()} now={Date.now()} disabled={false}
+      onOpenProject={() => undefined} onOpenSession={() => undefined} onRemove={async () => true} />);
+    const invoke = fixture.transport.invoke.bind(fixture.transport);
+    vi.spyOn(fixture.transport, 'invoke').mockImplementation(async (name, args) => name === 'session_get'
+      ? { api_version: 1, ok: false, error: { code: 'io_error', message: 'Fixture read failed', hint: '', retryable: true, field_errors: [] } }
+      : invoke(name, args));
+    for (const id of [route.session_id, secondId]) {
+      const current = document.querySelector<HTMLElement>(`[data-session-card="${id}"]`)!;
+      await act(async () => { fireEvent.click(within(current).getByRole('button', { name: 'Restore' })); });
+    }
+    fixture.unmount();
+    const errors = notices.getSnapshot().filter(notice => notice.text === `For the “Review notes” session: ${loadingError}`);
+    expect(errors).toHaveLength(2);
+    expect(new Set(errors.map(notice => notice.id)).size).toBe(2);
+    expect(commands(fixture.transport)).toEqual([]);
+  });
+
+  it('keeps identical archived-topic Restore failures separate for two sessions', async () => {
+    const fixture = await barrierSetup(), second = fixture.transport.sessions.get(secondId)!;
+    second.name = fixture.session.name;
+    const topic = structuredClone(Object.values(fixture.session.topics).find(topic => topic)!);
+    topic.archived_at = fixture.session.updated_at;
+    fixture.session.topics = { [topic.id]: structuredClone(topic) }; second.topics = { [topic.id]: structuredClone(topic) };
+    await fixture.navigation.refresh();
+    fixture.rerender(<ArchivePage navigation={fixture.navigation} actions={fixture.controllers} projectName="Example"
+      sessions={fixture.navigation.getSnapshot().sessions!.sessions.items}
+      snapshots={new Map([[sessionKey(route), fixture.session], [sessionKey({ ...route, session_id: secondId }), second]])}
+      target={route} query="" now={Date.now()} onRemove={async () => true} />);
+    for (const current of document.querySelectorAll<HTMLElement>('.pw-archive-card')) {
+      await act(async () => { fireEvent.click(within(current).getByRole('button', { name: 'Restore' })); });
+    }
+    const errors = notices.getSnapshot().filter(notice => notice.id.startsWith('topic-restore-failed:'));
+    expect(errors).toHaveLength(2);
+    expect(new Set(errors.map(notice => notice.id)).size).toBe(2);
+    expect(errors[0]!.text).toBe(errors[1]!.text);
+    expect(errors[0]!.text).toContain(`For “${topic.name}” in the “Review notes” session:`);
+    fixture.unmount();
+    expect(notices.getSnapshot().filter(notice => notice.id.startsWith('topic-restore-failed:'))).toEqual(errors);
+    expect(commands(fixture.transport)).toEqual(['topic_restore', 'topic_restore']);
+  });
+
+  it.each([null, 'Shared name'])('keeps cancellation receipts for two closed sessions named %s separate', async name => {
+    const fixture = await barrierSetup(), second = fixture.transport.sessions.get(secondId)!;
+    const sample = Object.values(fixture.session.inputs).find(input => input?.state === 'queued')!;
+    expect(sample).toBeTruthy();
+    fixture.session.inputs = { [sample.id]: structuredClone(sample) };
+    second.inputs = { [sample.id]: structuredClone(sample) };
+    await fixture.store.refresh(true);
+    const secondRoute = { ...route, session_id: secondId }, secondStore = fixture.navigation.opened.open(secondRoute);
+    await secondStore.refresh();
+    for (const store of [fixture.store, secondStore]) {
+      fixture.rerender(<CloseSessionDialog store={store} actions={fixture.controllers.forSession(store)} agent="codex" when="Today" name={name} onClose={fixture.onClose} />);
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Close session' })); });
+    }
+    const when = sessionWhen(Date.parse(fixture.session.created_at), Date.now()).toLowerCase();
+    const subject = name ? `the “${name}” session` : `the codex session from ${when}`;
+    const text = `Closed ${subject}. 1 unsent message was cancelled.`;
+    const receipts = notices.getSnapshot().filter(notice => notice.text === text);
+    expect(receipts).toHaveLength(2);
+    expect(new Set(receipts.map(notice => notice.id)).size).toBe(2);
+    expect(commands(fixture.transport)).toEqual(['session_close', 'session_close']);
   });
 
   it('keeps session archive confirmation counts unchanged by Open Ack proposals', async () => {
@@ -348,7 +521,7 @@ describe('Session archive cards', () => {
     expect(Object.values(session.inputs).every(input => input?.state === 'cancelled')).toBe(true);
   });
 
-  it('shows a plain error for a quick Undo while the archive navigation refresh is still running', async () => {
+  it('keeps a quick Undo retriable while the archive navigation refresh is still running', async () => {
     const fixture = new AppTransport(), session = fixture.sessions.get(route.session_id)!;
     session.state = 'closed'; session.closed_at = session.updated_at;
     for (const item of Object.values(session.items)) if (item?.status === 'waiting_on_me') item.status = 'open';
@@ -365,13 +538,13 @@ describe('Session archive cards', () => {
       await screen.findByText('Archived “Review notes”.');
       const undo = notices.getSnapshot().find(notice => notice.actions?.[0]?.label === 'Undo')!.actions![0].run;
       await act(async () => { fireEvent.click((await screen.findByRole('button', { name: 'Undo' }))); undo(); });
-      expect(await screen.findByText('The session could not be restored while another change is finishing. Find it under Archived and try Restore again.')).toBeTruthy();
+      expect(await screen.findByText('For the “Review notes” session: The session could not be restored while another change is finishing. Try again.')).toBeTruthy();
       expect(commands(transport)).toEqual(['session_archive']);
-      expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy();
       expect(session.archived_at).toBeTruthy();
     } finally { await act(async () => { release(); }); }
-    await unfold();
-    await act(async () => { fireEvent.click(within(card()).getByRole('button', { name: 'Restore' })); });
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Archived · 1' }) as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); });
     await waitFor(() => expect(session.archived_at).toBeUndefined());
     expect(commands(transport)).toEqual(['session_archive', 'session_restore']);
   });
