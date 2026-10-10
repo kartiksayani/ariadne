@@ -16,7 +16,10 @@ const chip = (name: string) => {
 async function ready() {
   await waitFor(() => expect(screen.getByRole('button', { name: 'Session actions' })).toBeTruthy());
   await waitFor(() => expect(filterButton().hasAttribute('disabled')).toBe(false));
-  await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
+  await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    });
 }
 async function mount(transport = new AppTransport()) {
   transport.preferences.global.selected_navigation = { kind: 'session', session: route };

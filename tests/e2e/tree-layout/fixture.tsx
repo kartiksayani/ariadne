@@ -8,6 +8,7 @@ import { AppTransport, route } from '../../../apps/desktop/tests/ui/app/transpor
 import { ItemRow, type RowAction } from '../../../apps/desktop/src/ui/tree/ItemRow';
 import { immutable } from '../../../apps/desktop/src/data';
 import type { ItemRow as Row } from '../../../apps/desktop/src/ui/tree/model';
+import { SessionBar } from '../../../apps/desktop/src/ui/tree/SessionBar';
 
 // The ordinary App over its real stores; only the native transport is replaced.
 // Item 1 carries a long finding (it must fold to two lines), item 5 a paragraph that
@@ -52,5 +53,10 @@ function ActionGridFixture() {
   </>;
 }
 
-createRoot(document.getElementById('root')!).render(new URLSearchParams(window.location.search).has('grid')
-  ? <ActionGridFixture /> : <DesktopApp service={createDesktopService(new TreeLayoutTransport())} />);
+const query = new URLSearchParams(window.location.search);
+createRoot(document.getElementById('root')!).render(query.has('grid') ? <ActionGridFixture /> : query.has('bar')
+  ? <div className="tree-column" style={{ width: 220 }}><SessionBar busy={false} onClose={() => {}} bar={{
+    sessionId: route.session_id, title: 'A long session name that needs to fit in a narrow column', secondary: null,
+    description: null, named: true, agent: 'codex', where: 'iTerm', meta: '12 topics', running: false,
+    connection: 'not_running', closed: true, archived: true,
+  }} /></div> : <DesktopApp service={createDesktopService(new TreeLayoutTransport())} />);

@@ -12,6 +12,16 @@ describe('alpha.13 session design frames', () => {
     expect(source).not.toContain('meta: `${curS.range}');
     expect(source).toContain('aria-label="Session actions"');
     expect(source).toContain('ph ph-dots-three');
+    expect(source).toContain('position:relative; flex:none;');
+    expect(source).toContain("run: curS.running ? 'Sending' : 'Disconnected'");
+    expect(source).toContain('aria-label="Pause"');
+    expect(source).toContain('width:20px; height:18px; padding:0;');
+  });
+
+  it('keeps the dispatch change scoped to the session bar', () => {
+    expect(source).toContain("run: run ? 'Agent running' : 'Agent not running'");
+    expect(source).toContain('sb.canPause');
+    expect(source).not.toContain('onClick="{{ closeThisSession }}"');
   });
 
   it('replaces the chips and topic dropdown with the active-aware filter icon', () => {

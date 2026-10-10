@@ -59,7 +59,10 @@ async function mount(transport = new AckTransport()) {
   render(<DesktopApp service={createDesktopService(transport)} />);
   fireEvent.click(await sessionButton(route));
   await screen.findByRole('region', { name: 'Session tree' });
-  await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
+  await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    });
   return transport;
 }
 

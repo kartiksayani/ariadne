@@ -16,6 +16,7 @@ async function openTree(page: Page, origin: string) {
   await expect(session).toBeEnabled(); await session.click();
   await expect(page.locator('.tree-session-bar').getByRole('button', { name: 'Session actions' })).toBeEnabled();
   await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-status', 'ready');
+  await expect(page.locator('.tree-session-bar')).toHaveAttribute('aria-busy', 'false');
 }
 
 test('folds a long preview to two lines, never rewraps on hover and never scrolls on a click', async ({ page }) => {
@@ -134,5 +135,27 @@ test('gives the title at least 60% of the row with all actions and keeps hover w
     for (const item of [row, noActions]) {
       expect(await item.evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(Math.ceil((await item.boundingBox())!.width));
     }
+  } finally { await server.close(); }
+});
+
+test('keeps the session menu inside a narrow column with Restore and a long name', async ({ page }) => {
+  const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+    logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+  try {
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    const origin = `http://127.0.0.1:${address.port}`;
+    await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
+    await page.setViewportSize({ width: 1600, height: 960 });
+    await page.goto(`${origin}/tests/e2e/tree-layout/fixture.html?bar`);
+    await page.evaluate(async () => { await document.fonts.ready; });
+    const bar = page.locator('.tree-session-bar'), more = bar.getByRole('button', { name: 'Session actions' });
+    await expect(bar.getByRole('button', { name: 'Restore session' })).toBeVisible();
+    const bounds = (await bar.boundingBox())!, menu = (await more.boundingBox())!;
+    expect(menu.x + menu.width).toBeLessThanOrEqual(bounds.x + bounds.width);
+    expect(await bar.evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(Math.ceil(bounds.width));
+    await more.click();
+    await expect(page.getByRole('menuitem', { name: 'Copy ID' })).toBeVisible();
   } finally { await server.close(); }
 });

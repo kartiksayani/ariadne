@@ -76,7 +76,10 @@
 }
 
 .tree-session-meta {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
@@ -97,7 +100,8 @@
 
 .tree-run {
   display: inline-flex;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   white-space: nowrap;
   align-items: center;
   gap: 6px;
@@ -130,11 +134,28 @@
 /* Sending and the main state action stay beside the session menu. */
 .tree-session-actions {
   display: inline-flex;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   align-items: center;
   white-space: nowrap;
   gap: 4px;
   margin-left: auto;
+}
+
+.tree-run-label,
+.tree-session-action-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-session-actions > .btn {
+  min-width: 0;
+}
+
+.tree-session-actions :where(.btn) > i,
+.tree-session-bar > i {
+  flex: none;
 }
 
 /* The dispatch chip's buttons sit in the bar's text line; Pause/Resume are
@@ -157,6 +178,7 @@
 }
 
 .tree-session-bar .dispatch-label {
+  min-width: 0;
   overflow: hidden;
   max-width: 40ch;
   white-space: nowrap;

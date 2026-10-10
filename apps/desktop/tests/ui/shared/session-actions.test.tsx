@@ -18,6 +18,44 @@ const trigger = () => screen.getByRole<HTMLButtonElement>('button', { name: 'Ses
 const option = (name: string) => screen.getByRole<HTMLButtonElement>('menuitem', { name });
 
 describe('session actions', () => {
+  it('exposes lifecycle busy state and omits unknown topic counts', () => {
+    const { container, rerender } = render(<SessionBar bar={{ ...bar, meta: '' }} busy onClose={() => {}} />);
+    expect(container.querySelector('.tree-session-bar')?.getAttribute('aria-busy')).toBe('true');
+    expect(container.querySelector('.tree-session-meta')).toBeNull();
+    rerender(<SessionBar bar={bar} busy={false} onClose={() => {}} />);
+    expect(container.querySelector('.tree-session-bar')?.getAttribute('aria-busy')).toBe('false');
+    expect(screen.getByTitle('3 topics').textContent).toBe('3 topics');
+  });
+  it.each(['Copy ID', 'Rename', 'Close session'])('delivers the WebKit blur-before-click sequence to %s', async name => {
+    vi.mocked(copyText).mockResolvedValue(undefined);
+    const close = vi.fn();
+    render(<SessionBar bar={bar} busy={false} onClose={close} onRename={async () => null} />);
+    trigger().focus(); fireEvent.click(trigger(), { detail: 1 });
+    const target = option(name);
+    fireEvent.mouseDown(target);
+    fireEvent.blur(trigger(), { relatedTarget: null });
+    expect(target.isConnected).toBe(true);
+    fireEvent.mouseUp(target);
+    await act(async () => { fireEvent.click(target, { detail: 1 }); });
+    if (name === 'Copy ID') {
+      expect(copyText).toHaveBeenCalledExactlyOnceWith(bar.sessionId);
+      expect(screen.getByRole('menuitem', { name: 'Copied' })).toBeTruthy();
+    } else if (name === 'Rename') {
+      expect(screen.getByRole('textbox', { name: 'Session name' })).toBe(document.activeElement);
+      expect(screen.queryByRole('menu')).toBeNull();
+    } else {
+      expect(close).toHaveBeenCalledOnce();
+      expect(screen.queryByRole('menu')).toBeNull();
+    }
+  });
+
+  it('dismisses session actions when switching to another session', () => {
+    const { rerender } = render(<SessionBar bar={bar} busy={false} onClose={() => {}} />);
+    fireEvent.click(trigger(), { detail: 1 });
+    rerender(<SessionBar bar={{ ...bar, sessionId: 'another-session' }} busy={false} onClose={() => {}} />);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
   it('keeps the full session title available and reveals secondary actions only in the menu', () => {
     render(<SessionBar bar={bar} busy={false} onClose={() => {}} onRename={async () => null} />);
     expect(screen.getByText(bar.title).getAttribute('title')).toBe(bar.title);
@@ -26,11 +64,11 @@ describe('session actions', () => {
     expect(trigger().getAttribute('aria-expanded')).toBe('false');
     expect(screen.queryByRole('menuitem')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Close session' })).toBeNull();
-    fireEvent.click(trigger());
+    fireEvent.click(trigger(), { detail: 1 });
     expect(trigger().getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByRole('menu').id).toBe(trigger().getAttribute('aria-controls'));
     expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Copy ID', 'Rename', 'Close session']);
-    expect(document.activeElement).toBe(option('Copy ID'));
+    expect(document.activeElement).not.toBe(option('Copy ID'));
   });
 
   it('copies without closing the menu so feedback remains available', async () => {
@@ -38,7 +76,7 @@ describe('session actions', () => {
     const user = userEvent.setup();
     const { container } = render(<SessionBar bar={bar} busy={false} onClose={() => {}} />);
     await user.click(trigger());
-    await user.keyboard('{Enter}');
+    await user.click(option('Copy ID'));
     expect(copyText).toHaveBeenCalledExactlyOnceWith(bar.sessionId);
     expect(screen.getByRole('menu')).toBeTruthy();
     expect(document.activeElement).toBe(option('Copied'));
@@ -115,21 +153,22 @@ describe('action menu keyboard and dismissal', () => {
   });
   it('cycles enabled items with arrows, Home and End and returns focus with Escape', async () => {
     const user = setup(); await user.click(trigger());
-    await user.keyboard('{ArrowDown}'); expect(document.activeElement).toBe(option('Last'));
     await user.keyboard('{ArrowDown}'); expect(document.activeElement).toBe(option('First'));
+    await user.keyboard('{ArrowDown}'); expect(document.activeElement).toBe(option('Last'));
+    await user.keyboard('{ArrowUp}'); expect(document.activeElement).toBe(option('First'));
     await user.keyboard('{ArrowUp}'); expect(document.activeElement).toBe(option('Last'));
     await user.keyboard('{Home}'); expect(document.activeElement).toBe(option('First'));
     await user.keyboard('{End}'); expect(document.activeElement).toBe(option('Last'));
     await user.keyboard('{Escape}'); expect(screen.queryByRole('menu')).toBeNull(); expect(document.activeElement).toBe(trigger());
     await user.keyboard('{ArrowDown}'); expect(document.activeElement).toBe(option('First'));
   });
-  it('dismisses on outside pointer and on focus leaving the menu', async () => {
+  it('dismisses on outside pointer and Tab while preserving focus during blur', async () => {
     const user = setup(), outside = screen.getByRole('button', { name: 'Outside' });
     await user.click(trigger()); await user.click(outside);
     expect(screen.queryByRole('menu')).toBeNull(); expect(document.activeElement).toBe(outside);
     await user.click(trigger()); act(() => { outside.focus(); });
-    expect(screen.queryByRole('menu')).toBeNull(); expect(document.activeElement).toBe(outside);
-    await user.click(trigger()); await user.tab();
+    expect(screen.getByRole('menu')).toBeTruthy(); expect(document.activeElement).toBe(outside);
+    await user.click(trigger()); await user.click(trigger()); await user.keyboard('{End}'); await user.tab();
     expect(screen.queryByRole('menu')).toBeNull(); expect(document.activeElement).toBe(outside);
   });
 });

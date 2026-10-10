@@ -15,7 +15,7 @@ describe('session ID actions', () => {
   it.each(['active', 'closed'] as const)('copies from the %s session bar without displaying the ID', async state => {
     const session = new AppTransport().sessions.get(route.session_id)!;
     session.state = state;
-    const { container } = render(<SessionBar bar={sessionBar(session, null, Date.now())!} busy={false} onClose={() => {}} />);
+    const { container } = render(<SessionBar bar={sessionBar(session, null)!} busy={false} onClose={() => {}} />);
     expect(container.innerHTML).not.toContain(route.session_id);
     vi.mocked(copyText).mockResolvedValue(undefined);
     fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));

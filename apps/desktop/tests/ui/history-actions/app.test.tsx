@@ -9,7 +9,10 @@ import { HistoryTransport } from './fixture';
 afterEach(cleanup);
 async function openSource() {
   fireEvent.click(await sessionButton(route)); await screen.findByRole('tree', { name: 'Session items' });
-  await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
+  await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    });
 }
 it('opens guarded history in ordinary App and sends an approved Continue into the explicitly selected target', async () => {
   const transport = new HistoryTransport(), source = structuredClone(transport.source);

@@ -13,7 +13,10 @@ async function setup(configure?: (transport: AppTransport) => void) {
   await screen.findByRole('tree', { name: 'Session items' });
   // Check the bar trigger and session readiness without leaving a menu open.
   expect(within(screen.getByLabelText('Session')).getByRole('button', { name: 'Session actions' })).toBeTruthy();
-  await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
+  await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    });
   return transport;
 }
 it('focuses search with Cmd+F outside editors and suppresses workspace shortcuts inside modal controls', async () => {

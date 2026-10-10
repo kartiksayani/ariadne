@@ -22,6 +22,7 @@ const control = (name: string) => name === 'Back' || name === 'Forward'
 function ready() {
   expect(screen.getByRole('button', { name: 'Session actions' })).toBeTruthy();
   expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+  expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
 }
 async function openSession(id = route.session_id) {
   await click(await sessionButton({ ...route, session_id: id }));

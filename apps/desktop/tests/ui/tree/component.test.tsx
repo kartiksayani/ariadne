@@ -21,6 +21,7 @@ import { HistoryTransport } from '../history-actions/fixture';
 import { LinkOpener } from '../../../src/ui/shared/MarkdownText';
 import { RecoveryPanel } from '../../../src/components/recovery/RecoveryPanel';
 import { notices } from '../../../src/ui/pages/notices';
+import { NavigationGraph } from '../../../src/ui/graph/NavigationGraph';
 
 const stores: NavigationStore[] = [];
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); notices.clear(); vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -451,6 +452,58 @@ describe('session tree rows', () => {
 });
 
 describe('session tree filters', () => {
+  it('preserves graph folds and both status edits when the composed writers contend', async () => {
+    const value = await mount(), { transport, navigation, store } = value;
+    value.rerender({ graph: <NavigationGraph navigation={navigation} store={store} tight={false} query="" onReveal={() => {}} /> });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'preferences_patch') await gate;
+      return invoke(name, args);
+    });
+    try {
+      const open = chip('Open'), progress = chip('In progress');
+      act(() => {
+        const parent = document.querySelector<HTMLElement>('.graph-node[data-item-id="1"]')!;
+        fireEvent.click(within(parent).getByRole('button', { name: 'Collapse branches' }));
+        fireEvent.click(open); fireEvent.click(progress);
+      });
+      await waitFor(() => expect(navigation.getSnapshot().writing).toBe(true));
+      expect(statusSelected('Open')).toBe(true); expect(statusSelected('In progress')).toBe(true);
+      expect(chip('Open').hasAttribute('disabled')).toBe(false);
+      await act(async () => { release(); });
+      await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'in_progress']));
+      await waitFor(() => expect(navigation.getSnapshot().writing).toBe(false));
+      expect(viewOf(transport).expanded_item_ids).not.toContain('1');
+      expect(statusSelected('Open')).toBe(true); expect(statusSelected('In progress')).toBe(true);
+      expect(notices.getSnapshot().some(notice => notice.id === 'tree-view-save-failed')).toBe(false);
+      expect(screen.queryByText('Ariadne isn’t sure that view change was saved. Try it again.')).toBeNull();
+    } finally { release(); }
+  });
+  it('queues rapid status toggles while keeping the menu enabled and focused during writes', async () => {
+    const { transport, navigation } = await mount();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'preferences_patch') await gate;
+      return invoke(name, args);
+    });
+    const open = chip('Open'); open.focus(); fireEvent.click(open);
+    await waitFor(() => expect(navigation.getSnapshot().writing).toBe(true));
+    expect(chip('In progress').hasAttribute('disabled')).toBe(false);
+    expect(document.activeElement).toBe(open);
+    fireEvent.click(chip('In progress'));
+    expect(statusSelected('Open')).toBe(true);
+    expect(statusSelected('In progress')).toBe(true);
+    await act(async () => { release(); });
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'in_progress']));
+    await waitFor(() => expect(navigation.getSnapshot().writing).toBe(false));
+    expect(statusSelected('Open')).toBe(true);
+    expect(statusSelected('In progress')).toBe(true);
+    expect(patches(transport)).toHaveLength(2);
+  });
   it('counts the matches themselves, excluding context and forced selections', async () => {
     const { rerender } = await mount({ props: { query: 'receipt', selectedId: '4' } });
     expect(screen.getByText('Showing 2 of 9 items matching “receipt”')).toBeTruthy();
@@ -906,6 +959,7 @@ describe('stopped deliveries in the tree', () => {
     expect((within(fix).getByRole('button', { name: 'Mark as done' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(ids()).toEqual(['1', '1.1', '4', '8']));
+    await waitFor(() => expect(banner()).not.toBeNull());
     expect(within(banner()!).getByText('A message needs your decision')).toBeTruthy();
     fireEvent.click(chip('All'));
     await waitFor(() => expect(banner()).toBeNull());

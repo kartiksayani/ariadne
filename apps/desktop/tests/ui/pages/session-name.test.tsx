@@ -66,8 +66,8 @@ describe('every place that names a session shows the name', () => {
     expect(sessionCardText(summary(), null, now).title).toBe('demo.local');
   });
   it('the session bar: name as title with the agent line and description; unnamed stays as before', () => {
-    expect(sessionBar(null, named, now)).toMatchObject({ title: 'Sync fixes', secondary: 'demo.local · iTerm window 1', description: 'Search webhook retries', named: true });
-    expect(sessionBar(null, summary(), now)).toMatchObject({ title: 'demo.local · iTerm window 1', secondary: null, description: null, named: false });
+    expect(sessionBar(null, named)).toMatchObject({ title: 'Sync fixes', secondary: 'demo.local · iTerm window 1', description: 'Search webhook retries', named: true });
+    expect(sessionBar(null, summary())).toMatchObject({ title: 'demo.local · iTerm window 1', secondary: null, description: null, named: false });
   });
   it('tabs: the name is the label and the tooltip keeps the agent and description', () => {
     const facts = (naming: { name?: string; description?: string } | null) => tabModels({ selection: 'session', projectCount: 1, sessions: [
@@ -203,7 +203,7 @@ describe('the rename fields', () => {
 });
 
 describe('the session bar', () => {
-  const bar = sessionBar(null, named, now)!;
+  const bar = sessionBar(null, named)!;
   it('shows the name, the agent line and the description, and no Rename without a way to save', () => {
     render(<SessionBarView bar={bar} busy={false} onClose={() => undefined} />);
     expect(screen.getByText('Sync fixes').className).toContain('tree-session-title');
@@ -345,7 +345,10 @@ describe('renaming from the project page and the session bar', () => {
     const transport = setup();
     fireEvent.click(await sessionButton(route));
     await screen.findByRole('region', { name: 'Session tree' });
-    await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
+    await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+        expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      });
     expect(document.querySelector('.tree-session-title')!.textContent).toBe('demo.local');
 
     fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
@@ -357,7 +360,10 @@ describe('renaming from the project page and the session bar', () => {
     await waitFor(() => expect(document.querySelector('.tree-session-title')!.textContent).toBe('Sync fixes'));
     expect(names(transport)).toHaveLength(1);
 
-    await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
+    await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+        expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      });
     fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
     fireEvent.change(screen.getByLabelText('Session name'), { target: { value: '' } });
