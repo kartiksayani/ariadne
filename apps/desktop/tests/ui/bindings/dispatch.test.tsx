@@ -23,7 +23,7 @@ describe('dispatch status in the owner’s words', () => {
     expect(dispatchStatus({ binding: binding({ owner_paused: true, dispatch_state: 'paused' }), closed: false }))
       .toMatchObject({ kind: 'paused', label: 'Paused (by you)', action: 'resume', live: false });
     expect(dispatchStatus({ binding: binding({ pause_reason: 'result_missing', dispatch_state: 'recovery_required' }), closed: false }))
-      .toMatchObject({ kind: 'blocked', label: 'Not sending: the agent finished without saving its answer', action: null, live: false });
+      .toMatchObject({ kind: 'blocked', label: 'Not sending: the agent hasn’t saved its answer yet', action: null, live: false });
     expect(dispatchStatus({ binding: binding(), closed: false, needsDecision: true }).label).toBe('Not sending: a message needs your decision');
     expect(dispatchStatus({ binding: binding({ connection_state: 'disconnected' }), closed: false, agent: 'codex' }))
       .toMatchObject({ kind: 'disconnected', label: 'Disconnected', reason: 'codex is disconnected' });
@@ -35,6 +35,13 @@ describe('dispatch status in the owner’s words', () => {
   it('a recovery blocker outranks the owner’s pause: Resume cannot clear it', () => {
     expect(dispatchStatus({ binding: binding({ owner_paused: true, pause_reason: 'uncertain' }), closed: false }))
       .toMatchObject({ kind: 'blocked', label: 'Not sending: Ariadne isn’t sure your last message arrived', action: null });
+  });
+  it('shows a neutral wait for an answer when the agent already has the message', () => {
+    const waiting = dispatchStatus({ binding: binding({ pause_reason: 'result_missing', dispatch_state: 'recovery_required' }),
+      closed: false, needsDecision: true, waitingAnswer: 'What is the state today?', agent: 'claude-code' });
+    expect(waiting).toMatchObject({ kind: 'waiting', label: 'Waiting for claude-code to answer “What is the state today?”', action: null, live: false });
+    expect(waiting.color).not.toBe('var(--a-warn)');
+    expect(pausedNote(waiting, 'claude-code')).toContain('Your next message waits here until this is answered or you stop waiting.');
   });
   it('takes the supervisor’s health only when it is unhealthy, with the retry countdown', () => {
     expect(dispatchStatus({ binding: binding(), closed: false, health: health() }).label).toBe('Sending');

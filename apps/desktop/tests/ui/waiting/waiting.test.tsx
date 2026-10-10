@@ -557,8 +557,11 @@ describe('source-backed Waiting and Sent panel', () => {
     act(() => { transport.emit('ariadne://supervisor_health', { ...health, state: 'running', reason: null, retry_in_seconds: null, updated_at: new Date(Date.now() + 1_000).toISOString() }); });
     await waitFor(() => expect(row().textContent).toContain('Queued behind your message on “Implement receipt lookup”'));
   });
-  it('cancels an in-flight Sent message too, keeping its delivery line', async () => {
-    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
+  it('cancels an in-flight message before the agent receives it, keeping its delivery line', async () => {
+    const { store, transport, drafts } = setup(), seed = fixture().session as Session;
+    const attempt = seed.inputs[inputId('72')]!.attempts[0]!;
+    attempt.acceptance = 'prepared'; attempt.host_turn_id = null; attempt.turn_state = 'unknown';
+    transport.capture(seed); await store.start();
     const open = vi.fn(), reveal = vi.fn();
     render(<WaitingColumn store={store} drafts={drafts()} revealItem={reveal} openSession={open} />);
     const row = sentRow('Implement receipt lookup');
@@ -570,6 +573,13 @@ describe('source-backed Waiting and Sent panel', () => {
     const cancel = transport.calls.find(call => call.name === 'input_cancel')!.request as { command: { params: unknown } };
     expect(cancel.command.params).toEqual({ input_id: inputId('72'), expected_revision: demo.revision });
     expect(reveal).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
+  });
+  it('hides Cancel message after the agent receives an in-flight message', async () => {
+    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
+    render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
+    const row = sentRow('Implement receipt lookup');
+    expect(row.querySelector('.waiting-sent-line')).toBeTruthy();
+    expect(within(row).queryByRole('button', { name: 'Cancel message' })).toBeNull();
   });
   it('retries a stopped Sent message in one click, as the owner’s word that the agent is idle', async () => {
     const { store, transport, drafts } = setup(); transport.capture(); await store.start();

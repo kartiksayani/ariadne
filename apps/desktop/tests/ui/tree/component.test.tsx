@@ -815,6 +815,23 @@ describe('stopped deliveries in the tree', () => {
   // Input 74 (item 7) stopped mid-delivery; on the active binding it is a recovery target.
   const active = (transport: AppTransport) => { const session = transport.sessions.get(route.session_id)!; session.inputs[stopped]!.binding_id = session.active_binding_id!; };
   const banner = () => screen.queryByRole('region', { name: 'Delivery recovery' });
+  it('keeps a delivered topic reply neutral in both the sticky line and its recovery note', async () => {
+    let topicName = '';
+    await mount({ configure: transport => {
+      const session = transport.sessions.get(route.session_id)!, input = session.inputs[stopped]!, attempt = input.attempts[0]!;
+      topicName = session.topics[input.target.topic_id]!.name;
+      input.target.item_id = null; input.kind = 'topic_reply';
+      attempt.acceptance = 'accepted'; attempt.host_turn_id = 'turn-example'; attempt.turn_state = 'completed'; attempt.result_state = 'missing';
+      attempt.error = { code: 'result_missing', reason: 'No saved result.', retryable: false, observed_at: session.updated_at };
+    } });
+    const band = topicRow(topicName), line = band.querySelector<HTMLElement>('.tree-topic-status')!;
+    expect(line.textContent).toBe('demo.local has your message but hasn’t saved its answer yet. It may still be working.');
+    expect(line.style.color).not.toBe('var(--a-warn)');
+    const fix = band.parentElement!.querySelector<HTMLElement>('.stuck-note[data-stuck="answer"]')!;
+    expect(fix.textContent).not.toMatch(/Couldn’t deliver|Not delivered/);
+    expect(within(fix).getByRole('button', { name: 'Ask for the answer' })).toBeTruthy();
+    expect(within(fix).queryByRole('button', { name: 'Cancel message' })).toBeNull();
+  });
   it('answers it on the item row: Couldn’t deliver, Retry in one click, without selecting the row', async () => {
     // On its own (old) binding there is no presence: Retry is the owner's word that the agent is idle.
     const { transport, calls } = await mount();

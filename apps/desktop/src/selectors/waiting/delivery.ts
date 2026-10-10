@@ -1,5 +1,6 @@
 import type { BindingSummary, Input, PresenceObservation, Session } from '../../generated/domain/models';
 import type { Immutable } from '../../data';
+import { awaitingAnswer } from './stuck';
 
 export type DeliveryKind = 'cancelled' | 'skipped' | 'handled' | 'uncertain' | 'rejected' | 'failed'
   | 'missing' | 'waiting_result' | 'published' | 'received' | 'sent' | 'sending' | 'queued' | 'saved' | 'unavailable';
@@ -49,6 +50,7 @@ export function deliveryEvidence(input: Immutable<Input>, binding: Immutable<Bin
     && receipt.result.data.attempt_id === attempt.id));
   if (conflict || attempt.acceptance === 'uncertain' || attempt.error?.code === 'protocol_conflict'
       || attempt.error?.code === 'delivery_uncertain') return evidence('uncertain');
+  if (awaitingAnswer(input)) return evidence('missing');
   if (attempt.acceptance === 'rejected') return evidence('rejected');
   if (attempt.turn_state === 'failed' || attempt.turn_state === 'interrupted') return evidence('failed');
   if (attempt.result_state === 'missing') return evidence('missing');

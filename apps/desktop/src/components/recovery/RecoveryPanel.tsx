@@ -10,11 +10,12 @@ import { useSession, type Immutable } from '../../data';
 import type { OwnerCommand } from '../../generated/core';
 import type { Attempt, Input, ResolutionKind, Session, TurnState } from '../../generated/domain/models';
 import { Dialog } from '../../ui/dialogs/Dialog';
+import { ConfirmDialog } from '../../ui/dialogs/ConfirmDialog';
 import { agentName } from '../../ui/shell/model';
 import { ActionFailure } from '../edge-states/EdgeState';
 import { SessionActions, useSessionActions } from '../bindings/actions';
 import { qualifiedPresence } from '../bindings/presence';
-import { inputAbout, recoveryProblem, stoppedAttempt } from '../../selectors/waiting/stuck';
+import { awaitingAnswer, inputAbout, keepsLateAnswer, recoveryProblem, stoppedAttempt } from '../../selectors/waiting/stuck';
 import { targetRemoved } from '../../selectors/removed';
 import '../bindings/controls.css';
 
@@ -77,22 +78,25 @@ export function RecoveryPanel({ actions }: { actions: SessionActions }) {
   const [selected, setSelected] = useState<{ inputId: string; attemptId: string } | null>(null);
   /** The simple path's attestation, per message: the owner checked the agent isn't working on it. */
   const [checked, setChecked] = useState<string | null>(null);
+  const [resending, setResending] = useState<{ inputId: string; attemptId: string } | null>(null);
   const snapshot = state.snapshot?.session;
   if (!snapshot) return null;
   const targets = recoveryTargets(snapshot).filter(({ input, attempt }) => !inline(shown, input, attempt));
   // Everything that needs a decision is on a visible row: no banner.
-  if (!targets.length && !selected) return null;
+  if (!targets.length && !selected && !resending) return null;
   const binding = snapshot.active_binding_id ? snapshot.bindings[snapshot.active_binding_id] : null;
   const agent = binding ? agentName(binding.adapter_id) : 'the agent';
   const presence = binding ? qualifiedPresence(binding, state.presence[binding.id]) : null;
   const disabled = state.status !== 'ready' || !!state.error || operation.writing || !!operation.pending;
   /** Mark as handled / Send again / Mark as done: reason may be empty; evidence only when liveness is unknown. */
-  const quick = (input: Immutable<Input>, attempt: Immutable<Attempt>, kind: 'accept_result' | 'resend' | 'skip') => {
+  const quick = (input: Immutable<Input>, attempt: Immutable<Attempt>, kind: 'accept_result' | 'resend' | 'skip' | 'request_result_repair') => {
     if (disabled || kind === 'resend' && targetRemoved(snapshot, input.target)) return;
     const evidence = kind === 'accept_result' || presence?.idle ? null : attestIdle();
     void actions.execute(resolveCommand({ input_id: input.id, attempt_id: attempt.id, expected_revision: snapshot.revision,
       decision: kind, reason: '', evidence }), snapshot.revision);
   };
+  const resend = resending ? targets.find(({ input, attempt }) => input.id === resending.inputId && attempt.id === resending.attemptId
+    && awaitingAnswer(input)) : null;
   const about = inputAbout;
   return <section className="lifecycle-recovery" aria-label="Delivery recovery">
     {!selected && <ActionFailure actions={actions} />}
@@ -100,13 +104,14 @@ export function RecoveryPanel({ actions }: { actions: SessionActions }) {
     {targets.map(({ input, attempt }) => {
       const current = input.active_attempt_id === attempt.id && attempt.sealed_at === null && input.state === 'needs_attention';
       const committed = current && attempt.result_state === 'committed';
+      const waiting = current && awaitingAnswer(input);
       const binned = targetRemoved(snapshot, input.target);
       // Without machine evidence that the agent is idle, Send again / Mark as done need the owner's word.
       const needsCheck = current && !committed && !presence?.idle;
       const ready = !disabled && !(current && !committed && presence?.busy) && (!needsCheck || checked === input.id);
       return <article className="lifecycle-recovery-row" key={`${input.id}/${attempt.id}`} data-input-id={input.id} data-attempt-id={attempt.id}>
         <div className="recovery-text"><strong>Your message on “{about(input)}”</strong>
-          <p>{recoveryProblem(attempt, agent)}{current && !committed && !binned ? ' Send it again, or mark it done?' : ''}</p>
+          <p>{recoveryProblem(attempt, agent)}{current && !committed && !waiting && !binned ? ' Send it again, or mark it done?' : ''}</p>
           {binned && <p>{binnedMessage}</p>}
           {current && !committed && presence?.busy && <p role="alert">{agent} is still working. Wait, or stop it in the terminal first.</p>}
           {needsCheck && !presence?.busy && <label className="recovery-check"><input type="checkbox" disabled={disabled} checked={checked === input.id}
@@ -115,9 +120,14 @@ export function RecoveryPanel({ actions }: { actions: SessionActions }) {
           {committed && <button type="button" className="btn btn-primary" disabled={disabled} onClick={() => quick(input, attempt, 'accept_result')}>
             Mark as handled — the agent saved its answer</button>}
           {current && !committed && <>
-            {!binned && <button type="button" className="btn btn-primary" disabled={!ready} title="Sending again may repeat work the agent already did."
-              onClick={() => quick(input, attempt, 'resend')}>Send again</button>}
-            <button type="button" className="btn btn-secondary" disabled={!ready} onClick={() => quick(input, attempt, 'skip')}>Mark as done</button></>}
+            {waiting && !binned && attempt.turn_state === 'completed' && !attempt.domain_result && <button type="button" className="btn btn-primary" disabled={!ready}
+              title="Ask the agent to save its answer without repeating the work" onClick={() => quick(input, attempt, 'request_result_repair')}>Ask for the answer</button>}
+            {waiting && <button type="button" className="btn btn-secondary" disabled={!ready}
+              title={keepsLateAnswer(snapshot, input) ? `Stop waiting for an answer. If ${agent} answers later, its answer will still show.` : 'Stop waiting for an answer.'}
+              onClick={() => quick(input, attempt, 'skip')}>Stop waiting</button>}
+            {!binned && <button type="button" className={`btn ${waiting ? 'btn-ghost' : 'btn-primary'}`} disabled={!ready} title="Sending again may repeat work the agent already did."
+              onClick={() => { if (waiting) setResending({ inputId: input.id, attemptId: attempt.id }); else quick(input, attempt, 'resend'); }}>Send again</button>}
+            {!waiting && <button type="button" className="btn btn-secondary" disabled={!ready} onClick={() => quick(input, attempt, 'skip')}>Mark as done</button>}</>}
           <details className="recovery-advanced"><summary>Advanced</summary>
             <button type="button" className="btn btn-ghost" disabled={disabled}
               onClick={() => setSelected({ inputId: input.id, attemptId: attempt.id })}>Review recovery</button></details>
@@ -127,6 +137,10 @@ export function RecoveryPanel({ actions }: { actions: SessionActions }) {
     {operation.receipt && 'data' in operation.receipt && operation.receipt.data.kind === 'input_resolve'
       && <p role="status">Saved. Sending resumes by itself once nothing else needs your decision.</p>}
     {selected && <RecoveryReview actions={actions} inputId={selected.inputId} attemptId={selected.attemptId} onClose={() => setSelected(null)} />}
+    {resending && <ConfirmDialog title="Send again?" body={`${agent} already has this message. Send it again anyway?`} confirmLabel="Send again"
+      busy={disabled || !resend || !!presence?.busy || !presence?.idle && checked !== resending.inputId
+        || !!resend && targetRemoved(snapshot, resend.input.target)} onCancel={() => setResending(null)}
+      onConfirm={() => { if (resend) quick(resend.input, resend.attempt, 'resend'); setResending(null); }} />}
   </section>;
 }
 
@@ -157,6 +171,8 @@ export function RecoveryReview({ actions, inputId, attemptId, onClose }: Recover
   const disabled = state.status !== 'ready' || !!state.error || operation.writing || !!operation.pending;
   const changed = revision !== snapshot.revision || !target;
   const available = target ? choices(target.input, target.attempt, snapshot) : [];
+  const waiting = !!target && awaitingAnswer(target.input);
+  const label = (kind: ResolutionKind) => waiting && kind === 'skip' ? 'Stop waiting' : waiting && kind === 'request_result_repair' ? 'Ask for the answer' : labels[kind];
   const allowed = !!decision && available.some(choice => choice === decision);
   const close = () => { if (!operation.writing) onClose(); };
   const submit = async () => {
@@ -191,13 +207,15 @@ export function RecoveryReview({ actions, inputId, attemptId, onClose }: Recover
           </div>)}</details>
           {target.input.resolution_history.map(entry => <p key={entry.op_id}>{labels[entry.kind]} · {entry.reason || 'no reason given'} · {entry.at}</p>)}
           <label>Recovery choice<select tabIndex={0} value={decision} disabled={operation.writing || !!operation.pending} onChange={event => { setDecision(event.target.value as ResolutionKind | ''); setDuplicate(false); }}>
-            <option value="">Choose deliberately</option>{available.map(choice => <option key={choice} value={choice}>{labels[choice]}</option>)}
+            <option value="">Choose deliberately</option>{available.map(choice => <option key={choice} value={choice}>{label(choice)}</option>)}
           </select></label>
           <label>Reason<input value={reason} required disabled={operation.writing || !!operation.pending} onChange={event => setReason(event.target.value)} /></label>
           {decision === 'request_result_repair' && <p>Request a new result-only model turn that inspects completed work. It can still make mistakes. Review prior effects before resuming.</p>}
-          {decision === 'skip' && <p>This records Skipped, preserving prior results and replies. It does not mark the message as handled.</p>}
+          {decision === 'skip' && <p>{waiting ? keepsLateAnswer(snapshot, target!.input) ? `Stop waiting for an answer. If ${agent} answers later, its answer will still show.` : 'Stop waiting for an answer.'
+            : 'This records Skipped, preserving prior results and replies. It does not mark the message as handled.'}</p>}
           {decision === 'resend' && <><p className="pw-dialog-warn" role="alert">Resending may repeat work and side effects. Ariadne cannot guarantee exactly-once host execution after a lost acknowledgement.</p>
-            <label><input type="checkbox" disabled={operation.writing || !!operation.pending} checked={duplicate} onChange={event => setDuplicate(event.target.checked)} />I reviewed the duplicate-work risk.</label></>}
+            <label><input type="checkbox" disabled={operation.writing || !!operation.pending} checked={duplicate} onChange={event => setDuplicate(event.target.checked)} />{waiting
+              ? `${agent} already has this message. Send it again anyway?` : 'I reviewed the duplicate-work risk.'}</label></>}
           {decision === 'confirm_evidence' && <><p>Record attributed owner evidence. This does not create an agent result or successful host completion.</p>
             <label>Observed outcome<select tabIndex={0} value={turn} disabled={operation.writing || !!operation.pending} onChange={event => setTurn(event.target.value as TurnState)}>
               {(['unknown', 'running', 'completed', 'failed', 'interrupted'] as const).map(value => <option key={value}>{value}</option>)}</select></label>

@@ -10,7 +10,7 @@ import { indexSession, type Immutable } from '../../data';
 import type { SupervisorHealth } from '../../data/service';
 import { normalizeSearch, sameOwner } from '../../selectors/tree/rows';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
-import { stuckInput, type Stuck } from '../../selectors/waiting/stuck';
+import { agentReceived, stoppedAttempt, stuckInput, type Stuck } from '../../selectors/waiting/stuck';
 import { deliveryLine as deliveryText, deliveryStage } from '../answer/delivery';
 import { agentLine, agentName, dayWord, hostApp, ownerName, sessionLabel, sessionRange } from '../shell/model';
 import { STATUS, statusKey, type StatusKey } from '../shared/status';
@@ -111,7 +111,11 @@ export function deliveryLine(session: Immutable<Session>, target: { readonly top
   const label = inputLabel(input, item?.options ?? []), agent = binding ? agentName(binding.adapter_id) : 'the agent';
   const stage = deliveryStage(evidence.kind);
   const note = input.state === 'needs_attention' ? stuckInput(session, input, presence, health) : null;
-  if (note) return { ...deliveryText('failed', input.kind, label, agent), failed: true, stuck: { input, note } };
+  if (note) {
+    const delivered = agentReceived(stoppedAttempt(input));
+    return { ...deliveryText(delivered ? 'waiting_answer' : 'failed', input.kind, label, agent),
+      ...(delivered ? { text: note.text } : {}), failed: !delivered, stuck: { input, note } };
+  }
   // A topic reply not sent yet is answered on the band: Edit puts it back in the reply box, Delete drops it.
   const queued = target.itemId === null && input.state === 'queued' ? stuckInput(session, input, presence, health) : null;
   return stage ? { ...deliveryText(stage, input.kind, label, agent), failed: stage === 'failed', stuck: queued ? { input, note: queued } : null } : null;

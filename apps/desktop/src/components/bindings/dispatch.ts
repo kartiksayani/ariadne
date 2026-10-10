@@ -9,7 +9,7 @@ import type { ConnectionState, DispatchState, PauseReason, PresenceObservation }
 import type { Immutable } from '../../data/session-store';
 import { connectionOf } from '../../ui/shared/connection';
 
-export type DispatchKind = 'sending' | 'paused' | 'blocked' | 'reconnecting' | 'disconnected' | 'closed' | 'none';
+export type DispatchKind = 'sending' | 'paused' | 'blocked' | 'waiting' | 'reconnecting' | 'disconnected' | 'closed' | 'none';
 
 export interface DispatchStatus {
   readonly kind: DispatchKind;
@@ -38,6 +38,8 @@ export interface DispatchFacts {
   readonly closed: boolean;
   /** An input on this binding waits for the owner's recovery decision. */
   readonly needsDecision?: boolean;
+  /** Words of the delivered message whose answer is still missing. */
+  readonly waitingAnswer?: string | null;
   readonly presence?: Immutable<PresenceObservation> | null;
   /** The desktop supervisor's health for this binding generation; null when unknown (Claude Code bindings have none). */
   readonly health?: SupervisorHealth | null;
@@ -48,7 +50,7 @@ export interface DispatchFacts {
 }
 
 const reasons: Readonly<Record<PauseReason, string>> = {
-  result_missing: 'the agent finished without saving its answer',
+  result_missing: 'the agent hasn’t saved its answer yet',
   uncertain: 'Ariadne isn’t sure your last message arrived',
   host_failure: 'the agent’s last turn failed',
   store_error: 'Ariadne couldn’t save to disk',
@@ -75,9 +77,13 @@ export function healthReason(health: SupervisorHealth | null | undefined, now = 
   return left > 0 ? `${reason} · retrying in ${Math.ceil(left)}s` : `${reason} · retrying now`;
 }
 
-export function dispatchStatus({ binding, closed, needsDecision = false, presence = null, health = null, agent = 'the agent', now = Date.now() }: DispatchFacts): DispatchStatus {
+export function dispatchStatus({ binding, closed, needsDecision = false, waitingAnswer = null, presence = null, health = null, agent = 'the agent', now = Date.now() }: DispatchFacts): DispatchStatus {
   if (!binding) return status('none', 'No agent connected', null, null, neutral);
   if (closed) return status('closed', 'Session closed', 'the session is closed', null, neutral);
+  if (waitingAnswer !== null) {
+    const text = `Waiting for ${agent} to answer “${waitingAnswer.length > 40 ? `${waitingAnswer.slice(0, 38).trimEnd()}…` : waitingAnswer}”`;
+    return status('waiting', text, text, null, neutral);
+  }
   const connection = connectionOf(binding, presence);
   if (connection === 'not_running') {
     return status('disconnected', 'Disconnected', binding.connection_state === 'disconnected' || binding.dispatch_state === 'disconnected'
@@ -97,6 +103,7 @@ export function dispatchStatus({ binding, closed, needsDecision = false, presenc
 
 /** The editors' inline warning while sending is paused or blocked; null while sending. */
 export function pausedNote(dispatch: DispatchStatus, agent: string): string | null {
+  if (dispatch.kind === 'waiting') return `${dispatch.label}. Your next message waits here until this is answered or you stop waiting.`;
   if (dispatch.kind === 'paused') return `Sending is paused — your message waits here until you resume.`;
   if (dispatch.kind === 'blocked') return `Not sending to ${agent}: ${dispatch.reason}. Your message waits until that’s sorted.`;
   return null;
