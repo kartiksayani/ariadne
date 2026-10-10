@@ -67,8 +67,9 @@ pub(crate) fn join(session: &mut Session, input_id: &UuidV4, attempt_id: &UuidV4
     }
 }
 
-/// Handle an input whose unsealed attempt committed its result: seal the
-/// attempt, free the binding and lift any barrier the input caused.
+/// Handle an input whose attempt committed its result: seal the attempt if
+/// needed, free the binding and lift any barrier the input caused. A late result
+/// keeps the original owner decision's seal time.
 pub(crate) fn handle_committed(
     session: &mut Session,
     input_id: &UuidV4,
@@ -81,7 +82,7 @@ pub(crate) fn handle_committed(
         .iter_mut()
         .find(|a| &a.id == attempt_id)
         .expect("validated attempt");
-    attempt.sealed_at = Some(at.clone());
+    attempt.sealed_at.get_or_insert_with(|| at.clone());
     input.state = InputState::Handled;
     input.active_attempt_id = None;
     let binding_id = input.binding_id.clone();

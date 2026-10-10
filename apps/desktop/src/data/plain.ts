@@ -21,7 +21,7 @@ const WORDS: Readonly<Partial<Record<CoreErrorCode, string>>> = {
   unhandled_owner_message: 'The agent hasn’t handled an earlier message yet. Wait for it, then try again.',
   result_already_committed: 'The agent already saved its answer.',
   attempt_sealed: 'That message was already settled.',
-  result_missing: 'The agent finished without saving its answer.',
+  result_missing: 'The agent hasn’t saved its answer yet. It may still be working.',
   delivery_uncertain: 'Ariadne isn’t sure whether the agent got the message. Check before sending it again.',
   queue_full: 'Too many messages are waiting. Let the agent catch up, then try again.',
   topic_not_archivable: 'This topic can’t be archived right now.',

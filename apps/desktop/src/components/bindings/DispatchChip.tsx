@@ -8,6 +8,7 @@ import { connectionOf, type Connection } from '../../ui/shared/connection';
 import { useSessionActions, type SessionActions } from './actions';
 import { dispatchStatus, pausedNote, type DispatchStatus } from './dispatch';
 import { useSupervisorHealth } from './health';
+import { awaitingAnswer, sentLabel, stoppedAttempt } from '../../selectors/waiting/stuck';
 import './controls.css';
 
 export interface DispatchControl {
@@ -35,7 +36,10 @@ export function useDispatch(actions: SessionActions): DispatchControl {
   const agent = binding ? agentName(binding.adapter_id) : 'the agent';
   const needsDecision = !!binding && Object.values(session?.inputs ?? {}).some(input => input?.binding_id === binding.id && input.state === 'needs_attention');
   const presence = binding ? state.presence[binding.id] ?? null : null;
-  const status = dispatchStatus({ binding, closed: session?.state === 'closed', needsDecision, presence, health, agent });
+  const waiting = Object.values(session?.inputs ?? {}).filter(input => !!input && input.binding_id === binding?.id
+    && awaitingAnswer(input) && stoppedAttempt(input)?.binding_generation === binding?.generation).sort((a, b) => a!.seq - b!.seq)[0];
+  const status = dispatchStatus({ binding, closed: session?.state === 'closed', needsDecision,
+    waitingAnswer: waiting ? sentLabel(waiting) || 'your message' : null, presence, health, agent });
   const connection = connectionOf(binding, presence);
   const busy = !session || state.status !== 'ready' || !!state.error || operation.writing || !!operation.pending;
   const [error, setError] = useState<string | null>(null);

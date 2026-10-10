@@ -54,6 +54,11 @@ pub(super) fn commit<F: FnMut() -> UuidV4>(
         }
     }
     let revision = increment(session.revision)?;
+    let late_result = {
+        let input = &session.inputs.0[input_id];
+        let attempt = input.attempts.iter().find(|a| &a.id == attempt_id).unwrap();
+        ariadne_domain::history::stopped_waiting_for_result(input, attempt)
+    };
     let input = session.inputs.0.get_mut(input_id).unwrap();
     let attempt = input
         .attempts
@@ -76,6 +81,10 @@ pub(super) fn commit<F: FnMut() -> UuidV4>(
     attempt.result_state = ResultState::Committed;
     *session = link_result_history(session, input_id, attempt_id, &[], batch.at.clone())
         .map_err(history)?;
-    crate::delivery_join::join(session, input_id, attempt_id, batch.at);
+    if late_result {
+        crate::delivery_join::handle_committed(session, input_id, attempt_id, batch.at);
+    } else {
+        crate::delivery_join::join(session, input_id, attempt_id, batch.at);
+    }
     Ok(())
 }

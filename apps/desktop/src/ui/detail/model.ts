@@ -13,7 +13,7 @@ import { excerptView, messageNumber, type ExcerptView } from '../shared/excerpt'
 import { statusKey, type StatusKey } from '../shared/status';
 import { deliveryLine as deliveryText, deliveryStage, deliverySteps, type DeliveryStage } from '../answer/delivery';
 import { displayStatus } from '../../selectors/waiting/replied';
-import { counted, heldInput, notSent, stuckInput, withdrawn, type NotSent, type Stuck } from '../../selectors/waiting/stuck';
+import { agentReceived, counted, heldInput, notSent, stoppedAttempt, stuckInput, withdrawn, type NotSent, type Stuck } from '../../selectors/waiting/stuck';
 import { relatedItems } from '../../selectors/related';
 import { hiddenItems } from '../tree/hidden';
 
@@ -145,7 +145,7 @@ const byDecisionThenNewest = (a: Immutable<Input>, b: Immutable<Input>) =>
  */
 function submission(session: Immutable<Session>, item: Immutable<Item>, saving: InputKind | null) {
   if (saving) return { kind: saving, stage: 'sending' as DeliveryStage, label: '' };
-  // Cancelled and skipped inputs never reached the agent; they leave no trace here.
+  // Settled inputs no longer need a delivery tracker.
   const inputs = Object.values(session.inputs).filter((input): input is Immutable<Input> => !!input && input.target.item_id === item.id
     && (ACTIVE_INPUT.has(input.state) || (input.state === 'handled' && TRACKED.has(input.kind)))).sort((a, b) => b.seq - a.seq);
   const latest = inputs.find(input => ACTIVE_INPUT.has(input.state)) ?? inputs[0];
@@ -186,6 +186,12 @@ function sentView(input: Immutable<Input>): Pick<PendingView, 'how' | 'text' | '
   return option ? { how: 'chose', text: option.label, note: input.payload.text } : { how: 'said', text: input.payload.text, note: '' };
 }
 const CAPTION: Readonly<Partial<Record<Input['state'], string>>> = { queued: 'Not sent yet', in_flight: 'On its way', needs_attention: 'Not delivered' };
+function caption(input: Immutable<Input>): string {
+  const attempt = stoppedAttempt(input);
+  if (attempt?.acceptance === 'uncertain' && attempt.host_turn_id) return 'Checking…';
+  if (agentReceived(attempt) && attempt?.result_state !== 'committed' && (attempt?.turn_state === 'failed' || attempt?.turn_state === 'interrupted')) return 'Delivered · stopped before answering';
+  return agentReceived(attempt) ? attempt?.result_state === 'committed' ? 'Delivered' : 'Delivered · no answer yet' : CAPTION[input.state] ?? '';
+}
 
 const kid = (item: Immutable<Item>): Kid => ({ id: item.id, question: item.question, status: statusKey[item.status], closed: closedStatus.has(statusKey[item.status]) });
 
@@ -225,7 +231,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
   const newest = active.at(-1);
   const held = !saving && !!newest && heldInput(session, newest);
   const stuck = !saving && tracked ? stuckInput(session, tracked, presence, health) : null;
-  const outbox = active.map((input): PendingView => ({ input, ...sentView(input), caption: CAPTION[input.state] ?? '',
+  const outbox = active.map((input): PendingView => ({ input, ...sentView(input), caption: caption(input),
     stuck: saving ? null : stuckInput(session, input, presence, health) }));
   const pending = !!sub?.stage && sub.stage !== 'failed' && !held;
   const outLabel = status === 'done' && item.type === 'explanation' ? 'Explained' : OUTLBL[status];

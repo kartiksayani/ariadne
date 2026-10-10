@@ -117,3 +117,7 @@ pending messages and live conversations elsewhere.
 
 [ADR-0097](ADR-0097-agent-delete-bin.md) lets agents remove items, subtrees and
 whole topics into a recoverable bin, with visible owner notices and exact Restore.
+
+[ADR-0098](ADR-0098-stop-waiting-keeps-late-results.md) makes missing-result Skip
+mean Stop waiting: dispatch moves on, while a valid late result from that exact
+accepted, completed attempt still saves its answer and handles the input.

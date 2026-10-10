@@ -2,7 +2,7 @@
 
 Status: accepted (2026-10-07).
 Supersedes: none (amends one rule of ADR-0036)
-Superseded by: none
+Superseded by: [ADR-0098](ADR-0098-stop-waiting-keeps-late-results.md) only for result-write finality after missing-result Skip. Expiry, dispatch barriers, late host facts and all other controls remain unchanged.
 
 ## Context
 

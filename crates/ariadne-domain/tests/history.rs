@@ -593,6 +593,100 @@ fn close_and_explicit_historical_replies_never_reopen_a_round() {
 }
 
 #[test]
+fn stopped_waiting_allows_a_late_reply_without_reactivating_the_attempt() {
+    let queued = record(
+        &seed(),
+        item("1"),
+        1,
+        InputKind::Reply,
+        "Owner request",
+        None,
+        None,
+    );
+    let mut skipped = stage_attempt(queued, 1);
+    let input = skipped.inputs.0.get_mut(&id(401)).unwrap();
+    input.state = InputState::Skipped;
+    input.active_attempt_id = None;
+    input.attempts[0].turn_state = TurnState::Completed;
+    input.attempts[0].result_state = ResultState::Missing;
+    input.attempts[0].sealed_at = Some(at());
+    input.attempts[0].error = Some(AttemptError {
+        code: "result_missing".into(),
+        reason: "Missing result".into(),
+        retryable: false,
+        observed_at: at(),
+    });
+    input.resolution_history.push(ResolutionHistoryEntry {
+        op_id: id(950),
+        kind: ResolutionKind::Skip,
+        reason: String::new(),
+        at: at(),
+        attempt_id: id(601),
+        evidence: None,
+    });
+    let draft = ReplyDraft {
+        message_id: id(900),
+        item_id: item("1"),
+        text: "Delayed answer".into(),
+        round_id: None,
+        at: at(),
+    };
+    for acceptance in [AcceptanceState::Accepted, AcceptanceState::Prepared] {
+        let mut candidate = skipped.clone();
+        let attempt = &mut candidate.inputs.0.get_mut(&id(401)).unwrap().attempts[0];
+        attempt.acceptance = acceptance;
+        if attempt.acceptance == AcceptanceState::Accepted {
+            attempt.host_turn_id = None; // Acceptance alone is sufficient.
+        }
+        let result = append_reply(&candidate, &source(1), draft.clone()).unwrap();
+        assert_eq!(result.inputs, candidate.inputs);
+        assert_eq!(result.bindings, candidate.bindings);
+        let reply = result.messages.last().unwrap();
+        assert_eq!(reply.body, "Delayed answer");
+        assert_eq!(reply.input_id, Some(id(401)));
+        assert_eq!(reply.attempt_id, Some(id(601)));
+        assert_eq!(
+            reply.host_turn_id,
+            candidate.inputs.0[&id(401)].attempts[0].host_turn_id
+        );
+    }
+    for invalidation in [
+        "no_evidence",
+        "uncertain",
+        "failed",
+        "resend",
+        "replaced",
+        "cancelled",
+    ] {
+        let mut candidate = skipped.clone();
+        let input = candidate.inputs.0.get_mut(&id(401)).unwrap();
+        match invalidation {
+            "no_evidence" => {
+                input.attempts[0].acceptance = AcceptanceState::Prepared;
+                input.attempts[0].host_turn_id = None;
+            }
+            "uncertain" => input.attempts[0].acceptance = AcceptanceState::Uncertain,
+            "failed" => input.attempts[0].turn_state = TurnState::Failed,
+            "resend" => input.resolution_history.last_mut().unwrap().kind = ResolutionKind::Resend,
+            "replaced" => input.attempts.push(attempt(2)),
+            "cancelled" => input.state = InputState::Cancelled,
+            _ => unreachable!(),
+        }
+        assert!(
+            !stopped_waiting_for_result(
+                &candidate.inputs.0[&id(401)],
+                &candidate.inputs.0[&id(401)].attempts[0]
+            ),
+            "{invalidation}"
+        );
+        assert!(
+            append_reply(&candidate, &source(1), draft.clone()).is_err(),
+            "{invalidation}"
+        );
+    }
+}
+
+#[test]
 fn replies_require_exact_binding_attempt_and_round_provenance() {
     let queued = record(
         &ask(&seed(), 1),
