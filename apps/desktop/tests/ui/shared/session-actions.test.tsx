@@ -81,13 +81,16 @@ describe('session actions', () => {
     expect(screen.getByRole('menu')).toBeTruthy();
     expect(document.activeElement).toBe(option('Copied'));
     expect(container.innerHTML).not.toContain(bar.sessionId);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(trigger());
   });
 
   it('closes the menu for Rename, saves the fields and returns focus to the trigger', async () => {
-    const rename = vi.fn(async () => null), close = vi.fn();
+    const rename = vi.fn(async () => null), close = vi.fn(), user = userEvent.setup();
     render(<SessionBar bar={bar} busy={false} onClose={close} onRename={rename} />);
-    fireEvent.click(trigger());
-    option('Rename').focus(); fireEvent.click(option('Rename'));
+    await user.click(trigger());
+    await user.click(option('Rename'));
     expect(screen.queryByRole('menu')).toBeNull();
     const field = screen.getByRole('textbox', { name: 'Session name' });
     expect(document.activeElement).toBe(field);
@@ -99,11 +102,34 @@ describe('session actions', () => {
     expect(document.activeElement).toBe(trigger());
   });
 
+  it.each(['Escape', 'Cancel', 'Save'])('returns focus after pointer Rename ends with %s without changing the name', async finish => {
+    const rename = vi.fn(async () => null), user = userEvent.setup();
+    render(<SessionBar bar={bar} busy={false} onClose={() => {}} onRename={rename} />);
+    await user.click(trigger());
+    await user.click(option('Rename'));
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Session name' }));
+    if (finish === 'Escape') await user.keyboard('{Escape}');
+    else await user.click(screen.getByRole('button', { name: finish }));
+    expect(screen.queryByRole('textbox', { name: 'Session name' })).toBeNull();
+    expect(rename).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(trigger());
+  });
+
   it('invokes Close once and dismisses its menu with focus on the trigger', async () => {
     const close = vi.fn(), user = userEvent.setup();
     render(<SessionBar bar={bar} busy={false} onClose={close} />);
     await user.click(trigger());
     await user.keyboard('{End} ');
+    expect(close).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(trigger());
+  });
+
+  it('focuses the trigger before a pointer Close hands control to the lifecycle review', async () => {
+    const close = vi.fn(() => { expect(document.activeElement).toBe(trigger()); }), user = userEvent.setup();
+    render(<SessionBar bar={bar} busy={false} onClose={close} />);
+    await user.click(trigger());
+    await user.click(option('Close session'));
     expect(close).toHaveBeenCalledOnce();
     expect(screen.queryByRole('menu')).toBeNull();
     expect(document.activeElement).toBe(trigger());

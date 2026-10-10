@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { sessionChrome } from './session-chrome';
+import { graphChrome } from './graph-chrome';
 import { itemRowChrome, topicRowChrome } from './row-chrome';
 
 export const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -20,7 +21,7 @@ import json, sys, zipfile
 with zipfile.ZipFile(sys.argv[1]) as archive:
     print(json.dumps({name.removeprefix(sys.argv[2]): archive.read(name).decode('utf-8') for name in archive.namelist() if not name.endswith('/')}))
 `, archive, prefix], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })) as Record<string, string>;
-  members['Ariadne.dc.html'] = topicRowChrome(sessionChrome(members['Ariadne.dc.html']!));
+  members['Ariadne.dc.html'] = graphChrome(topicRowChrome(sessionChrome(members['Ariadne.dc.html']!)));
   members['Item Row.dc.html'] = itemRowChrome(members['Item Row.dc.html']!);
   return members;
 }

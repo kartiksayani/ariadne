@@ -26,6 +26,16 @@ it('preserves mouse focus, opens into the menu with keyboard, and supports Arrow
   expect(screen.queryByRole('menu')).toBeNull(); expect(document.activeElement).toBe(trigger);
 });
 
+it('returns focus with Escape after pointer opening, including after a menu item takes focus', async () => {
+  const user = userEvent.setup(); render(menu());
+  const trigger = screen.getByRole('button', { name: 'Actions' });
+  await user.click(trigger); await user.keyboard('{Escape}');
+  expect(screen.queryByRole('menu')).toBeNull(); expect(document.activeElement).toBe(trigger);
+  await user.click(trigger); await user.click(screen.getByRole('menuitem', { name: 'Last' }));
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('menu')).toBeNull(); expect(document.activeElement).toBe(trigger);
+});
+
 it('lets unhandled app shortcuts propagate from the closed trigger and open menu', () => {
   const shortcut = vi.fn(); render(<div onKeyDown={shortcut}>{menu()}</div>);
   const trigger = screen.getByRole('button', { name: 'Actions' });

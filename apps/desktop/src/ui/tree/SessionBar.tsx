@@ -43,7 +43,7 @@ export function SessionBar({ bar, busy, onClose, dispatch, onRename }: {
             title="Give this session a name you will recognise" onClick={() => { close(true); setRenaming(true); }}>
             <i className="ph ph-pencil-simple" aria-hidden="true" />Rename</button>}
           {!bar.archived && !bar.closed && <button type="button" role="menuitem" className="btn btn-ghost" disabled={busy}
-            title="Mark this session Closed in Ariadne. The agent process isn’t touched." onClick={() => { close(); onClose(); }}>
+            title="Mark this session Closed in Ariadne. The agent process isn’t touched." onClick={() => { close(true); onClose(); }}>
             <i className="ph ph-x-circle" aria-hidden="true" />Close session</button>}
         </>}
       </ActionMenu>
