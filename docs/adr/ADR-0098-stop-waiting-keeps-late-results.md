@@ -18,10 +18,16 @@ while preserving the completed work's answer if it arrives later.
 - For a completed attempt with acceptance or a recorded host turn and an expired
   missing result, Skip means **Stop waiting**. It settles the input and releases
   its barrier as before.
+- Stop waiting applies to the current attempt only when its turn is completed,
+  its result state is missing and its error is `result_missing`. It requires no
+  idle evidence, even when the host is currently busy, and records only evidence
+  the owner actually supplied. Resend, result repair and other Skip cases retain
+  their idle observation or explicit attestation gate.
 - A later apply carrying `input_result` may commit against that exact skipped
   attempt. It saves the result and replies, marks the input handled, and retains
   the missing-result warning and owner decision in history. It neither restores
   the barrier nor clears a different input currently active on the binding.
+  The attempt keeps the original Stop waiting seal time.
 - This exception requires the original selected binding and generation, trusted
   issued grant, current target work, and the latest attempt and Skip decision.
   Cancellation, removal, resend, result repair, a replaced attempt and other

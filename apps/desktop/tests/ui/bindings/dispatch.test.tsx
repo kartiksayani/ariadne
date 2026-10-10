@@ -55,6 +55,19 @@ describe('dispatch status in the owner’s words', () => {
     // No entry (Claude Code bindings) is never "Not sending".
     expect(dispatchStatus({ binding: binding(), closed: false, health: null }).label).toBe('Sending');
   });
+  it('keeps disconnection, other pause reasons and unhealthy supervision visible while an answer is missing', () => {
+    const facts = { closed: false, waitingAnswer: 'What is the state today?', agent: 'claude-code', needsDecision: true };
+    expect(dispatchStatus({ ...facts, binding: binding({ connection_state: 'disconnected', pause_reason: 'result_missing' }) }))
+      .toMatchObject({ kind: 'disconnected', label: 'Disconnected' });
+    for (const reason of ['store_error', 'host_failure', 'incompatible', 'uncertain'] as const) {
+      expect(dispatchStatus({ ...facts, binding: binding({ pause_reason: reason }) }).kind).toBe('blocked');
+    }
+    expect(dispatchStatus({ ...facts, binding: binding({ pause_reason: 'store_error' }) }).label).toBe('Not sending: Ariadne couldn’t save to disk');
+    for (const state of ['stopped', 'backing_off'] as const) {
+      expect(dispatchStatus({ ...facts, binding: binding({ pause_reason: 'result_missing' }), health: health({ state, reason: 'The sender stopped' }) }))
+        .toMatchObject({ kind: 'blocked', label: 'Not sending: The sender stopped' });
+    }
+  });
   it('words the editors’ paused warning', () => {
     expect(pausedNote(dispatchStatus({ binding: binding({ owner_paused: true }), closed: false }), 'codex')).toMatch(/^Sending is paused/);
     expect(pausedNote(dispatchStatus({ binding: binding(), closed: false, needsDecision: true }), 'codex'))

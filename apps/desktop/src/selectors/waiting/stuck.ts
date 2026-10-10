@@ -16,7 +16,7 @@ import { agentName } from '../../ui/shell/model';
 import { targetRemoved } from '../removed';
 
 /** `sent` is on its way; `answer` waits for the agent to save an answer it already received. */
-export type StuckKind = 'held' | 'paused' | 'blocked' | 'behind' | 'busy' | 'waiting' | 'answer' | 'decision' | 'sent';
+export type StuckKind = 'held' | 'paused' | 'blocked' | 'behind' | 'busy' | 'waiting' | 'answer' | 'stopped' | 'checking' | 'decision' | 'sent';
 export interface Stuck {
   readonly kind: StuckKind;
   readonly text: string;
@@ -99,8 +99,10 @@ export function notSent(session: Immutable<Session>, message: Immutable<Message>
 export const counted = (session: Immutable<Session>, message: Immutable<Message>): boolean => !cancelledInput(session, message);
 
 /** What went wrong with a stopped delivery, in one plain sentence. */
-export function recoveryProblem(attempt: Immutable<Attempt>, agent: string): string {
+export function recoveryProblem(attempt: Immutable<Attempt>, agent: string, label?: string): string {
   if (attempt.result_state === 'committed') return `${agent} saved its answer, but the message wasn’t marked handled.`;
+  if (attempt.acceptance === 'uncertain' && attempt.host_turn_id) return `Checking whether ${label ? quoted(label) : 'your message'} was delivered…`;
+  if (agentReceived(attempt) && (attempt.turn_state === 'failed' || attempt.turn_state === 'interrupted')) return `${agent} got your message but stopped before answering.`;
   if (agentReceived(attempt)) return `${agent} has your message but hasn’t saved its answer yet. It may still be working.`;
   if (attempt.acceptance === 'uncertain') return `Ariadne isn’t sure it reached ${agent}.`;
   if (attempt.turn_state === 'completed') return `${agent} finished without saving its answer.`;
@@ -111,12 +113,18 @@ export function recoveryProblem(attempt: Immutable<Attempt>, agent: string): str
 
 /** Persisted claim evidence: the agent already has these words. */
 export const agentReceived = (attempt: Immutable<Attempt> | null | undefined): boolean =>
-  !!attempt && (attempt.acceptance === 'accepted' || !!attempt.host_turn_id);
+  !!attempt && attempt.acceptance !== 'uncertain' && attempt.acceptance !== 'rejected'
+    && (attempt.acceptance === 'accepted' || !!attempt.host_turn_id);
 
 export function awaitingAnswer(input: Immutable<Input>): boolean {
   const attempt = stoppedAttempt(input);
-  return agentReceived(attempt) && attempt?.result_state !== 'committed';
+  return agentReceived(attempt) && attempt?.result_state !== 'committed'
+    && attempt?.turn_state !== 'failed' && attempt?.turn_state !== 'interrupted';
 }
+
+/** Stop waiting for an expired answer sends nothing, so it needs no idle evidence. */
+export const skipWithoutIdle = (attempt: Immutable<Attempt> | null | undefined): boolean =>
+  attempt?.turn_state === 'completed' && attempt.result_state === 'missing' && attempt.error?.code === 'result_missing';
 
 /** The late-result exception applies only to Stop waiting after missing-result expiry. */
 export function keepsLateAnswer(session: Immutable<Session>, input: Immutable<Input>): boolean {
@@ -144,6 +152,8 @@ export function stuckInput(session: Immutable<Session>, input: Immutable<Input>,
     const attempt = stoppedAttempt(input), label = sentLabel(input);
     if (attempt?.result_state === 'committed') return stuck('decision', recoveryProblem(attempt, agent), { settle: 'accept_result' });
     if (awaitingAnswer(input)) return stuck('answer', recoveryProblem(attempt!, agent), { retry: true, settle: 'skip' });
+    if (agentReceived(attempt)) return stuck('stopped', recoveryProblem(attempt!, agent), { retry: true, settle: 'skip' });
+    if (attempt?.acceptance === 'uncertain' && attempt.host_turn_id) return stuck('checking', recoveryProblem(attempt, agent, label), { retry: true, settle: 'skip' });
     const lead = label ? `Couldn’t deliver ${quoted(label)}.` : 'Couldn’t deliver your message.';
     return stuck('decision', `${lead} ${attempt ? recoveryProblem(attempt, agent) : 'It needs your decision.'}`,
       { retry: !!attempt, settle: attempt ? 'skip' : null });

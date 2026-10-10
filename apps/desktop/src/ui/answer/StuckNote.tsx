@@ -14,7 +14,7 @@ import { useDispatch } from '../../components/bindings/DispatchChip';
 import { qualifiedPresence } from '../../components/bindings/presence';
 import { ActionFailure } from '../../components/edge-states/EdgeState';
 import { attestIdle, RecoveryReview, resolveCommand } from '../../components/recovery/RecoveryPanel';
-import { agentReceived, awaitingAnswer, keepsLateAnswer, stoppedAttempt, type Stuck } from '../../selectors/waiting/stuck';
+import { agentReceived, awaitingAnswer, keepsLateAnswer, skipWithoutIdle, stoppedAttempt, type Stuck } from '../../selectors/waiting/stuck';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { ALREADY_SENT, editable, NOT_TAKEN_BACK, TAKEN_BACK_NOT_LOADED, type ReviewOutcome } from './held';
 import '../../components/bindings/controls.css';
@@ -70,6 +70,7 @@ export function StuckNote({ actions, input, stuck, onEdit, compactActions = fals
   const waiting = awaitingAnswer(input);
   const received = agentReceived(input.attempts.find(value => value.id === input.active_attempt_id));
   const repair = waiting && attempt?.turn_state === 'completed' && !attempt.domain_result;
+  const stopWithoutIdle = skipWithoutIdle(attempt);
   const quiet = (run: () => void) => (event: MouseEvent) => { event.stopPropagation(); run(); };
   const write = (command: OwnerCommand) => {
     if (!session || busy) return;
@@ -78,11 +79,12 @@ export function StuckNote({ actions, input, stuck, onEdit, compactActions = fals
   const cancel = () => {
     if (session) write({ command: 'input_cancel', api_version: 1, op_id: '', params: { input_id: input.id, expected_revision: session.revision } });
   };
-  // Retry and Mark as done are one click. With no machine evidence that the agent is idle, the click is the owner's word that it is.
+  // Sending again needs idle evidence; stopping a missing-answer wait sends nothing.
   const resolve = (decision: 'resend' | 'skip' | 'accept_result' | 'request_result_repair') => {
-    if (!session || !attempt || decision !== 'accept_result' && presence?.busy) return;
+    const needsIdle = decision !== 'accept_result' && !(decision === 'skip' && stopWithoutIdle);
+    if (!session || !attempt || needsIdle && presence?.busy) return;
     write(resolveCommand({ input_id: input.id, attempt_id: attempt.id, expected_revision: session.revision,
-      decision, reason: '', evidence: decision === 'accept_result' || presence?.idle ? null : attestIdle() }));
+      decision, reason: '', evidence: !needsIdle || presence?.idle ? null : attestIdle() }));
   };
   const agent = dispatch.agent;
   const working = presence?.busy ? `${agent} is still working. Wait, or stop it in the terminal first.` : null;
@@ -100,17 +102,18 @@ export function StuckNote({ actions, input, stuck, onEdit, compactActions = fals
         onClick={quiet(runReview)}>{icons ? <i className="ph ph-pencil-simple" aria-hidden="true" /> : stuck.kind === 'held' ? 'Review and send again' : 'Edit'}</button>}
       {stuck.resume && <button type="button" className="btn btn-secondary dispatch-action" disabled={dispatch.busy}
         onClick={quiet(() => { void dispatch.resume(); })}><i className="ph ph-play" aria-hidden="true" />Resume</button>}
-      {repair && <button type="button" className="btn btn-primary dispatch-action" disabled={busy || !!working}
-        title={working ?? 'Ask the agent to save its answer without repeating the work'}
-        onClick={quiet(() => resolve('request_result_repair'))}>Ask for the answer</button>}
-      {waiting && stuck.settle === 'skip' && <button type="button" className="btn btn-secondary dispatch-action" disabled={busy || !!working}
-        title={working ?? (session && keepsLateAnswer(session, input) ? `Stop waiting for an answer. If ${agent} answers later, its answer will still show.` : 'Stop waiting for an answer.')}
+      {waiting && stuck.settle === 'skip' && <button type="button" className="btn btn-primary dispatch-action" disabled={busy || !stopWithoutIdle && !!working}
+        title={!stopWithoutIdle && working ? working : (session && keepsLateAnswer(session, input) ? `Stop waiting for an answer. If ${agent} answers later, its answer will still show.` : 'Stop waiting for an answer.')}
         onClick={quiet(() => resolve('skip'))}>Stop waiting</button>}
-      {stuck.retry && <button type="button" className={`btn ${waiting ? 'btn-ghost' : 'btn-secondary'} dispatch-action`} disabled={busy || !!working}
+      {repair && <button type="button" className="btn btn-secondary dispatch-action" disabled={busy || !!working}
+        title={`Asks ${agent} to save its answer now. An answer it’s still working on won’t be linked to this message.`}
+        onClick={quiet(() => resolve('request_result_repair'))}>Ask for the answer</button>}
+      {stuck.retry && <button type="button" className={`btn ${waiting ? 'btn-ghost' : received ? 'btn-primary' : 'btn-secondary'} dispatch-action`} disabled={busy || !!working}
         title={working ?? (presence?.idle ? 'Send it again' : `Send it again. Use this only if ${agent} isn’t working on it now.`)}
-        onClick={quiet(() => { if (waiting && attempt) setResending(attempt.id); else resolve('resend'); })}>{waiting ? 'Send again' : 'Retry'}</button>}
-      {!waiting && stuck.settle === 'skip' && <button type="button" className="btn btn-secondary dispatch-action" disabled={busy || !!working}
-        title={working ?? 'Stop trying; the message stays in the history as not delivered'} onClick={quiet(() => resolve('skip'))}>Mark as done</button>}
+        onClick={quiet(() => { if (received && attempt) setResending(attempt.id); else resolve('resend'); })}>{received ? 'Send again' : 'Retry'}</button>}
+      {!waiting && stuck.settle === 'skip' && <button type="button" className="btn btn-secondary dispatch-action" disabled={busy || !stopWithoutIdle && !!working}
+        title={received ? working ?? 'Stop waiting for an answer.' : working ?? 'Stop trying; the message stays in the history as not delivered'}
+        onClick={quiet(() => resolve('skip'))}>{received ? 'Stop waiting' : 'Mark as done'}</button>}
       {stuck.settle === 'accept_result' && <button type="button" className="btn btn-primary dispatch-action" disabled={busy}
         title="The agent saved its answer" onClick={quiet(() => resolve('accept_result'))}>Mark as handled</button>}
       {unsent ? <button type="button" className={icons ? 'btn btn-ghost btn-icon' : 'btn btn-ghost dispatch-action'} disabled={busy} aria-label={icons ? 'Delete message' : undefined} title={icons ? 'Delete message' : 'Delete this message; it won’t be sent'}
@@ -128,7 +131,7 @@ export function StuckNote({ actions, input, stuck, onEdit, compactActions = fals
       <RecoveryReview actions={actions} inputId={input.id} attemptId={attempt.id} onClose={() => setAdvanced(false)} /></div>, document.body)}
     {resending && createPortal(<div onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
       <ConfirmDialog title="Send again?" body={`${agent} already has this message. Send it again anyway?`} confirmLabel="Send again"
-        busy={busy || !!working || !waiting || attempt?.id !== resending} onCancel={() => setResending(null)}
+        busy={busy || !!working || !received || attempt?.id !== resending} onCancel={() => setResending(null)}
         onConfirm={() => { resolve('resend'); setResending(null); }} /></div>, document.body)}
   </div>;
 }

@@ -80,14 +80,20 @@ export function healthReason(health: SupervisorHealth | null | undefined, now = 
 export function dispatchStatus({ binding, closed, needsDecision = false, waitingAnswer = null, presence = null, health = null, agent = 'the agent', now = Date.now() }: DispatchFacts): DispatchStatus {
   if (!binding) return status('none', 'No agent connected', null, null, neutral);
   if (closed) return status('closed', 'Session closed', 'the session is closed', null, neutral);
-  if (waitingAnswer !== null) {
-    const text = `Waiting for ${agent} to answer “${waitingAnswer.length > 40 ? `${waitingAnswer.slice(0, 38).trimEnd()}…` : waitingAnswer}”`;
-    return status('waiting', text, text, null, neutral);
-  }
   const connection = connectionOf(binding, presence);
   if (connection === 'not_running') {
     return status('disconnected', 'Disconnected', binding.connection_state === 'disconnected' || binding.dispatch_state === 'disconnected'
       ? `${agent} is disconnected` : `${agent} isn’t running`, null, neutral);
+  }
+  if (binding.pause_reason && binding.pause_reason !== 'result_missing') {
+    const reason = reasons[binding.pause_reason];
+    return status('blocked', `Not sending: ${reason}`, reason, null, 'var(--a-warn)');
+  }
+  const unhealthy = healthReason(health, now);
+  if (waitingAnswer !== null && unhealthy) return status('blocked', `Not sending: ${unhealthy}`, unhealthy, 'pause', 'var(--a-warn)');
+  if (waitingAnswer !== null) {
+    const text = `Waiting for ${agent} to answer “${waitingAnswer.length > 40 ? `${waitingAnswer.slice(0, 38).trimEnd()}…` : waitingAnswer}”`;
+    return status('waiting', text, text, null, neutral);
   }
   // A recovery blocker outranks the owner's pause: Resume cannot clear it.
   const blocker = binding.pause_reason ? reasons[binding.pause_reason] : needsDecision ? decision : null;
@@ -95,7 +101,6 @@ export function dispatchStatus({ binding, closed, needsDecision = false, waiting
   if (binding.owner_paused || binding.dispatch_state === 'paused') return status('paused', 'Paused (by you)', 'you paused sending', 'resume', 'var(--a-warn)');
   // A settled recovery with nothing left to decide waits for the owner's Resume.
   if (binding.dispatch_state === 'recovery_required') return status('paused', 'Paused', 'sending waits for you to resume', 'resume', 'var(--a-warn)');
-  const unhealthy = healthReason(health, now);
   if (unhealthy) return status('blocked', `Not sending: ${unhealthy}`, unhealthy, 'pause', 'var(--a-warn)');
   if (connection === 'reconnecting') return status('reconnecting', 'Reconnecting…', null, 'pause', 'var(--st-progress)');
   return status('sending', 'Sending', null, 'pause', 'var(--st-done)');

@@ -188,6 +188,8 @@ function sentView(input: Immutable<Input>): Pick<PendingView, 'how' | 'text' | '
 const CAPTION: Readonly<Partial<Record<Input['state'], string>>> = { queued: 'Not sent yet', in_flight: 'On its way', needs_attention: 'Not delivered' };
 function caption(input: Immutable<Input>): string {
   const attempt = stoppedAttempt(input);
+  if (attempt?.acceptance === 'uncertain' && attempt.host_turn_id) return 'Checking…';
+  if (agentReceived(attempt) && attempt?.result_state !== 'committed' && (attempt?.turn_state === 'failed' || attempt?.turn_state === 'interrupted')) return 'Delivered · stopped before answering';
   return agentReceived(attempt) ? attempt?.result_state === 'committed' ? 'Delivered' : 'Delivered · no answer yet' : CAPTION[input.state] ?? '';
 }
 

@@ -113,8 +113,9 @@ export function deliveryLine(session: Immutable<Session>, target: { readonly top
   const note = input.state === 'needs_attention' ? stuckInput(session, input, presence, health) : null;
   if (note) {
     const delivered = agentReceived(stoppedAttempt(input));
-    return { ...deliveryText(delivered ? 'waiting_answer' : 'failed', input.kind, label, agent),
-      ...(delivered ? { text: note.text } : {}), failed: !delivered, stuck: { input, note } };
+    const checking = note.kind === 'checking';
+    return { ...deliveryText(checking ? 'checking' : delivered ? stage ?? 'waiting_answer' : 'failed', input.kind, label, agent),
+      ...(delivered || checking ? { text: note.text } : {}), failed: !delivered && !checking, stuck: { input, note } };
   }
   // A topic reply not sent yet is answered on the band: Edit puts it back in the reply box, Delete drops it.
   const queued = target.itemId === null && input.state === 'queued' ? stuckInput(session, input, presence, health) : null;

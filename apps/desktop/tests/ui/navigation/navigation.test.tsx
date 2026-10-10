@@ -860,7 +860,7 @@ describe('source-backed navigation views and explicit registration', () => {
     binding.owner_paused = false; binding.dispatch_state = 'enabled'; session.counts.sent_inputs.needs_attention = 1;
     expect(text()).toMatchObject({ run: 'Not sending: a message needs your decision', runDot: 'transparent' });
     session.counts.sent_inputs.needs_attention = 0; binding.pause_reason = 'result_missing'; binding.dispatch_state = 'recovery_required';
-    expect(text().run).toBe('Not sending: the agent finished without saving its answer');
+    expect(text().run).toBe('Not sending: the agent hasn’t saved its answer yet');
     binding.pause_reason = null; binding.dispatch_state = 'enabled';
     expect(sessionCardText(session, null, Date.now(), null, { binding_id: binding.id, generation: binding.generation, state: 'backing_off',
       reason: 'codex exited', retry_in_seconds: 4.2, updated_at: new Date().toISOString() }).run).toBe('Not sending: codex exited · retrying in 5s');

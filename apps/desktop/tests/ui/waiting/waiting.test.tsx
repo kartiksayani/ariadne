@@ -189,7 +189,8 @@ describe('delivery evidence', () => {
   it.each([
     ['uncertain', { acceptance: 'uncertain' }],
     ['rejected', { acceptance: 'rejected', turn_state: 'unknown' }],
-    ['failed', { turn_state: 'interrupted' }],
+    ['stopped', { turn_state: 'interrupted' }],
+    ['failed', { turn_state: 'interrupted', acceptance: 'prepared', host_turn_id: null }],
     ['missing', { turn_state: 'completed', result_state: 'missing' }],
     ['waiting_result', { turn_state: 'completed', result_state: 'pending' }],
     ['published', { turn_state: 'running', result_state: 'committed' }],

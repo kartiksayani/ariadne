@@ -677,7 +677,7 @@ fn grace_is_five_seconds_from_saved_completion_and_late_result_keeps_warning_own
         let a = &s.inputs.0[&p.input_id].attempts[0];
         assert_eq!(s.inputs.0[&p.input_id].state, InputState::Handled);
         assert_eq!(a.result_state, ResultState::Committed);
-        assert!(a.sealed_at.is_some());
+        assert_eq!(a.sealed_at, Some(at("06")));
         assert_eq!(a.error.as_ref().unwrap().code, "result_missing");
         let b = &s.bindings.0[&id(3)];
         assert_eq!(b.owner_paused, owner_paused);
@@ -711,9 +711,8 @@ fn stop_waiting_after_expiry_keeps_the_late_answer_and_the_next_active_input() {
         t.resolve(&p, ResolutionKind::Skip, 401);
         let skipped = t.saved();
         assert_eq!(skipped.inputs.0[&p.input_id].state, InputState::Skipped);
-        assert!(skipped.inputs.0[&p.input_id].attempts[0]
-            .sealed_at
-            .is_some());
+        let skip_sealed_at = skipped.inputs.0[&p.input_id].attempts[0].sealed_at.clone();
+        assert_eq!(skip_sealed_at, Some(at("05")));
         assert_eq!(skipped.bindings.0[&id(3)].pause_reason, None);
         let next = (!owner_paused).then(|| t.claim(201));
         let (context, request) = t.result_request(&p, 300);
@@ -734,7 +733,7 @@ fn stop_waiting_after_expiry_keeps_the_late_answer_and_the_next_active_input() {
         assert_eq!(input.active_attempt_id, None);
         let attempt = &input.attempts[0];
         assert_eq!(attempt.result_state, ResultState::Committed);
-        assert!(attempt.sealed_at.is_some());
+        assert_eq!(attempt.sealed_at, skip_sealed_at);
         assert_eq!(attempt.error.as_ref().unwrap().code, "result_missing");
         let result = attempt.domain_result.as_ref().unwrap();
         assert_eq!(result.reply_message_ids.len(), 1);

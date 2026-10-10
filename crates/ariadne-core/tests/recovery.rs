@@ -592,6 +592,88 @@ fn proven_retry_preserves_fifo_history_and_resumes_dispatch_with_exact_old_repla
 }
 
 #[test]
+fn stop_waiting_needs_no_idle_evidence_but_resend_and_repair_still_do() {
+    for state in [
+        None,
+        Some(ExecutionState::Unknown),
+        Some(ExecutionState::Running),
+        Some(ExecutionState::WaitingForApproval),
+    ] {
+        let s = Setup::new();
+        let input_id = s.queue(110);
+        let next_id = s.queue(111);
+        let p = s.claim(112);
+        s.report(&s.event(&p, "completed", completed())).unwrap();
+        s.expire(&p, 113, at("07")).unwrap().unwrap();
+        let observation = state.clone().map(|state| presence(&s, state));
+        let before = s.saved();
+        let bytes = s.bytes();
+        for decision in [ResolutionKind::Resend, ResolutionKind::RequestResultRepair] {
+            let c = command(&s, &p, 114, decision, false);
+            assert_eq!(
+                code(execute(&s, &c, observation.as_ref()).unwrap_err()),
+                if matches!(
+                    state,
+                    Some(ExecutionState::Running | ExecutionState::WaitingForApproval)
+                ) {
+                    CoreErrorCode::InvalidTransition
+                } else {
+                    CoreErrorCode::DeliveryUncertain
+                }
+            );
+            assert_eq!(s.bytes(), bytes);
+        }
+        let c = command(&s, &p, 115, ResolutionKind::Skip, false);
+        execute(&s, &c, observation.as_ref()).unwrap();
+        let saved = s.saved();
+        let input = &saved.inputs.0[&input_id];
+        assert_eq!(input.state, InputState::Skipped);
+        assert_eq!(input.active_attempt_id, None);
+        assert_eq!(input.attempts.len(), 1);
+        assert_eq!(input.attempts[0].sealed_at, Some(at("08")));
+        assert_eq!(input.attempts[0].turn_state, TurnState::Completed);
+        assert_eq!(input.attempts[0].result_state, ResultState::Missing);
+        assert_eq!(input.resolution_history.last().unwrap().evidence, None);
+        assert_eq!(saved.messages, before.messages);
+        assert_eq!(saved.inputs.0[&next_id], before.inputs.0[&next_id]);
+        assert_eq!(saved.bindings.0[&id(3)].active_input_id, None);
+        assert_eq!(
+            saved.bindings.0[&id(3)].dispatch_state,
+            DispatchState::Enabled
+        );
+        assert_eq!(saved.bindings.0[&id(3)].pause_reason, None);
+        assert_eq!(s.claim(116).input_id, next_id);
+    }
+}
+
+#[test]
+fn stop_waiting_requires_completed_expired_missing_result_and_matching_error() {
+    for missing_condition in 0..4 {
+        let s = Setup::new();
+        s.queue(110);
+        let p = s.claim(111);
+        s.report(&s.event(&p, "completed", completed())).unwrap();
+        s.expire(&p, 112, at("07")).unwrap().unwrap();
+        s.write(|session| {
+            let input = session.inputs.0.get_mut(&p.input_id).unwrap();
+            match missing_condition {
+                0 => input.attempts[0].turn_state = TurnState::Unknown,
+                1 => input.attempts[0].result_state = ResultState::Pending,
+                2 => input.attempts[0].error = None,
+                _ => input.attempts[0].error.as_mut().unwrap().code = "host_failed".into(),
+            }
+        });
+        let c = command(&s, &p, 113, ResolutionKind::Skip, false);
+        let bytes = s.bytes();
+        assert_eq!(
+            code(execute(&s, &c, None).unwrap_err()),
+            CoreErrorCode::DeliveryUncertain
+        );
+        assert_eq!(s.bytes(), bytes);
+    }
+}
+
+#[test]
 fn running_and_approval_block_every_resolution_even_with_owner_attestation() {
     for state in [ExecutionState::Running, ExecutionState::WaitingForApproval] {
         for decision in [

@@ -28,7 +28,7 @@ export function EdgeState({ kind, children, detail, onRetry, retryLabel = 'Refre
     </div>{children}
   </div>;
 }
-const decisionWords: Readonly<Record<string, string>> = { resend: 'send again', skip: 'mark as done', accept_result: 'mark as handled',
+const decisionWords: Readonly<Record<string, string>> = { resend: 'send again', skip: 'stopped waiting', accept_result: 'mark as handled',
   retry_unexecuted: 'retry', request_result_repair: 'ask for the missing answer', confirm_evidence: 'confirm what happened' };
 /** The saved action whose completion is unknown, in plain words, with a deliberate "Check again". */
 export function ActionFailure({ actions }: { actions: SessionActions }) {

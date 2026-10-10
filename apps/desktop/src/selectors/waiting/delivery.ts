@@ -1,8 +1,8 @@
 import type { BindingSummary, Input, PresenceObservation, Session } from '../../generated/domain/models';
 import type { Immutable } from '../../data';
-import { awaitingAnswer } from './stuck';
+import { agentReceived, awaitingAnswer } from './stuck';
 
-export type DeliveryKind = 'cancelled' | 'skipped' | 'handled' | 'uncertain' | 'rejected' | 'failed'
+export type DeliveryKind = 'cancelled' | 'skipped' | 'handled' | 'uncertain' | 'rejected' | 'failed' | 'stopped'
   | 'missing' | 'waiting_result' | 'published' | 'received' | 'sent' | 'sending' | 'queued' | 'saved' | 'unavailable';
 export interface DeliveryEvidence {
   readonly kind: DeliveryKind;
@@ -16,6 +16,7 @@ const labels: Record<DeliveryKind, readonly [string, string]> = {
   uncertain: ['Delivery uncertain', 'The agent may have got this message. Check before sending more.'],
   rejected: ['Rejected before delivery', 'The host rejected this attempt before delivery. This does not authorize automatic retry.'],
   failed: ['Failed', 'The matching host turn failed or was interrupted.'],
+  stopped: ['Delivered · stopped before answering', 'The agent received this message, but its turn failed or was interrupted.'],
   missing: ['Missing result', 'The matching host turn ended without a committed explicit result.'],
   waiting_result: ['Waiting for result', 'The agent turn finished. An explicit domain result has not been committed.'],
   published: ['Reply published · agent working', 'An explicit result is committed; the matching turn is still incomplete.'],
@@ -52,7 +53,10 @@ export function deliveryEvidence(input: Immutable<Input>, binding: Immutable<Bin
       || attempt.error?.code === 'delivery_uncertain') return evidence('uncertain');
   if (awaitingAnswer(input)) return evidence('missing');
   if (attempt.acceptance === 'rejected') return evidence('rejected');
-  if (attempt.turn_state === 'failed' || attempt.turn_state === 'interrupted') return evidence('failed');
+  if (attempt.turn_state === 'failed' || attempt.turn_state === 'interrupted') {
+    if (agentReceived(attempt) && attempt.result_state === 'committed') return evidence('published');
+    return evidence(agentReceived(attempt) ? 'stopped' : 'failed');
+  }
   if (attempt.result_state === 'missing') return evidence('missing');
   if (attempt.turn_state === 'completed') return evidence(attempt.result_state === 'pending' ? 'waiting_result' : 'unavailable');
   if (attempt.result_state === 'committed') return evidence('published');
