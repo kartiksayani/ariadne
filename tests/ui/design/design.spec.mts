@@ -430,6 +430,7 @@ for (const id of toastFrameIds) {
     await expect(title).toBeVisible();
     await expect(toast).toHaveCount(0);
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const emptyOverlay = await overlay.boundingBox();
     const geometry = async () => ({ bar: await bar.boundingBox(), title: await title.boundingBox(),
       center: await page.locator('.shell-center').boundingBox(), waiting: await page.locator('.shell-waiting').boundingBox(),
       detail: await page.locator('.shell-detail').count() ? await page.locator('.shell-detail').boundingBox() : null,
@@ -459,6 +460,7 @@ for (const id of toastFrameIds) {
     const visible = await geometry();
     expect(visible, 'toast appearance moves the session bar and title by 0px').toEqual(before);
     const toastBox = (await toast.boundingBox())!, overlayBox = (await overlay.boundingBox())!, centerBox = before.center!;
+    expect(overlayBox, 'the persistent overlay keeps its bounds when a toast appears').toEqual(emptyOverlay);
     expect(toastBox.x, 'toast stays inside the centre left edge').toBeGreaterThanOrEqual(centerBox.x + 16);
     expect(toastBox.x + toastBox.width, 'toast stays inside the centre right edge').toBeLessThanOrEqual(centerBox.x + centerBox.width - 16);
     expect(toastBox.width, 'toast is bounded by the centre width and 480px').toBeLessThanOrEqual(Math.min(480, centerBox.width - 32));
@@ -474,17 +476,25 @@ for (const id of toastFrameIds) {
     } else {
       expect(centerBox.width, 'fixture exercises the bottom anchor').toBeGreaterThan(400);
       expect(overlayBox.y + overlayBox.height, 'toast overlay ends 16px above the footer').toBe(before.footer!.y - 16);
+      expect(toastBox.y + toastBox.height, 'the toast itself ends at the bottom anchor').toBe(overlayBox.y + overlayBox.height);
       expect(toastBox.y, 'toast stays below the session header').toBeGreaterThanOrEqual(before.bar!.y + before.bar!.height);
     }
     await page.screenshot({ path: testInfo.outputPath(`${id}.png`), animations: 'disabled' });
+    await page.evaluate(() => window.__designToast!.show('Reference saved. The complete conversation is included, along with the earlier questions, replies and decisions. You can paste it into your notes and return to this conversation whenever you need it.'));
+    await expect(toast).toContainText('Reference saved. The complete conversation is included');
+    await settle(page);
+    expect((await toast.boundingBox())!.height, 'the update exercises a taller toast').toBeGreaterThan(toastBox.height);
+    expect(await geometry(), 'updating a toast leaves the surrounding panes in place').toEqual(before);
+    expect(await overlay.boundingBox(), 'updating a toast keeps the overlay bounds').toEqual(emptyOverlay);
     await page.evaluate(() => window.__designToast!.clear());
     await expect(toast).toHaveCount(0);
     await settle(page);
     const cleared = await geometry();
     expect(cleared, 'toast clearance moves the session bar and title by 0px').toEqual(before);
+    expect(await overlay.boundingBox(), 'the empty overlay keeps its bounds after dismissal').toEqual(emptyOverlay);
     const shifts = await monitor.evaluate(value => value.finish());
     await monitor.dispose();
-    expect(shifts.reduce((sum, value) => sum + value, 0), 'toast appearance and clearance cause 0 layout shift, including the overlay').toBe(0);
+    expect(shifts.reduce((sum, value) => sum + value, 0), 'toast appearance, update and clearance cause 0 layout shift, including the overlay').toBe(0);
     await testInfo.attach('session toast geometry', { body: JSON.stringify({ before, visible, cleared, layoutShifts: shifts }, null, 2), contentType: 'application/json' });
     expect(denied).toEqual([]);
   });

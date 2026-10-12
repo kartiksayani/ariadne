@@ -13,7 +13,7 @@ import { designFixture, prototypeData, type DesignFixture } from './fixtures';
 declare global { interface Window {
   __designFixture?: DesignFixture;
   __designError?: string;
-  __designToast?: { show: () => void; clear: () => void };
+  __designToast?: { show: (text?: string) => void; clear: () => void };
 } }
 
 async function mount() {
@@ -25,7 +25,7 @@ async function mount() {
   if (fixture.spec.toast) {
     const id = 'design-session-toast';
     window.__designToast = {
-      show: () => { notices.push({ id, icon: 'ph ph-check', text: 'Reference copied.', dismissible: true }); },
+      show: (text = 'Reference copied.') => { notices.push({ id, icon: 'ph ph-check', text, dismissible: true }); },
       clear: () => { notices.dismiss(id); },
     };
   }

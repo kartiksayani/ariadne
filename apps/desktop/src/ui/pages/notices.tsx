@@ -188,11 +188,13 @@ export function Notices({ store = notices }: { readonly store?: NoticeStore }) {
       if (event.relatedTarget instanceof HTMLElement && !event.currentTarget.contains(event.relatedTarget)) previousFocus.current = event.relatedTarget;
       focusedNotice.current = (event.target as HTMLElement).closest<HTMLElement>('[data-notice-id]')?.dataset.noticeId ?? null;
     }}>
-    <div className="pw-notice-group" role={information.length ? 'status' : undefined} aria-live="polite" aria-atomic="false" aria-relevant="additions text">
-      {information.map(notice => <NoticeCard key={notice.id} notice={notice} store={store} />)}
-    </div>
-    <div className="pw-notice-group" role={problems.length ? 'alert' : undefined} aria-live="assertive" aria-atomic="false" aria-relevant="additions text">
-      {problems.map(notice => <NoticeCard key={notice.id} notice={notice} store={store} />)}
+    <div className="pw-notice-stack">
+      <div className="pw-notice-group" role={information.length ? 'status' : undefined} aria-live="polite" aria-atomic="false" aria-relevant="additions text">
+        {information.map(notice => <NoticeCard key={notice.id} notice={notice} store={store} />)}
+      </div>
+      <div className="pw-notice-group" role={problems.length ? 'alert' : undefined} aria-live="assertive" aria-atomic="false" aria-relevant="additions text">
+        {problems.map(notice => <NoticeCard key={notice.id} notice={notice} store={store} />)}
+      </div>
     </div>
   </div>;
 }

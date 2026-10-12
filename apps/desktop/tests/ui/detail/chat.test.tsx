@@ -8,10 +8,13 @@ import { immutable } from '../../../src/data';
 import { detailModel } from '../../../src/ui/detail/model';
 import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
+import { createDesktopService } from '../../../src/data/service';
+import { OpenSessions } from '../../../src/data/session-store';
+import { AppTransport, route } from '../app/transport';
 import { setup } from '../history/fixtures';
 
 const model = (session: Session, itemId = '1') => detailModel({ session: immutable(session), itemId, now: Date.parse(session.updated_at), mode: null, later: false, saving: null })!;
-const opened: ReturnType<typeof setup>[] = [];
+const opened: Pick<ReturnType<typeof setup>, 'sessions'>[] = [];
 afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('the single item chat', () => {
@@ -81,6 +84,7 @@ describe('the single item chat', () => {
     vi.stubGlobal('ResizeObserver', class {
       constructor(callback: ResizeObserverCallback) { resize.mockImplementation(() => callback([], this as unknown as ResizeObserver)); }
       observe(element: Element) { observed.push(element); }
+      unobserve() {}
       disconnect() {}
     });
     let viewportHeight = 400, askTop = 800;
@@ -93,6 +97,7 @@ describe('the single item chat', () => {
       let top = 100, height = 0;
       if (this.classList.contains('detail-body')) height = viewportHeight;
       else if (this.classList.contains('detail-head')) height = 36;
+      else if (this.classList.contains('detail-why')) height = 120;
       else if (this.classList.contains('detail-waiting-tag')) { top += askTop + askHeight - 42 - scroll; height = 20; }
       else if (this.classList.contains('detail-bubble-agent') && this.querySelector('.detail-waiting-tag')) { top += askTop - scroll; height = askHeight; }
       return { top, bottom: top + height, height } as DOMRect;
@@ -134,6 +139,73 @@ describe('the single item chat', () => {
     pane.scrollTop = 100; fireEvent.scroll(pane);
     askTop += 120;
     act(() => resize());
+    expect(pane.scrollTop).toBe(100);
+  });
+
+  it.each(['current ask', 'transcript end'] as const)('ignores unchanged resize notifications while typing at the $0 and preserves that position through real composer growth', async position => {
+    const transport = new AppTransport(), service = createDesktopService(transport), sessions = new OpenSessions(service), store = sessions.open(route);
+    opened.push({ sessions });
+    const session = transport.sessions.get(route.session_id)!, item = session.items['2']!, round = session.rounds[item.current_round_id!]!;
+    round.owner_message_ids = []; round.result_input_ids = [];
+    for (const input of Object.values(session.inputs)) if (input?.target.item_id === item.id) input.state = 'cancelled';
+    const resize = vi.fn(), created = vi.fn();
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) {
+        created(); resize.mockImplementation(() => callback([], this as unknown as ResizeObserver));
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
+    let viewportHeight = 400;
+    vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(2500);
+    vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) {
+      return this.classList.contains('detail-body') ? viewportHeight : 0;
+    });
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const scroll = document.querySelector<HTMLElement>('.detail-body')?.scrollTop ?? 0;
+      let top = 100, height = 0;
+      if (this.classList.contains('detail-body')) height = viewportHeight;
+      else if (this.classList.contains('detail-head')) height = 36;
+      else if (this.classList.contains('detail-waiting-tag')) { top += 878 - scroll; height = 20; }
+      else if (this.classList.contains('detail-bubble-agent') && this.querySelector('.detail-waiting-tag')) { top += 800 - scroll; height = 120; }
+      return { top, bottom: top + height, width: 500, height } as DOMRect;
+    });
+    const drafts = new OwnerDraftStore(service);
+    await Promise.all([store.refresh(), drafts.load()]);
+    const props = { drafts, store, itemId: '2', later: false, onOpenItem: vi.fn() };
+    const view = render(<ItemDetail {...props} />);
+    const box = await screen.findByLabelText<HTMLTextAreaElement>('Reply in your own words');
+    await waitFor(() => expect(box.disabled).toBe(false));
+    const pane = document.querySelector<HTMLElement>('.detail-body')!;
+    expect(pane.scrollTop).toBe(764);
+    if (position === 'transcript end') { pane.scrollTop = 2100; fireEvent.scroll(pane); }
+    let scrollTop = pane.scrollTop;
+    const setScroll = vi.fn((next: number) => { scrollTop = Math.min(next, 2500 - viewportHeight); });
+    Object.defineProperty(pane, 'scrollTop', { configurable: true, get: () => scrollTop, set: setScroll });
+    // Initial and repeated notifications report no actual size change.
+    act(() => resize()); act(() => resize());
+    fireEvent.change(box, { target: { value: 'Keep the complete conversation.' } });
+    await waitFor(() => expect(box.value).toBe('Keep the complete conversation.'));
+    view.rerender(<ItemDetail {...props} later />);
+    act(() => resize());
+    expect(created).toHaveBeenCalledTimes(1);
+    expect(setScroll).not.toHaveBeenCalled();
+    expect(pane.scrollTop).toBe(position === 'transcript end' ? 2100 : 764);
+    // Growing the dock reduces the transcript's viewport: preserve end or ask following.
+    viewportHeight = 250;
+    act(() => resize());
+    expect(pane.scrollTop).toBe(position === 'transcript end' ? 2250 : 764);
+    setScroll.mockClear();
+    fireEvent.scroll(pane); // The observer's own scroll keeps the selected following behavior.
+    fireEvent.change(box, { target: { value: 'Keep the complete conversation and its replies.' } });
+    act(() => resize());
+    expect(setScroll).not.toHaveBeenCalled();
+    // An owner who scrolls away keeps their place during the next real resize.
+    pane.scrollTop = 100; fireEvent.scroll(pane); setScroll.mockClear();
+    viewportHeight = 200;
+    act(() => resize());
+    expect(setScroll).not.toHaveBeenCalled();
     expect(pane.scrollTop).toBe(100);
   });
 

@@ -83,12 +83,12 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
     // The connect card belongs to the project page; the session view does not carry it.
     await expect(setup).toHaveCount(0);
     const geometry = () => page.evaluate(() => {
-      const rows = document.querySelector<HTMLElement>('.tree-scroll')!, center = document.querySelector<HTMLElement>('.shell-center')!;
+      const rows = document.querySelector<HTMLElement>('.tree-scroll')!, center = document.querySelector<HTMLElement>('.shell-center-content')!;
       return { rowsHeight: rows.clientHeight, rowsScrollHeight: rows.scrollHeight, rowsScrollTop: rows.scrollTop,
         centerScrollTop: center.scrollTop, centerHeight: center.clientHeight, centerScrollHeight: center.scrollHeight,
         // The toolbar's offset under the session bar. The body never scrolls sideways, so opening the detail
         // column narrows the centre and the session bar may wrap; the toolbar must still sit right under it.
-        toolbarGap: document.querySelector('.tree-filters')!.getBoundingClientRect().top - document.querySelector('.tree-session-bar')!.getBoundingClientRect().bottom,
+        toolbarGap: document.querySelector('[role="group"][aria-label="Filter items"]')!.getBoundingClientRect().top - document.querySelector('.tree-session-bar')!.getBoundingClientRect().bottom,
         headerTop: document.querySelector('.shell-header')!.getBoundingClientRect().top };
     });
     const before = await geometry();
@@ -160,10 +160,10 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
       expect(current.centerScrollTop).toBe(0);
       expect(current.centerScrollHeight).toBeLessThanOrEqual(current.centerHeight + 1);
       await checkFilters(page);
-      const controls = await page.locator('.tree-filters').evaluate(element => [...element.querySelectorAll('button, input, select')].map(control => {
+      const controls = await page.getByRole('group', { name: 'Filter items' }).evaluate(element => [...element.querySelectorAll('button')].map(control => {
         const bounds = control.getBoundingClientRect();
         return { label: control.textContent || control.closest('label')?.textContent,
-          reachable: document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.closest('button, input, select') === control };
+          reachable: document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.closest('button') === control };
       }));
       expect(controls.filter(control => !control.reachable)).toEqual([]);
       const ordinary = tree.locator('[data-item-id="10.49"]');
@@ -182,8 +182,8 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
     await page.getByRole('button', { name: 'Graph', exact: true }).click();
     await expect(page.getByRole('tree', { name: / graph$/ }).first()).toBeVisible();
     expect(await page.locator('.graph-scroll').evaluate(element => getComputedStyle(element).overflowY)).toBe('auto');
-    expect(await page.locator('.shell-center').evaluate(element => getComputedStyle(element).overflowY)).toBe('hidden');
-    const graphBox = (await page.locator('.graph-scroll').boundingBox())!, centerBox = (await page.locator('.shell-center').boundingBox())!;
+    expect(await page.locator('.shell-center-content').evaluate(element => getComputedStyle(element).overflowY)).toBe('auto');
+    const graphBox = (await page.locator('.graph-scroll').boundingBox())!, centerBox = (await page.locator('.shell-center-content').boundingBox())!;
     expect(graphBox.y + graphBox.height).toBeLessThanOrEqual(centerBox.y + centerBox.height + 1);
     // Nothing in the session column is clipped: banners and controls shrink and scroll themselves.
     expect(await page.locator('.nav-session-content').evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);

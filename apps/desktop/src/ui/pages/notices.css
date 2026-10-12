@@ -1,34 +1,48 @@
-/* The centre column bounds the overlay, above the shell footer and beside the other panes. */
+/* Keep the overlay's bounds fixed, even while empty; cards sit above the footer beside the other panes. */
 .pw-notices {
   position: absolute;
   z-index: 25;
+  top: 16px;
   right: 16px;
   bottom: 16px;
+  width: min(480px, calc(100% - 32px));
+  overflow: hidden;
+  padding: 0;
+  pointer-events: none;
+}
+
+/* A fixed layout origin prevents taller receipts moving existing boxes; the transform anchors the stack visually. */
+.pw-notice-stack {
+  position: absolute;
+  top: 100%;
+  width: 100%;
+  max-height: 100%;
+  overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  width: min(480px, calc(100% - 32px));
-  max-height: calc(100% - 32px);
-  overflow: auto;
-  padding: 0;
-  pointer-events: none;
+  transform: translateY(-100%);
 }
 
 /* A squeezed centre uses its top edge, immediately below the shell tabs. */
 @container shell-center (max-width: 400px) {
   .pw-notices {
     top: 8px;
-    bottom: auto;
+  }
+
+  .pw-notice-stack {
+    top: 0;
+    transform: none;
   }
 }
 
 .pw-notice-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  /* Live regions persist without empty layout boxes moving as cards appear. */
+  display: contents;
 }
 
 .pw-notices .pw-note {
+  flex-shrink: 0;
   align-items: flex-start;
   flex-wrap: wrap;
   gap: 8px;
@@ -48,7 +62,7 @@
 .pw-notices .pw-note[data-tone="problem"] > i { color: var(--a-warn); }
 
 .pw-notices .pw-note-text {
-  flex-basis: 240px;
+  flex-basis: 0;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -58,7 +72,7 @@
   outline-offset: -2px;
 }
 
-.pw-notices .pw-note-action { align-self: center; }
+.pw-notices .pw-note-action { align-self: flex-start; }
 .pw-notices .pw-note-dismiss { margin-left: auto; }
 
 @keyframes pw-notice-arrive {

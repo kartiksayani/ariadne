@@ -36,6 +36,8 @@ import './detail.css';
 /** The pane is scrolled to (nearly) its end. */
 const nearEnd = (pane: HTMLElement) => pane.scrollHeight - pane.scrollTop - pane.clientHeight < 80;
 
+const resizeTargets = (pane: HTMLElement) => new Set<Element>([pane, ...pane.children, ...pane.querySelectorAll('.detail-turn-now .detail-bubble-agent')]);
+
 /** Return focus to the item's row so workspace keys work again. */
 function focusRoot(itemId: string) {
   const row = [...document.querySelectorAll<HTMLElement>(`[data-item-id="${CSS.escape(itemId)}"]`)].find(element => !element.closest('.shell-detail'));
@@ -208,6 +210,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const body = useRef<HTMLDivElement>(null), atEnd = useRef(true), justSent = useRef(false);
   // Following an ask is distinct from following the transcript's end: later context can follow the ask.
   const followingAsk = useRef(false), positionedScroll = useRef<number | null>(null);
+  const resizeWatch = useRef<{ observer: ResizeObserver; targets: Set<Element> } | null>(null);
   const presence = session?.active_binding_id ? current.presence[session.active_binding_id] ?? null : null;
   // The session's write barrier, shared with the session bar: Resume, Cancel and Retry go through it.
   const actions = useMemo(() => sessionActionsFor(drafts.service, store), [drafts, store]);
@@ -297,18 +300,39 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     justSent.current = false;
   }, [chatKey, itemId]);
   // Composer growth and late text/font reflow can move the ask without changing the body's own size.
-  // Reattach after renders so newly added sections and a replaced current turn are observed too.
+  // Keep the observer across draft renders: observing again emits an initial notification even when nothing resized.
   useEffect(() => {
     const element = body.current;
     if (!element || typeof ResizeObserver === 'undefined') return;
+    const targets = resizeTargets(element);
+    const measure = () => new Map([...targets].map(target => {
+      const { width, height } = target.getBoundingClientRect();
+      return [target, `${width ?? 0}:${height ?? 0}`] as const;
+    }));
+    let sizes = measure(), viewport = `${element.clientWidth}:${element.clientHeight}:${element.scrollHeight}`;
     const watch = new ResizeObserver(() => {
-      if (atEnd.current || followingAsk.current && element.querySelector('.detail-turn-now')) showLatest();
+      const next = measure(), nextViewport = `${element.clientWidth}:${element.clientHeight}:${element.scrollHeight}`;
+      const changed = viewport !== nextViewport || [...new Set([...sizes.keys(), ...next.keys()])]
+        .some(target => (sizes.get(target) ?? '0:0') !== (next.get(target) ?? '0:0'));
+      sizes = next; viewport = nextViewport;
+      if (!changed) return;
+      if (atEnd.current) {
+        element.scrollTop = element.scrollHeight;
+        positionedScroll.current = element.scrollTop;
+      } else if (followingAsk.current && element.querySelector('.detail-turn-now')) showLatest();
     });
-    watch.observe(element);
-    // A section above the conversation can change height while the chat only changes position.
-    for (const content of element.children) watch.observe(content);
-    for (const bubble of element.querySelectorAll('.detail-turn-now .detail-bubble-agent')) watch.observe(bubble);
-    return () => watch.disconnect();
+    for (const target of targets) watch.observe(target);
+    resizeWatch.current = { observer: watch, targets };
+    return () => { watch.disconnect(); resizeWatch.current = null; };
+  }, [noticeKey, chatKey === null]);
+  // A section above the conversation can change height while the chat only changes position.
+  // Refresh the targets after renders without resetting the previous measurements.
+  useEffect(() => {
+    const element = body.current, watch = resizeWatch.current;
+    if (!element || !watch) return;
+    const next = resizeTargets(element);
+    for (const target of watch.targets) if (!next.has(target)) { watch.observer.unobserve(target); watch.targets.delete(target); }
+    for (const target of next) if (!watch.targets.has(target)) { watch.targets.add(target); watch.observer.observe(target); }
   });
 
   // Words open in the box that fits the status, whichever box the action or a put-back names.
