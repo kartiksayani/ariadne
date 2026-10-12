@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { admissions, cliRequest, snapshot } from './scripted-provider.mjs';
+import { showFullItemQuestion } from './tree.spec.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const graph = () => browser.$('.graph-view');
@@ -63,7 +64,7 @@ async function sample() {
 }
 async function click(selector, parent = browser) { const button = await parent.$(selector); await button.waitForEnabled(); await button.scrollIntoView(); await button.click(); }
 async function detail(session, id) {
-  await wait(async () => await browser.execute(id => document.querySelector('.item-detail .detail-question')?.textContent === id, session.items[id].question), `Registered detail did not show the complete item ${id}`);
+  await showFullItemQuestion(session.items[id]);
 }
 async function selectedIn(id) {
   await wait(async () => (await sample()).nodes.some(value => value.id === id && value.selected), `Native graph did not select item ${id}`);

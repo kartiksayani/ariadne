@@ -28,12 +28,13 @@ export function EdgeState({ kind, children, detail, onRetry, retryLabel = 'Refre
     </div>{children}
   </div>;
 }
-const decisionWords: Readonly<Record<string, string>> = { resend: 'send again', skip: 'mark as done', accept_result: 'mark as handled',
+const decisionWords: Readonly<Record<string, string>> = { resend: 'send again', skip: 'stopped waiting', accept_result: 'mark as handled',
   retry_unexecuted: 'retry', request_result_repair: 'ask for the missing answer', confirm_evidence: 'confirm what happened' };
 /** The saved action whose completion is unknown, in plain words, with a deliberate "Check again". */
 export function ActionFailure({ actions }: { actions: SessionActions }) {
   const state = useSessionActions(actions);
   const command = state.pending?.command;
+  if (!command && actions.isTransientFailure(state.error)) return null;
   return state.error && <EdgeState kind="write_failure" detail={<><p>{plainFailure(state.error)}</p>
     {command?.command === 'input_resolve' && <p>Ariadne isn’t sure your decision ({decisionWords[command.params.decision] ?? 'recovery'}) was saved.</p>}
     {command && (command.command === 'binding_pause' || command.command === 'binding_resume' || command.command === 'binding_disconnect')

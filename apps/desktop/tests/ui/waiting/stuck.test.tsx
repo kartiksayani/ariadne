@@ -6,9 +6,12 @@ import type { Input, PresenceObservation, ProjectSummary, Session, SessionSummar
 import type { SupervisorHealth } from '../../../src/data/service';
 import { immutable } from '../../../src/data';
 import { displayStatus, ownerReplied } from '../../../src/selectors/waiting/replied';
-import { counted, heldInput, notSent, stuckInput, withdrawn } from '../../../src/selectors/waiting/stuck';
+import { counted, heldInput, notSent, sentLabel, stuckInput, withdrawn } from '../../../src/selectors/waiting/stuck';
 import { sentRows, waitingRows } from '../../../src/selectors/waiting/rows';
 import { detailModel } from '../../../src/ui/detail/model';
+import { deliveryLine, deliveryStage, deliverySteps } from '../../../src/ui/answer/delivery';
+import { deliveryLine as treeDelivery } from '../../../src/ui/tree/model';
+import { deliveryEvidence } from '../../../src/selectors/waiting/delivery';
 
 const id = (suffix: string) => `00000000-0000-4000-8000-0000000000${suffix}`;
 const seed = () => structuredClone(demo) as Session;
@@ -211,6 +214,63 @@ describe('Waiting on agent', () => {
 });
 
 describe('stuck inputs explain themselves', () => {
+  it.each(['failed', 'interrupted'] as const)('keeps receipt visible when a delivered turn %s', turn => {
+    const session = seed(), input = session.inputs[id('74')]!, attempt = input.attempts[0]!;
+    attempt.acceptance = 'accepted'; attempt.host_turn_id = 'turn-example'; attempt.turn_state = turn;
+    attempt.result_state = 'pending'; attempt.error = { code: 'host_failure', reason: 'Turn stopped.', retryable: false, observed_at: session.updated_at };
+    const note = stuckInput(immutable(session), immutable(input));
+    expect(note).toMatchObject({ kind: 'stopped', text: 'demo.local got your message but stopped before answering.' });
+    const model = detailModel({ session: immutable(session), itemId: '7', now: Date.parse(session.updated_at), mode: null, later: false, saving: null });
+    expect(pendingInChat(model).find(pending => pending.input.id === input.id)?.caption).toBe('Delivered · stopped before answering');
+    expect(deliveryEvidence(immutable(input), null).kind).toBe('stopped');
+    expect(deliveryLine(deliveryStage('stopped')!, input.kind, input.payload.text, 'demo.local').text).toBe(note!.text);
+    expect(deliverySteps('stopped', null)).toContainEqual({ label: 'Delivered · stopped before answering', state: 'current', failed: false });
+    expect(treeDelivery(immutable(session), { topicId: input.target.topic_id, itemId: '7' }, null)).toMatchObject({ failed: false, text: note!.text });
+    expect(JSON.stringify(model)).not.toMatch(/Couldn’t deliver|Not delivered|may still be working/);
+  });
+  it('checks uncertain acceptance even with a host turn instead of claiming receipt', () => {
+    const session = seed(), input = session.inputs[id('74')]!, attempt = input.attempts[0]!;
+    input.payload.text = 'What is the state today?';
+    attempt.acceptance = 'uncertain'; attempt.host_turn_id = 'turn-example'; attempt.turn_state = 'completed'; attempt.result_state = 'missing';
+    const line = deliveryLine('checking', input.kind, sentLabel(immutable(input)), 'demo.local').text;
+    expect(stuckInput(immutable(session), immutable(input))).toMatchObject({ kind: 'checking', text: line });
+    expect(deliveryEvidence(immutable(input), null).kind).toBe('uncertain');
+    const model = detailModel({ session: immutable(session), itemId: '7', now: Date.parse(session.updated_at), mode: null, later: false, saving: null });
+    expect(pendingInChat(model).find(pending => pending.input.id === input.id)?.caption).toBe('Checking…');
+    expect(treeDelivery(immutable(session), { topicId: input.target.topic_id, itemId: '7' }, null)).toMatchObject({ failed: false, text: line });
+    expect(JSON.stringify(model)).not.toMatch(/has your message|may still be working|Delivered ·/);
+  });
+  it.each(['failed', 'interrupted'] as const)('preserves a saved answer caption when the turn %s', turn => {
+    const session = seed(), input = session.inputs[id('74')]!, attempt = input.attempts[0]!;
+    attempt.acceptance = 'accepted'; attempt.turn_state = turn; attempt.result_state = 'committed';
+    attempt.error = { code: 'host_failure', reason: 'Turn stopped.', retryable: false, observed_at: session.updated_at };
+    const model = detailModel({ session: immutable(session), itemId: '7', now: Date.parse(session.updated_at), mode: null, later: false, saving: null });
+    expect(pendingInChat(model).find(pending => pending.input.id === input.id)?.caption).toBe('Delivered');
+    expect(stuckInput(immutable(session), immutable(input))).toMatchObject({ text: 'demo.local saved its answer, but the message wasn’t marked handled.', settle: 'accept_result' });
+    expect(deliveryEvidence(immutable(input), null).kind).toBe('published');
+    expect(deliverySteps(deliveryStage('published'), null)).toContainEqual({ label: 'Received', state: 'current', failed: false });
+    expect(JSON.stringify(model)).not.toContain('stopped before answering');
+  });
+  it.each(['accepted', 'host turn'] as const)('uses %s evidence to distinguish delivery from a missing answer', evidence => {
+    const session = seed(), input = session.inputs[id('74')]!, attempt = input.attempts[0]!;
+    attempt.acceptance = evidence === 'accepted' ? 'accepted' : 'prepared';
+    attempt.host_turn_id = evidence === 'host turn' ? 'turn-example' : null;
+    attempt.turn_state = 'completed'; attempt.result_state = 'missing';
+    attempt.error = { code: 'result_missing', reason: 'No saved result.', retryable: false, observed_at: session.updated_at };
+    expect(stuckInput(immutable(session), immutable(input))).toMatchObject({ kind: 'answer',
+      text: 'demo.local has your message but hasn’t saved its answer yet. It may still be working.', retry: true, settle: 'skip' });
+    const model = detailModel({ session: immutable(session), itemId: '7', now: Date.parse(session.updated_at), mode: null, later: false, saving: null });
+    expect(pendingInChat(model).find(pending => pending.input.id === input.id)?.caption).toBe('Delivered · no answer yet');
+    expect(JSON.stringify(model)).not.toContain('Couldn’t deliver');
+    expect(JSON.stringify(model)).not.toContain('Not delivered');
+    const stage = deliveryStage('missing')!;
+    expect(deliveryLine(stage, input.kind, input.payload.text, 'demo.local')).toMatchObject({
+      color: 'color-mix(in srgb, var(--color-text) 66%, transparent)',
+      text: 'demo.local has your message but hasn’t saved its answer yet. It may still be working.' });
+    expect(deliverySteps(stage, null)).toContainEqual({ label: 'Delivered · no answer yet', state: 'current', failed: false });
+    expect(treeDelivery(immutable(session), { topicId: input.target.topic_id, itemId: '7' }, null)).toMatchObject({
+      failed: false, text: 'demo.local has your message but hasn’t saved its answer yet. It may still be working.' });
+  });
   // Input 76 (queued drop on item 4) sits behind 72 (in flight) on the active binding.
   const stuck = (session: Session, presence: PresenceObservation | null = null) =>
     stuckInput(immutable(session), immutable(session.inputs[id('76')]!), presence ? immutable(presence) : null);

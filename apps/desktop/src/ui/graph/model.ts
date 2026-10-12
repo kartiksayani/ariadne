@@ -12,6 +12,7 @@ import { displayStatus, type DisplayStatus } from '../../selectors/waiting/repli
 import { hiddenItems } from '../tree/hidden';
 import { relatedItems } from '../../selectors/related';
 import { ackTarget } from '../../selectors/ack';
+import { hasStatusFilter } from '../../selectors/tree/folds';
 
 export type GraphStatus = 'open' | 'waiting' | 'agent' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
 
@@ -47,7 +48,7 @@ export interface GraphNode {
   readonly below: number;
   /** Has children but none are shown: draws the "+N" pill. */
   readonly collapsed: boolean;
-  /** Shows "−": expanded with children and no filter active. */
+  /** Shows "−": expanded with children, including filter context. */
   readonly canCollapse: boolean;
   readonly selected: boolean;
   /** On the thread from the topic to the selected item, but not the selected item. */
@@ -90,6 +91,7 @@ export interface GraphInput {
   readonly later: ReadonlySet<string>;
   readonly temporaryExpandedItemIds?: readonly string[];
   readonly revealedItemId?: string | null;
+  readonly filterCollapsedItemIds?: ReadonlySet<string>;
   readonly selectedId: string | null;
   readonly tight: boolean;
 }
@@ -119,7 +121,7 @@ export function topicCounts(items: readonly Immutable<Item>[], session?: Immutab
 }
 
 export const isFiltering = (filters: Immutable<SessionPreferences['filters']>): boolean =>
-  normalizeSearch(filters.search).trim().length > 0 || filters.statuses.length > 0 || filters.owners.length > 0 || filters.hide_later;
+  normalizeSearch(filters.search).trim().length > 0 || hasStatusFilter(filters.statuses) || filters.owners.length > 0 || filters.hide_later;
 
 /** Bezier from the parent's right edge to the child's left edge (Ariadne.dc.html:1573). */
 export const edgePath = (x1: number, y1: number, x2: number, y2: number): string => {
@@ -142,7 +144,7 @@ export function sessionGraph(input: GraphInput): SessionGraph {
   const { session, view, later, selectedId, tight } = input;
   const filtering = isFiltering(view.filters);
   const hidden = hiddenItems(session, new Set(view.hidden_item_ids ?? []));
-  const rows = sentenceRows(session, view, later, input.temporaryExpandedItemIds ?? [], input.revealedItemId ?? null).rows;
+  const rows = sentenceRows(session, view, later, input.temporaryExpandedItemIds ?? [], input.revealedItemId ?? null, input.filterCollapsedItemIds).rows;
   const visible = new Map<string, SentenceRow>(rows.map(row => [row.item.id, row]));
   const children = new Map<string, string[]>();
   for (const row of rows) {
@@ -193,7 +195,7 @@ export function sessionGraph(input: GraphInput): SessionGraph {
       const below = descendantCount(session, item.id), shown = (children.get(item.id)?.length ?? 0) > 0;
       const collapsed = row.childCount > 0 && !shown, selected = selectedId === item.id;
       const node: GraphNode = { item, status: graphStatus(displayStatus(session, item)), short: shortLabel(item), x: at.x, y: at.y, below,
-        collapsed: collapsed && below > 0, canCollapse: !filtering && !collapsed && below > 0, selected,
+        collapsed: collapsed && below > 0, canCollapse: !collapsed && below > 0, selected,
         onThread: thread.has(item.id) && !selected, closed: isClosed(item.status), dimmed: filtering && row.context && !selected,
         hidden: hidden.has(item.id), ack: ackTarget(session, item) };
       nodes.set(item.id, node);

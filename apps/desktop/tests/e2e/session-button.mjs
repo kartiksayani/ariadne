@@ -34,3 +34,11 @@ export async function openSessionButton(sessionId) {
   }
   throw new Error(`No project page lists session ${sessionId}`);
 }
+
+/** Finds and clicks the session's button, looking again if the list redraws between finding and clicking. */
+export async function openSession(sessionId) {
+  for (let attempt = 1; ; attempt++) {
+    try { await click(await openSessionButton(sessionId)); return; }
+    catch (error) { if (attempt === 3) throw error; }
+  }
+}

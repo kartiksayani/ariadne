@@ -10,6 +10,11 @@ import { DispatchDialog } from '../../../src/ui/pages/SessionDialogs';
 import { qualifiedPresence } from '../../../src/components/bindings/presence';
 import { RecoveryPanel, recoveryTargets } from '../../../src/components/recovery/RecoveryPanel';
 import { EdgeState, SessionNotice, type EdgeKind } from '../../../src/components/edge-states/EdgeState';
+import { immutable } from '../../../src/data';
+import { stuckInput } from '../../../src/selectors/waiting/stuck';
+import { StuckNote } from '../../../src/ui/answer/StuckNote';
+import { DispatchChip } from '../../../src/components/bindings/DispatchChip';
+import { notices } from '../../../src/ui/pages/notices';
 
 const opId = '00000000-0000-4000-8000-000000000099';
 const route = { project_id: demo.project_id, session_id: demo.id };
@@ -74,7 +79,7 @@ async function setup() {
   const actions = new SessionActions(service, store, () => opId);
   return { transport, sessions, store, actions };
 }
-afterEach(() => { cleanup(); opened.splice(0).forEach(sessions => sessions.closeAll()); vi.useRealTimers(); });
+afterEach(() => { cleanup(); opened.splice(0).forEach(sessions => sessions.closeAll()); notices.clear(); vi.useRealTimers(); });
 function dialog() { return within(screen.getByRole('dialog')); }
 /** The detailed audited form sits behind "Advanced". */
 function chooseRecovery(choice: string) {
@@ -86,6 +91,127 @@ function chooseRecovery(choice: string) {
 
 // The session card's dispatch dialog (WP5) replaced BindingControls: each button is the deliberate action.
 const dispatch = (actions: SessionActions) => <DispatchDialog store={actions.session} actions={actions} agent="claude-code" onClose={() => {}} />;
+async function waitingAnswer() {
+  const value = await setup(), { transport, store } = value;
+  const input = currentInput(transport.session), attempt = input.attempts[0]!;
+  const binding = currentBinding(transport.session);
+  binding.adapter_id = 'claude-code'; binding.pause_reason = 'result_missing';
+  attempt.binding_generation = binding.generation; attempt.acceptance = 'accepted'; attempt.host_turn_id = 'turn-example';
+  attempt.turn_state = 'completed'; attempt.result_state = 'missing'; attempt.domain_result = null;
+  attempt.error = { code: 'result_missing', reason: 'No saved result.', retryable: false, observed_at: transport.session.updated_at };
+  transport.session.revision += 1;
+  await store.refresh();
+  return { ...value, input, attempt };
+}
+describe('a delivered message with no answer yet', () => {
+  it.each(['removed', 'generation'] as const)('does not promise late-answer acceptance for %s recovery', async variant => {
+    const { actions, transport, store, input, attempt } = await waitingAnswer();
+    if (variant === 'removed') transport.session.items[input.target.item_id!]!.removed_at = transport.session.updated_at;
+    if (variant === 'generation') attempt.binding_generation = '00000000-0000-4000-8000-000000000098';
+    transport.session.revision += 1; await store.refresh();
+    render(<RecoveryPanel actions={actions} />);
+    expect(screen.getByRole('button', { name: 'Stop waiting' }).title).toBe('Stop waiting for an answer.');
+    expect(screen.getByRole('region', { name: 'Delivery recovery' }).textContent).toContain('has your message but hasn’t saved its answer yet');
+  });
+  it('shows truthful words and ordered actions, asks for a result-only repair, and hides cancellation', async () => {
+    const { actions, transport, input, attempt } = await waitingAnswer();
+    render(<><StuckNote actions={actions} input={immutable(input)} stuck={stuckInput(immutable(transport.session), immutable(input))!} /><DispatchChip actions={actions} /></>);
+    const note = document.querySelector<HTMLElement>('.stuck-note')!;
+    expect(note.getAttribute('data-stuck')).toBe('answer');
+    expect(note.textContent).toContain('claude-code has your message but hasn’t saved its answer yet. It may still be working.');
+    expect([...note.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Stop waiting', 'Ask for the answer', 'Send again', 'More options']);
+    expect(screen.getByRole('button', { name: 'Stop waiting' }).className).toContain('btn-primary');
+    expect(screen.getByRole('button', { name: 'Ask for the answer' }).title).toBe('Asks claude-code to save its answer now. An answer it’s still working on won’t be linked to this message.');
+    expect(screen.queryByRole('button', { name: 'Cancel message' })).toBeNull();
+    expect(note.textContent).not.toMatch(/Not delivered|Couldn’t deliver/);
+    expect(screen.getByRole('group', { name: 'Sending to the agent' }).textContent).toMatch(/^Waiting for claude-code to answer “/);
+    expect(screen.getByRole('button', { name: 'Stop waiting' }).title).toBe('Stop waiting for an answer. If claude-code answers later, its answer will still show.');
+    transport.replies.push(transport.receipt('input_resolve', 'request_result_repair'));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ask for the answer' })); });
+    expect(transport.mutations[0].command).toMatchObject({ command: 'input_resolve', params: {
+      input_id: input.id, attempt_id: attempt.id, decision: 'request_result_repair' } });
+  });
+  it('confirms before sending the already delivered words again', async () => {
+    const { actions, transport, input } = await waitingAnswer();
+    render(<StuckNote actions={actions} input={immutable(input)} stuck={stuckInput(immutable(transport.session), immutable(input))!} />);
+    const again = screen.getByRole('button', { name: 'Send again' });
+    expect(again.className).toContain('btn-ghost');
+    fireEvent.click(again);
+    expect(dialog().getByText('claude-code already has this message. Send it again anyway?')).toBeTruthy();
+    expect(transport.mutations).toHaveLength(0);
+    fireEvent.click(dialog().getByRole('button', { name: 'Cancel' }));
+    expect(transport.mutations).toHaveLength(0);
+    fireEvent.click(again); transport.replies.push(transport.receipt('input_resolve'));
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Send again' })); });
+    expect(transport.mutations[0].command).toMatchObject({ command: 'input_resolve', params: { decision: 'resend' } });
+  });
+  it('uses the same actions in recovery and retains idle gating', async () => {
+    const { actions, transport } = await waitingAnswer();
+    render(<RecoveryPanel actions={actions} />);
+    const panel = screen.getByRole('region', { name: 'Delivery recovery' });
+    expect([...panel.querySelectorAll('.recovery-actions button')].map(button => button.textContent)).toEqual([
+      'Stop waiting', 'Ask for the answer', 'Send again', 'Review recovery']);
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Send again' }));
+    expect(dialog().getByText('claude-code already has this message. Send it again anyway?')).toBeTruthy();
+    expect((dialog().getByRole('button', { name: 'Send again' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(dialog().getByRole('checkbox', { name: 'I checked: claude-code isn’t working on this now.' }));
+    expect((dialog().getByRole('button', { name: 'Send again' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(transport.mutations).toHaveLength(0);
+    fireEvent.click(dialog().getByRole('button', { name: 'Cancel' }));
+    act(() => transport.presence({ execution_state: 'running' }));
+    expect((screen.getByRole('button', { name: 'Ask for the answer' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Send again' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Stop waiting' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+  it.each(['failed', 'interrupted'] as const)('offers confirmed Send again first after the received turn %s', async turn => {
+    const { actions, transport, store, input, attempt } = await waitingAnswer();
+    attempt.turn_state = turn; attempt.result_state = 'pending'; attempt.error!.code = 'host_failure';
+    transport.session.revision += 1; await store.refresh();
+    render(<StuckNote actions={actions} input={immutable(input)} stuck={stuckInput(immutable(transport.session), immutable(input))!} />);
+    const note = document.querySelector<HTMLElement>('.stuck-note')!;
+    expect(note.textContent).toContain('claude-code got your message but stopped before answering.');
+    expect(note.textContent).not.toMatch(/may still be working|Couldn’t deliver|Not delivered/);
+    expect([...note.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Send again', 'Stop waiting', 'More options']);
+    expect(screen.getByRole('button', { name: 'Send again' }).className).toContain('btn-primary');
+    expect(screen.getByRole('button', { name: 'Stop waiting' }).title).toBe('Stop waiting for an answer.');
+    fireEvent.click(screen.getByRole('button', { name: 'Send again' }));
+    expect(dialog().getByText('claude-code already has this message. Send it again anyway?')).toBeTruthy();
+    expect(transport.mutations).toHaveLength(0);
+  });
+  it.each(['inline', 'panel', 'review'] as const)('stops waiting through %s while busy without an idle attestation', async surface => {
+    const { actions, transport, input } = await waitingAnswer();
+    act(() => transport.presence({ execution_state: 'running' }));
+    render(surface === 'inline' ? <StuckNote actions={actions} input={immutable(input)} stuck={stuckInput(immutable(transport.session), immutable(input))!} /> : <RecoveryPanel actions={actions} />);
+    transport.replies.push(transport.receipt('input_resolve', 'skip'));
+    if (surface === 'review') {
+      chooseRecovery('skip');
+      expect(dialog().queryByRole('checkbox')).toBeNull();
+    }
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: surface === 'review' ? 'Save recovery decision' : 'Stop waiting' })); });
+    expect(transport.mutations[0].command).toMatchObject({ command: 'input_resolve', params: { decision: 'skip', evidence: null } });
+  });
+  it('checks uncertain acceptance with a host turn in recovery without claiming receipt', async () => {
+    const { actions, transport, store, input, attempt } = await waitingAnswer();
+    attempt.acceptance = 'uncertain'; transport.session.revision += 1; await store.refresh();
+    render(<RecoveryPanel actions={actions} />);
+    expect(screen.getByRole('region', { name: 'Delivery recovery' }).textContent).toContain(stuckInput(immutable(transport.session), immutable(input))!.text);
+    expect(screen.getByRole('region', { name: 'Delivery recovery' }).textContent).not.toMatch(/has your message|may still be working/);
+  });
+  it('offers Send again first in recovery after a delivered turn stopped', async () => {
+    const { actions, transport, store, attempt } = await waitingAnswer();
+    attempt.turn_state = 'interrupted'; attempt.result_state = 'pending'; attempt.error!.code = 'host_failure';
+    transport.session.revision += 1; await store.refresh(); transport.presence();
+    render(<RecoveryPanel actions={actions} />);
+    const panel = screen.getByRole('region', { name: 'Delivery recovery' });
+    expect(panel.textContent).toContain('claude-code got your message but stopped before answering.');
+    expect([...panel.querySelectorAll('.recovery-actions button')].map(button => button.textContent)).toEqual(['Send again', 'Stop waiting', 'Review recovery']);
+    expect(screen.getByRole('button', { name: 'Send again' }).className).toContain('btn-primary');
+    fireEvent.click(screen.getByRole('button', { name: 'Send again' }));
+    expect(dialog().getByText('claude-code already has this message. Send it again anyway?')).toBeTruthy();
+    expect(transport.mutations).toHaveLength(0);
+  });
+});
 describe('explicit binding lifecycle', () => {
   it('sends a generation-fenced pause and keeps a refreshed owner pause visible', async () => {
     const { actions, transport, store } = await setup();
@@ -191,7 +317,7 @@ describe('plain recovery decisions', () => {
     expect(screen.getByRole('dialog').textContent).not.toMatch(uuidPattern);
     transport.replies.push(new Error('Lost acknowledgement'));
     await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Save recovery decision' })); });
-    expect(screen.getByRole('dialog').textContent).toContain('Ariadne isn’t sure your decision (mark as done) was saved.');
+    expect(screen.getByRole('dialog').textContent).toContain('Ariadne isn’t sure your decision (stopped waiting) was saved.');
     expect(screen.getByRole('dialog').textContent).not.toMatch(uuidPattern);
   });
 });
@@ -375,6 +501,25 @@ describe('receipt uncertainty across navigation', () => {
     expect(transport.mutations[1].command.op_id).not.toBe(transport.mutations[0].command.op_id);
     expect(corrected.getSnapshot().pending).toEqual(transport.mutations[1]);
     expect(transport.mutations[1].command).toMatchObject({ params: { evidence: { owner_attested_idle: true } } });
+  });
+  it('keeps a typed recovery revision conflict and reason in its form without a global toast', async () => {
+    const { actions, transport, store } = await setup(); const input = currentInput(transport.session);
+    const revision = transport.session.revision; const reason = '  Reviewed café terminal work. Keep prior effects.  ';
+    transport.presence(); render(<RecoveryPanel actions={actions} />); chooseRecovery('skip');
+    fireEvent.change(dialog().getByLabelText('Reason'), { target: { value: reason } });
+    transport.session.revision += 1; transport.replies.push(failure('revision_conflict'));
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Save recovery decision' })); });
+    expect(transport.mutations).toHaveLength(1);
+    expect(transport.mutations[0]).toEqual({ session: route, command: { command: 'input_resolve', api_version: 1, op_id: opId,
+      params: { input_id: input.id, attempt_id: input.active_attempt_id, expected_revision: revision, decision: 'skip', reason, evidence: null } } });
+    expect(actions.getSnapshot()).toMatchObject({ writing: false, pending: null, error: { error: { code: 'revision_conflict' } } });
+    expect(dialog().getByText('This changed while you were working. Look at it as it is now, then try again.')).toBeTruthy();
+    expect((dialog().getByLabelText('Reason') as HTMLInputElement).value).toBe(reason);
+    expect((dialog().getByLabelText('Recovery choice') as HTMLSelectElement).value).toBe('skip');
+    expect(store.getSnapshot().snapshot?.session.revision).toBe(revision + 1);
+    expect(dialog().getByRole('button', { name: 'Review current snapshot' })).toBeTruthy();
+    expect((dialog().getByRole('button', { name: 'Save recovery decision' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(notices.getSnapshot()).toEqual([]);
   });
   it('new app controller reloads persisted pause and uncertain attempt without automatic retry/resume', async () => {
     const { actions, transport, store } = await setup(); currentBinding(transport.session).owner_paused = true; transport.session.revision += 1; await store.refresh();

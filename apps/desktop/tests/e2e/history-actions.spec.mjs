@@ -4,15 +4,16 @@ import { randomUUID } from 'node:crypto';
 import { basename, join, resolve } from 'node:path';
 import { cliRequest, admissions, snapshot } from './scripted-provider.mjs';
 import { json } from '../../../../scripts/run-native-e2e.mjs';
-import { openSessionButton } from './session-button.mjs';
+import { openSession as clickSession } from './session-button.mjs';
 import { folded } from './owner-reply.mjs';
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const dialog = () => browser.$('[role="dialog"]');
 async function archiveDiagnostics(failure) {
-  const tree = await browser.$('.tree-column').getText().catch(() => '(unavailable)');
-  const hasDialog = await dialog().isExisting().catch(() => '(unavailable)');
+  let tree = '(unavailable)', hasDialog = '(unavailable)';
+  try { tree = await browser.$('.tree-column').getText(); } catch { /* Keep the original archive failure. */ }
+  try { hasDialog = await dialog().isExisting(); } catch { /* Diagnostics may fail before returning a promise. */ }
   return new Error(`${failure.message}\nTree column text: ${tree}\nDialog exists: ${hasDialog}`, { cause: failure });
 }
 // The detail carries its canonical local item identity.
@@ -20,13 +21,13 @@ const detailReference = async () => {
   const detail = await browser.$('.item-detail');
   return await detail.isExisting() ? detail.getAttribute('data-detail-item-id') : null;
 };
-// Close/Reopen sit in the tree's session bar; Archive and Continue on each topic band.
+// Close lives in Session actions; Reopen sits in the session bar; Archive and Continue on each topic band.
 const sessionBar = () => browser.$('.tree-session-bar');
 const topicBand = name => browser.$(`.tree-rows [role="treeitem"][aria-label="${name}"]`);
 async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.click(); }
 async function openSession(sessionId) {
   await click(await browser.$('button[data-shell-tab="all_sessions"]'));
-  await click(await openSessionButton(sessionId));
+  await clickSession(sessionId);
   await sessionBar().waitForDisplayed();
 }
 // A topic band shows its actions while it holds focus (the prototype's hover).
@@ -38,12 +39,16 @@ export async function topicAction(name, label) {
 export async function archiveClosedTopic(topicId) {
   // The all-closed prompt sits below the sticky band, in that topic's sibling content.
   try {
-    await wait(async () => await browser.$('.tree-column').getAttribute('data-session-status') === 'ready', 'Session was not ready for direct topic archive');
+    await wait(async () => await browser.$('.tree-column').getAttribute('data-session-status') === 'ready'
+      && await sessionBar().getAttribute('aria-busy') === 'false', 'Session was not ready for direct topic archive');
     await click(await browser.$(`.tree-rows [data-topic-id="${topicId}"] + .tree-topic-content .tree-prompt button`));
   } catch (failure) { throw await archiveDiagnostics(failure); }
 }
 async function lifecycle(button, confirmation, path, predicate) {
-  await click(await sessionBar().$(`button*=${button}`));
+  if (button === 'Close session') {
+    await click(await sessionBar().$('button[aria-label="Session actions"]'));
+    await click(await browser.$('[role="menu"][aria-label="Session actions"]').$('[role="menuitem"]*=Close session'));
+  } else await click(await sessionBar().$(`button*=${button}`));
   await click(await dialog().$(`button=${confirmation}`));
   await wait(async () => predicate(await readJson(path)), `Persisted ${confirmation} was not visible on disk`);
   await wait(async () => !(await dialog().isExisting()), 'Saved history confirmation did not close');
@@ -132,14 +137,20 @@ export async function runHistoryActionsAcceptance(configuration) {
   await wait(async () => await topicBand(topicName).isExisting(), 'Agent-created terminal topic did not refresh in App');
   const targetHistory = { items: target.items, messages: target.messages, rounds: target.rounds, answers: target.answers, bindings: target.bindings };
   // Nothing blocks an all-closed topic, so its prompt archives at once and the
-  // column offers Undo, which restores it (no confirmation dialog either way).
+  // toast offers Undo, which restores it (no confirmation dialog either way).
   await archiveClosedTopic(terminalTopic.id);
   try {
     await wait(async () => (await readJson(targetPath)).topics[terminalTopic.id].archived_at !== null, 'Direct topic archive was not visible on disk');
   } catch (failure) { throw await archiveDiagnostics(failure); }
   assert.equal(await dialog().isExisting(), false, 'An unblocked archive must not open the review');
-  await wait(async () => (await browser.$('.tree-column').getText()).includes(`Archived “${topicName}”.`), 'Archive did not report its Undo banner');
-  await click(await browser.$('.tree-column').$('button=Undo'));
+  let archiveNotice;
+  await wait(async () => {
+    for (const notice of await browser.$$('.pw-notices .pw-note')) {
+      if ((await notice.$('.pw-note-text').getText()).startsWith(`Archived “${topicName}”.`)) { archiveNotice = notice; return true; }
+    }
+    return false;
+  }, 'Archive did not show its Undo notification');
+  await click(await archiveNotice.$('button=Undo'));
   await wait(async () => (await readJson(targetPath)).topics[terminalTopic.id].archived_at === null, 'Undo did not restore the topic on disk');
   await wait(async () => await topicBand(topicName).isExisting(), 'Restored topic did not return to the tree');
   target = await readJson(targetPath);

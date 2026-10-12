@@ -133,14 +133,26 @@ fn resolve(
             )
         })?;
     let attempt = &input.attempts[index];
-    let idle = current_idle(binding, presence)?;
-    if !idle
-        && !params
-            .evidence
+    // This decision only stops waiting for completed work; it sends nothing
+    // and must not require an idle assertion about a different host turn.
+    let stop_waiting = params.decision == ResolutionKind::Skip
+        && input.active_attempt_id.as_ref() == Some(&params.attempt_id)
+        && attempt.turn_state == TurnState::Completed
+        && attempt.result_state == ResultState::Missing
+        && attempt
+            .error
             .as_ref()
-            .is_some_and(|e| e.owner_attested_idle)
-    {
-        return Err(core(CoreErrorCode::DeliveryUncertain, "Current host liveness is unknown; explicitly attest that the terminal is stopped or idle"));
+            .is_some_and(|e| e.code == "result_missing");
+    if !stop_waiting {
+        let idle = current_idle(binding, presence)?;
+        if !idle
+            && !params
+                .evidence
+                .as_ref()
+                .is_some_and(|e| e.owner_attested_idle)
+        {
+            return Err(core(CoreErrorCode::DeliveryUncertain, "Current host liveness is unknown; explicitly attest that the terminal is stopped or idle"));
+        }
     }
     if params.decision == ResolutionKind::ConfirmEvidence {
         if params.evidence.is_none() {

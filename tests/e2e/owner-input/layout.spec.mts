@@ -1,12 +1,37 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page, type Locator } from '@playwright/test';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 import type { Server } from 'node:http';
 
+async function ready(page: Page) {
+  await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-status', 'ready');
+  await expect(page.locator('.tree-session-bar')).toHaveAttribute('aria-busy', 'false');
+}
+
+async function reachable(control: Locator) {
+  await expect(control).toBeInViewport();
+  expect(await control.evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    return document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.closest('button') === element;
+  })).toBe(true);
+}
+
+async function checkFilters(page: Page) {
+  const trigger = page.getByRole('group', { name: 'Filter items' }).getByRole('button', { name: /^Filter/ });
+  await reachable(trigger);
+  await trigger.click();
+  const option = page.getByRole('menuitemcheckbox', { name: /^Open \d+$/ });
+  await reachable(option);
+  await expect(option).toHaveAttribute('aria-checked', 'false');
+  await page.keyboard.press('Escape');
+  await expect(trigger).toBeFocused();
+  await expect(option).toHaveCount(0);
+}
+
 test('scrolls full variable tree rows with the session bar, setup and filters accessible', async ({ page }, testInfo) => {
-  // Visiting every session-bar control at both sizes needs more time on loaded CI runners.
-  test.setTimeout(480_000);
+  // Visiting every session-bar control and menu item at both sizes takes about 6 minutes on loaded CI runners.
+  test.setTimeout(900_000);
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
@@ -53,16 +78,17 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
     expect(instruction.lineBottom).toBeLessThanOrEqual(instruction.bottom);
     await page.locator('button[data-session-id]').first().click();
     const tree = page.getByRole('tree'), setup = page.getByRole('region', { name: 'Session setup' });
+    await ready(page);
     await expect(tree.locator('.tree-item')).toHaveCount(2000);
     // The connect card belongs to the project page; the session view does not carry it.
     await expect(setup).toHaveCount(0);
     const geometry = () => page.evaluate(() => {
-      const rows = document.querySelector<HTMLElement>('.tree-scroll')!, center = document.querySelector<HTMLElement>('.shell-center')!;
+      const rows = document.querySelector<HTMLElement>('.tree-scroll')!, center = document.querySelector<HTMLElement>('.shell-center-content')!;
       return { rowsHeight: rows.clientHeight, rowsScrollHeight: rows.scrollHeight, rowsScrollTop: rows.scrollTop,
         centerScrollTop: center.scrollTop, centerHeight: center.clientHeight, centerScrollHeight: center.scrollHeight,
         // The toolbar's offset under the session bar. The body never scrolls sideways, so opening the detail
         // column narrows the centre and the session bar may wrap; the toolbar must still sit right under it.
-        toolbarGap: document.querySelector('.tree-filters')!.getBoundingClientRect().top - document.querySelector('.tree-session-bar')!.getBoundingClientRect().bottom,
+        toolbarGap: document.querySelector('[role="group"][aria-label="Filter items"]')!.getBoundingClientRect().top - document.querySelector('.tree-session-bar')!.getBoundingClientRect().bottom,
         headerTop: document.querySelector('.shell-header')!.getBoundingClientRect().top };
     });
     const before = await geometry();
@@ -83,72 +109,66 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
     expect(after.centerScrollHeight).toBeLessThanOrEqual(after.centerHeight + 1);
     expect(after.toolbarGap).toBe(before.toolbarGap);
     expect(after.headerTop).toBe(before.headerTop);
-    await expect(page.getByRole('group', { name: 'Filter items' }).getByRole('button', { name: /\bOpen \d+$/ })).toBeInViewport();
-    const actionTimeout = 15_000;
-    const requiredControls = ['Close session', 'Rename', 'Copy ID', 'Sending and connection'];
+    await checkFilters(page);
     for (const viewport of [{ width: 1000, height: 668 }, { width: 900, height: 650 }]) {
       await page.setViewportSize(viewport);
-      // The bar keeps Close session and the sending chip (details, Pause); connect lives on the project page.
+      await ready(page);
       const bar = page.locator('.tree-session-bar');
-      await expect(bar.getByRole('button', { name: 'Close session' })).toBeInViewport();
-      const sessionControls = await bar.getByRole('button').evaluateAll(buttons => buttons.map(button => {
-        const title = button.getAttribute('title'), ariaLabel = button.getAttribute('aria-label');
-        const label = (title === 'Sending and connection' ? title : ariaLabel ?? (button as HTMLElement).innerText)
-          .replace(/[\uE000-\uF8FF]/g, '').replace(/\s+/g, ' ').trim();
-        return { label, title, ariaLabel };
-      }));
-      expect(sessionControls.map(control => control.label)).toEqual(expect.arrayContaining(requiredControls));
-      const visitedControls: string[] = [];
-      for (const { label, title, ariaLabel } of sessionControls) {
-        // The sending button can change its name while its dialog is open; its title still identifies the focus return target.
-        // Text controls include icon glyphs in their accessible name; match their readable text instead.
-        const action = title
-          ? bar.getByRole('button').and(bar.getByTitle(title, { exact: true }))
-          : ariaLabel ? bar.getByRole('button', { name: ariaLabel, exact: true })
-            : bar.getByRole('button').filter({ hasText: label });
-        // Optional dispatch actions can disappear as status changes; required controls must all be checked.
-        if (!requiredControls.includes(label) && await action.count() === 0) continue;
-        await action.scrollIntoViewIfNeeded({ timeout: actionTimeout });
-        await expect(action).toBeInViewport();
-        expect(await action.evaluate(element => {
-          const bounds = element.getBoundingClientRect();
-          return document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.closest('button') === element;
-        }, undefined, { timeout: actionTimeout })).toBe(true);
-        visitedControls.push(label);
-        // Pause and Resume write at once; Close session and the sending details open a dialog to dismiss.
-        // Pause and Resume are icon buttons: their name is the aria-label.
-        if (/Pause|Resume|Try again/.test(label)) continue;
-        // Copy ID acts immediately without a dialog. This layout harness grants no clipboard permissions.
+      const actions = bar.getByRole('button', { name: 'Session actions', exact: true });
+      await reachable(actions);
+      // Every session action stays reachable through the menu with the tree scrolled.
+      for (const label of ['Close session', 'Rename', 'Copy ID']) {
+        await actions.click();
+        const menu = page.getByRole('menu', { name: 'Session actions' });
+        const menuBox = (await menu.boundingBox())!;
+        expect(menuBox.x).toBeGreaterThanOrEqual(0);
+        expect(menuBox.y).toBeGreaterThanOrEqual(0);
+        expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(viewport.width);
+        expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(viewport.height);
+        const action = page.getByRole('menuitem', { name: label, exact: true });
+        await reachable(action);
         if (label === 'Copy ID') {
-          await expect(page.getByRole('dialog')).toHaveCount(0);
-          continue;
-        }
-        // Rename opens its fields in the bar, not a dialog; Esc closes them and focus returns to the button.
-        if (label === 'Rename') {
-          await action.click({ timeout: actionTimeout });
-          const field = bar.getByLabel('Session name');
-          await expect(field).toBeInViewport();
+          // This harness grants no clipboard permissions; check reachability without writing.
           await page.keyboard.press('Escape');
-          await expect(field).toHaveCount(0);
-          continue;
+        } else {
+          await action.click();
+          if (label === 'Rename') {
+            const field = bar.getByLabel('Session name');
+            await expect(field).toBeInViewport();
+            await page.keyboard.press('Escape');
+            await expect(field).toHaveCount(0);
+          } else {
+            const review = page.getByRole('dialog');
+            await expect(review).toBeInViewport();
+            await review.getByRole('button', { name: 'Cancel', exact: true }).click();
+            await expect(review).toHaveCount(0);
+          }
         }
-        await action.click({ timeout: actionTimeout });
+        await expect(actions).toBeFocused();
+      }
+      // Sending details and optional dispatch actions remain directly in the bar.
+      await reachable(bar.getByRole('button').and(bar.getByTitle('Sending and connection', { exact: true })));
+      const directControls = await bar.getByRole('button').all();
+      for (const action of directControls) {
+        if (await action.getAttribute('aria-label') === 'Session actions') continue;
+        await reachable(action);
+        if (await action.getAttribute('title') !== 'Sending and connection') continue;
+        await action.click();
         const review = page.getByRole('dialog');
         await expect(review).toBeInViewport();
-        await review.getByRole('button', { name: label === 'Close session' ? 'Cancel' : 'Done', exact: true }).click();
+        await review.getByRole('button', { name: 'Done', exact: true }).click();
         await expect(review).toHaveCount(0);
         await expect(action).toBeFocused();
       }
-      expect(visitedControls, `session controls checked at ${viewport.width}×${viewport.height}`).toEqual(expect.arrayContaining(requiredControls));
       const current = await geometry();
       expect(current.rowsHeight).toBeGreaterThan(usefulRows);
       expect(current.centerScrollTop).toBe(0);
       expect(current.centerScrollHeight).toBeLessThanOrEqual(current.centerHeight + 1);
-      await expect(page.getByRole('group', { name: 'Filter items' }).getByRole('button', { name: /\bOpen \d+$/ })).toBeInViewport();
-      const controls = await page.locator('.tree-filters').evaluate(element => [...element.querySelectorAll('button, input, select')].map(control => {
+      await checkFilters(page);
+      const controls = await page.getByRole('group', { name: 'Filter items' }).evaluate(element => [...element.querySelectorAll('button')].map(control => {
         const bounds = control.getBoundingClientRect();
         return { label: control.textContent || control.closest('label')?.textContent,
-          reachable: document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.closest('button, input, select') === control };
+          reachable: document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.closest('button') === control };
       }));
       expect(controls.filter(control => !control.reachable)).toEqual([]);
       const ordinary = tree.locator('[data-item-id="10.49"]');
@@ -167,8 +187,8 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
     await page.getByRole('button', { name: 'Graph', exact: true }).click();
     await expect(page.getByRole('tree', { name: / graph$/ }).first()).toBeVisible();
     expect(await page.locator('.graph-scroll').evaluate(element => getComputedStyle(element).overflowY)).toBe('auto');
-    expect(await page.locator('.shell-center').evaluate(element => getComputedStyle(element).overflowY)).toBe('hidden');
-    const graphBox = (await page.locator('.graph-scroll').boundingBox())!, centerBox = (await page.locator('.shell-center').boundingBox())!;
+    expect(await page.locator('.shell-center-content').evaluate(element => getComputedStyle(element).overflowY)).toBe('auto');
+    const graphBox = (await page.locator('.graph-scroll').boundingBox())!, centerBox = (await page.locator('.shell-center-content').boundingBox())!;
     expect(graphBox.y + graphBox.height).toBeLessThanOrEqual(centerBox.y + centerBox.height + 1);
     // Nothing in the session column is clipped: banners and controls shrink and scroll themselves.
     expect(await page.locator('.nav-session-content').evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
@@ -197,7 +217,7 @@ test('keeps one sent answer with its delivery controls in the ordinary App', asy
     await page.locator('.pw-project-open').first().click();
     const session = page.locator('button[data-session-id]').first();
     await expect(session).toBeEnabled(); await session.click();
-    await expect(page.locator('.tree-session-bar').getByRole('button', { name: 'Close session' })).toBeEnabled();
+    await ready(page);
     await page.locator('[data-item-id="2"]').click();
     // The item and chat scroll on top; the composer is docked below it.
     const detail = page.locator('.shell-detail-scroll'), head = detail.locator('.item-detail .detail-head');
@@ -229,7 +249,8 @@ test('keeps one sent answer with its delivery controls in the ordinary App', asy
       const headBox = (await head.boundingBox())!, receiptBox = (await receipt.boundingBox())!, sentBox = (await sent.boundingBox())!;
       expect(receiptBox.y, `receipt below the question at ${viewport.width}×${viewport.height}`).toBeGreaterThanOrEqual(headBox.y + headBox.height);
       expect(receiptBox.y, `delivery controls below their reply at ${viewport.width}×${viewport.height}`).toBeGreaterThanOrEqual(sentBox.y + sentBox.height);
-      for (const content of await head.locator('h2, .detail-status').all()) {
+      for (const content of await head.locator('h2, .detail-badge').all()) {
+        await expect(content).toBeVisible();
         const box = (await content.boundingBox())!;
         expect(box.y + box.height, `question head above receipt at ${viewport.width}×${viewport.height}`).toBeLessThanOrEqual(receiptBox.y);
       }
@@ -255,7 +276,7 @@ test('docks the composer under a scrolling detail body that grows it to a third 
     await page.locator('.pw-project-open').first().click();
     const session = page.locator('button[data-session-id]').first();
     await expect(session).toBeEnabled(); await session.click();
-    await expect(page.locator('.tree-session-bar').getByRole('button', { name: 'Close session' })).toBeEnabled();
+    await ready(page);
     await page.locator('[data-item-id="2"]').click();
     const pane = page.locator('.item-detail'), body = pane.locator('.detail-body'), dock = pane.locator('.detail-dock');
     const composer = pane.getByLabel('Reply in your own words');
@@ -277,6 +298,9 @@ test('docks the composer under a scrolling detail body that grows it to a third 
       await expect(composer).toBeInViewport();
       // Quick replies sit above the composer inside the dock.
       if (await dock.locator('[data-answer-option]').count()) {
+        const choices = dock.locator('.answer-choices');
+        await expect(choices).toBeVisible();
+        await expect(dock.locator('[data-answer-option]').first()).toBeVisible();
         const options = (await dock.locator('[data-answer-option]').first().boundingBox())!, box = (await composer.boundingBox())!;
         expect(options.y + options.height).toBeLessThanOrEqual(box.y);
       }
@@ -310,17 +334,20 @@ test('reads as a chat: oldest exchange first with no round headers, quick replie
     await page.locator('.pw-project-open').first().click();
     const session = page.locator('button[data-session-id]').first();
     await expect(session).toBeEnabled(); await session.click();
-    await expect(page.locator('.tree-session-bar').getByRole('button', { name: 'Close session' })).toBeEnabled();
+    await ready(page);
     const pane = page.locator('.item-detail');
 
-    // A waiting item: its quick replies sit above the composer, which is the last thing in the dock.
+    // A waiting item shows every quick reply above the composer immediately.
     await page.locator('[data-item-id="2"]').click();
     const composer = pane.getByLabel('Reply in your own words');
     await expect(composer).toBeVisible();
     const options = pane.locator('.detail-dock [data-answer-option]');
     await expect(options).toHaveCount(2);
+    const choices = pane.locator('.answer-choices');
+    await expect(choices).toBeVisible();
     const composerBox = (await composer.boundingBox())!;
     for (const option of await options.all()) {
+      await expect(option).toBeInViewport();
       const box = (await option.boundingBox())!;
       expect(box.y + box.height, 'quick reply above the composer').toBeLessThanOrEqual(composerBox.y);
     }

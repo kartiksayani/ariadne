@@ -549,6 +549,36 @@ fn text_scale_rejects_values_between_steps_or_outside_bounds_without_writing() {
 }
 
 #[test]
+fn detail_panel_widths_above_the_old_limit_survive_reopening() {
+    for width in [DETAIL_WIDTH_MIN, 720, 721, 1396, DETAIL_WIDTH_MAX] {
+        let s = Setup::new();
+        let mut global = s.preferences().get(&owner()).unwrap().global;
+        global.detail_width = Some(width);
+        s.preferences()
+            .patch(
+                &owner(),
+                &patch(
+                    100,
+                    1,
+                    vec![PreferencesPatchEntry::SetGlobal {
+                        preferences: global,
+                    }],
+                ),
+            )
+            .unwrap();
+        let reopened = Registry::open(s.home.path()).unwrap();
+        assert_eq!(
+            PreferencesService::new(&reopened)
+                .get(&owner())
+                .unwrap()
+                .global
+                .detail_width,
+            Some(width)
+        );
+    }
+}
+
+#[test]
 fn all_typed_patch_effects_are_durable_preserving_stale_routes_and_inert_exact_drafts() {
     let s = Setup::new();
     let mut global = s.preferences().get(&owner()).unwrap().global;

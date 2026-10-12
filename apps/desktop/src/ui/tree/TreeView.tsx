@@ -1,6 +1,6 @@
 import { AgentBin } from '../remove/AgentBin';
 import { itemRemoved } from '../../selectors/removed';
-// The session tree column (handoff "Session tree"): session bar, status chips,
+// The session tree column (handoff "Session tree"): session bar, status menu,
 // banners, topic bands and item rows, with the tree keyboard, inline answering
 // and the empty and loading states. Selection, expansion, topic folds and filters
 // persist through navigation's preference writer.
@@ -42,6 +42,8 @@ import { ContinuePicker, continueTargets, openContinueTopic } from '../dialogs/C
 import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
 import { reconnectingNote } from '../shared/connection';
+import { useFilterFolds } from '../shared/filterFolds';
+import { isViewConflict } from '../shared/conflictNotice';
 import './tree.css';
 
 export type RowIntent = 'bring' | 'reply' | 'drop' | 'note' | 'followup' | 'reopen' | 'later' | 'hide';
@@ -103,15 +105,27 @@ export function TreeView(props: TreeViewProps) {
   // Rows of a pending removal are gone at once; Undo brings them back.
   const hidden = useHidden();
   const session = useMemo(() => raw && visibleSession(raw, route, hidden), [raw, route, hidden]);
-  const view = preferences?.sessions.find(value => value.session.project_id === route.project_id && value.session.session_id === route.session_id) ?? null;
+  const savedView = preferences?.sessions.find(value => value.session.project_id === route.project_id && value.session.session_id === route.session_id) ?? null;
+  type Edit = { change: (next: SessionPreferences) => void; done: (saved: boolean) => void };
+  const [pendingEdits, setPendingEdits] = useState<readonly Edit[]>([]);
+  const [writingEdits, setWritingEdits] = useState<readonly Edit[]>([]);
+  const writingBase = useRef(savedView);
+  const view = useMemo(() => {
+    if (!savedView || (!pendingEdits.length && !writingEdits.length)) return savedView;
+    const next = structuredClone(savedView) as SessionPreferences;
+    [...(savedView === writingBase.current ? writingEdits : []), ...pendingEdits].forEach(edit => edit.change(next));
+    return next;
+  }, [savedView, pendingEdits, writingEdits]);
+  // The graph has its own optimistic node edits; both mounted views use its saved
+  // status scope while the tree's filter queue waits for persistence.
+  // The composed graph reads saved statuses; both views must share the same fold scope during writes.
+  const filterFolds = useFilterFolds(navigation.routes, route, (graph ? savedView : view)?.filters, query);
   const viewBusy = nav.writing || nav.pendingOperationId !== null;
   const archivedMode = view?.filters.archived ?? false;
   const later = useMemo(() => new Set(preferences?.later.filter(item => item.project_id === route.project_id && item.session_id === route.session_id)
     .map(item => item.item_id) ?? []), [preferences, route.project_id, route.session_id]);
-  // Folds apply at once; the saved view catches up when its write lands.
-  const [folds, setFolds] = useState<ReadonlySet<string> | null>(null);
   const savedFolds = view?.collapsed_topic_ids;
-  const closedTopics = useMemo(() => folds ?? new Set(savedFolds ?? []), [folds, savedFolds]);
+  const closedTopics = useMemo(() => new Set(savedFolds ?? []), [savedFolds]);
   const hiddenFocus = useRef<string | null>(null);
   const [expandedHiddenGroups, setExpandedHiddenGroups] = useState<ReadonlySet<string>>(new Set());
   const [focusKey, setFocusKey] = useState<string | null>(selectedId);
@@ -123,6 +137,44 @@ export function TreeView(props: TreeViewProps) {
   useOwnerDrafts(drafts, raw);
   const lifecycle = useLifecycle(actions);
   const ack = useAck(actions, selectedId);
+  const [ackItemId, setAckItemId] = useState<string | null>(null);
+  const runAck = (itemId: string) => { setAckItemId(itemId); return ack.run(itemId); };
+  const noticeCallbacks = useRef({ lifecycle, onShowArchive });
+  noticeCallbacks.current = { lifecycle, onShowArchive };
+  const archivedNotice = lifecycle.archived;
+  const archiveNoticeId = JSON.stringify(['tree-archived', route.project_id, route.session_id, archivedNotice?.topicId]);
+  useEffect(() => () => noticeStore.dismiss(archiveNoticeId), [archiveNoticeId]);
+  useEffect(() => {
+    if (!archivedNotice) { noticeStore.dismiss(archiveNoticeId); return; }
+    noticeStore.push({ id: archiveNoticeId, icon: 'ph ph-archive', dismissible: true,
+      text: `Archived “${archivedNotice.name}”.`
+        + (archivedNotice.waiting ? ` Its ${archivedNotice.waiting} waiting question${archivedNotice.waiting > 1 ? 's' : ''} left your panel.` : '')
+        + (archivedNotice.cancelled ? ` ${archivedNotice.cancelled} unsent message${archivedNotice.cancelled > 1 ? 's were' : ' was'} cancelled.` : ''),
+      onDismiss: () => noticeCallbacks.current.lifecycle.dismiss(),
+      actions: [{ label: 'Undo', disabled: lifecycle.busy, run: () => { if (!noticeCallbacks.current.lifecycle.busy) noticeCallbacks.current.lifecycle.undo(); } },
+        { label: 'View archive', dismissOnRun: true, run: () => { noticeCallbacks.current.lifecycle.dismiss(); noticeCallbacks.current.onShowArchive(); } }] });
+  }, [archiveNoticeId, archivedNotice]);
+  useEffect(() => {
+    const notice = noticeStore.getSnapshot().find(value => value.id === archiveNoticeId);
+    if (notice && notice.actions?.[0]?.disabled !== lifecycle.busy) noticeStore.push({ ...notice,
+      actions: notice.actions?.map(action => action.label === 'Undo' ? { ...action, disabled: lifecycle.busy } : action) });
+  }, [archiveNoticeId, lifecycle.busy]);
+  const actionState = actions.getSnapshot();
+  const controllerFailure = !actionState.pending && isViewConflict(actionState.error) ? plainFailure(actionState.error) : null;
+  const ackNotice = ack.error === controllerFailure ? null : ack.error;
+  const lifecycleNotice = lifecycle.dialog || lifecycle.error === controllerFailure ? null : lifecycle.error;
+  const ackNoticeId = JSON.stringify(['item-ack', route.project_id, route.session_id, ackItemId]);
+  const lifecycleNoticeId = JSON.stringify(['tree-lifecycle', route.project_id, route.session_id]);
+  useEffect(() => () => noticeStore.dismiss(ackNoticeId), [ackNoticeId]);
+  useEffect(() => {
+    if (!ackNotice) { noticeStore.dismiss(ackNoticeId); return; }
+    noticeStore.push({ id: ackNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: ackNotice });
+  }, [ackNoticeId, ackNotice]);
+  useEffect(() => () => noticeStore.dismiss(lifecycleNoticeId), [lifecycleNoticeId]);
+  useEffect(() => {
+    if (!lifecycleNotice) { noticeStore.dismiss(lifecycleNoticeId); return; }
+    noticeStore.push({ id: lifecycleNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: lifecycleNotice });
+  }, [lifecycleNoticeId, lifecycleNotice]);
   const elements = useRef(new Map<string, HTMLDivElement>()), scroller = useRef<HTMLDivElement>(null);
   const mounted = useRef(true), request = useRef(0);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, [store]);
@@ -137,10 +189,11 @@ export function TreeView(props: TreeViewProps) {
   const revealId = reveal?.kind === 'item' ? reveal.route.item_id : null;
   const temporary = reveal?.kind === 'item' ? reveal.temporaryExpandedItemIds : null;
   const model = useMemo(() => session && view ? treeModel({ session, view, search: query, later, collapsedTopics: closedTopics, selectedId, revealId,
+    filterCollapsedItemIds: filterFolds.items, filterCollapsedTopicIds: filterFolds.topics,
     expandedHiddenGroups, temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute }) : null,
-  [session, view, query, expandedHiddenGroups, later, closedTopics, selectedId, revealId, temporary, presence, health, summaries, minute]);
+  [session, view, query, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, presence, health, summaries, minute]);
   const summary = summaries.find(value => value.project_id === route.project_id && value.session_id === route.session_id) ?? null;
-  const bar = sessionBar(session, summary, minute, presence);
+  const bar = sessionBar(session, summary, presence);
   const rows = useMemo(() => model?.rows ?? [], [model]);
   const sections = useMemo(() => {
     const groups: { topic: Extract<Row, { kind: 'topic' }>; items: Exclude<Row, { kind: 'topic' }> [] }[] = [];
@@ -150,8 +203,8 @@ export function TreeView(props: TreeViewProps) {
     }
     return groups;
   }, [rows]);
-  const latest = useRef({ view, preferences, rows, session, folds });
-  latest.current = { view, preferences, rows, session, folds };
+  const latest = useRef({ view, preferences, rows, session });
+  latest.current = { view, preferences, rows, session };
 
   const hiddenSelection = useRef<{ sessionId?: string; selectedId: string | null }>({ selectedId: null });
   useEffect(() => {
@@ -192,15 +245,28 @@ export function TreeView(props: TreeViewProps) {
 
   // ------------------------------------------------------------ writes
   const saveView = (change: (next: SessionPreferences) => void) => {
-    const { view: current, preferences: revision } = latest.current, snapshot = navigation.getSnapshot();
-    if (!current || !revision || snapshot.writing || snapshot.pendingOperationId !== null) return Promise.resolve(false);
-    const next = structuredClone(current) as SessionPreferences;
-    // A fold whose own write was skipped (another write in flight) rides along with the next view write.
-    const folds = latest.current.folds;
-    if (folds) next.collapsed_topic_ids = [...folds];
-    change(next);
-    return navigation.saveSessionView(next, revision.revision);
+    const snapshot = navigation.getSnapshot();
+    if (!latest.current.view || snapshot.pendingOperationId !== null && !snapshot.writing) return Promise.resolve(false);
+    return new Promise<boolean>(done => { setPendingEdits(previous => [...previous, { change, done }]); });
   };
+  useEffect(() => {
+    if (!pendingEdits.length || writingEdits.length || viewBusy || !savedView || !preferences) return;
+    const edits = pendingEdits, next = structuredClone(savedView) as SessionPreferences;
+    edits.forEach(edit => edit.change(next));
+    writingBase.current = savedView;
+    setPendingEdits([]); setWritingEdits(edits);
+    void navigation.saveSessionView(next, preferences.revision).then(saved => {
+      if (!saved && mounted.current && navigation.getSnapshot().writing) {
+        // Another preference writer won admission. Rebase these unsubmitted
+        // edits on its saved view once navigation is idle.
+        setPendingEdits(previous => [...edits, ...previous]);
+        return;
+      }
+      edits.forEach(edit => edit.done(saved));
+      if (!saved && mounted.current) noticeStore.push({ id: 'tree-view-save-failed', icon: 'ph ph-warning-circle', dismissible: true,
+        text: 'The view preference could not be saved. Try again.' });
+    }).finally(() => { if (mounted.current) setWritingEdits([]); });
+  }, [pendingEdits, writingEdits, viewBusy, savedView, preferences, navigation]);
   const clickedReveal = useRef<RevealedItem | null>(null);
   const select = (id: string, fromRow = true) => {
     if (viewBusy) return;
@@ -234,26 +300,28 @@ export function TreeView(props: TreeViewProps) {
   };
   const toggleItem = (id: string) => {
     const row = latest.current.rows.find(value => value.key === id);
-    if (!row || row.kind !== 'item' || !row.hasKids || model?.filtering) return;
+    if (!row || row.kind !== 'item' || !row.hasKids) return;
+    if (model?.filtering) filterFolds.setFold('items', id, row.expanded);
+    if (row.expanded) onDismissReveal();
     void saveView(next => {
       const expanded = new Set(next.expanded_item_ids);
       if (row.expanded) expanded.delete(id); else expanded.add(id);
       next.expanded_item_ids = [...expanded];
-    }).then(saved => { if (saved && row.expanded) onDismissReveal(); });
+    });
   };
   const toggleTopic = (id: string) => {
-    if (!closedTopics.has(id)) onDismissReveal();
+    const expanded = latest.current.rows.find(row => row.kind === 'topic' && row.key === id)?.expanded ?? !closedTopics.has(id);
+    if (expanded) onDismissReveal();
+    if (model?.filtering) filterFolds.setFold('topics', id, expanded);
     const next = new Set(closedTopics);
-    if (next.has(id)) next.delete(id); else next.add(id);
+    if (expanded) next.add(id); else next.delete(id);
     const kept = [...next].slice(-FOLDS_KEPT);
-    setFolds(new Set(kept));
     void saveView(saved => { saved.collapsed_topic_ids = kept; });
   };
   const setChip = (chip: Chip) => {
     onDismissReveal();
     void saveView(next => { next.filters.statuses = toggleChip(next.filters.statuses, chip); });
   };
-  const setTopic = (topicId: string | null) => { onDismissReveal(); void saveView(next => { next.filters.topic_id = topicId; }); };
   const resume = () => {
     const outsideSelected = selectedId !== null && selectedId === revealId;
     onResume();
@@ -337,7 +405,7 @@ export function TreeView(props: TreeViewProps) {
     fold: onRow(row => {
       if (row.kind === 'topic') { if (row.expanded) toggleTopic(row.topic.id); return true; }
       if (row.kind === 'hidden') { if (row.expanded) toggleHiddenGroup(row.key); else { const parent = parentKey(row); if (parent) focusRow(parent); } return true; }
-      if (row.hasKids && row.expanded && !model?.filtering) { toggleItem(row.item.id); return true; }
+      if (row.hasKids && row.expanded) { toggleItem(row.item.id); return true; }
       const parent = parentKey(row);
       if (parent && latest.current.rows.some(value => value.key === parent)) focusRow(parent);
       return true;
@@ -353,7 +421,7 @@ export function TreeView(props: TreeViewProps) {
         if (!event.repeat) {
           if (viewBusy) noticeStore.push({ id: 'tree-ack-view-saving', icon: 'ph ph-warning-circle', dismissible: true,
             text: 'Another view change is being saved. Wait for it, then try Ack again.' });
-          else void ack.run(row.item.id);
+          else void runAck(row.item.id);
         }
         return true;
       }
@@ -602,7 +670,7 @@ export function TreeView(props: TreeViewProps) {
   const itemActions = (row: ItemRowModel): RowAction[] => {
     const item = row.item, target = { ...route, item_id: item.id }, list: RowAction[] = [];
     const ackTo = row.ack;
-    if (ackTo) list.push({ icon: 'ph ph-check', title: ackTitle(ackTo, item.status), label: 'Ack', persistent: true, disabled: viewBusy || ack.busy, run: () => { void ack.run(item.id); } });
+    if (ackTo) list.push({ icon: 'ph ph-check', title: ackTitle(ackTo, item.status), persistent: true, disabled: viewBusy || ack.busy, run: () => { void runAck(item.id); } });
     const act = (intent: RowIntent) => () => onAct(intent, target, result => { clickedReveal.current = result; });
     if (item.status !== 'waiting_on_me' && (!row.delivery || row.delivery.failed || closed(item.status)) && running && !archivedMode && session?.state === 'active') {
       const bring = { icon: 'ph ph-megaphone-simple', title: 'Bring it up (b)', run: act('bring') };
@@ -615,7 +683,7 @@ export function TreeView(props: TreeViewProps) {
         if (item.status !== 'replaced') list.push({ icon: 'ph ph-arrow-counter-clockwise', title: 'Back to Open (o)', run: act('reopen') });
       }
     }
-    list.push({ icon: '', glyph: <HideIcon hidden={row.hidden} />, label: row.hidden ? 'Unhide' : undefined, title: row.hidden ? 'Unhide (x)' : 'Hide (x)', run: () => hideItem(row) });
+    list.push({ icon: '', glyph: <HideIcon hidden={row.hidden} />, title: row.hidden ? 'Unhide (x)' : 'Hide (x)', run: () => hideItem(row) });
     list.push({ icon: 'ph ph-trash', title: 'Remove (⌫)', run: () => onRemove({ kind: 'item', item: target }) });
     return list;
   };
@@ -674,7 +742,6 @@ export function TreeView(props: TreeViewProps) {
   const inline: ReadonlySet<string> = new Set(graph && !loading ? [] : rows.flatMap(row => row.delivery?.stuck ? [row.delivery.stuck.input.id] : []));
   const filtersShown = !archivedMode;
   const counts = model?.counts ?? { all: 0, waiting: 0, open: 0, progress: 0, closed: 0 };
-  const archived = lifecycle.archived;
   const queryText = query.trim();
   let body: ReactNode;
   if (loading) {
@@ -709,21 +776,14 @@ export function TreeView(props: TreeViewProps) {
       onRename={session ? lifecycle.rename : undefined}
       dispatch={<DispatchChip actions={actions} onDetails={() => setSending(true)} />} />}
     {sending && <DispatchDialog store={actions.session} actions={actions} agent={bar?.agent ?? 'the agent'} onClose={() => setSending(false)} />}
-    {filtersShown && <FilterBar chips={model?.chips ?? chipsOf([])} counts={counts} topics={model?.topics ?? []} topicId={view?.filters.topic_id ?? null}
-      showTopics={!(detailOpen && railOpen)} disabled={nav.writing || nav.pendingOperationId !== null} onChip={setChip} onTopic={setTopic} />}
+    {filtersShown && <FilterBar chips={model?.chips ?? chipsOf([])} counts={counts}
+      disabled={nav.pendingOperationId !== null && !nav.writing} dismissKey={route.session_id} onChip={setChip} />}
     {model && !graph && (!!query || !model.chips.has('all')) && <Banner icon={query ? 'ph ph-magnifying-glass' : 'ph ph-funnel'} actions={<><span aria-hidden="true">·</span><button type="button" className="btn btn-ghost" disabled={nav.writing || nav.pendingOperationId !== null} onClick={query ? onClearSearch : onClearFilters}>{query ? 'Clear search' : 'Clear filters'}</button></>}>
       Showing {model.searchCount} of {model.itemCount} items{query ? ` matching “${query}”` : ''}{model.hiddenCount > 0 ? ` (${model.hiddenCount} hidden)` : ''}{!model.chips.has('all') ? ' in the statuses you picked' : ''}</Banner>}
     {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>
       Showing an item outside your current filters.</Banner>}
-    {archived && <Banner icon="ph ph-archive" actions={<>
-      <button type="button" className="btn btn-ghost" disabled={lifecycle.busy} onClick={lifecycle.undo}>Undo</button>
-      <button type="button" className="btn btn-ghost" onClick={() => { lifecycle.dismiss(); onShowArchive(); }}>View archive</button></>}>
-      Archived “{archived.name}”.{archived.waiting ? ` Its ${archived.waiting} waiting question${archived.waiting > 1 ? 's' : ''} left your panel.` : ''}
-      {archived.cancelled ? ` ${archived.cancelled} unsent message${archived.cancelled > 1 ? 's were' : ' was'} cancelled.` : ''}</Banner>}
     {lifecycle.pending && <Banner icon="ph ph-warning" alert actions={<button type="button" className="btn btn-ghost" onClick={lifecycle.reconcile}>Check again</button>}>
       {lifecycle.pending}. Check whether your last change was saved before making another.</Banner>}
-    {ack.error && <Banner icon="ph ph-warning-circle" alert>{ack.error}</Banner>}
-    {lifecycle.error && <Banner icon="ph ph-warning-circle" alert>{lifecycle.error}</Banner>}
     <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
     {/* The graph keeps its own scroller so its legend stays sticky (ui/graph/graph.css). */}
     {graph && !loading ? graph : <div ref={scroller} className="tree-scroll" onScroll={remembering}>{body}</div>}

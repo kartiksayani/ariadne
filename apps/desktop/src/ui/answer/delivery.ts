@@ -6,18 +6,18 @@ import type { DeliveryKind } from '../../selectors/waiting/delivery';
 import type { DraftEntry } from '../../state/drafts/store';
 
 /** Sending → Received, plus Queued (agent not running), Checking (reconcile first) and Failed (Retry; the answer is kept). */
-export type DeliveryStage = 'queued' | 'sending' | 'received' | 'checking' | 'failed';
+export type DeliveryStage = 'queued' | 'sending' | 'received' | 'waiting_answer' | 'stopped' | 'checking' | 'failed';
 
 /**
  * Nearest handoff stage for each evidence kind. Gaps: "Received" here means the
- * host turn is running, not that the agent fetched the input; `missing` (the
- * turn ended without a result) has no handoff stage and shows as received.
+ * host turn is running, not that the agent fetched the input; a missing answer
+ * waits separately after delivery.
  */
 const stages: Readonly<Record<DeliveryKind, DeliveryStage | null>> = {
   queued: 'queued', saved: 'sending', sending: 'sending', sent: 'sending',
-  received: 'received', published: 'received', waiting_result: 'received', missing: 'received',
+  received: 'received', published: 'received', waiting_result: 'waiting_answer', missing: 'waiting_answer',
   uncertain: 'checking', unavailable: 'checking',
-  failed: 'failed', rejected: 'failed',
+  failed: 'failed', rejected: 'failed', stopped: 'stopped',
   handled: null, cancelled: null, skipped: null,
 };
 export const deliveryStage = (kind: DeliveryKind): DeliveryStage | null => stages[kind];
@@ -59,6 +59,8 @@ export function deliveryLine(stage: DeliveryStage, kind: InputKind, label: strin
   if (stage === 'queued') return { icon: 'ph ph-hourglass-medium', color: muted, text: `Queued for ${agent || 'the agent'} · delivers when it’s running again` };
   if (stage === 'sending') return { icon: 'ph ph-paper-plane-tilt', color: muted, text: sending(quoted, agent)[key] };
   if (stage === 'received') return { icon: 'ph ph-check', color: 'var(--a-acc-text)', text: received(quoted, agent)[key] };
+  if (stage === 'waiting_answer') return { icon: 'ph ph-hourglass-medium', color: muted, text: `${agent} has your message but hasn’t saved its answer yet. It may still be working.` };
+  if (stage === 'stopped') return { icon: 'ph ph-hourglass-medium', color: muted, text: `${agent} got your message but stopped before answering.` };
   if (stage === 'checking') return { icon: 'ph ph-circle-notch', color: muted, text: `Checking whether ${quoted} was delivered…` };
   return { icon: 'ph ph-warning-circle', color: 'var(--a-warn)', text: `Couldn’t deliver ${quoted}. Your answer is kept.` };
 }
@@ -75,10 +77,10 @@ export interface DeliveryStep {
  * without one, an answered item shows In progress or Resolved.
  */
 export function deliverySteps(stage: DeliveryStage | null, answered: 'in_progress' | 'resolved' | null): readonly DeliveryStep[] | null {
-  const current = stage ? (stage === 'received' ? 1 : 0) : answered === 'in_progress' ? 2 : answered === 'resolved' ? 3 : -1;
+  const current = stage ? (stage === 'received' || stage === 'waiting_answer' || stage === 'stopped' ? 1 : 0) : answered === 'in_progress' ? 2 : answered === 'resolved' ? 3 : -1;
   if (current < 0) return null;
   return ['Sending', 'Received', 'In progress', 'Resolved'].map((label, index) => ({
-    label: index === 0 && stage === 'failed' ? 'Not delivered' : index === 0 && stage === 'checking' ? 'Checking…' : index === 0 && stage === 'queued' ? 'Queued' : label,
+    label: index === 1 && stage === 'stopped' ? 'Delivered · stopped before answering' : index === 1 && stage === 'waiting_answer' ? 'Delivered · no answer yet' : index === 0 && stage === 'failed' ? 'Not delivered' : index === 0 && stage === 'checking' ? 'Checking…' : index === 0 && stage === 'queued' ? 'Queued' : label,
     state: index < current ? 'done' : index === current ? 'current' : 'todo',
     failed: index === current && stage === 'failed',
   }));

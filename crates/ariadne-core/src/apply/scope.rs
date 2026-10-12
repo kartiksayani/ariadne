@@ -93,8 +93,12 @@ pub(super) fn authorize(
                 error.details = Some(reason(context, BarrierReason::InputCancelled));
                 return Err(error);
             }
-            if attempt.sealed_at.is_some()
-                || matches!(input.state, InputState::Handled | InputState::Skipped)
+            let late_result = request.input_result.is_some()
+                && ariadne_domain::history::stopped_waiting_for_result(input, attempt)
+                && result_source_is_live(session, input);
+            if !late_result
+                && (attempt.sealed_at.is_some()
+                    || matches!(input.state, InputState::Handled | InputState::Skipped))
             {
                 return Err(core(
                     CoreErrorCode::AttemptSealed,
@@ -105,8 +109,9 @@ pub(super) fn authorize(
                 return Err(core(CoreErrorCode::StaleGeneration, "Historical read permission does not authorize new writes from an old originating attempt generation"));
             }
             if &input.binding_id != context.binding_id()
-                || input.active_attempt_id.as_ref() != Some(id)
-                || binding.active_input_id.as_ref() != Some(input_id)
+                || (!late_result
+                    && (input.active_attempt_id.as_ref() != Some(id)
+                        || binding.active_input_id.as_ref() != Some(input_id)))
             {
                 return Err(core(
                     CoreErrorCode::BindingMismatch,
@@ -167,6 +172,22 @@ pub(super) fn authorize(
     }
     Ok(())
 }
+
+fn result_source_is_live(session: &Session, input: &Input) -> bool {
+    session
+        .topics
+        .0
+        .get(&input.target.topic_id)
+        .is_some_and(|topic| !ariadne_domain::visibility::topic_is_removed(session, topic))
+        && input.target.item_id.as_ref().is_none_or(|id| {
+            session
+                .items
+                .0
+                .get(id)
+                .is_some_and(|item| !ariadne_domain::visibility::item_is_removed(session, item))
+        })
+}
+
 pub(super) fn reason(context: &AgentContext, reason: BarrierReason) -> Box<ErrorDetails> {
     let (input_id, attempt_id) = match context.read_scope() {
         AgentReadScope::Dispatched {

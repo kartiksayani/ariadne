@@ -182,7 +182,7 @@ export class RemovalQueue {
       notice = { id, icon: 'ph ph-trash', text: entry.mode === 'closed' ? `${base} The session is closed, so ${agent} isn’t told.` : base,
         actions: [undo], dismissible: true, onDismiss: dismiss };
     } else if (entry.stage === 'pending') {
-      notice = { id, icon: 'ph ph-hourglass', text: `${base} ${agent} is told in 5 seconds unless you undo.`, actions: [undo] };
+      notice = { id, icon: 'ph ph-hourglass', text: `${base} ${agent} is told in 5 seconds unless you undo.`, actions: [undo], dismissible: false };
     } else if (entry.mode === 'queued') {
       notice = { id, icon: 'ph ph-hourglass-medium', iconColor: 'var(--st-open)', text: `${base} ${agent} isn’t running; it’s told when it runs again.`,
         dismissible: entry.stage === 'done', onDismiss: dismiss };

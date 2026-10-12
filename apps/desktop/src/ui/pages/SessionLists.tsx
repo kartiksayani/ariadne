@@ -7,18 +7,19 @@ import { useNavigation, type NavigationStore } from '../../state/navigation/stor
 import type { SessionActionControllers } from '../../components/bindings/actions';
 import { RemoveDialog } from '../dialogs/RemoveDialog';
 import type { RemoveHandler, RemoveSubject, RemoveTarget } from '../dialogs/remove';
-import { ownerName, sessionWhen } from '../shell/model';
+import { ownerName, sessionPhrase, sessionWhen } from '../shell/model';
 import { RenameButton, SessionRename, saveSessionLabel } from '../shared/SessionRename';
 import { CopySessionId } from '../shared/CopySessionId';
 import type { RendererService } from '../../data/service';
 import { plainFailure } from '../../data/plain';
 import { useSupervisorHealth } from '../../components/bindings/health';
 import '../../components/bindings/controls.css';
-import { cardDispatch, continuationLinks, projectName, projectRemoval, routeOf, runOf, sessionCardText, sessionKey, sessionRemoval, topicChips, type TopicChip } from './model';
+import { agentOf, cardDispatch, continuationLinks, projectName, projectRemoval, routeOf, runOf, sessionCardText, sessionKey, sessionRemoval, topicChips, type TopicChip } from './model';
 import { notices } from './notices';
 import { ArchiveSessionDialog, CloseSessionDialog, DispatchDialog } from './SessionDialogs';
 import { closeImpact } from '../../components/history-actions/selectors';
 import { waitForLifecycleReady } from '../shared/lifecycleReady';
+import { isViewConflict } from '../shared/conflictNotice';
 import './pages.css';
 
 export interface SessionGroup {
@@ -52,8 +53,28 @@ export interface SessionListsProps {
 type Dialog = { kind: 'dispatch' | 'close' | 'archive'; store: SessionStore; agent: string; when: string; name: string | null; summary?: Immutable<SessionSummary>; onSaved?: () => void }
   | { kind: 'remove'; subject: RemoveSubject; target: RemoveTarget };
 
-const failed = (error: unknown, fallback = 'The session could not be changed. Try again.') => notices.push({ icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
-  text: plainFailure(error, fallback) });
+const sessionFailure = (summary: Immutable<SessionSummary>, now: number, error: unknown, fallback?: string) =>
+  `For ${sessionPhrase(summary, agentOf(summary), sessionWhen(Date.parse(summary.created_at), now))}: ${plainFailure(error, fallback)}`;
+const failed = (summary: Immutable<SessionSummary>, now: number, error: unknown, fallback = 'The session could not be changed. Try again.') => notices.push({ id: `session-lifecycle-failed:${sessionKey(summary)}`, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
+  text: sessionFailure(summary, now, error, fallback) });
+
+/** The receipt outlives this page; dismiss it only after an authoritative restore. */
+function watchArchiveNotice(store: SessionStore, navigation: NavigationStore, id: string, restored: () => void) {
+  const { route, snapshot } = store.getSnapshot(), revision = snapshot?.session.revision ?? 0;
+  const stop = () => { stopSession(); stopNavigation(); stopNotices(); };
+  const dismiss = () => { restored(); notices.dismiss(id); stop(); };
+  const stopSession = store.subscribe(() => {
+    const state = store.getSnapshot();
+    if (state.status === 'ready' && !state.error && state.snapshot && state.snapshot.session.revision >= revision
+        && state.snapshot.session.archived_at == null) dismiss();
+  });
+  const stopNavigation = navigation.subscribe(() => {
+    const state = navigation.getSnapshot();
+    const summary = state.sessions?.sessions.items.find(session => session.project_id === route.project_id && session.session_id === route.session_id);
+    if (state.status === 'ready' && !state.error && summary && summary.revision >= revision && summary.archived_at == null) dismiss();
+  });
+  const stopNotices = notices.subscribe(() => { if (!notices.getSnapshot().some(notice => notice.id === id)) stop(); });
+}
 
 export function Chip({ chip }: { readonly chip: TopicChip }) {
   return <span className="pw-topic-chip" title={chip.full} style={{ color: chip.color }}><i className={chip.icon} aria-hidden="true" />{chip.name}
@@ -88,8 +109,10 @@ export function SessionLists(props: SessionListsProps) {
   };
   const links = continuationLinks([...snapshots.values()]);
   const announceRestored = (summary: Immutable<SessionSummary>, reopen: boolean) => {
-    const name = ownerName(summary), subject = name ? `“${name}”` : 'the session';
-    notices.push({ icon: 'ph ph-arrow-counter-clockwise', dismissible: true,
+    const name = ownerName(summary), subject = name ? `“${name}”` : sessionPhrase(summary, agentOf(summary), sessionWhen(Date.parse(summary.created_at), now));
+    notices.dismiss(`session-archive:${summary.project_id}:${summary.session_id}`);
+    notices.dismiss(`session-lifecycle-failed:${sessionKey(summary)}`);
+    notices.push({ id: `session-restored:${sessionKey(summary)}`, icon: 'ph ph-arrow-counter-clockwise', dismissible: true,
       text: reopen ? `Restored and reopened ${subject}.` : `Restored ${subject}; it stays closed.` });
   };
   const announceArchive = (summary: Immutable<SessionSummary>, wasActive: boolean, controller: ReturnType<SessionActionControllers['forSession']>) => {
@@ -97,22 +120,36 @@ export function SessionLists(props: SessionListsProps) {
     const receipt = controller.getSnapshot().receipt;
     const data = receipt && 'data' in receipt ? receipt.data : undefined;
     const cancelled = data?.kind === 'session_lifecycle' ? data.cancelled_input_ids?.length ?? 0 : 0;
-    const name = ownerName(summary), subject = name ? `“${name}”` : 'the session';
-    let used = false;
-    const id = notices.push({ icon: 'ph ph-archive', text: `Archived${wasActive ? ' and closed' : ''} ${subject}.${cancelled ? ` ${cancelled} unsent message${cancelled === 1 ? ' was' : 's were'} cancelled.${wasActive ? ' Undo resumes sending, even if you paused it.' : ''} Cancelled messages stay cancelled.` : ''}`, dismissible: true,
-      actions: [{ label: 'Undo', run: () => {
-        if (used) return;
-        used = true;
-        notices.dismiss(id);
-        void lifecycle(summary, 'session_restore', wasActive, receipt && 'revision' in receipt ? receipt.revision : undefined);
-      } }] }, 8000);
+    const name = ownerName(summary), subject = name ? `“${name}”` : sessionPhrase(summary, agentOf(summary), sessionWhen(Date.parse(summary.created_at), now));
+    let used = false, restoring = false;
+    const id = `session-archive:${summary.project_id}:${summary.session_id}`;
+    const text = `Archived${wasActive ? ' and closed' : ''} ${subject}.${cancelled ? ` ${cancelled} unsent message${cancelled === 1 ? ' was' : 's were'} cancelled.${wasActive ? ' Undo resumes sending, even if you paused it.' : ''} Cancelled messages stay cancelled.` : ''}`;
+    const show = (error?: string) => { if (used) return; notices.push({ id, icon: error ? 'ph ph-warning-circle' : 'ph ph-archive',
+      ...(error ? { iconColor: 'var(--a-danger)' } : {}), text: error ?? text, dismissible: true,
+      actions: [{ label: controller.getSnapshot().pending?.command.command === 'session_restore' ? 'Check again' : 'Undo', run: undo }] }); };
+    const undo = async () => {
+      if (used || restoring) return;
+      restoring = true;
+      const report = (error: unknown, fallback?: string) => show(sessionFailure(summary, now, error, fallback));
+      try {
+        if (controller.getSnapshot().pending?.command.command === 'session_restore') {
+          if (await controller.retry()) { setDialog(null); announceRestored(summary, wasActive); used = true; await navigation.refresh(); }
+          else report(controller.getSnapshot().error);
+        } else if (await lifecycle(summary, 'session_restore', wasActive, report)) { used = true; notices.dismiss(id); }
+      } catch (error: unknown) { report(error); }
+      finally { restoring = false; }
+    };
+    show();
+    watchArchiveNotice(controller.session, navigation, id, () => { used = true; });
     void navigation.refresh();
   };
-  const lifecycle = async (summary: Immutable<SessionSummary>, kind: 'session_close' | 'session_reopen' | 'session_archive' | 'session_restore', reopen = false, expectedRevision?: number): Promise<boolean> => {
+  const lifecycle = async (summary: Immutable<SessionSummary>, kind: 'session_close' | 'session_reopen' | 'session_archive' | 'session_restore', reopen = false,
+    onFailure?: (error: unknown, fallback?: string) => void): Promise<boolean> => {
     const route = routeOf(summary), key = sessionKey(summary);
+    const report = onFailure ?? ((error: unknown, fallback?: string) => failed(summary, now, error, fallback));
     if (lifecycleBusy.current || disabled) {
-      failed(null, kind === 'session_restore'
-        ? `The session could not be restored while another change is finishing. Find it under Archived and try Restore again.${reopen ? ' Then reopen it to resume sending.' : ''}`
+      report(null, kind === 'session_restore'
+        ? 'The session could not be restored while another change is finishing. Try again.'
         : 'Ariadne is finishing another change. Try again.');
       return false;
     }
@@ -125,8 +162,9 @@ export function SessionLists(props: SessionListsProps) {
     try {
       const store = navigation.opened.open(route), controller = actions.forSession(store);
       const readiness = await waitForLifecycleReady(controller, attempt, true);
-      if (!readiness.ok) { if (readiness.error) failed(null, readiness.error); return false; }
+      if (!readiness.ok) { if (readiness.error) report(null, readiness.error); return false; }
       const session = readiness.session;
+      if (kind === 'session_restore' && session.archived_at == null) { notices.dismiss(`session-archive:${summary.project_id}:${summary.session_id}`); return true; }
       const agent = sessionCardText(summary, null, now).agent, when = sessionWhen(Date.parse(summary.created_at), now);
       // Close is one confirmation in plain words; Reopen runs at once.
       if (kind === 'session_close') { setDialog({ kind: 'close', store, agent, when, name: ownerName(session) }); return false; }
@@ -134,17 +172,17 @@ export function SessionLists(props: SessionListsProps) {
         const impact = closeImpact(session);
         if (session.state === 'active' || impact.questions + impact.unsent + impact.delivering) { setDialog({ kind: 'archive', store, agent, when, name: ownerName(session), summary }); return false; }
       }
-      const done = await controller.execute({ command: kind, api_version: 1, op_id: '', params: { expected_revision: expectedRevision ?? session.revision, ...(kind === 'session_restore' && reopen ? { reopen: true } : {}) } }, expectedRevision ?? session.revision);
+      const done = await controller.execute({ command: kind, api_version: 1, op_id: '', params: { expected_revision: session.revision, ...(kind === 'session_restore' && reopen ? { reopen: true } : {}) } }, session.revision);
       if (!done) {
         if (controller.getSnapshot().pending) setDialog({ kind: kind === 'session_archive' ? 'archive' : 'dispatch', store, agent, when, name: ownerName(session), summary,
           onSaved: kind === 'session_restore' ? () => { setDialog(null); announceRestored(summary, reopen); void navigation.refresh(); } : undefined });
-        else failed(controller.getSnapshot().error ?? new Error('The session could not be changed.'));
+        if (onFailure || !controller.getSnapshot().pending && !isViewConflict(controller.getSnapshot().error)) report(controller.getSnapshot().error ?? new Error('The session could not be changed.'));
       }
       if (done && kind === 'session_archive') announceArchive(summary, session.state === 'active', controller);
       if (done && kind === 'session_restore') announceRestored(summary, reopen);
       await navigation.refresh();
       return done;
-    } catch (error: unknown) { failed(error); return false; }
+    } catch (error: unknown) { report(error); return false; }
     finally { waiting.current = null; lifecycleBusy.current = false; if (!attempt.cancelled) setBusy(null); }
   };
   const dispatch = (summary: Immutable<SessionSummary>) => {

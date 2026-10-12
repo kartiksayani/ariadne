@@ -59,7 +59,10 @@ async function mount(transport = new AckTransport()) {
   render(<DesktopApp service={createDesktopService(transport)} />);
   fireEvent.click(await sessionButton(route));
   await screen.findByRole('region', { name: 'Session tree' });
-  await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Close session' }).disabled).toBe(false));
+  await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    });
   return transport;
 }
 
@@ -138,9 +141,9 @@ describe('local acknowledgement', () => {
     expect(acks(transport)).toHaveLength(1);
     expect(item.status).toBe(target); expect(item.ack_to).toBeNull();
     expect(screen.queryByText('1 to ack')).toBeNull();
-    const band = row().closest('.tree-topic-group')!.querySelector<HTMLElement>('.tree-topic-end')!;
-    expect(band.textContent).toContain(target === 'open' ? '2 open' : '1 open');
-    expect(band.textContent).toContain(target === 'open' ? '1 in progress' : '2 in progress');
+    const counts = row().closest('.tree-topic-group')!.querySelector<HTMLElement>('.tree-topic-counts')!;
+    expect(counts.textContent).toContain(target === 'open' ? '2 open' : '1 open');
+    expect(counts.textContent).toContain(target === 'open' ? '1 in progress' : '2 in progress');
     expect(row().querySelector('.tree-outcome')?.textContent).toContain(item.outcome);
     expect(within(detail()).getByText(item.outcome)).toBeTruthy();
     expect(within(detail()).getByText(item.why)).toBeTruthy();
@@ -168,7 +171,7 @@ describe('local acknowledgement', () => {
     const button = within(row()).getByRole<HTMLButtonElement>('button', { name: 'Ack → Done' });
     expect(button.disabled).toBe(true);
     row().focus(); fireEvent.keyDown(row(), { key: 'a' });
-    expect(screen.getByText('Another view change is being saved. Wait for it, then try Ack again.')).toBeTruthy();
+    expect(await screen.findByText('Another view change is being saved. Wait for it, then try Ack again.')).toBeTruthy();
     expect(acks(transport)).toHaveLength(0);
     await act(async () => { release(); });
     await waitFor(() => expect(within(row()).getByRole<HTMLButtonElement>('button', { name: 'Ack → Done' }).disabled).toBe(false));
@@ -187,7 +190,8 @@ describe('local acknowledgement', () => {
       return invoke(name, args);
     });
     if (source === 'graph') { fireEvent.keyDown(row(), { key: 'g' }); await screen.findByText('One graph per topic'); }
-    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
     fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Pending session name' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(saving).toBe(true));
@@ -222,7 +226,7 @@ describe('local acknowledgement', () => {
   it('offers a quiet row Ack with a target tooltip and a topic count, while questions keep their answer controls', async () => {
     await mount();
     const button = within(row()).getByRole('button', { name: 'Ack → Done' });
-    expect(button.textContent).toBe('Ack'); expect(button.title).toBe('Ack → Done');
+    expect(button.textContent).toBe(''); expect(button.title).toBe('Ack → Done');
     expect(button.closest('.tree-ack-slot')).not.toBeNull();
     expect(button.closest('.tree-actions')).toBeNull();
     expect(button.classList.contains('tree-action-ack')).toBe(true);
@@ -231,8 +235,8 @@ describe('local acknowledgement', () => {
     expect(document.querySelector('.shell-footer')?.textContent).toContain('ack / answer');
     const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
     expect(css).toMatch(/\.tree-actions\s*\{[^}]*visibility:\s*hidden/s);
-    expect(css).toMatch(/\.tree-ack-slot\s*\{[^}]*display:\s*flex;[^}]*flex:\s*none/s);
-    expect(css).toMatch(/\.tree-action-label\s*\{[^}]*white-space:\s*nowrap/s);
+    expect(button.closest('.tree-action-grid')).not.toBeNull();
+    expect(css).toMatch(/\.tree-ack-slot\s*\{[^}]*display:\s*contents/s);
   });
 
   it.each(['done', 'decided', 'dropped'] as const)('names %s in the detail tooltip, refreshes and keeps Follow up and Back to Open', async target => {
@@ -405,13 +409,17 @@ describe('local acknowledgement', () => {
     expect(screen.queryByText(refusal)).toBeNull();
   });
 
-  it.each(['tree', 'detail'] as const)('clears both views’ refusals after Ack succeeds from %s', async source => {
+  it.each(['tree', 'detail'] as const)('shares one item refusal across both views and clears it after Ack succeeds from %s', async source => {
     const transport = new AckTransport(); transport.refuse = true; await mount(transport);
     fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
-    for (const host of [row(), detail()]) {
+    for (const [index, host] of [row(), detail()].entries()) {
       await act(async () => { fireEvent.click(within(host).getByRole('button', { name: 'Ack → Done' })); });
+      await waitFor(() => expect(acks(transport)).toHaveLength(index + 1));
+      expect(await screen.findByText(refusal, { selector: '.pw-note-text' })).toBeTruthy();
     }
-    expect(screen.getAllByText(refusal)).toHaveLength(2);
+    expect(screen.getAllByText(refusal)).toHaveLength(1);
+    expect(notices.getSnapshot().filter(notice => notice.text === refusal).map(notice => notice.id))
+      .toEqual([JSON.stringify(['item-ack', route.project_id, route.session_id, '1.1'])]);
     transport.refuse = false;
     await act(async () => { fireEvent.click(within(source === 'tree' ? row() : detail()).getByRole('button', { name: 'Ack → Done' })); });
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe('done'));
@@ -441,6 +449,8 @@ describe('local acknowledgement', () => {
     const pressAck = async () => { await act(async () => { host().focus(); fireEvent.keyDown(host(), { key: 'a' }); }); };
     await pressAck();
     expect(await screen.findByText(refusal, { selector: '.pw-note-text' })).toBeTruthy();
+    expect(notices.getSnapshot().find(notice => notice.text === refusal)?.id)
+      .toBe(JSON.stringify(['item-ack', route.project_id, route.session_id, '1.1']));
     fireEvent.click(row('2')); await screen.findByLabelText('Detail of #2');
     await waitFor(() => expect(screen.queryByText(refusal)).toBeNull());
     fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
@@ -466,6 +476,16 @@ describe('local acknowledgement', () => {
     await act(async () => { release(); });
     await waitFor(() => expect(within(row()).getByRole<HTMLButtonElement>('button', { name: 'Ack → Done' }).disabled).toBe(false));
     expect(screen.queryByText(refusal)).toBeNull();
+  });
+
+  it('removes the app keyboard Ack refusal when the workspace unmounts', async () => {
+    const transport = new AckTransport(); transport.refuse = true;
+    await mount(transport);
+    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    await act(async () => { detail().focus(); fireEvent.keyDown(detail(), { key: 'a' }); });
+    expect(await screen.findByText(refusal, { selector: '.pw-note-text' })).toBeTruthy();
+    cleanup();
+    expect(notices.getSnapshot().some(notice => notice.id === JSON.stringify(['item-ack', route.project_id, route.session_id, '1.1']))).toBe(false);
   });
 
   it('keeps a lifecycle failure visible alongside an Ack refusal', async () => {

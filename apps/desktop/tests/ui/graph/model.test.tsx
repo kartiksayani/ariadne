@@ -3,11 +3,41 @@ import { applyChange, descendantCount, edgePath, graphMetrics, graphStatus, isCl
   sessionChip, sessionGraph, topicCounts, type GraphInput } from '../../../src/ui/graph/model';
 import { shortLabel } from '../../../src/ui/shared/short';
 import { graphSession, preferences, topicA, topicB } from './fixture';
+import { FILTER_STATUSES } from '../../../src/selectors/tree/folds';
 
 const build = (overrides: Partial<GraphInput> = {}) =>
   sessionGraph({ session: graphSession(), view: preferences(), later: new Set(), selectedId: null, tight: false, ...overrides });
 
 describe('graph model', () => {
+  it('treats a complete saved status set as All without opening saved folds', () => {
+    const view = preferences({ expanded_item_ids: [], filters: { ...preferences().filters, statuses: [...FILTER_STATUSES, 'open'] } });
+    const graph = build({ view });
+    expect(graph.filtering).toBe(false);
+    expect(graph.order).toEqual(['1', '2', '3', '8']);
+  });
+  it('matches Waiting on agent under In progress rather than Waiting on me', () => {
+    const session = graphSession(), item = session.items['1.1.1']!;
+    const input = structuredClone(Object.values(session.inputs).find(input => input)!);
+    session.answers = []; session.inputs = {};
+    input.target.item_id = item.id; input.state = 'queued'; input.answer_id = null;
+    input.payload.target_snapshot.question_revision = item.question_revision;
+    session.inputs[input.id] = input;
+    const waiting = preferences({ filters: { ...preferences().filters, statuses: ['waiting_on_me'] } });
+    expect(build({ session, view: waiting }).nodes.has(item.id)).toBe(false);
+    const progress = preferences({ filters: { ...preferences().filters, statuses: ['in_progress'] } });
+    expect(build({ session, view: progress }).nodes.get(item.id)).toMatchObject({ status: 'agent', dimmed: false });
+  });
+  it('ignores a saved topic filter and honors explicit folds of matching ancestors', () => {
+    const view = preferences({ expanded_item_ids: [], filters: { ...preferences().filters, topic_id: 'retired-topic-filter' } });
+    expect(build({ view }).order).toEqual(['1', '2', '3', '8']);
+    view.filters.search = 'morning or evening';
+    expect(build({ view }).order).toEqual(['1', '1.1', '1.1.1']);
+    const folded = build({ view, filterCollapsedItemIds: new Set(['1']) });
+    expect(folded.order).toEqual(['1']);
+    expect(folded.nodes.get('1')).toMatchObject({ collapsed: true, canCollapse: false });
+    expect(build({ view, filterCollapsedItemIds: new Set(['1']), revealedItemId: '1.1.1' }).order).toEqual(['1', '1.1', '1.1.1']);
+    expect(view.expanded_item_ids).toEqual([]);
+  });
   it('draws only the selection’s deduplicated connections, including backlinks and cross-topic targets', () => {
     const session = graphSession();
     session.items['1']!.related = ['2', '2', '8', 'missing'];
@@ -131,12 +161,12 @@ describe('graph model', () => {
     expect(build({ view: preferences({ filters: { ...preferences().filters, search: 'receipt' } }) }).topics[0].replacements).toEqual([]);
   });
 
-  it('keeps context nodes dimmed and hides "−" while a filter is active', () => {
+  it('keeps context nodes dimmed and allows folding while a filter is active', () => {
     const view = preferences({ expanded_item_ids: [], filters: { ...preferences().filters, search: 'morning or evening' } });
     const graph = build({ view, selectedId: null });
     expect(graph.filtering).toBe(true);
     expect(graph.order).toEqual(['1', '1.1', '1.1.1']);
-    expect(graph.nodes.get('1')).toMatchObject({ dimmed: true, canCollapse: false, collapsed: false });
+    expect(graph.nodes.get('1')).toMatchObject({ dimmed: true, canCollapse: true, collapsed: false });
     expect(graph.nodes.get('1.1.1')!.dimmed).toBe(false);
     expect(build({ view, selectedId: '1' }).nodes.get('1')!.dimmed).toBe(false);
   });

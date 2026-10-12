@@ -12,6 +12,8 @@ export function useGrow(ref: RefObject<HTMLTextAreaElement | null>, value: strin
     const fit = () => {
       const pane = box.closest<HTMLElement>(PANE), cap = Math.max(48, Math.floor((pane?.clientHeight || window.innerHeight) / 3));
       box.style.height = 'auto';
+      // An empty box stays one row; scrollHeight also counts a wrapped placeholder.
+      if (!value) { box.style.overflowY = 'hidden'; return; }
       // Not laid out (no height to measure): leave the browser's own size.
       if (!box.scrollHeight) return;
       // scrollHeight leaves out the borders; the box sizes by its border box.

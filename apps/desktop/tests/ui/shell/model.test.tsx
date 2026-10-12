@@ -89,15 +89,75 @@ describe('shell model', () => {
 
   it('sizes the detail panel to the owner width inside its bounds', () => {
     expect(bodyLayout({ width: 1600, detail: true, rail: false, detailWidth: 520 }).columns).toBe('300px minmax(560px,1fr) 520px');
-    expect(bodyLayout({ width: 2400, detail: true, rail: false, detailWidth: 5000 }).detailWidth).toBe(DETAIL_MAX);
+    expect(bodyLayout({ width: 4000, detail: true, rail: false, detailWidth: 5000 }).detailWidth).toBe(DETAIL_MAX);
     expect(bodyLayout({ width: 2400, detail: true, rail: false, detailWidth: 10 }).detailWidth).toBe(DETAIL_MIN);
-    // The widest the panel can go leaves the centre its minimum.
-    expect(bodyLayout({ width: 1500, detail: true, rail: false }).detailMax).toBe(1500 - 300 - 560);
+    // The resize limit leaves a usable tree even when the owner widens the panel.
+    expect(bodyLayout({ width: 1500, detail: true, rail: false }).detailMax).toBe(1500 - 300 - 380);
+  });
+
+  it('fits wide saved detail widths to the window while preserving the Waiting and rail rules', () => {
+    const saved = { detail: true, rail: false, detailWidth: 2000 };
+    expect(bodyLayout({ ...saved, width: 3000 })).toMatchObject({ detailWidth: 2000, folded: false, narrow: false,
+      columns: '300px minmax(560px,1fr) 2000px' });
+    expect(bodyLayout({ ...saved, width: 2000 })).toMatchObject({ detailWidth: 1576, detailMax: 1576, folded: true, auto: true,
+      columns: '44px minmax(380px,1fr) 1576px' });
+    expect(bodyLayout({ ...saved, width: 1200 })).toMatchObject({ detailWidth: 776, folded: true,
+      columns: '44px minmax(380px,1fr) 776px' });
+    expect(bodyLayout({ ...saved, width: 2000, rail: true })).toMatchObject({ detailWidth: 1336,
+      columns: '44px minmax(380px,1fr) 1336px 240px' });
+    expect(bodyLayout({ ...saved, width: 2000, rail: true, peek: true })).toMatchObject({ detailWidth: 1080, folded: false,
+      columns: '300px minmax(380px,1fr) 1080px 240px' });
+    expect(bodyLayout({ ...saved, width: 3000, folded: true })).toMatchObject({ detailWidth: 2000, folded: true, auto: false });
+    for (const detailWidth of [320, 400, 520, 720]) {
+      expect(bodyLayout({ width: 2000, detail: true, rail: false, detailWidth })).toMatchObject({ detailWidth, folded: false });
+    }
+  });
+
+  it.each([false, true])('shrinks a wide pane before the tree when Waiting opens (rail: %s)', rail => {
+    const saved = { detail: true, detailWidth: 2000, rail, peek: true };
+    for (const width of [1400, 1600, 2000]) {
+      const layout = bodyLayout({ ...saved, width });
+      const available = width - 300 - 380 - (rail ? 240 : 0);
+      expect(layout).toMatchObject({ detailWidth: available, detailMax: available, folded: false,
+        columns: `300px minmax(380px,1fr) ${available}px${rail ? ' 240px' : ''}` });
+    }
+    expect(bodyLayout({ ...saved, width: 3400 })).toMatchObject({ detailWidth: 2000, narrow: false,
+      columns: `300px minmax(560px,1fr) 2000px${rail ? ' 240px' : ''}` });
+  });
+
+  it.each([undefined, 320, 400, 2000])('keeps the tree usable with Waiting and the rail open at the minimum window width (detail width: %s)', detailWidth => {
+    const layout = bodyLayout({ width: 1300, detail: true, rail: true, detailWidth, peek: true });
+    const shown = detailWidth === 320 ? 320 : 380;
+    expect(layout).toMatchObject({ folded: false, narrow: true, detailWidth: shown, detailMax: 380,
+      columns: `300px minmax(380px,1fr) ${shown}px 240px` });
+    expect(300 + 380 + shown + 240).toBeLessThanOrEqual(1300);
+  });
+
+  it('can squeeze the centre when Waiting opens without a detail pane', () => {
+    expect(bodyLayout({ width: 1000, detail: false, rail: true, peek: true })).toMatchObject({ folded: false, narrow: true,
+      columns: '300px minmax(0,1fr) 240px' });
+  });
+
+  it('lets a widened detail panel use most of a 1400px window while keeping the default layout unchanged', () => {
+    const window = { width: 1400, detail: true, rail: false };
+    expect(bodyLayout(window)).toMatchObject({ folded: false, narrow: false, detailMax: 720,
+      columns: '300px minmax(560px,1fr) 400px' });
+    expect(bodyLayout({ ...window, detailWidth: 540 }).columns).toBe('300px minmax(560px,1fr) 540px');
+    expect(bodyLayout({ ...window, detailWidth: 541 })).toMatchObject({ folded: true, auto: true,
+      columns: '44px minmax(560px,1fr) 541px' });
+    expect(bodyLayout({ ...window, detailWidth: 900 }).columns).toBe('44px minmax(456px,1fr) 900px');
+    expect(bodyLayout({ ...window, detailWidth: 2400 })).toMatchObject({ detailWidth: 976, detailMax: 976,
+      columns: '44px minmax(380px,1fr) 976px' });
+    expect(bodyLayout({ ...window, detailWidth: 2400, rail: true }).columns).toBe('44px minmax(380px,1fr) 736px 240px');
+    expect(bodyLayout({ ...window, width: 1260 })).toMatchObject({ folded: false, narrow: false });
+    expect(bodyLayout({ ...window, width: 1259 })).toMatchObject({ folded: true, narrow: true });
+    expect(bodyLayout({ ...window, width: 950 }).columns).toBe('44px minmax(560px,1fr) 346px');
+    expect(bodyLayout({ ...window, detail: false, folded: true }).columns).toBe('44px minmax(560px,1fr)');
   });
 
   it('folds the Waiting column and narrows the detail panel so the body never scrolls sideways', () => {
     const total = (columns: string) => columns.split(' ').filter(part => part.endsWith('px') && !part.startsWith('minmax')).map(parseFloat)
-      .reduce((sum, value) => sum + value, 0) + 560;
+      .reduce((sum, value) => sum + value, 0) + Number(columns.match(/minmax\((\d+)px/)![1]);
     // 1300 px with detail and rail open: 300 + 560 + 400 + 240 would overflow.
     const tight = bodyLayout({ width: 1300, detail: true, rail: true });
     expect(tight).toMatchObject({ folded: true, auto: true, narrow: true });
@@ -105,12 +165,12 @@ describe('shell model', () => {
     expect(total(tight.columns)).toBeLessThanOrEqual(1300);
     // An owner-wide detail panel narrows to fit.
     const wide = bodyLayout({ width: 1300, detail: true, rail: true, detailWidth: 700 });
-    expect(wide.detailWidth).toBe(1300 - 44 - 560 - 240);
+    expect(wide.detailWidth).toBe(1300 - 44 - 380 - 240);
     expect(total(wide.columns)).toBeLessThanOrEqual(1300);
-    // The owner can still open it; the centre squeezes instead of the body scrolling.
+    // The owner can still open it; the panel shrinks to preserve a usable tree.
     const peek = bodyLayout({ width: 1300, detail: true, rail: true, peek: true });
     expect(peek).toMatchObject({ folded: false, narrow: true });
-    expect(peek.columns.startsWith('300px minmax(0,1fr)')).toBe(true);
+    expect(peek.columns).toBe('300px minmax(380px,1fr) 380px 240px');
     // The owner's own fold holds at any width and is not "auto".
     expect(bodyLayout({ width: 2000, detail: false, rail: false, folded: true })).toMatchObject({ folded: true, auto: false, columns: '44px minmax(560px,1fr)' });
     expect(bodyLayout({ width: 1300, detail: true, rail: false }).folded).toBe(false);

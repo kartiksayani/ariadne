@@ -1,6 +1,6 @@
 use super::*;
 use crate::commands::DesktopService;
-use crate::native::tray::capture;
+use crate::native::tray::capture::capture_for_tray;
 use ariadne_core::{native::NativeCoreService, *};
 use ariadne_domain::{
     history::open_ask_round,
@@ -76,7 +76,7 @@ fn denied_permission_completes_with_diagnostic_and_in_app_answer_still_saves() {
     let resolver = core.clone();
     let service =
         DesktopService::from_trusted_startup(core, move |route| resolver.resolve_session(route));
-    let captured = capture(|request| service.native_query(request)).unwrap();
+    let (captured, _) = capture_for_tray(|request| service.native_query(request)).unwrap();
     assert_eq!(captured.counts.waiting_unanswered.value(), 1);
     assert_eq!(captured.rows.len(), 1);
 
@@ -164,7 +164,7 @@ fn denied_permission_completes_with_diagnostic_and_in_app_answer_still_saves() {
     assert_eq!(saved.inputs.0[input_id].payload.text, text);
     assert_eq!(saved.answers.last().unwrap().text, text);
     assert_eq!(saved.messages.last().unwrap().body, text);
-    let refreshed = capture(|request| service.native_query(request)).unwrap();
+    let (refreshed, _) = capture_for_tray(|request| service.native_query(request)).unwrap();
     assert_eq!(refreshed.counts.waiting_unanswered.value(), 0);
     assert!(refreshed.rows.is_empty());
     assert_eq!(permission_diagnostic(&permission), Some(diagnostic));

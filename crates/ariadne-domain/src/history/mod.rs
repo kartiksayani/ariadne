@@ -61,6 +61,33 @@ pub struct ReplyDraft {
     pub at: UtcMillis,
 }
 
+/// Skip after missing-result expiry stops waiting, but does not discard the
+/// completed attempt's answer. Core must also require an input_result in the
+/// atomic apply and validate source work, binding, generation and issued grant
+/// before applying operations. This predicate stays valid while those operations
+/// change the work, so reply order does not change the attempt's provenance.
+pub fn stopped_waiting_for_result(input: &Input, attempt: &Attempt) -> bool {
+    input.state == InputState::Skipped
+        && input.active_attempt_id.is_none()
+        && input.attempts.last().is_some_and(|a| a.id == attempt.id)
+        && attempt.sealed_at.is_some()
+        && !matches!(
+            attempt.acceptance,
+            AcceptanceState::Rejected | AcceptanceState::Uncertain
+        )
+        && (attempt.acceptance == AcceptanceState::Accepted || attempt.host_turn_id.is_some())
+        && attempt.turn_state == TurnState::Completed
+        && attempt.result_state == ResultState::Missing
+        && attempt.domain_result.is_none()
+        && attempt
+            .error
+            .as_ref()
+            .is_some_and(|e| e.code == "result_missing")
+        && input.resolution_history.last().is_some_and(|entry| {
+            entry.kind == ResolutionKind::Skip && entry.attempt_id == attempt.id
+        })
+}
+
 /// Append an explicit full reply to exactly one item. An omitted round uses the
 /// current open round, if any; an explicit closed round keeps its close time.
 /// Item revision increments once; status/question revision remain unchanged.
@@ -97,13 +124,14 @@ pub fn append_reply(
                 .iter()
                 .find(|a| &a.id == attempt_id)
                 .ok_or(HistoryError::MissingReference)?;
+            let late_result = stopped_waiting_for_result(input, attempt);
             if input.binding_id != context.binding_id
                 || attempt.binding_generation != context.generation
-                || input.active_attempt_id.as_ref() != Some(attempt_id)
+                || (!late_result && input.active_attempt_id.as_ref() != Some(attempt_id))
             {
                 return Err(HistoryError::BindingMismatch);
             }
-            if attempt.sealed_at.is_some() {
+            if attempt.sealed_at.is_some() && !late_result {
                 return Err(HistoryError::AttemptSealed);
             }
             if attempt.domain_result.is_some() {

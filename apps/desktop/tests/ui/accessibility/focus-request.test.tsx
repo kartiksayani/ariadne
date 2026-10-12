@@ -21,7 +21,10 @@ afterEach(() => { cleanup(); editor.acknowledgments.clear(); });
 it('an older editor acknowledgment cannot clear the newer owner request', async () => {
   const transport = new AppTransport(); render(<DesktopApp service={createDesktopService(transport)} />);
   fireEvent.click(await sessionButton(route)); await screen.findByRole('tree', { name: 'Session items' });
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
+  await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    });
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
   row.focus(); fireEvent.keyDown(row, { key: 'r' });
   await waitFor(() => expect(editor.acknowledgments.size).toBe(1));

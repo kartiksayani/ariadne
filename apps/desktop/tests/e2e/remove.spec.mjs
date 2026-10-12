@@ -4,7 +4,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { admissions, cliRequest, snapshot } from './scripted-provider.mjs';
 import { json } from '../../../../scripts/run-native-e2e.mjs';
-import { openSessionButton } from './session-button.mjs';
+import { openSession } from './session-button.mjs';
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const exists = async path => { try { await stat(path); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; } };
@@ -76,14 +76,15 @@ export async function runRemoveAcceptance(configuration) {
 
   // Item: ⌫ on the row asks first, the row goes at once, and the command waits out the Undo window.
   await click(await browser.$('button[data-shell-tab="all_sessions"]'));
-  await click(await openSessionButton(sessionId));
+  await openSession(sessionId);
   const row = `.tree-rows [role="treeitem"][data-item-id="${item.id}"]`;
   await (await browser.$(row)).waitForDisplayed();
   await browser.execute(selector => document.querySelector(selector).focus(), row);
   await browser.keys('Backspace');
   await confirm('Remove item');
   await wait(async () => !(await browser.$(row).isExisting()), 'The removed row stayed in the tree');
-  assert.ok((await notices().getText()).includes('unless you undo'), 'Item remove did not offer Undo');
+  // Notices arrive as toasts after a short settle, so wait for the text rather than reading it once.
+  await wait(async () => (await notices().getText()).includes('unless you undo'), 'Item remove did not offer Undo', 4000);
   assert.ok((await readJson(sessionPath)).items[item.id], 'Item remove ran before the Undo window ended');
   await wait(async () => !(await readJson(sessionPath)).items[item.id], 'Item remove did not run after the Undo window', 30000);
   const afterItem = await readJson(sessionPath);

@@ -1,14 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { LinkOpener } from '../../../src/ui/shared/MarkdownText';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { setup } from './fixtures';
+import { Notices, notices } from '../../../src/ui/pages/notices';
 
 const copy = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
 vi.mock('../../../src/ui/shared/clipboard', () => ({ copyText: (text: string) => copy(text) }));
 const opened: ReturnType<typeof setup>[] = [];
-afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); notices.clear(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.clearAllMocks(); });
 
 describe('conversation message copying', () => {
   it('copies each chat message raw body, preserving markdown and whitespace', async () => {
@@ -16,16 +17,18 @@ describe('conversation message copying', () => {
     const session = value.transport.session;
     session.messages.forEach(message => { message.body = `  **Message ${message.id}**\r\n\r\n- source with spaces  `; });
     await value.store.refresh();
-    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={vi.fn()} />);
+    render(<><ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={vi.fn()} /><Notices /></>);
     const timeline = await screen.findByRole('region', { name: 'Conversation' });
     const entries = timeline.querySelectorAll<HTMLElement>('li[data-message-id] > .detail-msg:first-of-type');
     expect(entries.length).toBeGreaterThan(0);
     for (const entry of entries) {
       const message = session.messages.find(message => message.id === entry.parentElement!.dataset.messageId)!;
       expect(message).toBeDefined();
-      fireEvent.click(within(entry).getByRole('button', { name: 'Copy message' }));
+      await act(async () => { fireEvent.click(within(entry).getByRole('button', { name: 'Copy message' })); });
       expect(copy).toHaveBeenLastCalledWith(message.body);
+      expect(within(entry).getByRole('button', { name: 'Copy message' }).querySelector('.ph-copy')).not.toBeNull();
     }
+    await waitFor(() => { expect(screen.getAllByText('Message copied.').length).toBeGreaterThan(0); });
   });
 
   it('copies the original ask, owner message, result and pending message without display changes', async () => {

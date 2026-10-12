@@ -161,7 +161,9 @@ fn notification_click_routes_registered_item_and_loads_current_detail_after_answ
     };
     let before = current();
     assert_eq!(before, session);
-    let waiting = crate::native::tray::capture(|request| service.native_query(request)).unwrap();
+    let (waiting, _) =
+        crate::native::tray::capture::capture_for_tray(|request| service.native_query(request))
+            .unwrap();
     assert!(waiting.rows.iter().any(|row| row.route() == route));
     let receipt = core
         .execute_owner(
@@ -204,6 +206,8 @@ fn notification_click_routes_registered_item_and_loads_current_detail_after_answ
         after.answers.last().unwrap().text,
         "Use the next delivery window."
     );
-    let answered = crate::native::tray::capture(|request| service.native_query(request)).unwrap();
+    let (answered, _) =
+        crate::native::tray::capture::capture_for_tray(|request| service.native_query(request))
+            .unwrap();
     assert!(!answered.rows.iter().any(|row| row.route() == route));
 }

@@ -14,6 +14,8 @@ export interface FrameSpec {
   readonly rail: boolean;
   readonly selected?: string;
   readonly detail?: boolean;
+  /** App-only saved detail width, exercised through the resize separator. */
+  readonly detailWidth?: number;
   readonly answering?: string;
   readonly view?: 'graph';
   readonly openMode?: 'reply' | 'followup';
@@ -24,6 +26,18 @@ export interface FrameSpec {
   readonly hoverItem?: string;
   /** Topic names the frame shows folded (the review scenario folds t1-t3). */
   readonly collapseTopics?: readonly string[];
+  /** App-only answer frames exercise the dock independently of the immutable handoff. */
+  readonly answerOptions?: number;
+  readonly expandedAnswer?: number;
+  readonly hiddenItems?: readonly string[];
+  /** Compact dock states are app-only, independent of immutable handoff comparisons. */
+  readonly dockState?: 'question' | 'open' | 'pending';
+  /** Compare a stopped turn after delivery with a rejection before delivery. */
+  readonly acceptedFailure?: boolean;
+  /** App-only Paperwhite session frame with a controlled transient toast. */
+  readonly toast?: boolean;
+  /** Opens Waiting even when the window squeezes the centre column. */
+  readonly peekWaiting?: boolean;
 }
 
 const wide = { width: 1600, height: 960 } as const, narrow = { width: 1280, height: 800 } as const;
@@ -61,10 +75,33 @@ const specs: readonly FrameSpec[] = [
   // 1b with the pointer on a row: a plain row gets the hover band; the selected row keeps its own band.
   { ...base, id: '1b-hover', design: '1b', selected: '1.3.1.2', detail: true, rail: true, hoverItem: '1.3.1' },
   { ...base, id: '1b-hover-selected', design: '1b', selected: '1.3.1.2', detail: true, rail: true, hoverItem: '1.3.1.2' },
+  { ...base, width: 1400, height: 830, id: 'answer-two-long', selected: '3.1', detail: true, answerOptions: 2 },
+  { ...base, width: 1400, height: 830, id: 'answer-two-expanded', selected: '3.1', detail: true, answerOptions: 2, expandedAnswer: 0 },
+  { ...base, width: 1400, height: 830, id: 'answer-nine', selected: '3.1', detail: true, answerOptions: 9 },
+  { ...base, width: 1400, height: 830, id: 'answer-one', selected: '3.1', detail: true, answerOptions: 1 },
+  { ...base, width: 1400, height: 830, id: 'answer-text', selected: '3.1', detail: true, answerOptions: 0 },
+  { ...base, width: 1400, height: 500, id: 'answer-short', selected: '3.1', detail: true, answerOptions: 2 },
+  { ...base, width: 1400, height: 830, id: 'detail-hidden', selected: '3.1', detail: true, answerOptions: 2, hiddenItems: ['3.1'] },
+  { ...base, width: 1400, height: 830, id: 'detail-hidden-parent', selected: '2.1.1', detail: true, answerOptions: 2, hiddenItems: ['2.1'] },
+  { ...base, width: 1400, height: 830, id: 'detail-hidden-with-parent', selected: '2.1.1', detail: true, answerOptions: 2, hiddenItems: ['2.1', '2.1.1'] },
+  { ...base, width: 1400, height: 830, id: 'question-resting', selected: '3.1', detail: true, dockState: 'question' },
+  { ...base, width: 1400, height: 830, id: 'nonquestion-resting', selected: '3.1', detail: true, dockState: 'open' },
+  { ...base, width: 1280, height: 1240, id: 'nonquestion-pending', selected: '3.1', detail: true, dockState: 'pending' },
+  { ...base, id: 'delivery-stopped', scenario: 'failed', selected: '3.1', detail: true, acceptedFailure: true },
+  { ...base, ...narrow, id: 'session-toast-light', theme: 'light', toast: true },
+  { ...base, ...narrow, id: 'session-toast-detail', selected: '3.1', detail: true, toast: true },
+  { ...base, width: 1920, id: 'session-toast-detail-wide', selected: '3.1', detail: true, detailWidth: 800, toast: true },
+  { ...base, width: 1080, height: 800, id: 'session-toast-narrow', selected: '3.1', detail: true, peekWaiting: true, toast: true },
 ];
 
 /** Harness states drawn from another board frame's card (FrameSpec.design). */
 export const variantIds: readonly string[] = specs.filter(spec => spec.design).map(spec => spec.id);
+
+export const answerFrameIds: readonly string[] = specs.filter(spec => spec.answerOptions !== undefined).map(spec => spec.id);
+
+export const dockFrameIds: readonly string[] = specs.filter(spec => spec.dockState !== undefined).map(spec => spec.id);
+
+export const toastFrameIds: readonly string[] = specs.filter(spec => spec.toast).map(spec => spec.id);
 
 /** The fixed wall clock of the handoff page: 7 Oct 2026 15:10 UTC, after the last message of every frame (1i answers until 15:10). */
 export const designNow = Date.UTC(2026, 9, 7, 15, 10);

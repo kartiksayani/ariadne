@@ -29,7 +29,6 @@
   opacity: 1;
 }
 
-.detail-message-copy-feedback,
 .detail-msg:hover .detail-message-copy,
 .detail-msg:focus-within .detail-message-copy {
   opacity: 1;

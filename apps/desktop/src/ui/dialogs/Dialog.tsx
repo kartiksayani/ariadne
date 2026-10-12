@@ -1,7 +1,7 @@
 // The Paperwhite dialog of Ariadne.dc.html (lines 485-520): a backdrop of
 // neutral-900 at 55% over the whole window and a `.dialog` card. Focus stays
 // inside while it is open; Esc cancels and Enter confirms (README, Dialogs).
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { dialogControls } from '../../components/accessibility/dialog-focus';
 import './dialogs.css';
 
@@ -20,10 +20,17 @@ const interactive = 'button,a[href],input,select,textarea,[contenteditable="true
 
 export function Dialog({ label, width, role = 'dialog', onCancel, onConfirm, children }: DialogProps) {
   const element = useRef<HTMLDivElement>(null);
+  // Capture before the opening action's menu unmounts; its trigger survives the clicked item.
+  const [previous] = useState(() => {
+    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const menu = focused?.closest('[role="menu"]');
+    const trigger = menu?.id ? [...document.querySelectorAll<HTMLElement>('[aria-haspopup="menu"][aria-controls]')]
+      .find(control => control.getAttribute('aria-controls') === menu.id) : null;
+    return trigger ?? focused;
+  });
   const cancel = useRef(onCancel);
   cancel.current = onCancel;
   useEffect(() => {
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = element.current;
     if (!dialog) return undefined;
     dialog.focus();
@@ -35,7 +42,7 @@ export function Dialog({ label, width, role = 'dialog', onCancel, onConfirm, chi
       document.removeEventListener('focusin', contain);
       if (previous?.isConnected) previous.focus();
     };
-  }, []);
+  }, [previous]);
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel.current(); return; }
     if (event.key === 'Enter' && onConfirm && !(event.target instanceof Element && event.target.closest(interactive))) {

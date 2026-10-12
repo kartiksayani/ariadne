@@ -60,7 +60,14 @@ describe('the removal queue', () => {
     const { service, queue, notices } = harness(), restore = vi.fn();
     render(<Notices store={notices} />);
     act(() => { queue.schedule(itemTarget('2'), itemSubject('tell', 1), { restore }); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
     expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+    const undo = screen.getByRole('button', { name: 'Undo' });
+    undo.focus();
+    fireEvent.keyDown(undo, { key: 'Escape' });
+    await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS - 301); });
+    expect(service.removeItem).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Undo' })).toBe(undo);
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
     await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS * 2); });
     expect(service.removeItem).not.toHaveBeenCalled();

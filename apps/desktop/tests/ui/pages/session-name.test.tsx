@@ -66,8 +66,8 @@ describe('every place that names a session shows the name', () => {
     expect(sessionCardText(summary(), null, now).title).toBe('demo.local');
   });
   it('the session bar: name as title with the agent line and description; unnamed stays as before', () => {
-    expect(sessionBar(null, named, now)).toMatchObject({ title: 'Sync fixes', secondary: 'demo.local · iTerm window 1', description: 'Search webhook retries', named: true });
-    expect(sessionBar(null, summary(), now)).toMatchObject({ title: 'demo.local · iTerm window 1', secondary: null, description: null, named: false });
+    expect(sessionBar(null, named)).toMatchObject({ title: 'Sync fixes', secondary: 'demo.local · iTerm window 1', description: 'Search webhook retries', named: true });
+    expect(sessionBar(null, summary())).toMatchObject({ title: 'demo.local · iTerm window 1', secondary: null, description: null, named: false });
   });
   it('tabs: the name is the label and the tooltip keeps the agent and description', () => {
     const facts = (naming: { name?: string; description?: string } | null) => tabModels({ selection: 'session', projectCount: 1, sessions: [
@@ -203,41 +203,44 @@ describe('the rename fields', () => {
 });
 
 describe('the session bar', () => {
-  const bar = sessionBar(null, named, now)!;
+  const bar = sessionBar(null, named)!;
   it('shows the name, the agent line and the description, and no Rename without a way to save', () => {
     render(<SessionBarView bar={bar} busy={false} onClose={() => undefined} />);
     expect(screen.getByText('Sync fixes').className).toContain('tree-session-title');
     expect(screen.getByText('demo.local · iTerm window 1').className).toContain('tree-session-secondary');
     expect(screen.getByText('Search webhook retries').getAttribute('title')).toBe('Search webhook retries');
-    expect(screen.queryByRole('button', { name: 'Rename' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    expect(screen.queryByRole('menuitem', { name: 'Rename' })).toBeNull();
   });
   it('opens the fields from Rename, saves with the fields filled in, and closes', async () => {
     const onRename = vi.fn(async () => null);
     render(<SessionBarView bar={bar} busy={false} onClose={() => undefined} onRename={onRename} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
     const name = screen.getByLabelText('Session name') as HTMLInputElement;
     expect([name.value, (screen.getByLabelText('Session description') as HTMLInputElement).value]).toEqual(['Sync fixes', 'Search webhook retries']);
     fireEvent.change(name, { target: { value: 'Sync' } });
     await act(async () => { fireEvent.keyDown(name, { key: 'Enter' }); });
     expect(onRename).toHaveBeenCalledWith('Sync', 'Search webhook retries');
     expect(screen.queryByLabelText('Session name')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Rename' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Session actions' })).toBeTruthy();
   });
-  it('leaves the name alone on Esc and gives focus back to Rename', () => {
+  it('leaves the name alone on Esc and gives focus back to Session actions', () => {
     const onRename = vi.fn(async () => null);
     render(<SessionBarView bar={bar} busy={false} onClose={() => undefined} onRename={onRename} />);
-    const rename = screen.getByRole('button', { name: 'Rename' }) as HTMLButtonElement;
-    rename.focus(); fireEvent.click(rename);
-    expect(rename.disabled).toBe(true);
+    const trigger = screen.getByRole('button', { name: 'Session actions' });
+    trigger.focus(); fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    expect(screen.queryByRole('menu')).toBeNull();
     fireEvent.keyDown(screen.getByLabelText('Session name'), { key: 'Escape' });
     expect(onRename).not.toHaveBeenCalled();
     expect(screen.getByText('Sync fixes')).toBeTruthy();
-    expect(rename.disabled).toBe(false);
-    expect(document.activeElement).toBe(rename);
+    expect(document.activeElement).toBe(trigger);
   });
   it('offers Rename on a closed session and disables it while busy', () => {
     render(<SessionBarView bar={{ ...bar, closed: true }} busy onClose={() => undefined} onRename={async () => null} />);
-    expect((screen.getByRole('button', { name: 'Rename' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    expect((screen.getByRole('menuitem', { name: 'Rename' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole('button', { name: 'Reopen session' })).toBeTruthy();
   });
 });
@@ -342,10 +345,14 @@ describe('renaming from the project page and the session bar', () => {
     const transport = setup();
     fireEvent.click(await sessionButton(route));
     await screen.findByRole('region', { name: 'Session tree' });
-    await waitFor(() => expect((screen.getByRole('button', { name: 'Rename' }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+        expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      });
     expect(document.querySelector('.tree-session-title')!.textContent).toBe('demo.local');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
     const field = screen.getByLabelText('Session name');
     expect(document.activeElement).toBe(field);
     fireEvent.change(field, { target: { value: 'Sync fixes' } });
@@ -353,8 +360,12 @@ describe('renaming from the project page and the session bar', () => {
     await waitFor(() => expect(document.querySelector('.tree-session-title')!.textContent).toBe('Sync fixes'));
     expect(names(transport)).toHaveLength(1);
 
-    await waitFor(() => expect((screen.getByRole('button', { name: 'Rename' }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+        expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      });
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
     fireEvent.change(screen.getByLabelText('Session name'), { target: { value: '' } });
     await act(async () => { fireEvent.keyDown(screen.getByLabelText('Session name'), { key: 'Enter' }); });
     await waitFor(() => expect(document.querySelector('.tree-session-title')!.textContent).toBe('demo.local'));

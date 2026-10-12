@@ -224,6 +224,10 @@ impl Setup {
         p: &PreparedAttempt,
         n: u64,
     ) -> Result<ApplyReceipt, ariadne_core::apply::ApplyError> {
+        let (context, request) = self.result_request(p, n);
+        ApplyService::new(&self.registry).execute(&context, &request, || self.uuid(), at("06"))
+    }
+    fn result_request(&self, p: &PreparedAttempt, n: u64) -> (AgentContext, ApplyRequest) {
         let s = self.saved();
         let owner = s
             .messages
@@ -269,7 +273,7 @@ impl Setup {
                 handled_through_message_number: owner.number,
             }),
         };
-        ApplyService::new(&self.registry).execute(&context, &request, || self.uuid(), at("06"))
+        (context, request)
     }
     fn expire(
         &self,
@@ -651,6 +655,19 @@ fn grace_is_five_seconds_from_saved_completion_and_late_result_keeps_warning_own
             receipt.data,
             SavedReceiptData::DeliveryExpiry { .. }
         ));
+        let expired = t.saved();
+        assert_eq!(
+            expired.inputs.0[&p.input_id].state,
+            InputState::NeedsAttention
+        );
+        assert_eq!(
+            expired.bindings.0[&id(3)].pause_reason,
+            Some(PauseReason::ResultMissing)
+        );
+        assert_eq!(
+            expired.bindings.0[&id(3)].dispatch_state,
+            DispatchState::RecoveryRequired
+        );
         let bytes = t.bytes();
         assert!(t.expire(&p, 401, at("09")).unwrap().is_none());
         assert_eq!(bytes, t.bytes());
@@ -658,8 +675,9 @@ fn grace_is_five_seconds_from_saved_completion_and_late_result_keeps_warning_own
         t.result(&p, 300);
         let s = t.saved();
         let a = &s.inputs.0[&p.input_id].attempts[0];
+        assert_eq!(s.inputs.0[&p.input_id].state, InputState::Handled);
         assert_eq!(a.result_state, ResultState::Committed);
-        assert!(a.sealed_at.is_some());
+        assert_eq!(a.sealed_at, Some(at("06")));
         assert_eq!(a.error.as_ref().unwrap().code, "result_missing");
         let b = &s.bindings.0[&id(3)];
         assert_eq!(b.owner_paused, owner_paused);
@@ -672,6 +690,240 @@ fn grace_is_five_seconds_from_saved_completion_and_late_result_keeps_warning_own
                 DispatchState::Enabled
             }
         );
+    }
+}
+#[test]
+fn stop_waiting_after_expiry_keeps_the_late_answer_and_the_next_active_input() {
+    for owner_paused in [false, true] {
+        let t = Setup::new();
+        t.queue(100);
+        let next_input = t.queue(101);
+        let p = t.claim(200);
+        if owner_paused {
+            t.report(&t.event(&p, "accepted", EventPayload::Accepted { receipt: None }))
+                .unwrap();
+        }
+        t.report(&t.event(&p, "completed", completed())).unwrap();
+        t.expire(&p, 400, at("06")).unwrap().unwrap();
+        if owner_paused {
+            t.write(|s| s.bindings.0.get_mut(&id(3)).unwrap().owner_paused = true);
+        }
+        t.resolve(&p, ResolutionKind::Skip, 401);
+        let skipped = t.saved();
+        assert_eq!(skipped.inputs.0[&p.input_id].state, InputState::Skipped);
+        let skip_sealed_at = skipped.inputs.0[&p.input_id].attempts[0].sealed_at.clone();
+        assert_eq!(skip_sealed_at, Some(at("05")));
+        assert_eq!(skipped.bindings.0[&id(3)].pause_reason, None);
+        let next = (!owner_paused).then(|| t.claim(201));
+        let (context, request) = t.result_request(&p, 300);
+        let mut no_result = request.clone();
+        no_result.op_id = id(302);
+        no_result.input_result = None;
+        let bytes = t.bytes();
+        assert!(
+            matches!(ApplyService::new(&t.registry).execute(&context, &no_result, || t.uuid(), at("06")), Err(ariadne_core::apply::ApplyError::Core(e)) if e.code == CoreErrorCode::AttemptSealed)
+        );
+        assert_eq!(t.bytes(), bytes);
+        let receipt = ApplyService::new(&t.registry)
+            .execute(&context, &request, || t.uuid(), at("06"))
+            .unwrap();
+        let s = t.saved();
+        let input = &s.inputs.0[&p.input_id];
+        assert_eq!(input.state, InputState::Handled);
+        assert_eq!(input.active_attempt_id, None);
+        let attempt = &input.attempts[0];
+        assert_eq!(attempt.result_state, ResultState::Committed);
+        assert_eq!(attempt.sealed_at, skip_sealed_at);
+        assert_eq!(attempt.error.as_ref().unwrap().code, "result_missing");
+        let result = attempt.domain_result.as_ref().unwrap();
+        assert_eq!(result.reply_message_ids.len(), 1);
+        assert!(s
+            .messages
+            .iter()
+            .any(|m| result.reply_message_ids.contains(&m.id)
+                && m.body == "Explicit result explanation."));
+        assert_eq!(
+            input.resolution_history.last().unwrap().kind,
+            ResolutionKind::Skip
+        );
+        let binding = &s.bindings.0[&id(3)];
+        assert_eq!(binding.pause_reason, None);
+        assert_eq!(binding.owner_paused, owner_paused);
+        assert_eq!(
+            binding.dispatch_state,
+            if owner_paused {
+                DispatchState::Paused
+            } else {
+                DispatchState::Enabled
+            }
+        );
+        assert_eq!(
+            binding.active_input_id,
+            next.as_ref().map(|p| p.input_id.clone())
+        );
+        assert_eq!(
+            s.inputs.0[&next_input].state,
+            if owner_paused {
+                InputState::Queued
+            } else {
+                InputState::InFlight
+            }
+        );
+        let bytes = t.bytes();
+        assert_eq!(
+            ApplyService::new(&t.registry)
+                .execute(
+                    &context,
+                    &request,
+                    || panic!("replay does not allocate"),
+                    at("09")
+                )
+                .unwrap(),
+            receipt
+        );
+        assert_eq!(t.bytes(), bytes);
+        assert!(
+            matches!(t.try_result(&p, 301), Err(ariadne_core::apply::ApplyError::Core(e)) if e.code == CoreErrorCode::ResultAlreadyCommitted)
+        );
+        assert_eq!(t.bytes(), bytes);
+    }
+}
+
+#[test]
+fn late_result_reply_provenance_does_not_depend_on_source_deletion_order() {
+    for delete_first in [false, true] {
+        let t = Setup::new();
+        t.queue(100);
+        let p = t.claim(200);
+        t.report(&t.event(&p, "completed", completed())).unwrap();
+        t.expire(&p, 400, at("06")).unwrap().unwrap();
+        t.resolve(&p, ResolutionKind::Skip, 401);
+        let (context, mut request) = t.result_request(&p, 300);
+        let other = ItemRef::new("2").unwrap();
+        request
+            .expected_item_revisions
+            .0
+            .insert(other.clone(), t.saved().items.0[&other].revision);
+        let Operation::Reply { item, .. } = &mut request.operations[0] else {
+            panic!()
+        };
+        *item = EntityRef::Existing(ExistingRef { id: other });
+        let deletion = Operation::ItemDelete {
+            item: EntityRef::Existing(ExistingRef {
+                id: ItemRef::new("1").unwrap(),
+            }),
+        };
+        if delete_first {
+            request.operations.insert(0, deletion);
+        } else {
+            request.operations.push(deletion);
+        }
+        ApplyService::new(&t.registry)
+            .execute(&context, &request, || t.uuid(), at("06"))
+            .unwrap();
+        let saved = t.saved();
+        assert_eq!(saved.inputs.0[&p.input_id].state, InputState::Handled);
+        assert!(saved.inputs.0[&p.input_id].attempts[0]
+            .domain_result
+            .is_some());
+        assert!(saved.items.0[&ItemRef::new("1").unwrap()]
+            .removed_at
+            .is_some());
+        assert_eq!(saved.bindings.0[&id(3)].pause_reason, None);
+        assert_eq!(
+            saved.bindings.0[&id(3)].dispatch_state,
+            DispatchState::Enabled
+        );
+        let reply_id = &saved.inputs.0[&p.input_id].attempts[0]
+            .domain_result
+            .as_ref()
+            .unwrap()
+            .reply_message_ids[0];
+        let reply = saved.messages.iter().find(|m| &m.id == reply_id).unwrap();
+        assert_eq!(reply.item_id, Some(ItemRef::new("2").unwrap()));
+        assert_eq!(reply.input_id, Some(p.input_id.clone()));
+        assert_eq!(reply.attempt_id, Some(p.attempt_id.clone()));
+    }
+}
+
+#[test]
+fn resend_after_expiry_rejects_the_old_result_before_and_after_a_new_claim() {
+    let t = Setup::new();
+    t.queue(100);
+    let p = t.claim(200);
+    t.report(&t.event(&p, "accepted", EventPayload::Accepted { receipt: None }))
+        .unwrap();
+    t.report(&t.event(&p, "completed", completed())).unwrap();
+    t.expire(&p, 400, at("06")).unwrap().unwrap();
+    t.resolve(&p, ResolutionKind::Resend, 401);
+    for claimed in [false, true] {
+        if claimed {
+            assert_ne!(t.claim(201).attempt_id, p.attempt_id);
+        }
+        let bytes = t.bytes();
+        assert!(
+            matches!(t.try_result(&p, 300), Err(ariadne_core::apply::ApplyError::Core(e)) if e.code == CoreErrorCode::AttemptSealed)
+        );
+        assert_eq!(t.bytes(), bytes);
+        assert!(t.saved().inputs.0[&p.input_id].attempts[0]
+            .domain_result
+            .is_none());
+    }
+}
+
+#[test]
+fn missing_result_skip_does_not_bypass_generation_or_removal_or_cancellation() {
+    for invalidation in ["generation", "removed", "cancelled"] {
+        let t = Setup::new();
+        t.queue(100);
+        let p = t.claim(200);
+        t.report(&t.event(&p, "accepted", EventPayload::Accepted { receipt: None }))
+            .unwrap();
+        t.report(&t.event(&p, "completed", completed())).unwrap();
+        t.expire(&p, 400, at("06")).unwrap().unwrap();
+        if invalidation == "cancelled" {
+            owner_cancel(&t, &p.input_id, 401);
+        } else {
+            t.resolve(&p, ResolutionKind::Skip, 401);
+            if invalidation == "generation" {
+                t.write(|s| s.bindings.0.get_mut(&id(3)).unwrap().generation = id(777));
+            } else {
+                let saved = t.saved();
+                let item = ItemRef::new("1").unwrap();
+                let context = AgentContext::from_trusted_entrypoint(
+                    route(),
+                    id(3),
+                    saved.bindings.0[&id(3)].generation.clone(),
+                    AgentReadScope::Terminal {
+                        issued_through_message_number: saved.bindings.0[&id(3)]
+                            .issued_through_message_number,
+                    },
+                );
+                let request = ApplyRequest {
+                    op_id: id(402),
+                    source_input_id: None,
+                    attempt_id: None,
+                    expected_item_revisions: UniqueMap(std::collections::BTreeMap::from([(
+                        item.clone(),
+                        saved.items.0[&item].revision,
+                    )])),
+                    expected_topic_revisions: UniqueMap(Default::default()),
+                    summary: String::new(),
+                    operations: vec![Operation::ItemDelete {
+                        item: EntityRef::Existing(ExistingRef { id: item }),
+                    }],
+                    input_result: None,
+                };
+                ApplyService::new(&t.registry)
+                    .execute(&context, &request, || t.uuid(), at("07"))
+                    .unwrap();
+            }
+        }
+        let bytes = t.bytes();
+        assert!(
+            matches!(t.try_result(&p, 300), Err(ariadne_core::apply::ApplyError::Core(e)) if e.code == if invalidation == "generation" { CoreErrorCode::StaleGeneration } else { CoreErrorCode::AttemptSealed })
+        );
+        assert_eq!(t.bytes(), bytes, "{invalidation}");
     }
 }
 #[test]
@@ -1211,6 +1463,11 @@ fn late_facts_about_an_attempt_the_owner_resent_or_skipped_are_ignored() {
         ));
         let s = t.saved();
         assert_eq!(s.bindings.0[&id(3)], binding, "{decision:?}");
+        let bytes = t.bytes();
+        assert!(
+            matches!(t.try_result(&p, 301), Err(ariadne_core::apply::ApplyError::Core(e)) if e.code == CoreErrorCode::AttemptSealed)
+        );
+        assert_eq!(t.bytes(), bytes);
     }
 }
 

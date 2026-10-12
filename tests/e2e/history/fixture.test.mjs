@@ -6,33 +6,43 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { closeHistoryRailReferences, historyAsk, historyMessageBatch, historySeedRequest, navigationRejection, unpinHistoryMessage, waitForHistoryControl, waitForHistoryItem, waitForRoundResult } from '../../../apps/desktop/tests/e2e/history.spec.mjs';
+import { closeHistoryRailReferences, historyAsk, historyMessageBatch, historySeedRequest, navigationUpdated, unpinHistoryMessage, waitForHistoryControl, waitForHistoryItem, waitForRoundResult } from '../../../apps/desktop/tests/e2e/history.spec.mjs';
+import { historyFailureFacts } from '../../../apps/desktop/tests/e2e/history-evidence.mjs';
 import { archiveClosedTopic, topicAction } from '../../../apps/desktop/tests/e2e/history-actions.spec.mjs';
 
-test('history recovery requires the plain changed-view alert and enabled Refresh without uncertain Check again', async t => {
+test('history recovery requires the automatically refreshed navigation notification without Refresh', async t => {
   const previousBrowser = globalThis.browser;
   t.after(() => { globalThis.browser = previousBrowser; });
-  const changed = 'This changed while you were working. Look at it as it is now, then try again.';
-  let message, refresh, enabled, uncertain;
+  const updated = 'Updated to the latest. Try again if needed.';
+  let present, message, refresh;
   globalThis.browser = { $(selector) {
-    if (selector === '.nav-banner[role="alert"] p') return { async isExisting() { return message !== null; }, async getText() { return message; } };
-    assert.equal(selector, '.nav-banner[role="alert"]');
-    return { $(selector) {
-      assert.notEqual(message, null, 'An absent alert must not initiate a nested element lookup');
-      if (selector === 'button=Refresh') return { async isExisting() { return refresh; }, async isEnabled() { return enabled; } };
-      assert.equal(selector, 'button=Check again'); return { async isExisting() { return uncertain; } };
+    assert.equal(selector, '.pw-notices .pw-note[data-notice-id="navigation-action-failed"][data-tone="info"]');
+    return { async isExisting() { return present; }, $(selector) {
+      assert.equal(present, true, 'An absent notification must not initiate a nested element lookup');
+      if (selector === '.pw-note-text') return { async getText() { return message; } };
+      assert.equal(selector, 'button=Refresh'); return { async isExisting() { return refresh; } };
     } };
   } };
   const admitted = [];
-  for ([message, refresh, enabled, uncertain] of [[null, false, false, false], ['Preferences revision changed; reload before applying this new patch', true, true, false],
-    [changed, false, false, false], [changed, true, false, false], [changed, true, true, true], [changed, true, true, false]]) {
-    admitted.push(await navigationRejection());
-  }
-  assert.deepEqual(admitted, [false, false, false, false, false, true]);
+  for ([present, message, refresh] of [[false, null, false], [true, 'Another notification', false],
+    [true, updated, true], [true, updated, false]]) admitted.push(await navigationUpdated());
+  assert.deepEqual(admitted, [false, false, false, true]);
+});
+
+test('history failure evidence finds the docked follow-up send control', t => {
+  const dom = new JSDOM(`<article class="item-detail"><div class="detail-dock"><div data-owner-input="fixture"><div class="detail-box">
+    <div class="detail-composer-row"><textarea>Kept words</textarea><button aria-label="Send follow-up">Send follow-up</button></div>
+    </div></div></div></article>`);
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  t.after(() => { globalThis.document = previousDocument; dom.window.close(); });
+  const facts = historyFailureFacts();
+  assert.deepEqual(facts.ownerInput.send, { text: 'Send follow-up', disabled: false, ariaPressed: null });
+  assert.deepEqual(facts.ownerInput.textarea, { disabled: false, valueLength: 'Kept words'.length });
 });
 
 test('history topic actions use their accessible names and the all-closed prompt stays outside the sticky band', async t => {
-  const dom = new JSDOM(`<section class="tree-column" aria-label="Session tree" data-session-status="stale"><div class="tree-rows"><div class="tree-topic" role="treeitem" aria-label="Native topic" data-topic-id="topic" tabindex="0">
+  const dom = new JSDOM(`<section class="tree-column" aria-label="Session tree" data-session-status="stale"><div class="tree-session-bar" aria-busy="true"></div><div class="tree-rows"><div class="tree-topic" role="treeitem" aria-label="Native topic" data-topic-id="topic" tabindex="0">
     <button aria-label="Continue here"><i></i></button><button aria-label="Archive"><i></i></button></div>
     <div class="tree-topic-content"><div class="tree-prompt"><button>Archive topic</button></div></div>
     <div data-topic-id="other"></div><div class="tree-topic-content"><div class="tree-prompt"><button>Archive other topic</button></div></div></div></section>`);
@@ -43,6 +53,8 @@ test('history topic actions use their accessible names and the all-closed prompt
     assert.ok(node, 'The current native selector must find an actual rendered control');
     return { node, async waitForDisplayed() {}, async waitForEnabled() {},
       async getAttribute(name) { return node.getAttribute(name); },
+      async getText() { return node.textContent; },
+      async isExisting() { return node.isConnected; },
       async click() { clicked.push(node.getAttribute('aria-label') ?? node.textContent); },
       $(selector) { return wrap(node.querySelector(selector)); } };
   };
@@ -53,14 +65,38 @@ test('history topic actions use their accessible names and the all-closed prompt
       assert.deepEqual(clicked, ['Continue here', 'Archive'], 'A stale session must wait before clicking its archive prompt');
       dom.window.document.querySelector('.tree-column').setAttribute('data-session-status', 'ready');
       admitted.push(await condition());
+      assert.deepEqual(clicked, ['Continue here', 'Archive'], 'A busy session must also wait before clicking its archive prompt');
+      dom.window.document.querySelector('.tree-session-bar').setAttribute('aria-busy', 'false');
+      admitted.push(await condition());
       assert.equal(admitted.at(-1), true);
     },
     async execute(callback, element) { return callback(element.node); } };
   await topicAction('Native topic', 'Continue here');
   await topicAction('Native topic', 'Archive');
   await archiveClosedTopic('topic');
-  assert.deepEqual(admitted, [false, true]);
+  assert.deepEqual(admitted, [false, false, true]);
   assert.deepEqual(clicked, ['Continue here', 'Archive', 'Archive topic']);
+});
+
+test('archive diagnostics preserve the failure when browser inspection throws or rejects', async t => {
+  const previousBrowser = globalThis.browser;
+  t.after(() => { globalThis.browser = previousBrowser; });
+  const failure = new Error('Session was not ready for direct topic archive');
+  for (const asynchronous of [false, true]) {
+    const unavailable = () => {
+      if (asynchronous) return Promise.reject(new Error('Inspection unavailable'));
+      throw new Error('Inspection unavailable');
+    };
+    globalThis.browser = {
+      async waitUntil() { throw failure; },
+      $() { return { getText: unavailable, isExisting: unavailable }; },
+    };
+    await assert.rejects(archiveClosedTopic('topic'), error => {
+      assert.equal(error.cause, failure);
+      assert.equal(error.message, `${failure.message}\nTree column text: (unavailable)\nDialog exists: (unavailable)`);
+      return true;
+    });
+  }
 });
 
 test('history choice and Send wait for both native enabled and refresh aria-disabled to clear', async t => {
@@ -149,17 +185,22 @@ test('fork links and parent references cannot admit a different selected history
   const previousBrowser = globalThis.browser, previousDocument = globalThis.document;
   t.after(() => { globalThis.browser = previousBrowser; globalThis.document = previousDocument; dom.window.close(); });
   globalThis.document = dom.window.document;
-  // Selection uses the canonical article ID and complete question, even when
+  // Selection uses the canonical article ID and complete title tooltip, even when
   // other items appear as child, location or creation-message fork links.
-  const view = (header, question, nested) => `<article class="item-detail" data-detail-item-id="${header}"><div class="detail-head"><h2 class="detail-question">${question}</h2></div>
-    ${nested}</article>`;
+  const view = (header, question, nested, visible = question) => {
+    const title = document.createElement('h2');
+    title.className = 'detail-question'; title.setAttribute('title', question); title.textContent = visible;
+    return `<article class="item-detail" data-detail-item-id="${header}"><div class="detail-head">${title.outerHTML}</div>${nested}</article>`;
+  };
   const views = [
     view(parent.id, parent.question, `<section aria-label="Child items"><button class="detail-kid">${child.question}</button></section>
       <section class="detail-chat" aria-label="Conversation"><ol class="detail-chat-list"><li class="detail-turn" data-message-id="ask" data-round="1"></li><li class="detail-turn" data-message-id="fork-created"><button class="detail-fork">${child.question}</button></li></ol></section>`),
     view(child.id, parent.question, ''),
     view(parent.id, child.question, ''),
     view(child.id, child.question.split('\n')[0], ''),
+    view(child.id, child.question, '', ''),
     view(child.id, child.question, ''),
+    view(child.id, child.question, '', child.question.split('\n')[0]),
   ];
   const admitted = [];
   globalThis.browser = {
@@ -171,7 +212,7 @@ test('fork links and parent references cannot admit a different selected history
     },
   };
   await waitForHistoryItem(child);
-  assert.deepEqual(admitted, [false, false, false, false, true]);
+  assert.deepEqual(admitted, [false, false, false, false, false, true, true]);
   admitted.length = 0;
   views.splice(0, views.length,
     view(child.id, child.question, `<nav aria-label="Item location"><button>${parent.question}</button></nav><section>${parent.question}</section>`),

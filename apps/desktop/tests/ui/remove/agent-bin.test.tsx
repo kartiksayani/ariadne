@@ -17,7 +17,7 @@ import { sentRows, waitingRows } from '../../../src/selectors/waiting/rows';
 import { sessionGraph } from '../../../src/ui/graph/model';
 import { treeModel } from '../../../src/ui/tree/model';
 import { projectRemoval, sessionRemoval, topicChips } from '../../../src/ui/pages/model';
-import { notices } from '../../../src/ui/pages/notices';
+import { Notices, notices } from '../../../src/ui/pages/notices';
 import { AgentBin, binView, removalNotice, restoreRemoved } from '../../../src/ui/remove/AgentBin';
 import type { RemoveTarget } from '../../../src/ui/dialogs/remove';
 import { AppTransport, route } from '../app/transport';
@@ -74,14 +74,20 @@ function receiptSession(removal = notice()): Session {
 async function openApp(transport: BinTransport) {
   render(<DesktopApp service={createDesktopService(transport)} />);
   fireEvent.click(await sessionButton(route));
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
+  await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    });
 }
 async function refreshApp(transport: BinTransport) {
   const queries = transport.queries.filter(request => request.request.command === 'session_get').length;
   ++transport.source.revision;
   await act(async () => { transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: transport.source.revision }); });
   await waitFor(() => expect(transport.queries.filter(request => request.request.command === 'session_get').length).toBeGreaterThan(queries));
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
+  await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    });
 }
 
 /** Extend the ordinary app fake with the two Core restore receipts. */
@@ -207,7 +213,7 @@ describe('removed work projections', () => {
     const model = treeModel({ session, view, search: '', later: new Set(), collapsedTopics: new Set(), selectedId: '1.1.1',
       revealId: '1.1.1', temporaryExpanded: ['1', '1.1'], presence: null, summaries: [], now: Date.parse(session.updated_at) });
     expect(model.itemCount).toBe(2); expect(model.counts.waiting).toBe(0);
-    expect(model.topics.map(topic => topic.id)).toEqual([topicA]);
+    expect(model.rows.filter(row => row.kind === 'topic').map(row => row.topic.id)).toEqual([topicA]);
     expect(model.rows.filter(row => row.kind === 'item').map(row => row.item.id)).toEqual(['2', '3']);
   });
 
@@ -462,6 +468,45 @@ describe('agent removal bin', () => {
     expect(itemRemoved(restored, '1')).toBe(false); expect(itemRemoved(restored, '1.2')).toBe(false);
     expect(restored.items['1.1']!.removed_at).toBeTruthy(); expect(itemRemoved(restored, '1.1.1')).toBe(true);
   });
+  it('publishes immediate restore failure as a toast while keeping the bin available', async () => {
+    const value = await setup(), invoke = value.transport.invoke.bind(value.transport);
+    vi.spyOn(value.transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'item_restore') return { api_version: 1, ok: false,
+        error: { code: 'invalid_argument', message: 'Restore was refused.', hint: '', retryable: false, field_errors: [] } };
+      return invoke(name, args);
+    });
+    const view = render(<LiveBin actions={value.actions} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    await waitFor(() => expect(notices.getSnapshot().map(notice => notice.text)).toEqual(['Something in that isn’t valid. Check it and try again.']));
+    expect(screen.queryByRole('alert')).toBeNull();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Restore' })).toHaveProperty('disabled', false));
+    act(() => notices.dismiss(notices.getSnapshot()[0]!.id));
+    view.rerender(<LiveBin actions={value.actions} onRemove={vi.fn()} />);
+    expect(notices.getSnapshot()).toEqual([]);
+    render(<Notices />);
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    expect(await screen.findByText('Something in that isn’t valid. Check it and try again.')).toBeTruthy();
+    view.unmount();
+    expect(notices.getSnapshot()).toEqual([]);
+    expect(screen.queryByText('Something in that isn’t valid. Check it and try again.')).toBeNull();
+  });
+  it('keeps an unresolved restore error in the bin and locks further changes', async () => {
+    const value = await setup(), invoke = value.transport.invoke.bind(value.transport);
+    vi.spyOn(value.transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'item_restore') return { api_version: 1, ok: false,
+        error: { code: 'not_found', message: 'Removed work disappeared.', hint: '', retryable: false, field_errors: [] } };
+      return invoke(name, args);
+    });
+    render(<LiveBin actions={value.actions} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('Ariadne can’t find that any more. It may have been removed.');
+    expect(value.actions.getSnapshot().pending).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Restore' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Delete forever' })).toHaveProperty('disabled', true);
+    expect(notices.getSnapshot()).toEqual([]);
+  });
 
   it('restores a topic using its fresh revision while leaving cancelled owner messages cancelled', async () => {
     const session = removedSession(), input = cancelledInput(session, '8'); session.inputs = { [input.id]: input };
@@ -506,7 +551,10 @@ describe('agent removal bin', () => {
     const session = removedSession(), input = cancelledInput(session); session.inputs = { [input.id]: input };
     const transport = new BinTransport(session); render(<DesktopApp service={createDesktopService(transport)} />);
     fireEvent.click(await sessionButton(route)); await screen.findByRole('tree', { name: 'Session items' });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
+    await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+        expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      });
     fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete forever' }));
     const confirm = within(await screen.findByRole('alertdialog'));
@@ -551,7 +599,10 @@ describe('agent removal bin', () => {
     await waitFor(() => expect(restore.hasAttribute('disabled')).toBe(false));
     fireEvent.click(restore);
     await waitFor(() => expect(transport.source.items['1']!.removed_at).toBeUndefined());
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
+    await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+        expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      });
     await act(async () => { window.dispatchEvent(new Event('pagehide')); });
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull());
     await screen.findByRole('button', { name: 'Removed by agent · 2' });

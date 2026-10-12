@@ -7,6 +7,7 @@ import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { withdrawn } from '../../../src/selectors/waiting/stuck';
 import { immutable } from '../../../src/data';
 import { extraMessage, setup } from './fixtures';
+import { notices } from '../../../src/ui/pages/notices';
 
 const copy = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
 vi.mock('../../../src/ui/shared/clipboard', () => ({ copyText: (text: string) => copy(text) }));
@@ -14,7 +15,7 @@ const opened: ReturnType<typeof setup>[] = [];
 async function ready(change?: (session: ReturnType<typeof setup>['transport']['session']) => void) {
   const value = setup(); opened.push(value); change?.(value.transport.session); await value.store.refresh(); return value;
 }
-afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.restoreAllMocks(); copy.mockClear(); });
+afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); notices.clear(); vi.restoreAllMocks(); copy.mockClear(); });
 type FixtureSession = ReturnType<typeof setup>['transport']['session'];
 /** The rail keeps cancellations; only an edited message sent again leaves the history. */
 const shown = (session: FixtureSession) => session.messages.filter(message => !withdrawn(immutable(session), immutable(message))).length;
@@ -95,7 +96,7 @@ describe('item detail panel', () => {
     const order = [...document.querySelectorAll('.detail-body > section, .detail-body > div')].map(element => element.getAttribute('aria-label') ?? element.className);
     const body = ['detail-head', 'Your answer', 'Current outcome', 'Child items', 'Item links', 'Conversation'];
     expect(order.filter(name => body.includes(name))).toEqual(body);
-    expect([...detail.querySelectorAll('.detail-dock > section')].map(element => element.getAttribute('aria-label'))).toEqual(['Revisit']);
+    expect([...detail.querySelectorAll('.detail-dock .detail-quick-actions > section')].map(element => element.getAttribute('aria-label'))).toEqual(['Revisit']);
     // The handled answer is the request the stepper follows.
     expect(within(screen.getByRole('region', { name: 'Your answer' })).getByText('Resolved')).toBeTruthy();
     expect(screen.queryByText('Back and forth')).toBeNull();
@@ -118,8 +119,8 @@ describe('item detail panel', () => {
     expect([...chat.querySelectorAll<HTMLElement>('li[data-message-id]')].map(entry => entry.dataset.messageId)).toEqual(expected.map(message => message.id));
     expect(chat.querySelector('.detail-chat-marker')!.textContent).toBe('Agent raised this');
     expect(screen.queryByRole('region', { name: 'Timeline' })).toBeNull();
-    expect(document.querySelector('.detail-head .detail-reference')!.contains(screen.getByText('Agent reference'))).toBe(true);
-    expect(screen.getByText('Agent reference').parentElement!.querySelector('code')).toBeNull();
+    expect(document.querySelector('.detail-head .detail-reference')!.contains(screen.getByText('Copy reference'))).toBe(true);
+    expect(screen.getByText('Copy reference').parentElement!.querySelector('code')).toBeNull();
   });
   it('does not count an answer that archive cancelled as the owner’s answer: Waiting on you, with the not-sent line', async () => {
     const value = await ready(session => {

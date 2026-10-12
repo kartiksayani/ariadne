@@ -8,7 +8,7 @@ export function historyFailureFacts() {
   // The detail's owner input: the answer slot of a waiting item, else the open action box with its changed-target warning.
   const owner = document.querySelector('[data-owner-input]');
   const editor = owner?.querySelector('textarea') ?? null;
-  const send = owner?.querySelector('.answer-send, .detail-box-row .btn-primary') ?? null;
+  const send = owner?.querySelector('.answer-send, .answer-reply-send, .detail-composer-row button[aria-label^="Send "], .detail-box-row .btn-primary') ?? null;
   const search = document.querySelector('[data-shell-search]');
   const stateButtons = /^(Refresh|Refreshing…|Check again|Register project|Connect existing session|Try saving your draft again|Try sending again|Write another input)$/;
   const active = document.activeElement;

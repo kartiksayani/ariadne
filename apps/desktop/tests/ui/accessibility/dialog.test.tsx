@@ -3,8 +3,34 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Dialog } from '../../../src/ui/dialogs/Dialog';
+import { ActionMenu } from '../../../src/ui/shared/ActionMenu';
 
 afterEach(cleanup);
+it.each(['Escape', 'Cancel', 'Done'])('returns to the menu trigger after %s when the clicked item held focus', async finish => {
+  const user = userEvent.setup();
+  function Harness() {
+    const [open, setOpen] = useState(false);
+    return <><ActionMenu label="Actions" icon={<span>More</span>}>
+      {close => <button type="button" role="menuitem" onClick={() => { close(false); setOpen(true); }}>Open form</button>}
+    </ActionMenu>{open && <Dialog label="Form" width={520} onCancel={() => setOpen(false)}>
+      <button type="button" onClick={() => setOpen(false)}>Cancel</button>
+      <button type="button" onClick={() => setOpen(false)}>Done</button>
+    </Dialog>}</>;
+  }
+  render(<Harness />);
+  const trigger = screen.getByRole('button', { name: 'Actions' });
+  await user.click(trigger);
+  const item = screen.getByRole('menuitem', { name: 'Open form' });
+  // Native pointer activation can focus an item even though it is outside the tab order.
+  item.focus(); expect(document.activeElement).toBe(item);
+  fireEvent.click(item, { detail: 1 });
+  expect(screen.queryByRole('menu')).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole('dialog'));
+  if (finish === 'Escape') await user.keyboard('{Escape}');
+  else await user.click(screen.getByRole('button', { name: finish }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+});
 it('contains forward/reverse Tab across select, textarea and enabled controls, restores opener and consumes Escape', async () => {
   const user = userEvent.setup(), escaped = vi.fn();
   function Harness() {

@@ -17,7 +17,7 @@ describe('native link failure notice', () => {
     await screen.findByRole('button', { name: 'Text size' });
     await waitFor(() => expect(transport.listeners.get(event)?.size).toBe(1));
     act(() => { transport.emit(event, null); });
-    expect(screen.getByText(LINK_NOT_OPENED)).toBeTruthy();
+    expect(await screen.findByText(LINK_NOT_OPENED)).toBeTruthy();
     act(() => { transport.emit(event, null); });
     expect(screen.getAllByText(LINK_NOT_OPENED)).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));

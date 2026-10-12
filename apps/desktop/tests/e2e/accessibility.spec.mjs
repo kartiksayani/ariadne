@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { json } from '../../../../scripts/run-native-e2e.mjs';
-import { openSessionButton } from './session-button.mjs';
+import { openSession } from './session-button.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const focus = selector => browser.execute(selector => document.querySelector(selector).focus(), selector);
@@ -25,11 +25,11 @@ export async function runAccessibilityAcceptance(configuration) {
     'Ordinary native window must reach minimum outer size 1300×760');
   const before = await readFile(configuration.demo.sessionPath);
   const catalogue = await browser.$('button[data-shell-tab="all_sessions"]'); await catalogue.waitForEnabled(); await catalogue.click();
-  const session = await openSessionButton(configuration.demo.session_id); await session.click();
+  await openSession(configuration.demo.session_id);
   const row = '[role="treeitem"][data-item-id="2"]';
   await (await browser.$(row)).waitForDisplayed(); await focus(row);
   await browser.keys('r');
-  const editor = '.shell-detail-scroll [data-owner-input] textarea';
+  const editor = '.item-detail .detail-dock [data-owner-input] textarea';
   await wait(() => active(editor), 'Reply shortcut did not focus ordinary native editor');
   const draft = `Native keyboard retained draft ${process.env.ARIADNE_E2E_NONCE}`;
   await (await browser.$(editor)).setValue(draft);
@@ -54,8 +54,13 @@ export async function runAccessibilityAcceptance(configuration) {
   await focus(row); await browser.keys('r'); await wait(() => active(editor), 'Repeated Reply did not refocus');
   assert.equal(await (await browser.$(editor)).getValue(), `${draft}g`);
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-keyboard-retained-editor.png'));
-  // Close session in the session bar opens its one confirmation.
-  const closeButton = await browser.$('.tree-session-bar').$('button*=Close session'); await closeButton.waitForEnabled(); await closeButton.click();
+  // Close session in Session actions opens its one confirmation.
+  await wait(async () => await browser.$('.tree-column').getAttribute('data-session-status') === 'ready'
+    && await browser.$('.tree-session-bar').getAttribute('aria-busy') === 'false', 'Session was not ready for Close session');
+  const actions = await browser.$('.tree-session-bar button[aria-label="Session actions"]');
+  await actions.waitForEnabled(); await actions.click();
+  const closeButton = await browser.$('[role="menu"][aria-label="Session actions"]').$('[role="menuitem"]*=Close session');
+  await closeButton.waitForEnabled(); await closeButton.click();
   await (await browser.$('[role="dialog"]')).waitForDisplayed();
   await focus('[role="dialog"] button');
   await browser.keys(['Shift', 'Tab']);
@@ -66,7 +71,8 @@ export async function runAccessibilityAcceptance(configuration) {
   await browser.keys('Escape');
   await wait(async () => !(await browser.$('[role="dialog"]').isExisting()), 'Dialog Escape did not close overlay');
   assert.equal(await (await browser.$('.shell-detail')).isExisting(), true, 'Dialog Escape must preserve selected detail');
-  assert.equal(await browser.execute(() => document.activeElement?.textContent === 'Close session'), true, 'Dialog restores opener');
+  const opener = await browser.execute(() => ({ label: document.activeElement?.getAttribute('aria-label') ?? null, html: document.activeElement?.outerHTML.slice(0, 300) ?? null }));
+  assert.equal(opener.label, 'Session actions', `Dialog restores opener; focus is on ${opener.html}`);
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-keyboard-dialog-return.png'));
   assert.deepEqual(await readFile(configuration.demo.sessionPath), before, 'Keyboard focus/draft/modal checks leave durable demo domain unchanged');
   await json(join(process.env.ARIADNE_E2E_EVIDENCE, 'keyboard-accessibility.json'), { ordinaryApp: true, actualCoreStore: true,
