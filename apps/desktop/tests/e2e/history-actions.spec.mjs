@@ -47,7 +47,7 @@ export async function archiveClosedTopic(topicId) {
 async function lifecycle(button, confirmation, path, predicate) {
   if (button === 'Close session') {
     await click(await sessionBar().$('button[aria-label="Session actions"]'));
-    await click(await sessionBar().$('[role="menuitem"]*=Close session'));
+    await click(await browser.$('[role="menu"][aria-label="Session actions"]').$('[role="menuitem"]*=Close session'));
   } else await click(await sessionBar().$(`button*=${button}`));
   await click(await dialog().$(`button=${confirmation}`));
   await wait(async () => predicate(await readJson(path)), `Persisted ${confirmation} was not visible on disk`);
@@ -137,14 +137,20 @@ export async function runHistoryActionsAcceptance(configuration) {
   await wait(async () => await topicBand(topicName).isExisting(), 'Agent-created terminal topic did not refresh in App');
   const targetHistory = { items: target.items, messages: target.messages, rounds: target.rounds, answers: target.answers, bindings: target.bindings };
   // Nothing blocks an all-closed topic, so its prompt archives at once and the
-  // column offers Undo, which restores it (no confirmation dialog either way).
+  // toast offers Undo, which restores it (no confirmation dialog either way).
   await archiveClosedTopic(terminalTopic.id);
   try {
     await wait(async () => (await readJson(targetPath)).topics[terminalTopic.id].archived_at !== null, 'Direct topic archive was not visible on disk');
   } catch (failure) { throw await archiveDiagnostics(failure); }
   assert.equal(await dialog().isExisting(), false, 'An unblocked archive must not open the review');
-  await wait(async () => (await browser.$('.tree-column').getText()).includes(`Archived “${topicName}”.`), 'Archive did not report its Undo banner');
-  await click(await browser.$('.tree-column').$('button=Undo'));
+  let archiveNotice;
+  await wait(async () => {
+    for (const notice of await browser.$$('.pw-notices .pw-note')) {
+      if ((await notice.$('.pw-note-text').getText()).startsWith(`Archived “${topicName}”.`)) { archiveNotice = notice; return true; }
+    }
+    return false;
+  }, 'Archive did not show its Undo notification');
+  await click(await archiveNotice.$('button=Undo'));
   await wait(async () => (await readJson(targetPath)).topics[terminalTopic.id].archived_at === null, 'Undo did not restore the topic on disk');
   await wait(async () => await topicBand(topicName).isExisting(), 'Restored topic did not return to the tree');
   target = await readJson(targetPath);

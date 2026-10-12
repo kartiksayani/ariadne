@@ -4,18 +4,24 @@
 }
 
 .action-menu-options {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 4px);
-  right: 0;
+  position: fixed;
+  z-index: 40;
   display: flex;
   flex-direction: column;
-  min-width: max-content;
+  width: max-content;
+  overflow: auto;
   padding: 4px;
   border: 1px solid var(--color-divider);
   border-radius: var(--radius-md);
   background: var(--a-card);
   box-shadow: var(--a-pop);
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.5;
+}
+
+.action-menu-options > .btn {
+  padding: 3px 8px;
+  font-size: inherit;
 }
 
 .action-menu-options > button {
@@ -24,6 +30,7 @@
   justify-content: flex-start;
   gap: 8px;
   text-align: left;
+  flex: none;
 }
 
 .action-menu-options > button:hover,

@@ -64,9 +64,8 @@ const viewOf = (transport: AppTransport) => transport.preferences.sessions.find(
 const patches = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'preferences_patch');
 const filterButton = () => within(screen.getByRole('group', { name: 'Filter items' })).getByRole('button', { name: /^Filter/ });
 const chip = (label: string) => {
-  const group = within(screen.getByRole('group', { name: 'Filter items' }));
   if (filterButton().getAttribute('aria-expanded') !== 'true') fireEvent.click(filterButton());
-  return group.getByRole(label === 'All' ? 'menuitem' : 'menuitemcheckbox', { name: new RegExp(`^${label === 'All' ? 'Show all' : label}`) });
+  return within(screen.getByRole('menu', { name: /^Filter/ })).getByRole(label === 'All' ? 'menuitem' : 'menuitemcheckbox', { name: new RegExp(`^${label === 'All' ? 'Show all' : label}`) });
 };
 const statusSelected = (label: string) => label === 'All' ? !filterButton().hasAttribute('data-active') : chip(label).getAttribute('aria-checked') === 'true';
 const sessionAction = (name: string) => {

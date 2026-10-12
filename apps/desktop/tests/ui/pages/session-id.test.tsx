@@ -42,10 +42,10 @@ describe('session ID actions', () => {
     const bar = screen.getByLabelText('Session');
     expect(bar.textContent).not.toContain(route.session_id);
     fireEvent.click(within(bar).getByRole('button', { name: 'Session actions' }));
-    await act(async () => { fireEvent.click(within(bar).getByRole('menuitem', { name: 'Copy ID' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: 'Copy ID' })); });
     expect(copyText).toHaveBeenCalledTimes(2);
     expect(copyText).toHaveBeenLastCalledWith(route.session_id);
-    expect(within(bar).getByRole('menuitem', { name: 'Copy ID' }).querySelector('.ph-copy')).not.toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Copy ID' }).querySelector('.ph-copy')).not.toBeNull();
     await waitFor(() => { expect(screen.getAllByText('Connection reference copied.').length).toBeGreaterThan(0); });
     expect(bar.textContent).not.toContain(route.session_id);
   });

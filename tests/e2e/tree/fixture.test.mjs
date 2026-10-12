@@ -6,7 +6,36 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { assertStatusFilters, choose, observeTreeAnchor, observeTreeClickReadiness, openStatusFilterMenu, publishTreeRequest, treeBatch, treeCompletionBatch, treeClickReadinessStatus, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
+import { assertStatusFilters, choose, observeTreeAnchor, observeTreeClickReadiness, openStatusFilterMenu, publishTreeRequest, showFullItemQuestion, treeBatch, treeCompletionBatch, treeClickReadinessStatus, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
+
+for (const scenario of ['compact', 'expanded', 'incomplete', 'wrong-tooltip']) {
+  test(`full item question checks saved text before opening and complete rendered words: ${scenario}`, async () => {
+    const item = { id: 'fixture', question: 'Complete question\nRetain the second line.' }, calls = [];
+    let expanded = scenario === 'expanded';
+    const heading = {
+      getAttribute: async name => { assert.equal(name, 'title'); calls.push('title'); return scenario === 'wrong-tooltip' ? 'Other question' : item.question; },
+      isDisplayed: async () => true,
+      get textContent() { calls.push('text'); return expanded && scenario !== 'incomplete' ? item.question : 'Complete question…'; },
+    };
+    const expand = {
+      isExisting: async () => !expanded, waitForDisplayed: async () => calls.push('displayed'), waitForEnabled: async () => calls.push('enabled'),
+      click: async () => { calls.push('expand'); expanded = true; },
+    };
+    const action = runInNewContext(`(${showFullItemQuestion.toString()})(item)`, {
+      item, browser: { execute: async (callback, element) => callback(element), $: selector => {
+        if (selector === '.item-detail') return { getAttribute: async name => { assert.equal(name, 'data-detail-item-id'); return item.id; } };
+        if (selector === '[aria-label="Item detail"] .detail-question') return heading;
+        assert.equal(selector, '.item-detail button[aria-label="Expand title"]'); return expand;
+      } }, wait: async (condition, message) => assert.ok(await condition(), message),
+    });
+    if (scenario === 'wrong-tooltip') { await assert.rejects(action, /lost its complete saved question/); assert.deepEqual(calls, ['title']); }
+    else if (scenario === 'incomplete') await assert.rejects(action, /did not show the complete saved question/);
+    else {
+      await action;
+      assert.deepEqual(calls, scenario === 'expanded' ? ['title', 'text'] : ['title', 'displayed', 'enabled', 'expand', 'text']);
+    }
+  });
+}
 
 for (const scenario of ['multi-select', 'exclusive-selection', 'incorrect-saved-set', 'missing-active-indicator']) {
   test(`native status steps verify combined rows, deselection and saved sets: ${scenario}`, async () => {
@@ -18,9 +47,9 @@ for (const scenario of ['multi-select', 'exclusive-selection', 'incorrect-saved-
     const shown = () => ids.filter((id, index) => selected.size !== 1 || (selected.has('closed') ? doneIds.has(id)
       : !doneIds.has(id) || operations[index].parent === null));
     let menuOpen = false;
-    const trigger = { getAttribute: async name => name === 'aria-expanded' ? String(menuOpen) : selected.size && scenario !== 'missing-active-indicator' ? 'true' : null };
+    const trigger = { getAttribute: async name => name === 'aria-controls' ? 'fixture-filter' : name === 'aria-expanded' ? String(menuOpen) : selected.size && scenario !== 'missing-active-indicator' ? 'true' : null };
     const document = { querySelectorAll: selector => {
-      assert.equal(selector, '[role="group"][aria-label="Filter items"] [role="menuitemcheckbox"][aria-checked="true"]');
+      assert.equal(selector, '[role="menu"][id="fixture-filter"] [role="menuitemcheckbox"][aria-checked="true"]');
       assert.equal(menuOpen, true);
       return ['open', 'closed'].filter(chip => selected.has(chip)).map(chip => ({ textContent: chip === 'open' ? 'Open1320' : 'Closed680' }));
     } };
@@ -28,13 +57,13 @@ for (const scenario of ['multi-select', 'exclusive-selection', 'incorrect-saved-
       assert: { ...assert, deepEqual: (actual, expected, message) => assert.deepEqual(globalThis.structuredClone(actual), globalThis.structuredClone(expected), message) },
       browser: {
         $: selector => {
-          assert.equal(selector, '[role="group"][aria-label="Filter items"]');
+          assert.equal(selector, '[role="menu"][id="fixture-filter"]');
           return { $: async option => {
             assert.equal(menuOpen, true);
             return { getText: async () => option.endsWith('Show all') ? 'Show all 2000' : option.endsWith('Open') ? 'Open 1320' : 'Closed 680' };
           } };
         },
-        execute: async callback => globalThis.structuredClone(runInNewContext(`(${callback.toString()})()`, { document })),
+        execute: async (callback, ...args) => globalThis.structuredClone(runInNewContext(`(${callback.toString()})(...args)`, { document, args })),
         keys: async key => { assert.equal(key, 'Escape'); menuOpen = false; },
       },
       openStatusFilterMenu: async () => { menuOpen = true; return trigger; },
@@ -179,15 +208,15 @@ for (const expectedPressed of [true, false]) for (const scenario of ['focused', 
     const document = { visibilityState: scenario === 'hidden' ? 'hidden' : 'visible', hidden: scenario === 'hidden', hasFocus: () => scenario === 'focused' || scenario === 'readiness_error' };
     const window = { __ariadneTreeFilterCleanup: () => calls.push('cleanup') };
     let pressed = !expectedPressed;
-    const trigger = { getAttribute: async name => { assert.equal(name, 'aria-expanded'); return 'true'; } };
+    const trigger = { getAttribute: async name => { if (name === 'aria-controls') return 'fixture-filter'; assert.equal(name, 'aria-expanded'); return 'true'; } };
     const button = { waitForClickable: async () => { calls.push('clickable'); }, click: async () => { calls.push('click'); pressed = !pressed; },
       getAttribute: async name => { assert.equal(name, 'aria-checked'); return String(pressed); }, isEnabled: async () => true };
     // Run the actual orchestration with observed browser/OS boundaries; this
     // checks input ordering and rejection, not real macOS activation or rendering.
     const context = {
-      process: { env: environment }, expectedPressed,
+      process: { env: environment }, expectedPressed, assert,
       browser: {
-        $: selector => { assert.equal(selector, '[role="group"][aria-label="Filter items"]'); return { $: async option => { assert.equal(option, '[role="menuitemcheckbox"]*=Open'); return button; } }; },
+        $: selector => { assert.equal(selector, '[role="menu"][id="fixture-filter"]'); return { $: async option => { assert.equal(option, '[role="menuitemcheckbox"]*=Open'); return button; } }; },
         execute: async callback => {
           if (callback === observeTreeClickReadiness) { calls.push('observe'); return; }
           return runInNewContext(`(${callback.toString()})()`, { document, window });
@@ -220,12 +249,12 @@ for (const expectedPressed of [true, false]) for (const scenario of ['focused', 
 for (const clearIndicator of [true, false]) test(`native Show all requires a closed menu and cleared active indicator: ${clearIndicator ? 'cleared' : 'stale'}`, async () => {
   const calls = [];
   let expanded = true, active = true;
-  const trigger = { getAttribute: async name => name === 'aria-expanded' ? String(expanded) : active ? 'true' : null, isEnabled: async () => true };
+  const trigger = { getAttribute: async name => name === 'aria-controls' ? 'fixture-filter' : name === 'aria-expanded' ? String(expanded) : active ? 'true' : null, isEnabled: async () => true };
   const button = { waitForClickable: async () => calls.push('clickable'), click: async () => { calls.push('click'); expanded = false; active = !clearIndicator; } };
   const document = { visibilityState: 'visible', hidden: false, hasFocus: () => true }, window = { __ariadneTreeFilterCleanup: () => calls.push('cleanup') };
   const action = runInNewContext(`(${choose.toString()})('all', true)`, {
-    browser: { $: selector => {
-      assert.equal(selector, '[role="group"][aria-label="Filter items"]');
+    assert, browser: { $: selector => {
+      assert.equal(selector, '[role="menu"][id="fixture-filter"]');
       return { $: async option => { assert.equal(option, '[role="menuitem"]*=Show all'); return button; } };
     }, execute: async callback => callback === observeTreeClickReadiness ? calls.push('observe') : runInNewContext(`(${callback.toString()})()`, { document, window }) },
     openStatusFilterMenu: async () => trigger, observeTreeClickReadiness,

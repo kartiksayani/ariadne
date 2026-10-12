@@ -29,7 +29,7 @@ export async function runAccessibilityAcceptance(configuration) {
   const row = '[role="treeitem"][data-item-id="2"]';
   await (await browser.$(row)).waitForDisplayed(); await focus(row);
   await browser.keys('r');
-  const editor = '.shell-detail-scroll [data-owner-input] textarea';
+  const editor = '.item-detail .detail-dock [data-owner-input] textarea';
   await wait(() => active(editor), 'Reply shortcut did not focus ordinary native editor');
   const draft = `Native keyboard retained draft ${process.env.ARIADNE_E2E_NONCE}`;
   await (await browser.$(editor)).setValue(draft);
@@ -59,7 +59,7 @@ export async function runAccessibilityAcceptance(configuration) {
     && await browser.$('.tree-session-bar').getAttribute('aria-busy') === 'false', 'Session was not ready for Close session');
   const actions = await browser.$('.tree-session-bar button[aria-label="Session actions"]');
   await actions.waitForEnabled(); await actions.click();
-  const closeButton = await browser.$('.tree-session-bar [role="menuitem"]*=Close session');
+  const closeButton = await browser.$('[role="menu"][aria-label="Session actions"]').$('[role="menuitem"]*=Close session');
   await closeButton.waitForEnabled(); await closeButton.click();
   await (await browser.$('[role="dialog"]')).waitForDisplayed();
   await focus('[role="dialog"] button');

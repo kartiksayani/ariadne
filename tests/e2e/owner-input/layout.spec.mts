@@ -110,7 +110,6 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
     expect(after.toolbarGap).toBe(before.toolbarGap);
     expect(after.headerTop).toBe(before.headerTop);
     await checkFilters(page);
-    const actionTimeout = 15_000;
     for (const viewport of [{ width: 1000, height: 668 }, { width: 900, height: 650 }]) {
       await page.setViewportSize(viewport);
       await ready(page);
@@ -120,13 +119,19 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
       // Every session action stays reachable through the menu with the tree scrolled.
       for (const label of ['Close session', 'Rename', 'Copy ID']) {
         await actions.click();
+        const menu = page.getByRole('menu', { name: 'Session actions' });
+        const menuBox = (await menu.boundingBox())!;
+        expect(menuBox.x).toBeGreaterThanOrEqual(0);
+        expect(menuBox.y).toBeGreaterThanOrEqual(0);
+        expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(viewport.width);
+        expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(viewport.height);
         const action = page.getByRole('menuitem', { name: label, exact: true });
         await reachable(action);
         if (label === 'Copy ID') {
           // This harness grants no clipboard permissions; check reachability without writing.
           await page.keyboard.press('Escape');
         } else {
-          await action.click({ timeout: actionTimeout });
+          await action.click();
           if (label === 'Rename') {
             const field = bar.getByLabel('Session name');
             await expect(field).toBeInViewport();
@@ -148,7 +153,7 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
         if (await action.getAttribute('aria-label') === 'Session actions') continue;
         await reachable(action);
         if (await action.getAttribute('title') !== 'Sending and connection') continue;
-        await action.click({ timeout: actionTimeout });
+        await action.click();
         const review = page.getByRole('dialog');
         await expect(review).toBeInViewport();
         await review.getByRole('button', { name: 'Done', exact: true }).click();

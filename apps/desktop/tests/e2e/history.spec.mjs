@@ -42,15 +42,12 @@ const formerOutcome = 'Full native completed outcome\nKeep the former outcome af
 const inputs = session => Object.values(session.inputs).sort((a, b) => a.seq - b.seq);
 const row = id => browser.$(`.tree-rows [data-item-id="${id}"]`);
 let navigationRecovered = false;
-const revisionConflict = 'This changed while you were working. Look at it as it is now, then try again.';
+const updatedNavigation = 'Updated to the latest. Try again if needed.';
 const preferencesSnapshot = async () => (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot;
-export async function navigationRejection() {
-  const message = await browser.$('.nav-banner[role="alert"] p');
-  if (!(await message.isExisting()) || await message.getText() !== revisionConflict) return false;
-  const banner = await browser.$('.nav-banner[role="alert"]');
-  const refresh = await banner.$('button=Refresh'), uncertain = await banner.$('button=Check again');
-  // Plain copy folds changed-view codes together; Refresh without Check again identifies a definitive rejection.
-  return await refresh.isExisting() && await refresh.isEnabled() && !(await uncertain.isExisting());
+export async function navigationUpdated() {
+  const notice = await browser.$('.pw-notices .pw-note[data-notice-id="navigation-action-failed"][data-tone="info"]');
+  return await notice.isExisting() && await notice.$('.pw-note-text').getText() === updatedNavigation
+    && !(await notice.$('button=Refresh').isExisting());
 }
 const option = ordinal => ({ id: `history-choice-${ordinal}`, label: `Use round ${ordinal} choice`,
   consequence: `Keep the exact consequence for round ${ordinal}.`, recommended: true });
@@ -85,29 +82,16 @@ async function open(history, itemId = '1') {
   const catalogue = await browser.$('button[data-shell-tab="all_sessions"]'); await catalogue.waitForEnabled(); await catalogue.scrollIntoView(); await catalogue.click();
   const selectedCatalogue = async () => (await preferencesSnapshot()).global.selected_navigation.kind === 'all_sessions'
     && await catalogue.getAttribute('aria-current') === 'page' && await catalogue.isEnabled();
-  let rejectedNavigation = false;
-  await wait(async () => {
-    rejectedNavigation ||= await navigationRejection();
-    return rejectedNavigation || await selectedCatalogue();
-  }, 'History catalogue navigation neither completed nor showed a definitive revision conflict');
-  if (rejectedNavigation) {
-    assert.equal(navigationRecovered, false, 'Only one explicit history navigation recovery is allowed per native launch');
+  await wait(async () => await selectedCatalogue() || await navigationUpdated(), 'History catalogue navigation did not finish or refresh its changed view');
+  if (!await selectedCatalogue()) {
+    assert.equal(navigationRecovered, false, 'Only one fresh history navigation choice is allowed per native launch');
     navigationRecovered = true;
-    const rejected = { sessionId: history.sessionId, message: revisionConflict,
+    const refreshed = { sessionId: history.sessionId, message: updatedNavigation,
       preferences: await preferencesSnapshot(), body: await browser.$('body').getText() };
-    const refresh = await browser.$('.nav-banner[role="alert"]').$('button=Refresh');
-    await refresh.waitForDisplayed(); await refresh.waitForEnabled(); await refresh.scrollIntoView(); await refresh.click();
-    // The actual Refresh control returns after its awaited read completes;
-    // the definitive mutation error remains visible until a fresh choice.
-    await wait(async () => {
-      const refreshed = await browser.$('.nav-banner[role="alert"]').$('button=Refresh');
-      return await refreshed.isExisting() && await refreshed.isDisplayed() && await refreshed.isEnabled() && await catalogue.isEnabled();
-    }, 'Explicit history Refresh did not finish before the fresh navigation choice');
-    assert.equal(await navigationRejection(), true, 'History Refresh must retain the exact definitive revision conflict before a fresh navigation choice');
-    // A visible definitive rejection permits one fresh owner navigation choice.
+    // The changed view refreshes itself; navigation still needs a deliberate fresh owner choice.
     await catalogue.waitForEnabled(); await catalogue.scrollIntoView(); await catalogue.click();
-    await wait(selectedCatalogue, 'Fresh history catalogue navigation did not persist after Refresh');
-    await writeFile(join(evidence(), 'history-navigation-recovery.json'), JSON.stringify({ rejected, recovered: await preferencesSnapshot() }, null, 2));
+    await wait(selectedCatalogue, 'Fresh history catalogue choice did not persist after automatic refresh');
+    await writeFile(join(evidence(), 'history-navigation-recovery.json'), JSON.stringify({ refreshed, recovered: await preferencesSnapshot() }, null, 2));
   }
   const session = await openSessionButton(history.sessionId); await session.scrollIntoView(); await session.click();
   await wait(async () => {
@@ -464,7 +448,7 @@ export async function runHistoryAcceptance(configuration) {
       reviewedTarget[intent] = await reviewCurrentTarget();
       const text = `Native ${intent} after closed history\nThe owner's deliberate request leaves the status unchanged.`;
       await editor.scrollIntoView(); await editor.setValue(text);
-      const send = await browser.$(`${ownerInput('1')} .detail-box-row .btn-primary`); await failureEvidence(`owner-input-send-${intent}`, () => send.waitForEnabled()); await send.scrollIntoView(); await send.click();
+      const send = await browser.$(`${ownerInput('1')} button[aria-label="Send follow-up"]`); await failureEvidence(`owner-input-send-${intent}`, () => send.waitForEnabled()); await send.scrollIntoView(); await send.click();
     } else reviewedTarget[intent] = false;
     await wait(async () => inputs(await snapshot(history)).length === ordinal && (await admissions(history)).length === ordinal, 'Closed-item deliberate owner intent did not reach its isolated host');
     saved = await snapshot(history); assert.equal(saved.items['1'].status, 'done'); assert.equal(inputs(saved)[ordinal - 1].kind, intent);

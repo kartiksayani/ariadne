@@ -12,6 +12,16 @@ const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const row = id => browser.$(`.tree-rows [data-item-id="${id}"]`);
 const search = () => browser.$('[data-shell-search]');
+// The resting title is a compact Markdown excerpt. Open it before proving all rendered words.
+export async function showFullItemQuestion(item) {
+  const heading = () => browser.$('[aria-label="Item detail"] .detail-question');
+  await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === item.id
+    && await heading().getAttribute('title') === item.question, 'Selected detail lost its complete saved question');
+  const expand = await browser.$('.item-detail button[aria-label="Expand title"]');
+  if (await expand.isExisting()) { await expand.waitForDisplayed(); await expand.waitForEnabled(); await expand.click(); }
+  await wait(async () => await heading().isDisplayed() && await browser.execute(element => element.textContent, await heading()) === item.question,
+    'Expanded detail did not show the complete saved question');
+}
 // Types the text, then waits until the debounced preference write has made it durable.
 async function setSearch(tree, value) {
   const input = await search(); await input.waitForEnabled(); await input.setValue(value);
@@ -249,7 +259,7 @@ export function observeTreeClickReadiness(button, group, name, expectedPressed, 
     sample.readiness.hidden = document.hidden;
     sample.readiness.hasFocus = document.hasFocus();
     try {
-      const current = selector ? document.querySelector(selector) : [...(document.querySelector(`[aria-label="${group}"]`)?.querySelectorAll('button') ?? [])]
+      const current = selector ? document.querySelector(selector) : [...((group === 'Filter items' ? document.querySelector('[role="menu"][aria-label^="Filter"]') : document.querySelector(`[aria-label="${group}"]`))?.querySelectorAll('button') ?? [])]
         .find(value => value.textContent.trim() === name || [...value.children].some(child => child.tagName === 'SPAN' && child.textContent.trim() === name));
       const rect = button.getBoundingClientRect(), hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
       const enabled = !button.disabled && button.getAttribute('aria-disabled') !== 'true';
@@ -339,7 +349,9 @@ export async function choose(chip, pressed) {
   const labels = { all: 'Show all', waiting: 'Waiting on me', open: 'Open', progress: 'In progress', closed: 'Closed' };
   const trigger = await openStatusFilterMenu(), label = labels[chip];
   const selector = `[role="${chip === 'all' ? 'menuitem' : 'menuitemcheckbox'}"]*=${label}`;
-  const find = () => browser.$('[role="group"][aria-label="Filter items"]').$(selector);
+  const menuId = await trigger.getAttribute('aria-controls');
+  assert.ok(menuId, 'Open filter menu must be associated with its button');
+  const find = () => browser.$(`[role="menu"][id="${menuId}"]`).$(selector);
   const button = await find();
   await button.waitForClickable();
   await browser.execute(observeTreeClickReadiness, button, 'Filter items', label, pressed);
@@ -378,9 +390,11 @@ const anchor = () => browser.execute(observeTreeAnchor);
 export async function assertStatusFilters(tree, expectedIds) {
   const labels = { all: 'Show all', open: 'Open', closed: 'Closed' };
   const trigger = await openStatusFilterMenu();
-  const chipCount = async chip => Number((await (await browser.$('[role="group"][aria-label="Filter items"]').$(`[role="${chip === 'all' ? 'menuitem' : 'menuitemcheckbox'}"]*=${labels[chip]}`)).getText()).match(/\d+\s*$/)?.[0]);
-  const pressed = async () => browser.execute(() => [...document.querySelectorAll('[role="group"][aria-label="Filter items"] [role="menuitemcheckbox"][aria-checked="true"]')]
-    .map(element => element.textContent.replace(/\d+\s*$/, '').trim()));
+  const menuId = await trigger.getAttribute('aria-controls');
+  assert.ok(menuId, 'Open filter menu must be associated with its button');
+  const chipCount = async chip => Number((await (await browser.$(`[role="menu"][id="${menuId}"]`).$(`[role="${chip === 'all' ? 'menuitem' : 'menuitemcheckbox'}"]*=${labels[chip]}`)).getText()).match(/\d+\s*$/)?.[0]);
+  const pressed = async () => browser.execute(id => [...document.querySelectorAll(`[role="menu"][id="${id}"] [role="menuitemcheckbox"][aria-checked="true"]`)]
+    .map(element => element.textContent.replace(/\d+\s*$/, '').trim()), menuId);
   assert.equal(await trigger.getAttribute('data-active'), null);
   assert.deepEqual(await pressed(), []);
   assert.deepEqual(await Promise.all(['all', 'open', 'closed'].map(chipCount)), [2000, 1320, 680]);
@@ -473,7 +487,7 @@ export async function runTreeAcceptance(configuration) {
         alerts: [...document.querySelectorAll('[role="alert"],.nav-banner')].slice(0, 12).map(element => element.textContent.slice(0, 500)),
         statuses: [...document.querySelectorAll('[role="status"]')].slice(0, 12).map(element => element.textContent.slice(0, 500)),
         current: [...document.querySelectorAll('[aria-current]')].slice(0, 12).map(element => element.outerHTML.slice(0, 1000)),
-        controls: [...document.querySelectorAll('[role="group"][aria-label="Filter items"] button,[data-shell-search],button[data-session-id]')].slice(0, 40).map(element => {
+        controls: [...document.querySelectorAll('[role="group"][aria-label="Filter items"] button,[role="menu"][aria-label^="Filter"] button,[data-shell-search],button[data-session-id]')].slice(0, 40).map(element => {
           const bounds = element.getBoundingClientRect();
           return { text: element.textContent.slice(0, 200), sessionId: element.dataset.sessionId, disabled: element.disabled,
             checked: element.getAttribute('aria-checked'), expanded: element.getAttribute('aria-expanded'), active: element.hasAttribute('data-active'),
@@ -545,10 +559,7 @@ async function treeAcceptance(configuration) {
   // its 1,320 matches plus the 20 done roots as context; Closed matches 680 rows.
   await assertStatusFilters(tree, expectedIds);
 
-  // The detail heading folds the stored line breaks in rendered text, so its DOM text carries the complete question.
-  const heading = () => browser.$('[aria-label="Item detail"] .detail-question');
-  await (await row('1')).click(); await wait(async () => await heading().isDisplayed()
-    && await browser.execute(element => element.textContent, await heading()) === initialSession.items['1'].question, 'Native tree selection did not use full registered item detail');
+  await (await row('1')).click(); await showFullItemQuestion(initialSession.items['1']);
   const firstToggle = await (await row('1')).$('button[aria-label="Expand or collapse"]');
   await firstToggle.waitForEnabled(); await firstToggle.click();
   await wait(async () => !(await preferences(tree)).view.expanded_item_ids.includes('1'), 'Explicit collapse was not persisted');

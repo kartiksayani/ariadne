@@ -8,7 +8,7 @@ import { runAccessibilityAcceptance } from './accessibility.spec.mjs';
 import { runDiscoveryAcceptance } from './discovery.spec.mjs';
 import { runHistoryActionsAcceptance } from './history-actions.spec.mjs';
 import { runTreeAcceptance, restoreTreeAcceptance } from './tree.spec.mjs';
-import { navigationRejection, runHistoryAcceptance, restoreHistoryAcceptance } from './history.spec.mjs';
+import { navigationUpdated, runHistoryAcceptance, restoreHistoryAcceptance } from './history.spec.mjs';
 import { runGraphAcceptance } from './graph.spec.mjs';
 import { runRecoveryAcceptance } from './recovery.spec.mjs';
 import { runRemoveAcceptance } from './remove.spec.mjs';
@@ -28,7 +28,7 @@ const invoke = (command, request) => browser.execute(async (command, request) =>
 }, command, request);
 
 let navigationRecovered = false;
-const revisionConflict = 'This changed while you were working. Look at it as it is now, then try again.';
+const updatedNavigation = 'Updated to the latest. Try again if needed.';
 async function openSession(sessionId, itemId) {
   const before = await readJson(join(process.env.ARIADNE_HOME, 'ui.json')).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
   try {
@@ -39,19 +39,16 @@ async function openSession(sessionId, itemId) {
       const selected = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot.global.selected_navigation;
       return selected.kind === 'all_sessions' && await catalogue.getAttribute('aria-current') === 'page' && await catalogue.isEnabled();
     };
-    await wait(async () => await selectedCatalogue() || await navigationRejection(), 'All sessions navigation neither completed nor showed a definitive rejection');
-    if (await navigationRejection()) {
-      assert.equal(navigationRecovered, false, 'Only one explicit visible navigation recovery is allowed per native launch');
+    await wait(async () => await selectedCatalogue() || await navigationUpdated(), 'All sessions navigation did not finish or refresh its changed view');
+    if (!await selectedCatalogue()) {
+      assert.equal(navigationRecovered, false, 'Only one fresh navigation choice is allowed per native launch');
       navigationRecovered = true;
-      const rejected = { sessionId, message: revisionConflict, preferences: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')),
+      const refreshed = { sessionId, message: updatedNavigation, preferences: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')),
         body: await browser.$('body').getText() };
-      const refresh = await browser.$('.nav-banner[role="alert"]').$('button=Refresh');
-      await refresh.waitForDisplayed(); await refresh.waitForEnabled(); await refresh.click();
-      // A deliberate new owner choice after a definite changed-view rejection.
-      // Pending/uncertain completion offers Check again instead of Refresh.
+      // The changed view refreshes itself; the next click is a deliberate new owner choice.
       await catalogue.waitForEnabled(); await catalogue.click();
-      await wait(selectedCatalogue, 'Explicit refreshed All sessions choice did not persist');
-      await json(join(evidence, 'navigation-recovery.json'), { rejected, recovered: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')) });
+      await wait(selectedCatalogue, 'Fresh All sessions choice did not persist after automatic refresh');
+      await json(join(evidence, 'navigation-recovery.json'), { refreshed, recovered: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')) });
     }
     const session = await openSessionButton(sessionId);
     // Session cards can extend beyond the nested catalogue viewport.

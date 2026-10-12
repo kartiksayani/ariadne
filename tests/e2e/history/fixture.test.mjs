@@ -6,29 +6,39 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { closeHistoryRailReferences, historyAsk, historyMessageBatch, historySeedRequest, navigationRejection, unpinHistoryMessage, waitForHistoryControl, waitForHistoryItem, waitForRoundResult } from '../../../apps/desktop/tests/e2e/history.spec.mjs';
+import { closeHistoryRailReferences, historyAsk, historyMessageBatch, historySeedRequest, navigationUpdated, unpinHistoryMessage, waitForHistoryControl, waitForHistoryItem, waitForRoundResult } from '../../../apps/desktop/tests/e2e/history.spec.mjs';
+import { historyFailureFacts } from '../../../apps/desktop/tests/e2e/history-evidence.mjs';
 import { archiveClosedTopic, topicAction } from '../../../apps/desktop/tests/e2e/history-actions.spec.mjs';
 
-test('history recovery requires the plain changed-view alert and enabled Refresh without uncertain Check again', async t => {
+test('history recovery requires the automatically refreshed navigation notification without Refresh', async t => {
   const previousBrowser = globalThis.browser;
   t.after(() => { globalThis.browser = previousBrowser; });
-  const changed = 'This changed while you were working. Look at it as it is now, then try again.';
-  let message, refresh, enabled, uncertain;
+  const updated = 'Updated to the latest. Try again if needed.';
+  let present, message, refresh;
   globalThis.browser = { $(selector) {
-    if (selector === '.nav-banner[role="alert"] p') return { async isExisting() { return message !== null; }, async getText() { return message; } };
-    assert.equal(selector, '.nav-banner[role="alert"]');
-    return { $(selector) {
-      assert.notEqual(message, null, 'An absent alert must not initiate a nested element lookup');
-      if (selector === 'button=Refresh') return { async isExisting() { return refresh; }, async isEnabled() { return enabled; } };
-      assert.equal(selector, 'button=Check again'); return { async isExisting() { return uncertain; } };
+    assert.equal(selector, '.pw-notices .pw-note[data-notice-id="navigation-action-failed"][data-tone="info"]');
+    return { async isExisting() { return present; }, $(selector) {
+      assert.equal(present, true, 'An absent notification must not initiate a nested element lookup');
+      if (selector === '.pw-note-text') return { async getText() { return message; } };
+      assert.equal(selector, 'button=Refresh'); return { async isExisting() { return refresh; } };
     } };
   } };
   const admitted = [];
-  for ([message, refresh, enabled, uncertain] of [[null, false, false, false], ['Preferences revision changed; reload before applying this new patch', true, true, false],
-    [changed, false, false, false], [changed, true, false, false], [changed, true, true, true], [changed, true, true, false]]) {
-    admitted.push(await navigationRejection());
-  }
-  assert.deepEqual(admitted, [false, false, false, false, false, true]);
+  for ([present, message, refresh] of [[false, null, false], [true, 'Another notification', false],
+    [true, updated, true], [true, updated, false]]) admitted.push(await navigationUpdated());
+  assert.deepEqual(admitted, [false, false, false, true]);
+});
+
+test('history failure evidence finds the docked follow-up send control', t => {
+  const dom = new JSDOM(`<article class="item-detail"><div class="detail-dock"><div data-owner-input="fixture"><div class="detail-box">
+    <div class="detail-composer-row"><textarea>Kept words</textarea><button aria-label="Send follow-up">Send follow-up</button></div>
+    </div></div></div></article>`);
+  const previousDocument = globalThis.document;
+  globalThis.document = dom.window.document;
+  t.after(() => { globalThis.document = previousDocument; dom.window.close(); });
+  const facts = historyFailureFacts();
+  assert.deepEqual(facts.ownerInput.send, { text: 'Send follow-up', disabled: false, ariaPressed: null });
+  assert.deepEqual(facts.ownerInput.textarea, { disabled: false, valueLength: 'Kept words'.length });
 });
 
 test('history topic actions use their accessible names and the all-closed prompt stays outside the sticky band', async t => {

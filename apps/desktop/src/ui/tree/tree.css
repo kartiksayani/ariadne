@@ -231,11 +231,6 @@
   background: currentcolor;
 }
 
-.tree-filters .action-menu-options {
-  right: auto;
-  left: 0;
-}
-
 .tree-filter-option {
   padding: 6px 8px;
   border: 0;

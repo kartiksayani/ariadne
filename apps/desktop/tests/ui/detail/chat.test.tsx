@@ -18,6 +18,21 @@ const opened: Pick<ReturnType<typeof setup>, 'sessions'>[] = [];
 afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('the single item chat', () => {
+  it('keeps every line of a saved question reachable from its compact title', async () => {
+    const value = setup(); opened.push(value);
+    const item = value.transport.session.items['2']!;
+    item.question = 'Complete first line of the question.\nComplete retained second line of the question.';
+    await value.store.refresh();
+    render(<aside aria-label="Item detail"><ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="2" later={false} onOpenItem={vi.fn()} /></aside>);
+    const detail = screen.getByRole('complementary', { name: 'Item detail' });
+    const title = detail.querySelector<HTMLElement>('.detail-question')!;
+    expect(title.title).toBe(item.question);
+    expect(title.textContent).toBe(item.question.replace('\n', ' '));
+    fireEvent.click(within(detail).getByRole('button', { name: 'Expand title' }));
+    expect(title.textContent).toBe(item.question);
+    expect(title.closest('[hidden]')).toBeNull();
+  });
+
   it('keeps a long title compact with a tooltip and expands it without changing the answer', async () => {
     const value = setup(); opened.push(value);
     const item = value.transport.session.items['2']!;

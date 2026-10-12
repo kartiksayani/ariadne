@@ -10,7 +10,7 @@ export function FilterBar({ chips, counts, disabled, dismissKey, onChip }: {
   const active = selected.length > 0;
   const label = active ? `Filter: ${selected.map(value => value.label).join(', ')}` : 'Filter';
   return <div className="tree-filters" role="group" aria-label="Filter items">
-    <ActionMenu label={label} title={label} buttonClassName="btn btn-ghost btn-icon tree-filter-button" disabled={disabled} dismissKey={dismissKey} active={active}
+    <ActionMenu label={label} title={label} align="start" buttonClassName="btn btn-ghost btn-icon tree-filter-button" disabled={disabled} dismissKey={dismissKey} active={active}
       icon={<><i className="ph ph-funnel" aria-hidden="true" />{active && <span className="tree-filter-dot" aria-hidden="true" />}</>}>
       {close => <>
         {CHIPS.filter(value => value.chip !== 'all').map(value => <button key={value.chip} type="button" role="menuitemcheckbox"
