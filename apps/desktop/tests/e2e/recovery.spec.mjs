@@ -227,6 +227,9 @@ export async function runRecoveryAcceptance(configuration) {
   // Stop waiting releases the queue without closing the original attempt to its late answer.
   const lateWorkText = `native-stop-waiting-work-${nonce}\nSave the original answer when it becomes available.`;
   // Nothing is held once the successor has finished, so the waiting item's own answer box takes this reply.
+  // The window may still be switching from the held follow-up; wait for the answer box before choosing an editor.
+  await wait(async () => await browser.$('.item-detail .detail-answer-slot[data-owner-input]').isExisting()
+    && !(await browser.$('.item-detail [aria-label="Reply"] [aria-label="Item actions"] button').isExisting()), 'The answer box did not return after the successor finished');
   await ownerReply(configuration, lateWorkText);
   await wait(async () => (await admissions(configuration)).length === queuedBefore.length + 4, 'Stop-waiting input did not reach the real provider');
   const lateAdmission = (await admissions(configuration)).at(-1);
