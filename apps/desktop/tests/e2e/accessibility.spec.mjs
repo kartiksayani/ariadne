@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { json } from '../../../../scripts/run-native-e2e.mjs';
-import { openSessionButton } from './session-button.mjs';
+import { openSession } from './session-button.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const focus = selector => browser.execute(selector => document.querySelector(selector).focus(), selector);
@@ -25,7 +25,7 @@ export async function runAccessibilityAcceptance(configuration) {
     'Ordinary native window must reach minimum outer size 1300×760');
   const before = await readFile(configuration.demo.sessionPath);
   const catalogue = await browser.$('button[data-shell-tab="all_sessions"]'); await catalogue.waitForEnabled(); await catalogue.click();
-  const session = await openSessionButton(configuration.demo.session_id); await session.click();
+  await openSession(configuration.demo.session_id);
   const row = '[role="treeitem"][data-item-id="2"]';
   await (await browser.$(row)).waitForDisplayed(); await focus(row);
   await browser.keys('r');
