@@ -157,7 +157,7 @@ export async function runRecoveryAcceptance(configuration) {
   await openPrimary(configuration);
   // Stopping the wait is primary; asking for the answer is a separate result-only turn.
   const recoveryButtons = await (await recoveryRow()).$$('button');
-  assert.deepEqual(await Promise.all(recoveryButtons.map(button => button.getText())), ['Stop waiting', 'Ask for the answer', 'Send again', 'More options']);
+  assert.deepEqual(await Promise.all(Array.from(recoveryButtons, button => button.getText())),['Stop waiting', 'Ask for the answer', 'Send again', 'More options']);
   assert.ok((await (await recoveryRow()).$('button=Stop waiting').getAttribute('class')).includes('btn-primary'));
   const ask = await (await recoveryRow()).$('button=Ask for the answer');
   assert.ok((await ask.getAttribute('class')).includes('btn-secondary'));

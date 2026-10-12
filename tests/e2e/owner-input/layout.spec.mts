@@ -30,8 +30,8 @@ async function checkFilters(page: Page) {
 }
 
 test('scrolls full variable tree rows with the session bar, setup and filters accessible', async ({ page }, testInfo) => {
-  // Visiting every session-bar control at both sizes needs more time on loaded CI runners.
-  test.setTimeout(480_000);
+  // Visiting every session-bar control and menu item at both sizes takes about 6 minutes on loaded CI runners.
+  test.setTimeout(900_000);
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
