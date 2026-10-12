@@ -20,7 +20,7 @@
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
   transform: translateY(-100%);
 }
 
@@ -37,9 +37,12 @@
 }
 
 .pw-notice-group {
-  /* Live regions persist without empty layout boxes moving as cards appear. */
-  display: contents;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
+
+.pw-notice-group:not(:empty) + .pw-notice-group:not(:empty) { margin-top: 8px; }
 
 .pw-notices .pw-note {
   flex-shrink: 0;

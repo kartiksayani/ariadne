@@ -142,12 +142,19 @@ describe('the single item chat', () => {
     expect(pane.scrollTop).toBe(100);
   });
 
-  it.each(['current ask', 'transcript end'] as const)('ignores unchanged resize notifications while typing at the $0 and preserves that position through real composer growth', async position => {
+  it.each(['current ask', 'transcript end', 'current ask with later context at the end'] as const)('ignores unchanged resize notifications while typing at the $0 and preserves that position through real composer growth', async position => {
     const transport = new AppTransport(), service = createDesktopService(transport), sessions = new OpenSessions(service), store = sessions.open(route);
     opened.push({ sessions });
     const session = transport.sessions.get(route.session_id)!, item = session.items['2']!, round = session.rounds[item.current_round_id!]!;
     round.owner_message_ids = []; round.result_input_ids = [];
     for (const input of Object.values(session.inputs)) if (input?.target.item_id === item.id) input.state = 'cancelled';
+    const askAtEnd = position === 'current ask with later context at the end';
+    if (askAtEnd) {
+      const opening = session.messages.find(message => message.id === round.opened_message_id)!;
+      session.messages.push({ ...structuredClone(opening), id: 'later-context', number: Math.max(...session.messages.map(message => message.number)) + 1,
+        body: 'A later update after the question.' });
+      round.agent_message_ids.push('later-context');
+    }
     const resize = vi.fn(), created = vi.fn();
     vi.stubGlobal('ResizeObserver', class {
       constructor(callback: ResizeObserverCallback) {
@@ -158,7 +165,8 @@ describe('the single item chat', () => {
       disconnect() {}
     });
     let viewportHeight = 400;
-    vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(2500);
+    const scrollHeight = askAtEnd ? 1164 : 2500;
+    vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(scrollHeight);
     vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) {
       return this.classList.contains('detail-body') ? viewportHeight : 0;
     });
@@ -179,9 +187,13 @@ describe('the single item chat', () => {
     await waitFor(() => expect(box.disabled).toBe(false));
     const pane = document.querySelector<HTMLElement>('.detail-body')!;
     expect(pane.scrollTop).toBe(764);
+    if (askAtEnd) {
+      expect(pane.scrollTop).toBe(pane.scrollHeight - pane.clientHeight);
+      expect(screen.getByText('A later update after the question.')).toBeTruthy();
+    }
     if (position === 'transcript end') { pane.scrollTop = 2100; fireEvent.scroll(pane); }
     let scrollTop = pane.scrollTop;
-    const setScroll = vi.fn((next: number) => { scrollTop = Math.min(next, 2500 - viewportHeight); });
+    const setScroll = vi.fn((next: number) => { scrollTop = Math.min(next, scrollHeight - viewportHeight); });
     Object.defineProperty(pane, 'scrollTop', { configurable: true, get: () => scrollTop, set: setScroll });
     // Initial and repeated notifications report no actual size change.
     act(() => resize()); act(() => resize());
@@ -196,6 +208,15 @@ describe('the single item chat', () => {
     viewportHeight = 250;
     act(() => resize());
     expect(pane.scrollTop).toBe(position === 'transcript end' ? 2250 : 764);
+    if (askAtEnd) {
+      const head = pane.querySelector('.detail-head')!.getBoundingClientRect();
+      const marker = pane.querySelector('.detail-waiting-tag')!;
+      const ask = marker.closest('.detail-bubble-agent')!.getBoundingClientRect();
+      const tag = marker.getBoundingClientRect();
+      expect(ask.top).toBeGreaterThanOrEqual(head.bottom);
+      expect(tag.top).toBeGreaterThanOrEqual(head.bottom);
+      expect(tag.bottom).toBeLessThanOrEqual(pane.getBoundingClientRect().bottom);
+    }
     setScroll.mockClear();
     fireEvent.scroll(pane); // The observer's own scroll keeps the selected following behavior.
     fireEvent.change(box, { target: { value: 'Keep the complete conversation and its replies.' } });

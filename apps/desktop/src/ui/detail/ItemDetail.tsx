@@ -316,10 +316,11 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
         .some(target => (sizes.get(target) ?? '0:0') !== (next.get(target) ?? '0:0'));
       sizes = next; viewport = nextViewport;
       if (!changed) return;
-      if (atEnd.current) {
+      if (followingAsk.current && element.querySelector('.detail-turn-now')) showLatest();
+      else if (atEnd.current) {
         element.scrollTop = element.scrollHeight;
         positionedScroll.current = element.scrollTop;
-      } else if (followingAsk.current && element.querySelector('.detail-turn-now')) showLatest();
+      }
     });
     for (const target of targets) watch.observe(target);
     resizeWatch.current = { observer: watch, targets };

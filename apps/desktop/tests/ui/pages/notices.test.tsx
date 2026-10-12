@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NoticeStore, Notices } from '../../../src/ui/pages/notices';
@@ -169,6 +171,31 @@ describe('toast region', () => {
     expect(region.querySelector('[aria-live="polite"]')).toBe(polite);
     expect(region.querySelector('[aria-live="assertive"]')).toBe(assertive);
     expect(within(region).queryByRole('alert')).toBeNull();
+  });
+
+  it('keeps live regions as layout boxes and spaces groups only when both contain notices', () => {
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/pages/notices.css'), 'utf8');
+    render(<><style>{css}</style><Notices store={store} /></>);
+    const region = screen.getByRole('region', { name: 'Notifications' });
+    const stack = region.querySelector('.pw-notice-stack')!;
+    const polite = region.querySelector('[aria-live="polite"]')!;
+    const assertive = region.querySelector('[aria-live="assertive"]')!;
+    expect(getComputedStyle(region).position).toBe('absolute');
+    expect(getComputedStyle(stack).gap).toBe('0px');
+    for (const group of [polite, assertive]) {
+      expect(group.matches(':empty')).toBe(true);
+      expect(getComputedStyle(group).display).toBe('flex');
+      expect(getComputedStyle(group).flexDirection).toBe('column');
+      expect(getComputedStyle(group).gap).toBe('8px');
+    }
+    expect(parseFloat(getComputedStyle(assertive).marginTop || '0')).toBe(0);
+    const problem = push({ ...info, text: 'Retry needed.', tone: 'problem' });
+    expect(parseFloat(getComputedStyle(assertive).marginTop || '0')).toBe(0);
+    push(info);
+    expect(getComputedStyle(assertive).marginTop).toBe('8px');
+    act(() => { store.dismiss(problem); });
+    expect(assertive.matches(':empty')).toBe(true);
+    expect(parseFloat(getComputedStyle(assertive).marginTop || '0')).toBe(0);
   });
 
   it('preserves a visible card and focus when identical content refreshes', () => {
