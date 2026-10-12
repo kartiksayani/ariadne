@@ -5,6 +5,7 @@ import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
+import { blockFailureSummary, completedBlockResults } from '../apps/desktop/tests/e2e/block-results.mjs';
 export const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const desktop = join(repo, 'apps/desktop');
 export const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -170,7 +171,7 @@ export async function command(binary, args, { cwd = repo, env = process.env, tim
     onStart?.(child);
     const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', code => resolve(code)); });
     if (log) { await mkdir(dirname(log), { recursive: true }); await writeFile(log, output); }
-    if (code !== 0 || expired) throw new Error(`${binary} failed (${expired ? 'deadline/interruption' : code}); ${log || output}`);
+    if (code !== 0 || expired) throw Object.assign(new Error(`${binary} failed (${expired ? 'deadline/interruption' : code}); ${log || output}`), { exitCode: code, expired });
     return { pid: child.pid, output, stdout };
   } finally { clearTimeout(timer); process.off('SIGINT', interrupted); await stop(child); }
 }
@@ -198,6 +199,7 @@ export async function runNative() {
   const nonce = randomBytes(32).toString('hex');
   const binary = join(repo, 'target/native-e2e/debug/bundle/macos/Ariadne.app/Contents/MacOS/ariadne-desktop');
   let failure, owned, provider;
+  const phases = [], blockFailures = [];
   try {
     const buildCommand = [process.execPath, join(repo, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--debug', '--features', 'e2e', '--bundles', 'app', '--config', 'src-tauri/tauri.e2e.conf.json', '--', '--locked'];
     const runtimeCommand = [process.execPath, join(repo, 'node_modules/@wdio/cli/bin/wdio.js'), 'run', 'wdio.native.conf.mjs'];
@@ -209,7 +211,7 @@ export async function runNative() {
     await json(join(evidence, 'run.json'), details);
     await command(buildCommand[0], buildCommand.slice(1), { cwd: desktop, env: nativeEnv, log: join(evidence, 'build.log') });
     await command(cliBuildCommand[0], cliBuildCommand.slice(1), { env: cliEnv, log: join(evidence, 'cli-build.log') });
-    await command(process.execPath, ['--test', 'tests/e2e/process-contract/fixture-cli.test.mjs', 'tests/e2e/history/fixture.test.mjs', 'tests/e2e/graph/native-helper.test.mjs', 'tests/e2e/recovery/fixture.test.mjs'], {
+    await command(process.execPath, ['--test', 'tests/e2e/process-contract/fixture-cli.test.mjs', 'tests/e2e/history/fixture.test.mjs', 'tests/e2e/graph/native-helper.test.mjs', 'tests/e2e/recovery/fixture.test.mjs', 'tests/e2e/process-contract/block-results.test.mjs'], {
       env: { ...process.env, ARIADNE_FIXTURE_TEST_CLI: join(repo, 'target/native-e2e/debug/ariadne') }, log: join(evidence, 'fixture-cli.log'),
     });
     await command(process.execPath, ['--test', 'tests/e2e/tree/fixture.test.mjs', 'tests/e2e/process-contract/search-timing-observation.test.mjs'], {
@@ -222,6 +224,7 @@ export async function runNative() {
     for (const phase of ['delivery', 'restoration']) {
       const phaseEvidence = join(evidence, phase), phaseNonce = phase === 'delivery' ? nonce : randomBytes(32).toString('hex');
       await mkdir(phaseEvidence);
+      const phaseRun = { phase, evidence: phaseEvidence }; phases.push(phaseRun);
       if (phase === 'restoration') {
         if (owned && alive(owned.pid)) throw new Error('First native PID is still alive');
         await portFree(port);
@@ -243,10 +246,13 @@ export async function runNative() {
         await json(join(phaseEvidence, 'observed.json'), owned);
         const acknowledgement = quitNote.acknowledgeQuitNote(root, binary, phaseNonce, owned, controller.signal)
           .then(note => json(join(phaseEvidence, 'quit-note.json'), note));
-        await Promise.all([execution, acknowledgement]);
+        const [executionFailure] = await Promise.all([execution.then(() => null, error => error), acknowledgement]);
         const quit = JSON.parse(await readFile(join(phaseEvidence, 'quit.json'), 'utf8'));
         if (!quit.pidExited || !quit.leases?.released || quit.request.pid !== owned.pid || quit.request.nonce !== phaseNonce) throw new Error('Missing independently verified native Quit before teardown');
         await portFree(port);
+        phaseRun.results = await completedBlockResults(phaseEvidence, executionFailure);
+        const summary = blockFailureSummary(phaseRun.results);
+        if (summary) blockFailures.push(`${phase}:\n${summary}`);
       } catch (error) { await stop(launcher); await execution.catch(() => {}); throw error; }
     }
   } catch (error) { failure = error; }
@@ -264,12 +270,17 @@ export async function runNative() {
       await json(join(evidence, 'cleanup.json'), { pid: owned?.pid, pidExited: !owned || !alive(owned.pid), portFree: true, failure: failure?.message });
       await rm(root, { recursive: true });
   } catch (error) { failure ||= error; await json(join(evidence, 'cleanup-error.json'), { error: error.message, root }); }
+  for (const { phase, results } of phases) {
+    const summary = results ? blockFailureSummary(results) || `${results.length} blocks passed` : 'Phase did not complete its fatal checks';
+    console.log(`Native ${phase} blocks:\n${summary}`);
+  }
+  if (blockFailures.length) failure ||= new Error(`Native acceptance blocks failed:\n${blockFailures.join('\n')}`);
   if (failure) throw failure;
   console.log(`Native evidence: ${evidence}`);
 }
 async function main() {
   const suite = selector(process.argv.slice(2));
-  if (suite === 'process-contract') return command(process.execPath, ['--test', 'tests/e2e/process-contract/runner.test.mjs', 'tests/e2e/process-contract/native-quit-note.test.mjs']);
+  if (suite === 'process-contract') return command(process.execPath, ['--test', 'tests/e2e/process-contract/runner.test.mjs', 'tests/e2e/process-contract/native-quit-note.test.mjs', 'tests/e2e/process-contract/block-results.test.mjs']);
   await runNative();
   if (suite === 'all') await (await import('./check-release-boundary.mjs')).checkRelease();
 }

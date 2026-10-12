@@ -1,4 +1,5 @@
 {
+  "identifier": "com.ariadne.desktop.e2e",
   "build": { "frontendDist": "../../../target/native-e2e/desktop-dist" },
   "app": {
     "withGlobalTauri": true,

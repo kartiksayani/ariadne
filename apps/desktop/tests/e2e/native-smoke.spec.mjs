@@ -13,6 +13,8 @@ import { runGraphAcceptance } from './graph.spec.mjs';
 import { runRecoveryAcceptance } from './recovery.spec.mjs';
 import { runRemoveAcceptance } from './remove.spec.mjs';
 import { folded, openFollowUp, sendDetailReply } from './owner-reply.mjs';
+import { acceptanceBlocks } from './block-results.mjs';
+import { historyFailureFacts } from './history-evidence.mjs';
 
 const root = process.env.ARIADNE_E2E_ROOT;
 const nonce = process.env.ARIADNE_E2E_NONCE;
@@ -26,6 +28,40 @@ const invoke = (command, request) => browser.execute(async (command, request) =>
   // WebDriver reserves top-level "error" in its script-result envelope.
   catch (error) { return { ok: false, rejection: error }; }
 }, command, request);
+
+async function resetAcceptanceUI() {
+  // Scope Escape to a modal: workspace Escape can clear durable filters.
+  const modal = '[role="dialog"], [role="alertdialog"]';
+  for (let attempt = 0; attempt < 3 && await browser.$(modal).isExisting(); attempt++) {
+    await browser.execute(selector => document.querySelector(selector).focus(), modal);
+    await browser.keys('Escape');
+    await wait(async () => !(await browser.$(modal).isExisting()), 'Acceptance recovery could not cancel the dialog');
+  }
+  // Click the existing menu's own trigger; never dismiss removal notices,
+  // whose Dismiss buttons can commit deferred domain operations.
+  const menu = '[role="menu"]';
+  if (await browser.$(menu).isExisting()) {
+    const id = await browser.$(menu).getAttribute('id');
+    const trigger = await browser.$(`[aria-haspopup="menu"][aria-expanded="true"][aria-controls="${id}"]`);
+    await trigger.waitForEnabled(); await trigger.click();
+    await wait(async () => !(await browser.$(menu).isExisting()), 'Acceptance recovery could not close the menu');
+  }
+  // Each independent block already navigates to its own session. Preserve
+  // saved selection, search and scroll for the restoration assertions.
+}
+async function captureBlockFailure(name, error, started) {
+  // Helpers may already have recorded the failing DOM. Only accept evidence
+  // updated during this block, not an earlier block's retained failure file.
+  for (const file of await readdir(evidence)) {
+    if (!file.includes('failure') || !file.endsWith('.json') || (await stat(join(evidence, file))).mtimeMs < started) continue;
+    const facts = await readJson(join(evidence, file)).catch(() => null);
+    if (facts && (facts.dom || facts.observed || facts.frame || facts.body)) return;
+  }
+  try {
+    await json(join(evidence, `block-failure-${name}.json`), { error: String(error?.message ?? error), stack: error?.stack ?? null,
+      dom: await browser.execute(historyFailureFacts), body: await browser.$('body').getText() });
+  } finally { await browser.saveScreenshot(join(evidence, `block-failure-${name}.png`)); }
+}
 
 let navigationRecovered = false;
 const updatedNavigation = 'Updated to the latest. Try again if needed.';
@@ -235,38 +271,48 @@ describe('native owner FIFO and real process restoration', () => {
     const addresses = sockets.split('\n').filter(line => line.startsWith('n'));
     assert.ok(addresses.length > 0 && addresses.every(line => /^n(127\.0\.0\.1|\[::1\]):/.test(line)), 'Driver must bind only loopback');
     const configuration = await readJson(join(root, 'journey.json'));
+    const priorResults = phase === 'restoration' ? await readJson(join(process.env.ARIADNE_E2E_PRIOR_EVIDENCE, 'block-results.json')) : [];
+    const blocks = acceptanceBlocks({ evidence, reset: resetAcceptanceUI, capture: captureBlockFailure, priorResults });
     if (phase === 'delivery') {
       await assert.rejects(stat(receiptPath), { code: 'ENOENT' });
       await delivery(configuration);
-      await runDiscoveryAcceptance(configuration);
-      await runTreeAcceptance(configuration);
-      await runHistoryAcceptance(configuration);
-      await runHistoryActionsAcceptance(configuration);
-      await runAccessibilityAcceptance(configuration);
-      await runRemoveAcceptance(configuration);
+      await blocks.run('runDiscoveryAcceptance', () => runDiscoveryAcceptance(configuration));
+      await blocks.run('runTreeAcceptance', () => runTreeAcceptance(configuration));
+      await blocks.run('runHistoryAcceptance', () => runHistoryAcceptance(configuration), ['runTreeAcceptance']);
+      await blocks.run('runHistoryActionsAcceptance', () => runHistoryActionsAcceptance(configuration), ['runDiscoveryAcceptance']);
+      await blocks.run('runAccessibilityAcceptance', () => runAccessibilityAcceptance(configuration));
+      await blocks.run('runRemoveAcceptance', () => runRemoveAcceptance(configuration), ['runHistoryActionsAcceptance']);
     }
-    else { assert.equal(phase, 'restoration'); await restoration(configuration, witness); await restoreTreeAcceptance(configuration); await runGraphAcceptance(configuration); await restoreHistoryAcceptance(configuration); await runRecoveryAcceptance(configuration); }
+    else {
+      assert.equal(phase, 'restoration'); await restoration(configuration, witness);
+      await blocks.run('restoreTreeAcceptance', () => restoreTreeAcceptance(configuration), ['runTreeAcceptance']);
+      await blocks.run('runGraphAcceptance', () => runGraphAcceptance(configuration), ['restoreTreeAcceptance']);
+      await blocks.run('restoreHistoryAcceptance', () => restoreHistoryAcceptance(configuration), ['runHistoryAcceptance']);
+      await blocks.run('runRecoveryAcceptance', () => runRecoveryAcceptance(configuration));
+    }
 
-    const payload = `native-domain-${nonce}`, ping = await invoke('native_ping', { nonce, payload }); assert.equal(ping.ok, true);
-    const bytes = await readFile(receiptPath), disk = JSON.parse(bytes); assert.deepEqual(ping.data, disk);
-    assert.equal(disk.nonce, nonce); assert.equal(disk.payload, payload); assert.equal(disk.pid, witness.pid); assert.match(disk.receipt_id, /^ping-\d+-\d+$/);
-    const wrongNonce = nonce === '0'.repeat(64) ? '1'.repeat(64) : '0'.repeat(64);
-    const rejected = await invoke('native_ping', { nonce: wrongNonce, payload }); assert.equal(rejected.ok, false); assert.equal(rejected.rejection.code, 'nonce_mismatch');
-    for (const request of [{ nonce: wrongNonce }, {}]) {
-      assert.equal((await invoke('native_e2e_quit', request)).ok, false);
-      await assert.rejects(stat(join(root, 'quit-request.json')), { code: 'ENOENT' }); assert.ok(alive(witness.pid));
-    }
-    assert.deepEqual(await readFile(receiptPath), bytes); assert.deepEqual(await readdir(join(root, 'smoke')), ['receipt.json']);
-    await json(join(evidence, 'assertions.json'), { passed: true, phase, witness, observed, sockets, disk, wrongNonceRejected: true, missingQuitNonceRejected: true, receiptUnchangedAfterRejection: true });
-    // Return from the WebView before it closes; observe the actual PID, bridge
-    // port and physical locks from Node before WDIO can run its forced teardown.
-    await browser.execute(nonce => { void window.__TAURI_INTERNALS__.invoke('native_e2e_quit', { request: { nonce } }); }, nonce);
-    await wait(async () => { try { await stat(join(root, 'quit-request.json')); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }, 'Native Quit did not enter the normal shutdown path');
-    const quit = await proveQuit(root, process.env.ARIADNE_E2E_BINARY, nonce, observed, process.env.ARIADNE_HOME, configuration.bindingId, Number(process.env.ARIADNE_E2E_PORT));
-    await json(join(evidence, 'quit.json'), quit);
-    // The embedded WebDriver server died with the independently verified app.
-    // WDIO must not issue DELETE /session against that disposed server. This is
-    // reached only after real exit/port/lease proof, never after mere acceptance.
-    browser.sessionId = undefined;
+    await blocks.finish(async () => {
+      const payload = `native-domain-${nonce}`, ping = await invoke('native_ping', { nonce, payload }); assert.equal(ping.ok, true);
+      const bytes = await readFile(receiptPath), disk = JSON.parse(bytes); assert.deepEqual(ping.data, disk);
+      assert.equal(disk.nonce, nonce); assert.equal(disk.payload, payload); assert.equal(disk.pid, witness.pid); assert.match(disk.receipt_id, /^ping-\d+-\d+$/);
+      const wrongNonce = nonce === '0'.repeat(64) ? '1'.repeat(64) : '0'.repeat(64);
+      const rejected = await invoke('native_ping', { nonce: wrongNonce, payload }); assert.equal(rejected.ok, false); assert.equal(rejected.rejection.code, 'nonce_mismatch');
+      for (const request of [{ nonce: wrongNonce }, {}]) {
+        assert.equal((await invoke('native_e2e_quit', request)).ok, false);
+        await assert.rejects(stat(join(root, 'quit-request.json')), { code: 'ENOENT' }); assert.ok(alive(witness.pid));
+      }
+      assert.deepEqual(await readFile(receiptPath), bytes); assert.deepEqual(await readdir(join(root, 'smoke')), ['receipt.json']);
+      await json(join(evidence, 'assertions.json'), { passed: true, phase, witness, observed, sockets, disk, wrongNonceRejected: true, missingQuitNonceRejected: true, receiptUnchangedAfterRejection: true });
+      // Return from the WebView before it closes; observe the actual PID, bridge
+      // port and physical locks from Node before WDIO can run its forced teardown.
+      await browser.execute(nonce => { void window.__TAURI_INTERNALS__.invoke('native_e2e_quit', { request: { nonce } }); }, nonce);
+      await wait(async () => { try { await stat(join(root, 'quit-request.json')); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }, 'Native Quit did not enter the normal shutdown path');
+      const quit = await proveQuit(root, process.env.ARIADNE_E2E_BINARY, nonce, observed, process.env.ARIADNE_HOME, configuration.bindingId, Number(process.env.ARIADNE_E2E_PORT));
+      await json(join(evidence, 'quit.json'), quit);
+      // The embedded WebDriver server died with the independently verified app.
+      // WDIO must not issue DELETE /session against that disposed server. This is
+      // reached only after real exit/port/lease proof, never after mere acceptance.
+      browser.sessionId = undefined;
+    });
   });
 });
