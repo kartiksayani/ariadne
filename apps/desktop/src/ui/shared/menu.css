@@ -3,9 +3,10 @@
   flex: none;
 }
 
+/* Above toasts (25), below the dialog overlay (30), so a dialog opened from the keyboard covers a still-open menu. */
 .action-menu-options {
   position: fixed;
-  z-index: 40;
+  z-index: 28;
   display: flex;
   flex-direction: column;
   width: max-content;
