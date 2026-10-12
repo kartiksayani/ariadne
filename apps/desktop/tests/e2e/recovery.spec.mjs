@@ -226,7 +226,8 @@ export async function runRecoveryAcceptance(configuration) {
   await wait(async () => (await snapshot(configuration)).inputs[successor.id].state === 'handled', 'Recovery successor did not finish its ordinary result/completion join');
   // Stop waiting releases the queue without closing the original attempt to its late answer.
   const lateWorkText = `native-stop-waiting-work-${nonce}\nSave the original answer when it becomes available.`;
-  await ownerReply(configuration, lateWorkText, true);
+  // Nothing is held once the successor has finished, so the waiting item's own answer box takes this reply.
+  await ownerReply(configuration, lateWorkText);
   await wait(async () => (await admissions(configuration)).length === queuedBefore.length + 4, 'Stop-waiting input did not reach the real provider');
   const lateAdmission = (await admissions(configuration)).at(-1);
   await completeTurn(configuration, lateAdmission);
