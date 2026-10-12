@@ -83,7 +83,8 @@ export async function runRemoveAcceptance(configuration) {
   await browser.keys('Backspace');
   await confirm('Remove item');
   await wait(async () => !(await browser.$(row).isExisting()), 'The removed row stayed in the tree');
-  assert.ok((await notices().getText()).includes('unless you undo'), 'Item remove did not offer Undo');
+  // Notices arrive as toasts after a short settle, so wait for the text rather than reading it once.
+  await wait(async () => (await notices().getText()).includes('unless you undo'), 'Item remove did not offer Undo', 4000);
   assert.ok((await readJson(sessionPath)).items[item.id], 'Item remove ran before the Undo window ended');
   await wait(async () => !(await readJson(sessionPath)).items[item.id], 'Item remove did not run after the Undo window', 30000);
   const afterItem = await readJson(sessionPath);
