@@ -71,7 +71,8 @@ export async function runAccessibilityAcceptance(configuration) {
   await browser.keys('Escape');
   await wait(async () => !(await browser.$('[role="dialog"]').isExisting()), 'Dialog Escape did not close overlay');
   assert.equal(await (await browser.$('.shell-detail')).isExisting(), true, 'Dialog Escape must preserve selected detail');
-  assert.equal(await browser.execute(() => document.activeElement?.getAttribute('aria-label') === 'Session actions'), true, 'Dialog restores opener');
+  const opener = await browser.execute(() => ({ label: document.activeElement?.getAttribute('aria-label') ?? null, html: document.activeElement?.outerHTML.slice(0, 300) ?? null }));
+  assert.equal(opener.label, 'Session actions', `Dialog restores opener; focus is on ${opener.html}`);
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-keyboard-dialog-return.png'));
   assert.deepEqual(await readFile(configuration.demo.sessionPath), before, 'Keyboard focus/draft/modal checks leave durable demo domain unchanged');
   await json(join(process.env.ARIADNE_E2E_EVIDENCE, 'keyboard-accessibility.json'), { ordinaryApp: true, actualCoreStore: true,

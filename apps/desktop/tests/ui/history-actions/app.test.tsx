@@ -31,7 +31,9 @@ it.each(['Cancel', 'Escape', 'Close session'])('returns focus to Session actions
   ++transport.source.revision;
   act(() => { transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: transport.source.revision }); });
   expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('stale');
-  await user.click(screen.getByRole('menuitem', { name: 'Close session' }));
+  const close = screen.getByRole('menuitem', { name: 'Close session' });
+  close.focus(); expect(document.activeElement).toBe(close);
+  await user.click(close);
   expect(screen.queryByRole('menu')).toBeNull();
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(document.activeElement).toBe(trigger);
