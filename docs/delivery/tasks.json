@@ -1,19 +1,14 @@
 {
   "schema_version": 1,
   "status": {
-    "updated_at": "2026-10-09T00:00:00Z",
-    "headline": "58/58 done; alpha.6 released (v0.1.0-alpha.6, #141); alpha.7 UI and hide-item work in progress on fix/a8-hide, with three review fixes.",
+    "updated_at": "2026-10-13T00:00:00Z",
+    "headline": "Alpha.13 released (v0.1.0-alpha.13, 3e99578, #149); alpha.14 — a Map you can follow — in progress; alpha.15 Conversation view next.",
     "notes": [
-      "Alpha.6 released on 2026-10-09 as v0.1.0-alpha.6 at 859c7a6c (#141): lighter skill, easier filing, copy, back/forward, item links, tidier tree and text size.",
-      "Alpha.7 work on fix/a8-hide: independently scrolling Waiting on me and Sent sections; Option (⌥) 1–9 quick answers and ⌥0 for own words; one chronological detail chat; dimmed and labelled cancelled bubbles that keep the original choice and note; highlighted +N badges; persisted hide items via x, row actions and detail, with expandable hidden groups and waiting questions retained in Waiting on me. Alpha.7 is not yet released.",
-      "Alpha.7 minor review fixes: hide waits for a stale session to refresh; indirect-match +N badges use a quieter accent tint with AA text in both themes; pending Remove hides Sent rows immediately and Undo restores them. Focused regression tests and npm run check are the local checks for this work; native runs are excluded by the owner for this task.",
-      "P7.3 live Codex run on 2026-10-06 proved the core loop. Codex onboarding defects D1-D6 were fixed and merged in #116 (main 1e8d9e7), and docs/GUIDE.md documents the fixed behaviour; D7 is task P8.3; D8 follow-up: Ariadne should send the setup instruction through codex queue itself instead of the owner pasting it.",
-      "P7.2 live Claude run on 2026-10-06 proved the core loop (ADR-0076, PR #114); remaining coverage rows deferred by owner ruling 2026-10-06. Follow-ups: queued inputs stay bound to a retired binding after rebind; no confirm-completed resolution for committed-result/unknown-turn attempts; a session with a Disconnected binding cannot be closed; delivery format: `recent_context` re-sends every topic message the host already produced; send only messages this binding has not seen (other bindings or pre-connect history), shrink topic/item snapshots to id+status, and move the fixed instruction sentence to the skill; rules source.md should say option consequence is required; Claude Mod uses undocumented $.plugin.root.",
-      "PR #107 (agent rule sheet) merged to main as db352e5. It is not a roadmap item.",
-      "PR #106 carried the whole former stack (#94-#103) plus the Codex skill and the preferences-conflict fix; squash-merged as f020bbe at head 87aa6b4.",
-      "Superseded stack PRs #94, #93, #97, #101, #104, #99, #105, #98, #103 are closed; their branches are kept.",
-      "PR #109 squash-merged as 1906583 at head ed56f7d after quality run 37411039163; run 2 had failed only on a reference-capture first-load wait.",
-      "P7.1: acceptance tests merged via #106 and #109; evidence is https://github.com/kartiksayani/ariadne/actions/runs/37418522364 (full scope on main a2cfa9d, dispatched because the #110 push cancelled the run on 1906583)."
+      "14.0 data contracts (ADR-0099) are in progress on feat/a14-contracts; tree work needs owner sign-off on M1, change tracking screens on M2, and the Conversation screen on M3.",
+      "At most 3 Codex companion jobs (gpt-6.1-sol, high effort); Claude Code on Opus 5.5 maintains delivery and separate Opus 5.5 contexts review exact heads.",
+      "Live Claude and Codex core loops were proved on 2026-10-06; remaining live acceptance rows are deferred by owner ruling.",
+      "Codex follow-ups: investigate discovery of threads with no messages; send the setup instruction through codex queue instead of asking the owner to paste it.",
+      "Claude Mod follow-up: $.plugin.root is used but undocumented."
     ]
   },
   "tasks": [
@@ -2271,6 +2266,431 @@
         ],
         "note": "Merged in #133 and #134; the owner's UI redesign shows where the agent runs (\"iTerm window 1\") in the session bar and \"N topics\" on session cards."
       }
+    },
+    {
+      "id": "P9.1",
+      "title": "Alpha.7: one-chat detail, Waiting/Sent split, quick answers, hide items",
+      "phase": "M9",
+      "depends_on": [],
+      "paths": [
+        "apps/desktop/src/ui/*",
+        "apps/desktop/tests/ui/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "One-chat detail, Waiting/Sent split, quick answers and hide items."
+      ],
+      "checks": [
+        "quality at the merged PR head; independent exact-head review"
+      ],
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/143"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          143
+        ],
+        "note": "Merged in #143; v0.1.0-alpha.7 released."
+      },
+      "estimate_days": 1
+    },
+    {
+      "id": "P9.2",
+      "title": "Alpha.8: Ack — read-only items start Open with an Ack button",
+      "phase": "M9",
+      "depends_on": [],
+      "paths": [
+        "crates/ariadne-core/src/*",
+        "apps/desktop/src/ui/ack/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Read-only items start Open with an Ack button."
+      ],
+      "checks": [
+        "quality at the merged PR head; independent exact-head review"
+      ],
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/144"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          144
+        ],
+        "note": "Merged in #144; v0.1.0-alpha.8 released."
+      },
+      "estimate_days": 1
+    },
+    {
+      "id": "P9.3",
+      "title": "Alpha.9: item links — related items in details, graph and tree",
+      "phase": "M9",
+      "depends_on": [],
+      "paths": [
+        "apps/desktop/src/ui/detail/*",
+        "apps/desktop/src/ui/graph/*",
+        "apps/desktop/src/ui/tree/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Related item links appear in details, graph and tree."
+      ],
+      "checks": [
+        "quality at the merged PR head; independent exact-head review"
+      ],
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/145"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          145
+        ],
+        "note": "Merged in #145; v0.1.0-alpha.9 released."
+      },
+      "estimate_days": 1
+    },
+    {
+      "id": "P9.4",
+      "title": "Alpha.10: archive sessions — Archived group, Restore and Undo",
+      "phase": "M9",
+      "depends_on": [],
+      "paths": [
+        "crates/ariadne-core/src/*",
+        "apps/desktop/src/ui/pages/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Archive sessions into an Archived group with Restore and Undo."
+      ],
+      "checks": [
+        "quality at the merged PR head; independent exact-head review"
+      ],
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/146"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          146
+        ],
+        "note": "Merged in #146; v0.1.0-alpha.10 released."
+      },
+      "estimate_days": 1
+    },
+    {
+      "id": "P9.5",
+      "title": "Alpha.11: links open in the browser, answer box clears, hidden items grouped",
+      "phase": "M9",
+      "depends_on": [],
+      "paths": [
+        "apps/desktop/src-tauri/src/*",
+        "apps/desktop/src/ui/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Links open in the browser, the answer box clears and hidden items are grouped."
+      ],
+      "checks": [
+        "quality at the merged PR head; independent exact-head review"
+      ],
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/147"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          147
+        ],
+        "note": "Merged in #147; v0.1.0-alpha.11 released."
+      },
+      "estimate_days": 1
+    },
+    {
+      "id": "P9.6",
+      "title": "Alpha.12: agents delete into a bin, Ack goes where the agent says, connect recovery, short install summary",
+      "phase": "M9",
+      "depends_on": [],
+      "paths": [
+        "crates/ariadne-core/src/*",
+        "integrations/claude/plugin/*",
+        "scripts/install/*",
+        "apps/desktop/src/ui/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Agents delete into a bin, Ack goes where the agent says, connect recovers and install ends with a short summary."
+      ],
+      "checks": [
+        "quality at the merged PR head; independent exact-head review"
+      ],
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/148"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          148
+        ],
+        "note": "Merged in #148; v0.1.0-alpha.12 released."
+      },
+      "estimate_days": 1
+    },
+    {
+      "id": "P9.7",
+      "title": "Alpha.13: room for the conversation, tidier session page, truthful delivery, quieter menu bar",
+      "phase": "M9",
+      "depends_on": [],
+      "paths": [
+        "apps/desktop/src/ui/*",
+        "crates/ariadne-core/src/*",
+        "apps/desktop/tests/e2e/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Room for the conversation, a tidier session page, truthful delivery and a quieter menu bar."
+      ],
+      "checks": [
+        "quality at the merged PR head; independent exact-head review"
+      ],
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/149"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          149
+        ],
+        "note": "Merged in #149; v0.1.0-alpha.13 released."
+      },
+      "estimate_days": 1
+    },
+    {
+      "id": "P10.0",
+      "title": "14.0 Data contracts",
+      "phase": "M10",
+      "depends_on": [],
+      "paths": [
+        "crates/ariadne-domain/src/*",
+        "crates/ariadne-store/src/*",
+        "crates/ariadne-core/src/dto/*",
+        "crates/ariadne-core/src/native/preferences.rs",
+        "contracts/generated/*",
+        "apps/desktop/src/generated/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Define link kinds, change records, topic brief, seen state and the preference receipt window under ADR-0099."
+      ],
+      "checks": [
+        "Contract generation check; meaningful Domain, Store, Core and preference tests."
+      ],
+      "estimate_days": 1,
+      "active": true,
+      "progress": {
+        "state": "in_progress",
+        "prs": [],
+        "note": "In progress on feat/a14-contracts (ADR-0099)."
+      }
+    },
+    {
+      "id": "P10.1",
+      "title": "14.1 Agent rules and CLI warnings",
+      "phase": "M10",
+      "depends_on": [
+        "P10.0"
+      ],
+      "paths": [
+        "integrations/rules/*",
+        "integrations/claude/plugin/skills/ariadne/*",
+        "integrations/codex/skills/ariadne/*",
+        "crates/ariadne-cli/src/*",
+        "tools/xtask/src/rules.rs"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Rewrite the agent rules and add CLI warnings for the alpha.14 contracts."
+      ],
+      "checks": [
+        "Generated rules check; rule examples and CLI warning tests."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P10.2",
+      "title": "14.2 Tree look and getting around",
+      "phase": "M10",
+      "depends_on": [],
+      "paths": [
+        "apps/desktop/src/ui/tree/*",
+        "apps/desktop/src/state/navigation/*",
+        "apps/desktop/tests/ui/tree/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Implement the tree look and navigation from owner-approved mock M1."
+      ],
+      "checks": [
+        "Owner M1 sign-off before implementation; UI tests, design frames and local native journey."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P10.3",
+      "title": "14.3 Change tracking derived views",
+      "phase": "M10",
+      "depends_on": [
+        "P10.0"
+      ],
+      "paths": [
+        "crates/ariadne-core/src/queries/*",
+        "crates/ariadne-core/tests/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Derive change tracking views from the alpha.14 change records and seen state."
+      ],
+      "checks": [
+        "Real Core/Store tests of derived views."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P10.4",
+      "title": "14.4 Change tracking screens",
+      "phase": "M10",
+      "depends_on": [
+        "P10.2",
+        "P10.3"
+      ],
+      "paths": [
+        "apps/desktop/src/ui/*",
+        "apps/desktop/tests/ui/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Show change tracking derived views in screens following owner-approved mock M2."
+      ],
+      "checks": [
+        "Owner M2 sign-off before implementation; UI tests, design frames and local native journey."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.0",
+      "title": "15.0 Conversation contracts — ADR-0100",
+      "phase": "M11",
+      "depends_on": [
+        "P10.0",
+        "P10.1",
+        "P10.2",
+        "P10.3",
+        "P10.4"
+      ],
+      "paths": [
+        "docs/adr/ADR-0100-*.md",
+        "docs/planning/low-level/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Settle Conversation view contracts in ADR-0100 after alpha.14."
+      ],
+      "checks": [
+        "Independent contract review against all alpha.14 consumers."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.1",
+      "title": "15.1 Reading conversations",
+      "phase": "M11",
+      "depends_on": [
+        "P11.0"
+      ],
+      "paths": [
+        "crates/ariadne-core/src/queries/*",
+        "crates/ariadne-core/tests/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Read conversations under the settled ADR-0100 contracts."
+      ],
+      "checks": [
+        "Real Core/Store conversation read tests."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.2",
+      "title": "15.2 Conversation screen",
+      "phase": "M11",
+      "depends_on": [
+        "P11.0"
+      ],
+      "paths": [
+        "apps/desktop/src/ui/*",
+        "apps/desktop/tests/ui/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Implement the Conversation screen following owner-approved mock M3 and ADR-0100."
+      ],
+      "checks": [
+        "Owner M3 sign-off before implementation; UI tests, design frames and local native journey."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.3",
+      "title": "15.3 /ariadne-pr-comments",
+      "phase": "M11",
+      "depends_on": [],
+      "paths": [
+        "integrations/claude/plugin/skills/ariadne-pr-comments/*",
+        "tests/integrations/claude/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Add /ariadne-pr-comments."
+      ],
+      "checks": [
+        "Meaningful skill command tests and independent review."
+      ],
+      "estimate_days": 1
     }
   ]
 }

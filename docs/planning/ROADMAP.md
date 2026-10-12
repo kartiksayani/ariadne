@@ -137,6 +137,9 @@ without promoting a fixture, mocked provider or POC to live production proof.
 | M6 | P6.1–P6.4 | Actual packaged window/open/tray/notification routes, permission denial behavior, owned idempotent setup and read-only doctor, locked clean install/uninstall preserving unrelated settings and history. |
 | M7 | P7.1–P7.3 | Full deterministic failure suite, then five original owner messages in each supported existing host, complete explicit item replies/results and correlation/FIFO/isolation. Additional recovery scenarios are separate from the baseline five-input no-coalescing run. |
 | M8 | P8.1 | Clean-checkout packaged release journey, offline history/demo/edits, both live adapters, native/install/uninstall proof, evidence ledger and user-ready README with exact source/platform and limitations. |
+| M9 | P9.1–P9.7 | Released alpha.7–alpha.13: chat detail, Ack, links, archive, connect recovery, agent bin and truthful delivery. |
+| M10 | P10.0–P10.4 | Alpha.14: a Map you can follow. Data contracts, agent rules, tree navigation and change tracking; UI follows approved mocks M1 and M2. |
+| M11 | P11.0–P11.3 | Alpha.15: Conversation view. ADR-0100, conversation reads and screen after mock M3, plus `/ariadne-pr-comments`. |
 
 M7 Claude and Codex records each include busy queues, closed-item owner messages,
 multi-item replies, explicit statuses/topics/children, result-before-completion,

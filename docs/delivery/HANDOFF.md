@@ -1,28 +1,68 @@
-# Ariadne handoff — 2026-10-09
+# Ariadne handoff — 2026-10-13
 
-Claude Code session is the maintainer (Fable 5.1); reviewers Opus 5.5, implementers
-Sonnet 5.5, at most seven delegates. The owner approved autonomous delivery, pushes
-and squash merges (green `quality` + independent review at the exact head). Test
-Ariadne behaviour, not Apple window/menu mechanics. Latency budgets are not gates
-(ADR-0068). Preserve worktrees, branches and history; no force-push. The owner plans a
-closed-source freemium product: never add an open-source licence (Cargo.toml is
-`LicenseRef-Proprietary` since #108).
+Claude Code on **Opus 5.5** maintains delivery. At most **3 Codex companion jobs**
+(**gpt-6.1-sol, high effort**) implement bounded work in isolated worktrees with
+declared, disjoint paths. Independent review uses a separate **Opus 5.5** context
+at the exact head; one targeted re-review follows fixes. The owner authorized
+pushes and squash merges with green `quality` and exact-head review. The maintainer
+uses `gh pr merge --squash --match-head-commit <head>` and verifies main's tree
+matches the PR head (`git diff --quiet <head> origin/main`). Test Ariadne behavior, not Apple window/menu mechanics; latency
+is not a gate (ADR-0068). Keep the process budget in ORCHESTRATOR. Preserve worktrees,
+branches and history; no force-push or open-source licence.
 
-**Released: alpha.6 (`v0.1.0-alpha.6`, 859c7a6c, #141), 2026-10-09. Roadmap: 58/58 done.** The release includes the lighter skill, easier filing, copy, back/forward, item links, tidier tree and text size. The Paperwhite redesign (ADR-0086) was integrated in #138. [Alpha.6 release](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.6).
+Codex jobs cannot run browsers, sockets, the app, native e2e or `git add`/commits.
+The maintainer runs Playwright, design frames and the local native journey before
+push, stages and commits, and plans time for it. Before UI implementation, share a
+clickable HTML mock under `designs/mocks/`; the owner signs off and implementation
+follows it.
 
-## Alpha.7 work in progress
+**Main: `3e99578` (#149). Alpha.13 released (`v0.1.0-alpha.13`).**
+[Alpha.13 release](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.13).
+Releases since alpha.6, from main's squash subjects:
 
-The alpha.7 UI and hide-item fixes are committed on `fix/a8-hide` in [PR #143](https://github.com/kartiksayani/ariadne/pull/143), awaiting merge; alpha.7 is not released.
+- **alpha.7** [#143](https://github.com/kartiksayani/ariadne/pull/143): one-chat detail, Waiting/Sent split, quick answers, hide items.
+- **alpha.8** [#144](https://github.com/kartiksayani/ariadne/pull/144): Ack — read-only items start Open with an Ack button.
+- **alpha.9** [#145](https://github.com/kartiksayani/ariadne/pull/145): item links — related items in details, graph and tree.
+- **alpha.10** [#146](https://github.com/kartiksayani/ariadne/pull/146): archive sessions — Archived group, Restore and Undo.
+- **alpha.11** [#147](https://github.com/kartiksayani/ariadne/pull/147): links open in the browser, answer box clears, hidden items grouped.
+- **alpha.12** [#148](https://github.com/kartiksayani/ariadne/pull/148): agents delete into a bin, Ack goes where the agent says, connect recovery, short install summary.
+- **alpha.13** [#149](https://github.com/kartiksayani/ariadne/pull/149): room for the conversation, tidier session page, truthful delivery, quieter menu bar.
 
-- Waiting on me and Sent scroll separately. Sent holds messages waiting for the agent to pick up, with Edit and Delete actions.
-- ⌥1–9 picks and sends a quick answer; ⌥0 focuses own words. Choices keep any typed note.
-- Item detail is one chronological chat. Results avoid repeating a full follow-up message, and children have their own scrolling list.
-- Cancelled bubbles are dimmed and labelled to say whether the agent may have seen them; the original choice and note remain visible.
-- The +N children badge has an accent highlight. An indirect match gets a quieter tint while keeping AA text contrast in both themes.
-- Hide items uses x, row actions or detail, saves the hidden preference and gathers rows into expandable muted groups. Hidden questions still appear in Waiting on me; the graph fades hidden items.
-- Review fixes: x waits for a stale session refresh before saving; weak badges regain their cue; pending Remove hides Sent rows immediately and Undo brings them back. Regression tests cover these paths, including item, topic, session and project removals.
+## Alpha.14 in progress — a Map you can follow
 
-Local verification for this task is `npm run check`, focused Vitest and `python3 scripts/regenerate-roadmap.py --check`. The generated roadmap is refreshed with the task catalogue. Native/e2e runs are excluded by the owner's task instruction; no new native acceptance is claimed here.
+At the owner's request (2026-10-13), a second research pass runs before mock M1.
+Mocks, UI work and the agent rules rewrite wait for its findings; 14.0 data work
+continues.
+
+- **14.0:** data — link kinds, change records, topic brief, seen state and the
+  preference receipt window (ADR-0099); in progress on `feat/a14-contracts`.
+- **14.1:** agent rules rewrite and CLI warnings; after 14.0.
+- **14.2:** tree look and getting around; after mock M1 sign-off.
+- **14.3:** change tracking derived views; after 14.0.
+- **14.4:** change tracking screens; after 14.2, 14.3 and mock M2 sign-off.
+
+## Alpha.15 next — Conversation view
+
+- **15.0:** ADR-0100; after all alpha.14 work.
+- **15.1:** reading conversations; after 15.0.
+- **15.2:** Conversation screen; after 15.0 and mock M3 sign-off.
+- **15.3:** `/ariadne-pr-comments`; independent of the other modules.
+
+## Worktrees and next steps
+
+- `.worktrees/a14-contracts` — `feat/a14-contracts`: 14.0 data contracts.
+- `.worktrees/a14-harness` — `chore/a14-harness`: this docs/hook upkeep, uncommitted.
+- `.worktrees/a14-mock` — `design/a14-m1`: clickable M1 mock.
+
+1. Finish 14.0 and independent review at its exact head.
+2. Owner signs off M1.
+3. Start 14.1, 14.2 and 14.3 with disjoint ownership, at most 3 Codex jobs.
+
+After merge, tag `v0.1.0-alpha.N` with `-m "Ariadne v0.1.0-alpha.N"`, wait for the
+release workflow and edit notes with the fixed
+[How to upgrade block](../planning/PERSONAL_RELEASE.md#release-notes).
+Refresh this page, tasks.json and the roadmap chart. Check current PR CI/reviews
+and each worktree's unpushed work before scheduling.
 
 ## Earlier delivery evidence
 
