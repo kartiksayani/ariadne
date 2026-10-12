@@ -66,11 +66,51 @@ pub enum Operation {
         #[schemars(length(max = 40), description = SHORT_LABEL)]
         #[ts(optional = nullable)]
         short: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        #[schemars(length(max = 1200))]
+        brief: Option<String>,
+    },
+    #[serde(rename = "topic.edit")]
+    TopicEdit {
+        topic: UuidRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        name: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "crate::wire::nullable_patch",
+            skip_serializing_if = "Option::is_none"
+        )]
+        #[ts(optional, type = "string | null")]
+        #[schemars(
+            length(max = 40),
+            description = "Absent keeps the label, null clears it, a string replaces it (trimmed)."
+        )]
+        short: Option<Option<String>>,
+        #[serde(
+            default,
+            deserialize_with = "crate::wire::nullable_patch",
+            skip_serializing_if = "Option::is_none"
+        )]
+        #[ts(optional, type = "string | null")]
+        #[schemars(length(max = 1200))]
+        brief: Option<Option<String>>,
     },
     #[serde(rename = "item.add")]
     ItemAdd(Box<ItemAddOperation>),
     #[serde(rename = "item.edit")]
-    ItemEdit { item: EntityRef, patch: ItemPatch },
+    ItemEdit {
+        item: EntityRef,
+        patch: ItemPatch,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional = nullable)]
+        #[schemars(length(max = 280))]
+        reason: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        #[ts(as = "Option<bool>", optional)]
+        wording_only: bool,
+    },
     #[serde(rename = "item.ask")]
     ItemAsk {
         item: EntityRef,
@@ -87,6 +127,7 @@ pub enum Operation {
         ack_to: Option<AckTarget>,
         outcome: Option<String>,
         why: Option<String>,
+        #[schemars(length(max = 280))]
         reason: Option<String>,
     },
     #[serde(rename = "item.replace")]
@@ -127,6 +168,12 @@ pub struct ItemPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub related: Option<Vec<EntityRef>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub affects: Option<Vec<EntityRef>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub depends_on: Option<Vec<EntityRef>>,
     #[serde(
         default,
         deserialize_with = "crate::wire::nullable_patch",
@@ -175,6 +222,12 @@ pub struct ItemAddOperation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub related: Option<Vec<EntityRef>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub affects: Option<Vec<EntityRef>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub depends_on: Option<Vec<EntityRef>>,
     pub outcome: Option<String>,
     pub why: Option<String>,
     pub replaced_by: Option<EntityRef>,

@@ -5,7 +5,9 @@ use ariadne_domain::models::*;
 use ariadne_store::{registry::Registry, session::StoreError};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256 as Hasher};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+
+const RECEIPT_WINDOW: usize = 256;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -94,7 +96,7 @@ impl<'a> PreferencesService<'a> {
                             )));
                         }
                     }
-                    apply(&mut record.snapshot, entry);
+                    apply(&mut record.snapshot, entry).map_err(Failure::Core)?;
                 }
                 record.snapshot.revision = PositiveSafeInteger::new(
                     record.snapshot.revision.value() + 1,
@@ -115,6 +117,11 @@ impl<'a> PreferencesService<'a> {
                     command_digest: digest,
                     result: result.clone(),
                 });
+                if record.operations.len() > RECEIPT_WINDOW {
+                    record
+                        .operations
+                        .drain(..record.operations.len() - RECEIPT_WINDOW);
+                }
                 validate(&record).map_err(Failure::Core)?;
                 let bytes = serde_json::to_vec_pretty(&record).map_err(|_| {
                     Failure::Core(errors::local(
@@ -174,6 +181,7 @@ fn defaults() -> PreferencesSnapshot {
         sessions: vec![],
         later: vec![],
         drafts: vec![],
+        seen: vec![],
     }
 }
 fn one() -> SchemaVersion {
@@ -212,11 +220,22 @@ fn corrupt(path: &std::path::Path) -> Failure {
 fn validate(record: &Record) -> Result<(), CoreError> {
     let snapshot = &record.snapshot;
     let mut operations = BTreeSet::new();
+    let first_revision = snapshot
+        .revision
+        .value()
+        .checked_sub(record.operations.len() as u64)
+        .filter(|revision| *revision >= 1)
+        .ok_or_else(|| {
+            errors::local(
+                CoreErrorCode::InvalidArgument,
+                "Preferences revision disagrees with retained receipts",
+            )
+        })?;
     for (index, saved) in record.operations.iter().enumerate() {
         if !matches!(saved.actor_scope, ReceiptActorScope::Owner {})
             || !operations.insert(&saved.operation_id)
             || saved.result.operation_id != saved.operation_id
-            || saved.result.preferences_revision.value() != index as u64 + 2
+            || saved.result.preferences_revision.value() != first_revision + index as u64 + 1
         {
             return Err(errors::local(
                 CoreErrorCode::InvalidArgument,
@@ -224,11 +243,20 @@ fn validate(record: &Record) -> Result<(), CoreError> {
             ));
         }
     }
-    if snapshot.revision.value() != record.operations.len() as u64 + 1 {
-        return Err(errors::local(
-            CoreErrorCode::InvalidArgument,
-            "Preferences revision disagrees with retained receipts",
-        ));
+    let mut seen_sessions = BTreeSet::new();
+    for seen in &snapshot.seen {
+        if !seen_sessions.insert((&seen.session.project_id, &seen.session.session_id)) {
+            return Err(errors::local(
+                CoreErrorCode::InvalidArgument,
+                "Duplicate seen session",
+            ));
+        }
+        layout_bounds(&PreferencesPatchEntry::MarkSeen {
+            session: seen.session.clone(),
+            at: seen.since.clone(),
+            items: seen.items.clone(),
+            topics: seen.topics.clone(),
+        })?;
     }
     let mut sessions = BTreeSet::new();
     for view in &snapshot.sessions {
@@ -353,6 +381,21 @@ fn layout_bounds(entry: &PreferencesPatchEntry) -> Result<(), CoreError> {
                 ));
             }
         }
+        PreferencesPatchEntry::MarkSeen { items, topics, .. } => {
+            if items.len() > SEEN_ITEMS_CAPACITY || topics.len() > SEEN_TOPICS_CAPACITY {
+                return Err(seen_capacity());
+            }
+            let mut item_ids = BTreeSet::new();
+            let mut topic_ids = BTreeSet::new();
+            if !items.iter().all(|item| item_ids.insert(&item.item_id))
+                || !topics.iter().all(|topic| topic_ids.insert(&topic.topic_id))
+            {
+                return Err(errors::local(
+                    CoreErrorCode::InvalidArgument,
+                    "Duplicate seen item or topic",
+                ));
+            }
+        }
         _ => {}
     }
     Ok(())
@@ -369,7 +412,17 @@ fn entry_valid(entry: PreferencesPatchEntry) -> Result<(), CoreError> {
     }
     .validate_wire()
 }
-fn apply(snapshot: &mut PreferencesSnapshot, entry: &PreferencesPatchEntry) {
+fn seen_capacity() -> CoreError {
+    CoreError::new(
+        CoreErrorCode::CapacityExceeded,
+        "Seen history has too many items or topics in this session",
+        "Try marking fewer items or topics at once.",
+    )
+}
+fn apply(
+    snapshot: &mut PreferencesSnapshot,
+    entry: &PreferencesPatchEntry,
+) -> Result<(), CoreError> {
     match entry {
         PreferencesPatchEntry::SetGlobal { preferences } => snapshot.global = preferences.clone(),
         PreferencesPatchEntry::SetSessionView { preferences } => {
@@ -402,5 +455,62 @@ fn apply(snapshot: &mut PreferencesSnapshot, entry: &PreferencesPatchEntry) {
         PreferencesPatchEntry::DeleteDraft { operation_id } => {
             snapshot.drafts.retain(|draft| &draft.op_id != operation_id)
         }
+        PreferencesPatchEntry::MarkSeen {
+            session,
+            at,
+            items,
+            topics,
+        } => {
+            if let Some(seen) = snapshot
+                .seen
+                .iter_mut()
+                .find(|seen| seen.session == *session)
+            {
+                let mut item_indices: BTreeMap<_, _> = seen
+                    .items
+                    .iter()
+                    .enumerate()
+                    .map(|(index, item)| (item.item_id.clone(), index))
+                    .collect();
+                for item in items {
+                    if let Some(index) = item_indices.get(&item.item_id) {
+                        seen.items[*index].revision =
+                            seen.items[*index].revision.max(item.revision);
+                    } else {
+                        item_indices.insert(item.item_id.clone(), seen.items.len());
+                        seen.items.push(item.clone());
+                    }
+                }
+                let mut topic_indices: BTreeMap<_, _> = seen
+                    .topics
+                    .iter()
+                    .enumerate()
+                    .map(|(index, topic)| (topic.topic_id.clone(), index))
+                    .collect();
+                for topic in topics {
+                    if let Some(index) = topic_indices.get(&topic.topic_id) {
+                        if topic.at > seen.topics[*index].at {
+                            seen.topics[*index].at = topic.at.clone();
+                        }
+                    } else {
+                        topic_indices.insert(topic.topic_id.clone(), seen.topics.len());
+                        seen.topics.push(topic.clone());
+                    }
+                }
+                if seen.items.len() > SEEN_ITEMS_CAPACITY
+                    || seen.topics.len() > SEEN_TOPICS_CAPACITY
+                {
+                    return Err(seen_capacity());
+                }
+            } else {
+                snapshot.seen.push(SessionSeen {
+                    session: session.clone(),
+                    since: at.clone(),
+                    items: items.clone(),
+                    topics: topics.clone(),
+                });
+            }
+        }
     }
+    Ok(())
 }

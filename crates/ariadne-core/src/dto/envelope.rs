@@ -56,6 +56,15 @@ pub struct AgentMessagesToolRequest {
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
+pub struct AgentChangesToolRequest {
+    pub binding_id: UuidV4,
+    pub generation: UuidV4,
+    pub source_input_id: Option<UuidV4>,
+    pub attempt_id: Option<UuidV4>,
+    pub params: ItemChangesRequest,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
 pub struct AgentRoundsToolRequest {
     pub binding_id: UuidV4,
     pub generation: UuidV4,

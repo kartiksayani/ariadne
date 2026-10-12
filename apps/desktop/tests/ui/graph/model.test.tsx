@@ -58,6 +58,25 @@ describe('graph model', () => {
     }
   });
 
+  it.each(['affects', 'depends_on'] as const)('draws $field in both directions with the existing related edges and no duplicate targets', field => {
+    const session = graphSession();
+    session.items['1']![field] = ['2', '8', '1', 'missing'];
+    session.items['1.1']![field] = ['1'];
+    // Opposite declarations can connect the same pair; the graph still draws one edge.
+    session.items['2']!.related = ['1'];
+    const graph = build({ session, selectedId: '1' });
+    expect(graph.topics[0].related.map(edge => edge.id)).toEqual(['related:1:2', 'related:1:1.1']);
+    expect(graph.topics[0].related.find(edge => edge.id === 'related:1:1.1')!.d).toBe('M236 95 L262 53');
+    expect(graph.crossTopicRelated).toEqual([{ id: 'related:1:8', from: '1', to: '8' }]);
+    expect(build({ session, selectedId: '8' }).crossTopicRelated).toEqual([{ id: 'related:8:1', from: '8', to: '1' }]);
+    const hidden = build({ session, selectedId: '1', view: preferences({ hidden_item_ids: ['1.1'] }) });
+    expect(hidden.nodes.get('1.1')!.hidden).toBe(true);
+    expect(hidden.topics[0].related).toEqual(graph.topics[0].related);
+    const collapsed = build({ session, selectedId: '1', view: preferences({ expanded_item_ids: [] }) });
+    expect(collapsed.topics[0].related.map(edge => edge.id)).toEqual(['related:1:2']);
+    expect(collapsed.crossTopicRelated).toEqual(graph.crossTopicRelated);
+  });
+
   it('skips collapsed or filtered endpoints without changing expansion or filters', () => {
     const session = graphSession();
     session.items['1']!.related = ['1.1.1', '8'];

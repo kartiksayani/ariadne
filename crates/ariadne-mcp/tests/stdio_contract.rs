@@ -82,7 +82,13 @@ async fn actual_sdk_lists_only_generated_agent_tools_and_keeps_domain_errors_in_
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        ["session_read", "item_messages", "item_rounds", "apply"]
+        [
+            "session_read",
+            "item_messages",
+            "item_changes",
+            "item_rounds",
+            "apply"
+        ]
     );
     let manifest: Value = serde_json::from_str(include_str!(
         "../../../contracts/generated/core/mcp-tools.json"

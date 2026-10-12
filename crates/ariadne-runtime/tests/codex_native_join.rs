@@ -183,6 +183,7 @@ impl Setup {
                 r#ref: RequestRef::new("topic").unwrap(),
                 name: "Codex native join".into(),
                 short: None,
+                brief: None,
             },
             Operation::ItemAdd(Box::new(ItemAddOperation {
                 r#ref: RequestRef::new("item").unwrap(),
@@ -203,6 +204,8 @@ impl Setup {
                 note: None,
                 links: None,
                 related: None,
+                affects: None,
+                depends_on: None,
                 outcome: None,
                 why: None,
                 replaced_by: None,

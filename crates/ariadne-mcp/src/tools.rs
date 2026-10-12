@@ -221,6 +221,7 @@ fn decode(name: &str, arguments: Value) -> Result<Call, CoreError> {
     Ok(match name {
         "session_read" => query!(AgentReadToolRequest, SessionRead),
         "item_messages" => query!(AgentMessagesToolRequest, ItemMessages),
+        "item_changes" => query!(AgentChangesToolRequest, ItemChanges),
         "item_rounds" => query!(AgentRoundsToolRequest, ItemRounds),
         "apply" => {
             let request: AgentApplyToolRequest = serde_json::from_value(arguments)
@@ -301,7 +302,13 @@ fn manifest() -> Result<Vec<Tool>, CoreError> {
             .iter()
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>()
-            != ["session_read", "item_messages", "item_rounds", "apply"]
+            != [
+                "session_read",
+                "item_messages",
+                "item_changes",
+                "item_rounds",
+                "apply",
+            ]
     {
         return Err(fallback());
     }
@@ -314,6 +321,7 @@ fn manifest() -> Result<Vec<Tool>, CoreError> {
         let description = match definition.name.as_str() {
             "session_read" => "Read a bounded page of items, topics, messages or inputs for an explicit binding and generation.",
             "item_messages" => "Read a bounded page of the full message history of one explicit item.",
+            "item_changes" => "Read a bounded page of change records of one explicit item without repeating its current snapshot.",
             "item_rounds" => "Read a bounded page of the ask rounds of one explicit item.",
             _ => "Publish replies, item changes and the input result as one atomic ApplyRequest; retry uncertain saves with the same op_id and bytes.",
         };

@@ -18,6 +18,7 @@ pub enum QueryRequest {
     SessionGet {},
     SessionRead(SessionReadRequest),
     ItemMessages(ItemMessagesRequest),
+    ItemChanges(ItemChangesRequest),
     ItemRounds(ItemRoundsRequest),
     TopicContinuePreview(ContinuePreviewRequest),
     PreferencesGet {},
@@ -101,10 +102,22 @@ pub enum ItemPageRequest {
         cursor: Option<QueryCursor>,
         limit: PageLimit,
     },
+    ItemChanges {
+        item_id: ItemRef,
+        cursor: Option<QueryCursor>,
+        limit: PageLimit,
+    },
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct ItemMessagesRequest {
+    pub item_id: ItemRef,
+    pub cursor: Option<QueryCursor>,
+    pub limit: PageLimit,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ItemChangesRequest {
     pub item_id: ItemRef,
     pub cursor: Option<QueryCursor>,
     pub limit: PageLimit,
@@ -163,6 +176,7 @@ pub enum QueryResult {
     SessionGet(SessionSnapshot),
     SessionRead(SessionReadResult),
     ItemMessages(Box<ItemMessagesProjection>),
+    ItemChanges(ItemChangesProjection),
     ItemRounds(ItemRoundsProjection),
     TopicContinuePreview(ContinuePreview),
     PreferencesGet(PreferencesSnapshot),

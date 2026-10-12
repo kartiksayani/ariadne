@@ -93,6 +93,23 @@
       "properties": {
         "command": {
           "type": "string",
+          "const": "item_changes"
+        },
+        "params": {
+          "$ref": "#/$defs/ItemChangesRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "params"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
           "const": "item_rounds"
         },
         "params": {
@@ -382,6 +399,33 @@
         "skipped"
       ]
     },
+    "ItemChangesRequest": {
+      "type": "object",
+      "properties": {
+        "cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "limit": {
+          "$ref": "#/$defs/PageLimit"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "cursor",
+        "limit"
+      ]
+    },
     "ItemMessagesRequest": {
       "type": "object",
       "properties": {
@@ -465,6 +509,38 @@
             "view": {
               "type": "string",
               "const": "item_status_history"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "view",
+            "item_id",
+            "cursor",
+            "limit"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/QueryCursor"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "item_id": {
+              "$ref": "#/$defs/ItemRef"
+            },
+            "limit": {
+              "$ref": "#/$defs/PageLimit"
+            },
+            "view": {
+              "type": "string",
+              "const": "item_changes"
             }
           },
           "additionalProperties": false,
@@ -617,7 +693,8 @@
         "round_results",
         "round_forks",
         "item_status_history",
-        "item_updated_messages"
+        "item_updated_messages",
+        "item_changes"
       ]
     },
     "ReadView": {

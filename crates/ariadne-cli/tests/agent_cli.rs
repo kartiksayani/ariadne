@@ -521,7 +521,7 @@ fn all_agent_views_and_item_history_use_canonical_core_results() {
         };
         assert_eq!(result["data"]["data"]["view"], expected);
     }
-    for method in ["messages", "rounds"] {
+    for method in ["messages", "changes", "rounds"] {
         let result = envelope(
             &setup.agent(&["item", method], &["--item", "1", "--json"], None),
             0,
@@ -2059,6 +2059,566 @@ fn related_numbers_and_batch_refs_apply_and_read_as_item_numbers() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+fn typed_links_apply_nested_forward_refs_read_edit_clear_and_replay() {
+    for kind in ["affects", "depends_on"] {
+        let setup = Setup::new(&seed());
+        let body = json!({"operations":[
+            {"op":"item.add", "topic":{"id":id(5)}, "ref":"parent", "type":"task", "question":"Parent",
+             (kind):["child", "2"], "children":[
+                 {"ref":"child", "type":"task", "question":"Child", (kind):["parent"]}
+             ]}
+        ]});
+        let compact = envelope(&setup.apply(&body), 0);
+        assert_eq!(compact["data"]["items"].as_array().unwrap().len(), 2);
+        let before = setup.bytes();
+        let replay = envelope(&setup.apply(&body), 0);
+        assert_eq!(compact["data"]["op_id"], replay["data"]["op_id"]);
+        assert_eq!(replay["data"]["replayed"], true);
+        assert_eq!(before, setup.bytes());
+        let items = setup.page(&[]);
+        assert_eq!(items[2]["item"][kind], json!(["3.1", "2"]));
+        assert_eq!(items[3]["item"][kind], json!(["3"]));
+        assert!(items[2]["changes"].is_null());
+        assert!(items[3]["changes"].is_null());
+        let revision = items[2]["item"]["revision"].clone();
+        let edit = json!({"expected_item_revisions":{"3":revision}, "operations":[
+            {"op":"item.edit", "item":{"id":"3"}, "reason":"Target is no longer needed", "patch":{(kind):[]}}
+        ]});
+        let cleared = envelope(&setup.apply(&edit), 0);
+        assert_eq!(cleared["data"]["items"][0]["id"], "3");
+        let current = &setup.page(&[])[2];
+        assert_eq!(current["item"][kind], json!([]));
+        let changes = current["changes"]["items"].as_array().unwrap();
+        let last = changes.last().unwrap();
+        assert_eq!(last["reason"], "Target is no longer needed");
+        assert_eq!(last["before"][kind], json!(["3.1", "2"]));
+    }
+}
+
+#[test]
+fn every_edit_in_the_creation_batch_is_excluded_and_later_edits_record_changes() {
+    let setup = Setup::new(&seed());
+    let body = json!({"operations":[
+        {"op":"item.add", "ref":"parent", "topic":{"id":id(5)}, "type":"task", "question":"Parent", "affects":["later"]},
+        {"op":"item.edit", "item":{"ref":"parent"}, "reason":"Clarify the task", "patch":{"note":"Explicit same-batch edit"}},
+        {"op":"item.add", "ref":"later", "topic":{"id":id(5)}, "type":"task", "question":"Later"},
+        {"op":"item.edit", "item":{"ref":"later"}, "reason":"Explicitly add dependency", "patch":{"depends_on":["2"]}}
+    ]});
+    let before = setup.bytes();
+    envelope(
+        &setup.apply_with(&["--dry-run"], &serde_json::to_vec(&body).unwrap()),
+        0,
+    );
+    assert_eq!(before, setup.bytes());
+    envelope(&setup.apply(&body), 0);
+    let items = setup.page(&[]);
+    assert_eq!(items[2]["item"]["affects"], json!(["4"]));
+    assert!(items[2]["changes"].is_null());
+    assert!(items[3]["changes"].is_null());
+    envelope(&setup.apply(&json!({"expected_item_revisions":{"3":items[2]["item"]["revision"]}, "operations":[
+        {"op":"item.edit", "item":{"id":"3"}, "reason":"Clarify after creation", "patch":{"note":"Later batch edit"}}
+    ]})), 0);
+    let items = setup.page(&[]);
+    let changes = items[2]["changes"]["items"].as_array().unwrap();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0]["reason"], "Clarify after creation");
+    assert_eq!(
+        changes[0]["before"],
+        json!({"note":"Explicit same-batch edit"})
+    );
+}
+
+#[test]
+fn forward_creation_and_explicit_links_have_identical_retry_intent_and_history() {
+    let synthetic = json!({"operations":[
+        {"op":"item.add", "ref":"parent", "topic":{"id":id(5)}, "type":"task", "question":"Parent", "affects":["later"]},
+        {"op":"item.add", "ref":"later", "topic":{"id":id(5)}, "type":"task", "question":"Later"}
+    ]});
+    let explicit = json!({"operations":[
+        {"op":"item.add", "ref":"parent", "topic":{"id":id(5)}, "type":"task", "question":"Parent"},
+        {"op":"item.add", "ref":"later", "topic":{"id":id(5)}, "type":"task", "question":"Later"},
+        {"op":"item.edit", "item":{"ref":"parent"}, "patch":{"affects":["later"]}}
+    ]});
+    let first = Setup::new(&seed());
+    let second = Setup::new(&seed());
+    let synthetic_receipt = envelope(&first.apply(&synthetic), 0);
+    let explicit_receipt = envelope(&second.apply(&explicit), 0);
+    assert_eq!(
+        synthetic_receipt["data"]["op_id"],
+        explicit_receipt["data"]["op_id"]
+    );
+    assert!(first.page(&[])[2]["changes"].is_null());
+    let explicit_items = second.page(&[]);
+    assert!(explicit_items[2]["changes"].is_null());
+    let before = first.bytes();
+    let mut reused = explicit;
+    reused["op_id"] = synthetic_receipt["data"]["op_id"].clone();
+    let replay = envelope(&first.apply(&reused), 0);
+    assert_eq!(replay["data"]["replayed"], true);
+    assert_eq!(before, first.bytes());
+}
+
+#[test]
+fn cli_specific_link_repairs_keep_kind_and_typed_overlap_is_atomic() {
+    let setup = Setup::new(&seed());
+    let body = json!({"expected_item_revisions":{"1":1}, "operations":[
+        {"op":"item.edit", "item":{"id":"1"}, "patch":{"related":["2"], "affects":["2"]}}
+    ]});
+    let applied = envelope(&setup.apply(&body), 0);
+    assert!(applied["data"]["repairs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|repair| {
+            let text = repair.as_str().unwrap();
+            text.contains("related") && text.contains("affects")
+        }));
+    let item = &setup.page(&[])[0]["item"];
+    assert_eq!(item["related"], json!([]));
+    assert_eq!(item["affects"], json!(["2"]));
+    let before = setup.bytes();
+    let refused = json!({"expected_item_revisions":{"1":item["revision"]}, "operations":[
+        {"op":"topic.add", "name":"Must roll back"},
+        {"op":"item.edit", "item":{"id":"1"}, "patch":{"depends_on":["2"]}}
+    ]});
+    let failure = setup.apply(&refused);
+    assert!(!failure.status.success(), "{failure:?}");
+    assert_eq!(before, setup.bytes());
+}
+
+#[test]
+fn typed_link_removed_targets_filter_and_prune_with_replayed_receipt() {
+    for kind in ["affects", "depends_on"] {
+        let mut session = seed();
+        let item = session
+            .items
+            .0
+            .get_mut(&ItemRef::new("1").unwrap())
+            .unwrap();
+        let links = Some(vec![
+            ItemRef::new("2").unwrap(),
+            ItemRef::new("99").unwrap(),
+        ]);
+        if kind == "affects" {
+            item.affects = links;
+        } else {
+            item.depends_on = links;
+        }
+        let setup = Setup::new(&session);
+        assert_eq!(setup.page(&[])[0]["item"][kind], json!(["2"]));
+        let body = json!({"expected_item_revisions":{"1":1}, "operations":[
+            {"op":"item.edit", "item":{"id":"1"}, "patch":{(kind):["99", "2"]}}
+        ]});
+        let applied = envelope(&setup.apply(&body), 0);
+        assert_eq!(applied["data"]["pruned_related"], json!({"1":["99"]}));
+        let before = setup.bytes();
+        let replay = envelope(&setup.apply(&body), 0);
+        assert_eq!(
+            replay["data"]["pruned_related"],
+            applied["data"]["pruned_related"]
+        );
+        assert_eq!(replay["data"]["replayed"], true);
+        assert_eq!(before, setup.bytes());
+    }
+}
+
+#[test]
+fn topic_brief_add_edit_clear_guard_dry_run_and_read() {
+    let setup = Setup::new(&seed());
+    let body = json!({"operations":[
+        {"op":"topic.add", "ref":"topic", "name":"Context", "short":"Context", "brief":"  Initial context\nNext step  "},
+        {"op":"topic.edit", "topic":"topic", "brief":"  Updated context\nReason  "}
+    ]});
+    let before = setup.bytes();
+    let preview = envelope(
+        &setup.apply_with(&["--dry-run"], &serde_json::to_vec(&body).unwrap()),
+        0,
+    );
+    assert_eq!(preview["data"]["dry_run"], true);
+    assert_eq!(before, setup.bytes());
+    let applied = envelope(&setup.apply(&body), 0);
+    let topic = &setup.page(&["--view", "topics"])[1];
+    assert_eq!(topic["brief"], "Updated context\nReason");
+    assert!(topic["brief_updated_at"].as_str().is_some());
+    assert_eq!(applied["data"]["topics"][0]["revision"], topic["revision"]);
+    let topic_id = topic["id"].as_str().unwrap().to_string();
+    let clear = json!({"expected_topic_revisions":{(topic_id.clone()):topic["revision"]}, "operations":[
+        {"op":"topic.edit", "topic":topic_id, "name":"Renamed", "short":null, "brief":null}
+    ]});
+    envelope(&setup.apply(&clear), 0);
+    let current = &setup.page(&["--view", "topics"])[1];
+    assert_eq!(current["name"], "Renamed");
+    assert!(current["brief"].is_null());
+    assert!(current["short"].is_null());
+    let before = setup.bytes();
+    envelope(&setup.apply(&clear), 0); // Exact retry replays despite the stale guard.
+    assert_eq!(before, setup.bytes());
+    let stale = json!({"expected_topic_revisions":{(topic_id.clone()):1}, "operations":[
+        {"op":"topic.edit", "topic":topic_id, "brief":"Conflicting edit"}
+    ]});
+    envelope(&setup.apply(&stale), 3);
+    assert_eq!(before, setup.bytes());
+}
+
+#[test]
+fn typed_link_validation_refuses_self_duplicates_missing_and_capacity_atomically() {
+    for kind in ["affects", "depends_on"] {
+        for targets in [
+            json!(["1"]),
+            json!(["2", "2"]),
+            json!(["99"]),
+            json!(vec!["2"; 33]),
+        ] {
+            let setup = Setup::new(&seed());
+            let before = setup.bytes();
+            let body = json!({"expected_item_revisions":{"1":1}, "operations":[
+                {"op":"topic.add", "name":"Must roll back"},
+                {"op":"item.edit", "item":{"id":"1"}, "patch":{(kind):targets}}
+            ]});
+            let output = setup.apply(&body);
+            assert!(!output.status.success(), "{kind}: {output:?}");
+            assert_eq!(before, setup.bytes());
+        }
+    }
+}
+
+#[test]
+fn every_forward_link_kind_honors_the_expanded_operation_limit() {
+    for kind in ["related", "affects", "depends_on"] {
+        let setup = Setup::new(&seed());
+        let before = setup.bytes();
+        let mut operations: Vec<Value> = (0..100)
+            .map(|index| {
+                json!({"op":"item.add", "ref":format!("item{index}"),
+            "topic":{"id":id(5)}, "type":"task", "question":format!("Task {index}")})
+            })
+            .collect();
+        operations[0][kind] = json!(["item99"]);
+        let error = envelope(&setup.apply(&json!({"operations":operations})), 2);
+        assert!(error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("100 operations"));
+        assert_eq!(before, setup.bytes());
+    }
+}
+
+#[test]
+fn typed_link_capacity_accepts_thirty_two_targets_in_nested_add_and_edit() {
+    for kind in ["affects", "depends_on"] {
+        let setup = Setup::new(&seed());
+        let mut operations: Vec<Value> = (0..32)
+            .map(|index| {
+                json!({"op":"item.add", "ref":format!("target{index}"),
+            "topic":{"id":id(5)}, "type":"task", "question":format!("Target {index}")})
+            })
+            .collect();
+        let targets: Vec<_> = (0..32).map(|index| format!("target{index}")).collect();
+        operations.push(
+            json!({"op":"item.add", "topic":{"id":id(5)}, "type":"task", "question":"Parent",
+            "children":[{"type":"task", "question":"Linked child", (kind):targets}]}),
+        );
+        envelope(&setup.apply(&json!({"operations":operations})), 0);
+        let session = setup.store().read(&id(2)).unwrap();
+        let child = &session.items.0[&ItemRef::new("35.1").unwrap()];
+        let links = if kind == "affects" {
+            &child.affects
+        } else {
+            &child.depends_on
+        };
+        assert_eq!(links.as_ref().unwrap().len(), 32);
+        let numbers: Vec<_> = (3..35).map(|number| number.to_string()).collect();
+        envelope(
+            &setup.apply(&json!({"expected_item_revisions":{"1":1}, "operations":[
+                {"op":"item.edit", "item":{"id":"1"}, "patch":{(kind):numbers}}
+            ]})),
+            0,
+        );
+        assert_eq!(
+            setup.page(&[])[0]["item"][kind].as_array().unwrap().len(),
+            32
+        );
+    }
+}
+
+#[test]
+fn stored_related_overlap_is_repaired_when_only_specific_kind_is_written() {
+    for kind in ["affects", "depends_on"] {
+        let mut session = seed();
+        session
+            .items
+            .0
+            .get_mut(&ItemRef::new("1").unwrap())
+            .unwrap()
+            .related = Some(vec![ItemRef::new("2").unwrap()]);
+        let setup = Setup::new(&session);
+        let body = json!({"expected_item_revisions":{"1":1}, "operations":[
+            {"op":"item.edit", "item":{"id":"1"}, "patch":{(kind):["2"]}}
+        ]});
+        let applied = envelope(&setup.apply(&body), 0);
+        assert!(!applied["data"]["repairs"].as_array().unwrap().is_empty());
+        assert_eq!(setup.page(&[])[0]["item"]["related"], json!([]));
+        assert_eq!(setup.page(&[])[0]["item"][kind], json!(["2"]));
+        let before = setup.bytes();
+        let replay = envelope(&setup.apply(&body), 0);
+        assert_eq!(replay["data"]["replayed"], true);
+        assert_eq!(before, setup.bytes());
+    }
+}
+
+#[test]
+fn topic_brief_and_edit_reason_bounds_refuse_without_mutation() {
+    for operation in [
+        json!({"op":"topic.edit", "topic":id(5), "brief":"x".repeat(1201)}),
+        json!({"op":"item.edit", "item":{"id":"1"}, "reason":"x".repeat(281), "patch":{"note":"Changed"}}),
+        json!({"op":"item.edit", "item":{"id":"1"}, "reason":"Two\nlines", "patch":{"note":"Changed"}}),
+    ] {
+        let setup = Setup::new(&seed());
+        let before = setup.bytes();
+        let body = json!({"expected_item_revisions":{"1":1}, "expected_topic_revisions":{(id(5).as_str()):1},
+            "operations":[operation]});
+        envelope(&setup.apply(&body), 2);
+        assert_eq!(before, setup.bytes());
+    }
+}
+
+#[test]
+fn wording_only_edits_record_the_flag_and_normal_edits_omit_it() {
+    let setup = Setup::new(&seed());
+    let body = json!({"expected_item_revisions":{"1":1}, "operations":[
+        {"op":"item.edit", "item":{"id":"1"}, "wording_only":true,
+         "reason":"Clarify the existing choice", "patch":{"question":"Which release strategy?", "short":"Release strategy", "note":"The same choice, clearer words", "type":"decision", "links":[]}}
+    ]});
+    envelope(&setup.apply(&body), 0);
+    let item = &setup.page(&[])[0];
+    let change = &item["changes"]["items"][0];
+    assert_eq!(change["wording_only"], true);
+    assert_eq!(change["reason"], "Clarify the existing choice");
+    assert_eq!(change["revision"], 2);
+    assert_eq!(
+        change["before"],
+        json!({"question":"Which release approach?", "short":null, "note":null})
+    );
+    let before = setup.bytes();
+    let replay = envelope(&setup.apply(&body), 0);
+    assert_eq!(replay["data"]["replayed"], true);
+    assert_eq!(before, setup.bytes());
+    envelope(&setup.apply(&json!({"expected_item_revisions":{"1":2}, "operations":[
+        {"op":"item.edit", "item":{"id":"1"}, "wording_only":false, "patch":{"note":"A substantive update"}}
+    ]})), 0);
+    let items = setup.page(&[]);
+    assert!(items[0]["changes"]["items"][1]
+        .get("wording_only")
+        .is_none());
+}
+
+#[test]
+fn wording_only_wrong_shapes_and_forbidden_field_changes_refuse_atomically() {
+    for flag in [Value::Null, json!("true"), json!(1), json!([]), json!({})] {
+        let setup = Setup::new(&seed());
+        let before = setup.bytes();
+        let error = envelope(&setup.apply(&json!({"expected_item_revisions":{"1":1}, "operations":[
+            {"op":"topic.add", "name":"Must roll back"},
+            {"op":"item.edit", "item":{"id":"1"}, "wording_only":flag, "patch":{"note":"Changed"}}
+        ]})), 2);
+        assert_eq!(error["error"]["code"], "invalid_argument");
+        assert_eq!(before, setup.bytes());
+    }
+    for (field, value) in [
+        ("type", json!("task")),
+        ("ack_to", json!("done")),
+        (
+            "links",
+            json!([{"kind":"doc", "label":"Evidence", "target":"https://example.test/evidence"}]),
+        ),
+        ("related", json!(["2"])),
+        ("affects", json!(["2"])),
+        ("depends_on", json!(["2"])),
+    ] {
+        let setup = Setup::new(&seed());
+        let before = setup.bytes();
+        let error = envelope(
+            &setup.apply(&json!({"expected_item_revisions":{"1":1}, "operations":[
+                {"op":"topic.add", "name":"Must roll back"},
+                {"op":"item.edit", "item":{"id":"1"}, "wording_only":true,
+                 "patch":{"note":"Allowed text cannot conceal a forbidden change", (field):value}}
+            ]})),
+            2,
+        );
+        let message = error["error"]["message"].as_str().unwrap();
+        assert!(
+            message.contains("wording-only") && message.contains(field),
+            "{error}"
+        );
+        assert_eq!(before, setup.bytes());
+    }
+}
+
+#[test]
+fn wording_only_explicit_relation_edits_never_bypass_refusal_via_forward_links() {
+    for kind in ["related", "affects", "depends_on"] {
+        for allocated in [false, true] {
+            let setup = Setup::new(&seed());
+            let before = setup.bytes();
+            let add = json!({"op":"item.add", "ref":"later", "topic":{"id":id(5)}, "type":"task", "question":"Later"});
+            let edit = json!({"op":"item.edit", "item":{"id":"1"}, "wording_only":true, "patch":{(kind):["later"]}});
+            let operations = if allocated {
+                vec![add, edit]
+            } else {
+                vec![edit, add]
+            };
+            let error = envelope(
+                &setup.apply(&json!({"expected_item_revisions":{"1":1}, "operations":operations})),
+                2,
+            );
+            if allocated {
+                let message = error["error"]["message"].as_str().unwrap();
+                assert!(
+                    message.contains("wording-only") && message.contains(kind),
+                    "{error}"
+                );
+            } else {
+                assert_eq!(error["error"]["code"], "invalid_ref");
+            }
+            assert_eq!(before, setup.bytes());
+        }
+    }
+}
+
+#[test]
+fn wording_only_creation_batch_edit_keeps_synthetic_links_and_adds_no_record() {
+    let setup = Setup::new(&seed());
+    envelope(&setup.apply(&json!({"operations":[
+        {"op":"item.add", "ref":"parent", "topic":{"id":id(5)}, "type":"task", "question":"Parent", "affects":["later"]},
+        {"op":"item.edit", "item":{"ref":"parent"}, "wording_only":true, "patch":{"note":"Clearer wording"}},
+        {"op":"item.add", "ref":"later", "topic":{"id":id(5)}, "type":"task", "question":"Later"}
+    ]})), 0);
+    let items = setup.page(&[]);
+    assert_eq!(items[2]["item"]["affects"], json!(["4"]));
+    assert_eq!(items[2]["item"]["note"], "Clearer wording");
+    assert!(items[2]["changes"].is_null());
+}
+
+#[test]
+fn change_records_can_be_read_completely_with_independent_stdin_cursors() {
+    let setup = Setup::new(&seed());
+    for (revision, note) in [(1, "First edit"), (2, "Second edit")] {
+        envelope(
+            &setup.apply(
+                &json!({"expected_item_revisions":{"1":revision}, "operations":[
+                    {"op":"item.edit", "item":{"id":"1"}, "reason":note, "patch":{"note":note}}
+                ]}),
+            ),
+            0,
+        );
+    }
+    let before = setup.bytes();
+    let mut params = read_params("items", 10);
+    params["selection"]["filters"]["item_id"] = json!("1");
+    params["item_pages"] =
+        json!([{"view":"item_changes", "item_id":"1", "cursor":null, "limit":1}]);
+    let first = envelope(
+        &setup.agent(
+            &["read"],
+            &["--json-stdin", "--json"],
+            Some(&serde_json::to_vec(&params).unwrap()),
+        ),
+        0,
+    );
+    let first_page = &first["data"]["data"]["page"]["items"][0]["changes"];
+    assert_eq!(first_page["items"].as_array().unwrap().len(), 1);
+    assert_eq!(first_page["items"][0]["reason"], "First edit");
+    assert!(!first_page["next_cursor"].is_null());
+    params["item_pages"][0]["cursor"] = first_page["next_cursor"].clone();
+    let second = envelope(
+        &setup.agent(
+            &["read"],
+            &["--json-stdin", "--json"],
+            Some(&serde_json::to_vec(&params).unwrap()),
+        ),
+        0,
+    );
+    let second_page = &second["data"]["data"]["page"]["items"][0]["changes"];
+    assert_eq!(second_page["items"].as_array().unwrap().len(), 1);
+    assert_eq!(second_page["items"][0]["reason"], "Second edit");
+    assert!(second_page["next_cursor"].is_null());
+    let first_standalone = envelope(
+        &setup.agent(
+            &["item", "changes"],
+            &["--item", "1", "--limit", "1", "--json"],
+            None,
+        ),
+        0,
+    );
+    assert_eq!(first_standalone["data"]["kind"], "item_changes");
+    assert_eq!(first_standalone["data"]["data"]["item_id"], "1");
+    assert_eq!(first_standalone["data"]["data"]["changes"], *first_page);
+    let standalone_params = json!({"item_id":"1", "cursor":first_page["next_cursor"], "limit":1});
+    let standalone = envelope(
+        &setup.agent(
+            &["item_changes"],
+            &["--json-stdin", "--json"],
+            Some(&serde_json::to_vec(&standalone_params).unwrap()),
+        ),
+        0,
+    );
+    assert_eq!(standalone["data"]["data"]["changes"], *second_page);
+    assert_eq!(before, setup.bytes());
+}
+
+#[test]
+fn standalone_changes_reads_large_valid_records_without_the_current_snapshot() {
+    let mut session = seed();
+    let item = session
+        .items
+        .0
+        .get_mut(&ItemRef::new("1").unwrap())
+        .unwrap();
+    item.links = serde_json::from_value(json!([{"kind":"doc", "label":"p".repeat(400 * 1024), "target":"https://example.test/evidence"}])).unwrap();
+    let setup = Setup::new(&session);
+    envelope(&setup.apply(&json!({"expected_item_revisions":{"1":1}, "operations":[
+        {"op":"item.edit", "item":{"id":"1"}, "patch":{"links":[{"kind":"doc", "label":"c".repeat(400 * 1024), "target":"https://example.test/evidence"}]}}
+    ]})), 0);
+    let before = setup.bytes();
+    let result = envelope(
+        &setup.agent(&["item", "changes"], &["--item", "1", "--json"], None),
+        0,
+    );
+    let projection = &result["data"]["data"];
+    assert!(projection.get("item").is_none());
+    assert_eq!(projection["item_id"], "1");
+    assert_eq!(projection["changes"]["items"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        projection["changes"]["items"][0]["before"]["links"][0]["label"]
+            .as_str()
+            .unwrap()
+            .len(),
+        400 * 1024
+    );
+    assert!(projection["changes"]["next_cursor"].is_null());
+    let owner_request = OwnerQueryRequest {
+        session: Some(SessionRef {
+            project_id: id(1),
+            session_id: id(2),
+        }),
+        request: QueryRequest::ItemChanges(ItemChangesRequest {
+            item_id: ItemRef::new("1").unwrap(),
+            cursor: None,
+            limit: PageLimit::new(20).unwrap(),
+        }),
+    };
+    let owner = envelope(
+        &setup.call(
+            &["item", "changes", "--json-stdin", "--json"],
+            Some(&serde_json::to_vec(&owner_request).unwrap()),
+        ),
+        0,
+    );
+    assert_eq!(owner["data"], result["data"]);
+    assert_eq!(before, setup.bytes());
 }
 
 #[test]

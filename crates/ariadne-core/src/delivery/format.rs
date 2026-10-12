@@ -7,7 +7,12 @@ use serde_json::{json, Map, Value};
 /// an MCP tool name and an `ariadne <name>` CLI command (`ariadne read` is the
 /// short form of `session_read`). Tests in the CLI and MCP crates check these
 /// against the real surfaces.
-pub const AGENT_QUERY_TOOLS: [&str; 3] = ["session_read", "item_messages", "item_rounds"];
+pub const AGENT_QUERY_TOOLS: [&str; 4] = [
+    "session_read",
+    "item_messages",
+    "item_changes",
+    "item_rounds",
+];
 
 /// The whole marker line plus two UUID spellings must fit the delivery budget.
 const BUDGET: usize = 64 * 1024;

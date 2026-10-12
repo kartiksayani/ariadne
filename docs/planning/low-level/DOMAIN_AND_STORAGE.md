@@ -127,12 +127,17 @@ Topic and Item also carry optional `short` (ADR-0084): an agent-written 2-4 word
 label, trimmed, one line, at most 40 characters; omitted from JSON when absent, so
 stores written before it load and re-serialize unchanged.
 
-Item also carries optional `related: ItemRef[]`, at most 32 declarations
-([ADR-0094](../../adr/ADR-0094-item-links.md)).
-Declarations mean related in both directions within the same session, including
-across topics. Absent stays absent on serialization. Explicit writes reject self
+Item also carries optional `related`, `affects` and `depends_on`: `ItemRef[]`,
+at most 32 declarations per list ([ADR-0094](../../adr/ADR-0094-item-links.md),
+[ADR-0099](../../adr/ADR-0099-knowledge-transfer-records.md)). A destination
+appears in at most one list on each item. Strict writes refuse overlap; the CLI
+keeps the typed kind and removes overlap from `related`, reporting the repair.
+Typed connections read in both directions: affects / affected by and depends on /
+needed by.
+Connections stay within the same session, including across topics; `related`
+reads in both directions. Absent stays absent on serialization. Explicit writes reject self
 and duplicate targets and require existing targets, except a removed target
-already declared by that item may be resent. That related-list write prunes the
+already declared by that item may be resent. That list write prunes the
 removed targets and records their numbers in the saved receipt's `pruned_related`
 map. Stored dangling targets are tolerated after removal; reads and the UI show
 only live targets. New missing targets are refused with the operation and target.
@@ -140,9 +145,46 @@ Continuation remaps only targets
 in the copied set. Inline Markdown item references do not declare relations.
 
 Item: `{id,ordinal,topic_id,parent,question,type,status,ack_to?,owner,revision,
-question_revision,next_child,ask,note,options,links,outcome,why,replaced_by,
+question_revision,next_child,ask,note,options,links,related?,affects?,depends_on?,
+changes?,outcome,why,replaced_by,
 created_at,updated_at,created_message_id,updated_message_ids,status_history,
 waiting_since,recipient_binding_id,current_round_id,source_round_id,origin}`.
+Topic also carries optional `brief` and `brief_updated_at`. A brief is trimmed
+plain text, may contain line breaks and has at most 1,200 characters. Only an
+actual brief change updates its timestamp. `topic.add` accepts it; `topic.edit`
+changes name, short or brief and advances the topic revision with the same live
+and expected-revision checks as item creation. Null clears short or brief.
+
+`Item.changes` is optional, oldest first, with at most 20 `ItemChangeRecord`
+entries; writes trim the oldest. Each record has `{revision,at,cause_message_id,
+reason?,wording_only?,before}`. `before` holds only changed fields among question, short, type,
+status, note, ask, options, outcome, why, links, related, affects and depends_on;
+null represents a previously empty value. Agent Edit, Ask, Status and Replace
+write records inside `transition_item` only when one of those fields changes.
+Every change in the batch that created an item is part of creation and adds no
+record, including deferred CLI connections and explicit edits. Records begin
+with the first later batch, using the creation activity message as the boundary.
+Creation, owner actions, parent bumps when adding children, bin removal/restore
+and continuation copies add no records; copies start without records. Validation
+checks shape, strictly ascending revisions no newer than the item, and the count;
+a removed cause message does not invalidate a record. Agent reads page these
+records independently as optional `ItemReadProjection.changes`, selected with
+`item_changes`, rather than including them in the fixed `ItemSnapshot`: even
+six valid before-values containing large link lists can exceed its byte budget.
+Standalone `ItemChangesProjection={item_id,changes:Page<ItemChangeRecord>}` reads
+continue the same cursors without repeating the current item, preserving access
+when current and previous values cannot fit together. Explicit edit/status reasons
+are trimmed, one line and at most 280 characters. Status falls back to why and
+Replace uses why; these derived reasons normalize whitespace and take at most
+280 characters, preserving the full stored why. Ask supplies no reason.
+Edit accepts optional `wording_only`, default false: only question, short and
+note may actually change. A change to type, ack_to or any link list is refused
+with a plain message naming the field. The record includes `wording_only: true`
+only when requested; false is omitted and older records load and serialize
+unchanged. A flagged record contains only question, short and note before-values.
+Status, Ask and Replace never carry it. Later changed-since-read views exclude
+wording-only records while history retains them.
+
 `type=question|decision|finding|task|explanation`;
 `status=open|waiting_on_me|in_progress|decided|done|dropped|replaced`.
 `ack_to`, when present, is `open|in_progress|decided|done|dropped` (ADR-0093,
@@ -540,7 +582,10 @@ from this reference check.
 `ItemChange` is a native enum, not another serialized API DTO:
 
 - `Edit { question: Option<String>, item_type: Option<ItemType>,
-  note: Option<Option<String>>, links: Option<Vec<ItemLinkTarget>> }`.
+  note: Option<Option<String>>, links: Option<Vec<ItemLinkTarget>>,
+  related: Option<Vec<ItemRef>>, affects: Option<Vec<ItemRef>>,
+  depends_on: Option<Vec<ItemRef>>, short: Option<Option<String>>,
+  ack_to: Option<AckTarget>, reason: Option<String>, wording_only: bool }`.
   Outer `None` retains a field; `note: Some(None)` clears it.
 - `Ask { ask: String, options: Vec<ItemOption>, recipient_binding_id: UuidV4,
   round_id: UuidV4 }`.
@@ -716,10 +761,21 @@ revision2; exact replay precedes mutable revision guards and never writes. First
 publication is no-clobber; replacement fsyncs a validated `ui.previous.json`
 backup before publication and directory sync. Malformed/future records remain
 untouched. The canonical framed preference response stays within1MiB, while
-full receipt history has no invented aggregate file quota or pruning. Drafts
-and stale/unavailable view routes remain inert and preserved during unrelated
+receipt validation accepts any consecutive run ending at the snapshot revision.
+Each write keeps the newest 256 receipts; exact replay within that window returns
+the saved result. An older operation is new and its stale expected revision
+refuses it. Existing larger receipt histories load and trim on the next write.
+Drafts and stale/unavailable view routes remain inert and preserved during unrelated
 writes. Explicit owner reset/recovery and consuming native wiring remain their
 own acceptance joins; see [ADR-0041](../../adr/ADR-0041-native-core-and-owner-preferences.md).
+
+`PreferencesSnapshot.seen` defaults to an empty list and is omitted when empty,
+so old `ui.json` snapshots reserialize unchanged. Each `SessionSeen` holds
+`{session,since,items:[{item_id,revision}],topics:[{topic_id,at}]}`. Owner-only
+`mark_seen {session,at,items,topics}` merges maximum item revisions and topic times,
+sets since on the first entry only, and refuses more than 10,000 items or 1,024
+topics per session. `set_session_view` leaves seen state untouched. Browsing does
+not write session data.
 
 Warn at 16 MiB per session to surface unexpectedly large personal history. There
 is no first-version snapshot hard cap, item/message quota or reserved-byte ledger.
@@ -774,8 +830,9 @@ round `{ordinal,id}`, project `{canonical_root,id}`, session
 Ordinal paths are derived from explicit parent+ordinal data, never ItemRef parsing.
 `view=projects|sessions|topics|items|messages|inputs|item_messages|item_rounds|
 round_answers|round_owner_messages|round_agent_messages|round_results|round_forks|
-item_status_history|item_updated_messages`. Nested views identify continuation
-cursor scopes within existing queries; they add no endpoints. Execution validates
+item_status_history|item_updated_messages|item_changes`. Nested views identify continuation
+cursor scopes within existing queries. Item changes also have a standalone read
+using the same cursor scope. Execution validates
 the view, filter, sort key and snapshot revision together.
 
 ProjectSummary carries required project_id and required nullable project.

@@ -145,16 +145,27 @@ fn continuation_keeps_ack_proposals_and_remaps_related_without_external_collisio
     let source_item = ItemRef::new("1").unwrap();
     let internal = ItemRef::new("2").unwrap();
     let external = ItemRef::new("99").unwrap();
-    source.items.0.get_mut(&source_item).unwrap().related = Some(vec![
-        internal.clone(),
-        external.clone(),
-        ItemRef::new("98").unwrap(),
-    ]);
+    source.items.0.get_mut(&source_item).unwrap().related =
+        Some(vec![external.clone(), ItemRef::new("98").unwrap()]);
     let proposal = source.items.0.get_mut(&source_item).unwrap();
+    proposal.affects = Some(vec![internal.clone()]);
+    proposal.revision = PositiveSafeInteger::new(2).unwrap();
+    proposal.changes = Some(vec![ItemChangeRecord {
+        wording_only: false,
+        revision: proposal.revision,
+        at: proposal.updated_at.clone(),
+        cause_message_id: proposal.created_message_id.clone(),
+        reason: Some("Previous update".into()),
+        before: ItemChangeBefore {
+            note: Some(None),
+            ..Default::default()
+        },
+    }]);
     proposal.ack_to = Some(AckTarget::Done);
     proposal.outcome = Some("Exact completion proposal.".into());
     proposal.why = Some("Exact supporting evidence.".into());
-    source.items.0.get_mut(&internal).unwrap().related = Some(vec![source_item.clone()]);
+    source.items.0.get_mut(&internal).unwrap().depends_on =
+        Some(vec![source_item.clone(), ItemRef::new("97").unwrap()]);
     let mut outside_topic = source.topics.0[&id(5)].clone();
     outside_topic.id = id(7);
     outside_topic.order = PositiveSafeInteger::new(2).unwrap();
@@ -219,14 +230,16 @@ fn continuation_keeps_ack_proposals_and_remaps_related_without_external_collisio
     .unwrap();
     let copied = store.read(&id(20)).unwrap();
     assert_eq!(
-        copied.items.0[&ItemRef::new("100").unwrap()].related,
+        copied.items.0[&ItemRef::new("100").unwrap()].affects,
         Some(vec![ItemRef::new("101").unwrap()])
     );
     assert_eq!(
-        copied.items.0[&ItemRef::new("101").unwrap()].related,
+        copied.items.0[&ItemRef::new("101").unwrap()].depends_on,
         Some(vec![ItemRef::new("100").unwrap()])
     );
     let proposal = &copied.items.0[&ItemRef::new("100").unwrap()];
+    assert!(proposal.changes.is_none());
+    assert_eq!(proposal.related, Some(vec![]));
     assert_eq!(proposal.status, ItemStatus::Open);
     assert_eq!(proposal.ack_to, Some(AckTarget::Done));
     assert_eq!(proposal.outcome, source.items.0[&source_item].outcome);

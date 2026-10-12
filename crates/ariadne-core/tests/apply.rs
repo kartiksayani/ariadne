@@ -1056,6 +1056,7 @@ fn agent_topic_delete_cancels_targeted_inputs_and_restore_keeps_separate_item_bi
     add_work.operations = vec![
         add("child", uuid(5), Some(existing("1")), true),
         Operation::TopicAdd {
+            brief: None,
             r#ref: RequestRef::new("other").unwrap(),
             name: "Other topic".into(),
             short: None,
@@ -1355,6 +1356,8 @@ fn add(name: &str, topic: UuidRef, parent: Option<EntityRef>, waiting: bool) -> 
         note: None,
         links: None,
         related: None,
+        affects: None,
+        depends_on: None,
         outcome: None,
         why: None,
         replaced_by: None,
@@ -1569,6 +1572,7 @@ fn ordered_local_topics_children_and_replies_commit_one_batch_activity() {
     r.summary = "Exact batch summary.  \n".into();
     r.operations = vec![
         Operation::TopicAdd {
+            brief: None,
             r#ref: RequestRef::new("topic").unwrap(),
             name: "New topic".into(),
             short: None,
@@ -1608,6 +1612,8 @@ fn original_expected_guard_covers_sequential_edits_and_implicit_parent_allocatio
     let mut r = guarded(10, "1", 1);
     r.operations = vec![
         Operation::ItemEdit {
+            wording_only: false,
+            reason: None,
             item: existing("1"),
             patch: ItemPatch {
                 ack_to: None,
@@ -1616,12 +1622,16 @@ fn original_expected_guard_covers_sequential_edits_and_implicit_parent_allocatio
                 note: Some(Some("First".into())),
                 links: None,
                 related: None,
+                affects: None,
+                depends_on: None,
                 short: None,
             },
         },
         add("one", uuid(5), Some(existing("1")), false),
         add("two", uuid(5), Some(existing("1")), false),
         Operation::ItemEdit {
+            wording_only: false,
+            reason: None,
             item: existing("1"),
             patch: ItemPatch {
                 ack_to: None,
@@ -1630,6 +1640,8 @@ fn original_expected_guard_covers_sequential_edits_and_implicit_parent_allocatio
                 note: Some(None),
                 links: Some(vec![]),
                 related: None,
+                affects: None,
+                depends_on: None,
                 short: None,
             },
         },
@@ -1652,6 +1664,7 @@ fn late_invalid_operation_rolls_back_all_allocations_messages_counters_and_recei
     let mut r = request(10);
     r.operations = vec![
         Operation::TopicAdd {
+            brief: None,
             r#ref: RequestRef::new("topic").unwrap(),
             name: "Never saved".into(),
             short: None,
@@ -1669,6 +1682,7 @@ fn refs_are_ordered_unique_and_kind_checked() {
         vec![
             add("a", uuid_local("later"), None, false),
             Operation::TopicAdd {
+                brief: None,
                 r#ref: RequestRef::new("later").unwrap(),
                 name: "Later".into(),
                 short: None,
@@ -1676,11 +1690,13 @@ fn refs_are_ordered_unique_and_kind_checked() {
         ],
         vec![
             Operation::TopicAdd {
+                brief: None,
                 r#ref: RequestRef::new("x").unwrap(),
                 name: "First".into(),
                 short: None,
             },
             Operation::TopicAdd {
+                brief: None,
                 r#ref: RequestRef::new("x").unwrap(),
                 name: "Second".into(),
                 short: None,
@@ -1688,6 +1704,7 @@ fn refs_are_ordered_unique_and_kind_checked() {
         ],
         vec![
             Operation::TopicAdd {
+                brief: None,
                 r#ref: RequestRef::new("x").unwrap(),
                 name: "Topic".into(),
                 short: None,
@@ -2527,6 +2544,8 @@ fn item_links_are_saved_by_add_and_patch_even_when_targets_are_missing() {
 
     let mut edit = guarded(11, "1", 1);
     edit.operations = vec![Operation::ItemEdit {
+        wording_only: false,
+        reason: None,
         item: existing("1"),
         patch: ItemPatch {
             ack_to: None,
@@ -2535,6 +2554,8 @@ fn item_links_are_saved_by_add_and_patch_even_when_targets_are_missing() {
             note: None,
             links: Some(links.clone()),
             related: None,
+            affects: None,
+            depends_on: None,
             short: None,
         },
     }];
@@ -2560,6 +2581,8 @@ fn malformed_item_links_are_rejected_on_add_and_patch_without_saving_anything() 
         create.operations = vec![operation];
         let mut edit = guarded(11, "1", 1);
         edit.operations = vec![Operation::ItemEdit {
+            wording_only: false,
+            reason: None,
             item: existing("1"),
             patch: ItemPatch {
                 ack_to: None,
@@ -2568,6 +2591,8 @@ fn malformed_item_links_are_rejected_on_add_and_patch_without_saving_anything() 
                 note: None,
                 links: Some(links),
                 related: None,
+                affects: None,
+                depends_on: None,
                 short: None,
             },
         }];
@@ -2585,6 +2610,8 @@ fn malformed_item_links_are_rejected_on_add_and_patch_without_saving_anything() 
 
 fn short_patch(short: Option<Option<&str>>) -> Operation {
     Operation::ItemEdit {
+        wording_only: false,
+        reason: None,
         item: existing("1"),
         patch: ItemPatch {
             ack_to: None,
@@ -2593,6 +2620,8 @@ fn short_patch(short: Option<Option<&str>>) -> Operation {
             note: None,
             links: None,
             related: None,
+            affects: None,
+            depends_on: None,
             short: short.map(|value| value.map(Into::into)),
         },
     }
@@ -2608,6 +2637,7 @@ fn short_labels_are_stored_trimmed_and_absent_keeps_null_clears() {
     }
     r.operations = vec![
         Operation::TopicAdd {
+            brief: None,
             r#ref: RequestRef::new("topic").unwrap(),
             name: "SDK cache pull request".into(),
             short: Some(" SDK cache PR".into()),
@@ -2670,6 +2700,7 @@ fn short_labels_are_stored_trimmed_and_absent_keeps_null_clears() {
         setup.rejected(&r, CoreErrorCode::InvalidArgument);
         let mut r = request(15);
         r.operations = vec![Operation::TopicAdd {
+            brief: None,
             r#ref: RequestRef::new("topic").unwrap(),
             name: "Topic".into(),
             short: Some(bad.clone()),
@@ -2684,6 +2715,8 @@ fn short_labels_are_stored_trimmed_and_absent_keeps_null_clears() {
 
 fn related_patch(target: EntityRef, related: Option<Vec<EntityRef>>) -> Operation {
     Operation::ItemEdit {
+        wording_only: false,
+        reason: None,
         item: target,
         patch: ItemPatch {
             ack_to: None,
@@ -2692,6 +2725,8 @@ fn related_patch(target: EntityRef, related: Option<Vec<EntityRef>>) -> Operatio
             note: None,
             links: None,
             related,
+            affects: None,
+            depends_on: None,
             short: None,
         },
     }
@@ -2707,6 +2742,7 @@ fn related_links_resolve_existing_and_earlier_local_items_across_topics() {
     }
     r.operations = vec![
         Operation::TopicAdd {
+            brief: None,
             r#ref: RequestRef::new("other_topic").unwrap(),
             name: "Cross-topic links".into(),
             short: None,
@@ -2740,6 +2776,8 @@ fn related_patch_omitted_or_null_keeps_and_empty_list_clears() {
         let patch: ItemPatch = serde_json::from_str(patch_json).unwrap();
         let mut r = guarded(op, "1", op - 9);
         r.operations = vec![Operation::ItemEdit {
+            wording_only: false,
+            reason: None,
             item: existing("1"),
             patch,
         }];
@@ -2825,7 +2863,7 @@ fn related_targets_in_another_session_do_not_resolve() {
 }
 
 #[test]
-fn old_session_reads_keep_the_original_bytes_and_omit_related() {
+fn old_session_reads_keep_original_bytes_and_omit_optional_knowledge_fields() {
     let setup = Setup::new(&seed());
     let path = store_dir(setup._home.path(), 1)
         .join("sessions")
@@ -2833,14 +2871,25 @@ fn old_session_reads_keep_the_original_bytes_and_omit_related() {
     let original = include_bytes!("../../../fixtures/domain/history/seed.json");
     fs::write(path, original).unwrap();
     let loaded = setup.saved();
-    assert!(loaded.items.0.values().all(|item| item.related.is_none()));
+    assert!(loaded.items.0.values().all(|item| item.related.is_none()
+        && item.affects.is_none()
+        && item.depends_on.is_none()
+        && item.changes.is_none()));
+    assert!(loaded
+        .topics
+        .0
+        .values()
+        .all(|topic| topic.brief.is_none() && topic.brief_updated_at.is_none()));
     assert_eq!(setup.bytes(), original);
     let emitted = serde_json::to_value(loaded).unwrap();
-    assert!(emitted["items"]
-        .as_object()
-        .unwrap()
-        .values()
-        .all(|item| item.get("related").is_none()));
+    assert!(emitted["items"].as_object().unwrap().values().all(|item| [
+        "related",
+        "affects",
+        "depends_on",
+        "changes"
+    ]
+    .iter()
+    .all(|field| item.get(field).is_none())));
 }
 
 #[test]
@@ -3210,6 +3259,8 @@ fn editing_an_ack_choice_preserves_state_and_cannot_reinstate_cleared_ack() {
             let setup = Setup::new(&source);
             let mut r = guarded(992, "1", 1);
             r.operations.push(Operation::ItemEdit {
+                wording_only: false,
+                reason: None,
                 item: existing("1"),
                 patch: ItemPatch {
                     ack_to: Some(target),
@@ -3218,6 +3269,8 @@ fn editing_an_ack_choice_preserves_state_and_cannot_reinstate_cleared_ack() {
                     note: None,
                     links: None,
                     related: None,
+                    affects: None,
+                    depends_on: None,
                     short: None,
                 },
             });
@@ -3225,6 +3278,8 @@ fn editing_an_ack_choice_preserves_state_and_cannot_reinstate_cleared_ack() {
             for (op, revision, patch_json) in [(993, 2, "{}"), (994, 3, r#"{"ack_to":null}"#)] {
                 let mut keep = guarded(op, "1", revision);
                 keep.operations.push(Operation::ItemEdit {
+                    wording_only: false,
+                    reason: None,
                     item: existing("1"),
                     patch: serde_json::from_str(patch_json).unwrap(),
                 });
@@ -3873,6 +3928,8 @@ fn same_turn_bring_or_reopen_cannot_leave_an_open_ask_unanswered() {
                     let mut change = setup.dispatched(1023, &source);
                     change.operations.push(if edit {
                         Operation::ItemEdit {
+                            wording_only: false,
+                            reason: None,
                             item: existing("1"),
                             patch: ItemPatch {
                                 ack_to: None,
@@ -3882,6 +3939,8 @@ fn same_turn_bring_or_reopen_cannot_leave_an_open_ask_unanswered() {
                                 note: Some(Some("Revisited.".into())),
                                 links: None,
                                 related: Some(vec![existing("2")]),
+                                affects: None,
+                                depends_on: None,
                             },
                         }
                     } else {
@@ -3943,6 +4002,8 @@ fn handled_reply_keeps_a_proposed_completion_ackable_and_new_questions_answerabl
     assert_eq!(saved.inputs.0[&source].state, InputState::Handled);
     let mut edit = guarded(1011, "1", saved.items.0[&item("1")].revision.value());
     edit.operations.push(Operation::ItemEdit {
+        wording_only: false,
+        reason: None,
         item: existing("1"),
         patch: ItemPatch {
             ack_to: None,
@@ -3952,6 +4013,8 @@ fn handled_reply_keeps_a_proposed_completion_ackable_and_new_questions_answerabl
             note: None,
             links: None,
             related: None,
+            affects: None,
+            depends_on: None,
         },
     });
     setup.rejected(&edit, CoreErrorCode::InvalidTransition);
@@ -3973,4 +4036,470 @@ fn handled_reply_keeps_a_proposed_completion_ackable_and_new_questions_answerabl
         )
         .unwrap();
     assert_eq!(setup.saved().items.0[&item("1")].status, ItemStatus::Done);
+}
+
+fn typed_patch(kind: &str, targets: serde_json::Value) -> Operation {
+    serde_json::from_value(serde_json::json!({
+        "op": "item.edit", "item": {"id": "1"},
+        "patch": {kind: targets}, "reason": "  Explain the dependency.  "
+    }))
+    .unwrap()
+}
+
+#[test]
+fn knowledge_links_resolve_local_refs_preserve_omission_clear_and_record_changes() {
+    for kind in ["affects", "depends_on"] {
+        let setup = Setup::new(&seed());
+        let mut r = guarded(900, "1", 1);
+        let mut new_item = add("dependency", uuid(5), None, false);
+        if let Operation::ItemAdd(draft) = &mut new_item {
+            if kind == "affects" {
+                draft.affects = Some(vec![existing("2")]);
+            } else {
+                draft.depends_on = Some(vec![existing("2")]);
+            }
+        }
+        r.operations = vec![
+            new_item,
+            typed_patch(kind, serde_json::json!([{"ref":"dependency"}])),
+        ];
+        let receipt = setup.execute(&r).unwrap();
+        let saved = setup.saved();
+        let record = saved.items.0[&item("1")]
+            .changes
+            .as_ref()
+            .unwrap()
+            .last()
+            .unwrap();
+        assert_eq!(record.revision, p(2));
+        assert_eq!(record.reason.as_deref(), Some("Explain the dependency."));
+        assert_eq!(
+            serde_json::to_value(&record.before).unwrap(),
+            serde_json::json!({kind: null})
+        );
+        assert_eq!(
+            saved
+                .messages
+                .iter()
+                .find(|message| message.id == record.cause_message_id)
+                .unwrap()
+                .kind,
+            MessageKind::Activity
+        );
+        assert!(saved.items.0[&item("3")].changes.is_none());
+        assert_eq!(
+            serde_json::to_value(&saved.items.0[&item("3")]).unwrap()[kind],
+            serde_json::json!(["2"])
+        );
+        let summary = apply::summarize(&saved, &receipt).unwrap();
+        assert!(summary
+            .items
+            .iter()
+            .any(|changed| changed.id == item("1") && changed.revision == p(2)));
+        let mut keep = guarded(901, "1", 2);
+        keep.operations = vec![related_patch(existing("1"), None)];
+        setup.execute(&keep).unwrap();
+        assert_eq!(
+            serde_json::to_value(&setup.saved().items.0[&item("1")]).unwrap()[kind],
+            serde_json::json!(["3"])
+        );
+        let mut clear = guarded(902, "1", 3);
+        clear.operations = vec![typed_patch(kind, serde_json::json!([]))];
+        setup.execute(&clear).unwrap();
+        assert_eq!(
+            serde_json::to_value(&setup.saved().items.0[&item("1")]).unwrap()[kind],
+            serde_json::json!([])
+        );
+    }
+}
+
+#[test]
+fn knowledge_links_refuse_bad_refs_caps_and_cross_list_duplicates_atomically() {
+    for kind in ["affects", "depends_on"] {
+        for targets in [
+            serde_json::json!([{"id":"1"}]),
+            serde_json::json!([{"id":"2"},{"id":"2"}]),
+            serde_json::json!([{"id":"99"}]),
+            serde_json::json!([{"ref":"later"}]),
+        ] {
+            let setup = Setup::new(&seed());
+            let mut r = guarded(910, "1", 1);
+            r.operations = vec![typed_patch(kind, targets)];
+            setup.rejected(&r, CoreErrorCode::InvalidRef);
+        }
+        let setup = Setup::new(&seed());
+        let mut r = guarded(911, "1", 1);
+        r.operations = vec![typed_patch(
+            kind,
+            serde_json::json!(vec![serde_json::json!({"id":"2"}); 33]),
+        )];
+        setup.rejected(&r, CoreErrorCode::InvalidArgument);
+        let mut session = seed();
+        session.items.0.get_mut(&item("1")).unwrap().related = Some(vec![item("2")]);
+        let setup = Setup::new(&session);
+        r.operations = vec![typed_patch(kind, serde_json::json!([{"id":"2"}]))];
+        setup.rejected(&r, CoreErrorCode::InvalidRef);
+    }
+    let setup = Setup::new(&seed());
+    let mut r = guarded(912, "1", 1);
+    r.operations = vec![serde_json::from_value(serde_json::json!({"op":"item.edit","item":{"id":"1"},"patch":{"affects":[{"id":"2"}],"depends_on":[{"id":"2"}]}})).unwrap()];
+    setup.rejected(&r, CoreErrorCode::InvalidRef);
+}
+
+#[test]
+fn knowledge_dangling_links_prune_only_written_list_and_share_existing_receipt() {
+    let mut session = seed();
+    session.items.0.get_mut(&item("1")).unwrap().affects = Some(vec![item("2"), item("98")]);
+    session.items.0.get_mut(&item("1")).unwrap().depends_on = Some(vec![item("99")]);
+    let setup = Setup::new(&session);
+    let mut r = guarded(920, "1", 1);
+    r.operations = vec![typed_patch(
+        "affects",
+        serde_json::json!([{"id":"2"},{"id":"98"}]),
+    )];
+    let receipt = setup.execute(&r).unwrap();
+    let saved = setup.saved();
+    assert_eq!(saved.items.0[&item("1")].affects, Some(vec![item("2")]));
+    assert_eq!(saved.items.0[&item("1")].depends_on, Some(vec![item("99")]));
+    let SavedReceiptData::Apply { pruned_related, .. } = &receipt.data else {
+        panic!("apply")
+    };
+    assert_eq!(
+        pruned_related.as_ref().unwrap().0[&item("1")],
+        vec![item("98")]
+    );
+    assert_eq!(setup.execute(&r).unwrap(), receipt);
+}
+
+#[test]
+fn topic_briefs_trim_edit_clear_require_revision_and_refuse_nonlive_topics() {
+    let setup = Setup::new(&seed());
+    let mut r = request(930);
+    r.operations = vec![Operation::TopicAdd {
+        r#ref: RequestRef::new("briefed").unwrap(),
+        name: "Briefed".into(),
+        short: None,
+        brief: Some("  First line.\nSecond line.  ".into()),
+    }];
+    let receipt = setup.execute(&r).unwrap();
+    let SavedReceiptData::Apply { allocated_refs, .. } = &receipt.data else {
+        panic!("apply")
+    };
+    let AllocatedRef::Topic { id: topic_id } =
+        &allocated_refs.0[&RequestRef::new("briefed").unwrap()]
+    else {
+        panic!("topic")
+    };
+    let topic = setup.saved().topics.0[topic_id].clone();
+    assert_eq!(topic.brief.as_deref(), Some("First line.\nSecond line."));
+    assert_eq!(topic.brief_updated_at, Some(at()));
+    let mut edit = request(931);
+    edit.operations = vec![Operation::TopicEdit {
+        topic: UuidRef::Existing(ExistingUuidRef {
+            id: topic_id.clone(),
+        }),
+        name: Some("Renamed".into()),
+        short: Some(Some("  Read this  ".into())),
+        brief: Some(None),
+    }];
+    setup.rejected(&edit, CoreErrorCode::RevisionConflict);
+    edit.expected_topic_revisions
+        .0
+        .insert(topic_id.clone(), p(1));
+    let receipt = setup.execute(&edit).unwrap();
+    let saved = setup.saved();
+    let topic = &saved.topics.0[topic_id];
+    assert_eq!(topic.name, "Renamed");
+    assert_eq!(topic.short.as_deref(), Some("Read this"));
+    assert!(topic.brief.is_none());
+    assert_eq!(topic.revision, p(2));
+    assert_eq!(
+        apply::summarize(&saved, &receipt).unwrap().topics[0].revision,
+        p(2)
+    );
+    for archived in [false, true] {
+        let mut session = seed();
+        if archived {
+            session.topics.0.get_mut(&id(5)).unwrap().archived_at = Some(at());
+        }
+
+        let setup = Setup::new(&session);
+        if !archived {
+            let mut remove = request(933);
+            remove.expected_topic_revisions.0.insert(id(5), p(1));
+            remove.operations = vec![Operation::TopicDelete { topic: uuid(5) }];
+            setup.execute(&remove).unwrap();
+        }
+        let mut edit = request(932);
+        edit.expected_topic_revisions
+            .0
+            .insert(id(5), if archived { p(1) } else { p(2) });
+        edit.operations = vec![Operation::TopicEdit {
+            topic: uuid(5),
+            name: None,
+            short: None,
+            brief: Some(Some("Update".into())),
+        }];
+        setup.rejected(&edit, CoreErrorCode::InvalidTransition);
+    }
+}
+
+#[test]
+fn knowledge_text_bounds_reject_before_writing() {
+    for reason in ["x".repeat(281), "two\nlines".into(), " ".into()] {
+        let setup = Setup::new(&seed());
+        let mut r = guarded(940, "1", 1);
+        r.operations = vec![serde_json::from_value(serde_json::json!({"op":"item.edit", "item":{"id":"1"}, "patch":{"note":"edited"}, "reason":reason})).unwrap()];
+        setup.rejected(&r, CoreErrorCode::InvalidArgument);
+    }
+    for brief in ["x".repeat(1201), " ".into()] {
+        let setup = Setup::new(&seed());
+        let mut r = request(941);
+        r.operations = vec![Operation::TopicAdd {
+            r#ref: RequestRef::new("bad").unwrap(),
+            name: "Bad".into(),
+            short: None,
+            brief: Some(brief),
+        }];
+        setup.rejected(&r, CoreErrorCode::InvalidArgument);
+    }
+}
+
+#[test]
+fn lenient_knowledge_link_repair_uses_stored_lists_and_replays_without_repair() {
+    for kind in ["affects", "depends_on"] {
+        let mut session = seed();
+        session.items.0.get_mut(&item("1")).unwrap().related = Some(vec![item("2"), item("99")]);
+        let setup = Setup::new(&session);
+        let mut r = guarded(950, "1", 1);
+        r.operations = vec![typed_patch(kind, serde_json::json!([{"id":"2"}]))];
+        let service = ApplyService::new(&setup.registry);
+        let context = setup.context(None);
+        let (preview, repairs) = service
+            .preview_lenient(
+                &context,
+                &r,
+                || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                at(),
+            )
+            .unwrap();
+        assert_eq!(repairs.len(), 1);
+        assert_eq!(preview.session.items.0[&item("1")].related, Some(vec![]));
+        assert_eq!(setup.saved(), session);
+        let (receipt, replayed, repairs) = service
+            .execute_lenient(
+                &context,
+                &r,
+                || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                at(),
+            )
+            .unwrap();
+        assert!(!replayed);
+        assert_eq!(repairs.len(), 1);
+        let SavedReceiptData::Apply { pruned_related, .. } = &receipt.data else {
+            panic!("apply")
+        };
+        assert_eq!(
+            pruned_related.as_ref().unwrap().0[&item("1")],
+            vec![item("99")]
+        );
+        let saved = setup.saved();
+        assert_eq!(saved.items.0[&item("1")].related, Some(vec![]));
+        assert_eq!(
+            serde_json::to_value(&saved.items.0[&item("1")]).unwrap()[kind],
+            serde_json::json!(["2"])
+        );
+        let (replay, replayed, repairs) = service
+            .execute_lenient(&context, &r, || panic!("replay allocates nothing"), at())
+            .unwrap();
+        assert!(replayed);
+        assert!(repairs.is_empty());
+        assert_eq!(replay, receipt);
+        assert_eq!(setup.saved(), saved);
+    }
+}
+
+#[test]
+fn creation_batch_edits_have_no_records_and_later_batch_records_first_change() {
+    let setup = Setup::new(&seed());
+    let mut r = request(960);
+    r.operations = vec![add("first",uuid(5),None,false), add("second",uuid(5),None,false), serde_json::from_value(serde_json::json!({"op":"item.edit","item":{"ref":"first"},"patch":{"affects":[{"ref":"second"}]}})).unwrap(), serde_json::from_value(serde_json::json!({"op":"item.edit","item":{"ref":"first"},"patch":{"note":"Explicit creation content."},"reason":"Initial details","wording_only":true})).unwrap()];
+    let service = ApplyService::new(&setup.registry);
+    let context = setup.context(None);
+    let (preview, _) = service
+        .preview_lenient(
+            &context,
+            &r,
+            || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+            at(),
+        )
+        .unwrap();
+    assert!(preview.session.items.0[&item("3")].changes.is_none());
+    assert_eq!(preview.session.items.0[&item("3")].revision, p(3));
+    assert_eq!(setup.saved(), seed());
+    let (receipt, replayed, _) = service
+        .execute_lenient(
+            &context,
+            &r,
+            || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+            at(),
+        )
+        .unwrap();
+    assert!(!replayed);
+    let saved = setup.saved();
+    assert!(saved.items.0[&item("3")].changes.is_none());
+    assert_eq!(saved.items.0[&item("3")].affects, Some(vec![item("4")]));
+    assert_eq!(
+        saved.items.0[&item("3")].note.as_deref(),
+        Some("Explicit creation content.")
+    );
+    let (replay, replayed, _) = service
+        .execute_lenient(&context, &r, || panic!("replay allocates nothing"), at())
+        .unwrap();
+    assert!(replayed);
+    assert_eq!(replay, receipt);
+    assert_eq!(setup.saved(), saved);
+    let mut later = guarded(961, "3", 3);
+    later.operations = vec![serde_json::from_value(serde_json::json!({"op":"item.edit","item":{"id":"3"},"patch":{"note":"Changed after creation."},"reason":"Now revising."})).unwrap()];
+    setup.execute(&later).unwrap();
+    let saved = setup.saved();
+    let changes = saved.items.0[&item("3")].changes.as_ref().unwrap();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].revision, p(4));
+    assert_eq!(
+        changes[0].before.note,
+        Some(Some("Explicit creation content.".into()))
+    );
+    assert_eq!(changes[0].reason.as_deref(), Some("Now revising."));
+}
+
+#[test]
+fn wording_only_operation_defaults_false_and_preserves_legacy_serialization() {
+    let legacy =
+        serde_json::json!({"op":"item.edit","item":{"id":"1"},"patch":{"note":"Clearer prose"}});
+    let operation: Operation = serde_json::from_value(legacy).unwrap();
+    let normalized = serde_json::to_value(&operation).unwrap();
+    assert!(normalized.get("wording_only").is_none());
+    let mut explicit_false = normalized.clone();
+    explicit_false["wording_only"] = serde_json::json!(false);
+    let parsed: Operation = serde_json::from_value(explicit_false).unwrap();
+    assert_eq!(parsed, operation);
+    assert_eq!(serde_json::to_value(parsed).unwrap(), normalized);
+    let mut explicit_true = normalized;
+    explicit_true["wording_only"] = serde_json::json!(true);
+    let parsed: Operation = serde_json::from_value(explicit_true.clone()).unwrap();
+    assert_eq!(serde_json::to_value(parsed).unwrap(), explicit_true);
+}
+
+#[test]
+fn wording_only_batch_records_text_and_refuses_forbidden_changes_without_publication() {
+    for (field, value) in [
+        ("type", serde_json::json!("task")),
+        ("ack_to", serde_json::json!("dropped")),
+        (
+            "links",
+            serde_json::json!([{"kind":"item","label":"Reference","target":"2"}]),
+        ),
+        ("related", serde_json::json!([{"id":"2"}])),
+        ("affects", serde_json::json!([{"id":"2"}])),
+        ("depends_on", serde_json::json!([{"id":"2"}])),
+    ] {
+        let setup = Setup::new(&seed());
+        let mut r = guarded(990, "1", 1);
+        let mut patch = serde_json::json!({"note":"Clearer wording"});
+        patch[field] = value;
+        r.operations = vec![add("unpublished", uuid(5), None, false), serde_json::from_value(serde_json::json!({"op":"item.edit","item":{"id":"1"},"patch":patch,"wording_only":true})).unwrap()];
+        let before = setup.bytes();
+        let error = core_error(setup.execute(&r).unwrap_err());
+        assert_eq!(
+            error.code,
+            CoreErrorCode::InvalidArgument,
+            "{field}: {error:?}"
+        );
+        assert!(
+            error.message.contains(&format!("cannot change {field}")),
+            "{error:?}"
+        );
+        assert_eq!(setup.bytes(), before, "{field}");
+    }
+    let setup = Setup::new(&seed());
+    let mut r = guarded(991, "1", 1);
+    r.operations = vec![serde_json::from_value(serde_json::json!({"op":"item.edit","item":{"id":"1"},"patch":{"question":"Same meaning, clearer question","short":"Clear wording","note":"Clearer note"},"wording_only":true,"reason":"Clarify prose"})).unwrap()];
+    setup.execute(&r).unwrap();
+    let saved = setup.saved();
+    let changed = &saved.items.0[&item("1")];
+    let record = &changed.changes.as_ref().unwrap()[0];
+    assert!(record.wording_only);
+    assert_eq!(record.reason.as_deref(), Some("Clarify prose"));
+    let before = serde_json::to_value(&record.before).unwrap();
+    assert_eq!(before.as_object().unwrap().len(), 3);
+    for field in ["question", "short", "note"] {
+        assert!(before.get(field).is_some());
+    }
+}
+
+#[test]
+fn wording_only_echoes_keep_dangling_relations_and_never_hide_changes_through_pruning_or_repair() {
+    for kind in ["related", "affects", "depends_on"] {
+        let mut source = seed();
+        let root = source.items.0.get_mut(&item("1")).unwrap();
+        *match kind {
+            "related" => &mut root.related,
+            "affects" => &mut root.affects,
+            _ => &mut root.depends_on,
+        } = Some(vec![item("99")]);
+        let setup = Setup::new(&source);
+        let mut r = guarded(992, "1", 1);
+        let mut patch = serde_json::json!({"note":"Clearer wording"});
+        patch[kind] = serde_json::json!([{"id":"99"}]);
+        r.operations = vec![serde_json::from_value(serde_json::json!({"op":"item.edit","item":{"id":"1"},"patch":patch,"wording_only":true})).unwrap()];
+        let receipt = setup.execute(&r).unwrap();
+        let saved = setup.saved();
+        let root = &saved.items.0[&item("1")];
+        assert_eq!(
+            match kind {
+                "related" => &root.related,
+                "affects" => &root.affects,
+                _ => &root.depends_on,
+            },
+            &Some(vec![item("99")])
+        );
+        assert_eq!(
+            serde_json::to_value(&root.changes.as_ref().unwrap()[0].before).unwrap(),
+            serde_json::json!({"note":source.items.0[&item("1")].note})
+        );
+        let SavedReceiptData::Apply { pruned_related, .. } = receipt.data else {
+            panic!("apply receipt")
+        };
+        assert!(pruned_related
+            .as_ref()
+            .is_none_or(|pruned| pruned.0.is_empty()));
+        // Dropping the dangling declaration is still a forbidden actual change.
+        let mut clear = guarded(993, "1", 2);
+        let mut patch = serde_json::json!({"note":"Another wording change"});
+        patch[kind] = serde_json::json!([]);
+        clear.operations = vec![serde_json::from_value(serde_json::json!({"op":"item.edit","item":{"id":"1"},"patch":patch,"wording_only":true})).unwrap()];
+        setup.rejected(&clear, CoreErrorCode::InvalidArgument);
+    }
+    // Adding a specific link must be refused before lenient repair could remove
+    // the original related link and publish two forbidden changes.
+    let mut source = seed();
+    source.items.0.get_mut(&item("1")).unwrap().related = Some(vec![item("2")]);
+    let setup = Setup::new(&source);
+    let mut r = guarded(994, "1", 1);
+    r.operations = vec![serde_json::from_value(serde_json::json!({"op":"item.edit","item":{"id":"1"},"patch":{"note":"Clearer prose","affects":[{"id":"2"}]},"wording_only":true})).unwrap()];
+    let before = setup.bytes();
+    let service = ApplyService::new(&setup.registry);
+    let error = core_error(
+        service
+            .execute_lenient(
+                &setup.context(None),
+                &r,
+                || id(setup.next.fetch_add(1, Ordering::SeqCst)),
+                at(),
+            )
+            .unwrap_err(),
+    );
+    assert!(error.message.contains("cannot change affects"), "{error:?}");
+    assert_eq!(setup.bytes(), before);
 }

@@ -2,6 +2,7 @@
 //!
 //! Store/core compose these with history, delivery, actor and transaction checks;
 //! this module does not implement those state machines.
+mod changes;
 mod delivery;
 pub use delivery::{validate_prepared_payload, validate_session_delivery};
 pub(crate) mod items;
@@ -13,6 +14,72 @@ use std::fmt;
 
 pub use items::validate_item;
 pub use session::validate_session_items;
+
+pub const TOPIC_BRIEF_MAX_CHARS: usize = 1200;
+pub const CHANGE_REASON_MAX_CHARS: usize = 280;
+
+pub fn normalize_topic_brief(value: &str, path: &str) -> Result<String, ValidationError> {
+    let value = value.trim();
+    bounded_trimmed_text(value, path, TOPIC_BRIEF_MAX_CHARS, false)?;
+    Ok(value.to_owned())
+}
+
+pub fn normalize_change_reason(value: &str, path: &str) -> Result<String, ValidationError> {
+    let value = value.trim();
+    bounded_trimmed_text(value, path, CHANGE_REASON_MAX_CHARS, true)?;
+    Ok(value.to_owned())
+}
+
+fn bounded_trimmed_text(
+    value: &str,
+    path: &str,
+    maximum_chars: usize,
+    one_line: bool,
+) -> Result<(), ValidationError> {
+    text(value, path, true, None)?;
+    require(
+        !one_line || !value.contains(['\n', '\r']),
+        path,
+        ValidationErrorKind::Multiline,
+    )?;
+    require(
+        value.trim() == value,
+        path,
+        ValidationErrorKind::InvalidState,
+    )?;
+    require(
+        value.chars().count() <= maximum_chars,
+        path,
+        ValidationErrorKind::TooManyChars { maximum_chars },
+    )
+}
+
+pub(crate) fn item_reference_lists(
+    id: &ItemRef,
+    lists: [(&str, &Option<Vec<ItemRef>>); 3],
+    path: &str,
+) -> Result<(), ValidationError> {
+    let mut seen = BTreeSet::new();
+    for (field, targets) in lists {
+        if let Some(targets) = targets {
+            let path = format!("{path}.{field}");
+            require(
+                targets.len() <= 32,
+                &path,
+                ValidationErrorKind::TooMany { maximum: 32 },
+            )?;
+            require(
+                !targets.contains(id),
+                &path,
+                ValidationErrorKind::InvalidState,
+            )?;
+            for target in targets {
+                require(seen.insert(target), &path, ValidationErrorKind::Duplicate)?;
+            }
+        }
+    }
+    Ok(())
+}
 
 fn validate_removal(
     session: &Session,

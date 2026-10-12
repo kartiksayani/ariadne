@@ -577,6 +577,7 @@ fn every_skill_example_passes_the_real_cli_and_together_they_cover_the_surface()
     // The core table names every operation the request type has.
     for op in [
         "topic.add",
+        "topic.edit",
         "item.add",
         "item.edit",
         "item.ask",

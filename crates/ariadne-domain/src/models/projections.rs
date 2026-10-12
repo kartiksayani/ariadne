@@ -70,6 +70,7 @@ pub enum QueryView {
     RoundForks,
     ItemStatusHistory,
     ItemUpdatedMessages,
+    ItemChanges,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
@@ -120,7 +121,7 @@ pub struct Page<T> {
     pub snapshot_revision: PositiveSafeInteger,
 }
 
-/// All current item fields except unbounded updated-message and status-history arrays.
+/// Current item fields; change records and other history have independent pages.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct ItemSnapshot {
@@ -149,6 +150,12 @@ pub struct ItemSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub related: Option<Vec<ItemRef>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub affects: Option<Vec<ItemRef>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub depends_on: Option<Vec<ItemRef>>,
     pub outcome: Option<String>,
     pub why: Option<String>,
     pub replaced_by: Option<ItemRef>,
@@ -168,6 +175,9 @@ pub struct ItemReadProjection {
     pub item: ItemSnapshot,
     pub updated_messages: Page<Message>,
     pub status_history: Page<StatusHistoryEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub changes: Option<Page<ItemChangeRecord>>,
 }
 
 /// Frozen round fields; each historical list has an independent page below.
@@ -221,6 +231,13 @@ pub struct ItemMessagesProjection {
     pub item_id: ItemRef,
     pub messages: Page<Message>,
     pub timeline_context: TimelineContext,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ItemChangesProjection {
+    pub item_id: ItemRef,
+    pub changes: Page<ItemChangeRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]

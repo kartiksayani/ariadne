@@ -10,7 +10,7 @@ import { normalizeSearch, sentenceRows, type SentenceRow } from '../../selectors
 import { shortLabel } from '../shared/short';
 import { displayStatus, type DisplayStatus } from '../../selectors/waiting/replied';
 import { hiddenItems } from '../tree/hidden';
-import { relatedItems } from '../../selectors/related';
+import { connectedItems } from '../../selectors/related';
 import { ackTarget } from '../../selectors/ack';
 import { hasStatusFilter } from '../../selectors/tree/folds';
 
@@ -206,7 +206,7 @@ export function sessionGraph(input: GraphInput): SessionGraph {
   });
   const crossTopicRelated: RelatedEdge[] = [];
   const selected = selectedId ? nodes.get(selectedId) : undefined;
-  const linked = selected ? relatedItems(session, selected.item.id) : [];
+  const linked = selected ? connectedItems(session, selected.item.id) : [];
   const relatedByTopic = new Map<string, { id: string; d: string }[]>();
   for (const item of linked) {
     const target = nodes.get(item.id);

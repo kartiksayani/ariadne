@@ -137,6 +137,7 @@ fn quit_preserves_running_external_turn_and_queued_input_with_real_native_runtim
                     r#ref: RequestRef::new("topic").unwrap(),
                     name: "Held external turn".into(),
                     short: None,
+                    brief: None,
                 },
                 Operation::ItemAdd(Box::new(ItemAddOperation {
                     r#ref: RequestRef::new("item").unwrap(),
@@ -157,6 +158,8 @@ fn quit_preserves_running_external_turn_and_queued_input_with_real_native_runtim
                     note: None,
                     links: None,
                     related: None,
+                    affects: None,
+                    depends_on: None,
                     outcome: None,
                     why: None,
                     replaced_by: None,

@@ -446,6 +446,50 @@ fn summaries_preserve_incompleteness_and_all_seven_status_counts() {
 }
 
 #[test]
+fn item_changes_are_an_optional_independent_history_page() {
+    let mut snapshot = item();
+    for field in ["updated_message_ids", "status_history"] {
+        snapshot.as_object_mut().unwrap().remove(field);
+    }
+    let original = json!({"item": snapshot, "updated_messages": {"items": [], "next_cursor": null, "snapshot_revision": 2}, "status_history": {"items": [], "next_cursor": null, "snapshot_revision": 2}});
+    assert_eq!(
+        assert_wire::<ItemReadProjection>(original.clone()),
+        original
+    );
+    assert!(original.get("changes").is_none());
+    let mut changed = original;
+    changed["changes"] = page(
+        vec![json!({"revision": 2, "at": TIME, "cause_message_id": ID, "before": {"note": null}})],
+        "item_changes",
+        json!({"kind": "history", "index": 1}),
+    );
+    assert_eq!(assert_wire::<ItemReadProjection>(changed.clone()), changed);
+    assert_eq!(changed["changes"]["next_cursor"]["view"], "item_changes");
+    snapshot["changes"] = json!([]);
+    reject_wire::<ItemSnapshot>(snapshot);
+}
+
+#[test]
+fn standalone_item_changes_page_requires_no_current_item_snapshot() {
+    let changes = page(
+        vec![
+            json!({"revision": 2, "at": TIME, "cause_message_id": ID, "before": {"question": "Previous question"}}),
+        ],
+        "item_changes",
+        json!({"kind": "history", "index": 1}),
+    );
+    let projection = json!({"item_id": "1", "changes": changes});
+    assert_eq!(
+        assert_wire::<ItemChangesProjection>(projection.clone()),
+        projection
+    );
+    let mut unexpected_snapshot = projection;
+    unexpected_snapshot["item"] = item();
+    reject_wire::<ItemChangesProjection>(unexpected_snapshot);
+    reject_wire::<ItemChangesProjection>(json!({"item_id": "1"}));
+}
+
+#[test]
 fn every_cursor_sort_key_is_typed_and_none_is_an_opaque_token() {
     for position in [
         json!({"kind":"sequence","number":1,"id":ID}),

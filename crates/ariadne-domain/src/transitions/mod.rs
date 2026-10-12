@@ -14,6 +14,10 @@ pub enum ItemChange {
         note: Option<Option<String>>,
         links: Option<Vec<ItemLinkTarget>>,
         related: Option<Vec<ItemRef>>,
+        affects: Option<Vec<ItemRef>>,
+        depends_on: Option<Vec<ItemRef>>,
+        reason: Option<String>,
+        wording_only: bool,
         /// `None` keeps the label, `Some(None)` clears it, `Some(Some(_))` sets
         /// the trimmed value.
         short: Option<Option<String>>,
@@ -60,6 +64,7 @@ pub enum TransitionError {
     StaleGeneration,
     InvalidCauseMessage,
     InvalidTransition,
+    WordingOnlyChange { field: &'static str },
     MissingReason,
     UnhandledOwnerMessages { message_ids: Vec<UuidV4> },
     InvalidHandledWatermark,
@@ -72,7 +77,13 @@ impl From<ValidationError> for TransitionError {
 }
 impl fmt::Display for TransitionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self:?}")
+        match self {
+            Self::WordingOnlyChange { field } => write!(
+                f,
+                "A wording-only edit cannot change {field}; only question, short and note may change."
+            ),
+            _ => write!(f, "{self:?}"),
+        }
     }
 }
 impl std::error::Error for TransitionError {}
@@ -99,6 +110,7 @@ pub fn transition_item(
     validate_context(session, old, context)?;
     let mut item = old.clone();
     let mut fresh_round = false;
+    let reason;
     match change {
         ItemChange::Edit {
             ack_to,
@@ -107,8 +119,56 @@ pub fn transition_item(
             note,
             links,
             related,
+            affects,
+            depends_on,
+            reason: edit_reason,
+            wording_only,
             short,
         } => {
+            if *wording_only {
+                for (field, changed) in [
+                    (
+                        "ack_to",
+                        ack_to.is_some_and(|value| Some(value) != old.ack_to),
+                    ),
+                    (
+                        "type",
+                        item_type
+                            .as_ref()
+                            .is_some_and(|value| value != &old.item_type),
+                    ),
+                    (
+                        "links",
+                        links.as_ref().is_some_and(|value| value != &old.links),
+                    ),
+                    (
+                        "related",
+                        related
+                            .as_ref()
+                            .is_some_and(|value| Some(value) != old.related.as_ref()),
+                    ),
+                    (
+                        "affects",
+                        affects
+                            .as_ref()
+                            .is_some_and(|value| Some(value) != old.affects.as_ref()),
+                    ),
+                    (
+                        "depends_on",
+                        depends_on
+                            .as_ref()
+                            .is_some_and(|value| Some(value) != old.depends_on.as_ref()),
+                    ),
+                ] {
+                    if changed {
+                        return Err(TransitionError::WordingOnlyChange { field });
+                    }
+                }
+            }
+            reason = edit_reason
+                .as_deref()
+                .map(|reason| validation::normalize_change_reason(reason, "edit.reason"))
+                .transpose()?;
             if let Some(target) = ack_to {
                 if old.ack_to.is_none()
                     || !matches!(old.status, ItemStatus::Open | ItemStatus::InProgress)
@@ -135,20 +195,31 @@ pub fn transition_item(
             if let Some(note) = note {
                 item.note = note.clone();
             }
-            if let Some(related) = related {
-                validation::require(
-                    related.len() <= 32,
-                    "edit.related",
-                    ValidationErrorKind::TooMany { maximum: 32 },
-                )?;
-                for target in related {
+            for (field, proposed, saved) in [
+                ("related", related, &mut item.related),
+                ("affects", affects, &mut item.affects),
+                ("depends_on", depends_on, &mut item.depends_on),
+            ] {
+                if let Some(targets) = proposed {
+                    // A wording-only echo keeps even dangling declarations;
+                    // pruning would itself change an unapproved link list.
+                    if *wording_only {
+                        continue;
+                    }
                     validation::require(
-                        session.items.0.contains_key(target),
-                        format!("edit.related.{}", target.as_str()),
-                        ValidationErrorKind::MissingReference,
+                        targets.len() <= 32,
+                        format!("edit.{field}"),
+                        ValidationErrorKind::TooMany { maximum: 32 },
                     )?;
+                    for target in targets {
+                        validation::require(
+                            session.items.0.contains_key(target),
+                            format!("edit.{field}.{}", target.as_str()),
+                            ValidationErrorKind::MissingReference,
+                        )?;
+                    }
+                    *saved = Some(targets.clone());
                 }
-                item.related = Some(related.clone());
             }
             if let Some(links) = links {
                 item.links = links.clone();
@@ -160,6 +231,7 @@ pub fn transition_item(
             recipient_binding_id,
             round_id,
         } => {
+            reason = None;
             if validation::terminal(&old.status) {
                 return Err(TransitionError::InvalidTransition);
             }
@@ -184,15 +256,22 @@ pub fn transition_item(
             ack_to,
             outcome,
             why,
-            reason,
+            reason: status_reason,
         } => {
+            reason = status_reason
+                .as_deref()
+                .map(|reason| validation::normalize_change_reason(reason, "status.reason"))
+                .transpose()?
+                .or_else(|| why.as_deref().map(derived_reason));
             if matches!(status, ItemStatus::WaitingOnMe | ItemStatus::Replaced)
                 || old.status == ItemStatus::Replaced
             {
                 return Err(TransitionError::InvalidTransition);
             }
             if !validation::terminal(status) {
-                let reason = reason.as_ref().ok_or(TransitionError::MissingReason)?;
+                let reason = status_reason
+                    .as_ref()
+                    .ok_or(TransitionError::MissingReason)?;
                 validation::text(reason, "status.reason", true, None)?;
                 if ack_to.or(old.ack_to).is_none() && (outcome.is_some() || why.is_some()) {
                     return Err(TransitionError::InvalidTransition);
@@ -216,7 +295,7 @@ pub fn transition_item(
                 }
                 terminal_guard(session, old, context)?;
             }
-            validation::optional_text(reason, "status.reason", true, None)?;
+            validation::optional_text(status_reason, "status.reason", true, None)?;
             item.status = status.clone();
             item.ack_to = ack_to.or(old.ack_to);
             // A nonterminal Ack clears the target, but later progress still
@@ -232,13 +311,14 @@ pub fn transition_item(
                 .or_else(|| preserve_prose.then(|| old.why.clone()).flatten());
             item.replaced_by = None;
             leave_waiting(&mut item, old)?;
-            history(&mut item, old, context, reason.clone());
+            history(&mut item, old, context, status_reason.clone());
         }
         ItemChange::Replace {
             replacement,
             outcome,
             why,
         } => {
+            reason = Some(derived_reason(why));
             if old.status == ItemStatus::Replaced {
                 return Err(TransitionError::InvalidTransition);
             }
@@ -256,6 +336,19 @@ pub fn transition_item(
     }
     item.revision = increment(item.revision)?;
     item.updated_at = context.at.clone();
+    record_change(
+        &mut item,
+        old,
+        context,
+        reason,
+        matches!(
+            change,
+            ItemChange::Edit {
+                wording_only: true,
+                ..
+            }
+        ),
+    );
     if !item.updated_message_ids.contains(&context.cause_message_id) {
         item.updated_message_ids
             .push(context.cause_message_id.clone());
@@ -363,4 +456,80 @@ fn increment(value: PositiveSafeInteger) -> Result<PositiveSafeInteger, Transiti
         .checked_add(1)
         .and_then(|next| PositiveSafeInteger::new(next).ok())
         .ok_or(TransitionError::CounterOverflow)
+}
+
+fn derived_reason(why: &str) -> String {
+    // Preserve the existing full multiline `why`; its history reason is a short
+    // synopsis, so deriving one does not narrow that established prose contract.
+    why.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(validation::CHANGE_REASON_MAX_CHARS)
+        .collect::<String>()
+        .trim_end()
+        .to_owned()
+}
+
+fn record_change(
+    item: &mut Item,
+    old: &Item,
+    context: &TransitionContext,
+    reason: Option<String>,
+    wording_only: bool,
+) {
+    // An item remains new for its entire creation batch, including edits,
+    // questions and status changes following the add in that activity.
+    if old.created_message_id == context.cause_message_id {
+        return;
+    }
+    let mut before = ItemChangeBefore::default();
+    macro_rules! required {
+        ($field:ident) => {
+            if item.$field != old.$field {
+                before.$field = Some(Some(old.$field.clone()));
+            }
+        };
+    }
+    macro_rules! optional {
+        ($field:ident) => {
+            if item.$field != old.$field {
+                before.$field = Some(old.$field.clone().filter(|value| !value.is_empty()));
+            }
+        };
+    }
+    macro_rules! list {
+        ($field:ident) => {
+            if item.$field != old.$field {
+                before.$field = Some((!old.$field.is_empty()).then(|| old.$field.clone()));
+            }
+        };
+    }
+    required!(question);
+    required!(item_type);
+    required!(status);
+    optional!(short);
+    optional!(note);
+    optional!(ask);
+    optional!(outcome);
+    optional!(why);
+    optional!(related);
+    optional!(affects);
+    optional!(depends_on);
+    list!(options);
+    list!(links);
+    if before != ItemChangeBefore::default() {
+        let records = item.changes.get_or_insert_with(Vec::new);
+        records.push(ItemChangeRecord {
+            revision: item.revision,
+            at: context.at.clone(),
+            cause_message_id: context.cause_message_id.clone(),
+            reason,
+            wording_only,
+            before,
+        });
+        if records.len() > 20 {
+            records.drain(..records.len() - 20);
+        }
+    }
 }

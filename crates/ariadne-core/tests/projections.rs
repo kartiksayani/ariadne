@@ -1633,7 +1633,21 @@ fn archived_sessions_have_separate_totals_readable_history_and_no_aggregate_wait
 fn related_projection_skips_missing_targets_without_changing_saved_data() {
     let mut session = seed();
     let related = Some(vec![reference("2"), reference("99")]);
-    session.items.0.get_mut(&reference("1")).unwrap().related = related.clone();
+    session.items.0.get_mut(&reference("1")).unwrap().related = Some(vec![reference("98")]);
+    session.items.0.get_mut(&reference("1")).unwrap().affects = related.clone();
+    session.items.0.get_mut(&reference("1")).unwrap().depends_on = Some(vec![reference("97")]);
+    session.items.0.get_mut(&reference("1")).unwrap().revision = p(2);
+    session.items.0.get_mut(&reference("1")).unwrap().changes = Some(vec![ItemChangeRecord {
+        wording_only: false,
+        revision: p(2),
+        at: session.updated_at.clone(),
+        cause_message_id: id(999),
+        reason: Some("Retained after cause removal".into()),
+        before: ItemChangeBefore {
+            note: Some(None),
+            ..Default::default()
+        },
+    }]);
     let setup = Setup::new(&session);
     let QueryResult::SessionRead(SessionReadResult::Items(items)) = setup
         .query(
@@ -1655,8 +1669,17 @@ fn related_projection_skips_missing_targets_without_changing_saved_data() {
     else {
         panic!("items")
     };
-    assert_eq!(items.items[0].item.related, Some(vec![reference("2")]));
-    assert_eq!(setup.saved().items.0[&reference("1")].related, related);
+    assert_eq!(items.items[0].item.related, Some(vec![]));
+    assert_eq!(items.items[0].item.affects, Some(vec![reference("2")]));
+    assert_eq!(items.items[0].item.depends_on, Some(vec![]));
+    assert_eq!(
+        items.items[0]
+            .changes
+            .as_ref()
+            .map(|page| page.items.clone()),
+        session.items.0[&reference("1")].changes
+    );
+    assert_eq!(setup.saved().items.0[&reference("1")].affects, related);
 }
 
 #[test]
@@ -2031,4 +2054,279 @@ fn removed_topics_hide_items_and_totals_but_keep_cancelled_owner_message_text_re
     assert_eq!(list.counts.items_by_status.done.value(), 0);
     assert_eq!(list.counts.archived_topics.value(), 0);
     assert_eq!(setup.saved(), session);
+}
+
+fn changes_request(item_id: &str, cursor: Option<QueryCursor>, n: u64) -> QueryRequest {
+    QueryRequest::SessionRead(SessionReadRequest {
+        selection: ReadView::Items {
+            topic_id: None,
+            item_id: Some(reference(item_id)),
+            parent_item_id: None,
+            statuses: vec![],
+            archived: None,
+        },
+        cursor: None,
+        limit: limit(1),
+        item_pages: vec![ItemPageRequest::ItemChanges {
+            item_id: reference(item_id),
+            cursor,
+            limit: limit(n),
+        }],
+    })
+}
+
+#[test]
+fn change_history_pages_large_records_completely_without_mutating_saved_data() {
+    let mut session = seed();
+    let links: Vec<_> = (0..32)
+        .map(|index| ItemLinkTarget {
+            kind: LinkKind::Doc,
+            label: format!("Document {index}"),
+            target: "x".repeat(4096),
+        })
+        .collect();
+    let changes: Vec<_> = (2..=7)
+        .map(|revision| ItemChangeRecord {
+            wording_only: false,
+            revision: p(revision),
+            at: session.updated_at.clone(),
+            cause_message_id: id(999),
+            reason: Some(format!("Change {revision}")),
+            before: ItemChangeBefore {
+                links: Some(Some(links.clone())),
+                note: Some(Some(format!("Previous value {revision}"))),
+                ..Default::default()
+            },
+        })
+        .collect();
+    assert!(serde_json::to_vec(&changes).unwrap().len() > 768 * 1024);
+    session.items.0.get_mut(&reference("1")).unwrap().revision = p(7);
+    session.items.0.get_mut(&reference("1")).unwrap().changes = Some(changes.clone());
+    let setup = Setup::new(&session);
+    let before = fs::read(setup.path()).unwrap();
+    let mut cursor = None;
+    let mut all = vec![];
+    let mut pages = 0;
+    loop {
+        let mut request = changes_request("1", cursor, 100);
+        if pages == 0 {
+            let QueryRequest::SessionRead(read) = &mut request else {
+                panic!("request")
+            };
+            read.item_pages.clear();
+        }
+        let result = setup.query(&owner(), &request).unwrap();
+        assert!(serde_json::to_vec(&result).unwrap().len() < 1024 * 1024);
+        let QueryResult::SessionRead(SessionReadResult::Items(page)) = result else {
+            panic!("items")
+        };
+        assert!(serde_json::to_vec(&page.items[0]).unwrap().len() <= 768 * 1024);
+        let changes = page.items[0].changes.as_ref().unwrap();
+        assert!(!changes.items.is_empty());
+        assert_eq!(changes.snapshot_revision, session.revision);
+        all.extend(changes.items.clone());
+        cursor = changes.next_cursor.clone();
+        pages += 1;
+        if cursor.is_none() {
+            break;
+        }
+        assert_eq!(cursor.as_ref().unwrap().view, QueryView::ItemChanges);
+        assert!(matches!(
+            cursor.as_ref().unwrap().after,
+            Some(CursorPosition::History { .. })
+        ));
+    }
+    assert!(pages >= 2);
+    assert_eq!(all, changes);
+    assert_eq!(setup.saved(), session);
+    assert_eq!(fs::read(setup.path()).unwrap(), before);
+}
+
+#[test]
+fn change_history_cursors_are_scoped_and_stale_and_explicit_empty_pages_are_available() {
+    let mut session = seed();
+    session.items.0.get_mut(&reference("1")).unwrap().revision = p(3);
+    session.items.0.get_mut(&reference("1")).unwrap().changes = Some(
+        (2..=3)
+            .map(|revision| ItemChangeRecord {
+                wording_only: false,
+                revision: p(revision),
+                at: session.updated_at.clone(),
+                cause_message_id: id(999),
+                reason: None,
+                before: ItemChangeBefore {
+                    note: Some(None),
+                    ..Default::default()
+                },
+            })
+            .collect(),
+    );
+    let setup = Setup::new(&session);
+    let QueryResult::SessionRead(SessionReadResult::Items(first)) = setup
+        .query(&owner(), &changes_request("1", None, 1))
+        .unwrap()
+    else {
+        panic!("items")
+    };
+    let cursor = first.items[0].changes.as_ref().unwrap().next_cursor.clone();
+    assert!(cursor.is_some());
+    for (context, request) in [
+        (owner(), changes_request("2", cursor.clone(), 1)),
+        (agent(1), changes_request("1", cursor.clone(), 1)),
+    ] {
+        assert_eq!(
+            error(setup.query(&context, &request).unwrap_err()).code,
+            CoreErrorCode::InvalidArgument
+        );
+    }
+    let mut wrong_view = cursor.clone().unwrap();
+    wrong_view.view = QueryView::ItemStatusHistory;
+    assert_eq!(
+        error(
+            setup
+                .query(&owner(), &changes_request("1", Some(wrong_view), 1))
+                .unwrap_err()
+        )
+        .code,
+        CoreErrorCode::InvalidArgument
+    );
+    let mut wrong_shape = cursor.clone().unwrap();
+    wrong_shape.after = Some(CursorPosition::Sequence {
+        number: p(1),
+        id: id(1),
+    });
+    assert_eq!(
+        error(
+            setup
+                .query(&owner(), &changes_request("1", Some(wrong_shape), 1))
+                .unwrap_err()
+        )
+        .code,
+        CoreErrorCode::InvalidArgument
+    );
+    let QueryResult::SessionRead(SessionReadResult::Items(empty)) = setup
+        .query(&owner(), &changes_request("2", None, 1))
+        .unwrap()
+    else {
+        panic!("items")
+    };
+    assert!(empty.items[0].changes.as_ref().unwrap().items.is_empty());
+    assert!(empty.items[0]
+        .changes
+        .as_ref()
+        .unwrap()
+        .next_cursor
+        .is_none());
+    let mut default = changes_request("2", None, 1);
+    let QueryRequest::SessionRead(request) = &mut default else {
+        panic!("request")
+    };
+    request.item_pages.clear();
+    let result = setup.query(&owner(), &default).unwrap();
+    let QueryResult::SessionRead(SessionReadResult::Items(empty)) = &result else {
+        panic!("items")
+    };
+    assert!(empty.items[0].changes.is_none());
+    assert!(serde_json::to_value(&empty.items[0])
+        .unwrap()
+        .get("changes")
+        .is_none());
+    let mut duplicate = changes_request("1", None, 1);
+    let QueryRequest::SessionRead(request) = &mut duplicate else {
+        panic!("request")
+    };
+    request.item_pages.push(request.item_pages[0].clone());
+    assert_eq!(
+        error(setup.query(&owner(), &duplicate).unwrap_err()).code,
+        CoreErrorCode::InvalidArgument
+    );
+    assert_eq!(setup.saved(), session);
+    setup.submit(10, "1", "Changes the session snapshot.");
+    assert_eq!(
+        error(
+            setup
+                .query(&owner(), &changes_request("1", cursor, 1))
+                .unwrap_err()
+        )
+        .code,
+        CoreErrorCode::SnapshotChanged
+    );
+}
+
+#[test]
+fn standalone_changes_continue_nested_cursor_without_repeating_large_current_snapshot() {
+    let mut session = seed();
+    let large_link = ItemLinkTarget {
+        kind: LinkKind::Doc,
+        label: "previous".chars().cycle().take(400 * 1024).collect(),
+        target: "https://example.com".into(),
+    };
+    let changes: Vec<_> = (2..=4)
+        .map(|revision| ItemChangeRecord {
+            wording_only: false,
+            revision: p(revision),
+            at: session.updated_at.clone(),
+            cause_message_id: id(999),
+            reason: None,
+            before: ItemChangeBefore {
+                links: Some(Some(vec![large_link.clone()])),
+                ..Default::default()
+            },
+        })
+        .collect();
+    let item = session.items.0.get_mut(&reference("1")).unwrap();
+    item.revision = p(4);
+    item.links = vec![ItemLinkTarget {
+        label: "current".chars().cycle().take(400 * 1024).collect(),
+        ..large_link
+    }];
+    item.changes = Some(changes.clone());
+    let setup = Setup::new(&session);
+    let before = fs::read(setup.path()).unwrap();
+    let mut read = changes_request("1", None, 100);
+    let QueryRequest::SessionRead(request) = &mut read else {
+        panic!("request")
+    };
+    request.item_pages.clear();
+    let QueryResult::SessionRead(SessionReadResult::Items(nested)) =
+        setup.query(&owner(), &read).unwrap()
+    else {
+        panic!("items")
+    };
+    let page = nested.items[0].changes.as_ref().unwrap();
+    assert!(page.items.is_empty());
+    let mut cursor = page.next_cursor.clone();
+    assert!(cursor.as_ref().unwrap().after.is_none());
+    assert_eq!(
+        error(
+            setup
+                .query(&owner(), &changes_request("1", cursor.clone(), 100))
+                .unwrap_err()
+        )
+        .code,
+        CoreErrorCode::CapacityExceeded
+    );
+    let mut all = vec![];
+    let mut pages = 0;
+    while cursor.is_some() {
+        let request = QueryRequest::ItemChanges(ItemChangesRequest {
+            item_id: reference("1"),
+            cursor: cursor.clone(),
+            limit: limit(100),
+        });
+        let result = setup.query(&owner(), &request).unwrap();
+        assert!(serde_json::to_vec(&result).unwrap().len() < 1024 * 1024);
+        let QueryResult::ItemChanges(projection) = &result else {
+            panic!("changes")
+        };
+        assert_eq!(projection.item_id, reference("1"));
+        assert!(!projection.changes.items.is_empty());
+        all.extend(projection.changes.items.clone());
+        cursor = projection.changes.next_cursor.clone();
+        pages += 1;
+    }
+    assert!(pages >= 2);
+    assert_eq!(all, changes);
+    assert_eq!(setup.saved(), session);
+    assert_eq!(fs::read(setup.path()).unwrap(), before);
 }

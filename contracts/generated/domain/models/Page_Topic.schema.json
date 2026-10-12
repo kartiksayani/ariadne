@@ -296,7 +296,8 @@
         "round_results",
         "round_forks",
         "item_status_history",
-        "item_updated_messages"
+        "item_updated_messages",
+        "item_changes"
       ]
     },
     "SchemaVersion": {
@@ -312,6 +313,22 @@
       "type": "object",
       "properties": {
         "archived_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "brief": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "brief_updated_at": {
           "anyOf": [
             {
               "$ref": "#/$defs/UtcMillis"

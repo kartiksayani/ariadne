@@ -153,7 +153,7 @@ impl Expander {
         for (index, operation) in operations.into_iter().enumerate() {
             self.operation(operation, format!("operations[{index}]"), &mut out)?;
         }
-        Ok((defer_related(out)?, self.repairs))
+        Ok((defer_item_links(out)?, self.repairs))
     }
 
     /// A fresh `r1`, `r2`, ... that no request ref uses.
@@ -207,7 +207,7 @@ impl Expander {
                         };
                 }
             }
-            Some("topic.delete") => {
+            Some("topic.delete" | "topic.edit") => {
                 if let Some(Value::String(target)) = object.get("topic").cloned() {
                     *object.get_mut("topic").expect("present target") =
                         if UuidV4::new(target.as_str()).is_ok() {
@@ -235,7 +235,7 @@ impl Expander {
                     .unwrap_or("?");
                 let context = format!("item.edit, item {source}");
                 if let Some(Value::Object(patch)) = object.get_mut("patch") {
-                    related(patch, &format!("{path}.patch"), &context)?;
+                    item_links(patch, &format!("{path}.patch"), &context)?;
                 }
             }
             _ => {}
@@ -378,7 +378,7 @@ impl Expander {
             Some(_) => {}
         }
         options(&mut object);
-        related(&mut object, &path, &format!("item.add, ref '{reference}'"))?;
+        item_links(&mut object, &path, &format!("item.add, ref '{reference}'"))?;
         let topic = object.get("topic").cloned();
         out.push((path.clone(), Value::Object(object)));
         for (index, child) in children.into_iter().enumerate() {
@@ -400,22 +400,43 @@ impl Expander {
 }
 
 /// Number strings name existing items; other strings name local batch refs.
-fn related(object: &mut Map<String, Value>, path: &str, context: &str) -> Result<(), CoreError> {
-    if let Some(Value::Array(list)) = object.get_mut("related") {
-        if list.len() > 32 {
-            return Err(bad_request(format!(
-                "{path}.related ({context}): an item can have at most 32 related items; received {}",
+const ITEM_LINK_KINDS: [&str; 3] = ["related", "affects", "depends_on"];
+
+fn item_links(object: &mut Map<String, Value>, path: &str, context: &str) -> Result<(), CoreError> {
+    for kind in ITEM_LINK_KINDS {
+        if let Some(Value::Array(list)) = object.get_mut(kind) {
+            if list.len() > 32 {
+                return Err(bad_request(format!(
+                "{path}.{kind} ({context}): an item can have at most 32 {kind} items; received {}",
                 list.len()
             )));
-        }
-        for target in list {
-            if let Value::String(value) = target {
-                *target = if ItemRef::new(value.as_str()).is_ok() {
-                    json!({"id": value})
-                } else {
-                    json!({"ref": value})
-                };
             }
+            for target in list {
+                if let Value::String(value) = target {
+                    *target = if ItemRef::new(value.as_str()).is_ok() {
+                        json!({"id": value})
+                    } else {
+                        json!({"ref": value})
+                    };
+                }
+            }
+        }
+    }
+    // A later assignment may supersede a forward declaration. It must not hide
+    // an invalid pair of specific kinds in the authored operation.
+    if let (Some(affects), Some(depends_on)) = (
+        object.get("affects").and_then(Value::as_array),
+        object.get("depends_on").and_then(Value::as_array),
+    ) {
+        if let Some(target) = affects.iter().find(|target| {
+            serde_json::from_value::<EntityRef>((*target).clone()).is_ok()
+                && depends_on.contains(target)
+        }) {
+            return Err(CoreError::new(
+                CoreErrorCode::InvalidRef,
+                format!("{path} ({context}): {target} appears in affects and depends_on"),
+                "Choose one specific link kind for each target.",
+            ));
         }
     }
     Ok(())
@@ -425,7 +446,7 @@ fn related(object: &mut Map<String, Value>, path: &str, context: &str) -> Result
 /// only that initial link assignment to immediately after its latest allocation.
 /// Later explicit assignments to the same local item supersede the initial one.
 /// Core validates the retained assignments and expanded operation-count limit.
-fn defer_related(mut operations: Vec<(String, Value)>) -> Result<Vec<(String, Value)>, CoreError> {
+fn defer_item_links(mut operations: FlatOperations) -> Result<FlatOperations, CoreError> {
     let allocations: BTreeMap<_, _> = operations
         .iter()
         .enumerate()
@@ -434,46 +455,45 @@ fn defer_related(mut operations: Vec<(String, Value)>) -> Result<Vec<(String, Va
         .collect();
     let mut deferred: BTreeMap<usize, Vec<(String, Value)>> = BTreeMap::new();
     for index in 0..operations.len() {
-        let (path, op) = &operations[index];
+        let (_, op) = &operations[index];
         if op.get("op").and_then(Value::as_str) != Some("item.add") {
             continue;
         }
-        let Some(targets) = op.get("related").and_then(Value::as_array) else {
-            continue;
-        };
-        let last = targets
-            .iter()
-            .filter_map(|target| allocations.get(target.get("ref")?.as_str()?))
-            .copied()
-            .max()
-            .unwrap_or(index);
-        if last <= index {
-            continue;
+        for kind in ITEM_LINK_KINDS {
+            let (path, op) = &operations[index];
+            let Some(targets) = op.get(kind).and_then(Value::as_array) else {
+                continue;
+            };
+            let last = targets
+                .iter()
+                .filter_map(|target| allocations.get(target.get("ref")?.as_str()?))
+                .copied()
+                .max()
+                .unwrap_or(index);
+            if last <= index {
+                continue;
+            }
+            // Moving or superseding an assignment must never erase a wire type error.
+            serde_json::from_value::<Operation>(op.clone())
+                .map_err(|error| bad_request(format!("{path} (item.add): {error}")))?;
+            let reference = op["ref"].clone();
+            let superseded = operations[index + 1..=last].iter().any(|(_, later)| {
+                later.get("op").and_then(Value::as_str) == Some("item.edit")
+                    && later.get("item") == Some(&json!({"ref": reference}))
+                    && later
+                        .get("patch")
+                        .and_then(|patch| patch.get(kind))
+                        .is_some_and(|targets| !targets.is_null())
+            });
+            if !superseded {
+                deferred.entry(last).or_default().push((
+                    format!("{path}.{kind}"),
+                    json!({"op": "item.edit", "item": {"ref": reference},
+                    "patch": {(kind): targets}}),
+                ));
+            }
+            operations[index].1.as_object_mut().unwrap().remove(kind);
         }
-        // Moving or superseding an assignment must never erase a wire type error.
-        serde_json::from_value::<Operation>(op.clone())
-            .map_err(|error| bad_request(format!("{path} (item.add): {error}")))?;
-        let reference = op["ref"].clone();
-        let superseded = operations[index + 1..=last].iter().any(|(_, later)| {
-            later.get("op").and_then(Value::as_str) == Some("item.edit")
-                && later.get("item") == Some(&json!({"ref": reference}))
-                && later
-                    .get("patch")
-                    .and_then(|patch| patch.get("related"))
-                    .is_some_and(|related| !related.is_null())
-        });
-        if !superseded {
-            deferred.entry(last).or_default().push((
-                format!("{path}.related"),
-                json!({"op": "item.edit", "item": {"ref": reference},
-                    "patch": {"related": targets}}),
-            ));
-        }
-        operations[index]
-            .1
-            .as_object_mut()
-            .unwrap()
-            .remove("related");
     }
     let mut out =
         Vec::with_capacity(operations.len() + deferred.values().map(Vec::len).sum::<usize>());
@@ -581,6 +601,174 @@ impl<'de> Visitor<'de> for StrictVisitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_link_kind_normalizes_numbers_and_refs_on_add_edit_and_children() {
+        for kind in ITEM_LINK_KINDS {
+            let request = ok(json!({"operations":[
+                {"op":"item.add", "topic":{"id":TOPIC}, "ref":"parent", "type":"task", "question":"Parent",
+                 (kind):["1", "known"], "children":[{"type":"task", "question":"Child", (kind):["parent"]}]},
+                {"op":"item.edit", "item":{"id":"2"}, "patch":{(kind):["1", "parent"]}}
+            ]}));
+            let operations = wire(&request)["operations"].as_array().unwrap().clone();
+            assert_eq!(operations[0][kind], json!([{"id":"1"}, {"ref":"known"}]));
+            assert_eq!(operations[1][kind], json!([{"ref":"parent"}]));
+            assert_eq!(
+                operations[2]["patch"][kind],
+                json!([{"id":"1"}, {"ref":"parent"}])
+            );
+        }
+    }
+
+    #[test]
+    fn each_forward_link_kind_defers_independently_and_later_assignment_wins() {
+        let expanded = run(&json!({"operations":[
+            {"op":"item.add", "topic":{"id":TOPIC}, "ref":"parent", "type":"task", "question":"Parent",
+             "related":["child"], "affects":["later"], "depends_on":["child"],
+             "children":[{"ref":"child", "type":"task", "question":"Child"}]},
+            {"op":"item.edit", "item":{"ref":"parent"}, "patch":{"affects":[]}},
+            {"op":"item.add", "topic":{"id":TOPIC}, "ref":"later", "type":"task", "question":"Later"}
+        ]})).unwrap();
+        let operations = wire(&expanded.request)["operations"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert!(operations[0]["related"].is_null());
+        assert!(operations[0]["affects"].is_null());
+        assert!(operations[0]["depends_on"].is_null());
+        assert_eq!(operations[2]["patch"]["related"], json!([{"ref":"child"}]));
+        assert_eq!(
+            operations[3]["patch"]["depends_on"],
+            json!([{"ref":"child"}])
+        );
+        assert_eq!(operations[4]["patch"]["affects"], json!([]));
+        assert_eq!(operations.len(), 6);
+    }
+
+    #[test]
+    fn each_link_kind_checks_capacity_before_superseding_forward_assignments() {
+        for kind in ITEM_LINK_KINDS {
+            let error = message(json!({"operations":[
+                {"op":"item.add", "topic":{"id":TOPIC}, "ref":"parent", "type":"task", "question":"Parent",
+                 (kind):vec![json!("later");33]},
+                {"op":"item.edit", "item":{"ref":"parent"}, "patch":{(kind):[]}},
+                {"op":"item.add", "topic":{"id":TOPIC}, "ref":"later", "type":"task", "question":"Later"}
+            ]}));
+            assert!(error.contains(&format!("operations[0].{kind}")), "{error}");
+            assert!(
+                error.contains(&format!("at most 32 {kind} items")),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn superseding_forward_links_cannot_hide_a_specific_kind_overlap() {
+        let error = message(json!({"operations":[
+            {"op":"item.add", "topic":{"id":TOPIC}, "ref":"parent", "type":"task", "question":"Parent",
+             "affects":["later"], "depends_on":[{"ref":"later"}]},
+            {"op":"item.edit", "item":{"ref":"parent"}, "patch":{"affects":[]}},
+            {"op":"item.add", "topic":{"id":TOPIC}, "ref":"later", "type":"task", "question":"Later"}
+        ]}));
+        assert!(error.contains("operations[0]"), "{error}");
+        assert!(error.contains("affects and depends_on"), "{error}");
+    }
+
+    #[test]
+    fn synthetic_and_explicit_link_edits_with_identical_wire_operations_have_identical_ids() {
+        let synthetic = run(&json!({"operations":[
+            {"op":"item.add", "topic":{"id":TOPIC}, "ref":"parent", "type":"task", "question":"Parent", "affects":["later"]},
+            {"op":"item.add", "topic":{"id":TOPIC}, "ref":"later", "type":"task", "question":"Later"}
+        ]})).unwrap();
+        let mut explicit = wire(&synthetic.request);
+        explicit.as_object_mut().unwrap().remove("op_id");
+        let explicit = run(&explicit).unwrap();
+        assert_eq!(synthetic.request.operations, explicit.request.operations);
+        assert_eq!(synthetic.generated_op_id, explicit.generated_op_id);
+    }
+
+    #[test]
+    fn topic_edit_strings_preserve_clear_keep_and_brief_prose() {
+        for (target, reference) in [
+            (TOPIC, json!({"id":TOPIC})),
+            ("new_topic", json!({"ref":"new_topic"})),
+        ] {
+            let string = run(&json!({"operations":[{"op":"topic.edit", "topic":target,
+                "brief":"  What changed\nWhy it matters  ", "short":null}]}))
+            .unwrap();
+            let strict = run(&json!({"operations":[{"op":"topic.edit", "topic":reference,
+                "brief":"  What changed\nWhy it matters  ", "short":null}]}))
+            .unwrap();
+            assert_eq!(string.request, strict.request);
+            assert_eq!(string.generated_op_id, strict.generated_op_id);
+            let operation = &wire(&string.request)["operations"][0];
+            assert_eq!(operation["short"], Value::Null);
+            assert_eq!(operation["brief"], "  What changed\nWhy it matters  ");
+            assert!(operation.get("name").is_none_or(Value::is_null));
+        }
+    }
+
+    #[test]
+    fn edit_reason_is_preserved_for_strict_validation() {
+        let request = ok(json!({"operations":[{"op":"item.edit", "item":{"id":"1"},
+            "reason":"Owner chose the fallback", "patch":{"note":"Changed"}}]}));
+        assert_eq!(
+            wire(&request)["operations"][0]["reason"],
+            "Owner chose the fallback"
+        );
+    }
+
+    #[test]
+    fn wording_only_survives_forward_link_expansion_without_marking_synthetic_edits() {
+        let request = ok(json!({"operations":[
+            {"op":"item.add", "topic":{"id":TOPIC}, "ref":"parent", "type":"task",
+             "question":"Parent", "affects":["later"]},
+            {"op":"item.edit", "item":{"ref":"parent"}, "wording_only":true,
+             "patch":{"note":"Clearer wording"}},
+            {"op":"item.add", "topic":{"id":TOPIC}, "ref":"later", "type":"task", "question":"Later"}
+        ]}));
+        let operations = wire(&request)["operations"].as_array().unwrap().clone();
+        assert_eq!(operations.len(), 4);
+        assert_eq!(operations[1]["wording_only"], true);
+        assert_eq!(operations[1]["patch"]["note"], "Clearer wording");
+        assert_eq!(operations[3]["patch"]["affects"], json!([{"ref":"later"}]));
+        assert!(operations[3].get("wording_only").is_none());
+    }
+
+    #[test]
+    fn wording_only_requires_a_boolean_and_false_has_default_retry_identity() {
+        let omitted = json!({"operations":[{"op":"item.edit", "item":{"id":"1"},
+            "patch":{"note":"Clearer wording"}}]});
+        let mut explicit = omitted.clone();
+        explicit["operations"][0]["wording_only"] = json!(false);
+        assert_eq!(
+            run(&omitted).unwrap().request,
+            run(&explicit).unwrap().request
+        );
+        for invalid in [Value::Null, json!("true"), json!(1), json!([]), json!({})] {
+            explicit["operations"][0]["wording_only"] = invalid;
+            let error = message(explicit.clone());
+            assert!(error.contains("operations[0] (item.edit)"), "{error}");
+            assert!(error.contains("boolean"), "{error}");
+        }
+    }
+
+    #[test]
+    fn explicit_wording_only_forward_links_keep_their_flag_and_authored_position() {
+        for kind in ITEM_LINK_KINDS {
+            let request = ok(json!({"operations":[
+                {"op":"item.add", "topic":{"id":TOPIC}, "ref":"parent", "type":"task", "question":"Parent"},
+                {"op":"item.edit", "item":{"ref":"parent"}, "wording_only":true,
+                 "patch":{(kind):["later"]}},
+                {"op":"item.add", "topic":{"id":TOPIC}, "ref":"later", "type":"task", "question":"Later"}
+            ]}));
+            let operations = wire(&request)["operations"].as_array().unwrap().clone();
+            assert_eq!(operations.len(), 3);
+            assert_eq!(operations[1]["wording_only"], true);
+            assert_eq!(operations[1]["patch"][kind], json!([{"ref":"later"}]));
+            assert_eq!(operations[2]["op"], "item.add");
+        }
+    }
 
     #[test]
     fn delete_strings_expand_to_the_same_strict_refs_and_operation_id() {

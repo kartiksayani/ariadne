@@ -29,6 +29,9 @@ pub fn validate_session_items(session: &Session) -> Result<(), ValidationError> 
         )?;
         text(&topic.name, "topics.name", true, None)?;
         optional_short_label(&topic.short, "topics.short")?;
+        if let Some(brief) = &topic.brief {
+            bounded_trimmed_text(brief, "topics.brief", TOPIC_BRIEF_MAX_CHARS, false)?;
+        }
         validate_removal(
             session,
             &topic.removed_at,

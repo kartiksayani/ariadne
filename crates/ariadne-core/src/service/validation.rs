@@ -52,6 +52,7 @@ macro_rules! agent_read_wire {
 agent_read_wire!(
     AgentReadToolRequest,
     AgentMessagesToolRequest,
+    AgentChangesToolRequest,
     AgentRoundsToolRequest
 );
 impl AgentApplyToolRequest {
@@ -67,6 +68,7 @@ impl OwnerQueryRequest {
             QueryRequest::SessionGet {}
                 | QueryRequest::SessionRead(_)
                 | QueryRequest::ItemMessages(_)
+                | QueryRequest::ItemChanges(_)
                 | QueryRequest::ItemRounds(_)
                 | QueryRequest::RevealItem { .. }
         );
@@ -188,9 +190,25 @@ impl ApplyRequest {
         text(&self.summary, 4096, false)?;
         for operation in &self.operations {
             match operation {
-                Operation::TopicAdd { name, short, .. } => {
+                Operation::TopicAdd {
+                    name, short, brief, ..
+                } => {
                     text(name, 4096, true)?;
                     short_label(short.as_deref())?;
+                    topic_brief(brief.as_deref())?;
+                }
+                Operation::TopicEdit {
+                    name, short, brief, ..
+                } => {
+                    if let Some(name) = name {
+                        text(name, 4096, true)?;
+                    }
+                    if let Some(short) = short {
+                        short_label(short.as_deref())?;
+                    }
+                    if let Some(brief) = brief {
+                        topic_brief(brief.as_deref())?;
+                    }
                 }
                 Operation::ItemAdd(value) => {
                     let ItemAddOperation {
@@ -246,7 +264,8 @@ impl ApplyRequest {
                         links(values)?;
                     }
                 }
-                Operation::ItemEdit { patch, .. } => {
+                Operation::ItemEdit { patch, reason, .. } => {
+                    change_reason(reason.as_deref())?;
                     if let Some(value) = &patch.question {
                         text(value, 4096, true)?;
                     }
@@ -283,7 +302,8 @@ impl ApplyRequest {
                             "item.status ack_to is allowed only with open or in_progress",
                         ));
                     }
-                    for value in [outcome, why, reason].into_iter().flatten() {
+                    change_reason(reason.as_deref())?;
+                    for value in [outcome, why].into_iter().flatten() {
                         text(value, 4096, true)?;
                     }
                 }
@@ -454,6 +474,28 @@ impl OwnerCommand {
                                     },
                                 }
                                 .validate_wire()?;
+                            }
+                        }
+                        PreferencesPatchEntry::MarkSeen { items, topics, .. } => {
+                            if items.len() > SEEN_ITEMS_CAPACITY
+                                || topics.len() > SEEN_TOPICS_CAPACITY
+                            {
+                                return Err(CoreError::new(
+                                    CoreErrorCode::CapacityExceeded,
+                                    "Seen history has too many items or topics in this session",
+                                    "Try marking fewer items or topics at once.",
+                                ));
+                            }
+                            let mut item_ids = std::collections::BTreeSet::new();
+                            let mut topic_ids = std::collections::BTreeSet::new();
+                            if items.iter().any(|item| !item_ids.insert(&item.item_id))
+                                || topics
+                                    .iter()
+                                    .any(|topic| !topic_ids.insert(&topic.topic_id))
+                            {
+                                return Err(invalid(
+                                    "Seen entries must list each item and topic once",
+                                ));
                             }
                         }
                         PreferencesPatchEntry::SetLater { .. }
@@ -634,6 +676,16 @@ fn item_selection(value: &ItemPageRequest) -> NestedSelection<'_> {
             limit: limit.value(),
             view: QueryView::ItemStatusHistory,
         },
+        ItemPageRequest::ItemChanges {
+            item_id,
+            cursor,
+            limit,
+        } => NestedSelection {
+            parent: item_id.as_str(),
+            cursor,
+            limit: limit.value(),
+            view: QueryView::ItemChanges,
+        },
     }
 }
 fn round_selection(value: &RoundPageRequest) -> NestedSelection<'_> {
@@ -747,7 +799,10 @@ impl QueryRequest {
         if matches!(context.visibility(), QueryVisibility::Agent(_))
             && !matches!(
                 self,
-                Self::SessionRead(_) | Self::ItemMessages(_) | Self::ItemRounds(_)
+                Self::SessionRead(_)
+                    | Self::ItemMessages(_)
+                    | Self::ItemChanges(_)
+                    | Self::ItemRounds(_)
             )
         {
             return Err(CoreError::new(
@@ -783,10 +838,14 @@ impl QueryRequest {
                         ItemPageRequest::ItemStatusHistory { cursor: value, .. } => {
                             cursor(value, QueryView::ItemStatusHistory)?
                         }
+                        ItemPageRequest::ItemChanges { cursor: value, .. } => {
+                            cursor(value, QueryView::ItemChanges)?
+                        }
                     }
                 }
             }
             Self::ItemMessages(value) => cursor(&value.cursor, QueryView::ItemMessages)?,
+            Self::ItemChanges(value) => cursor(&value.cursor, QueryView::ItemChanges)?,
             Self::ItemRounds(value) => {
                 cursor(&value.cursor, QueryView::ItemRounds)?;
                 for nested in &value.round_pages {
@@ -834,7 +893,7 @@ fn cursor(value: &Option<QueryCursor>, view: QueryView) -> Result<(), CoreError>
             )
             | (QueryView::ItemRounds, Some(CursorPosition::Round { .. }))
             | (
-                QueryView::ItemStatusHistory,
+                QueryView::ItemStatusHistory | QueryView::ItemChanges,
                 Some(CursorPosition::History { .. })
             )
             | (QueryView::RoundResults, Some(CursorPosition::Result { .. }))
@@ -935,6 +994,20 @@ impl QueryResult {
                                 &selectors,
                                 value.snapshot_revision,
                             )?;
+                            if let Some(changes) = &item.changes {
+                                nested_page(
+                                    changes,
+                                    item.item.id.as_str(),
+                                    QueryView::ItemChanges,
+                                    &selectors,
+                                    value.snapshot_revision,
+                                )?;
+                            } else if selectors.iter().any(|selection| {
+                                selection.parent == item.item.id.as_str()
+                                    && selection.view == QueryView::ItemChanges
+                            }) {
+                                return Err(invalid("Requested item changes page is missing"));
+                            }
                         }
                     }
                     (SessionReadResult::Messages(value), ReadView::Messages { .. }, _) => {
@@ -977,6 +1050,13 @@ impl QueryResult {
                         context,
                     )?;
                 }
+            }
+            (Self::ItemChanges(result), QueryRequest::ItemChanges(request)) => {
+                if result.item_id != request.item_id {
+                    return Err(scope_error());
+                }
+                page(&result.changes, request.limit.value())?;
+                continued_page(&result.changes, &request.cursor, QueryView::ItemChanges)?;
             }
             (Self::ItemRounds(result), QueryRequest::ItemRounds(request)) => {
                 if result.item_id != request.item_id {
@@ -1204,4 +1284,23 @@ pub fn validate_owner_receipt(
             "Keep the original operation ID and reconcile the local service.",
         ))
     }
+}
+
+fn topic_brief(value: Option<&str>) -> Result<(), CoreError> {
+    value
+        .map(|value| {
+            ariadne_domain::validation::normalize_topic_brief(value, "brief")
+                .map(|_| ())
+                .map_err(|error| invalid(&format!("Invalid topic brief: {error}")))
+        })
+        .unwrap_or(Ok(()))
+}
+fn change_reason(value: Option<&str>) -> Result<(), CoreError> {
+    value
+        .map(|value| {
+            ariadne_domain::validation::normalize_change_reason(value, "reason")
+                .map(|_| ())
+                .map_err(|error| invalid(&format!("Invalid change reason: {error}")))
+        })
+        .unwrap_or(Ok(()))
 }

@@ -14,6 +14,36 @@ pub struct PreferencesSnapshot {
     pub sessions: Vec<SessionPreferences>,
     pub later: Vec<ItemRoute>,
     pub drafts: Vec<OwnerDraft>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<SessionSeen>>", optional)]
+    pub seen: Vec<SessionSeen>,
+}
+
+pub const SEEN_ITEMS_CAPACITY: usize = 10_000;
+pub const SEEN_TOPICS_CAPACITY: usize = 1_024;
+
+/// Owner browsing state is kept independently of session view preferences.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct SessionSeen {
+    pub session: SessionRef,
+    pub since: UtcMillis,
+    #[schemars(length(max = 10_000))]
+    pub items: Vec<ItemSeen>,
+    #[schemars(length(max = 1_024))]
+    pub topics: Vec<TopicSeen>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ItemSeen {
+    pub item_id: ItemRef,
+    pub revision: PositiveSafeInteger,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct TopicSeen {
+    pub topic_id: UuidV4,
+    pub at: UtcMillis,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
@@ -178,9 +208,28 @@ pub struct PreferencesPatch {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PreferencesPatchEntry {
-    SetGlobal { preferences: GlobalPreferences },
-    SetSessionView { preferences: SessionPreferences },
-    SetLater { item: ItemRoute, later: bool },
-    UpsertDraft { draft: OwnerDraft },
-    DeleteDraft { operation_id: UuidV4 },
+    SetGlobal {
+        preferences: GlobalPreferences,
+    },
+    SetSessionView {
+        preferences: SessionPreferences,
+    },
+    SetLater {
+        item: ItemRoute,
+        later: bool,
+    },
+    UpsertDraft {
+        draft: OwnerDraft,
+    },
+    DeleteDraft {
+        operation_id: UuidV4,
+    },
+    MarkSeen {
+        session: SessionRef,
+        at: UtcMillis,
+        #[schemars(length(max = 10_000))]
+        items: Vec<ItemSeen>,
+        #[schemars(length(max = 1_024))]
+        topics: Vec<TopicSeen>,
+    },
 }

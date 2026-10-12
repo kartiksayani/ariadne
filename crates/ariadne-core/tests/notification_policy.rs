@@ -80,6 +80,7 @@ fn preferences(global: GlobalPreferences, revision: u64) -> PreferencesSnapshot 
         sessions: vec![],
         later: vec![],
         drafts: vec![],
+        seen: vec![],
     }
 }
 fn operation_id() -> UuidV4 {

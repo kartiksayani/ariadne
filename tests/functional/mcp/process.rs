@@ -194,7 +194,13 @@ pub fn persisted_race_and_parity(binary: &str, args: &[&str], cli: Option<&str>)
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        ["session_read", "item_messages", "item_rounds", "apply"]
+        [
+            "session_read",
+            "item_messages",
+            "item_changes",
+            "item_rounds",
+            "apply",
+        ]
     );
     first.call(3, "session_read", arguments(read(Value::Null)));
     let page = first.envelope(3);

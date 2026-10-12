@@ -1087,6 +1087,22 @@
         "item_id"
       ]
     },
+    "ItemSeen": {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "revision"
+      ]
+    },
     "ItemStatus": {
       "type": "string",
       "enum": [
@@ -1408,6 +1424,43 @@
             "kind",
             "operation_id"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "at": {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ItemSeen"
+              },
+              "maxItems": 10000
+            },
+            "kind": {
+              "type": "string",
+              "const": "mark_seen"
+            },
+            "session": {
+              "$ref": "#/$defs/SessionRef"
+            },
+            "topics": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/TopicSeen"
+              },
+              "maxItems": 1024
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "session",
+            "at",
+            "items",
+            "topics"
+          ]
         }
       ]
     },
@@ -1712,6 +1765,22 @@
       "required": [
         "topic_id",
         "expected_revision"
+      ]
+    },
+    "TopicSeen": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "topic_id",
+        "at"
       ]
     },
     "TurnState": {

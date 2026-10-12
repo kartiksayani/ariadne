@@ -68,6 +68,7 @@ pub(super) fn item(
         item: snapshot(session, item),
         updated_messages: empty(session.revision),
         status_history: empty(session.revision),
+        changes: None,
     };
     let updated: Vec<_> = session
         .messages
@@ -91,7 +92,8 @@ pub(super) fn item(
             )
         })
         .collect();
-    let mut selected = [None, None];
+    let changes = change_entries(item);
+    let mut selected = [None; 3];
     for selector in selectors {
         let (id, index, cursor, limit) = match selector {
             ItemPageRequest::ItemUpdatedMessages {
@@ -104,6 +106,11 @@ pub(super) fn item(
                 cursor,
                 limit,
             } => (item_id, 1, cursor, limit),
+            ItemPageRequest::ItemChanges {
+                item_id,
+                cursor,
+                limit,
+            } => (item_id, 2, cursor, limit),
         };
         if id == &item.id && selected[index].replace((cursor, limit.value())).is_some() {
             return Err(invalid("Duplicate nested item selector"));
@@ -121,7 +128,19 @@ pub(super) fn item(
         QueryView::ItemStatusHistory,
         item.id.as_str(),
     )?;
+    let changes_scope = scope(session, context, QueryView::ItemChanges, item.id.as_str())?;
     let absent = None;
+    if item.changes.is_some() || selected[2].is_some() {
+        let (cursor, limit) = selected[2].unwrap_or((&absent, 100));
+        result.changes = Some(page(
+            changes.clone(),
+            &changes_scope,
+            cursor,
+            limit,
+            0,
+            true,
+        )?);
+    }
     let (cursor, limit) = selected[0].unwrap_or((&absent, 100));
     result.updated_messages = page(updated.clone(), &updated_scope, cursor, limit, 0, true)?;
     let (cursor, limit) = selected[1].unwrap_or((&absent, 100));
@@ -146,7 +165,7 @@ pub(super) fn item(
                     budget,
                     !explicit,
                 )?;
-            } else {
+            } else if index == 1 {
                 let budget = ENTITY_BYTES
                     .saturating_sub(bytes(&result)?.saturating_sub(bytes(&result.status_history)?));
                 result.status_history = page(
@@ -157,6 +176,17 @@ pub(super) fn item(
                     budget,
                     !explicit,
                 )?;
+            } else if let Some(current) = &result.changes {
+                let budget =
+                    ENTITY_BYTES.saturating_sub(bytes(&result)?.saturating_sub(bytes(current)?));
+                result.changes = Some(page(
+                    changes.clone(),
+                    &changes_scope,
+                    cursor,
+                    limit,
+                    budget,
+                    !explicit,
+                )?);
             }
         }
     }
@@ -374,6 +404,8 @@ fn snapshot(session: &Session, item: &Item) -> ItemSnapshot {
                 .cloned()
                 .collect()
         }),
+        affects: visible_links(session, item.affects.as_ref()),
+        depends_on: visible_links(session, item.depends_on.as_ref()),
         outcome: item.outcome.clone(),
         why: item.why.clone(),
         replaced_by: item
@@ -410,4 +442,56 @@ fn round_snapshot(round: &Round) -> RoundSnapshot {
         closed_at: round.closed_at.clone(),
         origin: round.origin.clone(),
     }
+}
+
+fn visible_links(session: &Session, targets: Option<&Vec<ItemRef>>) -> Option<Vec<ItemRef>> {
+    targets.map(|targets| {
+        targets
+            .iter()
+            .filter(|id| {
+                session
+                    .items
+                    .0
+                    .get(id)
+                    .is_some_and(|target| !item_is_removed(session, target))
+            })
+            .cloned()
+            .collect()
+    })
+}
+
+fn change_entries(item: &Item) -> Vec<(CursorPosition, ItemChangeRecord)> {
+    item.changes
+        .iter()
+        .flatten()
+        .enumerate()
+        .map(|(index, value)| {
+            (
+                CursorPosition::History {
+                    index: NonnegativeSafeInteger::new(index as u64).expect("stored index"),
+                },
+                value.clone(),
+            )
+        })
+        .collect()
+}
+
+pub(super) fn changes(
+    session: &Session,
+    context: &QueryContext,
+    item: &Item,
+    request: &ItemChangesRequest,
+) -> Result<ItemChangesProjection, CoreError> {
+    let scope = scope(session, context, QueryView::ItemChanges, item.id.as_str())?;
+    Ok(ItemChangesProjection {
+        item_id: item.id.clone(),
+        changes: page(
+            change_entries(item),
+            &scope,
+            &request.cursor,
+            request.limit.value(),
+            payload_budget(bytes(&item.id)?),
+            false,
+        )?,
+    })
 }

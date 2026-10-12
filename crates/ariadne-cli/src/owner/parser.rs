@@ -95,6 +95,7 @@ pub(super) fn command(noun: &str, verb: &str) -> Option<&'static str> {
         ("session", "archive") => "session_archive",
         ("session", "restore") => "session_restore",
         ("item", "messages") => "item_messages",
+        ("item", "changes") => "item_changes",
         ("item", "rounds") => "item_rounds",
         ("item", "reveal") => "reveal_item",
         ("item", "ack") => "ack",
@@ -128,6 +129,7 @@ fn is_query(command: &str) -> bool {
             | "session_list"
             | "session_read"
             | "item_messages"
+            | "item_changes"
             | "item_rounds"
             | "reveal_item"
             | "topic_continue_preview"
@@ -141,6 +143,7 @@ fn query_name(request: &QueryRequest) -> &'static str {
         QueryRequest::SessionGet {} => "session_get",
         QueryRequest::SessionRead(_) => "session_read",
         QueryRequest::ItemMessages(_) => "item_messages",
+        QueryRequest::ItemChanges(_) => "item_changes",
         QueryRequest::ItemRounds(_) => "item_rounds",
         QueryRequest::TopicContinuePreview(_) => "topic_continue_preview",
         QueryRequest::PreferencesGet {} => "preferences_get",
