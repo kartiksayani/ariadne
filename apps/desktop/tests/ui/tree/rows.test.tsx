@@ -5,6 +5,8 @@ import type { Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
 import { initialExpansion, normalizeSearch, sentenceRows } from '../../../src/selectors/tree/rows';
 import { chipsOf, toggleChip, topicCounts, treeModel } from '../../../src/ui/tree/model';
+import { closedSessionQuestion, waitingOnOwner } from '../../../src/selectors/sessionClosed';
+import { displayStatus } from '../../../src/selectors/waiting/replied';
 
 function seed() { return structuredClone(demo) as Session; }
 function view(session: Session): SessionPreferences {
@@ -14,6 +16,42 @@ function view(session: Session): SessionPreferences {
 }
 
 describe('saved status filter chips', () => {
+  it.each(['closed', 'archived'] as const)('excludes %s waiting questions from matching rows and zero counts', state => {
+    const session = seed(), preferences = view(session);
+    session.state = 'closed';
+    if (state === 'archived') session.archived_at = session.updated_at;
+    const frozen = immutable(session);
+    const project = () => treeModel({ session: frozen, view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
+      selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) });
+    expect(project().rows.some(row => row.kind === 'item' && row.item.id === '2')).toBe(true);
+    expect(project().counts.waiting).toBe(0);
+    preferences.filters.statuses = ['waiting_on_me'];
+    expect(project().rows).toEqual([]);
+    expect(project().searchCount).toBe(0);
+    expect(project().counts.waiting).toBe(0);
+    expect(sentenceRows(frozen, preferences, new Set()).matchingTotal).toBe(0);
+    expect(sentenceRows(frozen, preferences, new Set()).rows).toEqual([]);
+  });
+  it.each(['closed', 'archived'] as const)('preserves an answered question waiting on the agent in a %s session', state => {
+    const session = seed(), item = session.items['2']!;
+    const answer = structuredClone(session.answers[session.answers.length - 1]!);
+    answer.id = crypto.randomUUID(); answer.item_id = item.id; answer.question_revision = item.question_revision;
+    const input = Object.values(session.inputs).find(value => value?.target.item_id === item.id)!;
+    input.state = 'handled'; answer.input_id = input.id;
+    session.answers.push(answer);
+    session.state = 'closed';
+    if (state === 'archived') session.archived_at = session.updated_at;
+    const frozen = immutable(session), preferences = view(session);
+    expect(displayStatus(frozen, item)).toBe('waiting_on_agent');
+    expect(closedSessionQuestion(frozen, item)).toBe(false);
+    expect(waitingOnOwner(frozen, item)).toBe(false);
+    preferences.filters.statuses = ['in_progress'];
+    const model = treeModel({ session: frozen, view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
+      selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) });
+    expect(model.rows.find(row => row.kind === 'item' && row.item.id === item.id)).toMatchObject({ status: 'waiting_on_agent', sessionClosed: false });
+    expect(model.counts.waiting).toBe(0);
+    expect(sentenceRows(frozen, preferences, new Set()).rows.some(row => row.item.id === item.id)).toBe(true);
+  });
   it('places Ack counts after both waiting counts and before other statuses', () => {
     const statuses = ['open', 'waiting_on_agent', 'done', 'waiting_on_me', 'in_progress'] as const;
     expect(topicCounts(statuses, 1).map(count => count.text)).toEqual([

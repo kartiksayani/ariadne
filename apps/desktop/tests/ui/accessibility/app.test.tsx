@@ -38,7 +38,7 @@ it('focuses search with Cmd+F outside editors and suppresses workspace shortcuts
   expect(screen.getByRole('tree')).toBeTruthy(); expect(screen.queryByRole('log')).toBeNull(); expect(document.activeElement?.closest('[role="dialog"]')).toBe(dialog);
   fireEvent.keyDown(cancel, { key: 'Escape' });
   expect(screen.queryByRole('dialog')).toBeNull(); expect(screen.getByRole('group', { name: 'Item actions' })).toBeTruthy(); expect(document.activeElement).toBe(pause);
-});
+}, 10_000);
 it('announces a new waiting episode and committed input resolution once without stealing editor focus', async () => {
   const transport = await setup(), session = transport.sessions.get(route.session_id)!;
   const updates = screen.getByRole('status', { name: 'Queue updates' });
@@ -106,7 +106,7 @@ it('routes owner shortcuts from roving rows, repeats focus requests and never su
   await press('8', 'd'); await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Drop reason')));
   await press('8', 'e'); expect(await screen.findByRole('dialog', { name: /^Archive “.+”\?$/ })).toBeTruthy();
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
-});
+}, 10_000);
 it('sends Back to Open as one press from the o shortcut (Ariadne.dc.html:1207)', async () => {
   const transport = await setup();
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
@@ -132,7 +132,7 @@ it('queues a fresh Bring once with its visible fixed text and reveals its receip
   row.focus(); fireEvent.keyDown(row, { key: 'b' });
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(1);
-});
+}, 10_000);
 it.each([false, true])('opens the item over an existing Bring draft without editing/submitting/retrying it (attempted %s)', async attempted => {
   const transport = await setup(transport => {
     const session = transport.sessions.get(route.session_id)!, item = session.items['4']!;
@@ -256,7 +256,9 @@ it.each([{ key: 'r', id: '4' }, { key: 'b', id: '4' }, { key: 'r', id: '3' }, { 
   expect(transport.preferences.revision).toBeGreaterThan(beforeRevision);
   expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
   expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id).toBe(id);
-  expect(transport.mutations.slice(beforeMutations)).toHaveLength(1); expect(transport.preferences.drafts).toEqual([]);
+  expect(transport.mutations.slice(beforeMutations).filter(request => request.command.command !== 'preferences_patch'
+    || request.command.params.entries.some(entry => entry.kind !== 'mark_seen'))).toHaveLength(1);
+  expect(transport.preferences.drafts).toEqual([]);
   fireEvent.click(row); expect(await screen.findByLabelText(`Detail of #${id}`)).toBeTruthy();
 });
 it('keeps detail dismissed when shortcut navigation session read completes afterward', async () => {

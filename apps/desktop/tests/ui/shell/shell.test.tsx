@@ -52,6 +52,15 @@ describe('Paperwhite shell', () => {
     expect(notes).toContain('@container shell-center (max-width: 400px)');
   });
 
+  it('keeps notification actions opaque throughout their entrance, including a suspended first frame', () => {
+    // A hidden native WebView may suspend at any keyframe; Undo must already be visible.
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/pages/notices.css'), 'utf8');
+    const animation = css.split('@keyframes pw-notice-arrive {')[1]!.split('@media')[0]!;
+    expect(animation).not.toMatch(/opacity:\s*(?:0(?:\.\d+)?|\.\d+)\s*;/);
+    expect(animation).toContain('transform: translateY(4px);');
+    expect(animation).toContain('transform: translateY(0);');
+  });
+
   it('keeps one notification region inside the centre while adjacent panes change, and preserves input focus', () => {
     vi.useFakeTimers();
     try {

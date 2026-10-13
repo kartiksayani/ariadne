@@ -3,6 +3,7 @@ import type { ItemRoute, SessionRef } from '../../generated/core';
 import type { Immutable } from '../../data';
 import { ownerReplied } from './replied';
 import { itemRemoved } from '../removed';
+import { sessionEnded } from '../sessionClosed';
 
 export interface WaitingSession {
   readonly summary: Immutable<SessionSummary>;
@@ -37,10 +38,10 @@ function itemOrder(left: string, right: string): number {
   for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i] - b[i];
   return a.length - b.length;
 }
-export function waitingRows(sessions: readonly WaitingSession[]): readonly WaitingRow[] {
+function questionRows(sessions: readonly WaitingSession[], closed: boolean): readonly WaitingRow[] {
   const rows: WaitingRow[] = [];
   for (const { project, summary, session } of sessions) {
-    if (session.archived_at != null) continue;
+    if (session.archived_at != null || sessionEnded(session) !== closed) continue;
     for (const item of Object.values(session.items)) {
       if (!item || itemRemoved(session, item.id) || session.topics[item.topic_id]?.archived_at !== null || !unanswered(session, item)) continue;
       const round = item.current_round_id ? session.rounds[item.current_round_id] : undefined;
@@ -57,6 +58,9 @@ export function waitingRows(sessions: readonly WaitingSession[]): readonly Waiti
     || itemOrder(a.item.id, b.item.id));
   return Object.freeze(rows);
 }
+export const waitingRows = (sessions: readonly WaitingSession[]): readonly WaitingRow[] => questionRows(sessions, false);
+/** Archived questions remain in Archive; ended, unarchived sessions can be revealed below Waiting. */
+export const closedWaitingRows = (sessions: readonly WaitingSession[]): readonly WaitingRow[] => questionRows(sessions, true);
 export function sentRows(sessions: readonly WaitingSession[]): readonly SentRow[] {
   const rows: SentRow[] = [];
   for (const { project, summary, session } of sessions) {

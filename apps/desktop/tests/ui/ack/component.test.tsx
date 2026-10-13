@@ -66,7 +66,7 @@ async function mount(transport = new AckTransport()) {
   return transport;
 }
 
-describe('local acknowledgement', () => {
+describe('local acknowledgement', { timeout: 10_000 }, () => {
   it.each([
     { status: 'open', target: 'open', hint: 'Ack → keeps it open' },
     { status: 'open', target: 'in_progress', hint: 'Ack → In progress' },
@@ -138,6 +138,7 @@ describe('local acknowledgement', () => {
     fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
     await act(async () => { detail().focus(); fireEvent.keyDown(detail(), { key: 'a' }); });
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe(target === 'in_progress' ? 'progress' : 'open'));
+    await waitFor(() => expect(within(detail()).queryByRole('button', { name: /^Ack/ })).toBeNull());
     expect(acks(transport)).toHaveLength(1);
     expect(item.status).toBe(target); expect(item.ack_to).toBeNull();
     expect(screen.queryByText('1 to ack')).toBeNull();

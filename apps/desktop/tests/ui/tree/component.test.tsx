@@ -22,6 +22,7 @@ import { LinkOpener } from '../../../src/ui/shared/MarkdownText';
 import { RecoveryPanel } from '../../../src/components/recovery/RecoveryPanel';
 import { Notices, notices } from '../../../src/ui/pages/notices';
 import { NavigationGraph } from '../../../src/ui/graph/NavigationGraph';
+import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 
 const stores: NavigationStore[] = [];
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); notices.clear(); vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -89,6 +90,18 @@ async function staleTree(value: Awaited<ReturnType<typeof mount>>) {
 }
 
 describe('session tree rows', () => {
+  it('keeps closed questions in the tree with their status and a quiet chip, excluding waiting counts', async () => {
+    await mount({ configure: transport => { transport.sessions.get(route.session_id)!.state = 'closed'; } });
+    const question = row('2');
+    expect(within(question).getByText('Session closed').title).toBe(sessionClosedReason);
+    expect(within(question).getByText('Waiting on me')).toBeTruthy();
+    expect(screen.queryByText(/\d+ waiting on you/)).toBeNull();
+    fireEvent.click(filterButton());
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Waiting on me/ }).textContent).not.toMatch(/[1-9]/);
+    fireEvent.click(chip('Waiting on me'));
+    await waitFor(() => expect(ids()).toEqual([]));
+    expect(screen.getByText('No items match these filters.')).toBeTruthy();
+  });
   it('counts declarations and backlinks once, with a visible muted marker that keeps its reserved room when selected or hovered', async () => {
     const view = await mount({ configure: transport => {
       const session = transport.sessions.get(route.session_id)!;
@@ -1170,13 +1183,16 @@ describe('session tree inline answering', () => {
     } });
     row('2').focus(); fireEvent.keyDown(row('2'), { key: 'a' });
     await waitFor(() => expect(control()).not.toBeNull());
-    expect(within(control()!).getByText('This session is archived. Restore it, then reopen it to answer.')).toBeTruthy();
+    const reason = 'This session is archived. Restore it, then reopen it to answer.';
+    expect(within(row('2')).getByText('Session closed').title).toBe(reason);
+    expect(within(control()!).getByText(reason)).toBeTruthy();
   });
   it('blocks sending in a closed session', async () => {
     await mount({ configure: transport => { options(transport); transport.sessions.get(route.session_id)!.state = 'closed'; } });
     row('2').focus(); fireEvent.keyDown(row('2'), { key: 'a' });
     await waitFor(() => expect(control()).not.toBeNull());
-    expect(within(control()!).getByText('This session is closed. Reopen it to answer.')).toBeTruthy();
+    expect(within(row('2')).getByText('Session closed').title).toBe(sessionClosedReason);
+    expect(within(control()!).getByText(sessionClosedReason)).toBeTruthy();
   });
 });
 

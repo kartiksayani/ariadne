@@ -9,6 +9,7 @@ import { AnswerSlot } from '../../../src/ui/detail/AnswerSlot';
 import { useDetailSubmit } from '../../../src/ui/detail/submit';
 import { AppTransport, route } from '../app/transport';
 import { Notices, notices } from '../../../src/ui/pages/notices';
+import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 
 const stores: SessionStore[] = [];
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.close()); notices.clear(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -24,6 +25,70 @@ async function setup() {
 }
 
 describe('detail actions while the owner view is stale', () => {
+  it.each(['closed', 'archived'] as const)('keeps a %s waiting question and draft visible with the right disabled reason', async state => {
+    const { transport, store, drafts } = await setup();
+    const source = transport.sessions.get(route.session_id)!;
+    const entry = drafts.begin(source, '2', 'answer')!;
+    drafts.edit(entry, { text: 'My unsent answer' });
+    source.state = 'closed';
+    if (state === 'archived') source.archived_at = source.updated_at;
+    ++source.revision; await store.refresh();
+    // Archived details keep the saved draft rather than offering a composer.
+    render(<><ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />
+      {state === 'archived' && <AnswerSlot store={store} drafts={drafts} itemId="2" onEscape={vi.fn()} />}</>);
+    const reason = state === 'archived' ? 'This session is archived. Restore it, then reopen it to answer.' : sessionClosedReason;
+    expect(screen.getByText('Session closed').title).toBe(reason);
+    expect(screen.getByText('Waiting on me')).toBeTruthy();
+    const answer = await screen.findByRole('group', { name: 'Answer' });
+    const textarea = within(answer).getByRole('textbox') as HTMLTextAreaElement;
+    expect(textarea.value).toBe('My unsent answer'); expect(textarea.disabled).toBe(true);
+    expect(within(answer).getByRole('button', { name: 'Send as a reply only' }).hasAttribute('disabled')).toBe(true);
+    expect(within(answer).getByText(reason)).toBeTruthy();
+    expect(sends(transport)).toEqual([]);
+    expect(drafts.find(route, '2', 'answer')?.draft.text).toBe('My unsent answer');
+  });
+  it.each(['in_flight', 'handled'] as const)('keeps a %s answered question waiting on the agent with its saved answer after closing the session', async state => {
+    const { transport, store, drafts } = await setup();
+    const source = transport.sessions.get(route.session_id)!;
+    const entry = drafts.begin(source, '2', 'answer')!;
+    drafts.edit(entry, { text: 'Keep my delivered answer' });
+    expect(await drafts.submit(entry)).toBe(true);
+    const input = Object.values(source.inputs).find(value => value?.payload.text === 'Keep my delivered answer')!;
+    // AppTransport saves the input; add core's canonical answer snapshot for the waiting episode.
+    const answer = structuredClone(source.answers[source.answers.length - 1]!);
+    answer.id = crypto.randomUUID(); answer.item_id = '2'; answer.question_revision = source.items['2']!.question_revision;
+    answer.input_id = input.id; answer.message_id = input.message_id; answer.text = input.payload.text;
+    answer.selected_option_id = null; answer.supersedes_answer_id = null; input.answer_id = answer.id;
+    source.answers.push(answer);
+    input.state = state;
+    if (state === 'in_flight') {
+      // A committed result waiting for host completion is handled by Close, rather than cancelled.
+      const attempt = structuredClone(Object.values(source.inputs).find(value => value?.target.item_id === '2' && value.id !== input.id)!.attempts[0]!);
+      attempt.id = crypto.randomUUID(); attempt.sealed_at = null;
+      input.active_attempt_id = attempt.id; input.attempts = [attempt];
+    }
+    ++source.revision;
+    await store.refresh();
+    render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    expect(screen.getByText('Waiting on agent')).toBeTruthy();
+    if (state === 'handled') {
+      expect(await screen.findByText(/Saved · Queue position #/)).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Write another input' })).toHaveProperty('disabled', false);
+    }
+    await act(async () => {
+      await drafts.service.executeOwner({ session: route, command: { command: 'session_close', api_version: 1, op_id: crypto.randomUUID(),
+        params: { expected_revision: source.revision } } });
+      await store.refresh();
+    });
+    expect(screen.getByText('Waiting on agent')).toBeTruthy();
+    expect(screen.queryByText('Waiting on me')).toBeNull();
+    expect(screen.queryByText('Session closed')).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Your answer' })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Answer' })).toBeNull();
+    expect(screen.getByText('Keep my delivered answer')).toBeTruthy();
+    expect(input.state).toBe('handled');
+    expect(drafts.find(route, '2', 'answer')?.receipt?.data.kind).toBe('input_submit');
+  });
   it('copies an item with generic toast feedback and a stable copy button', async () => {
     const { store, drafts } = await setup();
     const writeText = vi.fn(async () => {});

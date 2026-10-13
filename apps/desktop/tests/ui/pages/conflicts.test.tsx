@@ -121,6 +121,7 @@ describe('conflict notices', () => {
   });
 
   it('retains every draft byte and exact failed send when Refresh is clicked', async () => {
+    vi.useFakeTimers();
     const transport = new AppTransport(), service = createDesktopService(transport), sessions = new OpenSessions(service);
     opened.push(sessions);
     const store = sessions.open(route), drafts = new OwnerDraftStore(service);
@@ -137,7 +138,6 @@ describe('conflict notices', () => {
       }
       return invoke(name, args);
     });
-    vi.useFakeTimers();
     render(<><DraftConflictNotices drafts={drafts} opened={sessions} selectedSession={route} /><Notices />
       <ItemDetail store={store} drafts={drafts} itemId="1.1" later={false} onOpenItem={vi.fn()} /></>);
     await act(async () => { expect(await drafts.submit(id)).toBe(false); });

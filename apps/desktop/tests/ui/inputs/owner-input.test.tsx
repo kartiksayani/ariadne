@@ -26,7 +26,7 @@ import { WaitingStore } from '../../../src/selectors/waiting/store';
 import { HistoryTransport } from '../history/fixtures';
 import { useWindowKeys } from '../../../src/ui/shell/windowKeys';
 // @ts-expect-error Native e2e helpers are plain ESM without type declarations.
-import { replyControlState } from '../../e2e/owner-reply.mjs';
+import { replyControlState, replyDraftState } from '../../e2e/owner-reply.mjs';
 
 const route = { project_id: demo.project_id, session_id: demo.id };
 const opened: OpenSessions[] = [];
@@ -36,6 +36,45 @@ const uuid = (n: number) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(n).padStart(12, '0
 function preferences(): PreferencesSnapshot {
   return { schema_version: 1, revision: 1, global: { theme: 'system', selected_navigation: { kind: 'projects' }, window: null, pinned: false, notification_watermark: null }, sessions: [], later: [], drafts: [] };
 }
+
+describe('reply failure diagnostics', () => {
+  it('includes a draft-store error outside the reply form and keeps the composer state', () => {
+    render(<>
+      <section className="item-detail"><p role="alert">Another item's error</p></section>
+      <section className="item-detail">
+        <div data-owner-input="8"><div className="detail-box">
+          <textarea defaultValue="Kept reply" /><button aria-label="Send reply" aria-disabled="true">Send</button>
+          <p role="status">Draft saved</p>
+        </div></div>
+        <p className="detail-error" role="alert">The draft could not be saved.</p>
+      </section>
+    </>);
+    expect(replyControlState('8')).toEqual({ formPresent: true, editorPresent: true, value: 'Kept reply',
+      editorEnabled: true, sendPresent: true, sendEnabled: false, alerts: ['Draft saved', 'The draft could not be saved.'] });
+  });
+  it('retains detail-panel errors when the reply form is missing', () => {
+    render(<section className="item-detail"><p role="alert">The draft could not be loaded.</p></section>);
+    expect(replyControlState('8')).toEqual({ formPresent: false, editorPresent: false, value: null,
+      editorEnabled: false, sendPresent: false, sendEnabled: false, alerts: ['The draft could not be loaded.'] });
+  });
+  it('serializes an explicit attempt state and retains a matching draft older than the last two', () => {
+    const saved = attemptedDraft(), prefs = preferences();
+    prefs.drafts = [saved,
+      { ...saved, op_id: uuid(85), text: 'Other words', submission_attempted: false },
+      { ...saved, op_id: uuid(86), text: 'Legacy words', submission_attempted: undefined },
+      { ...saved, op_id: uuid(87), session: { ...route, session_id: uuid(88) } },
+      { ...saved, op_id: uuid(89), target: { ...saved.target, item_id: '8' } },
+      { ...saved, op_id: uuid(90), intent: 'bring' }];
+    // Check the serialized evidence: JSON drops an undefined attempt flag.
+    expect(JSON.parse(JSON.stringify(replyDraftState({ sessionId: route.session_id, itemId: '2' }, prefs, saved.text))))
+      .toEqual({ revision: prefs.revision, drafts: [
+        { opId: saved.op_id, targetRevision: saved.target_revision, submissionAttempted: true, textMatchesExpected: true },
+        { opId: uuid(85), targetRevision: saved.target_revision, submissionAttempted: false, textMatchesExpected: false },
+        { opId: uuid(86), targetRevision: saved.target_revision, submissionAttempted: null, textMatchesExpected: false },
+      ] });
+  });
+});
+
 async function setup(saved: OwnerDraft[] = [], change: (session: Session) => void = () => {}) {
   const session = structuredClone(demo) as Session, prefs = preferences(); prefs.drafts = structuredClone(saved);
   session.items['2']!.options = [{ id: 'yes', label: 'Keep the design', consequence: 'Retain the current contract.', recommended: true },

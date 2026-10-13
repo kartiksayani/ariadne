@@ -17,6 +17,7 @@ export interface ProjectsPageProps {
   /** First launch: Ariadne found the projects itself (frame 1p). */
   readonly discovered: boolean;
   readonly disabled: boolean;
+  readonly navigationDisabled?: boolean;
   readonly discovery?: DiscoveryController;
   readonly onOpen: (projectId: string) => void;
   readonly onRegister: (root: string) => void;
@@ -30,7 +31,7 @@ function Discover({ controller, register, sessions }: { controller: DiscoveryCon
   return <section className="pw-discover" aria-label="Discover host sessions"><CandidateList controller={controller} sessions={sessions} select={candidate => register(candidate.cwd)} /></section>;
 }
 
-export function ProjectsPage({ projects, sessions, snapshots, now, discovered, disabled, discovery, onOpen, onRegister, onRemove, children }: ProjectsPageProps) {
+export function ProjectsPage({ projects, sessions, snapshots, now, discovered, disabled, navigationDisabled = disabled, discovery, onOpen, onRegister, onRemove, children }: ProjectsPageProps) {
   const [removing, setRemoving] = useState<{ id: string; subject: RemoveSubject } | null>(null);
   const [discovering, setDiscovering] = useState(false);
   const remove = (project: Immutable<ProjectSummary>, name: string) => {
@@ -49,13 +50,13 @@ export function ProjectsPage({ projects, sessions, snapshots, now, discovered, d
       {projects.map(project => {
         const card = projectCard(project, sessions, now);
         return <div key={card.id} className="pw-project-card" style={{ boxShadow: card.ring }} data-project-id={card.id}
-          onClick={() => { if (!disabled) onOpen(card.id); }}>
+          onClick={() => { if (!navigationDisabled) onOpen(card.id); }}>
           <div className="pw-project-head">
             <i className="ph ph-folder-simple pw-project-icon" aria-hidden="true" />
             <button type="button" className="pw-project-remove" title="Remove project" aria-label="Remove project"
               onClick={event => { event.stopPropagation(); remove(project, card.name); }}>
               <i className="ph ph-trash" aria-hidden="true" /></button>
-            <button type="button" className="pw-project-open" disabled={disabled} onClick={event => { event.stopPropagation(); onOpen(card.id); }}>
+            <button type="button" className="pw-project-open" disabled={navigationDisabled} onClick={event => { event.stopPropagation(); onOpen(card.id); }}>
               <span className="pw-project-name">{card.name}</span><span className="pw-project-path">{card.path}</span></button>
           </div>
           <div className="pw-project-facts">

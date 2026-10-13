@@ -9,6 +9,15 @@ const build = (overrides: Partial<GraphInput> = {}) =>
   sessionGraph({ session: graphSession(), view: preferences(), later: new Set(), selectedId: null, tight: false, ...overrides });
 
 describe('graph model', () => {
+  it.each(['closed', 'archived'] as const)('excludes %s sessions from graph waiting counts while keeping stored statuses', ended => {
+    const session = graphSession(), item = session.items['1.1.1']!;
+    session.answers = []; session.inputs = {};
+    expect(topicCounts([item], session)).toBe('1 waiting on you');
+    if (ended === 'closed') session.state = 'closed';
+    else session.archived_at = session.updated_at;
+    expect(topicCounts([item], session)).toBe('');
+    expect(item.status).toBe('waiting_on_me');
+  });
   it('treats a complete saved status set as All without opening saved folds', () => {
     const view = preferences({ expanded_item_ids: [], filters: { ...preferences().filters, statuses: [...FILTER_STATUSES, 'open'] } });
     const graph = build({ view });

@@ -13,7 +13,7 @@ import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { archiveImpact, archiveWarning, closeImpact, closeWarning } from '../../components/history-actions/selectors';
 import { announceClosed } from '../pages/SessionDialogs';
 import { agentName, ownerName, sessionPhrase, sessionWhen } from '../shell/model';
-import { displayStatus } from '../../selectors/waiting/replied';
+import { waitingOnOwner } from '../../selectors/sessionClosed';
 import { saveSessionLabel } from '../shared/SessionRename';
 import { loadingError, savingError, waitForLifecycleReady } from '../shared/lifecycleReady';
 import '../../components/history-actions/history-actions.css';
@@ -124,7 +124,7 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
     const topic = current.topics[topicId];
     if (!topic || topic.archived_at !== null) { setError(topic ? 'This topic is already archived.' : 'This topic is no longer available. Reload the session and try again.'); return false; }
     // Only questions still in the Waiting on me panel leave it; replied ones already wait on the agent.
-    const waiting = Object.values(current.items).filter(item => item?.topic_id === topicId && !itemRemoved(current, item.id) && displayStatus(current, item) === 'waiting_on_me').length;
+    const waiting = Object.values(current.items).filter(item => item?.topic_id === topicId && !itemRemoved(current, item.id) && waitingOnOwner(current, item)).length;
     const saved = await run({ command: 'topic_archive', api_version: 1, op_id: '', params: { topic_id: topicId, expected_revision: topic.revision } }, current);
     if (saved) {
       const receipt = actions.getSnapshot().receipt, data = receipt && 'data' in receipt ? receipt.data : undefined;

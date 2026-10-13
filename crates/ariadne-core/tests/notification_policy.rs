@@ -621,6 +621,92 @@ fn capture_uses_global_counts_labels_and_registered_snapshots() {
 }
 
 #[test]
+fn closing_or_archiving_a_session_removes_tray_rows_and_notification_arrivals() {
+    use ariadne_core::history_actions::HistoryActionService;
+    use ariadne_core::queries::QueryService;
+    use ariadne_store::{registry::Registry, session::Store};
+
+    for archive in [false, true] {
+        let session: Session = fixture("domain/demo/session.json");
+        let home = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let registry = Registry::open(home.path()).unwrap();
+        registry
+            .register(root.path(), &operation_id(), || session.project_id.clone())
+            .unwrap();
+        let store = Store::open_registered(
+            &registry.project_dir(&session.project_id),
+            session.project_id.clone(),
+        )
+        .unwrap();
+        store.create(&session).unwrap();
+        let route = RegisteredSession::from_trusted_entrypoint(
+            session.project_id.clone(),
+            session.id.clone(),
+        );
+        let owner = OwnerContext::from_trusted_entrypoint(OwnerScope::Session(route));
+        let read = |request: OwnerQueryRequest| {
+            let scope = request.session.map_or(OwnerScope::Registry, |route| {
+                OwnerScope::Session(RegisteredSession::from_trusted_entrypoint(
+                    route.project_id,
+                    route.session_id,
+                ))
+            });
+            Ok(QueryService::new(&registry)
+                .query(
+                    &QueryContext::owner(OwnerContext::from_trusted_entrypoint(scope)),
+                    &request.request,
+                )
+                .unwrap())
+        };
+        let active = capture(read).unwrap();
+        assert!(!active.rows.is_empty());
+        let mut preferences = global();
+        preferences.notification_watermark = Some(session.created_at.clone());
+        assert!(!policy::evaluate(&preferences, &active, at(1))
+            .arrivals
+            .is_empty());
+        let params = SessionLifecycleParams {
+            expected_revision: session.revision,
+        };
+        let command = if archive {
+            OwnerCommand::SessionArchive {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: operation_id(),
+                params,
+            }
+        } else {
+            OwnerCommand::SessionClose {
+                api_version: SchemaVersion::new(1).unwrap(),
+                op_id: operation_id(),
+                params,
+            }
+        };
+        HistoryActionService::new(&registry)
+            .execute(&owner, &command, at(2))
+            .unwrap();
+        let saved = store.read(&session.id).unwrap();
+        assert_eq!(saved.state, SessionState::Closed);
+        assert_eq!(saved.items, session.items);
+        assert_eq!(saved.rounds, session.rounds);
+        let path = registry
+            .project_dir(&session.project_id)
+            .join(format!("sessions/{}.json", session.id.as_str()));
+        let bytes = std::fs::read(&path).unwrap();
+        let closed = capture(read).unwrap();
+        assert_eq!(closed.counts.waiting_unanswered.value(), 0);
+        assert!(closed.rows.is_empty());
+        assert!(projection::TrayProjection::from_capture(&closed, &[])
+            .oldest
+            .is_empty());
+        assert!(policy::evaluate(&preferences, &closed, at(3))
+            .arrivals
+            .is_empty());
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
+}
+
+#[test]
 fn capture_skips_empty_sessions_but_keeps_diagnostics_and_rechecks_their_revision() {
     for partial in [false, true] {
         let mut projects: Page<ProjectSummary> = fixture("domain/projections/projects.json");

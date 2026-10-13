@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import App, { DesktopApp } from '../../src/App';
 import { createDesktopService } from '../../src/data/service';
 import { RegisteredRoutes } from '../../src/data/routes';
+import { NavigationStore } from '../../src/state/navigation/store';
 import { OwnFailure } from '../../src/data/plain';
 import { WaitingStore } from '../../src/selectors/waiting/store';
 import { MessageRail } from '../../src/ui/rail/MessageRail';
@@ -32,7 +33,8 @@ vi.mock('../../src/ui/tree/TreeView', async importOriginal => {
   return { ...actual, TreeView: vi.fn(actual.TreeView) };
 });
 
-const mutations = (transport: AppTransport, command: string) => transport.mutations.filter(request => request.command.command === command);
+const mutations = (transport: AppTransport, command: string) => transport.mutations.filter(request => request.command.command === command
+  && (request.command.command !== 'preferences_patch' || request.command.params.entries.some(entry => entry.kind !== 'mark_seen')));
 async function openSession(id = route.session_id, pending = false) {
   fireEvent.click(await sessionButton({ project_id: route.project_id, session_id: id }));
   await screen.findByRole('region', { name: 'Session tree' });
@@ -53,7 +55,144 @@ function setup(strict = false) {
 }
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-describe('ordinary desktop composition', () => {
+// These composed journeys include independent seen saves under default file parallelism.
+describe('ordinary desktop composition', { timeout: 10_000 }, () => {
+  it('reserves a newer item reveal before resolution and prevents an older queued tab from being submitted', async () => {
+    const { transport } = setup(); await openSession();
+    fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
+    await screen.findByLabelText('Detail of #1');
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
+    const invoke = transport.invoke.bind(transport);
+    let releaseOwner!: () => void, releaseReveal!: () => void, writing = false, resolving = false;
+    const ownerGate = new Promise<void>(resolve => { releaseOwner = resolve; });
+    const revealGate = new Promise<void>(resolve => { releaseReveal = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const request = args.request;
+      if ('command' in request && request.command.command === 'preferences_patch'
+        && request.command.params.entries.some(entry => entry.kind === 'set_global' && entry.preferences.theme === 'light')) {
+        writing = true; await ownerGate;
+      }
+      if ('request' in request && request.request.command === 'reveal_item' && request.request.params.item_id === '1.1') {
+        resolving = true; await revealGate;
+      }
+      return invoke(name, args);
+    });
+    const projectWrites = () => mutations(transport, 'preferences_patch').filter(request => request.command.command === 'preferences_patch'
+      && request.command.params.entries.some(entry => entry.kind === 'set_global' && entry.preferences.selected_navigation.kind === 'projects'));
+    const initialProjectWrites = projectWrites().length;
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to light' }));
+    await waitFor(() => expect(writing).toBe(true));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Projects' })); });
+    await act(async () => { fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ })); });
+    expect(projectWrites()).toHaveLength(initialProjectWrites);
+    await act(async () => { releaseOwner(); });
+    await waitFor(() => expect(resolving).toBe(true));
+    expect(projectWrites()).toHaveLength(initialProjectWrites);
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
+    await act(async () => { releaseReveal(); });
+    await screen.findByLabelText('Detail of #1.1');
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1'));
+    expect(projectWrites()).toHaveLength(initialProjectWrites);
+    expect(transport.preferences.global.theme).toBe('light');
+    expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
+  });
+
+  it('keeps a later tab selection when an earlier item reveal finishes resolving', async () => {
+    const { transport } = setup(); await openSession();
+    fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
+    await screen.findByLabelText('Detail of #1');
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void, resolving = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('request' in args.request && args.request.request.command === 'reveal_item' && args.request.request.params.item_id === '1.1') {
+        resolving = true; await gate;
+      }
+      return invoke(name, args);
+    });
+    await act(async () => { fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ })); });
+    await waitFor(() => expect(resolving).toBe(true));
+    fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
+    await screen.findByRole('heading', { name: 'Projects' });
+    await act(async () => { release(); });
+    expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'projects' });
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
+    expect(screen.queryByLabelText('Detail of #1.1')).toBeNull();
+    expect(mutations(transport, 'preferences_patch').some(request => request.command.command === 'preferences_patch'
+      && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1'))).toBe(false);
+  });
+
+  it('keeps the current selection and history position when a deferred Back target is removed', async () => {
+    const { transport } = setup(); await openSession();
+    fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1.1"]')!);
+    await screen.findByLabelText('Detail of #1.1');
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1'));
+    fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="2"]')!);
+    await screen.findByLabelText('Detail of #2');
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('2'));
+    const invoke = transport.invoke.bind(transport), before = mutations(transport, 'preferences_patch').length;
+    let release!: () => void, resolving = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('request' in args.request && args.request.request.command === 'reveal_item' && args.request.request.params.item_id === '1.1') {
+        resolving = true; await gate;
+      }
+      return invoke(name, args);
+    });
+    const back = screen.getByLabelText<HTMLButtonElement>('Back', { selector: 'button' });
+    await waitFor(() => expect(back.disabled).toBe(false));
+    fireEvent.click(back);
+    await waitFor(() => expect(resolving).toBe(true));
+    const session = transport.sessions.get(route.session_id)!;
+    session.items['1.1']!.removed_at = session.updated_at; ++session.revision;
+    await act(async () => { release(); });
+    await waitFor(() => expect(screen.getByLabelText<HTMLButtonElement>('Forward', { selector: 'button' }).disabled).toBe(true));
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('2');
+    expect(screen.getByLabelText('Detail of #2')).toBeTruthy();
+    expect(back.disabled).toBe(true);
+    expect(mutations(transport, 'preferences_patch').slice(before).some(request => request.command.command === 'preferences_patch'
+      && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1'))).toBe(false);
+  });
+
+  it('reveals a linked item while a background seen write is held and then fails', async () => {
+    const { transport } = setup(), invoke = transport.invoke.bind(transport);
+    let release!: () => void, entered = false, failed = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const request = args.request;
+      if ('request' in request && request.request.command === 'item_rounds' && request.request.params.item_id === '1') {
+        const session = transport.sessions.get(route.session_id)!;
+        return { api_version: 1, ok: true, data: { kind: 'item_rounds', data: { item_id: '1', rounds: page(projections(session).rounds, session.revision) } } };
+      }
+      if (!failed && 'command' in request && request.command.command === 'preferences_patch'
+        && request.command.params.entries.every(entry => entry.kind === 'mark_seen')) {
+        entered = true;
+        transport.mutations.push(structuredClone(request));
+        await gate;
+        failed = true;
+        throw new Error('Lost seen response');
+      }
+      return invoke(name, args);
+    });
+    await openSession();
+    fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
+    await screen.findByLabelText('Detail of #1');
+    await waitFor(() => expect(entered).toBe(true), { timeout: 3000 });
+    fireEvent.click(await screen.findByRole('button', { name: /^Branched into Add the receipt lookup test/ }));
+    // A reveal must finish before this unrelated background response arrives.
+    await screen.findByLabelText('Detail of #1.1');
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1');
+    await act(async () => { release(); await gate; });
+    await waitFor(() => {
+      expect(transport.preferences.seen?.some(seen => seen.session.session_id === route.session_id
+        && seen.items.some(item => item.item_id === '1'))).toBe(true);
+    }, { timeout: 3000 });
+    expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull();
+    expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(false);
+    expect(screen.getByLabelText('Detail of #1.1')).toBeTruthy();
+  });
+
   it('clears a route loading refusal on a same-revision ready capture', async () => {
     const { transport } = setup();
     await openSession();
@@ -62,7 +201,11 @@ describe('ordinary desktop composition', () => {
     const bring = await screen.findByRole<HTMLButtonElement>('button', { name: 'Bring it up' });
     await waitFor(() => expect(bring.disabled).toBe(false));
     const { store } = vi.mocked(TreeView).mock.lastCall![0];
+    await act(async () => { await store.refresh(); });
     const before = store.getSnapshot();
+    // Own the next capture: a periodic read can otherwise clear this notice
+    // before the assertion observes it under parallel file execution.
+    const refresh = vi.spyOn(store, 'refresh').mockResolvedValue();
     const loading = "Ariadne is still loading this session's latest changes. Try again.";
     vi.spyOn(RegisteredRoutes.prototype, 'revealItem').mockRejectedValueOnce(new OwnFailure({
       code: 'snapshot_changed', message: loading, hint: '', retryable: true, field_errors: [],
@@ -70,6 +213,7 @@ describe('ordinary desktop composition', () => {
     fireEvent.click(bring);
     expect(await screen.findByText(loading)).toBeTruthy();
     expect(store.getSnapshot().status).toBe('ready');
+    refresh.mockRestore();
     await act(async () => { await store.refresh(); });
     expect(store.getSnapshot().status).toBe('ready');
     expect(store.getSnapshot().snapshot).not.toBe(before.snapshot);
@@ -210,7 +354,17 @@ describe('ordinary desktop composition', () => {
     const session = transport.sessions.get(route.session_id)!;
     await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(session)));
     await waitFor(() => expect(transport.preferences.sessions[0].rail).toBe('activity'));
-    const before = structuredClone(transport.preferences), writes = transport.mutations.length;
+    // The already-open detail may finish its debounced seen mark during hover.
+    // Every other preference and write remains covered by this assertion.
+    const viewPreferences = () => {
+      const preferences = structuredClone(transport.preferences);
+      delete preferences.seen; preferences.revision = 0;
+      return preferences;
+    };
+    const ownerWrites = () => transport.mutations.filter(request => request.command.command !== 'preferences_patch'
+      || request.command.params.entries.some(entry => entry.kind !== 'mark_seen'));
+    const before = viewPreferences(), writes = ownerWrites().length;
+    const mark = vi.spyOn(NavigationStore.prototype, 'markItemSeen');
     const tree = screen.getByRole('tree', { name: 'Session items' }), detail = document.querySelector<HTMLElement>('.shell-detail-scroll')!;
     tree.scrollTop = 50; detail.scrollTop = 70; log.scrollTop = 123;
     const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
@@ -221,7 +375,7 @@ describe('ordinary desktop composition', () => {
     const card = log.querySelector<HTMLElement>(`[data-message-id="${message.id}"]`)!;
     const lit = (node: Element = row) => node.getAttribute('data-highlight');
     const unchanged = () => {
-      expect(transport.preferences).toEqual(before); expect(transport.mutations).toHaveLength(writes);
+      expect(viewPreferences()).toEqual(before); expect(ownerWrites()).toHaveLength(writes); expect(mark).not.toHaveBeenCalled();
       expect(tree.scrollTop).toBe(50); expect(detail.scrollTop).toBe(70); expect(log.scrollTop).toBe(123);
     };
     fireEvent.click(screen.getByRole('button', { name: 'Follow up' }));
@@ -254,7 +408,7 @@ describe('ordinary desktop composition', () => {
     const returned = await screen.findByRole('tree', { name: 'Session items' });
     expect(lit(returned.querySelector('[data-item-id="2"]')!)).toBe('strong');
     expect(card.classList.contains('pw-excerpt-active')).toBe(true);
-    expect(transport.preferences).toEqual(before); expect(transport.mutations).toHaveLength(writes);
+    expect(viewPreferences()).toEqual(before); expect(ownerWrites()).toHaveLength(writes); expect(mark).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Hide messages' }));
     await waitFor(() => expect(lit(returned.querySelector('[data-item-id="2"]')!)).toBeNull());
   }, 15_000); // Full tree/graph/detail/rail composition needs headroom under CI coverage.
@@ -692,19 +846,20 @@ describe('ordinary desktop composition', () => {
     if (outcome === 'bring') await act(async () => { fireEvent.keyDown(parent, { key: 'b' }); });
     if (outcome === 'native route') {
       await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '2' }); });
-      expect(transport.queries.some(query => query.request.command === 'reveal_item' && query.request.params.item_id === '2')).toBe(true);
+      // Native reserves the newer item now; resolution waits for the blur write.
+      expect(transport.queries.some(query => query.request.command === 'reveal_item' && query.request.params.item_id === '2')).toBe(false);
     }
     if (outcome === 'stopped') unmount();
     await act(async () => { release(); await gate; });
     if (outcome === 'stopped') {
       expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
       expect(document.querySelector('.product-app')).toBeNull();
-    } else if (outcome === 'confirmed') {
+    } else if (outcome === 'confirmed' || outcome === 'rejected') {
       await waitFor(() => expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(false));
       await screen.findByLabelText('Detail of #1.1');
       expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1');
       // The saved row offset is below its 40 px topic header: 20 - 40.
-      expect(transport.preferences.sessions[0].scroll).toEqual({ item_id: '1', offset: -20 });
+      if (outcome === 'confirmed') expect(transport.preferences.sessions[0].scroll).toEqual({ item_id: '1', offset: -20 });
     } else {
       if (outcome === 'uncertain') {
         const reconcile = await screen.findByRole('button', { name: 'Check again' });
@@ -712,7 +867,10 @@ describe('ordinary desktop composition', () => {
         expect(screen.queryByLabelText('Detail of #1.1')).toBeNull();
         fireEvent.click(reconcile);
         await waitFor(() => expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(false));
-        expect(mutations(transport, 'preferences_patch').at(-1)).toEqual(frozen);
+        const reconciliation = mutations(transport, 'preferences_patch').filter(request => request.command.op_id === frozen?.command.op_id);
+        expect(reconciliation).toEqual([frozen, frozen]);
+        await screen.findByLabelText('Detail of #1.1');
+        expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1');
       } else if (outcome === 'shortcut') {
         // Back to Open is one press: the shortcut sends the reopen request for the selected item.
         await waitFor(() => expect(mutations(transport, 'input_submit')).toHaveLength(1));
@@ -722,10 +880,17 @@ describe('ordinary desktop composition', () => {
         expect(mutations(transport, 'input_submit')[0].command).toMatchObject({ params: { kind: 'bring', text: 'Bring this up.', target: { item_id: '1' } } });
       }
       else await waitFor(() => expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(false));
-      expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
-      expect(screen.queryByLabelText('Detail of #1.1')).toBeNull();
+      if (outcome === 'native route') {
+        await screen.findByLabelText('Detail of #2');
+        expect(transport.queries.some(query => query.request.command === 'reveal_item' && query.request.params.item_id === '2')).toBe(true);
+        expect(transport.preferences.sessions[0].selected_item_id).toBe('2');
+        expect(screen.queryByLabelText('Detail of #1.1')).toBeNull();
+      } else if (outcome !== 'uncertain') {
+        expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
+        expect(screen.queryByLabelText('Detail of #1.1')).toBeNull();
+      }
     }
-    if (outcome !== 'confirmed') expect(mutations(transport, 'preferences_patch').some(request => request.command.command === 'preferences_patch'
+    if (!['confirmed', 'rejected', 'uncertain'].includes(outcome)) expect(mutations(transport, 'preferences_patch').some(request => request.command.command === 'preferences_patch'
       && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1'))).toBe(false);
   });
   it.each(['revision_conflict', 'commit_uncertain'] as const)('after a %s on the blur write, the fork click proceeds only for a definite conflict', async code => {
@@ -781,7 +946,7 @@ describe('ordinary desktop composition', () => {
       expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
     }
   });
-  it.each(['parent selection', 'tab close', 'read failure'])('cancels a waiting detail link after %s during catalogue completion', async outcome => {
+  it.each(['parent selection', 'tab close', 'read failure'])('preserves the latest selection after %s during late catalogue completion', async outcome => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[data-item-id="1"]')!);
     await screen.findByLabelText('Detail of #1');
@@ -810,10 +975,14 @@ describe('ordinary desktop composition', () => {
     await waitFor(() => expect(reading).toBe(true));
     const search = screen.getByLabelText('Search questions and outcomes');
     await waitFor(() => expect(search.hasAttribute('disabled')).toBe(false));
+    // The saved theme releases the queued link before its catalogue finishes.
+    await screen.findByLabelText('Detail of #1.1');
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1'));
     expect(completed).toBe(false);
     if (outcome === 'parent selection') {
       fireEvent.click(document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!);
       await screen.findByLabelText('Detail of #1');
+      await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
       await waitFor(() => expect(search.hasAttribute('disabled')).toBe(false));
     } else if (outcome === 'tab close') {
       fireEvent.click(screen.getByRole('button', { name: /Close .* tab/ }));
@@ -824,12 +993,13 @@ describe('ordinary desktop composition', () => {
     if (outcome === 'tab close') {
       expect(screen.queryByLabelText('Detail of #1')).toBeNull();
       expect(transport.preferences.sessions[0].tab_open).toBe(false);
-    } else expect(await screen.findByLabelText('Detail of #1')).toBeTruthy();
-    if (outcome === 'read failure') expect(document.querySelector('.nav-banner[role="alert"]')).not.toBeNull();
+    } else expect(await screen.findByLabelText(outcome === 'parent selection' ? 'Detail of #1' : 'Detail of #1.1')).toBeTruthy();
+    // A coalesced successful read after the rejected capture clears its banner.
+    if (outcome === 'read failure') await waitFor(() => expect(document.querySelector('.nav-banner[role="alert"]')).toBeNull());
     expect(transport.preferences.global.theme).toBe('light');
-    expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
+    expect(transport.preferences.sessions[0].selected_item_id).toBe(outcome === 'parent selection' ? '1' : '1.1');
     expect(mutations(transport, 'preferences_patch').some(request => request.command.command === 'preferences_patch'
-      && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1'))).toBe(false);
+      && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1'))).toBe(true);
   });
   it('retains the newer parent selection when child navigation finishes its late catalogue read', async () => {
     const { transport } = setup(); await openSession();

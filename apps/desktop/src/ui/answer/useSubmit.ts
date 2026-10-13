@@ -9,6 +9,7 @@ import type { Immutable } from '../../data/session-store';
 import { plainFailure } from '../../data/plain';
 import { blockedDraft, emptyDraft, ownerActions, useOwnerDrafts, type DraftEntry, type OwnerDraftStore, type OwnerIntent } from '../../state/drafts/store';
 import { agentName } from '../shell/model';
+import { sessionAnswerBlocked } from '../../selectors/sessionClosed';
 
 /** A keyboard request to open the input for an intent, optionally choosing option `optionIndex`. */
 export interface OwnerFocusRequest {
@@ -111,8 +112,7 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
   useEffect(() => { if (follows && session && entry) drafts.rebind(entry.draft.op_id, session); }, [follows, session, entry, drafts]);
   const guard = draft && session ? blockedDraft(draft, session) : null;
   const blocked = !session || !draft ? null : !current ? stale
-    : session.archived_at != null ? 'This session is archived. Restore it, then reopen it to answer.'
-    : session.state !== 'active' && intent === 'answer' ? 'This session is closed. Reopen it to answer.'
+    : session.archived_at != null || session.state !== 'active' && intent === 'answer' ? sessionAnswerBlocked(session)
       : connection === 'reconnecting' ? reconnectingNote(agent)
         : guard === emptyDraft ? null : guard;
   const locked = !entry || entry.saving || entry.uncertain || state.preferenceUncertain;

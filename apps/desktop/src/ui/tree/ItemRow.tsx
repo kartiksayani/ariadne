@@ -7,6 +7,7 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEve
 import { Markdown } from '../shared/MarkdownText';
 import { StatusBadge } from '../shared/StatusBadge';
 import { ackTitle } from '../shared/ack';
+import { SessionClosedChip } from '../shared/SessionClosedChip';
 import { closed, visual, type Guide, type ItemRow as Row } from './model';
 
 export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly disabled?: boolean; readonly persistent?: boolean }
@@ -91,6 +92,7 @@ export interface ItemRowProps {
   readonly focused: boolean;
   /** Selection is held while a view write is unconfirmed. */
   readonly disabled?: boolean;
+  readonly closedReason?: string;
   /** strong: the hovered message touched this item; weak: it touched something folded inside. */
   readonly highlight: 'strong' | 'weak' | null;
   readonly note: string | null;
@@ -110,7 +112,7 @@ export interface ItemRowProps {
   readonly onHover: (id: string | null) => void;
 }
 
-export function ItemRow({ row, selected, focused, disabled = false, highlight, note, actions, answer, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, onJump, onHover }: ItemRowProps) {
+export function ItemRow({ row, selected, focused, disabled = false, closedReason, highlight, note, actions, answer, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, onJump, onHover }: ItemRowProps) {
   const item = row.item, status = visual(row.status);
   const details = preview(row, () => { if (row.replacedBy) onJump(row.replacedBy.id); }, unfolded);
   const muted = closed(item.status) || row.context || row.later || row.hidden;
@@ -150,6 +152,7 @@ export function ItemRow({ row, selected, focused, disabled = false, highlight, n
         {hover.length > 0 && <span className="tree-actions">{hover.map(actionButton)}</span>}
       </span>}
       <span className="tree-row-status"><span className="tree-id">{item.id}</span>
+        {row.sessionClosed && <SessionClosedChip reason={closedReason} />}
         <StatusBadge status={status} label={row.badge} variant="text" /></span>
     </div>
   </div>;

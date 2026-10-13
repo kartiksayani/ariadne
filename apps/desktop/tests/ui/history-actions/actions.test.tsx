@@ -505,6 +505,8 @@ describe('guarded history controls', () => {
     expect(notices.getSnapshot().some(notice => notice.text.includes(`${unsent} unsent message`))).toBe(true);
   });
   it('words what closing leaves open and what it cancels', () => {
+    expect(closeWarning({ questions: 1, unsent: 0, delivering: 0 }, 'codex', 'archiving'))
+      .toBe('1 question is still open. Restore and reopen the session before answering.');
     expect(closeWarning({ questions: 1, unsent: 2, delivering: 0 }, 'codex')).toBe('1 question is still open and 2 of your messages haven’t reached codex — closing cancels those messages.');
     expect(closeWarning({ questions: 0, unsent: 1, delivering: 0 }, 'codex')).toBe('1 of your messages hasn’t reached codex — closing cancels it.');
     expect(closeWarning({ questions: 2, unsent: 0, delivering: 0 }, 'codex')).toBe('2 questions are still open — they stay in the closed session.');

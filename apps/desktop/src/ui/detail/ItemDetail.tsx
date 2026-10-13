@@ -27,6 +27,8 @@ import { notices } from '../pages/notices';
 import { isViewConflict } from '../shared/conflictNotice';
 import { shortLabel } from '../shared/short';
 import { displayStatus } from '../../selectors/waiting/replied';
+import { closedSessionQuestion, sessionAnswerBlocked } from '../../selectors/sessionClosed';
+import { SessionClosedChip } from '../shared/SessionClosedChip';
 import { CopyMessage } from './CopyMessage';
 import { StatusBadge } from '../shared/StatusBadge';
 import { actionText, boxText, detailModel, detailPath, type ActionKey, type Kid, type LinkView, type OpenMode, type PendingView, type WordsKind } from './model';
@@ -243,7 +245,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const currentQuestionOpen = item?.status === 'waiting_on_me' && !!round && round.closed_at === null
     && round.question_revision === item.question_revision;
   const archived = session?.archived_at != null || (item && session?.topics[item.topic_id]?.archived_at != null);
-  const showAnswer = !archived && currentQuestionOpen && !!(model?.answer || retained?.uncertain || retained?.error);
+  const showAnswer = !archived && (!!session && !!item && closedSessionQuestion(session, item) || currentQuestionOpen && !!(model?.answer || retained?.uncertain || retained?.error));
   const savedAnswers = !showAnswer && session ? drafts.savedAnswers({ project_id: session.project_id, session_id: session.id }, itemId) : [];
   const ackTo = session && item ? ackTarget(session, item) : null;
   // An open item is replied to and an in-progress item gets notes: that box is always there, never behind a button. Other
@@ -439,7 +441,8 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     }}>
     <div className={`detail-head${titleExpanded ? ' detail-head-expanded' : ''}`}>
       {/* The handoff embeds the badge in a block host; its line box makes the row 23px. */}
-      <div className="detail-status"><div className="detail-badge"><StatusBadge status={model.display} label={model.badgeLabel} /></div>
+      <div className="detail-status"><div className={`detail-badge${closedSessionQuestion(session, item) ? ' detail-badge-session-closed' : ''}`}><StatusBadge status={model.display} label={model.badgeLabel} />
+        {closedSessionQuestion(session, item) && <SessionClosedChip reason={sessionAnswerBlocked(session)} />}</div>
         <span className="detail-meta" title={model.meta}>{model.meta}</span>
         <span className="detail-reference"><button type="button" className="btn btn-ghost detail-copy" title="Copy the agent reference" onClick={copy}>
           <i className="ph ph-copy" aria-hidden="true" />Copy reference</button></span></div>

@@ -15,6 +15,7 @@ import { deliveryLine as deliveryText, deliveryStage } from '../answer/delivery'
 import { agentLine, agentName, dayWord, hostApp, ownerName, sessionLabel } from '../shell/model';
 import { STATUS, statusKey, type StatusKey } from '../shared/status';
 import { displayStatus, type DisplayStatus } from '../../selectors/waiting/replied';
+import { closedSessionQuestion, sessionEnded, waitingOnOwner } from '../../selectors/sessionClosed';
 import { continuedLabel } from '../shared/continued';
 import { hiddenGroupKey, hiddenGroupsFor, hiddenItems } from './hidden';
 import { agentRunning, connectionOf, type Connection } from '../shared/connection';
@@ -193,6 +194,7 @@ export interface ItemRow {
   readonly kind: 'item';
   readonly key: string;
   readonly item: Immutable<Item>;
+  readonly sessionClosed?: boolean;
   /** What the row shows: the item's status, or Waiting on agent once the owner replied. */
   readonly status: DisplayStatus;
   readonly ack: NonNullable<Item['ack_to']> | null;
@@ -269,9 +271,9 @@ function topicChip(session: Immutable<Session>, topic: Immutable<Topic>, summari
   return { label: `${ownerName(session) ?? (binding ? agentName(binding.adapter_id) : 'Session')} · ${day}`, title: 'From an earlier session' };
 }
 
-export function topicCounts(statuses: readonly DisplayStatus[], ackCount = 0): Count[] {
+export function topicCounts(statuses: readonly DisplayStatus[], ackCount = 0, ended = false): Count[] {
   const count = (test: (status: DisplayStatus) => boolean) => statuses.filter(test).length;
-  const waiting = count(status => status === 'waiting_on_me'), open = count(status => status === 'open');
+  const waiting = ended ? 0 : count(status => status === 'waiting_on_me'), open = count(status => status === 'open');
   const agent = count(status => status === 'waiting_on_agent');
   const progress = count(status => status === 'in_progress'), done = count(status => status !== 'waiting_on_agent' && closed(status));
   return [
@@ -320,10 +322,11 @@ export function treeModel(input: TreeInput): TreeModel {
   const shows = new Map(all.map(item => [item.id, displayStatus(session, item)]));
   const display = (item: Immutable<Item>) => shows.get(item.id) ?? item.status;
   const statusFiltered = !chips.has('all');
-  const statusMatch = (item: Immutable<Item>) => !statusFiltered || statusIn(filters.statuses, display(item));
+  const statusMatch = (item: Immutable<Item>) => !statusFiltered || (display(item) !== 'waiting_on_me' || waitingOnOwner(session, item))
+    && statusIn(filters.statuses, display(item));
   const filtering = terms.length > 0 || statusFiltered || filters.owners.length > 0 || filters.hide_later;
   const scoped = live.filter(item => base(item));
-  const counts = Object.fromEntries(CHIPS.map(({ chip: key }) => [key, scoped.filter(item => (!hidden.has(item.id) || key === 'waiting') && inChip(key, display(item))).length])) as Record<Chip, number>;
+  const counts = Object.fromEntries(CHIPS.map(({ chip: key }) => [key, scoped.filter(item => (!hidden.has(item.id) || key === 'waiting') && (key !== 'waiting' || waitingOnOwner(session, item)) && inChip(key, display(item))).length])) as Record<Chip, number>;
 
   // includeSets: matches, the forced reveal and selection, and their ancestors.
   const matched = new Set<string>(), forced = new Set<string>(), include = new Set<string>();
@@ -353,7 +356,7 @@ export function treeModel(input: TreeInput): TreeModel {
     const topicItems = all.filter(item => item.topic_id === topic.id), statuses = topicItems.map(display);
     const chipValue = topicChip(session, topic, input.summaries, input.now);
     const delivery = deliveryLine(session, { topicId: topic.id, itemId: null }, input.presence, input.health);
-    built.push({ kind: 'topic', key: topic.id, topic, depth: 0, expanded: open, first: built.length === 0, counts: topicCounts(statuses, topicItems.filter(item => ackTarget(session, item)).length),
+    built.push({ kind: 'topic', key: topic.id, topic, depth: 0, expanded: open, first: built.length === 0, counts: topicCounts(statuses, topicItems.filter(item => ackTarget(session, item)).length, sessionEnded(session)),
       earlier: !topic.origin && !!chipValue, chip: chipValue, allClosed: !delivery && statuses.length > 0 && statuses.every(status => status !== 'waiting_on_agent' && closed(status)), delivery });
     if (!open) continue;
     const walk = (list: readonly Immutable<Item>[], depth: number) => {
@@ -369,7 +372,7 @@ export function treeModel(input: TreeInput): TreeModel {
           const gather = (value: Immutable<Item>) => { below.push(value); kids(value.id).forEach(gather); };
           hiddenSiblings.forEach(gather);
           built.push({ kind: 'hidden', key: groupKey, topicId: topic.id, parent: item.parent, depth,
-            count: hiddenSiblings.length, waiting: below.some(value => display(value) === 'waiting_on_me'),
+            count: hiddenSiblings.length, waiting: below.some(value => waitingOnOwner(session, value)),
             expanded: groupOpen, delivery: null });
         }
         if (explicitHidden.has(item.id) && !groupOpen) continue;
@@ -380,11 +383,11 @@ export function treeModel(input: TreeInput): TreeModel {
           const below: Immutable<Item>[] = [];
           const gather = (id: string) => kids(id).forEach(child => { below.push(child); gather(child.id); });
           gather(item.id);
-          collapsed = { waiting: below.filter(value => display(value) === 'waiting_on_me').length, open: below.filter(value => value.status === 'open').length,
+          collapsed = { waiting: below.filter(value => waitingOnOwner(session, value)).length, open: below.filter(value => value.status === 'open').length,
             progress: below.filter(value => value.status === 'in_progress' || display(value) === 'waiting_on_agent').length, closed: below.filter(value => closed(value.status)).length, ids: below.map(value => value.id) };
         }
         const parked = item.status === 'open' && later.has(item.id);
-        built.push({ kind: 'item', key: item.id, item, status: display(item), ack: ackTarget(session, item), depth, hasKids: children.length > 0, expanded: open,
+        built.push({ kind: 'item', key: item.id, item, sessionClosed: closedSessionQuestion(session, item), status: display(item), ack: ackTarget(session, item), depth, hasKids: children.length > 0, expanded: open,
           hidden: hidden.has(item.id), context: filtering && !matched.has(item.id) && !forced.has(item.id), later: parked, segments: segments(item.question, input.search),
           replacedBy: item.replaced_by && !itemRemoved(session, item.replaced_by) ? session.items[item.replaced_by] ?? null : null, rounds: indexes.roundsByItem.get(item.id)?.length ?? 0,
           relatedCount: connectedItems(session, item.id).length,
@@ -437,6 +440,6 @@ export function parentKey(row: Row): string | null {
 
 /** The oldest item waiting on the owner in this session; one the owner already replied to waits on the agent. */
 export function oldestWaiting(session: Immutable<Session>): Immutable<Item> | null {
-  return items(session).filter(item => displayStatus(session, item) === 'waiting_on_me' && session.topics[item.topic_id]?.archived_at === null)
+  return items(session).filter(item => waitingOnOwner(session, item) && session.topics[item.topic_id]?.archived_at === null)
     .sort((a, b) => (a.waiting_since ?? a.created_at).localeCompare(b.waiting_since ?? b.created_at))[0] ?? null;
 }

@@ -174,6 +174,7 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
   const selectedSession = selection.kind === 'session' ? sessions.find(session => key(session) === key(selection.session)) : null;
   const mutationDisabled = refreshPending || state.writing || state.pendingOperationId !== null;
   const disabled = mutationDisabled || !state.preferences;
+  const navigationDisabled = refreshPending || !state.preferences;
   const refresh = async () => {
     if (refreshPending) return;
     setRefreshPending(true);
@@ -252,10 +253,10 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
     && <p className="pw-page-note" role="status">{state.error ? 'Sessions are unavailable for this view.' : 'Loading sessions…'}</p>;
   const page = selection.kind === 'session' ? null : selection.kind === 'projects'
     ? <ProjectsPage projects={projects} sessions={sessions} snapshots={snapshots} now={at} discovered={state.status === 'ready' && state.preferences?.sessions.length === 0 && projects.length > 0}
-      disabled={mutationDisabled} discovery={discovery} onOpen={openProject} onRegister={register} onRemove={onRemoveTarget}>
+      disabled={mutationDisabled} navigationDisabled={navigationDisabled} discovery={discovery} onOpen={openProject} onRegister={register} onRemove={onRemoveTarget}>
       {state.status === 'ready' && projects.length === 0 && <p className="pw-page-note">No registered projects. Register a project to connect an existing session.</p>}
     </ProjectsPage>
-    : <SessionLists navigation={store} actions={actions} groups={groups} sessions={sessions} snapshots={snapshots} openTabs={openTabs} now={at} disabled={disabled}
+    : <SessionLists navigation={store} actions={actions} groups={groups} sessions={sessions} snapshots={snapshots} openTabs={openTabs} now={at} disabled={disabled} navigationDisabled={navigationDisabled}
       onBack={selection.kind === 'project' ? () => select({ kind: 'projects' }) : undefined}
       overview={selection.kind === 'all_sessions' ? { sub: openProjectIds.length
         ? `Every session in ${openProjectIds.map(projectNameOf).join(' and ')}` : 'Open a session from Projects to see it here.' } : undefined}
@@ -266,9 +267,12 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
   const center = <>
     {page && <div className="pw-page-notes">{notes}</div>}
     {page ?? <div className="nav-content nav-session-content">{notes}<SelectedSession navigation={store} renderSession={renderSession} /></div>}
+    {state.pendingNavigation && <p className="nav-opening" role="status">{state.pendingNavigation.kind === 'all_sessions'
+      ? 'Opening All sessions…' : state.pendingNavigation.kind === 'projects' ? 'Opening Projects…'
+        : state.pendingNavigation.kind === 'project' ? 'Opening the project…' : 'Opening the session…'}</p>}
   </>;
   return <Shell header={{ ...defaultChrome,...chrome, text: headerText(headerInput, at), disabled }}
-    tabs={{ tabs, disabled, onSelect: selectTab, onClose: closeTab }}
+    tabs={{ tabs, disabled: navigationDisabled, closeDisabled: disabled, onSelect: selectTab, onClose: closeTab }}
     body={{ waiting: waitingContent ?? <WaitingFrame count="–" loading />,
       center, detail, detailPath, rail: railContent, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide,
       detailWidth: shown.detail_width ?? null, waitingFolded: shown.waiting_collapsed ?? false,
