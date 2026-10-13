@@ -1,6 +1,6 @@
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { QueryEnvelope, QueryResult, SessionReadResult } from '../../../src/generated/core';
-import type { ItemReadProjection, Message, Page, QueryCursor, RoundProjection, Session } from '../../../src/generated/domain/models';
+import type { ItemReadProjection, Page, QueryCursor, RoundProjection, Session } from '../../../src/generated/domain/models';
 import { createDesktopService, type DesktopTransport, type HintPayloads } from '../../../src/data/service';
 import { OpenSessions } from '../../../src/data/session-store';
 import { RegisteredRoutes } from '../../../src/data/routes';
@@ -88,7 +88,4 @@ export function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>(yes => { resolve = yes; });
   return { promise, resolve };
-}
-export function extraMessage(session: Session, number: number): Message {
-  return { ...session.messages[0], id: id(1100 + number), number, body: `New exact message ${number}` };
 }

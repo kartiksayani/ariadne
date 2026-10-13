@@ -39,8 +39,7 @@ export interface NavigationWorkspaceProps {
   readonly detail?: ReactNode;
   /** The detail header's breadcrumb. */
   readonly detailPath?: ReactNode;
-  readonly railContent?: ReactNode;
-  /** Header controls owned by the composition: search, views, rail and theme. */
+  /** Header controls owned by the composition: search, views and theme. */
   readonly chrome?: Omit<HeaderProps, 'text' | 'disabled'>;
   /** Facts for the selected session tab's header; null while it opens. */
   readonly session?: SessionFacts | null;
@@ -63,7 +62,7 @@ const key = (route: SessionRef) => JSON.stringify([route.project_id, route.sessi
 const projectName = (project: Immutable<ProjectSummary>) => project.project?.display_name ?? 'Unavailable project';
 const partial = (counts: Immutable<SummaryCounts>) => counts.completeness === 'partial';
 const running = isRunning;
-const defaultChrome: Omit<HeaderProps, 'text' | 'disabled'> ={ query: '', views: null, railOn: false, theme: 'dark' };
+const defaultChrome: Omit<HeaderProps, 'text' | 'disabled'> ={ query: '', views: null, theme: 'dark' };
 
 /** Saved binding-connect receipt: what to give the host, plus capabilities the owner cannot rely on. */
 function SetupCard({ setup, adapterId, onDismiss }: { setup: NonNullable<NavigationState['setup']>; adapterId: string | null; onDismiss: () => void }) {
@@ -125,7 +124,7 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   </>;
 }
 
-export function NavigationWorkspace({ store, discovery, waitingContent, detail, detailPath, railContent, chrome, session, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
+export function NavigationWorkspace({ store, discovery, waitingContent, detail, detailPath, chrome, session, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
   actions: injectedActions, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
   const transientError = !state.pendingOperationId && state.error === store.getMutationFailure() ? state.error : null;
@@ -274,7 +273,7 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
   return <Shell header={{ ...defaultChrome,...chrome, text: headerText(headerInput, at), disabled }}
     tabs={{ tabs, disabled: navigationDisabled, closeDisabled: disabled, onSelect: selectTab, onClose: closeTab }}
     body={{ waiting: waitingContent ?? <WaitingFrame count="–" loading />,
-      center, detail, detailPath, rail: railContent, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide,
+      center, detail, detailPath, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide,
       detailWidth: shown.detail_width ?? null, waitingFolded: shown.waiting_collapsed ?? false,
       onResizeDetail: width => saveLayout({ detail_width: width }), onFoldWaiting: folded => saveLayout({ waiting_collapsed: folded }) }}
     summary={footerSummary(global ? { items: Object.values(global.items_by_status).reduce((sum, count) => sum + count, 0), waiting: global.waiting_unanswered,

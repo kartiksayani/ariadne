@@ -167,7 +167,7 @@ are omitted, while nullable domain/service fields emit explicit null.
 | `topic_remove` | session ref, topic_id, expected_revision (topic), op_id | hard-deletes the topic's continuation family in every session that holds a copy, in any registered project; one `removed` notice to the latest copy; saved `removal` receipt |
 | `session_remove` | session:null, project_id, session_id, expected_revision, op_id | deletes the session file after a backup, pending inputs included; `Removed` receipt |
 | `project_remove` | session:null, project_id, op_id | unregisters the project and deletes only its Ariadne store after a backup; `Removed` receipt |
-| `preferences_patch` | expected_preferences_revision, patch | UI-only Later, drafts, theme, rail, tabs, geometry, seen state |
+| `preferences_patch` | expected_preferences_revision, patch | UI-only Later, drafts, theme, tabs, geometry, seen state |
 | `preferences_get` | none | local owner-only versioned UI preferences, including unsent drafts |
 | `reveal_item` | registered project/session/item IDs | focus route; no mutation |
 
@@ -394,7 +394,7 @@ Preference records belong to the local owner backend. `PreferencesSnapshot`
 contains schema/revision, global theme (system/light/dark), required
 `selected_navigation:NavigationSelection`, optional window geometry/monitor,
 pin and notification watermark; per-session required `tab_open`, selection, tab
-order, expansion, filters, rail and scroll; qualified Later routes; and unsent
+order, expansion, filters and scroll; qualified Later routes; and unsent
 `OwnerDraft` records. The optional submission_attempted marker defaults to false
 and false is omitted from serialization to preserve legacy preference-command
 replay digests. True is saved with the exact request-bearing draft before submit;
@@ -413,7 +413,11 @@ is explicit. The existing request/entity/page bounds apply. See
 `project{project_id}` or `session{session:SessionRef}`. SetGlobal/SetSessionView
 remain the only navigation preference patches. Closing a tab sets `tab_open`
 false and retains its view data and drafts. These required fields precede any
-production preferences writer; no compatibility defaults or migration apply.
+production preferences writer. Alpha.15 removes the session `rail` preference.
+Snapshot reads accept and ignore that retired key in older `ui.json` files;
+reads preserve the file bytes and the next confirmed patch omits the key. Other
+unknown fields and duplicate keys still reject, and current session-view patches
+accept only the published fields.
 `ViewFilters.owners` is required and uses the canonical `ItemOwner` union. Empty
 means all owners; selected exact owner values combine with OR, and with search,
 status, topic, Archive and Later filters through AND. Other-owner names preserve

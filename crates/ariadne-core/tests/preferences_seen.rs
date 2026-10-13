@@ -238,7 +238,6 @@ fn setting_session_view_cannot_overwrite_seen_state() {
             archived: false,
             hide_later: false,
         },
-        rail: RailView::Activity,
         scroll: None,
         collapsed_topic_ids: vec![],
         focused_item_id: None,
@@ -569,4 +568,74 @@ fn retained_receipts_require_nonempty_consecutive_history_ending_at_snapshot() {
             CoreErrorCode::CorruptSession
         );
     }
+}
+
+#[test]
+fn retired_rail_loads_without_rewriting_and_disappears_on_next_patch() {
+    let s = Setup::new();
+    s.service().patch(&owner(), &patch(100, 1, vec![])).unwrap();
+    let mut record = s.record();
+    let view = json!({
+        "session": route(), "tab_open": true, "selected_item_id": "1", "tab_order": 0,
+        "expanded_item_ids": ["1"], "filters": { "search": "kept", "statuses": [], "owners": [],
+            "topic_id": null, "archived": false, "hide_later": false }, "scroll": {"item_id": "1", "offset": 42}
+    });
+    let expected: SessionPreferences = serde_json::from_value(view.clone()).unwrap();
+    for rail in ["waiting", "sent", "activity", "hidden"] {
+        let mut legacy = view.clone();
+        legacy["rail"] = json!(rail);
+        record["snapshot"]["sessions"] = json!([legacy]);
+        s.write(&record);
+        let bytes = fs::read(s.live()).unwrap();
+        let reopened = Registry::open(s.home.path()).unwrap();
+        assert_eq!(
+            PreferencesService::new(&reopened)
+                .get(&owner())
+                .unwrap()
+                .sessions,
+            vec![expected.clone()]
+        );
+        assert_eq!(fs::read(s.live()).unwrap(), bytes);
+        assert!(!s.backup().exists());
+    }
+    let bytes = fs::read(s.live()).unwrap();
+    s.service().patch(&owner(), &patch(101, 2, vec![])).unwrap();
+    assert_eq!(s.saved().sessions, vec![expected]);
+    assert!(s.record()["snapshot"]["sessions"][0].get("rail").is_none());
+    assert_eq!(fs::read(s.backup()).unwrap(), bytes);
+}
+
+#[test]
+fn retired_rail_compatibility_keeps_unknown_and_duplicate_fields_invalid() {
+    let s = Setup::new();
+    s.service().patch(&owner(), &patch(100, 1, vec![])).unwrap();
+    let mut record = s.record();
+    record["snapshot"]["sessions"] = json!([{
+        "session": route(), "tab_open": true, "selected_item_id": null, "tab_order": 0,
+        "expanded_item_ids": [], "filters": { "search": "", "statuses": [], "owners": [],
+            "topic_id": null, "archived": false, "hide_later": false }, "scroll": null, "rail": "hidden"
+    }]);
+    let canonical = serde_json::to_string(&record).unwrap();
+    for invalid in [
+        canonical.replace(
+            "\"rail\":\"hidden\"",
+            "\"rail\":\"hidden\",\"unknown\":true",
+        ),
+        canonical.replace("\"tab_open\":true", "\"tab_open\":true,\"tab_open\":false"),
+        canonical.replace(
+            "\"rail\":\"hidden\"",
+            "\"rail\":\"hidden\",\"rail\":\"activity\"",
+        ),
+    ] {
+        fs::write(s.live(), invalid.as_bytes()).unwrap();
+        assert_eq!(
+            s.service().get(&owner()).unwrap_err().code,
+            CoreErrorCode::CorruptSession
+        );
+        assert_eq!(fs::read(s.live()).unwrap(), invalid.as_bytes());
+    }
+    assert!(serde_json::from_value::<SessionPreferences>(
+        record["snapshot"]["sessions"][0].clone()
+    )
+    .is_err());
 }

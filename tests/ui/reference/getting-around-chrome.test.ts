@@ -80,7 +80,9 @@ describe('owner-approved M1 reference navigation chrome', () => {
   it('adapts the existing Text size control so search has the same header space', () => {
     expect(source).toContain('aria-label="Text size"');
     expect(source).toContain('style="width:32px; height:32px; flex:none;">Aa</button>');
-    expect(source.indexOf('title="Messages (m)"')).toBeLessThan(source.indexOf('aria-label="Text size"'));
+    expect(source).not.toContain('title="Messages (m)"');
+    expect(source.indexOf('value="{{ q }}"')).toBeGreaterThanOrEqual(0);
+    expect(source.indexOf('value="{{ q }}"')).toBeLessThan(source.indexOf('aria-label="Text size"'));
     expect(source.indexOf('aria-label="Text size"')).toBeLessThan(source.indexOf('onClick="{{ toggleTheme }}"'));
   });
 

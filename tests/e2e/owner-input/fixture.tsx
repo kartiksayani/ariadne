@@ -43,7 +43,6 @@ class LayoutTransport extends AppTransport {
         }
       }
       this.preferences.sessions[0]!.expanded_item_ids = Array.from({ length: 20 }, (_, index) => String(index + 1));
-      this.preferences.sessions[0]!.rail = 'activity';
       this.preferences.global.selected_navigation = { kind: 'project', project_id: route.project_id };
     }
   }

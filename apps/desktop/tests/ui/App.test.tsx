@@ -5,28 +5,21 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import App, { DesktopApp } from '../../src/App';
 import { createDesktopService } from '../../src/data/service';
 import { RegisteredRoutes } from '../../src/data/routes';
-import { NavigationStore } from '../../src/state/navigation/store';
 import { OwnFailure } from '../../src/data/plain';
 import { WaitingStore } from '../../src/selectors/waiting/store';
-import { MessageRail } from '../../src/ui/rail/MessageRail';
+import { ItemDetail } from '../../src/ui/detail/ItemDetail';
 import { TreeView } from '../../src/ui/tree/TreeView';
 import { AppTransport, route, secondId } from './app/transport';
 import { sessionButton } from './app/open';
 import { page, projections } from './history/fixtures';
-import { withdrawn } from '../../src/selectors/waiting/stuck';
-import { immutable } from '../../src/data';
-import type { Session } from '../../src/generated/domain/models';
-
-/** The rail's message count: owner messages cancelled before they were sent are left out. */
-const shown = (session: Session) => session.messages.filter(message => !withdrawn(immutable(session), immutable(message))).length;
 
 vi.mock('react-dom/client', async importOriginal => {
   const actual = await importOriginal<typeof ReactDOM>();
   return { ...actual, createRoot: vi.fn(actual.createRoot) };
 });
-vi.mock('../../src/ui/rail/MessageRail', async importOriginal => {
-  const actual = await importOriginal<typeof import('../../src/ui/rail/MessageRail')>();
-  return { ...actual, MessageRail: vi.fn(actual.MessageRail) };
+vi.mock('../../src/ui/detail/ItemDetail', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../src/ui/detail/ItemDetail')>();
+  return { ...actual, ItemDetail: vi.fn(actual.ItemDetail) };
 });
 vi.mock('../../src/ui/tree/TreeView', async importOriginal => {
   const actual = await importOriginal<typeof import('../../src/ui/tree/TreeView')>();
@@ -225,9 +218,15 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await openSession();
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
+    await waitFor(() => {
+      expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
+      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    });
     await waitFor(() => expect(entered).toBe(true), { timeout: 3000 });
     fireEvent.click(await screen.findByRole('button', { name: /^Branched into Add the receipt lookup/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Go to' }));
+    const goTo = await screen.findByRole('button', { name: 'Go to' });
+    await waitFor(() => expect(goTo.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(goTo);
     // A reveal must finish before this unrelated background response arrives.
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1');
@@ -360,7 +359,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     expect([...transport.listeners.values()].every(callbacks => callbacks.size === 0)).toBe(true);
     expect(intervals.size).toBe(0);
   });
-  it('shows seeded presence to a late reader, shares tree/graph selection and opens complete detail and the message rail', async () => {
+  it('shows seeded presence to a late reader, shares tree/graph selection and opens complete item conversations', async () => {
     const { transport } = setup(); await openSession();
     await waitFor(() => expect(document.querySelector('.shell-context')?.textContent).toContain('Ariadne canonical demo · started'));
     expect(document.querySelector('.shell-context')?.textContent).not.toMatch(/Host unknown|heartbeat/);
@@ -384,80 +383,17 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     expect(await screen.findByRole('group', { name: 'Item actions' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Tree' }));
     expect(await screen.findByRole('tree', { name: 'Session items' })).toBeTruthy();
-    // The icon-only toggle carries its own accessible name, not only a tooltip title.
-    expect(screen.getByRole('button', { name: 'Messages (m)' }).getAttribute('aria-label')).toBe('Messages (m)');
-    fireEvent.click(screen.getByRole('button', { name: 'Messages (m)' }));
-    await screen.findByRole('log', { name: 'Session messages' });
-    await waitFor(() => expect(transport.preferences.sessions[0].rail).toBe('activity'));
+    expect(screen.queryByRole('button', { name: 'Messages (m)' })).toBeNull();
+    const conversation = await screen.findByRole('region', { name: 'Conversation' });
+    await waitFor(() => expect(conversation.querySelectorAll('[data-message-id]').length).toBeGreaterThan(0));
+    const writes = mutations(transport, 'preferences_patch').length;
+    fireEvent.keyDown(document.querySelector('.product-app')!, { key: 'm' });
+    expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);
     fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
     expect(screen.queryByRole('group', { name: 'Item actions' })).toBeNull();
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
   });
-  it('composes transient rail and tree cross-highlights without selecting, focusing or writing preferences', async () => {
-    const { transport } = setup(); await openSession();
-    fireEvent.click(document.querySelector('[data-item-id="1"]')!);
-    await screen.findByRole('group', { name: 'Item actions' });
-    fireEvent.click(screen.getByRole('button', { name: 'Messages (m)' }));
-    const log = await screen.findByRole('log', { name: 'Session messages' });
-    const session = transport.sessions.get(route.session_id)!;
-    await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(session)));
-    await waitFor(() => expect(transport.preferences.sessions[0].rail).toBe('activity'));
-    // Finish the legitimate opening dwell and its save before observing hover.
-    // A cross-highlight must never start another read, even across tree/graph renders.
-    await waitFor(() => expect(transport.preferences.seen?.find(seen => seen.session.session_id === route.session_id)
-      ?.items.some(item => item.item_id === '1')).toBe(true), { timeout: 4000 });
-    const viewPreferences = () => structuredClone(transport.preferences);
-    const ownerWrites = () => transport.mutations;
-    const before = viewPreferences(), writes = ownerWrites().length;
-    const mark = vi.spyOn(NavigationStore.prototype, 'markItemSeen');
-    const tree = screen.getByRole('tree', { name: 'Session items' }), detail = document.querySelector<HTMLElement>('.shell-detail-scroll')!;
-    tree.scrollTop = 50; detail.scrollTop = 70; log.scrollTop = 123;
-    const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
-    const linked = session.messages.filter(message => message.item_id === '2' || message.items_touched.includes('2'));
-    expect(linked.length).toBeGreaterThan(0);
-    const message = linked.find(message => message.item_id !== '1' && !message.items_touched.includes('1'))!;
-    expect(message).toBeTruthy();
-    const card = log.querySelector<HTMLElement>(`[data-message-id="${message.id}"]`)!;
-    const lit = (node: Element = row) => node.getAttribute('data-highlight');
-    const unchanged = () => {
-      expect(viewPreferences()).toEqual(before); expect(ownerWrites()).toHaveLength(writes); expect(mark).not.toHaveBeenCalled();
-      expect(tree.scrollTop).toBe(50); expect(detail.scrollTop).toBe(70); expect(log.scrollTop).toBe(123);
-    };
-    fireEvent.click(screen.getByRole('button', { name: 'Follow up' }));
-    const editor = await screen.findByLabelText('Follow-up message'); editor.focus();
-    fireEvent.mouseEnter(row);
-    for (const message of linked) expect(log.querySelector(`[data-message-id="${message.id}"]`)!.classList.contains('pw-excerpt-highlight')).toBe(true);
-    expect(document.activeElement).toBe(editor); unchanged();
-    fireEvent.mouseLeave(row);
-    expect(card.classList.contains('pw-excerpt-highlight')).toBe(false);
-    fireEvent.mouseEnter(card);
-    await waitFor(() => expect(lit()).toBe('strong'));
-    expect(row.getAttribute('aria-selected')).toBe('false'); expect(document.activeElement).toBe(editor); unchanged();
-    // Clicking pins without moving focus; the editor keeps it.
-    fireEvent.click(card); editor.focus(); fireEvent.mouseLeave(card);
-    expect(card.classList.contains('pw-excerpt-active')).toBe(true); expect(lit()).toBe('strong'); unchanged();
-    fireEvent.click(card); editor.focus();
-    await waitFor(() => expect(lit()).toBeNull()); unchanged();
-    fireEvent.mouseEnter(row); expect(card.classList.contains('pw-excerpt-highlight')).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
-    await screen.findAllByRole('tree', { name: / graph$/ });
-    expect(card.classList.contains('pw-excerpt-highlight')).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: 'Tree' }));
-    const restored = await screen.findByRole('tree', { name: 'Session items' });
-    expect(lit(restored.querySelector('[data-item-id="2"]')!)).toBeNull();
-    fireEvent.click(card);
-    expect(card.classList.contains('pw-excerpt-active')).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
-    await screen.findAllByRole('tree', { name: / graph$/ });
-    fireEvent.click(screen.getByRole('button', { name: 'Tree' }));
-    const returned = await screen.findByRole('tree', { name: 'Session items' });
-    expect(lit(returned.querySelector('[data-item-id="2"]')!)).toBe('strong');
-    expect(card.classList.contains('pw-excerpt-active')).toBe(true);
-    expect(viewPreferences()).toEqual(before); expect(ownerWrites()).toHaveLength(writes); expect(mark).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Hide messages' }));
-    await waitFor(() => expect(lit(returned.querySelector('[data-item-id="2"]')!)).toBeNull());
-  }, 15_000); // Full tree/graph/detail/rail composition needs headroom under CI coverage.
-  it('keeps the selected tree and complete rail idle when another session publishes presence', async () => {
+  it('keeps the selected tree and item detail idle when another session publishes presence', async () => {
     const starts = vi.spyOn(WaitingStore.prototype, 'start');
     const transport = new AppTransport(), second = transport.sessions.get(secondId)!;
     const binding = second.bindings[second.active_binding_id!]!;
@@ -466,15 +402,18 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     render(<DesktopApp service={createDesktopService(transport)} />);
     await openSession();
     const waiting = starts.mock.contexts[0] as WaitingStore;
-    fireEvent.click(screen.getByRole('button', { name: 'Messages (m)' }));
-    const log = await screen.findByRole('log', { name: 'Session messages' });
+    fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
+    const conversation = await screen.findByRole('region', { name: 'Conversation' });
+    const ownMessages = transport.sessions.get(route.session_id)!.messages.filter(message => message.item_id === '1');
     await waitFor(() => {
       expect(waiting.getSnapshot().status).toBe('ready');
-      expect(transport.preferences.sessions[0].rail).toBe('activity');
-      expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(transport.sessions.get(route.session_id)!));
+      expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
+      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      for (const message of ownMessages) expect(conversation.querySelector(`[data-message-id="${message.id}"]`)).not.toBeNull();
     });
+    await act(async () => {});
     const treeRenders = vi.mocked(TreeView).mock.calls.length;
-    const railRenders = vi.mocked(MessageRail).mock.calls.length;
+    const detailRenders = vi.mocked(ItemDetail).mock.calls.length;
     const previous = waiting.getSnapshot(), observation = {
       ...waiting.sessionState(route)!.presence[transport.sessions.get(route.session_id)!.active_binding_id!],
       generation: binding.generation, last_seen_at: '2026-10-05T02:05:00.000Z', execution_state: 'running' as const, freshness: 'fresh' as const,
@@ -483,7 +422,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     expect(waiting.getSnapshot()).not.toBe(previous);
     expect(waiting.sessionState({ ...route, session_id: secondId })?.presence[binding.id]).toEqual(observation);
     expect.soft(vi.mocked(TreeView).mock.calls).toHaveLength(treeRenders);
-    expect.soft(vi.mocked(MessageRail).mock.calls).toHaveLength(railRenders);
+    expect.soft(vi.mocked(ItemDetail).mock.calls).toHaveLength(detailRenders);
   });
   it('answers the latest oldest waiting question after a background capture finishes', async () => {
     const starts = vi.spyOn(WaitingStore.prototype, 'start');
@@ -1145,43 +1084,6 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     const writes = mutations(transport, 'preferences_patch').length;
     fireEvent.keyDown(document.querySelector('[data-shell-search]')!, { key: 'w' });
     expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);
-  });
-  it.each(['confirmed', 'reconciled'])('admits rail Close only after a shared preference write is %s', async completion => {
-    const { transport } = setup(); await openSession();
-    fireEvent.click(document.querySelector('[data-item-id="1"]')!);
-    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
-    fireEvent.click(screen.getByRole('button', { name: 'Messages (m)' }));
-    await screen.findByRole('log', { name: 'Session messages' });
-    await waitFor(() => expect(transport.preferences.sessions[0].rail).toBe('activity'));
-    let release!: () => void, entered = false;
-    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
-    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
-      if ('command' in args.request && args.request.command.command === 'preferences_patch'
-        && args.request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '2')) {
-        entered = true; await gate;
-      }
-      return invoke(name, args);
-    });
-    fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="2"]')!);
-    await waitFor(() => expect(entered).toBe(true));
-    const close = screen.getByRole('button', { name: 'Hide messages' });
-    expect(close.hasAttribute('disabled')).toBe(true);
-    const writes = mutations(transport, 'preferences_patch').length;
-    fireEvent.click(close); fireEvent.keyDown(document.querySelector('.product-app')!, { key: 'm' });
-    expect(screen.getByRole('log', { name: 'Session messages' })).toBeTruthy();
-    expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);
-    if (completion === 'reconciled') transport.failNext = 'preferences_patch';
-    await act(async () => { release(); await gate; });
-    if (completion === 'reconciled') {
-      const reconcile = await screen.findByRole('button', { name: 'Check again' });
-      expect(close.hasAttribute('disabled')).toBe(true);
-      fireEvent.click(close); fireEvent.keyDown(document.querySelector('.product-app')!, { key: 'm' });
-      expect(mutations(transport, 'preferences_patch')).toHaveLength(writes + 1);
-      fireEvent.click(reconcile);
-    }
-    await waitFor(() => expect(close.hasAttribute('disabled')).toBe(false)); fireEvent.click(close);
-    await waitFor(() => expect(screen.queryByRole('log', { name: 'Session messages' })).toBeNull());
-    expect(transport.preferences.sessions[0].rail).toBe('hidden');
   });
   it('leaves the reply box with Escape, then closes detail with Escape, and keeps the draft for reopening', async () => {
     const { transport } = setup(); await openSession();

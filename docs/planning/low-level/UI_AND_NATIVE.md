@@ -14,12 +14,13 @@ AppShell
     DetailRegion: ItemDetail
       ItemActions / AnswerControl
       BackAndForthRounds / ItemTimeline
-    MessageRail: complete current-session message history
+    SessionActivity: topic replies and lifecycle messages without an item conversation
+  UnsentMessageNotices: persistent recovery for cancelled messages without an item conversation
   Footer: implemented keyboard hints and scoped counts
   Dialogs: RegisterProject, BindSession, ArchiveTopic, ContinueTopic, ResolveInput, Settings
 ```
 
-Header/tabs/footer are 48/38/30 px. Waiting is 300 px, center at least 560 px, detail 400 px, optional rail 240 px. The target and default window is 1600x960; minimum window is 1300x760. Waiting stays pinned; center/detail/rail can overflow horizontally. Panels scroll independently. Detail and rail can close explicitly. There is no mobile layout or user-resizable split pane in v1.
+Header/tabs/footer are 48/38/30 px. Waiting is 300 px, center at least 560 px, detail 400 px. The target and default window is 1600x960; minimum window is 1300x760. Waiting stays pinned; center/detail can overflow horizontally. Panels scroll independently. Detail can close explicitly. There is no mobile layout or user-resizable split pane in v1.
 
 | State | Owner and persistence |
 | --- | --- |
@@ -28,7 +29,7 @@ Header/tabs/footer are 48/38/30 px. Waiting is 300 px, center at least 560 px, d
 | Global summaries | Backend cache keyed by root/session revision; inaccessible roots remain explicitly incomplete |
 | Binding/runtime evidence | Bridge events plus last persisted lifecycle fact, always qualified when disconnected |
 | Complete message/round history | Domain snapshot; includes item/message relations, answer/request entries, round snapshots, forks, reopen snapshots |
-| UI selection, tabs, tree expansion, filters, rail, scroll | Per-session preferences under `~/.ariadne/ui.json` |
+| UI selection, tabs, tree expansion, filters, scroll | Per-session preferences under `~/.ariadne/ui.json` |
 | Owner action drafts and operation IDs | Backend preferences; retain same operation ID while commit status is unresolved |
 | Theme, window geometry, pin, notification watermark | Versioned global preferences |
 
@@ -94,7 +95,7 @@ Watch registered session-store parent directories, debounce changes, validate sn
 
 Global Waiting contains an item only in an active, unarchived session, when its status is `waiting_on_me` and it has no Answer for the current `question_revision` whose input is in any state other than `cancelled` or `skipped`. A handled answer continues to suppress that waiting episode until a new ask changes the question revision. Sort eligible rows by the current waiting-episode timestamp, then project/session and stable item order. Sent shows one row per input in `queued`, `in_flight`, or `needs_attention`, including generic non-answer requests, and links each row to its target question snapshot. A new ask on an item can appear in Waiting while an older input for that item remains in Sent. Closed-session questions and their Sent inputs appear nowhere in Waiting or its actionable counts; retain them only as history in their own session's Map with `Session closed` and no answer controls. Do not offer a hidden-question count, Show toggle or historical Waiting cards. Unavailable-session notices use a known title or plain words, never a session ID.
 
-A message that hasn't been sent yet (`queued`) offers Edit and Delete wherever it shows: the item detail tracker, its topic band for a topic reply, and the Waiting rail's Sent row. Delete is `input_cancel`. Edit is `input_cancel` with `purpose: "edit"`, and it cancels first: only once core confirmed the cancel does the message's text and chosen option go into the owner's draft for that item (answer, reply, note or follow-up box; other kinds go to the reply box) or topic. The draft never holds a queued message's words while that message can still be sent, so the same words never go out twice. When the draft already holds different text, Edit cancels nothing and offers the old text to copy; a draft that gained other text during the cancel is never overwritten either. A refused cancel (the message already left the queue) says "This message was already sent, so it can't be edited."; an unconfirmed one changes nothing, says "Couldn't take this message back. Try again." and offers Check again. A held message labels Edit "Review and send again". In-flight messages keep Cancel, and stopped ones keep their recovery choices. An owner message the owner deleted before any delivery attempt leaves the timeline, the rounds and the message rail. One taken back to edit (`cancel_cause` `owner_edit`) stays, with "Taken back to edit" and "Put back in reply box" (which follows the same never-overwrite rule), until a later message carries the same words; one cancelled by archive or close keeps its "Not sent" line. None of these ever counts as an answer. Core never claims a cancelled input, and a cancel racing a claim gets `revision_conflict`.
+A message that hasn't been sent yet (`queued`) offers Edit and Delete wherever it shows: the item detail tracker, its topic band for a topic reply, and the Waiting rail's Sent row. Delete is `input_cancel`. Edit is `input_cancel` with `purpose: "edit"`, and it cancels first: only once core confirmed the cancel does the message's text and chosen option go into the owner's draft for that item (answer, reply, note or follow-up box; other kinds go to the reply box) or topic. The draft never holds a queued message's words while that message can still be sent, so the same words never go out twice. When the draft already holds different text, Edit cancels nothing and offers the old text to copy; a draft that gained other text during the cancel is never overwritten either. A refused cancel (the message already left the queue) says "This message was already sent, so it can't be edited."; an unconfirmed one changes nothing, says "Couldn't take this message back. Try again." and offers Check again. A held message labels Edit "Review and send again". In-flight messages keep Cancel, and stopped ones keep their recovery choices. An owner message the owner deleted before any delivery attempt keeps its text in the conversation with a cancellation label. One taken back to edit (`cancel_cause` `owner_edit`) stays, with "Taken back to edit" and "Put back in reply box" (which follows the same never-overwrite rule), until a later message carries the same words; one cancelled by archive or close keeps its "Not sent" line. None of these ever counts as an answer. Core never claims a cancelled input, and a cancel racing a claim gets `revision_conflict`.
 
 Use the API's `SummaryCounts` projection consistently: `waiting_unanswered` drives global/project Waiting counts and the tray; `sent_inputs` counts inputs by `queued`, `in_flight`, and `needs_attention`; `items_by_status` is the separate raw seven-status count. Topic/session chips count nonarchived items before local search/filter. Footer shows visible and total scope. Archived topic counts stay in Archive. Inaccessible roots make counts partial and display an incomplete marker, never zero. These counts are not recomputed from whatever rows happen to be visible after filtering.
 
@@ -113,7 +114,7 @@ Actual owner/draft actions, core/store/runtime composition and native Waiting
 acceptance remain their original task joins, not completion through a scripted
 transport.
 
-## 3. Tree, detail, message rail, search, and filters
+## 3. Tree, detail, search, and filters
 
 Build `childrenByParent`, `itemById`, `messagesByItem`, `roundsByItem`, and active-descendant counts once per changed snapshot. Sort siblings by stable numeric item reference while never reassigning references. Store topic order explicitly.
 
@@ -130,7 +131,7 @@ Item detail renders full item history in two linked forms:
 - **Back and forth:** ordered round cards, each with agent ask, owner choice and optional text (or free-text-only reply), agent result, related messages, and child items forked during that round. A new question is a child; refinement of the same decision is another round on the existing item.
 - **Timeline:** deduplicated session-local messages with author, timestamp, excerpt, touched items, and origin/created/updated role. Message numbers are Ariadne provenance numbers, not host transcript line numbers.
 
-The rail uses the same stored history, newest at bottom. Hovering a message highlights touched items; clicking pins that highlight. Selecting/hovering an item highlights its messages. Scrolling upward pauses follow; show `N new messages · Jump to latest`. Live updates never steal keyboard focus or scroll an owner away from older content.
+Alpha.15 removes the Messages pane by owner decision, including its layout slot, header toggle, `m` shortcut and saved rail state. Item conversations keep full messages and their cancellation recovery. Session activity above the tree retains topic replies and session lifecycle messages with no item conversation, including exact-text copy. Cancelled editable owner messages without an item conversation get persistent actionable notices until put back or dismissed. Restore/reopen prerequisites disable recovery until available; `putBackCancelled` preserves existing text and unconfirmed saves. These notices survive session selection changes. Older preference snapshots accept and ignore the retired `rail` field, while current DTOs and generated TypeScript omit it. Live updates never steal keyboard focus or scroll an owner away from older content.
 
 ### Seeing changes and shared seen state (Alpha.14.4)
 
@@ -201,7 +202,7 @@ text across unrelated confirmed writes. Discard the preview on route change,
 reopen or explicit reset; restored state comes from canonical preferences.
 See [ADR-0066](../../adr/ADR-0066-project-local-search-before-save-confirmation.md).
 
-Selecting from Waiting, Sent, search, tree, graph, archive, rail, tray, or notification calls a single `revealItem`: switch to project/session, load validated snapshot, select item, temporarily reveal ancestry, mark it outside current filters if applicable, and open detail. Opening or restoring a session restores a saved scroll anchor if present, otherwise brings the selected row into view once. Deliberate navigation from Waiting/Details, search, Back/Forward history, links and native reveal requests brings the target into view, including repeated requests for the same item and item routes opening a session with a saved reading anchor. Clicking an ordinary tree row, or opening or closing detail, never scrolls the Map. Keyboard row movement scrolls only enough to keep the focused row visible; the selected-item edge marker and Cmd+J explicitly scroll to the selection. Preserve filter values and offer an explicit clear action. Go to from a peek and Recent entries use this route. Replacement/fork/source references open a name-chip peek before deliberate navigation. If the item no longer exists, show its session and an explanatory banner.
+Selecting from Waiting, Sent, search, tree, graph, archive, tray, or notification calls a single `revealItem`: switch to project/session, load validated snapshot, select item, temporarily reveal ancestry, mark it outside current filters if applicable, and open detail. Opening or restoring a session restores a saved scroll anchor if present, otherwise brings the selected row into view once. Deliberate navigation from Waiting/Details, search, Back/Forward history, links and native reveal requests brings the target into view, including repeated requests for the same item and item routes opening a session with a saved reading anchor. Clicking an ordinary tree row, or opening or closing detail, never scrolls the Map. Keyboard row movement scrolls only enough to keep the focused row visible; the selected-item edge marker and Cmd+J explicitly scroll to the selection. Preserve filter values and offer an explicit clear action. Go to from a peek and Recent entries use this route. Replacement/fork/source references open a name-chip peek before deliberate navigation. If the item no longer exists, show its session and an explanatory banner.
 
 All Map reveals clear the pinned session/filter controls and the target topic's measured sticky header, including wrapped topic names and delivery lines. Centered reveals clamp the row's top below that header and keep the full row within the usable scroller viewport when it fits. An oversized row aligns its top below the header. Nearest keyboard reveals use the same measured header clearance while scrolling only as far as needed. Showing or hiding the selected-item edge marker does not change this usable viewport.
 
@@ -407,7 +408,6 @@ Keyboard navigation works when focus is outside editable controls:
 | `e` | Open guarded topic archive action |
 | `/` or Cmd+F | Focus search |
 | `g` | Switch tree/graph |
-| `m` | Toggle message rail |
 | Escape | Close top overlay/detail or leave editor without discarding draft |
 | Cmd+Enter | Submit the currently focused valid owner input |
 

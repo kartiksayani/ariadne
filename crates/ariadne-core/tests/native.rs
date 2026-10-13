@@ -97,7 +97,6 @@ fn view() -> SessionPreferences {
             archived: true,
             hide_later: false,
         },
-        rail: RailView::Sent,
         scroll: Some(ScrollAnchor {
             item_id: None,
             offset: 37.5,

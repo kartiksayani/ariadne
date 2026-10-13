@@ -7,6 +7,30 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256 as Hasher};
 use std::collections::{BTreeMap, BTreeSet};
 
+// Older ui.json snapshots retain this retired view field. Keep patch DTOs strict,
+// accept only this legacy snapshot key, and never serialize it back to disk.
+pub(crate) fn session_preferences_without_legacy_rail<'de, D>(
+    deserializer: D,
+) -> Result<Vec<SessionPreferences>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LegacySessionPreferences {
+        #[serde(default, rename = "rail")]
+        _rail: Option<serde::de::IgnoredAny>,
+        #[serde(flatten)]
+        preferences: SessionPreferences,
+    }
+    Vec::<LegacySessionPreferences>::deserialize(deserializer).map(|sessions| {
+        sessions
+            .into_iter()
+            .map(|session| session.preferences)
+            .collect()
+    })
+}
+
 const RECEIPT_WINDOW: usize = 256;
 
 #[derive(Serialize, Deserialize)]

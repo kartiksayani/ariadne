@@ -155,7 +155,7 @@ describe('graph model', () => {
     expect(b.counts).toBe('1 open');
   });
 
-  it('uses the tighter grid when detail or the rail is open', () => {
+  it('uses the tighter grid when detail is open', () => {
     expect(graphMetrics(true)).toEqual({ pad: 14, gap: 18 });
     const graph = build({ tight: true });
     expect(graph.nodes.get('1.1')!.x).toBe(14 + 18 + 190 + 18);

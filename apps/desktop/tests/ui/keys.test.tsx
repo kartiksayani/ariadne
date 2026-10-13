@@ -19,7 +19,7 @@ describe('workspace keymap', () => {
     expect(kinds(['ArrowDown', 'j', 'ArrowUp', 'k', 'Home', 'End'])).toEqual(['move-down', 'move-down', 'move-up', 'move-up', 'first', 'last']);
     expect(kinds(['ArrowRight', 'l', 'ArrowLeft', 'h', 'Enter'])).toEqual(['unfold', 'unfold', 'fold', 'fold', 'enter']);
     expect(kinds(['a', 'b', 'r', 'd', 'z', 'x', 'o', 'e'])).toEqual(['answer', 'bring', 'respond', 'drop', 'later', 'hide', 'reopen', 'archive']);
-    expect(kinds(['/', 'g', 'm', 'w', 'Escape', 'Backspace', 'Delete'])).toEqual(['search', 'graph', 'messages', 'waiting', 'escape', 'remove', 'remove']);
+    expect(kinds(['/', 'g', 'm', 'w', 'Escape', 'Backspace', 'Delete'])).toEqual(['search', 'graph', null, 'waiting', 'escape', 'remove', 'remove']);
     expect(workspaceIntent({ key: '1' })).toEqual({ kind: 'choose', index: 0 });
     expect(workspaceIntent({ key: '9' })).toEqual({ kind: 'choose', index: 8 });
     expect(kinds(['0', 'A', 'X', 'Tab', ' '])).toEqual([null, null, null, null, 'peek']);

@@ -11,6 +11,7 @@ pub struct PreferencesSnapshot {
     pub schema_version: SchemaVersion,
     pub revision: PositiveSafeInteger,
     pub global: GlobalPreferences,
+    #[serde(deserialize_with = "crate::native::session_preferences_without_legacy_rail")]
     pub sessions: Vec<SessionPreferences>,
     pub later: Vec<ItemRoute>,
     pub drafts: Vec<OwnerDraft>,
@@ -158,7 +159,6 @@ pub struct SessionPreferences {
     #[ts(as = "Option<Vec<ItemRef>>", optional)]
     pub hidden_item_ids: Vec<ItemRef>,
     pub filters: ViewFilters,
-    pub rail: RailView,
     pub scroll: Option<ScrollAnchor>,
     // Topic bands the owner folded in this session's tree.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -191,14 +191,6 @@ pub struct ViewFilters {
     pub topic_id: Option<UuidV4>,
     pub archived: bool,
     pub hide_later: bool,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum RailView {
-    Waiting,
-    Sent,
-    Activity,
-    Hidden,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]

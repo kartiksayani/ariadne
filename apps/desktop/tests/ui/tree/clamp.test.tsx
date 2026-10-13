@@ -53,9 +53,9 @@ function mount(body: string, extra: Partial<ItemRowProps> = {}) {
   function Harness() {
     const [unfolded, setUnfolded] = useState(false);
     const epoch = useTreeFonts();
-    return <ItemRefs.Provider value={{ lookup: id => { const value = extra.row?.replacedBy; return value?.id === id ? { label: value.question, name: shortLabel(value), status: value.status } : null; }, onOpenItem: openItem }}><TreeFonts.Provider value={epoch}><LinkOpener.Provider value={openLink}><ItemRow row={row} selected={false} focused={true} highlight={null} note={null}
+    return <ItemRefs.Provider value={{ lookup: id => { const value = extra.row?.replacedBy; return value?.id === id ? { label: value.question, name: shortLabel(value), status: value.status } : null; }, onOpenItem: openItem }}><TreeFonts.Provider value={epoch}><LinkOpener.Provider value={openLink}><ItemRow row={row} selected={false} focused={true} note={null}
       actions={[]} answer={null} unfolded={unfolded} onUnfold={() => setUnfolded(value => !value)} remember={() => {}}
-      onFocus={() => {}} onKeyDown={() => {}} onSelect={onSelect} onToggle={() => {}} onHover={() => {}} {...extra} /></LinkOpener.Provider></TreeFonts.Provider></ItemRefs.Provider>;
+      onFocus={() => {}} onKeyDown={() => {}} onSelect={onSelect} onToggle={() => {}} {...extra} /></LinkOpener.Provider></TreeFonts.Provider></ItemRefs.Provider>;
   }
   const view = render(<Harness />);
   return { ...view, row, onSelect, openItem, openLink, preview: () => document.querySelector<HTMLElement>('.tree-preview')! };

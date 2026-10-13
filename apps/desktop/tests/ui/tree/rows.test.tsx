@@ -12,7 +12,7 @@ function seed() { return structuredClone(demo) as Session; }
 function view(session: Session): SessionPreferences {
   return { session: { project_id: session.project_id, session_id: session.id }, tab_open: true, selected_item_id: null,
     tab_order: 0, expanded_item_ids: [], filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false },
-    rail: 'waiting', scroll: null };
+    scroll: null };
 }
 
 describe('saved status filter chips', () => {

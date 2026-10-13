@@ -27,5 +27,5 @@ export function graphSession(): Session {
 
 export function preferences(overrides: Partial<SessionPreferences> = {}): SessionPreferences {
   return { session: route, tab_open: true, tab_order: 0, selected_item_id: null, expanded_item_ids: ['1', '1.1'],
-    filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'hidden', scroll: null, ...overrides };
+    filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, scroll: null, ...overrides };
 }

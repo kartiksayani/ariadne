@@ -243,7 +243,7 @@ export interface ItemRow {
   readonly replacedBy: Immutable<Item> | null;
   readonly rounds: number;
   readonly relatedCount: number;
-  readonly collapsed: { readonly waiting: number; readonly open: number; readonly progress: number; readonly closed: number; readonly ids: readonly string[] } | null;
+  readonly collapsed: { readonly waiting: number; readonly open: number; readonly progress: number; readonly closed: number } | null;
   readonly delivery: Delivery | null;
   readonly badge: string;
   readonly hue?: number;
@@ -323,12 +323,11 @@ export function topicCounts(statuses: readonly DisplayStatus[], ackCount = 0, en
   ].filter((value): value is Count => !!value);
 }
 
-/** "1 waiting · 2 open · 5 closed inside", plus " · 2 touched in #14" when the hovered message reaches inside. */
-export function collapsedNote(collapsed: NonNullable<ItemRow['collapsed']>, touched: { readonly items: ReadonlySet<string>; readonly message: number | null } | null): string {
+/** "1 waiting · 2 open · 5 closed inside" for folded descendants. */
+export function collapsedNote(collapsed: NonNullable<ItemRow['collapsed']>): string {
   const parts = [collapsed.waiting && `${collapsed.waiting} waiting`, collapsed.open && `${collapsed.open} open`,
     collapsed.progress && `${collapsed.progress} in progress`, collapsed.closed && `${collapsed.closed} closed`].filter(Boolean);
-  const inside = touched ? collapsed.ids.filter(id => touched.items.has(id)).length : 0;
-  return `${parts.join(' · ')} inside${inside && touched?.message ? ` · ${inside} touched in #${touched.message}` : ''}`;
+  return `${parts.join(' · ')} inside`;
 }
 
 export function badgeLabel(item: Immutable<Item>, later: boolean, status: DisplayStatus = item.status): string {
@@ -423,7 +422,7 @@ export function treeModel(input: TreeInput): TreeModel {
           const gather = (id: string) => kids(id).forEach(child => { below.push(child); gather(child.id); });
           gather(item.id);
           collapsed = { waiting: below.filter(value => waitingOnOwner(session, value)).length, open: below.filter(value => value.status === 'open').length,
-            progress: below.filter(value => value.status === 'in_progress' || display(value) === 'waiting_on_agent').length, closed: below.filter(value => closed(value.status)).length, ids: below.map(value => value.id) };
+            progress: below.filter(value => value.status === 'in_progress' || display(value) === 'waiting_on_agent').length, closed: below.filter(value => closed(value.status)).length };
         }
         const parked = item.status === 'open' && later.has(item.id);
         built.push({ kind: 'item', key: item.id, item, sessionClosed: closedSessionQuestion(session, item), status: display(item), ack: ackTarget(session, item), depth, hasKids: children.length > 0, expanded: open,

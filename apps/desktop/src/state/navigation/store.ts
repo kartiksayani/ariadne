@@ -678,7 +678,7 @@ export class NavigationStore {
         view = { session, tab_open: false, selected_item_id: null,
           tab_order: Math.max(-1, ...preferences.sessions.map(saved => saved.tab_order)) + 1,
           expanded_item_ids: [...initialExpansion(snapshot)],
-          filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null };
+          filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, scroll: null };
       }
       const entries: ReplayEntries = fresh => {
         const saved = fresh.sessions.find(value => sameRoute(value.session, session));
@@ -729,7 +729,7 @@ export class NavigationStore {
       session: { project_id: item.project_id, session_id: item.session_id }, tab_open: false, selected_item_id: null,
       tab_order: Math.max(-1, ...preferences.sessions.map(saved => saved.tab_order)) + 1,
       expanded_item_ids: [...initialExpansion(session)],
-      filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null,
+      filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, scroll: null,
     };
     const ids = new Set((view.hidden_item_ids ?? []).filter(id => !!session.items[id]));
     if (hidden) ids.add(item.item_id);
@@ -831,7 +831,7 @@ export class NavigationStore {
         const existing = preferences.sessions.find(view => sameRoute(view.session, selection.session));
         const view: SessionPreferences = existing ?? { session: selection.session, tab_open: true, selected_item_id: null,
           tab_order: Math.max(-1, ...preferences.sessions.map(session => session.tab_order)) + 1, expanded_item_ids: [...initialExpansion(snapshot.session)],
-          filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null };
+          filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, scroll: null };
         entries.push({ kind: 'set_session_view', preferences: { ...view, tab_open: true,
           selected_item_id: reveal?.kind === 'item' ? reveal.route.item_id : view.selected_item_id } });
         if (equal(preferences.global.selected_navigation, selection) && existing?.tab_open && !reveal) {

@@ -25,7 +25,7 @@ export interface GraphViewProps {
   readonly search?: string;
   /** The navigation's current reveal (a link, waiting card or tree selection). */
   readonly reveal: RevealedItem | null;
-  /** Detail or the message rail is open: the prototype's tighter grid. */
+  /** Detail is open: the prototype's tighter grid. */
   readonly tight: boolean;
   /** Session chip shown on every topic card ("codex · yesterday"), or null. */
   readonly sessionLabel: string | null;
@@ -35,7 +35,6 @@ export interface GraphViewProps {
   readonly saveView: (view: SessionPreferences) => Promise<boolean>;
   /** Selection reached the item; `openDetail` is false for ↑/↓ moves and "−". */
   readonly onReveal: (result: RevealedItem, openDetail: boolean) => void;
-  readonly onHoverItem?: (itemId: string | null) => void;
 }
 
 /** Scrolls `element` into the scroller: centred (Reveal selected, links) or just into view (Ariadne.dc.html:990). */
@@ -56,9 +55,8 @@ interface NodeProps {
   readonly focusable: boolean;
   readonly onOpen: (node: GraphNode) => void;
   readonly onCollapse: (node: GraphNode) => void;
-  readonly onHover?: (itemId: string | null) => void;
 }
-const Node = memo(function Node({ node, focusable, onOpen, onCollapse, onHover }: NodeProps) {
+const Node = memo(function Node({ node, focusable, onOpen, onCollapse }: NodeProps) {
   const visual = statusVisual[node.status];
   const className = ['graph-node', node.status === 'waiting' && 'is-waiting', node.onThread && 'is-thread', node.selected && 'is-selected',
     node.closed && 'is-closed', node.dimmed && 'is-dimmed', node.hidden && 'is-hidden'].filter(Boolean).join(' ');
@@ -66,7 +64,7 @@ const Node = memo(function Node({ node, focusable, onOpen, onCollapse, onHover }
   return <div className={className} role="treeitem" aria-selected={node.selected} aria-expanded={node.below ? !node.collapsed : undefined}
     aria-label={`${node.short}: ${node.item.question}${node.hidden ? ' (hidden)' : ''}`} title={node.item.question} tabIndex={focusable ? 0 : -1}
     data-item-id={node.item.id} data-row={node.item.id} style={{ left: node.x, top: node.y }}
-    onClick={() => onOpen(node)} onMouseEnter={() => onHover?.(node.item.id)} onMouseLeave={() => onHover?.(null)}>
+    onClick={() => onOpen(node)}>
     <div className="graph-node-head">
       <i className={`graph-node-icon ${visual.icon}`} role="img" aria-label={visual.label} title={visual.label} style={{ color: `var(--st-${node.status})` }} />
       <span className="graph-node-title">{node.short}</span>
@@ -79,9 +77,9 @@ const Node = memo(function Node({ node, focusable, onOpen, onCollapse, onHover }
   </div>;
 });
 
-function TopicCard({ graph, sessionLabel, marker, focusId, onOpen, onCollapse, onHover }: {
+function TopicCard({ graph, sessionLabel, marker, focusId, onOpen, onCollapse }: {
   readonly graph: TopicGraph; readonly sessionLabel: string | null; readonly marker: string; readonly focusId: string | null;
-  readonly onOpen: NodeProps['onOpen']; readonly onCollapse: NodeProps['onCollapse']; readonly onHover?: NodeProps['onHover'];
+  readonly onOpen: NodeProps['onOpen']; readonly onCollapse: NodeProps['onCollapse'];
 }) {
   return <section className="graph-card" aria-label={graph.topic.name}>
     <div className="graph-card-head">
@@ -100,7 +98,7 @@ function TopicCard({ graph, sessionLabel, marker, focusId, onOpen, onCollapse, o
           <text x={arc.labelX} y={arc.labelY} textAnchor="middle" className="graph-replaced-label">replaced by</text>
         </g>)}
       </svg>
-      {graph.nodes.map(node => <Node key={node.item.id} node={node} focusable={node.item.id === focusId} onOpen={onOpen} onCollapse={onCollapse} onHover={onHover} />)}
+      {graph.nodes.map(node => <Node key={node.item.id} node={node} focusable={node.item.id === focusId} onOpen={onOpen} onCollapse={onCollapse} />)}
     </div>
   </section>;
 }
@@ -141,7 +139,7 @@ function CrossTopicLinks({ edges }: { readonly edges: readonly RelatedEdge[] }) 
   return <svg ref={overlay} className="graph-cross-related" aria-hidden="true">{paths.map(path => <path key={path.id} data-edge={path.id} d={path.d} className="graph-related" />)}</svg>;
 }
 
-export function GraphView({ store, routes, view, later, search, reveal, tight, sessionLabel, continuedFrom, preferencesBusy = false, saveView, onReveal, onHoverItem }: GraphViewProps) {
+export function GraphView({ store, routes, view, later, search, reveal, tight, sessionLabel, continuedFrom, preferencesBusy = false, saveView, onReveal }: GraphViewProps) {
   const state = useSession(store), raw = state.snapshot?.session, hidden = useHidden();
   const session = useMemo(() => raw && visibleSession(raw, state.route, hidden), [raw, state.route, hidden]);
   const marker = useId().replace(/:/g, '');
@@ -286,7 +284,6 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
     scrollToNode(scroller.current, element, scrollTarget.center);
     if (scrollTarget.focus || scroller.current.contains(document.activeElement)) element.focus({ preventScroll: true });
   }, [scrollTarget, graph]);
-  useEffect(() => () => onHoverItem?.(null), [store, onHoverItem]);
 
   const focusId = selectedId && graph?.nodes.has(selectedId) ? selectedId : graph?.order[0] ?? null;
   // Like the prototype, the graph and its legend show only when a topic has nodes (Ariadne.dc.html:2177).
@@ -307,7 +304,7 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
       </div>
       <div className="graph-cards">
         {graph?.topics.map(topic => <TopicCard key={topic.topic.id} graph={topic} sessionLabel={continuedFrom?.(topic.topic) ?? sessionLabel} marker={`${marker}-${topic.topic.id}`}
-          focusId={focusId} onOpen={open} onCollapse={collapse} onHover={onHoverItem} />)}
+          focusId={focusId} onOpen={open} onCollapse={collapse} />)}
         {!!graph?.crossTopicRelated.length && <CrossTopicLinks edges={graph.crossTopicRelated} />}
       </div></>}
     </div>

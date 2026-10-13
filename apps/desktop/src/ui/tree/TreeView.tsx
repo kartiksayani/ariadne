@@ -71,18 +71,14 @@ export interface TreeViewProps {
   readonly historyReveal?: RevealedItem | null;
   readonly selectedId: string | null;
   readonly detailOpen: boolean;
-  readonly railOpen: boolean;
   /** Graph content shown in place of the rows. */
   readonly graph?: ReactNode;
   /** Notices above the rows: stale data, recovery. */
   readonly notices?: ReactNode;
   /** Expanded topic information below its sticky header, above the item rows. */
   readonly topicContent?: (topicId: string) => ReactNode;
-  readonly highlightedItems: ReadonlySet<string>;
-  readonly highlightedMessages: ReadonlySet<string>;
   readonly summaries: readonly Immutable<SessionSummary>[];
   readonly now?: () => number;
-  readonly onHoverItem: (itemId: string | null) => void;
   /** The tree selected an item; restoration preserves the current detail state. */
   readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
   readonly onDismissReveal: () => void;
@@ -109,8 +105,8 @@ const SKELETON = [
 ];
 
 export function TreeView(props: TreeViewProps) {
-  const { navigation, store, actions, drafts, query, reveal, selectedId, detailOpen, railOpen, graph, notices, highlightedItems, highlightedMessages,
-    summaries, onHoverItem, onSelected, onDismissReveal, onResume, onAct, onClearFilters, onClearSearch, onShowArchive,
+  const { navigation, store, actions, drafts, query, reveal, selectedId, detailOpen, graph, notices,
+    summaries, onSelected, onDismissReveal, onResume, onAct, onClearFilters, onClearSearch, onShowArchive,
     onAgentNotRunning, onRemove } = props;
   const state = useSession(store), raw = state.snapshot?.session ?? null;
   const fontEpoch = useTreeFonts();
@@ -210,8 +206,6 @@ export function TreeView(props: TreeViewProps) {
   const mounted = useRef(true), request = useRef(0);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, [store]);
   // Unmounting or swapping the rows for the graph leaves no row to fire mouseleave.
-  const graphShown = !!graph;
-  useEffect(() => () => onHoverItem(null), [onHoverItem, graphShown]);
 
   const minute = Math.floor((props.now ?? Date.now)() / 60_000) * 60_000;
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] ?? null : null;
@@ -749,13 +743,13 @@ export function TreeView(props: TreeViewProps) {
     }) : [];
     setBreadcrumb(previous => previous.length === next.length && previous.every((id, index) => id === next[index]) ? previous : next);
   };
-  const layoutState = useRef({ selectedId, reveal, detailOpen, railOpen });
+  const layoutState = useRef({ selectedId, reveal, detailOpen });
   const releaseReveal = () => {
     if (!revealedAnchor.current) return;
     revealedAnchor.current = null;
     remembering();
   };
-  layoutState.current = { selectedId, reveal, detailOpen, railOpen };
+  layoutState.current = { selectedId, reveal, detailOpen };
   const previousLayout = useRef(layoutState.current);
   const previousWidth = useRef<number | null>(null);
   const holding = () => {
@@ -772,7 +766,7 @@ export function TreeView(props: TreeViewProps) {
       revealedAnchor.current = { key: target.key, offset };
       held.current = { key: target.key, offset, scrollTop: target.scrollTop };
     }
-    if (resized || previous.selectedId !== current.selectedId || previous.reveal !== current.reveal || previous.detailOpen !== current.detailOpen || previous.railOpen !== current.railOpen) {
+    if (resized || previous.selectedId !== current.selectedId || previous.reveal !== current.reveal || previous.detailOpen !== current.detailOpen) {
       settled.current = true; setAnchor(null);
     }
     const box = scroller.current, before = held.current, element = before ? elements.current.get(before.key) : undefined;
@@ -929,7 +923,6 @@ export function TreeView(props: TreeViewProps) {
 
   // ------------------------------------------------------------ rows
   const running = bar?.running ?? false;
-  const touchedMessage = highlightedMessages.size && session ? session.messages.find(message => highlightedMessages.has(message.id))?.number ?? null : null;
   const itemActions = (row: ItemRowModel): RowAction[] => {
     const item = row.item, target = { ...route, item_id: item.id }, list: RowAction[] = [];
     const ackTo = row.ack;
@@ -998,8 +991,7 @@ export function TreeView(props: TreeViewProps) {
         ? <HiddenRow key={row.key} row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleHiddenGroup} />
         : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={viewBusy && !navigation.isWritingRecent()} closedReason={session ? sessionAnswerBlocked(session) : undefined}
         changeMarker={changes?.markers.get(row.key)} nextUnseen={nextTarget?.id === row.key} nextUnseenPulse={nextPulse && nextTarget?.id === row.key}
-        highlight={highlightedItems.has(row.key) ? 'strong' : row.collapsed?.ids.some(id => highlightedItems.has(id)) ? 'weak' : null}
-        note={row.collapsed ? collapsedNote(row.collapsed, { items: highlightedItems, message: touchedMessage }) : null}
+        note={row.collapsed ? collapsedNote(row.collapsed) : null}
         actions={itemActions(row)} answer={answering === row.key ? answerControl : null} fix={fixOf(row)}
         unfolded={isUnfolded(row.key)} onUnfold={unfold}
         onFocusBranch={focusBranch}
@@ -1007,7 +999,7 @@ export function TreeView(props: TreeViewProps) {
           if (event.type === 'mouseenter') handlers?.onMouseEnter(event); else handlers?.onMouseMove(event);
         }}
         onPeekLeave={() => peek?.chipProps({ ...route, item_id: '' }).onMouseLeave?.()}
-        remember={remember} onFocus={setFocusKey} onKeyDown={keys} onSelect={select} onToggle={toggleItem} onHover={onHoverItem} />)}
+        remember={remember} onFocus={setFocusKey} onKeyDown={keys} onSelect={select} onToggle={toggleItem} />)}
       {session && <AgentBin session={session} actions={actions} topicId={row.topic.id} onRemove={onRemove} />}
     </div>)}
   </div></ItemRefs.Provider></TreeFonts.Provider>;

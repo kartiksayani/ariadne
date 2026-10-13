@@ -4,7 +4,6 @@ export function historyFailureFacts() {
   const text = node => node?.textContent?.trim() ?? null;
   const all = selector => [...document.querySelectorAll(selector)];
   const control = node => node ? { text: text(node), disabled: Boolean(node.disabled), ariaPressed: node.getAttribute('aria-pressed') } : null;
-  const titled = document.querySelector('button[title="Messages (m)"]');
   // The detail's owner input: the answer slot of a waiting item, else the open action box with its changed-target warning.
   const owner = document.querySelector('[data-owner-input]');
   const editor = owner?.querySelector('textarea') ?? null;
@@ -13,9 +12,10 @@ export function historyFailureFacts() {
   const stateButtons = /^(Refresh|Refreshing…|Check again|Register project|Connect existing session|Try saving your draft again|Try sending again|Write another input)$/;
   const active = document.activeElement;
   return {
-    // Messages (m) is an icon-only button: the spec selects it by title and it is named by aria-label.
-    messagesToggle: { titled: control(titled), ariaLabel: titled?.getAttribute('aria-label') ?? null,
-      railOpen: Boolean(document.querySelector('.pw-rail-list')), railMessageCount: all('.pw-rail-list [data-message-id]').length },
+    conversation: { present: Boolean(document.querySelector('.item-detail [aria-label="Conversation"]')),
+      messageIds: all('.detail-chat-list > li[data-message-id]').map(node => node.getAttribute('data-message-id')),
+      scroll: (() => { const pane = document.querySelector('.item-detail .detail-body');
+        return pane ? { top: pane.scrollTop, height: pane.scrollHeight, viewport: pane.clientHeight } : null; })() },
     // chromeDisabled follows writing / refreshPending / missing preferences; these labels expose that state.
     navigation: { banners: all('.nav-banner').map(node => ({ role: node.getAttribute('role'), text: text(node) })),
       alerts: all('[role="alert"]').map(text), statuses: all('[role="status"]').map(text),

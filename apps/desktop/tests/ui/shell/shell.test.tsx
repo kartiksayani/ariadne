@@ -16,7 +16,7 @@ function props(patch: Partial<ShellProps> = {}): ShellProps {
   const sessions = [{ id: 's1', project: 'search', agent: 'claude-code', createdAt: new Date(2026, 9, 7, 14, 2).getTime(), endedAt: null, running: true, on: true }];
   return {
     header: { text: { sessionText: 'search · started 14:02', connText: 'Connected · claude-code', connColor: 'var(--st-done)' }, query: '', views: null,
-      railOn: false, theme: 'dark' },
+      theme: 'dark' },
     tabs: { tabs: tabModels({ selection: 'session', sessions, projectCount: 1 }, now), onSelect: vi.fn(), onClose: vi.fn() },
     body: { waiting: <p>Waiting column</p>, center: <p>Centre column</p> },
     summary: '10 items · 3 waiting on you · 2 in progress · 4 open',
@@ -65,7 +65,7 @@ describe('Paperwhite shell', () => {
     vi.useFakeTimers();
     try {
       const value = props({ body: { waiting: <p>Waiting column</p>, center: <input aria-label="Centre draft" defaultValue="Draft" />,
-        detail: <p>Detail</p>, rail: <aside aria-label="Messages">Messages</aside> } });
+        detail: <p>Detail</p> } });
       const { rerender } = render(<Shell {...value} />);
       const center = screen.getByRole('main'), region = screen.getByRole('region', { name: 'Notifications' });
       const draft = screen.getByRole<HTMLInputElement>('textbox', { name: 'Centre draft' });
@@ -76,7 +76,7 @@ describe('Paperwhite shell', () => {
       act(() => { draft.focus(); notices.push({ id: 'shell-anchor', icon: 'ph ph-check', text: 'Reference copied.' }); vi.advanceTimersByTime(300); });
       expect(within(region).getByText('Reference copied.')).toBeTruthy();
       expect(document.activeElement).toBe(draft);
-      rerender(<Shell {...value} body={{ ...value.body, waitingFolded: true, detailWidth: 976, rail: undefined }} />);
+      rerender(<Shell {...value} body={{ ...value.body, waitingFolded: true, detailWidth: 976 }} />);
       expect(screen.getAllByRole('region', { name: 'Notifications' })).toEqual([region]);
       expect(region.parentElement).toBe(center);
       expect(center.querySelector('.shell-center-content')).toBe(scroll);
@@ -131,7 +131,7 @@ describe('Paperwhite shell', () => {
     expect(search.readOnly).toBe(true); expect(search.dataset.shellSearch).toBe('');
     expect(screen.queryByRole('group', { name: 'View' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Switch to light' }).querySelector('.ph-sun')).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Messages (m)' }).getAttribute('aria-pressed')).toBe('false');
+    expect(screen.queryByRole('button', { name: 'Messages (m)' })).toBeNull();
     const tabs = screen.getByRole('navigation', { name: 'Projects and sessions' });
     expect(within(tabs).getByRole('button', { name: 'Projects' }).dataset.shellTab).toBe('projects');
     const session = within(tabs).getByRole('button', { name: 'claude-code Today 14:02' });
@@ -148,28 +148,28 @@ describe('Paperwhite shell', () => {
     expect(footer.textContent).toContain('⌥1–9send choice + note');
     expect(footer.textContent).toContain('⌥0focus own words');
     expect(footer.textContent).toContain('⌘↵reply only');
+    expect([...document.querySelectorAll('.shell-footer .pw-keycap')].map(key => key.textContent)).not.toContain('m');
   });
 
-  it('wires views, search, rail, theme and the detail column', () => {
-    const select = vi.fn(), query = vi.fn(), rail = vi.fn(), theme = vi.fn(), close = vi.fn(), remove = vi.fn();
+  it('wires views, search, theme and the detail column', () => {
+    const select = vi.fn(), query = vi.fn(), theme = vi.fn(), close = vi.fn(), remove = vi.fn();
     render(<Shell {...props({
       header: { text: { sessionText: 's', connText: 'c', connColor: 'var(--st-open)' }, demo: true, query: 'needle', onQueryChange: query,
         views: [{ label: 'Tree', icon: 'ph ph-tree-view', title: 'Tree (g)', on: true, onSelect: select }, { label: 'Graph', icon: 'ph ph-graph', title: 'Graph (g)', on: false }],
-        railOn: true, onToggleRail: rail, theme: 'light', onToggleTheme: theme },
-      body: { waiting: null, center: null, detail: <section><p>Detail body</p></section>, rail: <aside aria-label="Messages">Rail</aside>, onCloseDetail: close, onRemove: remove },
+        theme: 'light', onToggleTheme: theme },
+      body: { waiting: null, center: null, detail: <section><p>Detail body</p></section>, onCloseDetail: close, onRemove: remove },
     })} />);
     expect(screen.getByText('Demo')).toBeTruthy();
     const views = screen.getByRole('group', { name: 'View' });
     expect(within(views).getByRole('button', { name: 'Tree' }).getAttribute('aria-pressed')).toBe('true');
     fireEvent.click(within(views).getByRole('button', { name: 'Tree' })); expect(select).toHaveBeenCalled();
     fireEvent.change(screen.getByRole('textbox', { name: 'Search questions and outcomes' }), { target: { value: 'next' } }); expect(query).toHaveBeenCalledWith('next');
-    fireEvent.click(screen.getByRole('button', { name: 'Messages (m)' })); expect(rail).toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Switch to dark' })); expect(theme).toHaveBeenCalled();
     const detail = screen.getByRole('complementary', { name: 'Item detail' });
     expect(detail.querySelector('.shell-detail-scroll')?.textContent).toBe('Detail body');
     fireEvent.click(within(detail).getByRole('button', { name: 'Remove item' })); expect(remove).toHaveBeenCalled();
     fireEvent.click(within(detail).getByRole('button', { name: 'Close detail' })); expect(close).toHaveBeenCalled();
-    expect((document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns).toBe('300px minmax(560px,1fr) 400px 240px');
+    expect((document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns).toBe('300px minmax(560px,1fr) 400px');
   });
 
   it('folds the Waiting column to a strip with its count and saves the owner choice', () => {
@@ -200,30 +200,30 @@ describe('Paperwhite shell', () => {
   it('folds the Waiting column by itself in a window too narrow for every column, and the owner can still open it', () => {
     vi.stubGlobal('ResizeObserver', class {
       constructor(private readonly receive: ResizeObserverCallback) {}
-      observe() { this.receive([{ contentRect: { width: 1300 } } as ResizeObserverEntry], this as unknown as ResizeObserver); }
+      observe() { this.receive([{ contentRect: { width: 1200 } } as ResizeObserverEntry], this as unknown as ResizeObserver); }
       disconnect() {}
     });
     const fold = vi.fn();
-    render(<Shell {...props({ body: { waiting: <WaitingFrame count="2" />, center: null, detail: <p>Detail</p>, rail: <aside>Rail</aside>, onFoldWaiting: fold } })} />);
+    render(<Shell {...props({ body: { waiting: <WaitingFrame count="2" />, center: null, detail: <p>Detail</p>, onFoldWaiting: fold } })} />);
     const grid = () => (document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns;
-    expect(grid()).toBe('44px minmax(560px,1fr) 400px 240px');
+    expect(grid()).toBe('44px minmax(560px,1fr) 400px');
     fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (2)' }));
     // Opening it in a narrow window is not saved as the owner's fold; the panel narrows first.
     expect(fold).not.toHaveBeenCalled();
-    expect(grid()).toBe('300px minmax(380px,1fr) 380px 240px');
+    expect(grid()).toBe('300px minmax(380px,1fr) 400px');
     fireEvent.click(screen.getByRole('button', { name: 'Hide Waiting on me' }));
     expect(fold).toHaveBeenCalledWith(true);
   });
 
-  it.each([undefined, 320, 400, 2000])('keeps a tree beside every pane width when Waiting opens in a 1300px window (detail width: %s)', detailWidth => {
-    measureBody(1300);
+  it.each([undefined, 400, 2000])('keeps a tree beside every pane width when Waiting opens in a 1200px window (detail width: %s)', detailWidth => {
+    measureBody(1200);
     const resize = vi.fn(), fold = vi.fn();
-    render(<Shell {...props({ body: { waiting: <WaitingFrame count="2" />, center: <p>Centre column</p>, detail: <p>Detail</p>, rail: <aside>Rail</aside>,
+    render(<Shell {...props({ body: { waiting: <WaitingFrame count="2" />, center: <p>Centre column</p>, detail: <p>Detail</p>,
       detailWidth, onResizeDetail: resize, onFoldWaiting: fold } })} />);
     fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (2)' }));
-    const shown = detailWidth === 320 ? 320 : 380;
+    const shown = Math.min(detailWidth ?? 400, 520);
     expect((document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns)
-      .toBe(`300px minmax(380px,1fr) ${shown}px 240px`);
+      .toBe(`300px minmax(380px,1fr) ${shown}px`);
     expect(screen.getByRole('separator', { name: 'Resize detail panel' }).getAttribute('aria-valuenow')).toBe(String(shown));
     expect(resize).not.toHaveBeenCalled(); expect(fold).not.toHaveBeenCalled();
   });
@@ -351,47 +351,46 @@ describe('Paperwhite shell', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it('reserves the rail when resizing, and keeps Waiting open when the owner peeks', () => {
+  it('keeps Waiting open while resizing after the owner peeks', () => {
     measureBody(2000);
     const resize = vi.fn(), fold = vi.fn();
-    render(<Shell {...props({ body: { waiting: <WaitingFrame count="2" />, center: null, detail: <p>Detail</p>, rail: <aside>Rail</aside>,
-      detailWidth: 1156, onResizeDetail: resize, onFoldWaiting: fold } })} />);
+    render(<Shell {...props({ body: { waiting: <WaitingFrame count="2" />, center: null, detail: <p>Detail</p>,
+      detailWidth: 1576, onResizeDetail: resize, onFoldWaiting: fold } })} />);
     const edge = screen.getByRole('separator', { name: 'Resize detail panel' });
     const grid = () => (document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns;
-    expect(grid()).toBe('44px minmax(560px,1fr) 1156px 240px');
-    expect(edge.getAttribute('aria-valuemax')).toBe('1336');
+    expect(grid()).toBe('44px minmax(380px,1fr) 1576px');
+    expect(edge.getAttribute('aria-valuemax')).toBe('1576');
     fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (2)' }));
-    expect(grid()).toBe('300px minmax(380px,1fr) 1080px 240px');
-    expect(edge.getAttribute('aria-valuemax')).toBe('1080');
+    expect(grid()).toBe('300px minmax(380px,1fr) 1320px');
+    expect(edge.getAttribute('aria-valuemax')).toBe('1320');
     fireEvent.keyDown(edge, { key: 'End' });
-    expect(grid()).toBe('300px minmax(380px,1fr) 1080px 240px');
+    expect(grid()).toBe('300px minmax(380px,1fr) 1320px');
     expect(fold).not.toHaveBeenCalled();
     fireEvent.blur(edge);
-    expect(resize).toHaveBeenCalledExactlyOnceWith(1080);
+    expect(resize).toHaveBeenCalledExactlyOnceWith(1320);
   });
 
   it('clamps a saved wide pane when Waiting opens and the window shrinks, then restores it without saving the clamp', () => {
     const windowWidth = measureBody(3400), resize = vi.fn(), fold = vi.fn();
-    render(<Shell {...props({ body: { waiting: <WaitingFrame count="2" />, center: <p>Centre column</p>, detail: <p>Detail</p>, rail: <aside>Rail</aside>,
+    render(<Shell {...props({ body: { waiting: <WaitingFrame count="2" />, center: <p>Centre column</p>, detail: <p>Detail</p>,
       detailWidth: 2000, onResizeDetail: resize, onFoldWaiting: fold } })} />);
     const grid = () => (document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns;
-    expect(grid()).toBe('300px minmax(560px,1fr) 2000px 240px');
+    expect(grid()).toBe('300px minmax(560px,1fr) 2000px');
     windowWidth(2000);
-    expect(grid()).toBe('44px minmax(380px,1fr) 1336px 240px');
+    expect(grid()).toBe('44px minmax(380px,1fr) 1576px');
     fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (2)' }));
-    expect(grid()).toBe('300px minmax(380px,1fr) 1080px 240px');
+    expect(grid()).toBe('300px minmax(380px,1fr) 1320px');
     windowWidth(1400);
-    expect(grid()).toBe('300px minmax(380px,1fr) 480px 240px');
+    expect(grid()).toBe('300px minmax(380px,1fr) 720px');
     windowWidth(3400);
-    expect(grid()).toBe('300px minmax(560px,1fr) 2000px 240px');
+    expect(grid()).toBe('300px minmax(560px,1fr) 2000px');
     expect(resize).not.toHaveBeenCalled(); expect(fold).not.toHaveBeenCalled();
   });
 
   it('disables chrome controls while navigation writes', () => {
-    render(<Shell {...props({ header: { ...props().header, onQueryChange: vi.fn(), onToggleRail: vi.fn(), onToggleTheme: vi.fn(), disabled: true },
+    render(<Shell {...props({ header: { ...props().header, onQueryChange: vi.fn(), onToggleTheme: vi.fn(), disabled: true },
       tabs: { ...props().tabs, disabled: true } })} />);
     expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Search questions and outcomes' }).disabled).toBe(true);
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Messages (m)' }).disabled).toBe(true);
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Projects' }).disabled).toBe(true);
   });
 });

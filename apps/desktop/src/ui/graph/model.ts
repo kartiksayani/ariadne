@@ -35,7 +35,7 @@ export const graphStatus = (status: DisplayStatus): GraphStatus =>
 const closedStatuses: ReadonlySet<Item['status']> = new Set(['decided', 'done', 'dropped', 'replaced']);
 export const isClosed = (status: Item['status']): boolean => closedStatuses.has(status);
 
-/** Node and grid sizes (Ariadne.dc.html:1515). "Tight" is when detail or the rail is open. */
+/** Node and grid sizes (Ariadne.dc.html:1515). "Tight" is when detail is open. */
 export const NODE_WIDTH = 190, NODE_HEIGHT = 66, ROW_HEIGHT = 84;
 export const graphMetrics = (tight: boolean) => ({ pad: tight ? 14 : 20, gap: tight ? 18 : 26 });
 

@@ -173,16 +173,16 @@ saved concurrent operation wins over stale-preview rejection, and an unsaved
 preview. Source read/hash failures before that transaction remain uncertain.
 No new DTO or alternate mutation path is introduced.
 
-History/rail composition owns transient cross-highlights for the current session.
-`NavigationSentenceTree` and `SentenceTree` accept optional
-`highlightedItemIds: ReadonlySet<string>` and `onHoverItem(itemId: string | null)`
-props. Rail hover/pin uses its existing item/message refs to highlight both tree
-rows and detail messages; tree hover feeds the existing rail `hoveredItemId`.
-Selection retains its existing reveal route. Highlights never write preferences,
-change selection, move focus or scroll. Clear transient refs on session changes
-and view disposal; memoized rows must update when their highlight changes.
-The App owns this wiring, reusing existing TreeRow touched styling and rail
-callbacks. No CoreService, persisted DTO or second session reader is introduced.
+Alpha.15 removes the Messages pane and its transient cross-highlights by owner decision.
+Item conversations retain saved messages and cancellation recovery through
+`NotSentLine` and `putBackCancelled`; existing drafts are never overwritten.
+`SessionActivity` retains topic replies and lifecycle history with no item
+conversation. `UnsentMessageNotices` supplies persistent, dismissible recovery
+for cancelled editable owner messages without a conversation. Notices survive
+selection changes, use current loaded session state on recovery, and disappear
+only after successful put-back, resend or owner dismissal. Current session
+preferences omit rail state; persisted snapshots accept and ignore the retired
+field while keeping strict unknown-field validation elsewhere.
 
 ### Claude installed-helper acceptance join
 

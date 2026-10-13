@@ -46,7 +46,7 @@ export class AppTransport implements DesktopTransport {
   }
   view(sessionId = demo.id): SessionPreferences {
     return { session: { ...route, session_id: sessionId }, tab_open: true, selected_item_id: null, tab_order: 0, expanded_item_ids: ['1', '2', '3'],
-      filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'hidden', scroll: null };
+      filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, scroll: null };
   }
   async listen<E extends keyof HintPayloads>(event: E, receive: (hint: HintPayloads[E]) => void) {
     const set = this.listeners.get(event) ?? new Set(); set.add(receive as (hint: never) => void); this.listeners.set(event, set);

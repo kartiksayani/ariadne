@@ -107,8 +107,6 @@ export interface ItemRowProps {
   /** Selection is held while a view write is unconfirmed. */
   readonly disabled?: boolean;
   readonly closedReason?: string;
-  /** strong: the hovered message touched this item; weak: it touched something folded inside. */
-  readonly highlight: 'strong' | 'weak' | null;
   readonly note: string | null;
   readonly actions: readonly RowAction[];
   readonly answer: ReactNode;
@@ -122,13 +120,12 @@ export interface ItemRowProps {
   readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
   readonly onSelect: (id: string) => void;
   readonly onToggle: (id: string) => void;
-  readonly onHover: (id: string | null) => void;
   readonly onFocusBranch?: (id: string) => void;
   readonly onPeekHover?: (id: string, event: MouseEvent<HTMLDivElement>) => void;
   readonly onPeekLeave?: () => void;
 }
 
-export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, highlight, note, actions, answer, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, onHover, onFocusBranch, onPeekHover, onPeekLeave }: ItemRowProps) {
+export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, note, actions, answer, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, onFocusBranch, onPeekHover, onPeekLeave }: ItemRowProps) {
   const item = row.item, status = visual(row.status);
   const name = useContext(ItemRefs)?.lookup(item.id)?.label ?? shortLabel(item);
   const details = preview(row);
@@ -139,12 +136,11 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
   const persistent = actions.filter(action => action.persistent), hover = actions.filter(action => !action.persistent);
   return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={row.depth + 1} aria-selected={selected} aria-disabled={disabled || undefined}
     aria-expanded={row.hasKids ? row.expanded : undefined} tabIndex={focused ? 0 : -1} className={`tree-row tree-item ${row.depth === 1 ? 'tree-item-root' : 'tree-item-child'}${row.hidden ? ' tree-item-hidden' : ''}`}
-    data-open={unfolded || undefined} data-item-id={item.id} data-row={row.key} data-highlight={highlight ?? undefined}
+    data-open={unfolded || undefined} data-item-id={item.id} data-row={row.key}
     data-next-unseen={nextUnseen || undefined} data-next-unseen-pulse={nextUnseenPulse || undefined}
     style={{ paddingLeft: 12 + row.depth * 24 }} onFocus={event => { if (event.target === event.currentTarget) onFocus(row.key); }}
-    onKeyDown={onKeyDown} onClick={() => onSelect(item.id)} onMouseEnter={event => { onHover(item.id); onPeekHover?.(item.id, event); }}
-    onMouseMove={event => onPeekHover?.(item.id, event)} onMouseLeave={() => { onHover(null); onPeekLeave?.(); }}>
-    <div className="tree-mark" />
+    onKeyDown={onKeyDown} onClick={() => onSelect(item.id)} onMouseEnter={event => onPeekHover?.(item.id, event)}
+    onMouseMove={event => onPeekHover?.(item.id, event)} onMouseLeave={() => onPeekLeave?.()}>
     {row.hue !== undefined && <span aria-hidden="true" className="tree-top-colour" style={{ background: `hsl(${row.hue} 48% 58%)` }} />}
     <Guides guides={row.guides} />
     {row.hasKids
@@ -166,7 +162,7 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
         onClick={event => { event.stopPropagation(); onFocusBranch(item.id); }}>Focus</button>}
       {row.ack && <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}>{ackTitle(row.ack, item.status)}</div>}
       {delivery(row, fix)}
-      {note && <button type="button" className="tree-collapsed" tabIndex={-1} data-weak={highlight === 'weak' || undefined}
+      {note && <button type="button" className="tree-collapsed" tabIndex={-1}
         onClick={event => { event.stopPropagation(); onToggle(item.id); }}><i className="ph ph-dots-three" />{note}</button>}
       {answer && <div className="tree-answer" onClick={event => event.stopPropagation()}>{answer}</div>}
     </div>

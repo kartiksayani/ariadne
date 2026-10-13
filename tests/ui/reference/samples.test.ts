@@ -18,13 +18,28 @@ describe('neutral design samples', () => {
     expect(data.SYNC_MSGS).toHaveLength(4);
   });
 
-  it('applies requested theme and rail variants without changing frame content', () => {
-    const fixture = designFixture('1a', data, { theme: 'light', rail: false });
-    expect(fixture.spec).toMatchObject({ id: '1a', theme: 'light', rail: false });
+  it('applies requested themes without changing frame content or adding Messages preferences', () => {
+    const fixture = designFixture('1a', data, { theme: 'light' });
+    expect(fixture.spec).toMatchObject({ id: '1a', theme: 'light' });
     expect(fixture.transport.preferences.global.theme).toBe('light');
     const view = fixture.transport.preferences.sessions.find(view => view.session.session_id === fixture.route!.session_id)!;
-    expect(view.rail).toBe('hidden');
+    expect(view).not.toHaveProperty('rail');
+    expect(fixture.spec).not.toHaveProperty('rail');
+    expect(fixture.spec).not.toHaveProperty('hoverMsg');
     expect(fixture.spec.selected).toBe(designFixture('1a', data).spec.selected);
+  });
+
+  it('compares the surviving columns of every former Messages frame', () => {
+    const source = handoffMembers()['Ariadne.dc.html']!;
+    expect(source).not.toContain('title="Messages (m)"');
+    expect(source).toContain('rail: false,');
+    expect(source).toContain('hoverMsg: null, msgSel: null,');
+    for (const frame of frameIds) {
+      const fixture = designFixture(frame, data);
+      expect(fixture.spec).not.toHaveProperty('rail');
+      expect(fixture.spec).not.toHaveProperty('hoverMsg');
+      for (const view of fixture.transport.preferences.sessions) expect(view).not.toHaveProperty('rail');
+    }
   });
 
   it('builds every frame and resolves the project-page selection', () => {

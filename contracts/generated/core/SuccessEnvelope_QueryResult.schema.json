@@ -3971,15 +3971,6 @@
         "item_changes"
       ]
     },
-    "RailView": {
-      "type": "string",
-      "enum": [
-        "waiting",
-        "sent",
-        "activity",
-        "hidden"
-      ]
-    },
     "ReceiptActorScope": {
       "oneOf": [
         {
@@ -5359,9 +5350,6 @@
             "$ref": "#/$defs/ItemRef"
           }
         },
-        "rail": {
-          "$ref": "#/$defs/RailView"
-        },
         "recent_items": {
           "type": "array",
           "items": {
@@ -5407,7 +5395,6 @@
         "tab_order",
         "expanded_item_ids",
         "filters",
-        "rail",
         "scroll"
       ]
     },

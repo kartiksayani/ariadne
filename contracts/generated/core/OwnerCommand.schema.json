@@ -1488,15 +1488,6 @@
         "project_id"
       ]
     },
-    "RailView": {
-      "type": "string",
-      "enum": [
-        "waiting",
-        "sent",
-        "activity",
-        "hidden"
-      ]
-    },
     "RecentAction": {
       "type": "string",
       "enum": [
@@ -1645,9 +1636,6 @@
             "$ref": "#/$defs/ItemRef"
           }
         },
-        "rail": {
-          "$ref": "#/$defs/RailView"
-        },
         "recent_items": {
           "type": "array",
           "items": {
@@ -1693,7 +1681,6 @@
         "tab_order",
         "expanded_item_ids",
         "filters",
-        "rail",
         "scroll"
       ]
     },

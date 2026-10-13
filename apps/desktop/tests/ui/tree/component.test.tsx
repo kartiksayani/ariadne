@@ -30,11 +30,10 @@ import { removeSubject } from '../../../src/ui/remove/model';
 
 const stores: NavigationStore[] = [];
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); notices.clear(); vi.restoreAllMocks(); vi.useRealTimers(); });
-const none: ReadonlySet<string> = new Set();
 const now = () => Date.parse('2026-10-07T12:00:00Z');
 
 interface Recorded {
-  selected: RevealedItem[]; hovered: (string | null)[]; acts: [RowIntent, ItemRoute][];
+  selected: RevealedItem[]; acts: [RowIntent, ItemRoute][];
   openedDetail: boolean[];
   dismissed: number; resumed: number; cleared: number; archive: number; removed: number;
 }
@@ -48,13 +47,12 @@ async function mount({ transport = new AppTransport(), configure, props = {}, lo
   const store = navigation.opened.open(route);
   if (load) await store.refresh();
   const actions = new SessionActionControllers(service).forSession(store), drafts = new OwnerDraftStore(service);
-  const calls: Recorded = { selected: [], openedDetail: [], hovered: [], acts: [], dismissed: 0, resumed: 0, cleared: 0, archive: 0, removed: 0 };
+  const calls: Recorded = { selected: [], openedDetail: [], acts: [], dismissed: 0, resumed: 0, cleared: 0, archive: 0, removed: 0 };
   const openLink = vi.fn();
-  const hover = (id: string | null) => { calls.hovered.push(id); };
   function Harness(extra: Partial<TreeViewProps>) {
     const [selected, setSelected] = useState<string | null>(null);
     return <RemovalContext.Provider value={removal}><LinkOpener.Provider value={openLink}><TreeView navigation={navigation} store={store} actions={actions} drafts={drafts} query="" reveal={null} selectedId={selected}
-      detailOpen={false} railOpen={false} highlightedItems={none} highlightedMessages={none} summaries={[]} now={now} onHoverItem={hover}
+      detailOpen={false} summaries={[]} now={now}
       onSelected={(result, openDetail = true) => { calls.selected.push(result); calls.openedDetail.push(openDetail); if (result.kind === 'item') setSelected(result.route.item_id); }}
       onDismissReveal={() => { calls.dismissed++; }} onResume={() => { calls.resumed++; }} onAct={(intent, target) => { calls.acts.push([intent, target]); }}
       onClearFilters={() => { calls.cleared++; }} onShowArchive={() => { calls.archive++; }}
@@ -618,23 +616,6 @@ describe('session tree rows', () => {
     expect(drafts.findTopic(route, topic)?.draft.text).toBe('Something else');
     expect(cancels(transport)).toHaveLength(0);
   });
-  it('reports hover, highlights touched rows and notes touches folded inside', async () => {
-    const { calls, rerender } = await mount();
-    fireEvent.mouseEnter(row('4')); fireEvent.mouseLeave(row('4'));
-    expect(calls.hovered.slice(-2)).toEqual(['4', null]);
-    rerender({ highlightedItems: new Set(['1.1']) });
-    expect(row('1.1').getAttribute('data-highlight')).toBe('strong'); expect(row('1').getAttribute('data-highlight')).toBeNull();
-    fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' }));
-    await waitFor(() => expect(row('1').getAttribute('data-highlight')).toBe('weak'));
-    const badge = row('1').querySelector('.tree-collapsed')!;
-    expect(badge.hasAttribute('data-weak')).toBe(true);
-    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
-    const rule = (selector: string) => [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(([, value]) => value!.trim() === selector)?.[2];
-    expect(rule('.tree-collapsed')).toContain('color: var(--a-acc-text)');
-    expect(rule('.tree-collapsed[data-weak]')).toContain('var(--color-accent) 7%, var(--a-card)');
-    expect(rule('.tree-collapsed[data-weak]')).not.toBe(rule('.tree-collapsed'));
-    expect(rule('.tree-collapsed[data-weak]:hover')).toContain('var(--color-accent) 10%, var(--a-card)');
-  });
   it('offers the row actions for the item status and routes them to the workspace', async () => {
     const { calls, transport } = await mount();
     fireEvent.click(within(row('1.1')).getByRole('button', { name: 'Bring it up (b)' }));
@@ -833,7 +814,7 @@ describe('session tree filters', () => {
     rerender({ query: 'receipt' });
     expect(chip('All').textContent).toContain('2'); expect(chip('Open').textContent).toContain('1');
     expect(row('1.1').querySelector('.tree-hit')?.textContent?.toLowerCase()).toBe('receipt');
-    for (const props of [{}, { detailOpen: true }, { detailOpen: true, railOpen: true }]) {
+    for (const props of [{}, { detailOpen: true }]) {
       rerender(props);
       expect(screen.queryByRole('combobox', { name: 'Topic' })).toBeNull();
     }
@@ -958,12 +939,10 @@ describe('session tree column states', () => {
     expect(document.querySelector('.tree-run .dispatch-label')?.textContent).toBe('Disconnected');
     expect(document.querySelector('.tree-run')?.getAttribute('data-running')).toBeNull();
   });
-  it('shows graph content in place of the rows and clears the hover', async () => {
-    const { calls, rerender } = await mount();
-    fireEvent.mouseEnter(row('4'));
+  it('shows graph content in place of the rows', async () => {
+    const { rerender } = await mount();
     rerender({ graph: <p>Topic graph stand-in</p> });
     expect(screen.getByText('Topic graph stand-in')).toBeTruthy(); expect(screen.queryByRole('tree')).toBeNull();
-    expect(calls.hovered.at(-1)).toBeNull();
   });
   it('lists archived topics with Restore and no session bar or chips', async () => {
     const transport = new HistoryTransport();
@@ -1566,21 +1545,16 @@ describe('session tree reading position', () => {
     expect(top('8')).toBe(800);
     rerender({ detailOpen: true });
     expect(top('8')).toBe(800);
-    const before = top('8');
-    rerender({ detailOpen: true, railOpen: true });
-    expect(top('8')).toBe(before);
   });
-  it('leaves a visible selection in place when detail and messages open', async () => {
+  it('leaves a visible selection in place when detail opens', async () => {
     layout();
     const { rerender } = await mount({ configure: savedAtTop, props: { selectedId: '3' } });
     const before = top('3');
     rerender({ detailOpen: true });
     expect(top('3')).toBe(before);
-    rerender({ detailOpen: true, railOpen: true });
-    expect(top('3')).toBe(before);
   });
 
-  it.each(['detail', 'messages', 'window'] as const)('keeps the reading anchor when %s changes and text reflows', async change => {
+  it.each(['detail', 'window'] as const)('keeps the reading anchor when %s changes and text reflows', async change => {
     let width = 300, spacing = 100;
     const observers: { run: () => void; targets: Set<Element> }[] = [];
     vi.stubGlobal('ResizeObserver', class {
@@ -1603,7 +1577,7 @@ describe('session tree reading position', () => {
       }, props: { selectedId: '8' } });
       const box = document.querySelector<HTMLElement>('.tree-scroll')!;
       expect(box.scrollTop).toBe(380);
-      if (change !== 'window') view.rerender(change === 'detail' ? { detailOpen: true } : { railOpen: true });
+      if (change === 'detail') view.rerender({ detailOpen: true });
       expect(box.scrollTop).toBe(380);
       // The native layout's observer arrives after the panel state has rendered.
       width = 200; spacing = 120;
@@ -1844,7 +1818,6 @@ describe('item details in the tree', () => {
     await mount();
     const body = row('4').querySelector('.tree-body')!, before = row('4').innerHTML;
     expect(row('4').querySelector('.tree-actions')).not.toBeNull();
-    fireEvent.mouseEnter(row('4'));
     expect(row('4').innerHTML).toBe(before); expect(row('4').querySelector('.tree-body')).toBe(body);
     // The icons are always laid out and only fade in: nothing in the stylesheet takes them out of the flow.
     const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
@@ -2252,13 +2225,13 @@ describe('scrolling the tree', () => {
     expect(scroller().scrollTop).toBe(448);
   });
 
-  it('keeps selection still when detail or messages open after the owner scrolls away', async () => {
+  it('keeps selection still when detail opens after the owner scrolls away', async () => {
     const view = await opened({ props: { selectedId: '8' } });
     view.rerender({ detailOpen: true });
     expect(scroller().scrollTop).toBe(150);
     scroller().scrollTop = 150;
     fireEvent.scroll(scroller());
-    view.rerender({ detailOpen: true, railOpen: true });
+    view.rerender({ detailOpen: false });
     expect(scroller().scrollTop).toBe(150);
   });
 
@@ -2460,8 +2433,7 @@ describe('scrolling the tree', () => {
       const before = row('1').getBoundingClientRect().top;
       expect(before - 60).toBe(170);
       expect(viewOf(view.transport).scroll).toEqual({ item_id: '1', offset: 197 });
-      // The rail receives focus only when clicked; the previous row's scroll
-      // is persisted by that blur, even though the rail action never moves it.
+      // Moving focus to another control persists the deliberate scroll on blur.
       outside.focus();
       await waitFor(() => expect(viewOf(view.transport).scroll).toEqual({ item_id: '1', offset: 170 }));
       expect(row('1').getBoundingClientRect().top).toBe(before);
