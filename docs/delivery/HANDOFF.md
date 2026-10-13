@@ -44,8 +44,9 @@ the agent stays in the terminal.
 - `.worktrees/a14-mock` — `design/a15-m3`: item conversation mock, waiting on owner sign-off.
 - `.worktrees/a14-polish` — `fix/a14-polish`: this follow-up PR, based on main `91bf3537`.
   Earlier follow-ups cover cached row names and visible Ack all eligibility, Go to
-  focus expiry, and the layout suite split. Current uncommitted work covers Reply
-  wording, a CLI test prebuild before JS coverage, and these release records.
+  focus expiry, and the layout suite split. Reply wording, a CLI test prebuild
+  before JS coverage, and these release records are committed in
+  [PR #157](https://github.com/kartiksayani/ariadne/pull/157).
 
 1. Finish removing the Messages pane and its affected checks.
 2. Review mock M3, then implement the larger item conversation view within the approved scope.

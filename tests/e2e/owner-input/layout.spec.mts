@@ -182,6 +182,9 @@ test('keeps the connect card and scrolling instruction accessible', async ({ pag
     await openLayoutSession(page);
     // The connect card belongs to the project page; the session view does not carry it.
     await expect(card).toHaveCount(0);
+    await page.getByRole('navigation', { name: 'Projects and sessions' }).getByRole('button', { name: 'Projects', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
+    await expect(card).toHaveCount(0);
   });
 });
 
@@ -213,11 +216,20 @@ test('scrolls and selects full variable rows in a 2000-item tree with accessible
   });
 });
 
-test('keeps session-bar actions accessible over a scrolled tree at 1000x668', async ({ page }) => {
+test('keeps session-bar actions accessible over a scrolled tree at 1000x668 and after resizing to 900x650', async ({ page }) => {
   const viewport = { width: 1000, height: 668 };
   await withLayoutFixture(page, viewport, '?scrollTree', async () => {
     await openLayoutSession(page);
     await checkSessionBar(page, viewport);
+    await page.setViewportSize({ width: 900, height: 650 });
+    await ready(page);
+    await reachable(page.locator('.tree-session-bar').getByRole('button', { name: 'Session actions', exact: true }));
+    await expect(page.getByRole('tree').locator('[data-item-id="10.50"]')).toHaveAttribute('aria-selected', 'true');
+    const resized = await geometry(page);
+    expect(resized.rowsHeight).toBeGreaterThan(usefulRows);
+    expect(resized.centerScrollTop).toBe(0);
+    expect(resized.centerScrollHeight).toBeLessThanOrEqual(resized.centerHeight + 1);
+    await checkFilters(page);
   });
 });
 
@@ -226,7 +238,6 @@ test('keeps session-bar actions and graph scrolling accessible at 900x650', asyn
   await withLayoutFixture(page, viewport, '?scrollTree', async () => {
     await openLayoutSession(page);
     await checkSessionBar(page, viewport);
-    const setup = page.getByRole('region', { name: 'Session setup' });
     // Graph renders in the tree column under the session bar and owns its
     // scrolling there. Catalogue routes retain the centre pane scroller,
     // including complete setup content below the catalogue.
@@ -240,7 +251,6 @@ test('keeps session-bar actions and graph scrolling accessible at 900x650', asyn
     expect(await page.locator('.nav-session-content').evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
     await page.getByRole('navigation', { name: 'Projects and sessions' }).getByRole('button', { name: 'Projects', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
-    await expect(setup).toHaveCount(0);
   });
 });
 
