@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RecentAction",
+  "type": "string",
+  "enum": [
+    "viewed",
+    "peeked",
+    "answered",
+    "acked"
+  ]
+}
