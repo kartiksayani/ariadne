@@ -37,6 +37,32 @@ describe('shared reading observations', () => {
     const result = renderHook(() => useReadingSeen(lane, null, value.seen.session));
     expect(result.result.current).toBeNull(); lane.stop();
   });
+  it('publishes repeated real reads without changing earlier snapshots or waiting for confirmed preferences', () => {
+    const save = vi.fn(), lane = new ReadingLane(save), value = changesFixture(2);
+    const prefs = { seen: [value.seen] } as PreferencesSnapshot;
+    const result = renderHook(() => useReadingSeen(lane, prefs, value.seen.session, false));
+    const first = { kind: 'mark_seen' as const, session: value.seen.session, at: '2026-10-10T02:00:00Z',
+      items: [{ item_id: 'updated-0', revision: 2 }], topics: [{ topic_id: value.topic.id, at: '2026-10-10T02:00:00Z' }] };
+    act(() => { lane.mark(first); });
+    const snapshot = lane.getMarkedSnapshot(), observed = result.result.current;
+    act(() => { lane.mark({ ...first, at: '2026-10-10T01:00:00Z',
+      items: [{ item_id: 'updated-0', revision: 1 }, { item_id: 'updated-1', revision: 2 }],
+      topics: [{ topic_id: value.topic.id, at: '2026-10-10T01:00:00Z' }] }); });
+    expect(result.result.current!.items).toEqual([{ item_id: 'updated-0', revision: 2 }, { item_id: 'updated-1', revision: 2 }]);
+    expect(lane.getMarkedSnapshot()[0].at).toBe('2026-10-10T01:00:00Z');
+    expect(result.result.current!.topics).toEqual(first.topics);
+    act(() => { lane.mark({ ...first, at: '2026-10-10T03:00:00Z',
+      items: [{ item_id: 'updated-0', revision: 3 }], topics: [{ topic_id: value.topic.id, at: '2026-10-10T03:00:00Z' }] }); });
+    expect(result.result.current!.items).toEqual([{ item_id: 'updated-0', revision: 3 }, { item_id: 'updated-1', revision: 2 }]);
+    expect(result.result.current!.topics).toEqual([{ topic_id: value.topic.id, at: '2026-10-10T03:00:00Z' }]);
+    expect(lane.getMarkedSnapshot()[0].at).toBe('2026-10-10T01:00:00Z');
+    expect(lane.getMarkedSnapshot()).not.toBe(snapshot);
+    expect(snapshot).toEqual([first]);
+    expect(observed!.items).toEqual(first.items);
+    expect(observed!.topics).toEqual(first.topics);
+    expect(prefs.seen![0].items).toEqual([]);
+    expect(save).toHaveBeenCalledTimes(3); lane.stop();
+  });
   it('excludes pending catch-up from real reads and preserves a same-revision read after Undo', () => {
     vi.useFakeTimers(); const save = vi.fn(), lane = new ReadingLane(save), value = changesFixture(2);
     const prefs = { seen: [value.seen] } as PreferencesSnapshot;

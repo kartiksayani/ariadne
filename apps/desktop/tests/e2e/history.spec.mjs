@@ -319,16 +319,38 @@ async function rail(history, saved, paged) {
   await wait(async () => (await preferences()).seen?.find(value => value.session.project_id === history.projectId
     && value.session.session_id === history.sessionId)?.items.some(value => value.item_id === '1' && value.revision >= saved.items['1'].revision),
   'Opened parent detail did not finish its seen preference write');
-  // Seen observations may update the envelope; Unpin must preserve navigation
-  // and every field of this session's saved view instead.
-  const navigationPreferences = snapshot => {
-    const view = snapshot.sessions.find(value => value.session.project_id === history.projectId && value.session.session_id === history.sessionId);
-    assert.ok(view, 'History session must have a saved view');
-    return { selected_navigation: snapshot.global.selected_navigation, view };
+  // Move focus out of the tree before the baseline: Unpin's click would otherwise
+  // finish the previous parent selection's blur-triggered scroll save.
+  const expectedScroll = await browser.execute(() => {
+    const tree = document.querySelector('.tree-scroll'), top = tree.getBoundingClientRect().top;
+    let readingTop = top;
+    for (const header of tree.querySelectorAll('.tree-topic')) {
+      const rect = header.getBoundingClientRect();
+      if (rect.top <= top && rect.bottom > top) readingTop = Math.max(readingTop, rect.bottom);
+    }
+    const first = [...tree.querySelectorAll('.tree-rows [data-item-id]')].find(element => element.getBoundingClientRect().bottom > readingTop);
+    const header = first?.closest('.tree-topic-group')?.querySelector('.tree-topic');
+    return first ? { item_id: first.dataset.itemId, offset: first.getBoundingClientRect().top - top - (header?.getBoundingClientRect().height ?? 0) } : null;
+  });
+  assert.ok(expectedScroll, 'History tree must have a visible reading anchor');
+  await browser.execute(element => element.focus({ preventScroll: true }), card);
+  await wait(async () => {
+    const view = (await preferences()).sessions.find(value => value.session.project_id === history.projectId && value.session.session_id === history.sessionId);
+    return view?.scroll?.item_id === expectedScroll.item_id && view.scroll.offset === expectedScroll.offset
+      && await browser.$('[data-shell-search]').isEnabled();
+  }, 'Parent tree reading anchor did not finish its previous scroll preference write');
+  // Only read observations, their envelope revision and their replay receipt window
+  // may advance independently. Every other persisted preference must stay identical.
+  const nonSeenPreferences = async () => {
+    const record = await readJson(join(process.env.ARIADNE_HOME, 'ui.json'));
+    delete record.operations;
+    delete record.snapshot.seen;
+    delete record.snapshot.revision;
+    return record;
   };
-  const beforeUnpin = navigationPreferences(await preferences());
+  const beforeUnpin = await nonSeenPreferences();
   await unpinHistoryMessage(card, parentMessage);
-  assert.deepEqual(navigationPreferences(await preferences()), beforeUnpin, 'Unpin must not write saved navigation or selection');
+  assert.deepEqual(await nonSeenPreferences(), beforeUnpin, 'Unpin must not write saved navigation or selection');
   await closeHistoryRailReferences(parentMessage);
   await toggle.waitForEnabled(); await toggle.click();
   await wait(async () => (await browser.$$('.pw-rail-list [data-message-id]')).length === saved.messages.length, 'Reopened rail did not reload the complete canonical history');
@@ -486,7 +508,7 @@ export async function runHistoryAcceptance(configuration) {
   assert.equal(new Set((await admissions(history)).map(entry => entry.attemptId)).size, 7);
   await browser.saveScreenshot(join(evidence(), 'native-complete-history.png'));
   await writeFile(join(evidence(), 'history-acceptance.json'), JSON.stringify({ history, publication, ownerTexts, resultTexts, paged,
-    roundIds, reviewedTarget, proof, railProof, nativePinAndSelectionRefs: true, clearReferenceProof: 'Actual Unpin removes pin state without navigation, selection or view preference writes; deliberate rail Close clears references',
+    roundIds, reviewedTarget, proof, railProof, nativePinAndSelectionRefs: true, clearReferenceProof: 'Actual Unpin removes pin state without changing any persisted preference except seen observations, revision and replay receipts; deliberate rail Close clears references',
     hoverProof: 'Focused actual-App component tests; embedded driver lacks hover transitions', finalSession, queued: await admissions(history), originalAdmissions }, null, 2));
 }
 

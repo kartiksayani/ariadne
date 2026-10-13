@@ -2008,6 +2008,77 @@ describe('scrolling the tree', () => {
   });
 
   // The first row grows by `grow` px (a live edit made it longer); every row below it moves down with it.
+  it('flushes an earlier deliberate scroll on blur without moving the reading row or saving an unchanged anchor twice', async () => {
+    const rectangle = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = document.querySelector<HTMLElement>('.tree-scroll');
+      if (this === box) return new DOMRect(0, 0, 300, 400);
+      if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 60);
+      const id = this.getAttribute('data-item-id'), at = id ? ids().indexOf(id) : -1;
+      if (at >= 0) return new DOMRect(0, 257 + at * 100 - (box?.scrollTop ?? 0), 300, 40);
+      return rectangle.call(this);
+    });
+    const view = await mount({ configure: transport => { viewOf(transport).scroll = { item_id: '1', offset: 197 }; } });
+    const outside = document.createElement('button'); document.body.append(outside);
+    try {
+      fireEvent.pointerDown(row('1')); row('1').focus();
+      scroller().scrollTop = 27; fireEvent.scroll(scroller());
+      const before = row('1').getBoundingClientRect().top;
+      expect(before - 60).toBe(170);
+      expect(viewOf(view.transport).scroll).toEqual({ item_id: '1', offset: 197 });
+      // The rail receives focus only when clicked; the previous row's scroll
+      // is persisted by that blur, even though the rail action never moves it.
+      outside.focus();
+      await waitFor(() => expect(viewOf(view.transport).scroll).toEqual({ item_id: '1', offset: 170 }));
+      expect(row('1').getBoundingClientRect().top).toBe(before);
+      const writes = () => patches(view.transport).filter(value => value.command.command === 'preferences_patch'
+        && value.command.params.entries.some(entry => entry.kind === 'set_session_view'));
+      expect(writes()).toHaveLength(1);
+      row('1').focus(); outside.focus();
+      await act(async () => { await Promise.resolve(); });
+      expect(writes()).toHaveLength(1);
+      expect(row('1').getBoundingClientRect().top).toBe(before);
+    } finally { outside.remove(); }
+  });
+
+  it('holds the reading row through a 27 px layout shrink above it without writing an unchanged saved anchor', async () => {
+    let prefix = 257;
+    const observers: { run: () => void; targets: Set<Element> }[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      targets = new Set<Element>();
+      constructor(run: () => void) { observers.push({ run, targets: this.targets }); }
+      observe(target: Element) { this.targets.add(target); }
+      disconnect() { this.targets.clear(); }
+    });
+    const rectangle = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = document.querySelector<HTMLElement>('.tree-scroll');
+      if (this === box) return new DOMRect(0, 0, 300, 400);
+      if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 60);
+      const id = this.getAttribute('data-item-id'), at = id ? ids().indexOf(id) : -1;
+      if (at >= 0) return new DOMRect(0, prefix + at * 100 - (box?.scrollTop ?? 0), 300, 40);
+      return rectangle.call(this);
+    });
+    const outside = document.createElement('button'); document.body.append(outside);
+    try {
+      const view = await mount({ configure: transport => { viewOf(transport).scroll = { item_id: '1', offset: 20 }; } });
+      expect(scroller().scrollTop).toBe(177);
+      fireEvent.pointerDown(row('1')); fireEvent.scroll(scroller());
+      const before = row('1').getBoundingClientRect().top;
+      // A topic child can resize without rerendering TreeView; delivery arrives
+      // through its existing content ResizeObserver, as it does in WKWebView.
+      prefix -= 27;
+      act(() => observers.filter(observer => [...observer.targets].some(target => target.matches('.tree-rows'))).forEach(observer => observer.run()));
+      expect(scroller().scrollTop).toBe(150);
+      expect(row('1').getBoundingClientRect().top).toBe(before);
+      row('1').focus(); outside.focus();
+      await act(async () => { await Promise.resolve(); });
+      expect(viewOf(view.transport).scroll).toEqual({ item_id: '1', offset: 20 });
+      expect(patches(view.transport).filter(value => value.command.command === 'preferences_patch'
+        && value.command.params.entries.some(entry => entry.kind === 'set_session_view'))).toHaveLength(0);
+    } finally { outside.remove(); vi.unstubAllGlobals(); }
+  });
+
   describe('when rows above the viewport change size', () => {
     let grow = 0;
     const growing = () => {
