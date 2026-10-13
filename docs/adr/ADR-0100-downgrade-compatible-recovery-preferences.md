@@ -30,6 +30,14 @@ the current tabs, Later and drafts. If a downgraded build has already advanced t
 main preferences, keep its changes and the companion's marker. Never report a
 completed recovery before its marker is durable.
 
+The companion is optional convenience data. If it cannot be read, validated or
+reconciled with the main revision, move it aside to
+`ui-recovery.corrupt-<time>.json`, log a plain line, and continue without markers.
+Never delete its evidence or let it block navigation or saved drafts. If moving
+it fails, keep it untouched and ignore it for that operation. Old notices may
+reappear. Keep at most 10,000 completion IDs in insertion order, evicting the
+oldest first for a new ID; an existing ID keeps its position.
+
 Keep the existing 1 MiB response allowance for the legacy preference fields.
 The bounded recovery ledger and revision metadata have a separate 400 KiB
 allowance for the maximum 10,000 input IDs and revision digit growth. Account

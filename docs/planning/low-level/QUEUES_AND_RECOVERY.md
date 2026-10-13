@@ -202,7 +202,9 @@ Uncertain, Cancelled and Skipped are derived delivery labels, not new persisted
 Input.state values or item statuses. The mockup
 stepper's 'Resolved' means this submission handled; display separate item status.
 A result published while the turn continues is immediately visible on its target
-item; full body persists. The rail uses excerpts derived from full Messages.
+item; full body persists and remains readable in its item-detail Conversation.
+Topic replies and lifecycle messages without an item conversation remain stored
+and unshown after the Alpha.15 Messages-pane removal.
 A terminal summary captured by the bridge remains bounded diagnostic activity.
 All corrections, rounds, branches and superseded answers remain inspectable.
 

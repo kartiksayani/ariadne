@@ -32,7 +32,7 @@ current choices; the archive preserves historical revisions.
 - One JSON snapshot per project session, shared Rust core/CLI/MCP/Tauri commands.
 - Full explicit item replies/rounds/forks; agent controls statuses and branches.
 - Durable FIFO; successful host turn + committed domain result resolves an input.
-- Real mockup tree/detail/waiting/graph/rail/owner actions, with explicit deviations.
+- Real mockup tree/detail conversation/Waiting/graph/owner actions, with explicit deviations.
 - Discovery/liveness in v1, with explicit manual connection and qualified evidence.
 
 ## Evidence and boundaries
@@ -44,5 +44,13 @@ Original ZIP has a [verified member checksum manifest](assets/design-manifest.js
 Provider research and older smoke reports are preserved in the
 [planning archive](https://github.com/kartiksayani/ariadne/tree/reference/planning-and-pocs).
 Use the current LLD for implementation.
+
+Alpha.15 removes the Messages pane by owner decision. Item-detail conversations
+remain the history surface; topic replies and lifecycle messages without an item
+conversation stay stored and unshown. Reference frames adapt the removed pane
+while preserving parity for the rest of each frame. Original mockup assets,
+completed task descriptions, earlier ADRs and historical `.delivery/` records
+retain their Messages-pane references as evidence, not current UI instructions.
+The Waiting pane and tree guide rails retain their existing names and behavior.
 
 Publishing this curated repository is authorized.

@@ -56,6 +56,22 @@ it('rebases recovery completion after a foreign preference change without replac
   } });
 });
 
+it('confirms recovery at capacity by evicting the oldest ID and preserves that order on reload', async () => {
+  const transport = new AppTransport();
+  const full = Array.from({ length: 10_000 }, (_, index) => `00000000-0000-4000-8000-${(index + 10_000).toString(16).padStart(12, '0')}`);
+  transport.preferences.resolved_unsent_input_ids = full;
+  const store = navigation(transport); await store.start();
+  expect(await store.resolveUnsentInput(full[0])).toBe(true);
+  expect(store.getSnapshot().preferences?.resolved_unsent_input_ids).toEqual(full);
+  expect(await store.resolveUnsentInput(first)).toBe(true);
+  const expected = [...full.slice(1), first];
+  expect(store.getSnapshot().preferences?.resolved_unsent_input_ids).toEqual(expected);
+  expect(transport.preferences.resolved_unsent_input_ids).toEqual(expected);
+  store.stop();
+  const reopened = navigation(transport); await reopened.start();
+  expect(reopened.getSnapshot().preferences?.resolved_unsent_input_ids).toEqual(expected);
+});
+
 it('keeps unconfirmed recovery completion pending and retries the same operation', async () => {
   const transport = new AppTransport(), store = navigation(transport);
   await store.start();

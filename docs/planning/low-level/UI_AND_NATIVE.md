@@ -48,11 +48,16 @@ Cancelled messages without an item conversation use the owner-only
 Put back resolved across restarts, without waiting for a later submitted
 message. Put back first confirms the restored draft, then saves a separate
 `resolve_unsent_input` patch; an unconfirmed marker leaves the recovery notice
-available. The bounded monotonic ledger is stored in fixed `ui-recovery.json`
+available. The bounded ledger is stored in fixed `ui-recovery.json`
 under the same `ui.lock` as `ui.json`. Companion-first publication and receipt
 roll-forward preserve markers through interrupted writes and saves by older
 binaries. The disk adapter writes each session's legacy `rail: "hidden"` while
 the current API and renderer contracts omit rail state.
+Keep at most 10,000 completion IDs, evicting the oldest first when a new ID is
+added. Companion problems never block navigation or saved drafts: quarantine
+the file as `ui-recovery.corrupt-<time>.json`, record a plain log line, and
+continue without markers. Preserve the original evidence even if quarantine
+fails. Old notices may reappear; main preference corruption remains an error.
 Ordinary preferences keep their 1MiB response budget, with a separate bounded
 400KiB recovery-ID and revision metadata allowance so a valid near-limit save by an older binary
 cannot make drafts or markers unreadable. Other response budgets are unchanged.

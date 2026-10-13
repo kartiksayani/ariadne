@@ -250,8 +250,10 @@ transport acknowledgement and host completion never change status.
 Message: `{id,number,author,kind,body,created_at,item_id,topic_id,items_touched,
 binding_id,input_id,attempt_id,host_turn_id,round_id,origin}`.
 `author=owner|agent|system`; `kind=owner_input|reply|activity|lifecycle`.
-`body` is the complete submitted text, not an excerpt. Excerpts for rail/search
-are derived views. A reply has exactly one `item_id`; `topic_id` is derived.
+`body` is the complete submitted text, not an excerpt. Item-detail conversations
+use full Messages; search excerpts are derived views. Topic replies and lifecycle
+messages without an item conversation remain stored and unshown after the
+Alpha.15 Messages-pane removal. A reply has exactly one `item_id`; `topic_id` is derived.
 Activity summaries may touch several items but are not copied into every item's
 conversation. System lifecycle records describe close/archive/recovery, not agent
 speech. Message bodies are append-only; corrections create new messages.

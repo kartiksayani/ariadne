@@ -57,7 +57,8 @@ export function UnsentMessageNotices({ waiting, drafts, opened, selectedStore, n
         if (hint) hints.current.set(inputId, hint);
         if (!active.current || finished.current.has(inputId)) return;
         const blocked = putBackBlocked(observed.current.get(session.id) ?? session, unsent.input);
-        const detail = hints.current.get(inputId) ?? blocked;
+        const storedHint = hints.current.get(inputId);
+        const detail = [blocked, storedHint !== blocked ? storedHint : null].filter(Boolean).join(' ');
         const firstLine = unsent.input.payload.text.split(/\r?\n/u)[0].trim();
         const quote = firstLine.length > 72 ? `${firstLine.slice(0, 70).trimEnd()}…` : firstLine;
         notices.push({ id, icon: 'ph ph-chat-text',

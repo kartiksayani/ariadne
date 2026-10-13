@@ -650,6 +650,314 @@ fn recovery_path(s: &Setup) -> PathBuf {
     s.home.path().join(".ariadne/ui-recovery.json")
 }
 
+fn quarantined_paths(s: &Setup) -> Vec<PathBuf> {
+    let mut paths = fs::read_dir(s.home.path().join(".ariadne"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("ui-recovery.corrupt-")
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+}
+
+fn assert_quarantined(s: &Setup, bytes: &[u8]) {
+    assert!(!recovery_path(s).exists());
+    let before = quarantined_paths(s);
+    assert!(before.iter().any(|path| fs::read(path).unwrap() == bytes));
+    let reopened = Registry::open(s.home.path()).unwrap();
+    assert!(PreferencesService::new(&reopened)
+        .get(&owner())
+        .unwrap()
+        .resolved_unsent_input_ids
+        .is_empty());
+    assert_eq!(quarantined_paths(s), before);
+}
+
+fn restored_draft() -> OwnerDraft {
+    OwnerDraft {
+        submission_attempted: false,
+        op_id: id(80),
+        session: route(),
+        binding_id: id(3),
+        target: InputTarget {
+            topic_id: id(4),
+            item_id: None,
+        },
+        intent: InputKind::Reply,
+        text: "Preserved draft".into(),
+        selected_option_id: None,
+        target_revision: revision(1),
+        question_revision: None,
+        supersedes_answer_id: None,
+    }
+}
+
+#[test]
+fn malformed_and_future_companions_preserve_main_and_allow_draft_saves() {
+    for kind in 0..9 {
+        let s = Setup::new();
+        s.service()
+            .patch(
+                &owner(),
+                &patch(
+                    100,
+                    1,
+                    vec![PreferencesPatchEntry::UpsertDraft {
+                        draft: restored_draft(),
+                    }],
+                ),
+            )
+            .unwrap();
+        s.service()
+            .patch(&owner(), &patch(101, 2, vec![resolve(90)]))
+            .unwrap();
+        let mut bad: Value = serde_json::from_slice(&fs::read(recovery_path(&s)).unwrap()).unwrap();
+        match kind {
+            1 => bad["schema_version"] = json!(2),
+            2 => bad["schema_version"] = json!(0),
+            3 => bad["operations"] = json!([]),
+            4 => bad["operations"][0]["result"]["operation_id"] = json!(id(999)),
+            5 => bad["operations"][0]["actor_scope"] = json!({"agent": {}}),
+            6 => bad["unknown"] = json!(true),
+            7 => {
+                let duplicate = bad["operations"][0].clone();
+                bad["operations"].as_array_mut().unwrap().push(duplicate);
+            }
+            8 => bad["operations"] = json!(vec![bad["operations"][0].clone(); 257]),
+            _ => (),
+        }
+        let bytes = if kind == 0 {
+            b"{malformed owner text".to_vec()
+        } else {
+            serde_json::to_vec(&bad).unwrap()
+        };
+        fs::write(recovery_path(&s), &bytes).unwrap();
+        let main = fs::read(s.live()).unwrap();
+        let saved = s.saved();
+        assert_eq!(saved.revision, revision(3));
+        assert_eq!(saved.drafts, vec![restored_draft()]);
+        assert!(saved.resolved_unsent_input_ids.is_empty());
+        assert_eq!(fs::read(s.live()).unwrap(), main);
+        assert_quarantined(&s, &bytes);
+        let mut draft = restored_draft();
+        draft.text = "Updated draft".into();
+        s.service()
+            .patch(
+                &owner(),
+                &patch(
+                    102,
+                    3,
+                    vec![PreferencesPatchEntry::UpsertDraft {
+                        draft: draft.clone(),
+                    }],
+                ),
+            )
+            .unwrap();
+        assert_eq!(s.saved().drafts, vec![draft]);
+        assert_eq!(quarantined_paths(&s).len(), 1);
+    }
+}
+
+#[test]
+fn companion_ahead_of_restored_or_deleted_main_never_blocks_drafts() {
+    for deleted in [false, true] {
+        let s = Setup::new();
+        s.service()
+            .patch(
+                &owner(),
+                &patch(
+                    100,
+                    1,
+                    vec![PreferencesPatchEntry::UpsertDraft {
+                        draft: restored_draft(),
+                    }],
+                ),
+            )
+            .unwrap();
+        let restored = fs::read(s.live()).unwrap();
+        s.service().patch(&owner(), &patch(101, 2, vec![])).unwrap();
+        s.service()
+            .patch(&owner(), &patch(102, 3, vec![resolve(90)]))
+            .unwrap();
+        let companion = fs::read(recovery_path(&s)).unwrap();
+        if deleted {
+            fs::remove_file(s.live()).unwrap();
+        } else {
+            fs::write(s.live(), &restored).unwrap();
+        }
+        let saved = s.saved();
+        let expected_revision = if deleted { 1 } else { 2 };
+        assert_eq!(saved.revision, revision(expected_revision));
+        assert!(saved.resolved_unsent_input_ids.is_empty());
+        if deleted {
+            assert!(!s.live().exists());
+        } else {
+            assert_eq!(fs::read(s.live()).unwrap(), restored);
+            assert_eq!(saved.drafts, vec![restored_draft()]);
+        }
+        assert_quarantined(&s, &companion);
+        let mut draft = restored_draft();
+        draft.text = "New local draft".into();
+        s.service()
+            .patch(
+                &owner(),
+                &patch(
+                    103,
+                    expected_revision,
+                    vec![PreferencesPatchEntry::UpsertDraft {
+                        draft: draft.clone(),
+                    }],
+                ),
+            )
+            .unwrap();
+        assert_eq!(s.saved().drafts, vec![draft]);
+        assert_eq!(quarantined_paths(&s).len(), 1);
+    }
+}
+
+#[test]
+fn companion_projection_failure_returns_original_main_without_markers() {
+    let s = Setup::new();
+    s.service().patch(&owner(), &patch(100, 1, vec![])).unwrap();
+    let original = fs::read(s.live()).unwrap();
+    s.service()
+        .patch(&owner(), &patch(101, 2, vec![resolve(90)]))
+        .unwrap();
+    let companion = fs::read(recovery_path(&s)).unwrap();
+    fs::write(s.live(), &original).unwrap();
+    fs::remove_file(s.backup()).unwrap();
+    let outside = s.home.path().join("untouched");
+    fs::write(&outside, b"outside owner evidence").unwrap();
+    std::os::unix::fs::symlink(&outside, s.backup()).unwrap();
+    let saved = s.saved();
+    assert_eq!(saved.revision, revision(2));
+    assert!(saved.resolved_unsent_input_ids.is_empty());
+    assert_eq!(fs::read(s.live()).unwrap(), original);
+    assert_eq!(fs::read(outside).unwrap(), b"outside owner evidence");
+    assert_quarantined(&s, &companion);
+    fs::remove_file(s.backup()).unwrap();
+    s.service()
+        .patch(
+            &owner(),
+            &patch(
+                102,
+                2,
+                vec![PreferencesPatchEntry::UpsertDraft {
+                    draft: restored_draft(),
+                }],
+            ),
+        )
+        .unwrap();
+    assert_eq!(s.saved().drafts, vec![restored_draft()]);
+}
+
+#[test]
+fn unreadable_or_unquarantinable_companion_allows_get_and_draft_patch() {
+    for directory in [false, true] {
+        let s = Setup::new();
+        let marker_command = patch(100, 1, vec![resolve(90)]);
+        let marker_receipt = s.service().patch(&owner(), &marker_command).unwrap();
+        let path = recovery_path(&s);
+        if directory {
+            fs::remove_file(&path).unwrap();
+            fs::create_dir(&path).unwrap();
+            fs::write(path.join("evidence"), b"preserve owner evidence").unwrap();
+        } else {
+            fs::write(&path, b"unreadable companion bytes").unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+        }
+        let before = fs::read(s.live()).unwrap();
+        assert_eq!(s.saved().revision, revision(2));
+        assert_eq!(fs::read(s.live()).unwrap(), before);
+        s.service()
+            .patch(
+                &owner(),
+                &patch(
+                    101,
+                    2,
+                    vec![PreferencesPatchEntry::UpsertDraft {
+                        draft: restored_draft(),
+                    }],
+                ),
+            )
+            .unwrap();
+        assert_eq!(s.saved().drafts, vec![restored_draft()]);
+        assert_eq!(
+            s.service().patch(&owner(), &marker_command).unwrap(),
+            marker_receipt
+        );
+        assert!(s.saved().resolved_unsent_input_ids.is_empty());
+        if directory {
+            assert_eq!(
+                fs::read(path.join("evidence")).unwrap(),
+                b"preserve owner evidence"
+            );
+            assert!(quarantined_paths(&s).is_empty());
+            assert!(s
+                .service()
+                .patch(&owner(), &patch(102, 3, vec![resolve(90)]))
+                .is_err());
+            assert_eq!(s.saved().revision, revision(3));
+        } else {
+            let evidence = quarantined_paths(&s);
+            assert_eq!(evidence.len(), 1);
+            fs::set_permissions(&evidence[0], fs::Permissions::from_mode(0o600)).unwrap();
+            assert_quarantined(&s, b"unreadable companion bytes");
+        }
+    }
+}
+
+#[test]
+fn main_corruption_and_future_schema_still_error_without_quarantining_valid_companion() {
+    let s = Setup::new();
+    s.service()
+        .patch(&owner(), &patch(100, 1, vec![resolve(90)]))
+        .unwrap();
+    let original = s.record();
+    let companion = fs::read(recovery_path(&s)).unwrap();
+    for future in [false, true] {
+        let bytes = if future {
+            let mut main = original.clone();
+            main["snapshot"]["schema_version"] = json!(2);
+            serde_json::to_vec(&main).unwrap()
+        } else {
+            b"malformed main record".to_vec()
+        };
+        fs::write(s.live(), &bytes).unwrap();
+        let expected = if future {
+            CoreErrorCode::FutureSchema
+        } else {
+            CoreErrorCode::CorruptSession
+        };
+        assert_eq!(s.service().get(&owner()).unwrap_err().code, expected);
+        assert_eq!(
+            s.service()
+                .patch(
+                    &owner(),
+                    &patch(
+                        101,
+                        2,
+                        vec![PreferencesPatchEntry::UpsertDraft {
+                            draft: restored_draft()
+                        }]
+                    )
+                )
+                .unwrap_err()
+                .code,
+            expected
+        );
+        assert_eq!(fs::read(s.live()).unwrap(), bytes);
+        assert_eq!(fs::read(recovery_path(&s)).unwrap(), companion);
+        assert!(quarantined_paths(&s).is_empty());
+    }
+}
+
 // Copied strict alpha.14 record/session shape. Do not deserialize through the
 // new snapshot DTO: that would hide an accidentally introduced disk extension.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -823,10 +1131,9 @@ fn durable_marker_replays_after_failed_main_publication_without_false_success() 
     );
     assert_eq!(fs::read(s.live()).unwrap(), before);
     let companion = fs::read(recovery_path(&s)).unwrap();
-    assert_eq!(
-        s.service().get(&owner()).unwrap_err().code,
-        CoreErrorCode::CommitUncertain
-    );
+    // Restore the publication destination before reloading: a still-valid
+    // pending receipt rolls forward and replays without a second marker write.
+    // A reload while projection remains broken is covered separately above.
     fs::remove_dir(s.backup()).unwrap();
     let reopened = Registry::open(s.home.path()).unwrap();
     let service = PreferencesService::new(&reopened);
@@ -940,23 +1247,36 @@ fn recovery_companion_enforces_capacity_integrity_and_preserves_evidence() {
     let mut full: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     full["resolved_input_ids"] = json!((10000..20000).map(id).collect::<Vec<_>>());
     fs::write(&path, serde_json::to_vec(&full).unwrap()).unwrap();
-    let companion = fs::read(&path).unwrap();
-    let main = fs::read(s.live()).unwrap();
     assert_eq!(s.saved().resolved_unsent_input_ids.len(), 10000);
+    // Existing IDs do not refresh their insertion position at capacity.
+    let existing_command = patch(101, 2, vec![resolve(10000)]);
+    let existing_receipt = s.service().patch(&owner(), &existing_command).unwrap();
     assert_eq!(
-        s.service()
-            .patch(&owner(), &patch(101, 2, vec![resolve(91)]))
-            .unwrap_err()
-            .code,
-        CoreErrorCode::CapacityExceeded
+        s.saved().resolved_unsent_input_ids,
+        (10000..20000).map(id).collect::<Vec<_>>()
     );
-    assert_eq!(fs::read(&path).unwrap(), companion);
-    assert_eq!(fs::read(s.live()).unwrap(), main);
-    // An existing marker is idempotent even at capacity; there is no eviction.
+    // New IDs evict oldest-first; repeated IDs in later operations remain stable.
     s.service()
-        .patch(&owner(), &patch(102, 2, vec![resolve(10000)]))
+        .patch(&owner(), &patch(102, 3, vec![resolve(91), resolve(92)]))
         .unwrap();
-    assert_eq!(s.saved().resolved_unsent_input_ids.len(), 10000);
+    let expected = (10002..20000)
+        .map(id)
+        .chain([id(91), id(92)])
+        .collect::<Vec<_>>();
+    assert_eq!(s.saved().resolved_unsent_input_ids, expected);
+    assert_eq!(
+        s.service().patch(&owner(), &existing_command).unwrap(),
+        existing_receipt
+    );
+    assert_eq!(s.saved().resolved_unsent_input_ids, expected);
+    let reopened = Registry::open(s.home.path()).unwrap();
+    assert_eq!(
+        PreferencesService::new(&reopened)
+            .get(&owner())
+            .unwrap()
+            .resolved_unsent_input_ids,
+        expected
+    );
     let original: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     for ids in [
         json!([id(90), id(90)]),
@@ -967,11 +1287,10 @@ fn recovery_companion_enforces_capacity_integrity_and_preserves_evidence() {
         bad["resolved_input_ids"] = ids;
         fs::write(&path, serde_json::to_vec(&bad).unwrap()).unwrap();
         let bytes = fs::read(&path).unwrap();
-        assert_eq!(
-            s.service().get(&owner()).unwrap_err().code,
-            CoreErrorCode::CorruptSession
-        );
-        assert_eq!(fs::read(&path).unwrap(), bytes);
+        let main = fs::read(s.live()).unwrap();
+        assert!(s.saved().resolved_unsent_input_ids.is_empty());
+        assert_eq!(fs::read(s.live()).unwrap(), main);
+        assert_quarantined(&s, &bytes);
     }
 }
 
@@ -1005,7 +1324,7 @@ fn companion_receipt_deduplicates_after_ordinary_main_history_prunes_it() {
 }
 
 #[test]
-fn first_marker_recovers_from_companion_without_main_and_refuses_a_larger_gap() {
+fn first_marker_recovers_from_companion_without_main_and_quarantines_a_larger_gap() {
     let s = Setup::new();
     let command = patch(100, 1, vec![resolve(90)]);
     let receipt = s.service().patch(&owner(), &command).unwrap();
@@ -1021,12 +1340,11 @@ fn first_marker_recovers_from_companion_without_main_and_refuses_a_larger_gap() 
     fs::write(recovery_path(&s), serde_json::to_vec(&ledger).unwrap()).unwrap();
     let main = fs::read(s.live()).unwrap();
     let companion = fs::read(recovery_path(&s)).unwrap();
-    assert_eq!(
-        service.get(&owner()).unwrap_err().code,
-        CoreErrorCode::CorruptSession
-    );
+    let saved = service.get(&owner()).unwrap();
+    assert_eq!(saved.revision, revision(2));
+    assert!(saved.resolved_unsent_input_ids.is_empty());
     assert_eq!(fs::read(s.live()).unwrap(), main);
-    assert_eq!(fs::read(recovery_path(&s)).unwrap(), companion);
+    assert_quarantined(&s, &companion);
 }
 
 #[test]

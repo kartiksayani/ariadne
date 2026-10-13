@@ -34,7 +34,7 @@ where
 
 const RECEIPT_WINDOW: usize = 256;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record {
     // This canonical field is the sole authoritative file schema version.
@@ -303,34 +303,38 @@ fn validate_resolved(ids: &[UuidV4]) -> Result<(), CoreError> {
 /// The companion is authoritative for markers. Its last receipt is also the
 /// recoverable revision projection if publication stopped between the two files.
 fn load(file: &mut UiFile<'_>) -> Result<(Record, RecoveryRecord), Failure> {
-    let mut record = decode(file.bytes(), &file.path())?;
-    let recovery = match file.recovery_bytes() {
-        None => RecoveryRecord {
-            schema_version: one(),
-            resolved_input_ids: vec![],
-            operations: vec![],
-        },
-        Some(bytes) => {
-            let path = file.recovery_path();
-            if serde_json::from_slice::<serde_json::Value>(bytes)
-                .ok()
-                .and_then(|value| value.get("schema_version")?.as_u64())
-                .is_some_and(|version| version > 1)
-            {
-                return Err(Failure::Core(errors::local(
-                    CoreErrorCode::FutureSchema,
-                    format!(
-                        "{} uses a future recovery schema; keep this file unchanged",
-                        path.display()
-                    ),
-                )));
-            }
-            let recovery: RecoveryRecord =
-                serde_json::from_slice(bytes).map_err(|_| corrupt(&path))?;
-            validate_recovery(&recovery).map_err(|_| corrupt(&path))?;
-            recovery
-        }
+    let original = decode(file.bytes(), &file.path())?;
+    let Some(bytes) = file.recovery_bytes() else {
+        return Ok((original, empty_recovery()));
     };
+    let recovery =
+        serde_json::from_slice::<RecoveryRecord>(bytes).map_err(|_| corrupt(&file.recovery_path()));
+    let attempt = recovery.and_then(|recovery| {
+        validate_recovery(&recovery).map_err(Failure::Core)?;
+        project_recovery(file, original.clone(), recovery)
+    });
+    match attempt {
+        Ok(records) => Ok(records),
+        Err(_) => {
+            file.discard_recovery();
+            Ok((original, empty_recovery()))
+        }
+    }
+}
+
+fn empty_recovery() -> RecoveryRecord {
+    RecoveryRecord {
+        schema_version: one(),
+        resolved_input_ids: vec![],
+        operations: vec![],
+    }
+}
+
+fn project_recovery(
+    file: &mut UiFile<'_>,
+    mut record: Record,
+    recovery: RecoveryRecord,
+) -> Result<(Record, RecoveryRecord), Failure> {
     record.snapshot.resolved_unsent_input_ids = recovery.resolved_input_ids.clone();
     // Old binaries may publish an ordinary patch at the marker's intended
     // revision. Its fields and history win; the durable marker still applies.
@@ -675,6 +679,11 @@ fn apply(
         }
         PreferencesPatchEntry::ResolveUnsentInput { input_id } => {
             if !snapshot.resolved_unsent_input_ids.contains(input_id) {
+                // Preserve insertion order. Only a new marker evicts the oldest;
+                // an existing ID is idempotent and never refreshes its position.
+                if snapshot.resolved_unsent_input_ids.len() == RESOLVED_UNSENT_INPUT_CAPACITY {
+                    snapshot.resolved_unsent_input_ids.remove(0);
+                }
                 snapshot.resolved_unsent_input_ids.push(input_id.clone());
             }
         }

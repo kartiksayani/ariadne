@@ -94,9 +94,30 @@ fn recovery_companion_does_not_follow_links_or_replace_a_restore_after_absence()
     let outside = home.path().join("preserved");
     fs::write(&outside, b"owner bytes").unwrap();
     std::os::unix::fs::symlink(&outside, root.join("ui-recovery.json")).unwrap();
-    assert!(registry.with_ui_file(|_| Ok::<_, StoreError>(())).is_err());
+    registry
+        .with_ui_file(|file| {
+            assert!(file.recovery_bytes().is_none());
+            Ok::<_, StoreError>(())
+        })
+        .unwrap();
     assert_eq!(fs::read(&outside).unwrap(), b"owner bytes");
-    fs::remove_file(root.join("ui-recovery.json")).unwrap();
+    assert!(!root.join("ui-recovery.json").exists());
+    let evidence = fs::read_dir(&root)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("ui-recovery.corrupt-")
+        })
+        .unwrap();
+    assert!(fs::symlink_metadata(&evidence)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(fs::read_link(&evidence).unwrap(), outside);
     let operation = UuidV4::new("00000000-0000-4000-8000-000000000001").unwrap();
     let result = registry.with_ui_file(|mut file| {
         fs::write(root.join("ui-recovery.json"), b"restored ledger").unwrap();
@@ -113,4 +134,79 @@ fn recovery_companion_does_not_follow_links_or_replace_a_restore_after_absence()
         b"restored ledger"
     );
     assert!(!root.join("ui.json").exists());
+}
+
+#[test]
+fn unreadable_companion_is_quarantined_without_touching_main_bytes() {
+    let home = tempfile::tempdir().unwrap();
+    let registry = Registry::open(home.path()).unwrap();
+    let root = home.path().join(".ariadne");
+    fs::write(root.join("ui.json"), b"main record").unwrap();
+    fs::set_permissions(root.join("ui.json"), fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(
+        root.join("ui-recovery.json"),
+        b"unreadable companion evidence",
+    )
+    .unwrap();
+    fs::set_permissions(
+        root.join("ui-recovery.json"),
+        fs::Permissions::from_mode(0o000),
+    )
+    .unwrap();
+    registry
+        .with_ui_file(|file| {
+            assert_eq!(file.bytes(), Some(b"main record".as_slice()));
+            assert!(file.recovery_bytes().is_none());
+            Ok::<_, StoreError>(())
+        })
+        .unwrap();
+    assert!(!root.join("ui-recovery.json").exists());
+    let evidence = fs::read_dir(&root)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("ui-recovery.corrupt-")
+        })
+        .unwrap();
+    fs::set_permissions(&evidence, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(
+        fs::read(evidence).unwrap(),
+        b"unreadable companion evidence"
+    );
+    assert_eq!(fs::read(root.join("ui.json")).unwrap(), b"main record");
+    let count = fs::read_dir(&root).unwrap().count();
+    Registry::open(home.path())
+        .unwrap()
+        .with_ui_file(|file| {
+            assert!(file.recovery_bytes().is_none());
+            Ok::<_, StoreError>(())
+        })
+        .unwrap();
+    assert_eq!(fs::read_dir(&root).unwrap().count(), count);
+}
+
+#[test]
+fn failed_companion_quarantine_preserves_evidence_and_allows_main_publication() {
+    let home = tempfile::tempdir().unwrap();
+    let registry = Registry::open(home.path()).unwrap();
+    let root = home.path().join(".ariadne");
+    fs::create_dir(root.join("ui-recovery.json")).unwrap();
+    fs::write(root.join("ui-recovery.json/evidence"), b"preserve me").unwrap();
+    let operation = UuidV4::new("00000000-0000-4000-8000-000000000001").unwrap();
+    registry
+        .with_ui_file(|mut file| {
+            assert!(file.recovery_bytes().is_none());
+            assert!(file.publish_recovery(b"new marker", &operation).is_err());
+            file.publish_current(b"main draft save", &operation)
+        })
+        .unwrap();
+    assert_eq!(
+        fs::read(root.join("ui-recovery.json/evidence")).unwrap(),
+        b"preserve me"
+    );
+    assert_eq!(fs::read(root.join("ui.json")).unwrap(), b"main draft save");
 }

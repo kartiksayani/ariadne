@@ -24,6 +24,7 @@ pub struct PreferencesSnapshot {
     pub resolved_unsent_input_ids: Vec<UuidV4>,
 }
 
+/// New IDs evict the oldest marker at capacity; existing IDs keep their order.
 pub const RESOLVED_UNSENT_INPUT_CAPACITY: usize = 10_000;
 /// Ordinary preferences retain their original envelope budget. Recovery IDs
 /// and revision metadata have a separate bounded allowance so older writers

@@ -171,6 +171,27 @@ it('quotes a short plain first line and copies every saved word even when the re
   expect(screen.getByRole('button', { name: 'Put back in reply box' })).toBeTruthy();
 });
 
+it('keeps Copy feedback after the current recovery prerequisite as the session changes', async () => {
+  const value = await setup('session_closed');
+  const button = await screen.findByRole<HTMLButtonElement>('button', { name: 'Put back in reply box' });
+  fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+  expect(await screen.findByText(/Reopen the session to put it back in the reply box\. Copied\./)).toBeTruthy();
+  expect(button.disabled).toBe(true);
+  expect(copyText).toHaveBeenLastCalledWith(value.input.payload.text);
+
+  value.session.state = 'active'; value.topic.archived_at = value.session.updated_at; ++value.session.revision;
+  await act(() => value.store.refresh());
+  expect(await screen.findByText(/Restore the topic to put it back in the reply box\. Copied\./)).toBeTruthy();
+  expect(screen.queryByText(/Reopen the session to put it back/)).toBeNull();
+  expect(button.disabled).toBe(true);
+
+  value.topic.archived_at = null; ++value.session.revision;
+  await act(() => value.store.refresh());
+  await waitFor(() => expect(button.disabled).toBe(false));
+  expect(screen.getByText(/Copied\./)).toBeTruthy();
+  expect(screen.queryByText(/Restore the topic to put it back/)).toBeNull();
+});
+
 it.each([
   ['already_sent', held.ALREADY_SENT], ['not_taken_back', held.NOT_TAKEN_BACK],
   ['taken_back', held.TAKEN_BACK_NOT_LOADED], ['unavailable', 'Your reply box is busy. Try again when it is ready.'],

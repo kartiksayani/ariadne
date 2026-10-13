@@ -567,7 +567,7 @@ export class NavigationStore {
             saved.later = saved.later.filter(item => !sameRoute(item, entry.item) || item.item_id !== entry.item.item_id);
             if (entry.later) saved.later.push(structuredClone(entry.item));
           } else {
-            saved.resolved_unsent_input_ids = [...new Set([...(saved.resolved_unsent_input_ids ?? []), entry.input_id])];
+            saved.resolved_unsent_input_ids = [...new Set([...(saved.resolved_unsent_input_ids ?? []), entry.input_id])].slice(-10_000);
           }
         }
         this.seenAdvance = null;

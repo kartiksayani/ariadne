@@ -443,8 +443,9 @@ records remain untouched; explicit owner reset/backup recovery remains native
 Settings acceptance. See [ADR-0041](../../adr/ADR-0041-native-core-and-owner-preferences.md).
 
 Owner preferences expose optional `resolved_unsent_input_ids`, default empty:
-up to 10,000 unique UUID v4 input identities, with no eviction. The additive
-`resolve_unsent_input {input_id}` entry unions an identity into this ledger for
+up to 10,000 unique UUID v4 input identities in completion order. When a new
+identity exceeds the bound, evict the oldest first; resolving an existing identity
+does not reorder it. The additive `resolve_unsent_input {input_id}` entry adds an identity to this ledger for
 both Dismiss and confirmed Put back. A recovery patch contains only recovery
 entries, listing each input once; mixing with view, draft or other preference
 entries rejects. Put back confirms the restored draft in an ordinary patch
@@ -470,9 +471,18 @@ confirm companion durability and roll forward that projection only when the
 main revision is exactly one below its latest marker receipt. If an older
 binary has already advanced main to that revision or later, preserve all its
 fields and receipts; the companion remains authoritative for the markers.
-A main revision further behind refuses as corrupt without rewriting evidence.
+A companion that cannot be read, parsed, validated or reconciled with main is
+optional recovery data: move it aside under the same lock to
+`ui-recovery.corrupt-<time>.json`, log a plain line without message text, and
+continue with no markers. This includes main being more than one revision behind
+after an owner restore or deletion. Preserve the companion rather than deleting
+it; if it cannot be moved, log that failure and still allow navigation and draft
+patches without using or overwriting it. Old recovery notices may reappear.
+Main `ui.json` validation and corruption errors retain their existing behaviour.
 Replay checks operation IDs and digests against both retained histories, even
-after ordinary writes prune a marker's main receipt. No markers are serialized
+after ordinary writes prune a marker's main receipt. A retained receipt still
+replays the original completed operation after quarantine or eviction; replay
+does not recreate discarded markers. No markers are serialized
 inline in `ui.json`, so older binary saves preserve the companion unchanged.
 
 Owner preferences expose optional `seen`, default empty. Each entry is

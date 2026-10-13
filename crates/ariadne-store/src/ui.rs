@@ -8,6 +8,7 @@ pub struct UiFile<'a> {
     directory: &'a Directory,
     previous: Option<Vec<u8>>,
     recovery: Option<Vec<u8>>,
+    recovery_writable: bool,
 }
 
 pub(crate) fn with_file<T, E: From<StoreError>>(
@@ -26,12 +27,27 @@ pub(crate) fn with_file<T, E: From<StoreError>>(
             }
         };
         let previous = read("ui.json")?;
-        let recovery = read("ui-recovery.json")?;
-        work(UiFile {
+        // The companion is optional. Even an unreadable entry must not block
+        // opening the authoritative main file or saving ordinary preferences.
+        let recovery = directory.read("ui-recovery.json");
+        let recovery_problem = !matches!(
+            &recovery,
+            Ok(_)
+                | Err(StoreError::Io {
+                    kind: io::ErrorKind::NotFound,
+                    ..
+                })
+        );
+        let mut file = UiFile {
             directory,
             previous,
-            recovery,
-        })
+            recovery: recovery.ok(),
+            recovery_writable: true,
+        };
+        if recovery_problem {
+            file.discard_recovery();
+        }
+        work(file)
     })
 }
 
@@ -53,6 +69,26 @@ impl UiFile<'_> {
         self.recovery.as_deref()
     }
 
+    /// Preserve the optional companion entry under ui.lock. Failure still
+    /// disables its markers, and forbids replacing the unquarantined source.
+    pub fn discard_recovery(&mut self) {
+        self.recovery = None;
+        self.recovery_writable = false;
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let target = format!("ui-recovery.corrupt-{timestamp}.json");
+        match self.directory.rename_entry_no_replace("ui-recovery.json", &target)
+            .and_then(|()| self.directory.sync()) {
+            Ok(()) => {
+                self.recovery_writable = true;
+                eprintln!("Ariadne: quarantined optional UI recovery companion; continuing without markers");
+            }
+            Err(_) => eprintln!("Ariadne: could not quarantine optional UI recovery companion; preserving its entry and continuing without markers"),
+        }
+    }
+
     /// Re-establish durability on a retry after an uncertain directory sync.
     /// Companion data was synced before its atomic publication.
     pub fn confirm_recovery(&self, operation_id: &UuidV4) -> Result<(), StoreError> {
@@ -70,6 +106,11 @@ impl UiFile<'_> {
         candidate: &[u8],
         operation_id: &UuidV4,
     ) -> Result<(), StoreError> {
+        if !self.recovery_writable {
+            return Err(StoreError::UnsafePath {
+                path: self.recovery_path(),
+            });
+        }
         let temporary = self.directory.temp("ui-recovery.json", candidate)?;
         if self.recovery.is_some() {
             temporary.replace("ui-recovery.json")?;
