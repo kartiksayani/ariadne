@@ -46,6 +46,19 @@ function mount(value: Awaited<ReturnType<typeof setup>>, extra: Partial<PeekProv
 }
 
 describe('name chips and item peek', () => {
+  it('shows the complete title in the peek heading without repeating the chip short name', async () => {
+    const value = await setup();
+    const title = 'Add the receipt lookup test and keep its full result explanation available before choosing the next delivery window.';
+    value.source.items['2']!.question = title; ++value.source.revision;
+    await value.store.refresh();
+    const { chip } = mount(value);
+    expect(chip().textContent).toBe('Delivery choice');
+    fireEvent.click(chip());
+    const peek = screen.getByRole('dialog', { name: `Peek: ${title}` });
+    expect(within(peek).getByRole('heading', { level: 2 }).textContent).toBe(title);
+    expect(within(peek).queryByText('Delivery choice')).toBeNull();
+  });
+
   it('keeps running-text names inside the existing line box while retaining keyboard peek and focus return', async () => {
     const style = document.createElement('style');
     style.textContent = readFileSync(resolve(__dirname, '../../../src/ui/peek/peek.css'), 'utf8');
@@ -57,7 +70,7 @@ describe('name chips and item peek', () => {
       expect(computed.padding).toBe('0px');
       expect(computed.borderTopWidth).toBe('0px');
       chip().focus(); fireEvent.keyDown(chip(), { key: ' ' });
-      expect(screen.getByRole('dialog', { name: 'Peek: Delivery choice' })).toBeTruthy();
+      expect(screen.getByRole('dialog', { name: `Peek: ${value.source.items['2']!.question}` })).toBeTruthy();
       fireEvent.keyDown(document, { key: 'Escape' });
       expect(document.activeElement).toBe(chip());
     } finally { style.remove(); }
@@ -66,7 +79,7 @@ describe('name chips and item peek', () => {
   it('answers a current waiting ask on a task through the same safe answer submission', async () => {
     const value = await setup(); value.source.items['2']!.type = 'task'; ++value.source.revision; await value.store.refresh();
     const { chip } = mount(value); fireEvent.click(chip());
-    const peek = screen.getByRole('dialog', { name: 'Peek: Delivery choice' });
+    const peek = screen.getByRole('dialog', { name: `Peek: ${value.source.items['2']!.question}` });
     expect(within(peek).getByText('task')).toBeTruthy();
     fireEvent.change(within(peek).getByRole('textbox', { name: 'One-line answer' }), { target: { value: 'Proceed with the task.' } });
     fireEvent.click(within(peek).getByRole('button', { name: 'Send' }));
@@ -81,13 +94,13 @@ describe('name chips and item peek', () => {
     expect(chip().textContent).toBe('Delivery choice');
     expect(chip().textContent).not.toContain('#2');
     chip().focus(); fireEvent.keyDown(chip(), { key: ' ' });
-    const first = screen.getByRole('dialog', { name: 'Peek: Delivery choice' });
+    const first = screen.getByRole('dialog', { name: `Peek: ${value.source.items['2']!.question}` });
     expect(within(first).getByText('question')).toBeTruthy();
     expect(within(first).getByText('Waiting on me')).toBeTruthy();
     expect(document.activeElement).toBe(within(first).getByRole('button', { name: 'Close peek' }));
     fireEvent.click(screen.getByRole('button', { name: `${value.source.items['8']!.question} · Open` }));
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
-    expect(screen.queryByRole('dialog', { name: 'Peek: Delivery choice' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: `Peek: ${value.source.items['2']!.question}` })).toBeNull();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement?.textContent).toContain('Preserve');

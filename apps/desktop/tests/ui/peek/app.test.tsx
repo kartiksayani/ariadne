@@ -12,7 +12,7 @@ async function openFirst() {
 }
 
 describe('peek desktop composition', { timeout: 10_000 }, () => {
-  it('previews a historical fork with its current disambiguated name before Go to selects it', async () => {
+  it('previews a historical fork with its full title while its chip keeps the disambiguated name before Go to selects it', async () => {
     const transport = new AppTransport(), source = transport.sessions.get(route.session_id)!;
     const fork = source.items['1.1']!, elsewhere = source.items['8']!;
     fork.short = elsewhere.short = 'Cache lookup'; elsewhere.topic_id = fork.topic_id;
@@ -27,7 +27,9 @@ describe('peek desktop composition', { timeout: 10_000 }, () => {
     expect(chip.textContent).not.toContain(fork.question);
     expect(chip.title).toBe(fork.question); expect(chip.classList.contains('name-chip')).toBe(true);
     fireEvent.click(chip);
-    const peek = await screen.findByRole('dialog', { name: 'Peek: Redis · Cache lookup' });
+    const peek = await screen.findByRole('dialog', { name: `Peek: ${fork.question}` });
+    expect(within(peek).getByRole('heading', { level: 2 }).textContent).toBe(fork.question);
+    expect(within(peek).queryByText('Redis · Cache lookup')).toBeNull();
     expect(screen.getByRole('article').getAttribute('data-detail-item-id')).toBe('1');
     expect(transport.preferences.sessions[0]!.selected_item_id).toBe('1');
     fireEvent.click(within(peek).getByRole('button', { name: 'Go to' }));
@@ -66,14 +68,14 @@ describe('peek desktop composition', { timeout: 10_000 }, () => {
     const detail = await screen.findByRole('article', { name: `Detail of ${source.items['1']!.question}` });
     const chip = within(detail).getByRole('button', { name: `${source.items['2']!.question} · Waiting on me` });
     expect(chip.textContent).toBe('Delivery choice'); fireEvent.click(chip);
-    const peek = await screen.findByRole('dialog', { name: 'Peek: Delivery choice' });
+    const peek = await screen.findByRole('dialog', { name: `Peek: ${source.items['2']!.question}` });
     expect(screen.getByRole('article').getAttribute('data-detail-item-id')).toBe('1');
     fireEvent.click(within(peek).getByRole('button', { name: 'Go to' }));
     await screen.findByRole('article', { name: `Detail of ${source.items['2']!.question}` });
     await waitFor(() => expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id).toBe('2'));
     await waitFor(() => expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.recent_items).toEqual(expect.arrayContaining([expect.objectContaining({ item_id: '2', action: 'viewed' })])));
     expect(transport.queries.some(request => request.request.command === 'reveal_item' && request.request.params.item_id === '2')).toBe(true);
-    expect(screen.queryByRole('dialog', { name: 'Peek: Delivery choice' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: `Peek: ${source.items['2']!.question}` })).toBeNull();
   });
 
   it('opens a Waiting path chip in another session and answers its referenced question without switching the workspace', async () => {
@@ -89,9 +91,9 @@ describe('peek desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => expect(document.querySelector(`[data-waiting-item="2"][data-session-id="${secondId}"]`)).not.toBeNull());
     const card = document.querySelector<HTMLElement>(`[data-waiting-item="2"][data-session-id="${secondId}"]`)!;
     fireEvent.click(within(card).getByRole('button', { name: `${other.items['8']!.question} · Open` }));
-    const branchPeek = await screen.findByRole('dialog', { name: 'Peek: Other branch' });
+    const branchPeek = await screen.findByRole('dialog', { name: `Peek: ${other.items['8']!.question}` });
     fireEvent.click(within(branchPeek).getByRole('button', { name: `${other.items['2']!.question} · Waiting on me` }));
-    const questionPeek = await screen.findByRole('dialog', { name: 'Peek: Other delivery' });
+    const questionPeek = await screen.findByRole('dialog', { name: `Peek: ${other.items['2']!.question}` });
     fireEvent.change(within(questionPeek).getByRole('textbox', { name: 'One-line answer' }), { target: { value: 'Yes, keep this delivery.' } });
     fireEvent.click(within(questionPeek).getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(1));
@@ -112,7 +114,7 @@ describe('peek desktop composition', { timeout: 10_000 }, () => {
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
     const detail = await screen.findByRole('article', { name: `Detail of ${source.items['1']!.question}` });
     fireEvent.click(within(detail).getByRole('button', { name: `${source.items['2']!.question} · Waiting on me` }));
-    const peek = await screen.findByRole('dialog', { name: 'Peek: Delivery choice' });
+    const peek = await screen.findByRole('dialog', { name: `Peek: ${source.items['2']!.question}` });
     fireEvent.change(within(peek).getByRole('textbox', { name: 'One-line answer' }), { target: { value: 'Keep this draft after cancel.' } });
     fireEvent.click(within(peek).getByRole('button', { name: 'Send' }));
     const modal = await screen.findByRole('dialog', { name: /isn’t running for this session/ });
@@ -120,10 +122,10 @@ describe('peek desktop composition', { timeout: 10_000 }, () => {
     expect(document.activeElement).toBe(modal);
     fireEvent.keyDown(modal, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /isn’t running for this session/ })).toBeNull());
-    expect(screen.getByRole('dialog', { name: 'Peek: Delivery choice' })).toBe(peek);
+    expect(screen.getByRole('dialog', { name: `Peek: ${source.items['2']!.question}` })).toBe(peek);
     expect((within(peek).getByRole('textbox', { name: 'One-line answer' }) as HTMLInputElement).value).toBe('Keep this draft after cancel.');
     expect(transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(0);
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByRole('dialog', { name: 'Peek: Delivery choice' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: `Peek: ${source.items['2']!.question}` })).toBeNull();
   });
 });

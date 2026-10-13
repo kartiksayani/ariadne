@@ -500,11 +500,18 @@ for (const theme of ['light', 'dark'] as const) test(`Getting around preserves t
   const root = page.locator('.tree-item.tree-item-root').first(), scroller = page.locator('.tree-scroll');
   const sourceId = await root.getAttribute('data-item-id');
   await root.click();
+  const detail = page.locator('.item-detail');
+  await expect(detail).toHaveAttribute('data-detail-item-id', sourceId!);
+  const fullTitle = await detail.locator('.detail-question').getAttribute('title');
   const before = await scroller.evaluate(element => element.scrollTop);
   await root.focus();
   await page.keyboard.press('Space');
   const peek = page.getByRole('dialog', { name: /^Peek:/ });
   await expect(peek).toBeVisible();
+  const heading = peek.getByRole('heading', { level: 2 });
+  await expect(heading).toHaveText(fullTitle!);
+  await expect(heading).toHaveCSS('white-space', 'pre-wrap');
+  expect(await heading.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
   await expect(peek.getByRole('button', { name: 'Copy reference' })).toBeVisible();
   await expect(peek.getByRole('button', { name: 'Go to' })).toBeVisible();
   const box = (await peek.boundingBox())!, chrome = (await page.locator('.shell-header').boundingBox())!, viewport = page.viewportSize()!;

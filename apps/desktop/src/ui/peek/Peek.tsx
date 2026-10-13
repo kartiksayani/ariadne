@@ -148,10 +148,10 @@ function PeekCard({ shown, drafts, card, onClose, onGoTo, onAgentNotRunning, onP
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure); observer?.observe(element);
     return () => { window.removeEventListener('resize', measure); window.removeEventListener('scroll', measure, true); observer?.disconnect(); };
   }, [shown, card]);
-  const name = item ? labels?.get(item.id) ?? item.question : 'Item unavailable';
-  return <div ref={card} className="item-peek" role="dialog" aria-label={`Peek: ${name}`} style={{ left: position.left, top: position.top, maxWidth: position.maxWidth, maxHeight: position.maxHeight }}
+  const title = item?.question ?? 'Item unavailable';
+  return <div ref={card} className="item-peek" role="dialog" aria-label={`Peek: ${title}`} style={{ left: position.left, top: position.top, maxWidth: position.maxWidth, maxHeight: position.maxHeight }}
     onKeyDown={event => event.stopPropagation()}>
-    <div className="peek-head"><h2>{name}</h2><button type="button" className="btn btn-ghost btn-icon" aria-label="Close peek" title="Close peek (Esc)" onClick={onClose}><i className="ph ph-x" aria-hidden="true" /></button></div>
+    <div className="peek-head"><h2>{title}</h2><button type="button" className="btn btn-ghost btn-icon" aria-label="Close peek" title="Close peek (Esc)" onClick={onClose}><i className="ph ph-x" aria-hidden="true" /></button></div>
     {valid ? <ItemRefSession.Provider value={shown.route}><ItemRefs.Provider value={{ lookup: id => { const target = session.items[id]; return target && !itemRemoved(session, id) ? { label: target.question, name: labels?.get(id), status: displayStatus(session, target) } : null; }, route: id => ({ ...shown.route, item_id: id }), onOpenItem: onGoTo }}><FileRefProject.Provider value={session.project_id}>
       <div className="peek-tags"><span>{item.type}</span><StatusBadge status={statusKey[displayStatus(session, item)]} /></div>
       <Markdown className="peek-summary" text={item.outcome || item.ask || item.why || 'No summary yet.'} compact />

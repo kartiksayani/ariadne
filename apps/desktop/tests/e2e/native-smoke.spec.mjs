@@ -7,7 +7,7 @@ import { openSessionButton } from './session-button.mjs';
 import { runAccessibilityAcceptance } from './accessibility.spec.mjs';
 import { runDiscoveryAcceptance } from './discovery.spec.mjs';
 import { runHistoryActionsAcceptance } from './history-actions.spec.mjs';
-import { runTreeAcceptance, restoreTreeAcceptance } from './tree.spec.mjs';
+import { goToPeekItem, runTreeAcceptance, restoreTreeAcceptance } from './tree.spec.mjs';
 import { navigationUpdated, runHistoryAcceptance, restoreHistoryAcceptance } from './history.spec.mjs';
 import { runGraphAcceptance } from './graph.spec.mjs';
 import { runRecoveryAcceptance } from './recovery.spec.mjs';
@@ -147,7 +147,10 @@ async function delivery(configuration) {
   await openSession(configuration.demo.session_id, '1');
   await showHistory(configuration.demo.before.messages.filter(message => message.item_id === '1').map(message => message.body));
   const child = await browser.$('.item-detail button.detail-fork');
-  await child.waitForDisplayed(); assert.ok((await child.getText()).includes('Add the receipt lookup test')); await child.click();
+  await child.waitForDisplayed();
+  assert.equal(await child.getAttribute('title'), 'Add the receipt lookup test', 'The child chip names its canonical child');
+  await child.click();
+  await goToPeekItem(configuration.demo.before.items['1.1'], '1');
   await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === '1.1'
     && (await browser.$('[aria-label="Item detail"]').getText()).includes('Add the receipt lookup test'), 'Canonical demo child navigation failed');
   await browser.saveScreenshot(join(evidence, 'canonical-demo.png'));

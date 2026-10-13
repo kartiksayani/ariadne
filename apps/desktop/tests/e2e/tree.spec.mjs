@@ -12,6 +12,19 @@ const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const row = id => browser.$(`.tree-rows [data-item-id="${id}"]`);
 const search = () => browser.$('[data-shell-search]');
+// Reference chips preview an item without selecting it; only Go to reveals it.
+export async function goToPeekItem(item, currentItemId) {
+  const peek = () => browser.$('.item-peek');
+  const heading = () => browser.$('.item-peek .peek-head h2');
+  await wait(async () => await peek().isDisplayed() && await heading().isDisplayed()
+    && await browser.execute(element => element.textContent, await heading()) === item.question,
+  'Item reference peek did not show the complete saved question');
+  assert.equal(await browser.$('.item-detail').getAttribute('data-detail-item-id'), currentItemId,
+    'Opening a reference peek must preserve the selected detail until Go to');
+  const go = await peek().$('button=Go to');
+  await go.waitForEnabled(); await go.scrollIntoView(); await go.click();
+  await wait(async () => !(await peek().isExisting()), 'Go to did not close the item reference peek');
+}
 // The resting title is a compact Markdown excerpt. Open it before proving all rendered words.
 export async function showFullItemQuestion(item) {
   const heading = () => browser.$('[aria-label="Item detail"] .detail-question');
@@ -567,7 +580,9 @@ async function treeAcceptance(configuration) {
   await wait(async () => (await visibleIds()).includes('1.1'), 'Filtered context must temporarily expose its ancestry');
   await (await search()).waitForEnabled();
   const beforeReveal = (await preferences(tree)).view;
-  const child = await browser.$('[aria-label="Child items"]').$(`button*=${initialSession.items['1.2'].question.split('\n')[0]}`); await child.waitForDisplayed(); await child.click();
+  const child = await browser.$('[aria-label="Child items"]').$('button[aria-label^="Native sentence 1.2\\a "]');
+  await child.waitForDisplayed(); assert.equal(await child.getAttribute('aria-label'), initialSession.items['1.2'].question); await child.click();
+  await goToPeekItem(initialSession.items['1.2'], '1'); await showFullItemQuestion(initialSession.items['1.2']);
   await wait(async () => (await browser.$('.tree-column').getText()).includes('Showing an item outside your current filters.'), 'Detail child reveal did not preserve the filter and expose an outside-filter row');
   assert.equal(await focusedId(), '1.2');
   const revealed = (await preferences(tree)).view;
