@@ -300,16 +300,11 @@ async function conversation(history, saved, paged) {
   const sibling = await row('1.2'); await sibling.waitForDisplayed(); await sibling.scrollIntoView(); await sibling.click();
   await waitForHistoryItem(saved.items['1.2']);
   const siblingMessageIds = await proveConversationMessages(saved, '1.2');
-  const activity = await browser.$('.session-activity');
-  if (await activity.isExisting() && !await browser.execute(node => node.open, activity)) {
-    const summary = await activity.$('summary'); await summary.scrollIntoView(); await summary.click();
-  }
-  const activityMessages = await browser.execute(() => [...document.querySelectorAll('[aria-label="Session activity"] > li[data-message-id]')]
-    .map(card => ({ id: card.dataset.messageId, body: card.querySelector('p')?.textContent })));
-  for (const message of activityMessages) assert.equal(message.body, saved.messages.find(value => value.id === message.id)?.body,
-    'Session activity must retain every word of a message outside item conversations');
-  const reachable = new Set([...messageIds, ...childMessageIds, ...siblingMessageIds, ...activityMessages.map(message => message.id)]);
-  for (const message of saved.messages) assert.ok(reachable.has(message.id), `Canonical message #${message.number} became unreachable after removing Messages`);
+  assert.equal(await browser.$('.session-activity').isExisting(), false, 'Session history has no disclosure');
+  const conversationMessageIds = new Set([...messageIds, ...childMessageIds, ...siblingMessageIds]);
+  const storedHistoryMessages = saved.messages.filter(message => !conversationMessageIds.has(message.id));
+  const persisted = await snapshot(history);
+  assert.deepEqual(persisted.messages, saved.messages, 'Reading item conversations must preserve every complete stored message');
   await selectParent(saved.items['1']);
   await proveConversationMessages(saved, '1');
   // Scroll the actual detail body: the docked editor is outside this reading region.
@@ -363,11 +358,13 @@ async function conversation(history, saved, paged) {
   await apply(history, [{ op: 'reply', ref: 'history_followed', item: { id: '1' }, round_id: null,
     text: 'Following native conversation reply\nThe genuine subsequent message remains visible.' }], { '1': live.items['1'].revision });
   const final = await snapshot(history);
+  assert.deepEqual(final.messages.slice(0, saved.messages.length), saved.messages,
+    'Live conversation arrivals must preserve every earlier complete stored message');
   await proveConversationMessages(final, '1');
   await wait(async () => { const state = await conversationState(); return state.height - state.viewport - state.top <= 2; },
     'Item conversation did not keep following the next genuine message');
   const followed = await conversationState(); assert.equal(followed.focused, true); assert.equal(followed.draft, draft);
-  return { messageIds, childMessageIds, siblingMessageIds, activityMessageIds: activityMessages.map(message => message.id), beforeUp, paused, held, following, followed, count, draft, final };
+  return { messageIds, childMessageIds, siblingMessageIds, storedHistoryMessageIds: storedHistoryMessages.map(message => message.id), beforeUp, paused, held, following, followed, count, draft, final };
 }
 
 export async function runHistoryAcceptance(configuration) {

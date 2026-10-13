@@ -32,6 +32,8 @@ describe('neutral design samples', () => {
   it('compares the surviving columns of every former Messages frame', () => {
     const source = handoffMembers()['Ariadne.dc.html']!;
     expect(source).not.toContain('title="Messages (m)"');
+    expect(source).not.toContain('Session activity');
+    expect(source).not.toContain('session-activity');
     expect(source).toContain('rail: false,');
     expect(source).toContain('hoverMsg: null, msgSel: null,');
     for (const frame of frameIds) {

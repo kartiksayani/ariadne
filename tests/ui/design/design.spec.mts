@@ -182,6 +182,8 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
     await expect(page.locator('.tree-scroll-shell .tree-selected-slot, .tree-scroll-shell .tree-selected-edge')).toHaveCount(0);
   }
   await expect(page.locator('.pw-rail')).toHaveCount(0);
+  await expect(page.locator('.session-activity')).toHaveCount(0);
+  await expect(page.getByRole('list', { name: 'Session activity', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Messages (m)', exact: true })).toHaveCount(0);
   expect(denied).toEqual([]);
 }

@@ -384,6 +384,8 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     fireEvent.click(screen.getByRole('button', { name: 'Tree' }));
     expect(await screen.findByRole('tree', { name: 'Session items' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Messages (m)' })).toBeNull();
+    expect(screen.queryByText(/Session activity/)).toBeNull();
+    expect(document.querySelector('.session-activity')).toBeNull();
     const conversation = await screen.findByRole('region', { name: 'Conversation' });
     await waitFor(() => expect(conversation.querySelectorAll('[data-message-id]').length).toBeGreaterThan(0));
     const writes = mutations(transport, 'preferences_patch').length;

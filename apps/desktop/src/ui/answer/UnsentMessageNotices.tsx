@@ -5,7 +5,7 @@ import type { WaitingStore } from '../../selectors/waiting/store';
 import { notSent } from '../../selectors/waiting/stuck';
 import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
 import { notices } from '../pages/notices';
-import { inItemConversation } from '../detail/SessionActivity';
+import { inItemConversation } from '../../selectors/history';
 import { editable, putBackBlocked, putBackCancelled, sendingAgain } from './held';
 
 const noSubscribe = () => () => {};

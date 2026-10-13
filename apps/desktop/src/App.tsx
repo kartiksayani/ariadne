@@ -21,7 +21,6 @@ import { NavigationGraph } from './ui/graph/NavigationGraph';
 import type { OwnerFocusRequest, PendingSubmission } from './ui/answer/useSubmit';
 import { agentNotRunning } from './ui/answer/notRunning';
 import { DetailPath, ItemDetail } from './ui/detail/ItemDetail';
-import { SessionActivity } from './ui/detail/SessionActivity';
 import { WaitingColumn } from './ui/waiting/WaitingColumn';
 import { PeekProvider } from './ui/peek/Peek';
 import { ItemRefSession } from './ui/peek/context';
@@ -164,7 +163,6 @@ function SessionArchive({ application, view, onRemove }: { application: Applicat
   const project = navigation.projects?.projects.items.find(value => value.project_id === route.project_id);
   return <section className="app-session" aria-label="Session workspace">
     <SessionNotice state={state} refresh={() => { void view.store.refresh(); }} />
-    {state.snapshot && <SessionActivity session={state.snapshot.session} earlierAgent={earlierAgent(route, sessions)} />}
     <ArchivePage navigation={application.navigation} actions={application.actions} projectName={project?.project?.display_name ?? 'this project'}
       sessions={sessions} snapshots={snapshots} target={route} query={view.preferences?.filters.search ?? ''} now={Date.now()} onRemove={onRemove} />
   </section>;
@@ -194,8 +192,7 @@ function SessionCenter({ application, view, graph, reveal, onRemoveTarget, ...pr
     reveal={reveal?.store === view.store ? reveal : null} summaries={summaries}
     topicContent={session ? topicId => <TopicChanges session={session} topicId={topicId} navigation={application.navigation}
       onOpenItem={props.onOpenItem} /> : undefined}
-    notices={<div className="tree-notices">{notice}{recovering && <RecoveryPanel actions={actions} />}
-      {session && <SessionActivity session={session} earlierAgent={earlierAgent(state.route, summaries)} />}</div>}
+    notices={notice || recovering ? <div className="tree-notices">{notice}{recovering && <RecoveryPanel actions={actions} />}</div> : null}
     graph={graph && !view.preferences?.filters.archived ? <NavigationGraph navigation={application.navigation} store={view.store} query={props.query}
       tight={props.detailOpen} onReveal={props.onSelected} /> : null} />;
 }

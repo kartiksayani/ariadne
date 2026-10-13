@@ -14,7 +14,6 @@ AppShell
     DetailRegion: ItemDetail
       ItemActions / AnswerControl
       BackAndForthRounds / ItemTimeline
-    SessionActivity: topic replies and lifecycle messages without an item conversation
   UnsentMessageNotices: persistent recovery for cancelled messages without an item conversation
   Footer: implemented keyboard hints and scoped counts
   Dialogs: RegisterProject, BindSession, ArchiveTopic, ContinueTopic, ResolveInput, Settings
@@ -131,7 +130,7 @@ Item detail renders full item history in two linked forms:
 - **Back and forth:** ordered round cards, each with agent ask, owner choice and optional text (or free-text-only reply), agent result, related messages, and child items forked during that round. A new question is a child; refinement of the same decision is another round on the existing item.
 - **Timeline:** deduplicated session-local messages with author, timestamp, excerpt, touched items, and origin/created/updated role. Message numbers are Ariadne provenance numbers, not host transcript line numbers.
 
-Alpha.15 removes the Messages pane by owner decision, including its layout slot, header toggle, `m` shortcut and saved rail state. Item conversations keep full messages and their cancellation recovery. Session activity above the tree retains topic replies and session lifecycle messages with no item conversation, including exact-text copy. Cancelled editable owner messages without an item conversation get persistent actionable notices until put back or dismissed. Restore/reopen prerequisites disable recovery until available; `putBackCancelled` preserves existing text and unconfirmed saves. These notices survive session selection changes. Older preference snapshots accept and ignore the retired `rail` field, while current DTOs and generated TypeScript omit it. Live updates never steal keyboard focus or scroll an owner away from older content.
+Alpha.15 removes the Messages pane by owner decision, including its layout slot, header toggle, `m` shortcut and saved rail state. Item conversations keep full messages and their cancellation recovery. Topic replies and lifecycle messages with no item conversation remain stored and are not shown; there is no replacement history surface. Cancelled editable owner messages without an item conversation get persistent actionable notices until put back or dismissed. Restore/reopen prerequisites disable recovery until available; `putBackCancelled` preserves existing text and unconfirmed saves. These notices survive session selection changes. Older preference snapshots accept and ignore the retired `rail` field, while current DTOs and generated TypeScript omit it. Live updates never steal keyboard focus or scroll an owner away from older content.
 
 ### Seeing changes and shared seen state (Alpha.14.4)
 

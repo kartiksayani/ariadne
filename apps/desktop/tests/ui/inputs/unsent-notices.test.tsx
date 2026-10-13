@@ -5,7 +5,7 @@ import { OpenSessions } from '../../../src/data/session-store';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { UnsentMessageNotices } from '../../../src/ui/answer/UnsentMessageNotices';
-import { SessionActivity } from '../../../src/ui/detail/SessionActivity';
+import { inItemConversation } from '../../../src/selectors/history';
 import { Notices, notices } from '../../../src/ui/pages/notices';
 import { AppTransport, route } from '../app/transport';
 
@@ -31,8 +31,7 @@ async function setup(cause: 'topic_archived' | 'session_closed', item = false) {
   await store.refresh();
   const drafts = new OwnerDraftStore(service); await drafts.load();
   const waiting = new WaitingStore(service, opened);
-  const view = render(<><Notices /><UnsentMessageNotices waiting={waiting} drafts={drafts} opened={opened} selectedStore={store} />
-    <SessionActivity session={store.getSnapshot().snapshot!.session} /></>);
+  const view = render(<><Notices /><UnsentMessageNotices waiting={waiting} drafts={drafts} opened={opened} selectedStore={store} /></>);
   return { ...view, transport, session, topic, input, message, drafts, store, waiting, opened };
 }
 
@@ -79,27 +78,30 @@ it('respects dismissal across refresh and keeps recovery through selection chang
 });
 
 it('leaves item cancellation recovery in its conversation rather than adding a duplicate notice', async () => {
-  await setup('topic_archived', true);
+  const value = await setup('topic_archived', true);
+  expect(inItemConversation(value.session, value.message)).toBe(true);
   expect(notices.getSnapshot().some(notice => notice.id.startsWith('unsent:'))).toBe(false);
 });
 
-it('keeps full topic replies and session lifecycle history outside item conversations', async () => {
+it('keeps topic reply text stored without adding a message history surface', async () => {
   const value = await setup('topic_archived');
-  const activity = screen.getByRole('list', { name: 'Session activity' });
-  expect(activity.querySelector(`[data-message-id="${value.message.id}"]`)?.textContent).toContain(value.message.body);
-  expect(within(activity).getAllByRole('button', { name: 'Copy message' }).length).toBeGreaterThan(0);
+  expect(inItemConversation(value.session, value.message)).toBe(false);
+  expect(value.store.getSnapshot().snapshot!.session.messages.find(message => message.id === value.message.id)?.body).toBe(value.message.body);
+  expect(document.querySelector(`[data-message-id="${value.message.id}"]`)).toBeNull();
+  expect(screen.queryByText('Session activity', { exact: false })).toBeNull();
 });
 
-it('keeps removal lifecycle messages reachable even when their only item is in Removed by agent', async () => {
+it('keeps removal lifecycle messages stored without claiming they have an item conversation', async () => {
   const value = await setup('topic_archived');
   const item = value.session.items['1']!;
   item.removed_at = value.session.updated_at;
   const lifecycle = { ...value.message, id: '00000000-0000-4000-8000-000000007777', kind: 'lifecycle' as const,
     author: 'system' as const, body: 'Work moved to the bin.', item_id: item.id, items_touched: [item.id], input_id: null };
   value.session.messages.push(lifecycle);
-  value.rerender(<SessionActivity session={value.session} />);
-  const activity = screen.getByRole('list', { name: 'Session activity' });
-  expect(activity.querySelector(`[data-message-id="${lifecycle.id}"]`)?.textContent).toContain(lifecycle.body);
+  ++value.session.revision; await act(() => value.store.refresh());
+  expect(inItemConversation(value.session, lifecycle)).toBe(false);
+  expect(value.store.getSnapshot().snapshot!.session.messages.find(message => message.id === lifecycle.id)?.body).toBe(lifecycle.body);
+  expect(screen.queryByText(lifecycle.body)).toBeNull();
 });
 
 it('removes topic take-back recovery after the same words are sent from another editor', async () => {

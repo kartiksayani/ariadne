@@ -176,8 +176,10 @@ No new DTO or alternate mutation path is introduced.
 Alpha.15 removes the Messages pane and its transient cross-highlights by owner decision.
 Item conversations retain saved messages and cancellation recovery through
 `NotSentLine` and `putBackCancelled`; existing drafts are never overwritten.
-`SessionActivity` retains topic replies and lifecycle history with no item
-conversation. `UnsentMessageNotices` supplies persistent, dismissible recovery
+Topic replies and lifecycle history with no item conversation remain stored,
+without a replacement history surface. `selectors/history.ts::inItemConversation`
+identifies which messages already have reachable conversations.
+`UnsentMessageNotices` supplies persistent, dismissible recovery
 for cancelled editable owner messages without a conversation. Notices survive
 selection changes, use current loaded session state on recovery, and disappear
 only after successful put-back, resend or owner dismissal. Current session
