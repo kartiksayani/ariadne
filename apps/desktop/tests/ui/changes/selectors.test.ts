@@ -3,7 +3,9 @@ import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { SessionSeen } from '../../../src/generated/core';
 import type { Answer, Item, ItemChangeBefore, ItemChangeRecord, Message, Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data/session-store';
-import { briefLists, changeCard, changeTreeOrder, isChangedSinceRead, isNewToOwner, nextUnseen, sinceYouWereHere } from '../../../src/selectors/changes';
+import { changeCard } from '../../../src/selectors/changes/card';
+import { changeTreeOrder, isChangedSinceRead, isNewToOwner, nextUnseen } from '../../../src/selectors/changes/seen';
+import { briefLists, sinceYouWereHere } from '../../../src/selectors/changes/topic';
 
 const baseline = '2026-10-10T00:00:00.000Z', later = '2026-10-10T01:00:00.000Z', latest = '2026-10-10T02:00:00.000Z';
 function fixture() {

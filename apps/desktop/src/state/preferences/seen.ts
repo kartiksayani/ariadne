@@ -38,6 +38,7 @@ export function queueSeen(queue: Map<string, SeenPatch>, entry: SeenPatch): void
   const key = JSON.stringify([entry.session.project_id, entry.session.session_id]);
   const current = queue.get(key);
   if (!current) { queue.set(key, structuredClone(entry)); return; }
+  if (Date.parse(entry.at) < Date.parse(current.at)) current.at = entry.at;
   // Use the same upward-only merge for repeated item/topic observations.
   mergeSeen(current, entry);
 }

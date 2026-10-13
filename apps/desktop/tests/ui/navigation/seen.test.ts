@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OwnerMutationRequest, PreferencesPatchEntry } from '../../../src/generated/core';
 import { createDesktopService, type DesktopTransport } from '../../../src/data/service';
+import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { sessionSeen, type SeenPatch } from '../../../src/state/preferences/seen';
 import { AppTransport, route, secondId } from '../app/transport';
@@ -8,11 +9,20 @@ import { AppTransport, route, secondId } from '../app/transport';
 class SeenTransport extends AppTransport {
   beforePatch: (() => void) | null = null;
   holdPatch: Promise<void> | null = null;
+  holdSeen: Promise<void> | null = null;
+  failSeen: (() => Promise<void>) | null = null;
   holdSession: Promise<void> | null = null;
   override async invoke<T>(name: string, args: Parameters<DesktopTransport['invoke']>[1]): Promise<T> {
     if (name === 'session_get' && this.holdSession) await this.holdSession;
     const request = args.request;
     if ('command' in request && request.command.command === 'preferences_patch') {
+      if (request.command.params.entries.every(entry => entry.kind === 'mark_seen')) {
+        if (this.holdSeen) await this.holdSeen;
+        if (this.failSeen) {
+          this.mutations.push(structuredClone(request));
+          await this.failSeen();
+        }
+      }
       if (this.holdPatch) await this.holdPatch;
       const conflict = this.beforePatch;
       this.beforePatch = null;
@@ -50,7 +60,7 @@ describe('owner seen preference batching', () => {
     const { store, transport } = await setup();
     const before = store.getSnapshot().preferences!;
     let release!: () => void;
-    transport.holdPatch = new Promise<void>(resolve => { release = resolve; });
+    transport.holdSeen = new Promise<void>(resolve => { release = resolve; });
     await vi.advanceTimersByTimeAsync(1000);
     expect(store.getSnapshot()).toMatchObject({ writing: false, pendingOperationId: null });
     const saving = action === 'theme' ? store.saveTheme('dark', before.revision)
@@ -58,12 +68,40 @@ describe('owner seen preference batching', () => {
         : action === 'hidden' ? store.setHidden({ ...route, item_id: '1' }, true, before.revision)
           : action === 'later' ? store.setLater({ ...route, item_id: '1' }, true, before.revision)
             : store.navigate({ kind: 'all_sessions' });
-    transport.holdPatch = null; release();
+    // The owner edit completes even while the background transport is held.
     expect(await saving).toBe(true);
-    expect(transport.mutations).toHaveLength(2);
-    const command = transport.mutations[1].command;
+    expect(transport.mutations).toHaveLength(1);
+    transport.holdSeen = null; release();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(transport.mutations).toHaveLength(3);
+    const command = transport.mutations[2].command;
     expect(command.command === 'preferences_patch' && command.params.expected_preferences_revision).toBe(2);
     expect(store.getSnapshot().error).toBeNull();
+  });
+
+  it('ignores a delayed seen receipt after a newer owner edit is saved', async () => {
+    const { store, transport } = await setup();
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const result = await invoke(name, args);
+      if ('command' in args.request && args.request.command.command === 'preferences_patch'
+        && args.request.command.params.entries.every(entry => entry.kind === 'mark_seen')) await gate;
+      return result;
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(transport.preferences.revision).toBe(2);
+    // The delayed receipt leaves navigation at its old capture. Its normal
+    // owner conflict rebase preserves the marks and saves the requested theme.
+    expect(await store.saveTheme('dark', 1)).toBe(true);
+    const saved = store.getSnapshot().preferences!;
+    expect(saved.revision).toBe(3);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getSnapshot().preferences).toBe(saved);
+    expect(store.getSnapshot().preferences!.global.theme).toBe('dark');
+    expect(store.getSnapshot()).toMatchObject({ error: null, writing: false, pendingOperationId: null });
   });
 
   it('keeps navigation object identities and accepts only its own seen-only revision advances', async () => {
@@ -177,23 +215,22 @@ describe('owner seen preference batching', () => {
     expect(transport.preferences.seen).toHaveLength(2);
   });
 
-  it('retries once against fresh preferences with a new id and preserves upward-only foreign seen state', async () => {
+  it('retries conflicts against fresh preferences and preserves upward-only foreign seen state', async () => {
     const { store, transport } = await setup();
     store.markItemSeen(route, '1');
     transport.beforePatch = () => {
-      // A later navigation attempt does not invalidate an already viewed item.
-      void store.navigate({ kind: 'all_sessions' });
       transport.preferences.global.pinned = true;
       transport.preferences.seen = [{ session: route, since: '2026-10-01T00:00:00.000Z',
         items: [{ item_id: '1', revision: 8 }, { item_id: '2', revision: 2 }], topics: [] }];
       ++transport.preferences.revision;
     };
     await vi.advanceTimersByTimeAsync(1000);
-    expect(transport.mutations).toHaveLength(3);
+    expect(store.getSnapshot()).toMatchObject({ error: null, writing: false, pendingOperationId: null });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(transport.mutations).toHaveLength(2);
     expect(transport.mutations[1].command.op_id).not.toBe(transport.mutations[0].command.op_id);
     expect(entries(transport.mutations[1])).toEqual(entries(transport.mutations[0]));
     expect(store.getSnapshot().preferences?.global.pinned).toBe(true);
-    expect(store.getSnapshot().preferences?.global.selected_navigation).toEqual({ kind: 'all_sessions' });
     expect(sessionSeen(store.getSnapshot().preferences, route)).toMatchObject({ since: '2026-10-01T00:00:00.000Z',
       items: [{ item_id: '1', revision: 8 }, { item_id: '2', revision: 2 }] });
     expect(store.getSnapshot().error).toBeNull();
@@ -220,29 +257,49 @@ describe('owner seen preference batching', () => {
     transport.holdPatch = new Promise<void>(resolve => { release = resolve; });
     store.markItemSeen(route, '1');
     await vi.advanceTimersByTimeAsync(1000);
-    const firstWrite = store.getWritingCompletion()!;
+    expect(store.getWritingCompletion()).toBeNull();
     store.markItemSeen(route, '2');
     await vi.advanceTimersByTimeAsync(1000);
     transport.holdPatch = null; release();
-    expect(await firstWrite).toBe(true);
     await vi.advanceTimersByTimeAsync(0);
     expect(transport.mutations).toHaveLength(2);
     expect(seenEntries(transport.mutations[0])[0].items.map(item => item.item_id)).toEqual(['1']);
     expect(seenEntries(transport.mutations[1])[0].items.map(item => item.item_id)).toEqual(['2']);
   });
 
-  it('keeps uncertain seen operations for explicit reconciliation without automatic replay', async () => {
+  it.each(['transport', 'commit_uncertain', 'delivery_uncertain'] as const)('silently retries %s seen failures without blocking owner edits', async code => {
     const { store, transport } = await setup();
-    transport.failNext = 'preferences_patch';
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(store.getSnapshot().pendingOperationId).not.toBeNull();
     store.markItemSeen(route, '1');
+    const invoke = transport.invoke.bind(transport);
+    let fail = true;
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (fail && 'command' in args.request && args.request.command.command === 'preferences_patch'
+        && args.request.command.params.entries.every(entry => entry.kind === 'mark_seen')) {
+        fail = false;
+        if (code === 'transport') {
+          transport.mutations.push(structuredClone(args.request));
+          throw new Error('Lost response');
+        }
+        // Model an uncertain result whose monotonic marks actually committed.
+        await invoke(name, args);
+        return { api_version: 1, ok: false, error: { code, message: 'Unknown completion.', hint: '', retryable: true, field_errors: [] } };
+      }
+      return invoke(name, args);
+    });
     await vi.advanceTimersByTimeAsync(1000);
-    expect(transport.mutations).toHaveLength(1);
-    expect(await store.retryMutation()).toBe(true);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(transport.mutations[1]).toEqual(transport.mutations[0]);
-    expect(transport.mutations).toHaveLength(3);
+    expect(store.getSnapshot()).toMatchObject({ writing: false, pendingOperationId: null, error: null });
+    expect(store.getMutationFailure()).toBeNull();
+    expect(store.getWritingCompletion()).toBeNull();
+    expect(await store.navigate({ kind: 'all_sessions' })).toBe(true);
+    store.markItemSeen(route, '2');
+    await vi.advanceTimersByTimeAsync(1000);
+    const marks = transport.mutations.filter(request => seenEntries(request).length);
+    expect(marks).toHaveLength(2);
+    expect(marks[1].command.op_id).not.toBe(marks[0].command.op_id);
+    expect(seenEntries(marks[1])[0].items.map(item => item.item_id)).toEqual(['1', '2']);
+    expect(sessionSeen(store.getSnapshot().preferences, route)?.items).toHaveLength(2);
+    expect(sessionSeen(store.getSnapshot().preferences, route)?.since).toBe(initialTime);
+    expect(store.getSnapshot()).toMatchObject({ writing: false, pendingOperationId: null, error: null });
   });
 
   it('does not mark an item until a hinted session has a fresh capture', async () => {
@@ -263,31 +320,64 @@ describe('owner seen preference batching', () => {
     expect(seenEntries(transport.mutations[0])[0].items).toEqual([{ item_id: '1', revision: 6 }]);
   });
 
-  it('serializes explicit reconciliation of an uncertain seen write with owner edits and rejects duplicate retries', async () => {
+  it('reads fresh revisions and survives two conflicts caused by saved draft keystrokes', async () => {
     const { store, transport } = await setup();
-    transport.failNext = 'preferences_patch';
-    await vi.advanceTimersByTimeAsync(1000);
-    let release!: () => void;
-    transport.holdPatch = new Promise<void>(resolve => { release = resolve; });
-    const retry = store.retryMutation();
-    expect(store.getSnapshot().writing).toBe(true);
-    expect(await store.retryMutation()).toBe(false);
-    const saving = store.saveTheme('dark', transport.preferences.revision);
-    transport.holdPatch = null; release();
-    expect(await retry).toBe(true);
-    expect(await saving).toBe(true);
-    expect(transport.mutations).toHaveLength(3);
-    expect(transport.mutations[1]).toEqual(transport.mutations[0]);
-    expect(transport.preferences.global.theme).toBe('dark');
-    expect(store.getSnapshot()).toMatchObject({ writing: false, pendingOperationId: null, error: null });
+    const drafts = new OwnerDraftStore(store.service);
+    await drafts.load();
+    const session = store.opened.get(route)!.getSnapshot().snapshot!.session;
+    const draftId = drafts.begin(session, '2', 'answer')!;
+    expect(draftId).toBeTruthy();
+    expect(await drafts.editSaved(draftId, { text: 'A' })).toBe(true);
+    expect(store.getSnapshot().preferences!.revision).toBe(1);
+    const invoke = transport.invoke.bind(transport);
+    let conflicts = 0;
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch'
+        && args.request.command.params.entries.every(entry => entry.kind === 'mark_seen') && conflicts < 2) {
+        ++conflicts;
+        expect(args.request.command.params.expected_preferences_revision).toBe(transport.preferences.revision);
+        expect(await drafts.editSaved(draftId, { text: conflicts === 1 ? 'AB' : 'ABC' })).toBe(true);
+      }
+      return invoke(name, args);
+    });
+    store.markItemSeen(route, '1');
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(conflicts).toBe(2);
+    expect(store.getSnapshot()).toMatchObject({ error: null, writing: false, pendingOperationId: null });
+    expect(await store.setHidden({ ...route, item_id: '1' }, true, store.getSnapshot().preferences!.revision)).toBe(true);
+    await vi.advanceTimersByTimeAsync(2000);
+    const marks = transport.mutations.filter(request => seenEntries(request).length);
+    expect(marks).toHaveLength(3);
+    expect(new Set(marks.map(request => request.command.op_id)).size).toBe(3);
+    expect(transport.preferences.drafts.find(draft => draft.op_id === draftId)?.text).toBe('ABC');
+    expect(transport.preferences.sessions[0].hidden_item_ids).toEqual(['1']);
+    expect(sessionSeen(store.getSnapshot().preferences, route)?.items).toEqual([{ item_id: '1', revision: session.items['1']!.revision }]);
+    expect(store.getSnapshot().error).toBeNull();
   });
 
-  it('holds bookkeeping after a rejected owner edit so its error stays visible', async () => {
+  it('bounds repeated background failures and resumes retained marks on the next observation', async () => {
+    const { store, transport } = await setup();
+    transport.failSeen = async () => { throw new Error('Offline'); };
+    store.markItemSeen(route, '1');
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(transport.mutations).toHaveLength(3);
+    expect(store.getSnapshot()).toMatchObject({ error: null, writing: false, pendingOperationId: null });
+    transport.failSeen = null;
+    store.markItemSeen(route, '2');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(transport.mutations).toHaveLength(4);
+    expect(seenEntries(transport.mutations[3])[0]).toMatchObject({ at: initialTime,
+      items: [{ item_id: '1', revision: transport.sessions.get(route.session_id)!.items['1']!.revision },
+        { item_id: '2', revision: transport.sessions.get(route.session_id)!.items['2']!.revision }] });
+    expect(sessionSeen(store.getSnapshot().preferences, route)?.items).toHaveLength(2);
+  });
+
+  it('keeps a rejected owner error visible while background bookkeeping succeeds', async () => {
     const { store, transport } = await setup();
     expect(await store.saveTheme('dark', 0)).toBe(false);
     const error = store.getSnapshot().error;
     await vi.advanceTimersByTimeAsync(1000);
-    expect(transport.mutations).toHaveLength(0);
+    expect(transport.mutations).toHaveLength(1);
     expect(store.getSnapshot().error).toBe(error);
     expect(await store.saveTheme('dark', 1)).toBe(true);
     await vi.advanceTimersByTimeAsync(0);

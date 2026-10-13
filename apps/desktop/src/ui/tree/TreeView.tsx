@@ -36,7 +36,7 @@ import { useLifecycle } from './Lifecycle';
 import { ItemRefs } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
 import { displayStatus } from '../../selectors/waiting/replied';
-import { sessionEnded, sessionClosedReason } from '../../selectors/sessionClosed';
+import { sessionEnded, sessionClosedReason, sessionAnswerBlocked } from '../../selectors/sessionClosed';
 import { useUnfolded } from './unfold';
 import type { RemoveTarget } from '../dialogs/remove';
 import { ContinuePicker, continueTargets, openContinueTopic } from '../dialogs/ContinueTopicDialog';
@@ -350,7 +350,7 @@ export function TreeView(props: TreeViewProps) {
   const options = answerRow?.item.options ?? [];
   const pickedIndex = entry?.draft.selected_option_id ? options.findIndex(option => option.id === entry.draft.selected_option_id) : -1;
   const chosen = pickedIndex >= 0 ? pickedIndex : options.findIndex(option => option.recommended);
-  const blocked = session && sessionEnded(session) ? sessionClosedReason
+  const blocked = session && sessionEnded(session) ? sessionAnswerBlocked(session)
     : session?.state !== 'active' ? sessionClosedReason
     : bar?.connection === 'reconnecting' ? reconnectingNote(bar.agent) : null;
   const focusRow = (key: string) => { setFocusKey(key); elements.current.get(key)?.focus({ preventScroll: true }); };
@@ -728,7 +728,7 @@ export function TreeView(props: TreeViewProps) {
           agent={bar?.agent ?? 'the agent'} onClose={() => { setReplying(null); focusRow(row.key); }} /> : null} fix={fixOf(row)} />
       {items.map(row => row.kind === 'hidden'
         ? <HiddenRow key={row.key} row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleHiddenGroup} />
-        : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={viewBusy}
+        : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={viewBusy} closedReason={session ? sessionAnswerBlocked(session) : undefined}
         highlight={highlightedItems.has(row.key) ? 'strong' : row.collapsed?.ids.some(id => highlightedItems.has(id)) ? 'weak' : null}
         note={row.collapsed ? collapsedNote(row.collapsed, { items: highlightedItems, message: touchedMessage }) : null}
         actions={itemActions(row)} answer={answering === row.key ? answerControl : null} fix={fixOf(row)}

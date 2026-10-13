@@ -8,7 +8,7 @@ import { plainFailure } from '../../data/plain';
 import { useOwnerDrafts, type DraftEntry, type DraftState, type OwnerDraftStore } from '../../state/drafts/store';
 import { AnswerControl, defaultSelection } from '../answer/AnswerControl';
 import { useSubmit, type OwnerFocusRequest, type PendingSubmission } from '../answer/useSubmit';
-import { closedSessionQuestion, sessionClosedReason } from '../../selectors/sessionClosed';
+import { sessionEnded, sessionAnswerBlocked } from '../../selectors/sessionClosed';
 
 /** The handoff's wording for a saved draft written against an older item revision or binding. */
 export const changedText ='This item changed. Review the current question and options; your text is retained.';
@@ -44,7 +44,7 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
   const [shortcutStatus, setShortcutStatus] = useState<string | null>(null);
   const state = useOwnerDrafts(drafts), current = useSession(store), session = current.snapshot?.session;
   const item = session?.items[itemId];
-  const ended = !!session && !!item && closedSessionQuestion(session, item);
+  const ended = !!session && sessionEnded(session);
   const live = current.status === 'ready' && !current.error;
   const presence = session?.active_binding_id ? current.presence[session.active_binding_id] ?? null : null;
   const submit = useSubmit({ drafts, session, current: live, itemId, intent: 'answer', onAgentNotRunning, onSaved: onSent, presence });
@@ -94,7 +94,7 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
   // Saved: the input is queued; the stepper above follows it once the session shows it.
   if (entry.receipt?.data.kind === 'input_submit') return <div className="detail-answer-slot" data-owner-input={mark}>
     <p role="status">Saved · Queue position #{entry.receipt.data.input_seq}</p>
-    {ended && <p role="status">{sessionClosedReason}</p>}
+    {ended && <p role="status">{sessionAnswerBlocked(session!)}</p>}
     {shortcutStatus && <p role="alert">{shortcutStatus}</p>}
     <div className="detail-actions"><button type="button" className="btn btn-secondary" disabled={ended || state.preferenceUncertain || entry.saving || !live} onClick={submit.another}>Write another input</button></div>
     {error && <p className="detail-error" role="alert">{error}</p>}
@@ -109,7 +109,7 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
     <AnswerControl variant="chat" options={options} selected={selected} draft={draft.text} label="Answer"
       locked={submit.locked || submit.changed || ended} frozen={!live}
       warn={submit.changed && !entry.uncertain ? changedText : undefined} warnAction={submit.changed && !entry.uncertain ? review : undefined}
-      blocked={ended ? sessionClosedReason : entry.uncertain || submit.changed ? undefined : submit.blocked ?? blocked ?? undefined}
+      blocked={ended ? sessionAnswerBlocked(session!) : entry.uncertain || submit.changed ? undefined : submit.blocked ?? blocked ?? undefined}
       onSelect={index => { const option = options[index]; if (option) submit.select(option.id); }}
       onDraft={submit.write} onSendOption={(index, note) => { const option = options[index]; if (option) submit.sendOption(option.id, note); }}
       onSendText={submit.sendText} onEscape={onEscape} />

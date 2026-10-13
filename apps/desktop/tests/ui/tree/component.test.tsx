@@ -98,6 +98,9 @@ describe('session tree rows', () => {
     expect(screen.queryByText(/\d+ waiting on you/)).toBeNull();
     fireEvent.click(filterButton());
     expect(screen.getByRole('menuitemcheckbox', { name: /^Waiting on me/ }).textContent).not.toMatch(/[1-9]/);
+    fireEvent.click(chip('Waiting on me'));
+    await waitFor(() => expect(ids()).toEqual([]));
+    expect(screen.getByText('No items match these filters.')).toBeTruthy();
   });
   it('counts declarations and backlinks once, with a visible muted marker that keeps its reserved room when selected or hovered', async () => {
     const view = await mount({ configure: transport => {
@@ -1180,12 +1183,15 @@ describe('session tree inline answering', () => {
     } });
     row('2').focus(); fireEvent.keyDown(row('2'), { key: 'a' });
     await waitFor(() => expect(control()).not.toBeNull());
-    expect(within(control()!).getByText(sessionClosedReason)).toBeTruthy();
+    const reason = 'This session is archived. Restore it, then reopen it to answer.';
+    expect(within(row('2')).getByText('Session closed').title).toBe(reason);
+    expect(within(control()!).getByText(reason)).toBeTruthy();
   });
   it('blocks sending in a closed session', async () => {
     await mount({ configure: transport => { options(transport); transport.sessions.get(route.session_id)!.state = 'closed'; } });
     row('2').focus(); fireEvent.keyDown(row('2'), { key: 'a' });
     await waitFor(() => expect(control()).not.toBeNull());
+    expect(within(row('2')).getByText('Session closed').title).toBe(sessionClosedReason);
     expect(within(control()!).getByText(sessionClosedReason)).toBeTruthy();
   });
 });

@@ -4,6 +4,7 @@ import { indexSession, type Immutable } from '../../data';
 import { itemRemoved } from '../removed';
 import { hasStatusFilter, matchExpansion, matchesStatus } from './folds';
 import { displayStatus } from '../waiting/replied';
+import { waitingOnOwner } from '../sessionClosed';
 
 export interface SentenceRow {
   readonly item: Immutable<Item>;
@@ -56,6 +57,7 @@ export function sentenceRows(session: Immutable<Session>, view: Immutable<Sessio
   const matching = new Set<string>();
   for (const id of inScope) {
     const item = session.items[id]!;
+    if (hasStatusFilter(filters.statuses) && displayStatus(session, item) === 'waiting_on_me' && !waitingOnOwner(session, item)) continue;
     if (!matchesStatus(filters.statuses, displayStatus(session, item))) continue;
     if (filters.owners.length && !filters.owners.some(owner => sameOwner(owner, item.owner))) continue;
     if (filters.hide_later && later.has(id)) continue;

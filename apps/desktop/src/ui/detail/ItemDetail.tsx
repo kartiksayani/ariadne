@@ -27,7 +27,7 @@ import { notices } from '../pages/notices';
 import { isViewConflict } from '../shared/conflictNotice';
 import { shortLabel } from '../shared/short';
 import { displayStatus } from '../../selectors/waiting/replied';
-import { closedSessionQuestion } from '../../selectors/sessionClosed';
+import { closedSessionQuestion, sessionAnswerBlocked } from '../../selectors/sessionClosed';
 import { SessionClosedChip } from '../shared/SessionClosedChip';
 import { CopyMessage } from './CopyMessage';
 import { StatusBadge } from '../shared/StatusBadge';
@@ -442,7 +442,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     <div className={`detail-head${titleExpanded ? ' detail-head-expanded' : ''}`}>
       {/* The handoff embeds the badge in a block host; its line box makes the row 23px. */}
       <div className="detail-status"><div className={`detail-badge${closedSessionQuestion(session, item) ? ' detail-badge-session-closed' : ''}`}><StatusBadge status={model.display} label={model.badgeLabel} />
-        {closedSessionQuestion(session, item) && <SessionClosedChip />}</div>
+        {closedSessionQuestion(session, item) && <SessionClosedChip reason={sessionAnswerBlocked(session)} />}</div>
         <span className="detail-meta" title={model.meta}>{model.meta}</span>
         <span className="detail-reference"><button type="button" className="btn btn-ghost detail-copy" title="Copy the agent reference" onClick={copy}>
           <i className="ph ph-copy" aria-hidden="true" />Copy reference</button></span></div>

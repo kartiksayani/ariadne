@@ -46,4 +46,4 @@ export const ownerReplied = (session: Immutable<Session>, item: Immutable<Item>)
   item.status === 'waiting_on_me' && currentQuestionReplied(session, item);
 
 export const displayStatus = (session: Immutable<Session>, item: Immutable<Item>): DisplayStatus =>
-  session.state === 'closed' || session.archived_at != null ? item.status : ownerReplied(session, item) ? 'waiting_on_agent' : item.status;
+  ownerReplied(session, item) ? 'waiting_on_agent' : item.status;

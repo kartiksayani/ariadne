@@ -24,7 +24,7 @@ import { FileRefProject, ItemRefs, Markdown } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { WaitingFold } from '../shell/fold';
-import { sessionClosedReason } from '../../selectors/sessionClosed';
+import { sessionAnswerBlocked, sessionClosedReason } from '../../selectors/sessionClosed';
 import { SessionClosedChip } from '../shared/SessionClosedChip';
 import './waiting.css';
 
@@ -142,12 +142,14 @@ export function WaitingColumn({ store, drafts, revealItem, openSession, selected
     </div>}
     {showClosed && closedQuestions.map(row => {
       const draft = draftState.ready ? drafts.find(row.route, row.item.id, 'answer')?.draft : undefined;
+      const session = store.sessionState(row.route)?.snapshot?.session;
+      const reason = session ? sessionAnswerBlocked(session) : sessionClosedReason;
       return <div className="waiting-card waiting-card-closed" key={row.id} data-closed-question={row.item.id}>
         <div className="waiting-path">{row.projectLabel} › {row.sessionLabel}</div>
-        <SessionClosedChip />
+        <SessionClosedChip reason={reason} />
         <Markdown className="waiting-question" text={row.item.question} />
         <AnswerControl variant="full" options={row.item.options} selected={defaultSelection(row.item.options, draft?.selected_option_id)}
-          draft={draft?.text ?? ''} label="Answer" locked blocked={sessionClosedReason}
+          draft={draft?.text ?? ''} label="Answer" locked blocked={reason}
           onSelect={() => {}} onDraft={() => {}} onSendOption={() => {}} onSendText={() => {}} />
         <button type="button" className="btn btn-ghost waiting-details" onClick={() => revealItem({ ...row.route })}>Details</button>
       </div>;

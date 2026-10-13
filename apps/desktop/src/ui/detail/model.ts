@@ -12,7 +12,8 @@ import { shortLabel } from '../shared/short';
 import { excerptView, messageNumber, type ExcerptView } from '../shared/excerpt';
 import { statusKey, type StatusKey } from '../shared/status';
 import { deliveryLine as deliveryText, deliveryStage, deliverySteps, type DeliveryStage } from '../answer/delivery';
-import { displayStatus } from '../../selectors/waiting/replied';
+import { displayStatus, ownerReplied } from '../../selectors/waiting/replied';
+import { sessionAnswerBlocked, sessionEnded } from '../../selectors/sessionClosed';
 import { agentReceived, counted, heldInput, notSent, stoppedAttempt, stuckInput, withdrawn, type NotSent, type Stuck } from '../../selectors/waiting/stuck';
 import { relatedItems, type LinkDirection } from '../../selectors/related';
 import { hiddenItems } from '../tree/hidden';
@@ -283,14 +284,14 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     if (offline && open) open = { ...open, hint: `Reconnecting to ${agent}. These come back with the connection.` };
   }
 
-  const answerable = !archived && status === 'waiting' && !pending;
+  const answerable = !archived && status === 'waiting' && !pending && !(sessionEnded(session) && ownerReplied(session, item));
   // The answer slot hides while its input is pending; a follow-up reply still queues behind it.
   // A reply being written stays when the hold clears, next to the answer box. A waiting item's words go out as a reply
   // (`sentAs`), so the button says reply: "follow-up" is only ever the kind sent on a finished item.
   const followUp = !readOnly && status === 'waiting' && (pending || replyDraft) ? { label: `Add a ${sentAs(status)}`,
     hint: pending ? 'Queued behind the answer in flight' : 'Your reply is kept. Send it, or answer below.', disabled: offline } : null;
   const recommended = item.options.findIndex(option => option.recommended);
-  const blocked = session.archived_at != null ? 'This session is archived. Restore it, then reopen it to answer.' : session.state !== 'active' ? 'This session is closed. Reopen it to answer.'
+  const blocked = sessionEnded(session) ? sessionAnswerBlocked(session)
     : offline ? reconnectingNote(agent) : null;
 
   const rounds = Object.values(session.rounds).filter((round): round is Immutable<Round> => !!round && round.item_id === item.id).sort((a, b) => a.ordinal - b.ordinal);

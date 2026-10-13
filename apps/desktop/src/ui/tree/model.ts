@@ -322,7 +322,8 @@ export function treeModel(input: TreeInput): TreeModel {
   const shows = new Map(all.map(item => [item.id, displayStatus(session, item)]));
   const display = (item: Immutable<Item>) => shows.get(item.id) ?? item.status;
   const statusFiltered = !chips.has('all');
-  const statusMatch = (item: Immutable<Item>) => !statusFiltered || statusIn(filters.statuses, display(item));
+  const statusMatch = (item: Immutable<Item>) => !statusFiltered || (display(item) !== 'waiting_on_me' || waitingOnOwner(session, item))
+    && statusIn(filters.statuses, display(item));
   const filtering = terms.length > 0 || statusFiltered || filters.owners.length > 0 || filters.hide_later;
   const scoped = live.filter(item => base(item));
   const counts = Object.fromEntries(CHIPS.map(({ chip: key }) => [key, scoped.filter(item => (!hidden.has(item.id) || key === 'waiting') && (key !== 'waiting' || waitingOnOwner(session, item)) && inChip(key, display(item))).length])) as Record<Chip, number>;

@@ -57,6 +57,44 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 // These composed journeys include independent seen saves under default file parallelism.
 describe('ordinary desktop composition', { timeout: 10_000 }, () => {
+  it('reveals a linked item while a background seen write is held and then fails', async () => {
+    const { transport } = setup(), invoke = transport.invoke.bind(transport);
+    let release!: () => void, entered = false, failed = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const request = args.request;
+      if ('request' in request && request.request.command === 'item_rounds' && request.request.params.item_id === '1') {
+        const session = transport.sessions.get(route.session_id)!;
+        return { api_version: 1, ok: true, data: { kind: 'item_rounds', data: { item_id: '1', rounds: page(projections(session).rounds, session.revision) } } };
+      }
+      if (!failed && 'command' in request && request.command.command === 'preferences_patch'
+        && request.command.params.entries.every(entry => entry.kind === 'mark_seen')) {
+        entered = true;
+        transport.mutations.push(structuredClone(request));
+        await gate;
+        failed = true;
+        throw new Error('Lost seen response');
+      }
+      return invoke(name, args);
+    });
+    await openSession();
+    fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
+    await screen.findByLabelText('Detail of #1');
+    await waitFor(() => expect(entered).toBe(true), { timeout: 3000 });
+    fireEvent.click(await screen.findByRole('button', { name: /^Branched into Add the receipt lookup test/ }));
+    // A reveal must finish before this unrelated background response arrives.
+    await screen.findByLabelText('Detail of #1.1');
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1');
+    await act(async () => { release(); await gate; });
+    await waitFor(() => {
+      expect(transport.preferences.seen?.some(seen => seen.session.session_id === route.session_id
+        && seen.items.some(item => item.item_id === '1'))).toBe(true);
+    }, { timeout: 3000 });
+    expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull();
+    expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(false);
+    expect(screen.getByLabelText('Detail of #1.1')).toBeTruthy();
+  });
+
   it('clears a route loading refusal on a same-revision ready capture', async () => {
     const { transport } = setup();
     await openSession();
