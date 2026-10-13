@@ -1,5 +1,5 @@
 import type { Immutable } from '../../data/session-store';
-import { CoreFailure, ServiceFailure } from '../../data';
+import { CoreFailure, ServiceFailure, type RendererService } from '../../data';
 import type { Item, Session } from '../../generated/domain/models';
 import type { SessionActions } from '../../components/bindings/actions';
 import { ackTarget } from '../../selectors/ack';
@@ -17,7 +17,16 @@ export function ackAllItems(session: Immutable<Session>, topicId: string): reado
 }
 const proposal = (item: Immutable<Item>) => JSON.stringify([item.revision, item.type, item.topic_id,
   item.question, item.ask, item.ack_to, item.outcome, item.why]);
-interface PendingAck { readonly id: string; readonly proposal: string }
+interface PendingAck { readonly id: string; readonly reviewed: Immutable<Item> }
+/** A manual Ack changes only the reviewed result's acknowledgement state. */
+function alreadyAcknowledged(item: Immutable<Item>, reviewed: Immutable<Item>): boolean {
+  const terminal = ['decided', 'done', 'dropped'].includes(reviewed.ack_to!);
+  return item.revision === reviewed.revision + 1 && item.ack_to == null && item.status === reviewed.ack_to
+    && item.type === reviewed.type && item.topic_id === reviewed.topic_id
+    && item.question === reviewed.question && item.ask === reviewed.ask
+    && item.outcome === (terminal ? reviewed.outcome ?? 'Acknowledged by the owner.' : reviewed.outcome)
+    && item.why === (terminal ? reviewed.why ?? 'The owner read this item.' : reviewed.why);
+}
 export interface AckAllState {
   readonly phase: 'idle' | 'holding' | 'saving' | 'failed' | 'done' | 'cancelled';
   readonly topicId: string | null;
@@ -33,6 +42,7 @@ export class AckAllController {
   private queue: PendingAck[] = [];
   private timer: ReturnType<typeof setTimeout> | undefined;
   private flight = false;
+  private running: Promise<void> | null = null;
   private operationId: string | null = null;
   private readonly listeners = new Set<() => void>();
   private readonly noticeId: string;
@@ -66,7 +76,7 @@ export class AckAllController {
     if (!session || this.actions.getSnapshot().writing || this.actions.getSnapshot().pending) return false;
     const eligible = new Map(ackAllItems(session, topicId).map(item => [item.id, item]));
     if (reviewed.some(item => !eligible.has(item.id) || proposal(eligible.get(item.id)!) !== proposal(item))) return false;
-    this.queue = reviewed.map(item => ({ id: item.id, proposal: proposal(item) }));
+    this.queue = reviewed.map(item => ({ id: item.id, reviewed: item }));
     this.publish({ phase: 'holding', topicId, topicName, total: reviewed.length, completed: 0, error: null });
     this.timer = setTimeout(() => { this.timer = undefined; void this.retry(); }, ACK_ALL_HOLD_MS);
     return true;
@@ -80,9 +90,18 @@ export class AckAllController {
     if (this.flight || this.state.phase !== 'failed' || this.actions.getSnapshot().pending) return false;
     this.queue = []; this.publish({ phase: 'cancelled', error: null }); return true;
   }
-  async retry(): Promise<void> {
-    if (this.flight || !this.queue.length || !['holding', 'failed'].includes(this.state.phase)) return;
+  /** Closing the application commits confirmed work still in its Undo window. */
+  flush(): Promise<void> {
+    return this.state.phase === 'holding' ? this.retry() : this.running ?? Promise.resolve();
+  }
+  retry(): Promise<void> {
+    if (this.flight) return this.running ?? Promise.resolve();
+    if (!this.queue.length || !['holding', 'failed'].includes(this.state.phase)) return Promise.resolve();
     clearTimeout(this.timer); this.timer = undefined; this.flight = true;
+    this.running = this.save();
+    return this.running;
+  }
+  private async save(): Promise<void> {
     this.publish({ phase: 'saving', error: null });
     try {
       while (this.queue.length) {
@@ -97,8 +116,15 @@ export class AckAllController {
           const sessionState = this.actions.session.getSnapshot();
           if (sessionState.status !== 'ready' || sessionState.error) throw new Error('The latest results are still loading. Try again when this session is ready.');
           const session = sessionState.snapshot?.session;
+          const item = session && activeItems(session).find(item => item.id === next.id);
+          if (item && session?.archived_at == null && session.topics[this.state.topicId!]?.archived_at == null
+              && alreadyAcknowledged(item, next.reviewed)) {
+            this.queue.shift();
+            this.publish({ completed: this.state.completed + 1 });
+            continue;
+          }
           const current = session && ackAllItems(session, this.state.topicId!).find(item => item.id === next.id);
-          if (!current || proposal(current) !== next.proposal) throw new Error('A result changed. Read the current result, then cancel the remaining batch and confirm it again.');
+          if (!current || proposal(current) !== proposal(next.reviewed)) throw new Error('A result changed. Read the current result, then cancel the remaining batch and confirm it again.');
           // execute publishes its immutable pending operation synchronously before transport.
           // Observe only operations admitted by this dispatch, never an earlier same-item Ack.
           let unsubscribe = () => {};
@@ -120,12 +146,40 @@ export class AckAllController {
     } catch (error) {
       this.publish({ phase: 'failed', error: error instanceof CoreFailure || error instanceof ServiceFailure
         ? ackFailure(error) : error instanceof Error ? error.message : ackFailure(error) });
-    } finally { this.flight = false; }
+    } finally { this.flight = false; this.running = null; }
   }
 }
 const controllers = new WeakMap<SessionActions, AckAllController>();
+const lifetimes = new WeakMap<RendererService, Set<AckAllController>>();
 export function ackAllFor(actions: SessionActions): AckAllController {
   let controller = controllers.get(actions);
-  if (!controller) { controller = new AckAllController(actions); controllers.set(actions, controller); }
+  if (!controller) {
+    controller = new AckAllController(actions); controllers.set(actions, controller);
+    let lifetime = lifetimes.get(actions.service);
+    if (!lifetime) { lifetime = new Set(); lifetimes.set(actions.service, lifetime); }
+    lifetime.add(controller);
+  }
   return controller;
+}
+/** Application-owned teardown waits for confirmed batches before closing their readers. */
+export function stopAckAll(service: RendererService): Promise<void> {
+  const lifetime = lifetimes.get(service);
+  if (!lifetime) return Promise.resolve();
+  const stopping = [...lifetime];
+  return Promise.all(stopping.map(controller => controller.flush())).then(() => {
+    stopping.forEach(controller => lifetime.delete(controller));
+  });
+}
+/** Shares the removal queue's close/hide behavior, independent of mounted topic rows. */
+export function attachAckAll(service: RendererService, target: Window = window): () => void {
+  const flush = () => { lifetimes.get(service)?.forEach(controller => { void controller.flush(); }); };
+  const hidden = () => { if (target.document.visibilityState === 'hidden') flush(); };
+  target.addEventListener('pagehide', flush);
+  target.addEventListener('beforeunload', flush);
+  target.document.addEventListener('visibilitychange', hidden);
+  return () => {
+    target.removeEventListener('pagehide', flush);
+    target.removeEventListener('beforeunload', flush);
+    target.document.removeEventListener('visibilitychange', hidden);
+  };
 }

@@ -5,7 +5,7 @@ import { createDesktopService } from '../../../src/data/service';
 import { SessionActions } from '../../../src/components/bindings/actions';
 import type { MutationReceipt, OwnerMutationRequest, OwnerQueryRequest, SessionSeen } from '../../../src/generated/core';
 import { AckAll } from '../../../src/ui/navigation/AckAll';
-import { ackAllFor, ackAllItems, ACK_ALL_HOLD_MS } from '../../../src/ui/navigation/ackAllController';
+import { ackAllFor, ackAllItems, attachAckAll, stopAckAll, ACK_ALL_HOLD_MS } from '../../../src/ui/navigation/ackAllController';
 import { RecentDialog, RecentTrail, recentEntries, recordRecent } from '../../../src/ui/navigation/Recent';
 import { navigationVisits } from '../../../src/ui/navigation/visits';
 import { NavigationStore } from '../../../src/state/navigation/store';
@@ -29,6 +29,10 @@ class BulkTransport extends AppTransport {
     const session = this.sessions.get(request.session!.session_id)!, item = session.items[command.params.item_id]!;
     const status = item.ack_to!;
     item.status = status; item.ack_to = null; item.revision++; session.revision++;
+    if (['decided', 'done', 'dropped'].includes(status)) {
+      item.outcome ??= 'Acknowledged by the owner.';
+      item.why ??= 'The owner read this item.';
+    }
     const receipt: MutationReceipt = { operation_id: command.op_id, session_id: session.id, revision: session.revision,
       data: { kind: 'item_ack', item_id: item.id, item_revision: item.revision, status, message_id: crypto.randomUUID() } };
     this.receipts.set(command.op_id, receipt);
@@ -112,6 +116,74 @@ it('Ack all remains queued after unmount and sends each result once sequentially
   await act(async () => { await vi.advanceTimersByTimeAsync(ACK_ALL_HOLD_MS); });
   expect(controller.getSnapshot()).toMatchObject({ phase: 'done', completed: 2, remaining: 0 });
   expect(acks(transport).map(value => value.command.command === 'ack' && value.command.params.item_id)).toEqual(['1', '1.1']);
+});
+
+it('application stop flushes the confirmed hold before closing readers and clears its timer', async () => {
+  const { actions, controller, transport, service, store, topicId } = await ready(); vi.useFakeTimers();
+  controller.confirm(topicId, 'Results', ackAllItems(store.getSnapshot().snapshot!.session, topicId));
+  await stopAckAll(service); store.close();
+  expect(controller.getSnapshot()).toMatchObject({ phase: 'done', completed: 2, remaining: 0 });
+  expect(actions.getSnapshot().pending).toBeNull();
+  await vi.advanceTimersByTimeAsync(ACK_ALL_HOLD_MS);
+  expect(acks(transport).map(value => value.command.command === 'ack' && value.command.params.item_id)).toEqual(['1', '1.1']);
+});
+
+it('repeated unload and stop join one sequential batch and never duplicate an acknowledgment', async () => {
+  const { controller, transport, service, store, topicId } = await ready(); vi.useFakeTimers();
+  let release!: () => void;
+  transport.gate = new Promise<void>(resolve => { release = resolve; });
+  const detach = attachAckAll(service);
+  controller.confirm(topicId, 'Results', ackAllItems(store.getSnapshot().snapshot!.session, topicId));
+  window.dispatchEvent(new Event('pagehide')); window.dispatchEvent(new Event('beforeunload'));
+  const stopped = stopAckAll(service);
+  const completedSecondStop = vi.fn(), stoppedAgain = stopAckAll(service).then(completedSecondStop);
+  expect(acks(transport)).toHaveLength(1);
+  expect(controller.getSnapshot().phase).toBe('saving');
+  await vi.advanceTimersByTimeAsync(ACK_ALL_HOLD_MS);
+  expect(acks(transport)).toHaveLength(1);
+  expect(completedSecondStop).not.toHaveBeenCalled();
+  release(); await Promise.all([stopped, stoppedAgain]); detach();
+  expect(controller.getSnapshot()).toMatchObject({ phase: 'done', completed: 2 });
+  expect(new Set(acks(transport).map(value => value.command.op_id)).size).toBe(2);
+  expect(transport.receipts.size).toBe(2);
+});
+
+it('Undo before unload leaves no acknowledged work for lifecycle flush', async () => {
+  const { controller, transport, service, store, topicId } = await ready(); vi.useFakeTimers();
+  const detach = attachAckAll(service);
+  controller.confirm(topicId, 'Results', ackAllItems(store.getSnapshot().snapshot!.session, topicId));
+  controller.undo(); window.dispatchEvent(new Event('pagehide')); await stopAckAll(service); detach();
+  await vi.advanceTimersByTimeAsync(ACK_ALL_HOLD_MS);
+  expect(acks(transport)).toHaveLength(0);
+});
+
+it.each(['open', 'done'] as const)('skips a manual Ack to %s during the hold and saves the other reviewed result', async target => {
+  const { actions, controller, transport, store, topicId } = await ready();
+  const item = transport.sessions.get(route.session_id)!.items['1']!;
+  item.ack_to = target; item.outcome = null; item.why = null;
+  item.revision++; transport.sessions.get(route.session_id)!.revision++;
+  await store.refresh(true); vi.useFakeTimers();
+  const session = store.getSnapshot().snapshot!.session;
+  controller.confirm(topicId, 'Results', ackAllItems(session, topicId));
+  expect(await actions.execute({ command: 'ack', api_version: 1, op_id: '', params: { item_id: item.id, expected_revision: item.revision } }, session.revision)).toBe(true);
+  await vi.advanceTimersByTimeAsync(ACK_ALL_HOLD_MS);
+  expect(controller.getSnapshot()).toMatchObject({ phase: 'done', completed: 2, remaining: 0 });
+  expect(acks(transport).map(value => value.command.command === 'ack' && value.command.params.item_id)).toEqual(['1', '1.1']);
+});
+
+it.each(['edited after Ack', 'question', 'decision'] as const)('does not skip a manually acknowledged result that becomes %s', async change => {
+  const { actions, controller, transport, store, topicId } = await ready(); vi.useFakeTimers();
+  const session = store.getSnapshot().snapshot!.session;
+  controller.confirm(topicId, 'Results', ackAllItems(session, topicId));
+  await actions.execute({ command: 'ack', api_version: 1, op_id: '', params: { item_id: '1', expected_revision: session.items['1']!.revision } }, session.revision);
+  const current = transport.sessions.get(route.session_id)!;
+  if (change === 'edited after Ack') current.items['1']!.question = 'Updated result';
+  else current.items['1']!.type = change;
+  current.items['1']!.revision++; current.revision++;
+  await store.refresh(true); await vi.advanceTimersByTimeAsync(ACK_ALL_HOLD_MS);
+  expect(acks(transport)).toHaveLength(1);
+  expect(controller.getSnapshot()).toMatchObject({ phase: 'failed', completed: 0, remaining: 2 });
+  expect(controller.getSnapshot().error).toContain('result changed');
 });
 
 it('changed proposals during Undo hold retain all unsaved work and require renewed review', async () => {

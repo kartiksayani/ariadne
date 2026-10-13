@@ -192,12 +192,12 @@ function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRu
 function SentRow({ row, drafts, store, open }: { readonly row: SentRowModel; readonly drafts: OwnerDraftStore; readonly store: WaitingStore; readonly open: () => void }) {
   const keys = useWorkspaceKeys<HTMLDivElement>({ enter: () => { open(); return true; } }, { scope: 'row' });
   const session = store.storeOf(row.session);
-  return <ItemRefSession.Provider value={row.session}><div className="waiting-sent" role="button" tabIndex={0} onClick={open} onKeyDown={keys} data-sent-input={row.input?.id}>
-    <div className="waiting-sent-question">{row.item ? <ItemReference itemId={row.item.item_id}>{row.question}</ItemReference> : row.question}</div>
+  return <div className="waiting-sent" role="button" tabIndex={0} onClick={open} onKeyDown={keys} data-sent-input={row.input?.id}>
+    <div className="waiting-sent-question">{row.question}</div>
     {row.stuck && row.input && session
       ? <SentStuck row={row} input={row.input} drafts={drafts} session={session} open={open} />
       : <div className="waiting-sent-line" style={{ color: row.line.color }}><i className={row.line.icon} aria-hidden="true" /><span>{row.line.text}</span></div>}
-  </div></ItemRefSession.Provider>;
+  </div>;
 }
 
 /** A Sent message that hasn't reached the agent: why, with Resume, Retry, Edit (Review and send again) and Delete, or Cancel. */

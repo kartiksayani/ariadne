@@ -3,8 +3,8 @@ import type { RecentAction, RecentItem, SessionSeen } from '../../generated/core
 import type { Item, Session } from '../../generated/domain/models';
 import type { Immutable } from '../../data/session-store';
 import { isChangedSinceRead, isNewToOwner, type SeenState } from '../../selectors/changes/seen';
-import { activeItems, itemRemoved } from '../../selectors/removed';
-import { itemLabels } from '../shared/short';
+import { itemRemoved } from '../../selectors/removed';
+import { peekNames } from '../peek/names';
 import { Dialog } from '../dialogs/Dialog';
 import './navigation.css';
 
@@ -32,7 +32,7 @@ interface RecentProps {
   readonly onReveal: (id: string) => void;
 }
 export function RecentTrail({ session, entries, nextWaiting, onReveal }: RecentProps & { readonly nextWaiting: Immutable<Item> | null }) {
-  const labels = itemLabels(activeItems(session), session.topics);
+  const labels = peekNames(session);
   return <nav className="recent-trail" aria-label="Your recent trail">
     <div className="recent-trail-items">{recentEntries(session, entries).slice(0, 3).map(({ entry, item }, index) =>
       <span key={item.id}>{index > 0 && <span className="recent-trail-separator" aria-hidden="true">›</span>}
@@ -47,7 +47,7 @@ export function RecentDialog({ session, entries, seen, onReveal, onClose }: Rece
 }) {
   const [changedOnly, setChangedOnly] = useState(false);
   const visits = recentEntries(session, entries, changedOnly, seen);
-  const labels = itemLabels(activeItems(session), session.topics);
+  const labels = peekNames(session);
   return <Dialog label="Recent items" width={560} onCancel={onClose}>
     <div className="recent-header"><h2>Recent</h2><button type="button" className="btn btn-ghost" aria-pressed={changedOnly}
       onClick={() => setChangedOnly(value => !value)}>Changed only</button>

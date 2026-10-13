@@ -23,25 +23,27 @@ export interface PeekProviderProps {
   readonly drafts: OwnerDraftStore;
   readonly onGoTo: (route: ItemRoute) => void;
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
-  /** A future seen-state owner can consume this after one uninterrupted second. */
-  readonly onPeekSeen?: (route: ItemRoute) => void;
+  /** Records only the first displayed item revision after one uninterrupted second. */
+  readonly onPeekSeen?: (route: ItemRoute, observedRevision: number) => void;
   readonly onVisit?: (route: ItemRoute, action: PeekVisit) => void;
   readonly children: ReactNode;
 }
-type OpenPeek = { readonly route: ItemRoute; readonly anchor: HTMLElement; readonly store: SessionStore; readonly focus: boolean };
+type OpenPeek = { readonly route: ItemRoute; readonly anchor: HTMLElement; readonly anchorRect: DOMRect; readonly store: SessionStore; readonly focus: boolean };
 type Hover = { readonly route: ItemRoute; readonly anchor: HTMLElement };
 
 export function PeekProvider({ lookup, drafts, onGoTo, onAgentNotRunning, onPeekSeen, onVisit, children }: PeekProviderProps) {
   const [shown, setShown] = useState<OpenPeek | null>(null);
   const hover = useRef<Hover | null>(null), timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const source = useRef<HTMLElement | null>(null);
+  const origin = useRef<{ anchor: HTMLElement; anchorRect: DOMRect } | null>(null);
   const current = useRef({ lookup, onVisit }); current.current = { lookup, onVisit };
   const command = useRef(false), card = useRef<HTMLDivElement>(null);
+  const tookFocus = useRef(false);
   const cancelHover = useCallback(() => { if (timer.current) clearTimeout(timer.current); timer.current = null; }, []);
   const close = useCallback((restore = true) => {
     cancelHover();
-    if (restore && source.current?.isConnected) source.current.focus({ preventScroll: true });
-    source.current = null;
+    if (restore && (tookFocus.current || card.current?.contains(document.activeElement)) && origin.current?.anchor.isConnected) origin.current.anchor.focus({ preventScroll: true });
+    origin.current = null;
+    tookFocus.current = false;
     setShown(null);
   }, [cancelHover]);
   const show = useCallback((route: ItemRoute, anchor: HTMLElement, focus: boolean) => {
@@ -49,8 +51,12 @@ export function PeekProvider({ lookup, drafts, onGoTo, onAgentNotRunning, onPeek
     if (document.querySelector('[aria-modal="true"]')) return;
     const store = current.current.lookup(route);
     if (!store) return;
-    source.current = anchor;
-    setShown({ route: { ...route }, anchor, store, focus });
+    // Nested references replace the card; retain its original outside anchor and focus source.
+    const previous = origin.current, nested = !!card.current?.contains(anchor) && !!previous;
+    const anchorOrigin = nested && previous ? previous : { anchor, anchorRect: anchor.getBoundingClientRect() };
+    origin.current = anchorOrigin;
+    tookFocus.current = focus || nested && (tookFocus.current || !!card.current?.contains(document.activeElement));
+    setShown({ route: { ...route }, ...anchorOrigin, store, focus });
     current.current.onVisit?.(route, 'peek');
   }, [cancelHover]);
   const schedule = useCallback(() => {
@@ -65,7 +71,12 @@ export function PeekProvider({ lookup, drafts, onGoTo, onAgentNotRunning, onPeek
   useEffect(() => {
     const keydown = (event: globalThis.KeyboardEvent) => {
       if (document.querySelector('[aria-modal="true"]')) { cancelHover(); return; }
-      if (event.key === 'Escape' && card.current) { event.preventDefault(); event.stopPropagation(); close(); return; }
+      if (event.key === 'Escape' && card.current) {
+        const ownsFocus = tookFocus.current || card.current.contains(document.activeElement);
+        close();
+        if (ownsFocus) { event.preventDefault(); event.stopPropagation(); }
+        return;
+      }
       if (event.key === 'Meta' && !command.current) { command.current = true; schedule(); }
     };
     const keyup = (event: globalThis.KeyboardEvent) => { if (event.key === 'Meta' || !event.metaKey) { command.current = false; cancelHover(); } };
@@ -104,7 +115,7 @@ export function PeekProvider({ lookup, drafts, onGoTo, onAgentNotRunning, onPeek
 function PeekCard({ shown, drafts, card, onClose, onGoTo, onAgentNotRunning, onPeekSeen, onAnswered }: {
   readonly shown: OpenPeek; readonly drafts: OwnerDraftStore; readonly card: RefObject<HTMLDivElement | null>;
   readonly onClose: () => void; readonly onGoTo: () => void; readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
-  readonly onPeekSeen?: (route: ItemRoute) => void; readonly onAnswered: () => void;
+  readonly onPeekSeen?: (route: ItemRoute, observedRevision: number) => void; readonly onAnswered: () => void;
 }) {
   const state = useSession(shown.store), session = state.snapshot?.session, item = session?.items[shown.route.item_id];
   const labels = useMemo(() => session ? peekNames(session) : null, [session]);
@@ -114,7 +125,9 @@ function PeekCard({ shown, drafts, card, onClose, onGoTo, onAgentNotRunning, onP
   const seenCallback = useRef(onPeekSeen); seenCallback.current = onPeekSeen;
   useEffect(() => {
     if (!valid) return;
-    const timer = setTimeout(() => seenCallback.current?.(shown.route), 1000);
+    // A refresh during this opening must not acknowledge the newer text.
+    const observedRevision = item!.revision;
+    const timer = setTimeout(() => seenCallback.current?.(shown.route, observedRevision), 1000);
     return () => clearTimeout(timer);
   }, [shown, valid]);
   useLayoutEffect(() => {
@@ -126,7 +139,8 @@ function PeekCard({ shown, drafts, card, onClose, onGoTo, onAgentNotRunning, onP
       const style = getComputedStyle(element);
       // scrollHeight includes padding, but the fixed card's border also needs room.
       const height = element.scrollHeight + (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
-      setPosition(peekPosition(shown.anchor.getBoundingClientRect(), 340, height, window.innerWidth, window.innerHeight, chromeBottom));
+      const anchorRect = shown.anchor.isConnected ? shown.anchor.getBoundingClientRect() : shown.anchorRect;
+      setPosition(peekPosition(anchorRect, 340, height, window.innerWidth, window.innerHeight, chromeBottom));
     };
     measure();
     if (shown.focus) element.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });

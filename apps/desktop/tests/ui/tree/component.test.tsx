@@ -24,6 +24,9 @@ import { Notices, notices } from '../../../src/ui/pages/notices';
 import { NavigationGraph } from '../../../src/ui/graph/NavigationGraph';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 import { shortLabel } from '../../../src/ui/shared/short';
+import { peekNames } from '../../../src/ui/peek/names';
+import { RemovalContext, RemovalQueue } from '../../../src/ui/remove/queue';
+import { removeSubject } from '../../../src/ui/remove/model';
 
 const stores: NavigationStore[] = [];
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); notices.clear(); vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -35,8 +38,8 @@ interface Recorded {
   openedDetail: boolean[];
   dismissed: number; resumed: number; cleared: number; archive: number; removed: number;
 }
-async function mount({ transport = new AppTransport(), configure, props = {}, load = true }: {
-  transport?: AppTransport; configure?: (transport: AppTransport) => void; props?: Partial<TreeViewProps>; load?: boolean;
+async function mount({ transport = new AppTransport(), configure, props = {}, load = true, removal = null }: {
+  transport?: AppTransport; configure?: (transport: AppTransport) => void; props?: Partial<TreeViewProps>; load?: boolean; removal?: RemovalQueue | null;
 } = {}) {
   configure?.(transport);
   transport.preferences.sessions = transport.preferences.sessions.map(view => ({ ...view, tab_open: true }));
@@ -50,12 +53,12 @@ async function mount({ transport = new AppTransport(), configure, props = {}, lo
   const hover = (id: string | null) => { calls.hovered.push(id); };
   function Harness(extra: Partial<TreeViewProps>) {
     const [selected, setSelected] = useState<string | null>(null);
-    return <LinkOpener.Provider value={openLink}><TreeView navigation={navigation} store={store} actions={actions} drafts={drafts} query="" reveal={null} selectedId={selected}
+    return <RemovalContext.Provider value={removal}><LinkOpener.Provider value={openLink}><TreeView navigation={navigation} store={store} actions={actions} drafts={drafts} query="" reveal={null} selectedId={selected}
       detailOpen={false} railOpen={false} highlightedItems={none} highlightedMessages={none} summaries={[]} now={now} onHoverItem={hover}
       onSelected={(result, openDetail = true) => { calls.selected.push(result); calls.openedDetail.push(openDetail); if (result.kind === 'item') setSelected(result.route.item_id); }}
       onDismissReveal={() => { calls.dismissed++; }} onResume={() => { calls.resumed++; }} onAct={(intent, target) => { calls.acts.push([intent, target]); }}
       onClearFilters={() => { calls.cleared++; }} onShowArchive={() => { calls.archive++; }}
-      onRemove={() => { calls.removed++; }} {...props} {...extra} /></LinkOpener.Provider>;
+      onRemove={() => { calls.removed++; }} {...props} {...extra} /></LinkOpener.Provider></RemovalContext.Provider>;
   }
   const view = render(<Harness />);
   return { transport, navigation, store, actions, drafts, calls, openLink, rerender: (extra: Partial<TreeViewProps>) => view.rerender(<Harness {...extra} />) };
@@ -92,9 +95,92 @@ async function staleTree(value: Awaited<ReturnType<typeof mount>>) {
 }
 
 describe('session tree rows', () => {
+  it('preserves Focus before a cold session refresh and again after restart', async () => {
+    const transport = new AppTransport(); viewOf(transport).focused_item_id = '1';
+    for (let opening = 0; opening < 2; opening++) {
+      const view = await mount({ transport, load: false });
+      expect(view.store.getSnapshot().snapshot).toBeNull();
+      await act(async () => {});
+      expect(viewOf(transport).focused_item_id).toBe('1');
+      await act(async () => { await view.store.refresh(); });
+      expect(ids()).toEqual(['1', '1.1']);
+      expect(viewOf(transport).focused_item_id).toBe('1');
+      cleanup(); view.navigation.stop();
+    }
+  });
+
+  it('preserves Focus through pending root removal and Undo', async () => {
+    const transport = new AppTransport(); viewOf(transport).focused_item_id = '1';
+    const session = transport.sessions.get(route.session_id)!;
+    const removal = new RemovalQueue({ service: createDesktopService(transport), notices, read: async () => session });
+    await mount({ transport, removal });
+    const target = { kind: 'item' as const, item: { ...route, item_id: '1' } };
+    let operation = '';
+    act(() => { operation = removal.schedule(target, removeSubject(session, target)!); });
+    expect(row('1')).toBeNull();
+    await act(async () => {});
+    expect(viewOf(transport).focused_item_id).toBe('1');
+    act(() => { removal.undo(operation); });
+    expect(ids()).toEqual(['1', '1.1']);
+    expect(viewOf(transport).focused_item_id).toBe('1');
+  });
+
+  it('uses shared active-item names for Selected, breadcrumbs and Focus', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = document.querySelector<HTMLElement>('.tree-scroll');
+      if (this === box) return new DOMRect(0, 0, 300, 400);
+      if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 60);
+      const id = this.getAttribute('data-item-id');
+      return id && this.getAttribute('role') === 'treeitem' ? new DOMRect(0, ids().indexOf(id) * 200 - (box?.scrollTop ?? 0), 300, 100) : new DOMRect();
+    });
+    const view = await mount({ configure: transport => {
+      const session = transport.sessions.get(route.session_id)!;
+      session.items['1']!.short = 'Shared name';
+      session.items['8']!.short = 'Shared name'; session.items['8']!.removed_at = session.updated_at;
+    }, props: { selectedId: '1' } });
+    const name = peekNames(view.store.getSnapshot().snapshot!.session).get('1')!;
+    expect(name).toBe('Shared name');
+    fireEvent.click(within(row('1')).getByRole('button', { name: `Focus on ${name}` }));
+    expect(screen.getByText(/^Focused:/).textContent).toContain(name);
+    const box = document.querySelector<HTMLElement>('.tree-scroll')!; box.scrollTop = 100; fireEvent.scroll(box);
+    expect(screen.getByRole('button', { name: /^↑ Selected:/ }).textContent).toContain(name);
+    expect(within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name }).textContent).toBe(name);
+  });
+
+  it('keeps Focus discoverable without a tab stop on every top-level row', async () => {
+    await mount();
+    for (const button of screen.getAllByRole('button', { name: /^Focus on / })) expect(button.tabIndex).toBe(-1);
+    expect(within(row('1')).getByRole('button', { name: /^Focus on / }).textContent).toBe('Focus');
+  });
+
+  it('updates Recent Changed only immediately while a seen save is still pending', async () => {
+    const view = await mount({ configure: transport => {
+      const session = transport.sessions.get(route.session_id)!;
+      const baseline = '2026-10-01T00:00:00.000Z';
+      session.items['1.1']!.created_at = '2026-10-13T00:00:00.000Z';
+      transport.preferences.seen = [{ session: route, since: baseline, items: [], topics: [] }];
+      viewOf(transport).recent_items = [{ item_id: '1.1', action: 'viewed', visited_at: '2026-10-13T01:00:00.000Z' }];
+    } });
+    let release!: () => void, entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
+    vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch'
+        && args.request.command.params.entries.some(entry => entry.kind === 'mark_seen')) { entered = true; await gate; }
+      return invoke(name, args);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
+    const dialog = screen.getByRole('dialog', { name: 'Recent items' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Changed only' }));
+    expect(within(dialog).getByRole('button', { name: / · viewed/ })).toBeTruthy();
+    act(() => { view.navigation.markItemSeen(route, '1.1'); });
+    expect(within(dialog).getByText('No changed items in your recent visits.')).toBeTruthy();
+    await waitFor(() => expect(entered).toBe(true), { timeout: 3000 });
+    expect(view.transport.preferences.seen![0]!.items).toEqual([]);
+    await act(async () => { release(); await gate; });
+  });
   it('enters Focus by visible action, remembers it on remount, and leaves through the notice', async () => {
     const view = await mount();
-    fireEvent.click(within(row('1')).getByRole('button', { name: 'Focus' }));
+    fireEvent.click(within(row('1')).getByRole('button', { name: /^Focus on /  }));
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
     expect(ids()).toEqual(['1', '1.1']);
     expect(screen.getByText(/^Focused:/).textContent).toContain(shortLabel(view.transport.sessions.get(route.session_id)!.items['1']!));
@@ -119,7 +205,7 @@ describe('session tree rows', () => {
     const view = await mount();
     const target: RevealedItem = { kind: 'item', route: { ...route, item_id: '8' }, store: view.store, temporaryExpandedItemIds: [] };
     view.rerender({ selectedId: '8', reveal: target });
-    fireEvent.click(within(row('1')).getByRole('button', { name: 'Focus' }));
+    fireEvent.click(within(row('1')).getByRole('button', { name: /^Focus on /  }));
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
     expect(ids()).toEqual(['1', '1.1']);
     expect(screen.getByRole('button', { name: /^↓ Selected:/ })).toBeTruthy();
@@ -127,7 +213,7 @@ describe('session tree rows', () => {
 
   it('returns Selected keyboard focus after revealing a row outside Focus', async () => {
     const view = await mount({ props: { selectedId: '8' } });
-    fireEvent.click(within(row('1')).getByRole('button', { name: 'Focus' }));
+    fireEvent.click(within(row('1')).getByRole('button', { name: /^Focus on /  }));
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
     const tag = screen.getByRole('button', { name: /^↓ Selected:/ });
     tag.focus(); await userEvent.keyboard('{Enter}');
@@ -549,7 +635,7 @@ describe('session tree rows', () => {
     expect(rule('.tree-collapsed[data-weak]:hover')).toContain('var(--color-accent) 10%, var(--a-card)');
   });
   it('offers the row actions for the item status and routes them to the workspace', async () => {
-    const { calls } = await mount();
+    const { calls, transport } = await mount();
     fireEvent.click(within(row('1.1')).getByRole('button', { name: 'Bring it up (b)' }));
     fireEvent.click(within(row('1.1')).getByRole('button', { name: 'Later (z)' }));
     fireEvent.click(within(row('5')).getByRole('button', { name: 'Back to Open (o)' }));
@@ -558,7 +644,7 @@ describe('session tree rows', () => {
     expect(calls.acts.map(([intent, target]) => `${intent}:${target.item_id}`)).toEqual(['bring:1.1', 'later:1.1', 'reopen:5', 'followup:5']);
     expect(calls.removed).toBe(1);
     // A delivery on its way still permits owner-only Hide and Remove.
-    expect(within(row('3')).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Focus', 'Hide (x)', 'Remove (⌫)']);
+    expect(within(row('3')).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual([`Focus on ${shortLabel(transport.sessions.get(route.session_id)!.items['3']!)}`, 'Hide (x)', 'Remove (⌫)']);
     fireEvent.keyDown(row('1.1'), { key: 'b' }); expect(calls.acts).toHaveLength(4);
   });
 });
@@ -1525,6 +1611,35 @@ describe('session tree reading position', () => {
       expect(top('4')).toBe(20);
     } finally { vi.unstubAllGlobals(); }
   });
+
+  it('holds the selected row when closing detail shortens a visible predecessor by one line without browser anchoring', async () => {
+    let shrink = 0;
+    const callbacks: (() => void)[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(run: () => void) { callbacks.push(run); }
+      observe() {} disconnect() {}
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = document.querySelector<HTMLElement>('.tree-scroll');
+      if (this === box) return new DOMRect(0, 0, shrink ? 500 : 300, 400);
+      const id = this.getAttribute('data-item-id'), at = id ? ids().indexOf(id) : -1;
+      return at >= 0 && this.getAttribute('role') === 'treeitem'
+        ? new DOMRect(0, at * 100 - (box?.scrollTop ?? 0) - (at >= 4 ? shrink : 0), 300, at === 3 ? 100 - shrink : 100) : new DOMRect();
+    });
+    try {
+      const view = await mount({ props: { selectedId: '4', detailOpen: true } });
+      const box = document.querySelector<HTMLElement>('.tree-scroll')!;
+      box.scrollTop = 250; fireEvent.scroll(box);
+      const before = row('4').getBoundingClientRect().top;
+      expect(before).toBe(150);
+      // Row 3 is the first visible reading anchor; its top does not move. Row 4 does.
+      shrink = 21; view.rerender({ detailOpen: false });
+      act(() => callbacks.forEach(run => run()));
+      expect(row('4').getBoundingClientRect().top).toBe(before);
+      const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+      expect(css.match(/\.tree-scroll\s*\{([^}]+)\}/)?.[1]).toContain('overflow-anchor: none');
+    } finally { vi.unstubAllGlobals(); }
+  });
 });
 
 describe('item details in the tree', () => {
@@ -1653,7 +1768,7 @@ describe('item details in the tree', () => {
     expect(more('1')!.textContent).toBe('Show less');
   });
 
-  it('tabs from a top-level row to its preview link before the discoverable Focus action', async () => {
+  it('tabs from a top-level row to its preview link and Show more while skipping the Focus action', async () => {
     measure();
     await mount({ configure: transport => { transport.sessions.get(route.session_id)!.items['1']!.outcome = `[Read the evidence](https://example.com)\n${long}`; } });
     const link = within(row('1')).getByRole('link', { name: 'Read the evidence' });
@@ -1666,7 +1781,9 @@ describe('item details in the tree', () => {
     await userEvent.tab();
     expect(document.activeElement).toBe(more('1'));
     await userEvent.tab();
-    expect(document.activeElement).toBe(within(row('1')).getByRole('button', { name: /^Focus/ }));
+    const focus = within(row('1')).getByRole('button', { name: /^Focus on / });
+    expect(focus.tabIndex).toBe(-1);
+    expect(document.activeElement).not.toBe(focus);
   });
 
   it('preserves full Markdown structure and agent-written item links without selecting their row', async () => {

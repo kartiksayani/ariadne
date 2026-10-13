@@ -25,6 +25,7 @@ import { WaitingColumn } from './ui/waiting/WaitingColumn';
 import { PeekProvider } from './ui/peek/Peek';
 import { ItemRefSession } from './ui/peek/context';
 import { navigationVisits } from './ui/navigation/visits';
+import { attachAckAll, stopAckAll } from './ui/navigation/ackAllController';
 import { MessageRail } from './ui/rail/MessageRail';
 import { SessionActionControllers } from './components/bindings/actions';
 import { RecoveryPanel, recoveryTargets } from './components/recovery/RecoveryPanel';
@@ -633,6 +634,7 @@ function Workspace({ application }: { application: Application }) {
   const appRoot = useRef<HTMLDivElement>(null);
   useWindowKeys(appRoot, historyControls, intent => changeTextSize(nextTextSize(textSizeIntent.current ?? navigation.getSnapshot().preferences?.global.text_scale, intent)));
   return <PeekProvider lookup={target => navigation.opened.open(target)} drafts={application.drafts} onGoTo={revealItem} onAgentNotRunning={onAgentNotRunning}
+    onPeekSeen={(target, observedRevision) => navigation.markItemSeen(target, target.item_id, observedRevision)}
     onVisit={(target, action) => { if (action !== 'opened') navigationVisits.record(target, target.item_id, action === 'peek' ? 'peeked' : 'answered'); }}>
     <ItemRefSession.Provider value={route ?? null}><ItemHistoryContext.Provider value={historyControls}><RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys}>
     <DraftConflictNotices drafts={application.drafts} opened={navigation.opened} selectedSession={route ?? null} />
@@ -722,10 +724,11 @@ export function DesktopApp({ service }: { service: RendererService }) {
     const next: Application = { service, navigation, waiting, removals,
       drafts: new OwnerDraftStore(service, undefined, navigation.preferenceWrites), actions, discovery: new DiscoveryController(service) };
     const detach = removals.attach();
+    const detachAckAll = attachAckAll(service);
     const detachLinkFailures = listenForLinkFailures(service);
     setApplication(next);
     // Leaving the app runs the removals still in their window rather than dropping them.
-    return () => { detachLinkFailures(); detach(); void removals.flush(); next.discovery.dispose(); next.waiting.stop(); next.navigation.stop(); };
+    return () => { detachLinkFailures(); detach(); detachAckAll(); void removals.flush(); next.discovery.dispose(); next.waiting.stop(); void stopAckAll(service).finally(() => next.navigation.stop()); };
   }, [service]);
   // Links in agent text open in the system browser; a failure leaves the app where it is and says so.
   const openLink = useMemo(() => linkOpener(service), [service]);

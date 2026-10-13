@@ -168,7 +168,7 @@ for (const theme of ['light', 'dark']) test(`Getting around keeps breadcrumbs an
     // Focus restricts Map rows while Waiting remains complete.
     const root = page.locator('.tree-item[data-item-id="1"]');
     const waitingCount = await page.locator('.waiting-card').count();
-    await root.getByRole('button', { name: 'Focus', exact: true }).click();
+    await root.getByRole('button', { name: /^Focus on / }).click();
     await expect(page.getByRole('button', { name: 'Leave Focus' })).toBeVisible();
     await expect(page.locator('.tree-item[data-item-id="8"]')).toHaveCount(0);
     expect(await page.locator('.waiting-card').count()).toBe(waitingCount);

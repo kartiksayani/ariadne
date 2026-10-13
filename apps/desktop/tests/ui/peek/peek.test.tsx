@@ -37,10 +37,10 @@ function RowSource() {
 function mount(value: Awaited<ReturnType<typeof setup>>, extra: Partial<PeekProviderProps> = {}) {
   const go = vi.fn(), visit = vi.fn();
   render(<PeekProvider lookup={() => value.store} drafts={value.drafts} onGoTo={go} onVisit={visit} {...extra}>
-    <ItemRefSession.Provider value={route}><ItemRefs.Provider value={null}>
+    <ItemRefSession.Provider value={route}>
       <Markdown text="See [#2](item:2) and [#8](item:8)." />
       <RowSource /><button type="button">Outside control</button>
-    </ItemRefs.Provider></ItemRefSession.Provider>
+    </ItemRefSession.Provider>
   </PeekProvider>);
   return { go, visit, chip: () => screen.getByRole('button', { name: `${value.source.items['2']!.question} · Waiting on me` }) };
 }
@@ -76,7 +76,7 @@ describe('name chips and item peek', () => {
     });
   });
 
-  it('uses names through a null text provider, opens on click/Space, replaces one peek, and restores focus with Escape', async () => {
+  it('uses names through session scope, opens on click/Space, replaces one peek, and restores focus with Escape', async () => {
     const value = await setup(), { chip, go, visit } = mount(value);
     expect(chip().textContent).toBe('Delivery choice');
     expect(chip().textContent).not.toContain('#2');
@@ -131,7 +131,7 @@ describe('name chips and item peek', () => {
     expect(visit).toHaveBeenCalledTimes(1);
   });
 
-  it('emits the seen hook once after a full second, cancels a short preview, and writes no seen state', async () => {
+  it('emits the displayed revision once after a full second and cancels a short preview', async () => {
     const value = await setup(); vi.useFakeTimers();
     const seen = vi.fn(), { chip } = mount(value, { onPeekSeen: seen });
     fireEvent.click(chip()); act(() => vi.advanceTimersByTime(999));
@@ -139,10 +139,69 @@ describe('name chips and item peek', () => {
     fireEvent.keyDown(document, { key: 'Escape' }); act(() => vi.advanceTimersByTime(10));
     expect(seen).not.toHaveBeenCalled();
     fireEvent.click(chip()); act(() => vi.advanceTimersByTime(1000));
-    expect(seen).toHaveBeenCalledExactlyOnceWith({ ...route, item_id: '2' });
+    expect(seen).toHaveBeenCalledExactlyOnceWith({ ...route, item_id: '2' }, value.source.items['2']!.revision);
     act(() => vi.advanceTimersByTime(500)); expect(seen).toHaveBeenCalledTimes(1);
     expect(value.transport.mutations.some(request => request.command.command === 'preferences_patch'
       && request.command.params.entries.some(entry => entry.kind === 'mark_seen'))).toBe(false);
+  });
+
+  it('keeps the opening revision when the displayed item refreshes during the dwell', async () => {
+    const value = await setup(); vi.useFakeTimers();
+    const revision = value.source.items['2']!.revision, seen = vi.fn(), { chip } = mount(value, { onPeekSeen: seen });
+    fireEvent.click(chip()); act(() => vi.advanceTimersByTime(500));
+    ++value.source.items['2']!.revision; ++value.source.revision;
+    value.source.items['2']!.ask = 'A newer question summary.';
+    await act(async () => { await value.store.refresh(); });
+    expect(within(screen.getByRole('dialog')).getByText('A newer question summary.')).toBeTruthy();
+    act(() => vi.advanceTimersByTime(500));
+    expect(seen).toHaveBeenCalledExactlyOnceWith({ ...route, item_id: '2' }, revision);
+    act(() => vi.advanceTimersByTime(1000)); expect(seen).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps hover previews from taking editor Escape or restoring focus on close', async () => {
+    const value = await setup(); vi.useFakeTimers(); const { chip } = mount(value), editorKeys = vi.fn();
+    render(<input aria-label="Outside editor" onKeyDown={editorKeys} />);
+    const editor = screen.getByRole('textbox', { name: 'Outside editor' }); editor.focus();
+    const hover = () => { fireEvent.mouseEnter(chip(), { metaKey: true }); act(() => vi.advanceTimersByTime(500)); };
+    hover(); expect(document.activeElement).toBe(editor);
+    fireEvent.keyDown(editor, { key: 'Escape' });
+    expect(editorKeys).toHaveBeenCalledTimes(1); expect(editorKeys.mock.calls[0][0].defaultPrevented).toBe(false);
+    expect(screen.queryByRole('dialog')).toBeNull(); expect(document.activeElement).toBe(editor);
+    hover(); fireEvent.click(screen.getByRole('button', { name: 'Close peek' }));
+    expect(document.activeElement).toBe(editor);
+    hover(); screen.getByRole('button', { name: 'Close peek' }).focus();
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(document.activeElement).toBe(chip()); expect(editorKeys).toHaveBeenCalledTimes(1);
+  });
+
+  it('carries the original anchor position and focus source through nested replacement', async () => {
+    const value = await setup(); value.source.items['2']!.ask = 'Review [the branch](item:8).'; ++value.source.revision;
+    await value.store.refresh(); const { chip } = mount(value), source = chip();
+    vi.spyOn(source, 'getBoundingClientRect').mockReturnValue({ left: 300, right: 400, top: 200, bottom: 220, width: 100, height: 20 } as DOMRect);
+    source.focus(); fireEvent.click(source);
+    const first = screen.getByRole('dialog'), position = { left: first.style.left, top: first.style.top };
+    const nested = within(first).getByRole('button', { name: `${value.source.items['8']!.question} · Open` });
+    vi.spyOn(nested, 'getBoundingClientRect').mockReturnValue({ left: 12, right: 20, top: 12, bottom: 20, width: 8, height: 8 } as DOMRect);
+    fireEvent.click(nested);
+    const replacement = screen.getByRole('dialog'); expect(nested.isConnected).toBe(false);
+    expect(replacement.style.left).toBe(position.left); expect(replacement.style.top).toBe(position.top);
+    fireEvent(window, new Event('resize'));
+    expect(replacement.style.left).toBe(position.left); expect(replacement.style.top).toBe(position.top);
+    fireEvent.keyDown(document, { key: 'Escape' }); expect(document.activeElement).toBe(source);
+  });
+
+  it('preserves agent words for removed references and honors owner text suppression under a session scope', async () => {
+    const value = await setup(); value.source.items['8']!.removed_at = value.source.updated_at; ++value.source.revision;
+    await value.store.refresh();
+    const { container } = render(<PeekProvider lookup={() => value.store} drafts={value.drafts} onGoTo={vi.fn()}>
+      <ItemRefSession.Provider value={route}><ItemRefs.Provider value={{ lookup: () => null, onOpenItem: vi.fn() }}>
+        <Markdown text="Keep [the agent’s original words](item:8)." />
+        <ItemRefs.Provider value={null}><Markdown text="Keep [my exact words](item:2)." /><ItemReference itemId="2">Owner reference</ItemReference></ItemRefs.Provider>
+      </ItemRefs.Provider></ItemRefSession.Provider>
+    </PeekProvider>);
+    expect(container.textContent).toContain('the agent’s original words (item unavailable)');
+    expect(container.textContent).toContain('Keep my exact words.'); expect(container.textContent).toContain('Owner reference');
+    expect(container.querySelector('button, a')).toBeNull();
   });
 
   it('keeps command-hover pending across parent refreshes and uses the latest visit callback', async () => {

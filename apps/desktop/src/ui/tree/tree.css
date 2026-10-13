@@ -17,6 +17,7 @@
   padding-bottom: 40px;
   scroll-padding-top: var(--tree-header-height, 0);
   overflow: auto;
+  overflow-anchor: none; /* Use Ariadne's position hold in Chromium as in the shipped WKWebView. */
 }
 
 .tree-rows {

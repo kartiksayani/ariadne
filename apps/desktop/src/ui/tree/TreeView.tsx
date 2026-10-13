@@ -35,7 +35,8 @@ import { Banner, SessionBar } from './SessionBar';
 import { FilterBar } from './FilterBar';
 import { useLifecycle } from './Lifecycle';
 import { ItemRefs } from '../shared/MarkdownText';
-import { itemLabels, shortLabel } from '../shared/short';
+import { shortLabel } from '../shared/short';
+import { peekNames } from '../peek/names';
 import { nearestDelta, openingTop } from './scroll';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { sessionEnded, sessionClosedReason, sessionAnswerBlocked } from '../../selectors/sessionClosed';
@@ -53,6 +54,7 @@ import { usePeek } from '../peek/Peek';
 import { RecentDialog, RecentTrail } from '../navigation/Recent';
 import { navigationVisits } from '../navigation/visits';
 import { AckAll } from '../navigation/AckAll';
+import { ackAllItems } from '../navigation/ackAllController';
 import './tree.css';
 
 export type RowIntent = 'bring' | 'reply' | 'drop' | 'note' | 'followup' | 'reopen' | 'later' | 'hide';
@@ -227,9 +229,7 @@ export function TreeView(props: TreeViewProps) {
   const focusedId = focusedItem && !focusedItem.parent && session && !itemRemoved(session, focusedItem.id) ? focusedItem.id : null;
   const focusedBranch = useMemo(() => session && focusedId ? branchItems(session, focusedId) : null, [session, focusedId]);
   const rows = useMemo(() => session ? focusedRows(model?.rows ?? [], session, focusedId) : model?.rows ?? [], [model, session, focusedId]);
-  const names = useMemo(() => itemLabels([
-    ...Object.values(session?.items ?? {}).filter(item => !!item),
-  ], session?.topics), [session?.items, session?.topics]);
+  const names = useMemo(() => session ? peekNames(session) : new Map<string, string>(), [session]);
   const sections = useMemo(() => {
     const groups: { topic: Extract<Row, { kind: 'topic' }>; items: Exclude<Row, { kind: 'topic' }> [] }[] = [];
     for (const row of rows) {
@@ -238,8 +238,8 @@ export function TreeView(props: TreeViewProps) {
     }
     return groups;
   }, [rows]);
-  const latest = useRef({ view, preferences, rows, session });
-  latest.current = { view, preferences, rows, session };
+  const latest = useRef({ view, preferences, rows, session, selectedId, answering });
+  latest.current = { view, preferences, rows, session, selectedId, answering };
 
   const hiddenSelection = useRef<{ sessionId?: string; selectedId: string | null }>({ selectedId: null });
   useEffect(() => {
@@ -384,8 +384,11 @@ export function TreeView(props: TreeViewProps) {
     void saveView(next => { delete next.focused_item_id; });
   }, [reveal, revealId, focusedId]);
   useEffect(() => {
-    if (view?.focused_item_id && !focusedId) void saveView(next => { delete next.focused_item_id; });
-  }, [view?.focused_item_id, focusedId]);
+    const id = view?.focused_item_id;
+    if (state.status !== 'ready' || !raw || !id) return;
+    const item = raw.items[id];
+    if (!item || item.parent || itemRemoved(raw, id)) void saveView(next => { delete next.focused_item_id; });
+  }, [view?.focused_item_id, state.status, raw]);
   const toggleItem = (id: string) => {
     const row = latest.current.rows.find(value => value.key === id);
     if (!row || row.kind !== 'item' || !row.hasKids) return;
@@ -704,6 +707,7 @@ export function TreeView(props: TreeViewProps) {
   // leave (a live edit, a message landing, fonts loading). WKWebView has no `overflow-anchor`, so the first visible row
   // is remembered with its offset (and the scroll position it was seen at) and put back after every layout change.
   const held = useRef<{ readonly key: string; readonly offset: number; readonly scrollTop: number } | null>(null);
+  const panelTarget = useRef<{ readonly key: string; readonly top: number; readonly scrollTop: number } | null>(null);
   const [breadcrumb, setBreadcrumb] = useState<readonly string[]>([]);
   const placed = useRef<Anchor | null>(null);
   placed.current = anchor;
@@ -711,6 +715,10 @@ export function TreeView(props: TreeViewProps) {
     const box = scroller.current;
     if (!box) { held.current = null; return; }
     const top = readingTop(), list = latest.current.rows.filter(row => row.kind === 'item');
+    const panelKey = latest.current.answering ?? latest.current.selectedId;
+    const panelRect = panelKey ? elements.current.get(panelKey)?.getBoundingClientRect() : undefined;
+    panelTarget.current = panelKey && panelRect && panelRect.top >= top && panelRect.top < box.getBoundingClientRect().bottom
+      ? { key: panelKey, top: panelRect.top, scrollTop: box.scrollTop } : null;
     // Rows are stacked in order, so the first one ending below the tree's top is found by halving.
     let low = 0, high = list.length;
     while (low < high) {
@@ -755,6 +763,14 @@ export function TreeView(props: TreeViewProps) {
     const width = scroller.current?.getBoundingClientRect().width ?? null;
     const resized = previousWidth.current !== null && previousWidth.current !== width;
     previousWidth.current = width;
+    // Closing detail widens previews above the selected/answered row. Preserve
+    // that row's last screen position rather than the earlier reading anchor.
+    const target = panelTarget.current;
+    if (previous.detailOpen && !current.detailOpen && target && target.key === (latest.current.answering ?? current.selectedId)) {
+      const offset = Math.max(target.top, readingTop() + 8) - readingTop();
+      revealedAnchor.current = { key: target.key, offset };
+      held.current = { key: target.key, offset, scrollTop: target.scrollTop };
+    }
     if (resized || previous.selectedId !== current.selectedId || previous.reveal !== current.reveal || previous.detailOpen !== current.detailOpen || previous.railOpen !== current.railOpen) {
       settled.current = true; setAnchor(null);
     }
@@ -970,6 +986,7 @@ export function TreeView(props: TreeViewProps) {
   }, onOpenItem: id => select(id, false) }}><div role="tree" aria-label="Session items" aria-busy={state.status === 'loading'} className="tree-rows" onBlur={saveScroll}>
     {sections.map(({ topic: row, items }) => <div key={row.key} className="tree-topic-group" role="presentation">
       <TopicRow row={row} focused={focusKey === row.key} actions={topicActions(row)}
+        ackAllCount={!archivedMode && session ? ackAllItems(session, row.topic.id).length : 0}
         ackAll={!archivedMode ? <AckAll actions={actions} topicId={row.topic.id} topicName={row.topic.name} disabled={viewBusy} /> : undefined}
         prompt={row.allClosed && !archivedMode ? () => lifecycle.archive(row.topic.id) : null}
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
@@ -1054,7 +1071,7 @@ export function TreeView(props: TreeViewProps) {
       nextWaiting={oldestWaiting(session)} onReveal={id => select(id, false)} />
       <button type="button" className="btn btn-ghost" title="Recent (⌘E)" onClick={() => setRecentOpen(true)}>Recent</button></div>}
     {session && recentOpen && <RecentDialog session={session} entries={view?.recent_items}
-      seen={preferences?.seen?.find(mark => mark.session.project_id === route.project_id && mark.session.session_id === route.session_id)}
+      seen={seen}
       onReveal={id => select(id, false)} onClose={() => setRecentOpen(false)} />}
     {sending && <DispatchDialog store={actions.session} actions={actions} agent={bar?.agent ?? 'the agent'} onClose={() => setSending(false)} />}
     {filtersShown && <FilterBar chips={model?.chips ?? chipsOf([])} counts={counts}

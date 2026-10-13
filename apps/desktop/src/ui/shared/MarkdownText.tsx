@@ -19,7 +19,8 @@ export interface ItemReferenceNavigation {
   /** The canonical route lets a global peek work through a local text provider. */
   route?(itemId: string): ItemRoute;
 }
-export const ItemRefs = createContext<ItemReferenceNavigation | null>(null);
+// An absent provider permits session-scoped chips; explicit null keeps owner text plain.
+export const ItemRefs = createContext<ItemReferenceNavigation | null | undefined>(undefined);
 
 /** An in-app item link, shared by Markdown and the item's Links section. */
 export function ItemReference({ itemId, children, className, inline = false, preserveContent = false, ariaLabel, title: customTitle }: {
@@ -28,12 +29,13 @@ export function ItemReference({ itemId, children, className, inline = false, pre
   readonly inline?: boolean;
 }) {
   const navigation = useContext(ItemRefs), scope = useContext(ItemRefSession), peek = usePeek();
+  if (navigation === null) return className ? <span className={className}>{children}</span> : <>{children}</>;
   const route = navigation?.route?.(itemId) ?? (scope ? { ...scope, item_id: itemId } : null);
   const preview = peek && route ? peek.reference(route) : null;
   const item = preview ? { label: preview.question, name: preview.name, status: preview.status } : navigation?.lookup(itemId);
   if (!navigation && !preview && !(peek && route)) return className ? <span className={className}>{children}</span> : <>{children}</>;
   if (!item) {
-    const content = peek && route ? <span className="md-item-missing">Item unavailable</span> : <>{children} <span className="md-item-missing">(item not found)</span></>;
+    const content = <>{children} <span className="md-item-missing">{peek && route ? '(item unavailable)' : '(item not found)'}</span></>;
     return className ? <span className={className}>{content}</span> : content;
   }
   const title = customTitle ?? `${item.label} · ${STATUS[statusKey[item.status]].label}`;

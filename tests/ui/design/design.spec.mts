@@ -516,7 +516,7 @@ for (const theme of ['light', 'dark'] as const) test(`Getting around preserves t
   await expect(root).toBeFocused();
   expect(await scroller.evaluate(element => element.scrollTop)).toBe(before);
   const waiting = await page.locator('[data-waiting-item]').count();
-  await root.getByRole('button', { name: 'Focus', exact: true }).click();
+  await root.getByRole('button', { name: /^Focus on / }).click();
   await expect(page.getByText(/^Focused:/)).toBeVisible();
   expect(await page.locator('[data-waiting-item]').count()).toBe(waiting);
   await expect(page.locator(`.tree-item-root:not([data-item-id="${sourceId}"])`)).toHaveCount(0);
