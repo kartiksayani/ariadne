@@ -96,6 +96,8 @@ export interface TreeViewProps {
 
 /** Most folded topics a session view keeps (the saved `collapsed_topic_ids` bound); the oldest folds drop first. */
 const FOLDS_KEPT = 256;
+// A row ending at the sticky edge can peek out by a sub-pixel without being the reading row.
+const READING_EDGE_CLEARANCE = 1;
 /** A saved reading offset, or the initial selection centred while the view loads. */
 interface Anchor { readonly key: string; readonly offset: number | null }
 const SKELETON = [
@@ -612,6 +614,7 @@ export function TreeView(props: TreeViewProps) {
   const folding = useRef<string | null>(null);
   const unfold = (id: string) => {
     settled.current = true;
+    held.current = null; revealedAnchor.current = null;
     if (isUnfolded(id)) folding.current = id;
     toggleUnfolded(id);
   };
@@ -701,7 +704,7 @@ export function TreeView(props: TreeViewProps) {
   // The tree never jumps on its own: what the owner is reading stays put when rows above it grow, shrink, arrive or
   // leave (a live edit, a message landing, fonts loading). WKWebView has no `overflow-anchor`, so the first visible row
   // is remembered with its offset (and the scroll position it was seen at) and put back after every layout change.
-  const held = useRef<{ readonly key: string; readonly offset: number; readonly scrollTop: number } | null>(null);
+  const held = useRef<{ readonly key: string; readonly offset: number; readonly top: number; readonly scrollTop: number } | null>(null);
   const panelTarget = useRef<{ readonly key: string; readonly top: number; readonly scrollTop: number } | null>(null);
   const [breadcrumb, setBreadcrumb] = useState<readonly string[]>([]);
   const placed = useRef<Anchor | null>(null);
@@ -709,16 +712,23 @@ export function TreeView(props: TreeViewProps) {
   const remembering = () => {
     const box = scroller.current;
     if (!box) { held.current = null; return; }
+    const before = held.current, element = before ? elements.current.get(before.key) : undefined;
+    // An observer, layout effect or delayed programmatic scroll event can arrive between
+    // reflows. With no owner scroll, restore the held row before adopting the new layout.
+    if (before && element && before.scrollTop > 0 && box.scrollTop === before.scrollTop && (settled.current || !placed.current)) {
+      const delta = element.getBoundingClientRect().top - box.getBoundingClientRect().top - before.top;
+      if (Math.abs(delta) >= 1) box.scrollTop += delta;
+    }
     const top = readingTop(), list = latest.current.rows.filter(row => row.kind === 'item');
     const panelKey = latest.current.answering ?? latest.current.selectedId;
     const panelRect = panelKey ? elements.current.get(panelKey)?.getBoundingClientRect() : undefined;
     panelTarget.current = panelKey && panelRect && panelRect.top >= top && panelRect.top < box.getBoundingClientRect().bottom
       ? { key: panelKey, top: panelRect.top, scrollTop: box.scrollTop } : null;
-    // Rows are stacked in order, so the first one ending below the tree's top is found by halving.
+    // Rows are stacked in order. Skip predecessors ending within a pixel of the sticky edge.
     let low = 0, high = list.length;
     while (low < high) {
       const middle = (low + high) >> 1, element = elements.current.get(list[middle]!.key);
-      if (!element || element.getBoundingClientRect().bottom > top) high = middle; else low = middle + 1;
+      if (!element || element.getBoundingClientRect().bottom > top + READING_EDGE_CLEARANCE) high = middle; else low = middle + 1;
     }
     const key = list[low]?.key;
     // A deliberate reveal holds its own row through detail-width and preview-clamp changes.
@@ -728,7 +738,9 @@ export function TreeView(props: TreeViewProps) {
     const holdKey = revealed?.key ?? key, holdElement = holdKey ? elements.current.get(holdKey) : undefined;
     // Edge/breadcrumb observation may run before reflow correction. Preserve the
     // reveal's original offset instead of adopting its temporarily obscured top.
-    held.current = holdKey && holdElement ? { key: holdKey, offset: revealed?.offset ?? holdElement.getBoundingClientRect().top - top, scrollTop: box.scrollTop } : null;
+    const holdRect = holdElement?.getBoundingClientRect();
+    held.current = holdKey && holdRect ? { key: holdKey, offset: revealed?.offset ?? holdRect.top - top,
+      top: holdRect.top - box.getBoundingClientRect().top, scrollTop: box.scrollTop } : null;
     // Reading keeps a partially visible row anchored, but breadcrumb names belong to
     // the first complete row below the pinned topic, not that clipped predecessor.
     const first = key ? elements.current.get(key) : undefined;
@@ -764,7 +776,7 @@ export function TreeView(props: TreeViewProps) {
     if (previous.detailOpen && !current.detailOpen && target && target.key === (latest.current.answering ?? current.selectedId)) {
       const offset = Math.max(target.top, readingTop() + 8) - readingTop();
       revealedAnchor.current = { key: target.key, offset };
-      held.current = { key: target.key, offset, scrollTop: target.scrollTop };
+      held.current = { key: target.key, offset, top: readingTop() + offset - (scroller.current?.getBoundingClientRect().top ?? 0), scrollTop: target.scrollTop };
     }
     if (resized || previous.selectedId !== current.selectedId || previous.reveal !== current.reveal || previous.detailOpen !== current.detailOpen) {
       settled.current = true; setAnchor(null);
@@ -793,7 +805,7 @@ export function TreeView(props: TreeViewProps) {
     const box = scroller.current;
     if (!box || event.currentTarget.contains(event.relatedTarget)) return;
     const top = readingTop();
-    const first = latest.current.rows.find(row => row.kind === 'item' && (elements.current.get(row.key)?.getBoundingClientRect().bottom ?? -Infinity) > top);
+    const first = latest.current.rows.find(row => row.kind === 'item' && (elements.current.get(row.key)?.getBoundingClientRect().bottom ?? -Infinity) > top + READING_EDGE_CLEARANCE);
     const element = first && elements.current.get(first.key);
     if (!first || !element) return;
     // Save in the same target-header coordinates used by place, even during topic push-out.
@@ -803,6 +815,7 @@ export function TreeView(props: TreeViewProps) {
 
   const [selectedEdge, setSelectedEdge] = useState<'above' | 'below' | null>(null);
   const updateEdge = () => {
+    remembering();
     const box = scroller.current, element = selectedId ? elements.current.get(selectedId) : null;
     let edge: 'above' | 'below' | null = null;
     if (box && element && !graph) {
@@ -811,8 +824,6 @@ export function TreeView(props: TreeViewProps) {
       else if (b.top >= a.bottom) edge = 'below';
     }
     if (box && !element && selectedId && session?.items[selectedId] && !graph) edge = 'below';
-    // The tag's reserved slot keeps its appearance from resizing the content or moving the reading anchor.
-    remembering();
     setSelectedEdge(previous => previous === edge ? previous : edge);
   };
   useLayoutEffect(updateEdge);
@@ -894,13 +905,16 @@ export function TreeView(props: TreeViewProps) {
     window.addEventListener('keydown', shortcut);
     return () => window.removeEventListener('keydown', shortcut);
   }, [graph]);
-  const edgeCallbacks = useRef({ updateEdge, revealSelected });
-  edgeCallbacks.current = { updateEdge, revealSelected };
+  const edgeCallbacks = useRef({ updateEdge, revealSelected, holding });
+  edgeCallbacks.current = { updateEdge, revealSelected, holding };
   const topicKeys = JSON.stringify(sections.map(section => section.topic.key));
   useEffect(() => {
     const box = scroller.current;
     if (!box || graph || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => edgeCallbacks.current.updateEdge());
+    const observer = new ResizeObserver(() => {
+      if (previousWidth.current !== box.getBoundingClientRect().width) edgeCallbacks.current.holding();
+      edgeCallbacks.current.updateEdge();
+    });
     observer.observe(box);
     const content = box.querySelector('.tree-rows');
     if (content) observer.observe(content);
@@ -1085,6 +1099,8 @@ export function TreeView(props: TreeViewProps) {
         {index > 0 && <span aria-hidden="true"> › </span>}<button type="button" title={session?.items[id]?.question} onClick={() => select(id, false)}>{names.get(id)}</button>
       </span>)}</nav>
       <div ref={scroller} className="tree-scroll" onScroll={() => {
+        // At the held scrollTop this can be our own correction's delayed event;
+        // remembering restores any intervening reflow before capturing again.
         if (held.current?.scrollTop !== scroller.current?.scrollTop) revealedAnchor.current = null;
         openingPlacement.current = null; settled.current = true; remembering(); updateEdge();
       }}>{body}</div>

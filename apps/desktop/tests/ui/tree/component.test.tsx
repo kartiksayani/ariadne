@@ -1587,6 +1587,128 @@ describe('session tree reading position', () => {
     } finally { vi.unstubAllGlobals(); }
   });
 
+  it.each([-34.4, 34.4])('keeps an ordinary reading anchor when the edge observer sees a %s px resize reflow first', async shift => {
+    let width = 300, reflow = 0;
+    const observers: { run: () => void; targets: Set<Element> }[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      targets = new Set<Element>();
+      constructor(run: () => void) { observers.push({ run, targets: this.targets }); }
+      observe(target: Element) { this.targets.add(target); }
+      disconnect() { this.targets.clear(); }
+    });
+    const rectangle = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = document.querySelector<HTMLElement>('.tree-scroll');
+      if (this === box) return new DOMRect(0, 0, width, 400);
+      if (this.matches('.tree-topic')) return new DOMRect(0, 0, width, 20);
+      const id = this.getAttribute('data-item-id'), at = id ? ids().indexOf(id) : -1, target = ids().indexOf('4');
+      if (at >= 0 && this.getAttribute('role') === 'treeitem') {
+        return new DOMRect(0, at * 100 - (box?.scrollTop ?? 0) + (at >= target ? reflow : 0), width,
+          at === target - 1 ? 100 + reflow : 100);
+      }
+      return rectangle.call(this);
+    });
+    try {
+      await mount({ configure: transport => {
+        viewOf(transport).scroll = { item_id: '4', offset: 0 };
+      }, props: { selectedId: '4', detailOpen: true } });
+      const box = document.querySelector<HTMLElement>('.tree-scroll')!;
+      // Ordinary reading has finished the opening restoration and has no deliberate reveal to pin it.
+      fireEvent.wheel(box); fireEvent.scroll(box);
+      expect(top('4')).toBe(20);
+      const edge = observers.find(observer => observer.targets.has(box)
+        && !observer.targets.has(row('4')) && [...observer.targets].some(target => target.matches('.tree-rows')))!;
+      const correction = observers.find(observer => !observer.targets.has(box)
+        && [...observer.targets].some(target => target.matches('.tree-rows')))!;
+      width = shift < 0 ? 500 : 200; reflow = shift;
+      // The scroller/edge callback can arrive before the content callback after a window resize.
+      act(() => edge.run());
+      act(() => correction.run());
+      expect(top('4')).toBeCloseTo(20);
+      expect(box.scrollTop).toBeCloseTo(380 + shift);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it.each([-0.06, 0, 0.06])('holds item 7 at %s px from the sticky edge through detail, widening, and narrowing', async offset => {
+    const headerHeight = 85.39;
+    let width = 700, reflow = 0;
+    const observers: { run: () => void; targets: Set<Element> }[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      targets = new Set<Element>();
+      constructor(run: () => void) { observers.push({ run, targets: this.targets }); }
+      observe(target: Element) { this.targets.add(target); }
+      disconnect() { this.targets.clear(); }
+    });
+    const rectangle = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = document.querySelector<HTMLElement>('.tree-scroll');
+      if (this === box) return new DOMRect(0, 0, width, 400);
+      if (this.matches('.tree-topic')) return new DOMRect(0, 0, width, headerHeight);
+      const id = this.getAttribute('data-item-id'), at = id ? ids().indexOf(id) : -1, target = ids().indexOf('7');
+      if (at >= 0 && this.getAttribute('role') === 'treeitem') {
+        const readingHeight = width === 800 ? 162.4 : 176.8;
+        return new DOMRect(0, at * 100 + (at >= target ? reflow : 0) + (at > target ? readingHeight - 100 : 0) - (box?.scrollTop ?? 0), width,
+          at === target - 1 ? 100 + reflow : at === target ? readingHeight : 100);
+      }
+      return rectangle.call(this);
+    });
+    try {
+      const view = await mount({ configure: transport => {
+        viewOf(transport).scroll = { item_id: '7', offset };
+      }, props: { selectedId: '7' } });
+      const box = document.querySelector<HTMLElement>('.tree-scroll')!;
+      fireEvent.wheel(box); fireEvent.scroll(box);
+      const before = top('7');
+      expect(before).toBeCloseTo(headerHeight + offset);
+      // The predecessor ends at the same sub-pixel edge where the reading row starts.
+      const predecessor = row(ids()[ids().indexOf('7') - 1]!);
+      expect(predecessor.getBoundingClientRect().bottom).toBeCloseTo(before);
+      const deliver = () => {
+        const active = observers.filter(observer => observer.targets.size);
+        const edge = active.find(observer => observer.targets.has(box) && !observer.targets.has(row('7'))
+          && [...observer.targets].some(target => target.matches('.tree-rows')))!;
+        act(() => edge.run());
+        act(() => edge.run());
+        act(() => active.find(observer => !observer.targets.has(box)
+          && [...observer.targets].some(target => target.matches('.tree-rows')))!.run());
+      };
+      fireEvent.pointerDown(row('7')); fireEvent.click(row('7'));
+      await waitFor(() => expect(view.calls.selected.at(-1)).toMatchObject({ route: { item_id: '7' } }));
+      width = 560; reflow = 52; view.rerender({ detailOpen: true }); deliver();
+      expect(top('7')).toBeCloseTo(before);
+      width = 800; reflow = -52; deliver();
+      expect(top('7')).toBeCloseTo(before);
+      expect(row('7').getBoundingClientRect().height).toBeCloseTo(162.4);
+      // Our first correction queues a scroll event. A second reflow can land before
+      // that event, without changing scrollTop or delivering another observer yet.
+      const correctedScroll = box.scrollTop;
+      reflow += 34.4;
+      expect(box.scrollTop).toBe(correctedScroll);
+      fireEvent.scroll(box);
+      expect(top('7')).toBeCloseTo(before);
+      expect(box.scrollTop).toBeCloseTo(correctedScroll + 34.4);
+      deliver();
+      expect(top('7')).toBeCloseTo(before);
+      reflow -= 16.4; deliver();
+      expect(top('7')).toBeCloseTo(before);
+      width = 656; reflow = 18; deliver();
+      expect(top('7')).toBeCloseTo(before);
+      expect(row('7').getBoundingClientRect().height).toBeCloseTo(176.8);
+      // Narrowing measures the new text width first. Preview clamping then reflows the
+      // preceding row again, and the edge callback can run before content correction.
+      reflow += 16.4;
+      fireEvent.scroll(box);
+      expect(top('7')).toBeCloseTo(before);
+      deliver();
+      expect(top('7')).toBeCloseTo(before);
+      deliver();
+      expect(top('7')).toBeCloseTo(before);
+      await act(async () => { fireEvent.blur(row('7'), { relatedTarget: document.body }); });
+      expect(viewOf(view.transport).scroll?.item_id).toBe('7');
+      expect(viewOf(view.transport).scroll?.offset).toBeCloseTo(offset);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('holds the selected row when closing detail shortens a visible predecessor by one line without browser anchoring', async () => {
     let shrink = 0;
     const callbacks: (() => void)[] = [];
@@ -1675,6 +1797,49 @@ describe('item details in the tree', () => {
     expect(row('4').querySelector('.tree-heading .tree-row-status')).not.toBeNull();
     expect(document.querySelector('.tree-id')).toBeNull();
     expect(row('4').textContent).not.toMatch(/#4|^4/);
+  });
+
+  it('lets Show more and Show less steer after a deliberate reveal instead of restoring its old anchor', async () => {
+    measure();
+    const observers: { run: () => void; targets: Set<Element> }[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      targets = new Set<Element>();
+      constructor(run: () => void) { observers.push({ run, targets: this.targets }); }
+      observe(target: Element) { this.targets.add(target); }
+      disconnect() { this.targets.clear(); }
+    });
+    const rectangle = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = document.querySelector<HTMLElement>('.tree-scroll');
+      if (this === box) return new DOMRect(0, 0, 300, 400);
+      if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 20);
+      const id = this.getAttribute('data-item-id'), at = id ? ids().indexOf(id) : -1, target = ids().indexOf('3');
+      const extra = row('3')?.querySelector('.tree-preview')?.hasAttribute('data-open') ? 200 : 0;
+      if (at >= 0 && this.getAttribute('role') === 'treeitem') {
+        return new DOMRect(0, at * 100 + (at > target ? extra : 0) - (box?.scrollTop ?? 0), 300, at === target ? 100 + extra : 100);
+      }
+      return rectangle.call(this);
+    });
+    try {
+      await mount({ configure: transport => {
+        transport.sessions.get(route.session_id)!.items['3']!.outcome = long;
+        viewOf(transport).scroll = { item_id: '4', offset: 20 };
+      }, props: { selectedId: '4' } });
+      const box = document.querySelector<HTMLElement>('.tree-scroll')!;
+      fireEvent.keyDown(window, { key: 'j', metaKey: true });
+      expect(row('4').getBoundingClientRect().top).toBe(40);
+      const scroll = box.scrollTop;
+      const deliver = () => act(() => observers.filter(observer => !observer.targets.has(box)
+        && [...observer.targets].some(target => target.matches('.tree-rows'))).forEach(observer => observer.run()));
+      fireEvent.click(more('3')!);
+      deliver();
+      expect(box.scrollTop).toBe(scroll);
+      expect(row('4').getBoundingClientRect().top).toBe(240);
+      fireEvent.click(more('3')!);
+      deliver();
+      expect(row('3').getBoundingClientRect().top).toBe(20);
+      expect(row('4').getBoundingClientRect().top).toBe(120);
+    } finally { vi.unstubAllGlobals(); }
   });
 
   it.each([4, 5, 6, 7, 8])('clamps %s body lines only if at least three would be hidden', async lines => {
