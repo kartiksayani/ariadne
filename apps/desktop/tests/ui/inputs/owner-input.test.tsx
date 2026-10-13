@@ -426,7 +426,7 @@ describe('owner input component and durable draft controller', () => {
       }
       // A replaced item has a stopped delivery on it: still no box.
       cleanup(); show(value, '7');
-      await screen.findByRole('article', { name: 'Detail of #7' });
+      await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="7"]' });
       expect(screen.queryByRole('textbox')).toBeNull();
     });
     it('keeps the box, and hides Bring it up and Drop, while a message to the item is on its way; a second one queues behind it', async () => {
@@ -2253,8 +2253,8 @@ describe('the item detail reads like a chat', () => {
     item.origin = { project_id: demo.project_id, session_id: demo.id, topic_id: item.topic_id, entity_id: '77', source_revision: 1 };
     value.session.revision++; await value.store.refresh();
     render(<ItemDetail drafts={value.drafts} store={value.store} itemId="8" later={false} onOpenItem={() => {}}
-      provenance={<span className="copied-provenance"><button type="button">Source item 77</button></span>} />);
-    const button = await screen.findByRole('button', { name: 'Source item 77' });
+      provenance={<span className="copied-provenance"><button type="button">Source item</button></span>} />);
+    const button = await screen.findByRole('button', { name: 'Source item' });
     const body = document.querySelector<HTMLElement>('.detail-body')!, dock = document.querySelector<HTMLElement>('.detail-dock')!;
     expect(body.contains(button)).toBe(true);
     expect(dock.contains(button)).toBe(false);
@@ -2265,7 +2265,7 @@ describe('the item detail reads like a chat', () => {
     // An item that was not copied has no such section.
     cleanup();
     render(<ItemDetail drafts={value.drafts} store={value.store} itemId="1.1" later={false} onOpenItem={() => {}} provenance={<span>Never shown</span>} />);
-    await screen.findByRole('article', { name: 'Detail of #1.1' });
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     expect(screen.queryByText('Never shown')).toBeNull();
   });
   it('scrolls to the latest message on opening, and on sending even when read further up', async () => {

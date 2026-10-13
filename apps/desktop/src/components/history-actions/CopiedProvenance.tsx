@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ItemRoute } from '../../generated/core';
 import { originalFailure, plainFailure, useSession, type SessionStore } from '../../data';
+import { shortLabel } from '../../ui/shared/short';
 
 /** The caller routes through RegisteredRoutes; copied local history is always retained. */
 export function CopiedProvenance({ store, itemId, revealItem, projectPath = () => null }: {
@@ -8,10 +9,10 @@ export function CopiedProvenance({ store, itemId, revealItem, projectPath = () =
   /** The folder of a registered project, to name it when it can't be opened. */
   projectPath?: (projectId: string) => string | null;
 }) {
-  const state = useSession(store), origin = state.snapshot?.session.items[itemId]?.origin;
+  const state = useSession(store), item = state.snapshot?.session.items[itemId], origin = item?.origin;
   const [unavailableSource, setUnavailableSource] = useState<{ identity: string; message: string } | null>(null);
   const [opening, setOpening] = useState(false);
-  if (!origin) return null;
+  if (!item || !origin) return null;
   const source = { project_id: origin.project_id, session_id: origin.session_id, item_id: origin.entity_id };
   const copied = { ...state.route, item_id: itemId };
   const identity = JSON.stringify(source);
@@ -21,9 +22,9 @@ export function CopiedProvenance({ store, itemId, revealItem, projectPath = () =
       void revealItem(source).catch((error: unknown) => setUnavailableSource({ identity,
         message: originalFailure(error, projectPath(source.project_id)) ?? `Original project is unavailable. ${plainFailure(error, 'The original item could not be opened.')}` }))
         .finally(() => setOpening(false));
-    }}>Source item {source.item_id}</button>
+    }}>Source item</button>
     {unavailableSource?.identity === identity && <><span role="status">{unavailableSource.message} Full copied history remains here.</span>
       <button type="button" className="btn btn-secondary" onClick={() => { void revealItem(copied).catch((error: unknown) => setUnavailableSource({ identity,
-        message: `Original project is unavailable. ${plainFailure(error, 'The copied item could not be opened.')}` })); }}>Open copied item {copied.item_id}</button></>}
+        message: `Original project is unavailable. ${plainFailure(error, 'The copied item could not be opened.')}` })); }}>Open copied item: {shortLabel(item)}</button></>}
   </span>;
 }

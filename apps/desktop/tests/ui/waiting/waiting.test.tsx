@@ -749,6 +749,9 @@ describe('source-backed Waiting and Sent panel', () => {
     const { store, transport, drafts } = setup(); transport.capture(withOptions()); await store.start(); const answers = drafts();
     const view = render(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} />);
     await act(async () => { await answers.load(); });
+    const card = document.querySelector<HTMLElement>('[data-waiting-item="2"]')!;
+    expect(within(card).getByRole('group', { name: 'Answer Which delivery window?' })).toBeTruthy();
+    expect(within(card).queryByRole('group', { name: 'Answer #2' })).toBeNull();
     expect(document.querySelector('[data-waiting-item="2"]')?.getAttribute('aria-current')).toBeNull();
     view.rerender(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} selected={{ ...route, item_id: '2' }} />);
     expect(document.querySelector('[data-waiting-item="2"]')?.getAttribute('aria-current')).toBe('true');

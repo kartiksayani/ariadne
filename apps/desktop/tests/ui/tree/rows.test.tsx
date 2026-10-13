@@ -267,3 +267,54 @@ describe('canonical sentence tree projection', () => {
     expect(Number.isFinite(elapsed)).toBe(true);
   });
 });
+
+
+describe('continuous Map rails', () => {
+  const model = (session: Session, selectedId: string | null = null, collapsed = false) => {
+    const preferences = view(session);
+    preferences.expanded_item_ids = collapsed ? [] : ['1', '1.1'];
+    return treeModel({ session: immutable(session), view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
+      selectedId, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) }).rows;
+  };
+  it('joins the parent bullet to the last direct child, across intervening descendants', () => {
+    const session = seed();
+    session.items['1.2'] = { ...session.items['1.1']!, id: '1.2', ordinal: 2 };
+    session.items['1.1.1'] = { ...session.items['1.1']!, id: '1.1.1', parent: '1.1', ordinal: 1 };
+    const rows = model(session), get = (key: string) => rows.find(row => row.key === key)!;
+    expect(get('1').guides).toContainEqual({ kind: 'line', x: 44, width: 24, on: false, fromBullet: true, toBullet: false });
+    expect(get('1.1').guides).toContainEqual({ kind: 'line', x: 44, width: 24, on: false, fromBullet: false, toBullet: false });
+    expect(get('1.1.1').guides).toContainEqual({ kind: 'line', x: 44, width: 24, on: false, fromBullet: false, toBullet: false });
+    expect(get('1.2').guides).toContainEqual({ kind: 'line', x: 44, width: 24, on: false, fromBullet: false, toBullet: true });
+    expect(get('1.2').guides).toContainEqual({ kind: 'elbow', x: 44, width: 24, on: false });
+    expect(get('2').guides.some(guide => guide.x === 44)).toBe(false);
+    const topic = get(session.items['1']!.topic_id);
+    expect(topic.guides.some(guide => guide.fromBullet && guide.x === 20)).toBe(true);
+  });
+  it('accents only the path to the selection, with decorative hues on roots only', () => {
+    const session = seed(), rows = model(session, '1.1');
+    const root = rows.find(row => row.key === '1')!, child = rows.find(row => row.key === '1.1')!;
+    expect(root.guides.some(guide => guide.on && guide.fromBullet && guide.x === 44)).toBe(true);
+    expect(child.guides.some(guide => guide.on && guide.toBullet && guide.x === 44)).toBe(true);
+    expect(rows.find(row => row.key === '2')!.guides.some(guide => guide.on)).toBe(false);
+    for (const row of rows) if (row.kind === 'item') expect(row.hue !== undefined).toBe(row.depth === 1);
+    expect(model(session, '2').find(row => row.key === '1')).toMatchObject({ hue: root.kind === 'item' ? root.hue : undefined });
+  });
+  it('removes child stems when folded and retains continuous rails through hidden groups and filters', () => {
+    const session = seed();
+    expect(model(session, null, true).find(row => row.key === '1')!.guides.some(guide => guide.x === 44)).toBe(false);
+    const preferences = view(session); preferences.expanded_item_ids = ['1']; preferences.hidden_item_ids = ['1.1'];
+    const rows = treeModel({ session: immutable(session), view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
+      selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) }).rows;
+    const hidden = rows.find(row => row.kind === 'hidden')!;
+    expect(hidden.guides).toContainEqual({ kind: 'line', x: 44, width: 24, on: false, fromBullet: false, toBullet: true });
+    preferences.filters.search = session.items['1.1']!.question;
+    const filtered = treeModel({ session: immutable(session), view: preferences, search: preferences.filters.search, later: new Set(), collapsedTopics: new Set(),
+      selectedId: '1.1', revealId: '1.1', temporaryExpanded: ['1'], presence: null, summaries: [], now: Date.parse(session.updated_at) }).rows;
+    expect(filtered.find(row => row.key === '1')!.guides.some(guide => guide.fromBullet && guide.x === 44)).toBe(true);
+  });
+  it('builds all rails for 2,000 items without DOM measurements', () => {
+    const session = seed(), base = session.items['1']!; session.items = {};
+    for (let n = 1; n <= 2000; n++) session.items[String(n)] = { ...base, id: String(n), ordinal: n, parent: null };
+    expect(model(session, '2000').filter(row => row.kind === 'item')).toHaveLength(2000);
+  });
+});

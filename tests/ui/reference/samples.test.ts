@@ -18,6 +18,15 @@ describe('neutral design samples', () => {
     expect(data.SYNC_MSGS).toHaveLength(4);
   });
 
+  it('applies requested theme and rail variants without changing frame content', () => {
+    const fixture = designFixture('1a', data, { theme: 'light', rail: false });
+    expect(fixture.spec).toMatchObject({ id: '1a', theme: 'light', rail: false });
+    expect(fixture.transport.preferences.global.theme).toBe('light');
+    const view = fixture.transport.preferences.sessions.find(view => view.session.session_id === fixture.route!.session_id)!;
+    expect(view.rail).toBe('hidden');
+    expect(fixture.spec.selected).toBe(designFixture('1a', data).spec.selected);
+  });
+
   it('builds every frame and resolves the project-page selection', () => {
     for (const frame of frameIds) expect(() => designFixture(frame, data)).not.toThrow();
     const fixture = designFixture('1ac', data);

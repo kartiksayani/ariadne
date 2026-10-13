@@ -153,19 +153,8 @@
 .pw-continue-group-title i { font-size: calc(12px * var(--text-scale)); }
 
 .pw-continue-line {
-  display: flex;
-  gap: 10px;
   font-size: calc(13px * var(--text-scale));
   line-height: 1.5;
-}
-
-.pw-continue-line code {
-  flex: none;
-  min-width: 30px;
-  padding-top: 1px;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: calc(11.5px * var(--text-scale));
-  color: color-mix(in srgb, var(--color-text) 58%, transparent);
 }
 
 .pw-continue-line span { text-wrap: pretty; }

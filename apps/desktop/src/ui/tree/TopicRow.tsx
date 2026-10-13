@@ -3,6 +3,7 @@
 // prompt.
 import type { KeyboardEvent, ReactNode } from 'react';
 import type { TopicRow as Row } from './model';
+import { Guides } from './ItemRow';
 
 export interface TopicAction { readonly icon: string; readonly label: string; readonly title: string; readonly run: () => void; readonly archive?: boolean }
 
@@ -28,6 +29,7 @@ export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onK
   return <><div ref={element => remember(row.key, element)} role="treeitem" aria-level={1} aria-expanded={row.expanded} aria-label={topic.name}
     tabIndex={focused ? 0 : -1} className="tree-row tree-topic" data-topic-id={topic.id} data-row={row.key} data-first={row.first || undefined}
     onFocus={event => { if (event.target === event.currentTarget) onFocus(row.key); }} onKeyDown={onKeyDown}>
+    <Guides guides={row.guides} />
     <div className="tree-topic-head">
       <button type="button" className="tree-chevron" tabIndex={-1} aria-label="Expand or collapse topic"
         onClick={event => { event.stopPropagation(); onToggle(topic.id); }}><i className={row.expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} /></button>
@@ -42,7 +44,7 @@ export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onK
     {row.counts.length > 0 && <div className="tree-topic-counts">{row.counts.map(count => <span key={count.text} className="tree-count"><i className={count.icon} style={{ color: count.color }} />{count.text}</span>)}</div>}
     {row.delivery && <div className="tree-topic-line tree-topic-status" style={{ color: row.delivery.color }}><i className={row.delivery.icon} /><span>{row.delivery.text}</span></div>}
   </div>
-  {(fix || prompt || reply) && <div className="tree-topic-content">
+  {(fix || prompt || reply) && <div className="tree-topic-content"><Guides guides={row.guides.filter(guide => guide.kind === 'line').map(guide => ({ ...guide, fromBullet: false }))} />
     {row.delivery?.stuck && fix && <div className="tree-topic-fix">{fix}</div>}
     {prompt && <div className="tree-topic-line tree-prompt"><i className="ph ph-check-circle" /><span>Everything here is closed.</span>
       <button type="button" className="btn btn-ghost" onClick={event => { event.stopPropagation(); prompt(); }}><i className="ph ph-archive" />Archive topic</button></div>}

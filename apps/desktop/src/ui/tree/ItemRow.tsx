@@ -1,13 +1,14 @@
 // "Item Row" of the handoff (Item Row.dc.html): guides and the accent thread,
 // the status icon, the question with search hits, the item's details (folded to
-// two lines, with Show more) and under them the delivery of the owner's latest
+// four lines, with Show more) and under them the delivery of the owner's latest
 // message, the collapsed note, the inline answer box, the round tag, hover actions, the
-// id and the text badge.
+// top-line text badge.
 import { useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { Markdown } from '../shared/MarkdownText';
 import { StatusBadge } from '../shared/StatusBadge';
 import { ackTitle } from '../shared/ack';
 import { SessionClosedChip } from '../shared/SessionClosedChip';
+import { shortLabel } from '../shared/short';
 import { closed, visual, type Guide, type ItemRow as Row } from './model';
 
 export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly disabled?: boolean; readonly persistent?: boolean }
@@ -18,35 +19,36 @@ export function Guides({ guides }: { guides: readonly Guide[] }) {
   return <>{guides.map((guide, index) => {
     const color = guide.on ? 'var(--color-accent)' : 'var(--a-guide)', stroke = guide.on ? '1.5px' : '1px';
     return guide.kind === 'line'
-      ? <div key={index} className="tree-guide" style={{ left: guide.x, width: stroke, background: color }} />
-      : <div key={index} className="tree-elbow" style={{ left: guide.x, width: guide.width, borderLeft: `${guide.through ? '0px' : stroke} solid ${color}`,
-        borderBottom: `${stroke} solid ${color}`, borderBottomLeftRadius: guide.through ? 0 : 7 }} />;
+      ? <div key={index} aria-hidden="true" className="tree-guide" data-from-bullet={guide.fromBullet || undefined} data-to-bullet={guide.toBullet || undefined}
+        style={{ left: guide.x, width: stroke, background: color }} />
+      : <div key={index} aria-hidden="true" className="tree-elbow" style={{ left: guide.x, width: guide.width, borderBottom: `${stroke} solid ${color}` }} />;
   })}</>;
 }
 
 /** Lines of an item's preview before "Show more" folds the rest away. */
-const CLAMP_LINES = 2;
+const CLAMP_LINES = 4;
+const MIN_HIDDEN_LINES = 3;
 /** Row height of the preview text (tree.css `.tree-line`), when the browser reports none. */
 const PREVIEW_LINE = 21;
 
 interface Preview { readonly node: ReactNode; /** The long text the clamp applies to, if any. */ readonly text: string | null }
 
 /** The item's own details under the title, by priority (Item Row.dc.html:68-75). A delivery never takes this place. */
-function preview(row: Row, jump: () => void, open: boolean): Preview | null {
+function preview(row: Row, jump: () => void): Preview | null {
   const item = row.item;
   if (row.later) return { text: null, node: <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}><i className="ph ph-clock" /><span>Parked for later · still open</span></div> };
-  if (item.status === 'waiting_on_me' && item.ask) return { text: item.ask, node: <div className="tree-line tree-ask"><Markdown className="tree-clamp" text={item.ask} compact={!open} /></div> };
+  if (item.status === 'waiting_on_me' && item.ask) return { text: item.ask, node: <div className="tree-line tree-ask"><Markdown className="tree-clamp" text={item.ask} inline /></div> };
   if (item.status === 'replaced' && row.replacedBy) {
     return { text: null, node: <div className="tree-line" style={{ color: neutral(66) }}><i className="ph ph-arrow-bend-down-right tree-line-small" /><span>Replaced by</span>
-      <button type="button" className="tree-jump" onClick={event => { event.stopPropagation(); jump(); }}>{row.replacedBy.question}</button>
+      <button type="button" className="tree-jump" title={row.replacedBy.question} onClick={event => { event.stopPropagation(); jump(); }}>{shortLabel(row.replacedBy)}</button>
       <StatusBadge status={visual(row.replacedBy.status)} variant="text" /></div> };
   }
   if ((closed(item.status) || item.status === 'open' || item.status === 'in_progress') && item.outcome) {
     return { text: item.outcome, node: <div className="tree-line tree-outcome"><i className="ph ph-arrow-elbow-down-right" style={{ color: `var(--st-${visual(item.status)})` }} />
-      <Markdown className="tree-clamp" text={item.outcome} compact={!open} /></div> };
+      <Markdown className="tree-clamp" text={item.outcome} inline /></div> };
   }
   if (item.status === 'in_progress' && item.note) {
-    return { text: item.note, node: <div className="tree-line tree-line-tight" style={{ color: 'var(--st-progress)' }}><i className="ph ph-robot" /><Markdown className="tree-clamp" text={item.note} compact={!open} /></div> };
+    return { text: item.note, node: <div className="tree-line tree-line-tight" style={{ color: 'var(--st-progress)' }}><i className="ph ph-robot" /><Markdown className="tree-clamp" text={item.note} inline /></div> };
   }
   return null;
 }
@@ -59,27 +61,25 @@ function delivery(row: Row, fix: ReactNode): ReactNode {
   return <div className="tree-line tree-delivery" style={{ color: value.color }}><i className={value.icon} /><span>{value.text}</span></div>;
 }
 
-/** Measure title and excerpt separately; expanding shows both in full. */
-function PreviewBlock({ row, value, open, onToggle }: { row: Row; value: Preview | null; open: boolean; onToggle: () => void }) {
+/** Clamp the body only when folding hides at least three lines. */
+function PreviewBlock({ value, open, onToggle }: { value: Preview | null; open: boolean; onToggle: () => void }) {
   const box = useRef<HTMLDivElement>(null);
   const [long, setLong] = useState(false);
   const text = value?.text;
   useLayoutEffect(() => {
-    const title = box.current?.previousElementSibling as HTMLElement | null;
     const excerpt = text == null ? null : box.current?.querySelector<HTMLElement>('.tree-clamp');
-    const targets = [title, excerpt].filter((target): target is HTMLElement => !!target);
     const measure = () => {
-      const overflows = targets.some(target => target.scrollHeight > (parseFloat(getComputedStyle(target).lineHeight) || PREVIEW_LINE) * CLAMP_LINES + 1);
-      // Flattened block content still offers its complete structure even when the summary fits.
-      setLong(previous => overflows || !!text?.includes('\n') || (open && previous));
+      const line = excerpt ? parseFloat(getComputedStyle(excerpt).lineHeight) || PREVIEW_LINE : PREVIEW_LINE;
+      setLong(!!excerpt && excerpt.scrollHeight >= line * (CLAMP_LINES + MIN_HIDDEN_LINES) - 1);
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
-    targets.forEach(target => observer.observe(target));
+    if (excerpt) observer.observe(excerpt);
     return () => observer.disconnect();
-  }, [text, row.item.question, open]);
-  return <div ref={box} className="tree-preview" data-open={open || undefined} style={{ '--tree-clamp': CLAMP_LINES } as CSSProperties}>
+  }, [text]);
+  return <div ref={box} className="tree-preview" data-open={open || undefined} data-clamped={long && !open || undefined} style={{ '--tree-clamp': CLAMP_LINES } as CSSProperties}
+    onFocus={event => { if (long && !open && event.target.closest('.tree-clamp')) onToggle(); }}>
     {value?.node}
     {long && <button type="button" className="tree-more" aria-expanded={open}
       onClick={event => { event.stopPropagation(); onToggle(); }}>{open ? 'Show less' : 'Show more'}</button>}
@@ -100,7 +100,7 @@ export interface ItemRowProps {
   readonly answer: ReactNode;
   /** A stopped delivery's inline fix (ui/answer/StuckNote); it takes the delivery line's place. */
   readonly fix?: ReactNode;
-  /** The long preview is shown in full ("Show less" offered) instead of folded to two lines. */
+  /** The long preview is shown in full ("Show less" offered) instead of folded to four lines. */
   readonly unfolded: boolean;
   readonly onUnfold: (id: string) => void;
   readonly remember: (key: string, element: HTMLDivElement | null) => void;
@@ -114,7 +114,7 @@ export interface ItemRowProps {
 
 export function ItemRow({ row, selected, focused, disabled = false, closedReason, highlight, note, actions, answer, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, onJump, onHover }: ItemRowProps) {
   const item = row.item, status = visual(row.status);
-  const details = preview(row, () => { if (row.replacedBy) onJump(row.replacedBy.id); }, unfolded);
+  const details = preview(row, () => { if (row.replacedBy) onJump(row.replacedBy.id); });
   const muted = closed(item.status) || row.context || row.later || row.hidden;
   const actionButton = (action: RowAction) => <button key={action.title} type="button" tabIndex={action.persistent ? 0 : -1}
     className={`tree-action${action.persistent ? ' tree-action-ack' : ''}`} title={action.title} aria-label={action.title} disabled={action.disabled}
@@ -126,6 +126,7 @@ export function ItemRow({ row, selected, focused, disabled = false, closedReason
     style={{ paddingLeft: 12 + row.depth * 24 }} onFocus={event => { if (event.target === event.currentTarget) onFocus(row.key); }}
     onKeyDown={onKeyDown} onClick={() => onSelect(item.id)} onMouseEnter={() => onHover(item.id)} onMouseLeave={() => onHover(null)}>
     <div className="tree-mark" />
+    {row.hue !== undefined && <span aria-hidden="true" className="tree-top-colour" style={{ background: `hsl(${row.hue} 48% 58%)` }} />}
     <Guides guides={row.guides} />
     {row.hasKids
       ? <button type="button" className="tree-chevron" tabIndex={-1} aria-label="Expand or collapse"
@@ -133,10 +134,12 @@ export function ItemRow({ row, selected, focused, disabled = false, closedReason
       : <span className="tree-chevron-space" />}
     <span className="tree-icon"><StatusBadge status={status} variant="icon" /></span>
     <div className="tree-body">
-      <div className="tree-question tree-clamp" style={{ color: muted ? neutral(64) : 'var(--color-text)' }}>
+      <div className="tree-heading"><div className="tree-question" style={{ color: muted ? neutral(64) : 'var(--color-text)' }}>
         {row.segments.map((segment, index) => <span key={index} className={segment.hit ? 'tree-hit' : undefined}>{segment.text}</span>)}
-      </div>
-      <PreviewBlock row={row} value={details} open={unfolded} onToggle={() => onUnfold(item.id)} />
+      </div><span className="tree-row-status">
+        {row.sessionClosed && <SessionClosedChip reason={closedReason} />}
+        <StatusBadge status={status} label={row.badge} variant="text" /></span></div>
+      <PreviewBlock value={details} open={unfolded} onToggle={() => onUnfold(item.id)} />
       {row.ack && <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}>{ackTitle(row.ack, item.status)}</div>}
       {delivery(row, fix)}
       {note && <button type="button" className="tree-collapsed" tabIndex={-1} data-weak={highlight === 'weak' || undefined}
@@ -151,9 +154,6 @@ export function ItemRow({ row, selected, focused, disabled = false, closedReason
         {persistent.length > 0 && <span className="tree-ack-slot">{persistent.map(actionButton)}</span>}
         {hover.length > 0 && <span className="tree-actions">{hover.map(actionButton)}</span>}
       </span>}
-      <span className="tree-row-status"><span className="tree-id">{item.id}</span>
-        {row.sessionClosed && <SessionClosedChip reason={closedReason} />}
-        <StatusBadge status={status} label={row.badge} variant="text" /></span>
     </div>
   </div>;
 }

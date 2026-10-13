@@ -117,7 +117,11 @@ transport.
 
 Build `childrenByParent`, `itemById`, `messagesByItem`, `roundsByItem`, and active-descendant counts once per changed snapshot. Sort siblings by stable numeric item reference while never reassigning references. Store topic order explicitly.
 
-Determine initial expansion once per session view: active branches expanded, fully terminal subtrees collapsed. Persist explicit owner changes. Selecting an item hidden under a collapsed parent uses a temporary reveal path; it does not permanently reset the saved collapse choice. Rows show question and terminal outcome separately, soft-wrap full sentences, and never clip to a fixed height. Dimming applies to decoration, not to the whole row text. If an active descendant is under a terminal ancestor, show its count and reveal ancestry on selection.
+Determine initial expansion once per session view: active branches expanded, fully terminal subtrees collapsed. Persist explicit owner changes. Selecting an item hidden under a collapsed parent uses a temporary reveal path; it does not permanently reset the saved collapse choice. Rows place status beside the named title and show question and terminal outcome separately. Body text soft-wraps; use a four-line preview only when at least three more lines would be hidden, with an explicit expand/collapse control. Dimming applies to decoration, not to the whole row text. If an active descendant is under a terminal ancestor, show its count and reveal ancestry on selection.
+
+Ariadne-owned visible references and accessible labels use item `shortLabel` names, with long labels truncated to available width. Do not display numeric item references in rows, detail navigation, Waiting answer labels, copied-item actions, or the Continue preview. The Source item action has a generic label when the source name is unavailable locally; the fallback names the local copied item. Retain identity in route/data attributes, durable provenance, agent-written text, the actual Continue summary, and Copy reference (`item.id — item.question`).
+
+Draw continuous ancestry rails across all row content. Rails are neutral by default and accent on the selected path. A stable hue assigned to each top-level root is decorative and does not encode status. Clicking a visible tree row selects it without changing the reader's scroll position. Show an edge marker when selection is outside the viewport; clicking it or pressing Cmd+J reveals and scrolls to the selected item.
 
 Item detail renders full item history in two linked forms:
 
@@ -139,7 +143,7 @@ text across unrelated confirmed writes. Discard the preview on route change,
 reopen or explicit reset; restored state comes from canonical preferences.
 See [ADR-0066](../../adr/ADR-0066-project-local-search-before-save-confirmation.md).
 
-Selecting from Waiting, Sent, search, tree, graph, archive, rail, tray, or notification calls a single `revealItem`: switch to project/session, load validated snapshot, select item, temporarily reveal ancestry, mark it outside current filters if applicable, scroll nearest, and open detail. Preserve filter values and offer an explicit clear action. Replacement/fork/source references use this route. If the item no longer exists, show its session and an explanatory banner.
+Selecting from Waiting, Sent, search, tree, graph, archive, rail, tray, or notification calls a single `revealItem`: switch to project/session, load validated snapshot, select item, temporarily reveal ancestry, mark it outside current filters if applicable, and open detail. Opening or restoring a session restores a saved scroll anchor if present, otherwise brings the selected row into view once. Deliberate navigation from Waiting/Details, search, Back/Forward history, links and native reveal requests brings the target into view, including repeated requests for the same item and item routes opening a session with a saved reading anchor. Clicking an ordinary tree row, or opening or closing detail, never scrolls the Map. Keyboard row movement scrolls only enough to keep the focused row visible; the selected-item edge marker and Cmd+J explicitly scroll to the selection. Preserve filter values and offer an explicit clear action. Replacement/fork/source references use this route. If the item no longer exists, show its session and an explanatory banner.
 
 Start with variable-height DOM rows memoized by item revision. Add virtualization only if the recorded large-fixture performance evidence shows a real problem; virtualize the flattened visible list with measured heights and keep ARIA focus and scroll anchoring.
 
@@ -302,6 +306,7 @@ Keyboard navigation works when focus is outside editable controls:
 | Right / l | Expand or move to first child |
 | Left / h | Collapse or move to parent |
 | Home / End | First / last visible row |
+| Cmd+J | Reveal and scroll to the selected item, including from editable controls |
 | Enter | Open detail, expand/collapse topic, or activate focused navigation control |
 | `a` | Ack the focused eligible item; otherwise focus answer control for waiting item or oldest waiting item |
 | `1`–`9` | Select an answer option; never submit |

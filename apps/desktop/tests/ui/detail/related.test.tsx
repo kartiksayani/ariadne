@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { immutable } from '../../../src/data';
 import { connectedItems, relatedItems } from '../../../src/selectors/related';
 import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
+import { shortLabel } from '../../../src/ui/shared/short';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { setup } from '../history/fixtures';
 
@@ -58,7 +59,7 @@ describe('related item navigation', () => {
     expect(first.items['1']![field]).toEqual(['2', '2', 'missing', '1', '1.1']);
   });
 
-  it('shows item numbers, short labels, display status and inherited hiding, and opens every target', async () => {
+  it('shows short labels without item numbers, display status and inherited hiding, and opens every target', async () => {
     const value = setup(); opened.push(value);
     const session = value.transport.session;
     session.items['1']!.related = ['2', '2', 'missing'];
@@ -72,14 +73,16 @@ describe('related item navigation', () => {
     render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={open} hiddenItemIds={['1']} />);
     const related = screen.getByRole('region', { name: 'Related items' });
     expect(within(related).getAllByRole('button')).toHaveLength(3);
-    const window = within(related).getByRole('button', { name: /#2 Delivery window/ });
+    const window = within(related).getByRole('button', { name: /^Delivery window ·/ });
     expect(window.textContent).toContain('Waiting on agent');
-    const child = within(related).getByRole('button', { name: /#1\.1.*\(hidden\)/ });
+    const child = within(related).getByRole('button', { name: `${shortLabel(session.items['1.1']!)} (hidden) · Open` });
     expect(child.textContent).toContain('Hidden');
     expect(child.classList.contains('is-hidden')).toBe(true);
     expect(window.classList.contains('is-hidden')).toBe(false);
     fireEvent.click(child); fireEvent.click(window);
-    fireEvent.click(within(related).getByRole('button', { name: /#8/ }));
+    fireEvent.click(within(related).getByRole('button', { name: `${shortLabel(session.items['8']!)} · Open` }));
+    expect(related.textContent).not.toMatch(/#(?:1\.1|2|8)\b/);
+    expect(screen.getByRole('article').getAttribute('aria-label')).toBe(`Detail of ${shortLabel(session.items['1']!)}`);
     expect(open.mock.calls).toEqual([['1.1'], ['2'], ['8']]);
     expect(related.compareDocumentPosition(screen.getByRole('region', { name: 'Conversation' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -100,14 +103,14 @@ describe('related item navigation', () => {
     render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={open} hiddenItemIds={['1']} />);
     const section = screen.getByRole('region', { name: heading });
     expect(within(section).getByText(heading)).toBeTruthy();
-    const target = within(section).getByRole('button', { name: /#1\.1 Receipt test \(hidden\)/ });
+    const target = within(section).getByRole('button', { name: /^Receipt test \(hidden\) ·/ });
     expect(target.title).toBe(session.items['1.1']!.question);
     expect(target.classList.contains('detail-related-item')).toBe(true);
     expect(target.classList.contains('is-hidden')).toBe(true);
     expect(within(target).getByText('Hidden')).toBeTruthy();
     const related = screen.getByRole('region', { name: 'Related items' });
     expect(within(related).getAllByRole('button')).toHaveLength(1);
-    expect(within(related).getByRole('button', { name: /#2/ }).classList.contains('is-hidden')).toBe(false);
+    expect(within(related).getByRole('button', { name: new RegExp(`^${shortLabel(session.items['2']!)}`) }).classList.contains('is-hidden')).toBe(false);
     for (const label of ['Affects', 'Affected by', 'Depends on', 'Needed by']) {
       if (label !== heading) expect(screen.queryByRole('region', { name: label })).toBeNull();
     }

@@ -5,9 +5,12 @@ import { itemRowChrome, topicRowChrome } from '../design/row-chrome';
 describe('compact tree row design frames', () => {
   const source = handoffMembers()['Item Row.dc.html']!;
 
-  it('stacks the status and ordinal above a two-row action grid with unchanged buttons', () => {
+  it('puts status beside the title, removes visible IDs and retains the two-row action grid', () => {
     expect(source).toContain('grid-template-rows:repeat(2, auto); grid-auto-flow:column;');
-    expect(source).toContain('order:-1; display:flex; flex-direction:column; align-items:flex-end; gap:2px;');
+    expect(source).toContain('data-item-id="{{ it.id }}"');
+    expect(source).toContain('flex:1 1 12ch; min-width:0; font-size:15px;');
+    expect(source).not.toContain('font-family:ui-monospace, Menlo, monospace; font-size:11px;');
+    expect(source).toContain('gap:4px 8px; min-width:0;');
     expect(source).toContain('width:26px; height:24px;');
   });
 
@@ -16,6 +19,12 @@ describe('compact tree row design frames', () => {
     expect(source).toContain("actionVisibility: sel || hov ? 'visible' : 'hidden'");
     expect(source).toContain('visibility:{{ actionVisibility }}; opacity:{{ actionOpacity }};');
     expect(source).not.toContain('showActions: (sel || hov)');
+  });
+
+  it('uses accent topic titles while preserving the earlier-topic opacity', () => {
+    const topic = handoffMembers()['Ariadne.dc.html']!;
+    expect(topic).toContain("nameColor: earlier ? 'color-mix(in srgb, var(--a-acc-text) 82%, transparent)' : 'var(--a-acc-text)'");
+    expect(topic).toContain('color:{{ r.nameColor }};');
   });
 
   it('leaves unrelated reference content unchanged', () => {

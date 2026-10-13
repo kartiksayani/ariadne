@@ -306,6 +306,8 @@
 /* ---------------------------------------------------------------- rows */
 
 .tree-row {
+  --tree-bullet-y: 23px;
+
   position: relative;
   cursor: pointer;
   outline: none;
@@ -348,6 +350,8 @@
 
 /* Topic band. */
 .tree-topic {
+  --tree-bullet-y: 22px;
+
   position: sticky;
   top: 0;
   z-index: 3;
@@ -387,11 +391,11 @@
   font-weight: 500;
   line-height: calc(22px * var(--text-scale));
   letter-spacing: -.01em;
-  color: var(--color-text);
+  color: var(--a-acc-text);
 }
 
 .tree-topic-name[data-earlier] {
-  color: color-mix(in srgb, var(--color-text) 82%, transparent);
+  color: color-mix(in srgb, var(--a-acc-text) 82%, transparent);
 }
 
 .tree-session-chip {
@@ -502,6 +506,7 @@
 
 /* Reply and recovery controls scroll with the section, below its sticky band. */
 .tree-topic-content {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -563,6 +568,8 @@
 
 /* Extra room before a root keeps its descendants together without breaking guide lines. */
 .tree-item-root {
+  --tree-bullet-y: 31px;
+
   padding-top: 20px;
 }
 
@@ -595,23 +602,52 @@
 }
 
 .tree-guide {
+  pointer-events: none;
   position: absolute;
   top: 0;
-  bottom: 0;
+  bottom: -1px;
+}
+
+.tree-guide[data-from-bullet] { top: var(--tree-bullet-y); }
+
+.tree-guide[data-to-bullet] {
+  bottom: auto;
+  height: var(--tree-bullet-y);
 }
 
 .tree-elbow {
   position: absolute;
   top: 0;
-  height: 20px;
+  height: var(--tree-bullet-y);
+  pointer-events: none;
 }
 
-.tree-item-child > .tree-elbow {
-  height: 23px;
+.tree-chevron-space::after {
+  content: '';
+  display: block;
+  width: 5px;
+  height: 5px;
+  margin: 8px auto;
+  border: 1px solid var(--a-guide);
+  border-radius: 50%;
+  background: var(--a-bg);
 }
 
-.tree-item-root > .tree-elbow {
-  height: 31px;
+.tree-top-colour {
+  position: absolute;
+  top: 25px;
+  left: 4px;
+  width: 3px;
+  height: 13px;
+  border-radius: 2px;
+}
+
+.tree-heading {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
 }
 
 .tree-icon {
@@ -631,7 +667,7 @@
   gap: 3px;
 }
 
-/* The title expands with its excerpt; only text is clamped, never the badge or actions. */
+/* Titles and options remain fully readable. */
 .tree-question {
   font-size: calc(15px * var(--text-scale));
   line-height: calc(22px * var(--text-scale));
@@ -640,18 +676,25 @@
   text-wrap: pretty;
 }
 
+.tree-heading > .tree-question {
+  flex: 1 1 12ch;
+  min-width: 0;
+}
+
 .tree-hit {
   border-radius: 3px;
   background: color-mix(in srgb, var(--color-accent) 32%, transparent);
 }
 
 .tree-line {
+  --tree-preview-line: calc(21px * var(--text-scale));
+
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 7px;
   font-size: calc(13.5px * var(--text-scale));
-  line-height: calc(21px * var(--text-scale));
+  line-height: var(--tree-preview-line);
 }
 
 .tree-line-tight {
@@ -693,7 +736,7 @@
   text-wrap: pretty;
 }
 
-/* Titles and excerpts fold separately to two lines. Show more opens the whole row. */
+/* Four body lines remain visible when at least three lines can be folded. */
 .tree-preview {
   display: flex;
   flex-direction: column;
@@ -705,22 +748,16 @@
   align-self: stretch;
 }
 
-/* Compact Markdown flows inline; expanded Markdown keeps its block structure. */
+/* Preserve Markdown structure; only eligible bodies have a height limit. */
 .tree-clamp {
-  display: -webkit-box;
-  min-width: 0;
-  overflow: hidden;
-  -webkit-line-clamp: var(--tree-clamp, 2);
-  -webkit-box-orient: vertical;
-}
-
-.tree-line > .tree-clamp {
-  flex: 1;
-}
-
-.tree-item[data-open] .tree-clamp {
   display: block;
-  overflow: visible;
+  min-width: 0;
+}
+.tree-line > .tree-clamp { flex: 1; }
+
+.tree-preview[data-clamped] .tree-clamp {
+  max-height: calc(var(--tree-preview-line, 21px) * var(--tree-clamp, 4));
+  overflow: hidden;
 }
 
 .tree-preview .md-pre {
@@ -827,13 +864,12 @@
   gap: 4px;
 }
 
-/* The status and ordinal share the action column, leaving the rest to the sentence. */
 .tree-row-status {
-  order: -1;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding-top: 2px;
 }
 
 /* Only present for actions: the intrinsic grid never reserves an empty column. */
@@ -934,19 +970,6 @@
   color: var(--color-text);
   background: color-mix(in srgb, var(--color-text) 9%, transparent);
 }
-
-.tree-id {
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: calc(11px * var(--text-scale));
-  color: color-mix(in srgb, var(--color-text) 55%, transparent);
-  opacity: 0;
-}
-
-.tree-item:hover .tree-id,
-.tree-item[aria-selected="true"] .tree-id {
-  opacity: 1;
-}
-
 
 /* ---------------------------------------------------------------- states */
 
@@ -1057,6 +1080,8 @@
 
 
 .tree-hidden-group {
+  --tree-bullet-y: 20px;
+
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1075,4 +1100,43 @@
 
 .tree-item-hidden {
   opacity: .58;
+}
+
+.tree-scroll-shell {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* An opaque surface in every interactive state, including the global button reset. */
+.tree-selected-edge,
+.tree-selected-edge:hover,
+.tree-selected-edge:focus,
+.tree-selected-edge:active {
+  position: absolute;
+  z-index: 4;
+  left: 12px;
+  right: 24px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-divider);
+  border-radius: 5px;
+  background: var(--a-card);
+  color: var(--a-acc-text);
+  box-shadow: var(--a-lift);
+  font: inherit;
+  font-size: calc(12.5px * var(--text-scale));
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.tree-selected-edge[data-edge="above"] { top: 8px; }
+.tree-selected-edge[data-edge="below"] { bottom: 8px; }
+
+.tree-selected-edge:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }

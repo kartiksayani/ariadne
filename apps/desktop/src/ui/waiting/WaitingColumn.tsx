@@ -198,7 +198,7 @@ function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRu
       {delivery.retry && <button type="button" className="btn btn-secondary waiting-delivery-action" onClick={retry}>Retry</button>}</div>}
     <div onClick={event => event.stopPropagation()}>
       {actions && <PausedNote actions={actions} />}
-      <AnswerControl variant="compact" options={item.options} selected={selection} draft={entry?.draft.text ?? ''} label={`Answer #${item.id}`}
+      <AnswerControl variant="compact" options={item.options} selected={selection} draft={entry?.draft.text ?? ''} label={`Answer ${shortLabel(item)}`}
         locked={submit.locked || !!delivery || submit.changed} blocked={delivery || submit.changed ? undefined : submit.blocked ?? undefined}
         warn={submit.changed && !delivery ? 'This item changed. Review the current question and options; your text is retained.' : undefined}
         warnAction={submit.changed && !delivery ? { label: 'Review current target', onAction: submit.review } : undefined}

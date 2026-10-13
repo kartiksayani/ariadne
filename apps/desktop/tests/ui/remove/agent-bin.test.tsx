@@ -656,7 +656,7 @@ describe('agent removal receipts in the composed app', () => {
     await waitFor(() => expect(rows()).toEqual(['1', '1.1']));
     await waitFor(() => expect(transport.listeners.get('ariadne://route')?.size).toBe(1));
     await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '1.2' }); });
-    const detail = await screen.findByLabelText('Detail of #1.2');
+    const detail = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.2"]' });
     expect(within(detail).getByRole('heading', { name: 'Other child' })).toBeTruthy();
     await waitFor(() => expect(rows()).toEqual(['1', '1.1', '1.2']));
     fireEvent.click(screen.getByRole('button', { name: 'Resume filtered view' }));

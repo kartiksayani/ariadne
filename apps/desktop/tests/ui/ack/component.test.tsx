@@ -52,7 +52,7 @@ class AckTransport extends AppTransport {
   }
 }
 const row = (id = '1.1') => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
-const detail = () => screen.getByLabelText('Detail of #1.1');
+const detail = () => screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
 const acks = (transport: AppTransport) => transport.mutations.filter(value => value.command.command === 'ack');
 const refusal = 'This item can’t be acknowledged now. Check its current status and any question waiting for you.';
 async function mount(transport = new AckTransport()) {
@@ -82,11 +82,11 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
       const label = status === 'open' ? 'Open' : 'In progress', colour = status === 'open' ? 'open' : 'progress';
       await mount(transport);
       expect(within(row()).getByRole('img', { name: label })).toBeTruthy();
-      expect(row().querySelector('.tree-end .status-badge')?.textContent).toBe(label);
+      expect(row().querySelector('.tree-heading .status-badge')?.textContent).toBe(label);
       expect(within(row()).getByText(hint)).toBeTruthy();
       expect(within(row()).getByRole('button', { name: hint }).title).toBe(hint);
       expect(row().querySelector<HTMLElement>('.tree-outcome i')?.style.color).toBe(`var(--st-${colour})`);
-      fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+      fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
       expect(detail().querySelector('.detail-badge')?.textContent).toBe(label);
       expect(detail().querySelector<HTMLElement>('.detail-badge .status-badge')?.style.color).toBe(`var(--st-${colour})`);
       expect(within(detail()).getByText(hint)).toBeTruthy();
@@ -113,7 +113,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
         session.inputs[input.id] = input;
       }
       await mount(transport);
-      fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+      fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
       if (question === 'archived') {
         session.state = 'closed'; session.archived_at = session.updated_at; ++session.revision;
         act(() => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
@@ -135,7 +135,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     item.status = 'in_progress'; item.ack_to = target;
     item.outcome = 'Retry limits are recorded.'; item.why = 'The limits have an explicit owner.';
     await mount(transport);
-    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await act(async () => { detail().focus(); fireEvent.keyDown(detail(), { key: 'a' }); });
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe(target === 'in_progress' ? 'progress' : 'open'));
     await waitFor(() => expect(within(detail()).queryByRole('button', { name: /^Ack/ })).toBeNull());
@@ -182,7 +182,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
 
   it.each(['tree', 'detail', 'graph'] as const)('explains a keyboard Ack from %s while another change is being saved or awaits confirmation', async source => {
     const transport = await mount();
-    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     let release!: () => void, saving = false;
     const gate = new Promise<void>(resolve => { release = resolve; });
     const invoke = transport.invoke.bind(transport);
@@ -212,16 +212,16 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     session.items['1']!.related = ['1.1'];
     session.items['1.1']!.short = 'Retry limits';
     await mount(transport);
-    fireEvent.click(row('1')); await screen.findByLabelText('Detail of #1');
+    fireEvent.click(row('1')); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     const related = screen.getByRole('region', { name: 'Related items' });
-    const linked = within(related).getByRole('button', { name: /#1\.1 Retry limits/ });
+    const linked = within(related).getByRole('button', { name: /^Retry limits ·/ });
     expect(linked.textContent).toContain('Open');
-    fireEvent.click(linked); await screen.findByLabelText('Detail of #1.1');
+    fireEvent.click(linked); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await act(async () => { fireEvent.click(within(detail()).getByRole('button', { name: 'Ack → Done' })); });
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe('done'));
     expect(acks(transport)).toHaveLength(1);
-    fireEvent.click(row('1')); await screen.findByLabelText('Detail of #1');
-    expect(within(screen.getByRole('region', { name: 'Related items' })).getByRole('button', { name: /#1\.1 Retry limits/ }).textContent).toContain('Done');
+    fireEvent.click(row('1')); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
+    expect(within(screen.getByRole('region', { name: 'Related items' })).getByRole('button', { name: /^Retry limits ·/ }).textContent).toContain('Done');
   });
 
   it('offers a quiet row Ack with a target tooltip and a topic count, while questions keep their answer controls', async () => {
@@ -245,7 +245,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     item.ack_to = target;
     const revision = item.revision;
     await mount(transport);
-    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     const label = target[0].toUpperCase() + target.slice(1);
     const button = within(detail()).getByRole('button', { name: `Ack → ${label}` });
     expect(button.title).toBe(`Ack → ${label}`);
@@ -271,7 +271,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     const view = () => transport.preferences.sessions.find(value => value.session.session_id === route.session_id)!;
     expect(view().hidden_item_ids).toContain('1.1');
     await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '1.1' }); });
-    await screen.findByLabelText('Detail of #1.1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     expect(row().classList.contains('tree-item-hidden')).toBe(true);
     const button = within(detail()).getByRole('button', { name: 'Ack → Done' });
     expect(button.closest('.detail-dock')).not.toBeNull();
@@ -292,7 +292,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
       }
     }
     const transport = new RefreshTransport(); await mount(transport);
-    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     let release!: () => void;
     transport.hold = new Promise<void>(resolve => { release = resolve; });
     const session = transport.sessions.get(route.session_id)!, item = session.items['1.1']!;
@@ -317,7 +317,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     item.outcome = 'Retry limits are recorded.'; item.why = 'The limits now have an explicit owner.';
     await mount(transport);
     expect(row().querySelector('.tree-outcome')?.textContent).toContain(item.outcome);
-    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     expect(within(within(detail()).getByRole('region', { name: 'Current outcome' })).getByText('Outcome')).toBeTruthy();
     expect(within(detail()).getByText(item.outcome)).toBeTruthy();
     expect(within(detail()).getByText(item.why)).toBeTruthy();
@@ -331,7 +331,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     earlier.payload.target_snapshot.item_question = item.question;
     item.ask = 'Are these limits acceptable?';
     const earlierId = earlier.id;
-    await mount(transport); fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    await mount(transport); fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await act(async () => { fireEvent.click(within(detail()).getByRole('button', { name: 'Ack → Done' })); });
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe('done'));
     expect(session.inputs[earlierId]!.state).toBe('queued');
@@ -354,7 +354,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
   it.each(['tree', 'detail', 'graph'] as const)('uses a to Ack from %s without opening an answer', async source => {
     const transport = await mount();
     let target = row();
-    if (source === 'detail') { fireEvent.click(target); target = await screen.findByLabelText('Detail of #1.1'); }
+    if (source === 'detail') { fireEvent.click(target); target = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' }); }
     if (source === 'graph') { fireEvent.keyDown(target, { key: 'g' }); await screen.findByText('One graph per topic'); target = row(); }
     await act(async () => { target.focus(); fireEvent.keyDown(target, { key: 'a' }); });
     await waitFor(() => expect(acks(transport)).toHaveLength(1));
@@ -367,7 +367,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     row('2').focus(); fireEvent.keyDown(row('2'), { key: 'a' });
     await waitFor(() => expect(row('2').querySelector('.tree-answer')).not.toBeNull());
     expect(acks(transport)).toHaveLength(0);
-    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     const words = within(detail()).getByRole('textbox');
     fireEvent.keyDown(words, { key: 'a' });
     expect(acks(transport)).toHaveLength(0);
@@ -380,7 +380,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     expect(marker.classList.contains('graph-node-ack')).toBe(true);
     expect(marker.title).toContain('Ack → Done');
     expect(within(row('2')).queryByText('Ack → Decided')).toBeNull();
-    fireEvent.click(marker); await screen.findByLabelText('Detail of #1.1');
+    fireEvent.click(marker); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     expect(acks(transport)).toHaveLength(0);
     await act(async () => { fireEvent.click(within(detail()).getByRole('button', { name: 'Ack → Done' })); });
     await waitFor(() => expect(within(row()).queryByText('Ack → Done')).toBeNull());
@@ -388,7 +388,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
 
   it.each(['tree', 'detail'] as const)('surfaces a plain refusal from %s and permits another attempt', async source => {
     const transport = new AckTransport(); transport.refuse = true; await mount(transport);
-    if (source === 'detail') { fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1'); }
+    if (source === 'detail') { fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' }); }
     const host = source === 'detail' ? detail() : row();
     await act(async () => { fireEvent.click(within(host).getByRole('button', { name: 'Ack → Done' })); });
     expect(await screen.findByText('This item can’t be acknowledged now. Check its current status and any question waiting for you.')).toBeTruthy();
@@ -401,18 +401,18 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
 
   it.each(['tree', 'detail'] as const)('clears a %s refusal when another item is selected and keeps it cleared on return', async source => {
     const transport = new AckTransport(); transport.refuse = true; await mount(transport);
-    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await act(async () => { fireEvent.click(within(source === 'tree' ? row() : detail()).getByRole('button', { name: 'Ack → Done' })); });
     expect(await screen.findByText(refusal)).toBeTruthy();
-    fireEvent.click(row('2')); await screen.findByLabelText('Detail of #2');
+    fireEvent.click(row('2')); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     await waitFor(() => expect(screen.queryByText(refusal)).toBeNull());
-    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     expect(screen.queryByText(refusal)).toBeNull();
   });
 
   it.each(['tree', 'detail'] as const)('shares one item refusal across both views and clears it after Ack succeeds from %s', async source => {
     const transport = new AckTransport(); transport.refuse = true; await mount(transport);
-    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     for (const [index, host] of [row(), detail()].entries()) {
       await act(async () => { fireEvent.click(within(host).getByRole('button', { name: 'Ack → Done' })); });
       await waitFor(() => expect(acks(transport)).toHaveLength(index + 1));
@@ -433,10 +433,10 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     let release!: () => void;
     transport.ackWait = new Promise(resolve => { release = resolve; });
     await mount(transport);
-    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     fireEvent.click(within(row()).getByRole('button', { name: 'Ack → Done' }));
     await waitFor(() => expect(acks(transport)).toHaveLength(1));
-    fireEvent.click(row('2')); await screen.findByLabelText('Detail of #2');
+    fireEvent.click(row('2')); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     await act(async () => { release(); });
     await waitFor(() => expect(within(row()).getByRole<HTMLButtonElement>('button', { name: 'Ack → Done' }).disabled).toBe(false));
     expect(screen.queryByText(refusal)).toBeNull();
@@ -444,7 +444,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
 
   it.each(['detail', 'graph'] as const)('clears a keyboard Ack refusal from %s on selection changes and on a button Ack success', async source => {
     const transport = new AckTransport(); transport.refuse = true; await mount(transport);
-    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     if (source === 'graph') { fireEvent.keyDown(row(), { key: 'g' }); await screen.findByText('One graph per topic'); }
     const host = () => source === 'detail' ? detail() : row();
     const pressAck = async () => { await act(async () => { host().focus(); fireEvent.keyDown(host(), { key: 'a' }); }); };
@@ -452,9 +452,9 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     expect(await screen.findByText(refusal, { selector: '.pw-note-text' })).toBeTruthy();
     expect(notices.getSnapshot().find(notice => notice.text === refusal)?.id)
       .toBe(JSON.stringify(['item-ack', route.project_id, route.session_id, '1.1']));
-    fireEvent.click(row('2')); await screen.findByLabelText('Detail of #2');
+    fireEvent.click(row('2')); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     await waitFor(() => expect(screen.queryByText(refusal)).toBeNull());
-    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     expect(screen.queryByText(refusal)).toBeNull();
     await pressAck();
     expect(await screen.findByText(refusal, { selector: '.pw-note-text' })).toBeTruthy();
@@ -470,10 +470,10 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     let release!: () => void;
     transport.ackWait = new Promise(resolve => { release = resolve; });
     await mount(transport);
-    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await act(async () => { detail().focus(); fireEvent.keyDown(detail(), { key: 'a' }); });
     await waitFor(() => expect(acks(transport)).toHaveLength(1));
-    fireEvent.click(row('2')); await screen.findByLabelText('Detail of #2');
+    fireEvent.click(row('2')); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     await act(async () => { release(); });
     await waitFor(() => expect(within(row()).getByRole<HTMLButtonElement>('button', { name: 'Ack → Done' }).disabled).toBe(false));
     expect(screen.queryByText(refusal)).toBeNull();
@@ -482,7 +482,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
   it('removes the app keyboard Ack refusal when the workspace unmounts', async () => {
     const transport = new AckTransport(); transport.refuse = true;
     await mount(transport);
-    fireEvent.click(row()); await screen.findByLabelText('Detail of #1.1');
+    fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await act(async () => { detail().focus(); fireEvent.keyDown(detail(), { key: 'a' }); });
     expect(await screen.findByText(refusal, { selector: '.pw-note-text' })).toBeTruthy();
     cleanup();

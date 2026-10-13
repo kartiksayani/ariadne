@@ -10,7 +10,7 @@ import type { PresenceObservation } from '../../../src/generated/domain/models';
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const sends = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'input_submit');
 const row = () => document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
-const detail = () => screen.getByLabelText('Detail of #2');
+const detail = () => screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
 const alt = (target: Element, digit: number, repeat = false) => fireEvent.keyDown(target, {
   key: digit === 1 ? '¡' : digit === 0 ? 'º' : '™', code: `Digit${digit}`, altKey: true, repeat,
 });
@@ -35,7 +35,7 @@ async function openQuestion() {
       expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
     });
   fireEvent.click(row());
-  await screen.findByLabelText('Detail of #2');
+  await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
   await waitFor(() => expect(within(detail()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').disabled).toBe(false));
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
@@ -271,7 +271,7 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
     const target = entry === 'tree' ? row() : entry === 'waiting'
       ? document.querySelector<HTMLElement>('[data-waiting-item="2"]')! : detail();
     target.focus(); alt(target, 0);
-    await screen.findByLabelText('Detail of #2');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     await waitFor(() => expect(document.activeElement).toBe(within(detail()).getByLabelText('Reply in your own words')));
     expect(sends(transport)).toHaveLength(0);
   });

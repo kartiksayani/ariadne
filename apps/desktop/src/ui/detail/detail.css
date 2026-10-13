@@ -749,6 +749,19 @@
   gap: 4px;
 }
 
+.detail-provenance .copied-provenance {
+  max-width: 100%;
+}
+
+.detail-provenance .copied-provenance .btn {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .detail-related-item {
   display: flex;
   align-items: center;
@@ -773,15 +786,10 @@
   opacity: .58;
 }
 
-.detail-related-number,
 .detail-related-hidden {
   flex: none;
   font-size: calc(11px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
-}
-
-.detail-related-number {
-  font-family: ui-monospace, Menlo, monospace;
 }
 
 .detail-related-label {

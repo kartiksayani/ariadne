@@ -433,7 +433,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   return <ItemRefs.Provider value={{ lookup: id => {
     const target = session.items[id];
     return target && !itemRemoved(session, target.id) ? { label: shortLabel(target), status: displayStatus(session, target) } : null;
-  }, onOpenItem }}><FileRefProject.Provider value={session.project_id}><article className="item-detail" data-detail-item-id={itemId} data-status={model.status} aria-label={`Detail of #${model.id}`}>
+  }, onOpenItem }}><FileRefProject.Provider value={session.project_id}><article className="item-detail" data-detail-item-id={itemId} data-status={model.status} aria-label={`Detail of ${shortLabel(item)}`}>
     <div className="detail-body" ref={body} onScroll={event => {
       const pane = event.currentTarget;
       if (pane.scrollTop !== positionedScroll.current) followingAsk.current = false;
@@ -488,8 +488,8 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     {model.related.map(section => <section key={section.direction} className="detail-section detail-related" aria-label={section.label}>
       {sectionLabel(section.label)}
       {section.items.map(target => <button key={target.id} type="button" className={`detail-related-item${target.hidden ? ' is-hidden' : ''}`}
-        title={target.question} aria-label={`#${target.id} ${target.label}${target.hidden ? ' (hidden)' : ''} · ${STATUS[target.status].label}`} onClick={() => onOpenItem(target.id)}>
-        <span className="detail-related-number">#{target.id}</span><span className="detail-related-label">{target.label}</span>
+        title={target.question} aria-label={`${target.label}${target.hidden ? ' (hidden)' : ''} · ${STATUS[target.status].label}`} onClick={() => onOpenItem(target.id)}>
+        <span className="detail-related-label">{target.label}</span>
         {target.hidden && <span className="detail-related-hidden">Hidden</span>}<StatusBadge status={target.status} variant="text" />
       </button>)}
     </section>)}

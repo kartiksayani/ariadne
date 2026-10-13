@@ -102,7 +102,8 @@ async function settle(page: Page) {
 async function openApp(page: Page, origin: string, spec: FrameSpec) {
   await page.setViewportSize({ width: spec.width, height: spec.height });
   await page.clock.setFixedTime(frameNow(spec));
-  await page.goto(`${origin}/tests/ui/design/gallery.html?frame=${spec.id}`);
+  const params = new URLSearchParams({ frame: spec.id, theme: spec.theme, rail: spec.rail ? '1' : '0' });
+  await page.goto(`${origin}/tests/ui/design/gallery.html?${params}`);
   await page.waitForFunction(() => (window as { __designError?: string }).__designError
     || /\d+ items/.test(document.querySelector('.shell-summary')?.textContent ?? ''), null, { timeout: 60_000 });
   expect(await page.evaluate(() => (window as { __designError?: string }).__designError)).toBeUndefined();
@@ -228,9 +229,8 @@ async function compare(page: Page, design: Buffer, app: Buffer, regions: readonl
 interface Region { readonly name: string; readonly x: number; readonly y: number; readonly width: number; readonly height: number }
 
 test.describe.configure({ mode: 'parallel' });
-/** The tree row of item `itemId` in a board card: the Item Row whose id label reads it (Item Row.dc.html). */
-const designRow = (designPage: Page, card: string, itemId: string) => designPage.locator(`[id="${card}"] .dv-card [role="treeitem"]`)
-  .filter({ has: designPage.locator('span', { hasText: new RegExp(`^${itemId.replace(/\./g, '\\.')}$`) }) }).first();
+/** Stable identity works even though reference rows no longer print their item numbers. */
+const designRow = (designPage: Page, card: string, itemId: string) => designPage.locator(`[id="${card}"] .dv-card [role="treeitem"][data-item-id="${itemId}"]`).first();
 
 for (const id of [...designFrames, ...variantIds]) {
   test(`frame ${id}`, async ({ page, origin, designPage }) => {
@@ -295,6 +295,32 @@ for (const width of [1920, 1600, 1280]) for (const acceptedFailure of [false, tr
     expect(denied).toEqual([]);
   });
 }
+
+for (const theme of ['light', 'dark'] as const) test(`Map names and top-line status keep their layout on hover in ${theme}`, async ({ page, origin }) => {
+  const denied: string[] = [];
+  await route(page.context(), origin, denied);
+  await openApp(page, origin, { ...frameSpec('1a'), theme, rail: false, hoverMsg: undefined });
+  const root = page.locator('.tree-item.tree-item-root').first(), child = page.locator('.tree-item.tree-item-child').first();
+  await expect(page.locator('.tree-id')).toHaveCount(0);
+  await expect(root.locator('.tree-top-colour')).toHaveCount(1);
+  await expect(child.locator('.tree-top-colour')).toHaveCount(0);
+  const heading = root.locator('.tree-heading'), title = root.locator('.tree-question'), status = heading.locator('.tree-row-status');
+  await expect(status).toBeVisible();
+  const titleBefore = await title.boundingBox(), statusBefore = await status.boundingBox();
+  expect(statusBefore!.y).toBeLessThan(titleBefore!.y + titleBefore!.height);
+  const topicColour = await page.locator('.tree-topic-name').first().evaluate(element => {
+    const probe = document.createElement('span');
+    probe.style.color = element.hasAttribute('data-earlier') ? 'color-mix(in srgb, var(--a-acc-text) 82%, transparent)' : 'var(--a-acc-text)';
+    element.append(probe);
+    const expected = getComputedStyle(probe).color, actual = getComputedStyle(element).color;
+    probe.remove(); return { actual, expected };
+  });
+  expect(topicColour.actual).toBe(topicColour.expected);
+  await root.hover();
+  expect(await title.boundingBox()).toEqual(titleBefore);
+  expect(await status.boundingBox()).toEqual(statusBefore);
+  expect(denied).toEqual([]);
+});
 
 test('a long waiting conversation opens at its latest ask and keeps the question visible', async ({ page, origin }) => {
   const denied: string[] = [];

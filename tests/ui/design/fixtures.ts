@@ -235,8 +235,8 @@ const archivedAt = (words: string | undefined, fallback: string) => {
 };
 
 /** Builds the frame's application state; throws "fixture not written" for frames without one. */
-export function designFixture(frame: string, data: PrototypeData): DesignFixture {
-  const spec = frameSpec(frame), world = scenarioWorld(spec, data);
+export function designFixture(frame: string, data: PrototypeData, presentation: Partial<Pick<FrameSpec, 'theme' | 'rail'>> = {}): DesignFixture {
+  const spec = { ...frameSpec(frame), ...presentation }, world = scenarioWorld(spec, data);
   const projectIds = new Map(world.projects.map((project, index) => [project.id, uuid('a', index + 1)]));
   const refs = new Map(world.sessions.map((session, index) => [session.id, { project_id: projectIds.get(session.project)!, session_id: uuid('b', index + 1) }]));
   const messageIds = new Map(world.msgs.map(message => [message.number, uuid('d', message.number)]));
