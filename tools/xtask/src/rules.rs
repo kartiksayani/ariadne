@@ -4,7 +4,7 @@
 use std::{fs, path::Path};
 
 /// Files loaded only when the core skill points at them, one source each.
-const ON_DEMAND: [&str; 7] = [
+const ON_DEMAND: [&str; 8] = [
     "inputs.md",
     "errors.md",
     "reconnect.md",
@@ -12,6 +12,7 @@ const ON_DEMAND: [&str; 7] = [
     "review.md",
     "checklist.md",
     "follow-up.md",
+    "pr-comments.md",
 ];
 
 const CLAUDE_DESCRIPTION: &str = "File work in Ariadne as topics and items, not long chat replies; also for [ARIADNE_INPUT:] messages. Needs a connected session: if not, ask the owner to run /ariadne-connect and load nothing else.";
@@ -138,6 +139,28 @@ pub fn generate(root: &Path, check: bool) -> Result<(), String> {
             write_or_check(
                 &target_directory.join(name),
                 &on_demand(name, source, agent)?,
+                check,
+            )?;
+        }
+        if agent == "codex" {
+            let command_directory = target_directory.with_file_name("ariadne-pr-comments");
+            if command_directory.is_symlink() {
+                return Err("PR comments skill path is symlinked".into());
+            }
+            if !check {
+                fs::create_dir_all(&command_directory).map_err(|error| error.to_string())?;
+            }
+            let source = &on_demand_bodies
+                .iter()
+                .find(|(name, _)| *name == "pr-comments.md")
+                .expect("PR comments source")
+                .1;
+            write_or_check(
+                &command_directory.join("SKILL.md"),
+                &format!(
+                    "---\nname: ariadne-pr-comments\ndescription: Import open PR review comments into Ariadne for the owner's Fix, Reply or Skip choice. Invoke with a PR number or github.com PR URL in a connected thread.\n---\n{}",
+                    on_demand("pr-comments.md", source, agent)?
+                ),
                 check,
             )?;
         }

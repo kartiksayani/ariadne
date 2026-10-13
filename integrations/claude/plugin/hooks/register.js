@@ -3,6 +3,7 @@ import { BUSY, claimLoop } from './claims.js';
 import { forget, qualify, recall, remember, setup } from './setup.js';
 import { bounded, descriptorValid, ModError, plainFailure, uuid } from './contracts.js';
 import { announcements } from './discovery.js';
+import { prCommentsPrompt } from './pr-comments.js';
 
 // Claude's static validator follows `$` only inside this file, so imported
 // helpers receive a facade whose members are spelled $.noun.event(...) here.
@@ -313,6 +314,7 @@ async function sessionStart(state, $, event, next) {
   for (const [name,description] of [['ariadne-connect','Bind this original conversation to Ariadne'],['ariadne-status','Show the registered Ariadne connection'],['ariadne-disconnect','Disconnect Ariadne without stopping Claude']]) {
     await $.command.register({name,description,...(name === 'ariadne-connect' ? {argumentHint:'[session-id]'} : {})});
   }
+  await $.command.register({name:'ariadne-pr-comments',description:'Choose what to do with open PR review comments',argumentHint:'<PR>'});
   try { state.claudeSessionId = await $.session.id(); } catch { state.claudeSessionId = null; }
   // Discovery may describe an unqualified engine; only native inspection can
   // qualify it. Its heartbeat never enables the independent claim loop.
@@ -377,6 +379,23 @@ function connectRun(state, $, event) {
     const requestedSessionId = selectedSession(event);
     return transition(state,$,() => connectTransition(state,$,requestedSessionId),true);
   });
+}
+async function prCommentsRun(state, $, event) {
+  let text;
+  try { text = prCommentsPrompt(event?.args); }
+  catch (error) { return {text:error.plain}; }
+  await follow(state,$);
+  if (state.sessionEnded) return {text:TEXT.ended};
+  if (!state.loopBinding || !state.loop) return {text:'Connect this conversation with /ariadne-connect first.'};
+  if (state.ownerTransition || busy(state)) return {text:'Ariadne is still handling another request. Try again when it finishes.'};
+  // Like owner-input submissions, this promise can span the model's whole turn.
+  // Never await it in the command handler or automatically retry uncertain delivery.
+  try {
+    void $.prompt.submit({text,asUser:true}).then(result => {
+      if (typeof result?.drop === 'string') $.ui.log('The PR comments request did not start. Run /ariadne-pr-comments again.');
+    }).catch(() => $.ui.log('The PR comments request may not have started. Check the conversation before trying again.'));
+  } catch { return {text:'The PR comments request may not have started. Check the conversation before trying again.'}; }
+  return {text:'The agent will file the review choices in Ariadne. Pick Fix, Reply or Skip there.'};
 }
 async function statusAction(state, $) {
   if (!state.qualified) await qualify(host($),state.descriptor);
@@ -470,6 +489,7 @@ function registerModule(descriptor, on, publish) {
   state.owner = descriptor ? setup(descriptor.helperPath,(h,binding) => savedBinding(state,h,binding),publish) : null;
   on('session.start',($,event,next) => sessionStart(state,$,event,next));
   on('command.run',{command:'ariadne-connect'},($,event) => connectRun(state,$,event));
+  on('command.run',{command:'ariadne-pr-comments'},($,event) => prCommentsRun(state,$,event));
   on('command.run',{command:'ariadne-status'},($) => checked(state,$,() => statusAction(state,$)));
   on('command.run',{command:'ariadne-disconnect'},($) => checked(state,$,() => transition(state,$,() => disconnectAction(state,$))));
   on('turn.start',($,event,next) => turnStart(state,$,event,next));

@@ -76,6 +76,7 @@ impl Fixture {
             ("hooks/setup.js", "// fixture"),
             ("hooks/claims.js", "// fixture"),
             ("hooks/discovery.js", "// fixture"),
+            ("hooks/pr-comments.js", "// fixture"),
             ("hooks/installed.js", "export default null;"),
             ("skills/ariadne/SKILL.md", "# Local scripted provider"),
             ("skills/ariadne/inputs.md", "# Fixture"),
@@ -85,6 +86,7 @@ impl Fixture {
             ("skills/ariadne/review.md", "# Fixture"),
             ("skills/ariadne/checklist.md", "# Fixture"),
             ("skills/ariadne/follow-up.md", "# Fixture"),
+            ("skills/ariadne/pr-comments.md", "# Fixture"),
         ] {
             let file = plugin.join(name);
             fs::create_dir_all(file.parent().unwrap()).unwrap();

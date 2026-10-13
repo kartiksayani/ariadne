@@ -22,7 +22,7 @@ use std::{
 
 pub const SUPPORTED_HOST_VERSION: &str = "2.1.287";
 type FileIdentity = (u64, u64, u64, i64, i64, i64, i64);
-const RESOURCES: [&str; 16] = [
+const RESOURCES: [&str; 18] = [
     ".claude-plugin/plugin.json",
     "hooks/hooks.json",
     "hooks/register.js",
@@ -30,6 +30,7 @@ const RESOURCES: [&str; 16] = [
     "hooks/setup.js",
     "hooks/claims.js",
     "hooks/discovery.js",
+    "hooks/pr-comments.js",
     "hooks/installed.js",
     "skills/ariadne/SKILL.md",
     "skills/ariadne/inputs.md",
@@ -39,6 +40,7 @@ const RESOURCES: [&str; 16] = [
     "skills/ariadne/review.md",
     "skills/ariadne/checklist.md",
     "skills/ariadne/follow-up.md",
+    "skills/ariadne/pr-comments.md",
 ];
 
 /// Explicit installed paths supplied by native composition, never discovered from PATH/cache.

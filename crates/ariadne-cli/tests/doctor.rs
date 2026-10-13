@@ -152,6 +152,31 @@ fn canonical_doctor_is_strictly_read_only_and_omits_session_bodies() {
 }
 
 #[test]
+fn doctor_detects_missing_or_changed_pr_comments_resources_without_writing() {
+    for name in [
+        "claude-mod/plugin/hooks/pr-comments.js",
+        "claude-mod/plugin/skills/ariadne/pr-comments.md",
+        "codex-skills/ariadne/pr-comments.md",
+        "codex-skills/ariadne-pr-comments/SKILL.md",
+    ] {
+        let profile = Profile::new();
+        let path = profile.version.join("integrations").join(name);
+        fs::write(&path, "edited recipe").unwrap();
+        let before = snapshot(profile.home.path());
+        let check = &checks(&profile.report(), "installation.resource_parity")[0];
+        assert_eq!(check["status"], "error");
+        assert_eq!(check["facts"]["changed"], serde_json::json!([name]));
+        assert_eq!(snapshot(profile.home.path()), before);
+        fs::remove_file(path).unwrap();
+        let before = snapshot(profile.home.path());
+        let check = &checks(&profile.report(), "installation.resource_parity")[0];
+        assert_eq!(check["status"], "warning");
+        assert_eq!(check["facts"]["missing"], serde_json::json!([name]));
+        assert_eq!(snapshot(profile.home.path()), before);
+    }
+}
+
+#[test]
 fn missing_session_and_registry_coordination_never_get_created() {
     let profile = Profile::new();
     let locks = profile.store().join("locks");

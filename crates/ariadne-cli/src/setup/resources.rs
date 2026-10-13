@@ -74,6 +74,14 @@ pub fn bundle(helper: &Path) -> BTreeMap<String, Vec<u8>> {
             "codex-skills/ariadne/SKILL.md",
             resource!("codex/skills/ariadne/SKILL.md").as_slice(),
         ),
+        (
+            "claude-mod/plugin/hooks/pr-comments.js",
+            resource!("claude/plugin/hooks/pr-comments.js").as_slice(),
+        ),
+        (
+            "codex-skills/ariadne-pr-comments/SKILL.md",
+            resource!("codex/skills/ariadne-pr-comments/SKILL.md").as_slice(),
+        ),
     ]
     .into_iter()
     .chain(on_demand_files!(
@@ -83,7 +91,8 @@ pub fn bundle(helper: &Path) -> BTreeMap<String, Vec<u8>> {
         "report.md",
         "review.md",
         "checklist.md",
-        "follow-up.md"
+        "follow-up.md",
+        "pr-comments.md"
     )) {
         files.insert(name.to_owned(), bytes.to_vec());
     }
@@ -133,9 +142,10 @@ pub fn host_commands(stable_integrations: &Path, agent: &str) -> Vec<String> {
     if agent != "claude" {
         // The skill's folder also holds the on-demand files its SKILL.md points at.
         let skill = stable_integrations.join("codex-skills/ariadne/SKILL.md");
+        let pr_comments = stable_integrations.join("codex-skills/ariadne-pr-comments/SKILL.md");
         commands.push(format!(
-            "In the existing Codex terminal, run /status and select that thread in Ariadne; keep host approvals explicit. After connecting, paste the short setup instruction Ariadne shows into that Codex thread once per binding; the installed Ariadne skill holds the rules (if the thread cannot load it, read {} first).",
-            skill.display()
+            "In the existing Codex terminal, run /status and select that thread in Ariadne; keep host approvals explicit. After connecting, paste the short setup instruction Ariadne shows into that Codex thread once per binding; the installed Ariadne skill holds the rules (if the thread cannot load it, read {} first). For PR review choices, invoke $ariadne-pr-comments <PR>; if Codex cannot load that skill, read {} and follow its recipe with the PR argument.",
+            skill.display(), pr_comments.display()
         ));
     }
     commands

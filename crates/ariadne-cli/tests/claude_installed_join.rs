@@ -260,7 +260,7 @@ impl Fixture {
     }
     fn connect(&mut self) -> (UuidV4, UuidV4) {
         let started = self.sdk.command(json!({"action":"start"}));
-        assert_eq!(started["commands"].as_array().unwrap().len(), 3);
+        assert_eq!(started["commands"].as_array().unwrap().len(), 4);
         assert!(started["prompts"].as_array().unwrap().is_empty());
         // Readiness includes native qualification, route publication and an
         // unchanged-operation retry. Its former 3s deadline was shorter than a
