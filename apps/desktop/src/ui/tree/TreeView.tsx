@@ -839,7 +839,9 @@ export function TreeView(props: TreeViewProps) {
   };
   useLayoutEffect(() => {
     const target = focusRequested.current;
-    if (!target || !elements.current.has(target)) return;
+    if (!target) return;
+    if (selectedId !== target) { focusRequested.current = null; return; }
+    if (!elements.current.has(target)) return;
     focusRequested.current = null;
     focusRow(target);
   }, [rows, selectedId, reveal]);

@@ -243,6 +243,31 @@ describe('session tree rows', () => {
     await waitFor(() => expect(document.activeElement).toBe(row('8')));
   });
 
+  it('expires a Go to focus request after a failed Focus exit and a different selection', async () => {
+    const view = await mount();
+    fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
+    const exit = structuredClone(viewOf(view.transport));
+    delete exit.focused_item_id;
+    view.transport.failNext = 'preferences_patch';
+    await act(async () => { expect(await view.navigation.saveSessionView(exit, view.transport.preferences.revision)).toBe(false); });
+    expect(view.navigation.getSnapshot().pendingOperationId).not.toBeNull();
+    const target: RevealedItem = { kind: 'item', route: { ...route, item_id: '8' }, store: view.store, temporaryExpandedItemIds: [] };
+    view.rerender({ selectedId: '8', reveal: target });
+    expect(viewOf(view.transport).focused_item_id).toBe('1');
+    expect(row('8')).toBeNull();
+    // A different workspace selection supersedes Go to while its target is still outside Focus.
+    view.rerender({ selectedId: '1', reveal: null });
+    act(() => { row('1').focus(); });
+    expect(document.activeElement).toBe(row('1'));
+    // Retrying the failed view save leaves Focus and finally mounts the old Go to target.
+    await act(async () => { expect(await view.navigation.retryMutation()).toBe(true); });
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+    expect(row('8')).not.toBeNull();
+    expect(row('1').getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(row('1'));
+  });
+
   it('keeps newly entered Focus after an earlier external reveal', async () => {
     const view = await mount();
     const target: RevealedItem = { kind: 'item', route: { ...route, item_id: '8' }, store: view.store, temporaryExpandedItemIds: [] };
