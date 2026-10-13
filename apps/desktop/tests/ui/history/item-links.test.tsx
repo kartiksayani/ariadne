@@ -29,7 +29,8 @@ describe('item links in the detail panel', () => {
   it('opens item links in this session with a plain-language tooltip, by click and Enter', async () => {
     const { open, openItem, files, region } = await panel([{ kind: 'item', label: 'Receipt follow-up', target: '1.1' }]);
     const link = within(region).getByRole('link', { name: 'Receipt follow-up' });
-    expect(link.getAttribute('title')).toBe('Add the receipt lookup… · Open');
+    expect(link.getAttribute('title')).toBe('Add the receipt lookup test · Open');
+    expect(link.textContent).toBe('Receipt follow-up');
     expect(link.getAttribute('title')).not.toContain('1.1');
     fireEvent.click(link);
     fireEvent.keyDown(link, { key: 'Enter' });

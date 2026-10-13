@@ -1,10 +1,12 @@
 // The status menu reads and toggles the saved status set.
 import { ActionMenu } from '../shared/ActionMenu';
+import type { ReactNode } from 'react';
 import { CHIPS, type Chip } from './model';
 
-export function FilterBar({ chips, counts, disabled, dismissKey, onChip }: {
+export function FilterBar({ chips, counts, disabled, dismissKey, onChip, children }: {
   chips: ReadonlySet<Chip>; counts: Readonly<Record<Chip, number>>; disabled: boolean;
   dismissKey?: string; onChip: (chip: Chip) => void;
+  children?: ReactNode;
 }) {
   const selected = CHIPS.filter(value => value.chip !== 'all' && chips.has(value.chip));
   const active = selected.length > 0;
@@ -24,5 +26,6 @@ export function FilterBar({ chips, counts, disabled, dismissKey, onChip }: {
         </button>
       </>}
     </ActionMenu>
+    {children}
   </div>;
 }

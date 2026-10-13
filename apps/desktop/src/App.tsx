@@ -255,10 +255,13 @@ function Workspace({ application }: { application: Application }) {
   const selectedId = candidateId && sessionState?.snapshot?.session.items[candidateId] && !itemRemoved(sessionState.snapshot.session, candidateId) ? candidateId : null;
   const seenRevision = selectedId ? sessionState?.snapshot?.session.items[selectedId]?.revision : null;
   const readingSeen = useReadingSeen(navigation.reading, state.preferences, route ?? { project_id: '', session_id: '' });
+  const detailNeedsRead = useMemo(() => selectedId != null && seenRevision != null
+    && (readingSeen?.items.find(item => item.item_id === selectedId)?.revision ?? -1) < seenRevision,
+  [readingSeen, selectedId, seenRevision]);
   const observeDetail = useCallback(() => {
     if (route && selectedId) navigation.markItemSeen(route, selectedId, seenRevision ?? undefined);
   }, [navigation, route?.project_id, route?.session_id, selectedId, seenRevision]);
-  useSeenDwell(detailOpen && route && selectedId && sessionState?.status === 'ready' && !sessionState.error ? `${key}:${selectedId}` : null, seenRevision, observeDetail);
+  useSeenDwell(detailOpen && detailNeedsRead && route && selectedId && sessionState?.status === 'ready' && !sessionState.error ? `${key}:${selectedId}` : null, seenRevision, observeDetail);
   const [answerJump, setAnswerJump] = useState<{ route: string; itemId: string; messageId: string; token: number } | null>(null);
   const answerJumpSequence = useRef(0);
   const consumeAnswerJump = useCallback((token: number) => setAnswerJump(previous => previous?.token === token ? null : previous), []);

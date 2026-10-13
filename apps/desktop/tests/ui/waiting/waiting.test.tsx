@@ -531,16 +531,32 @@ describe('source-backed Waiting and Sent panel', () => {
   it('opens references from the waiting question in that card’s session without opening the card itself', async () => {
     const { store, transport, drafts } = setup(), seed = mutableSession();
     seed.items['2']!.question = 'Read [receipt follow-up](item:1.1) or [missing follow-up](item:99).';
+    seed.items['1.1']!.short = 'Receipt test';
     transport.push('project_list', projectPage()); transport.push('session_list', sessionPage()); transport.push('session_get', loaded(seed));
     await store.start();
     const reveal = vi.fn(), external = vi.fn();
     render(<LinkOpener.Provider value={external}><WaitingColumn store={store} drafts={drafts()} revealItem={reveal} openSession={vi.fn()} /></LinkOpener.Provider>);
     const link = await screen.findByRole('link', { name: 'receipt follow-up' });
+    expect(link.title).toBe(`${seed.items['1.1']!.question} · Open`);
     fireEvent.click(link); fireEvent.keyDown(link, { key: 'Enter' });
     expect(reveal.mock.calls).toEqual([[{ ...route, item_id: '1.1' }], [{ ...route, item_id: '1.1' }]]);
     expect(screen.queryByRole('link', { name: 'missing follow-up' })).toBeNull();
     expect(screen.getByText('(item not found)')).toBeTruthy();
     expect(external).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes colliding ancestor labels across the visible Waiting cards', async () => {
+    const { store, transport, drafts } = setup(), seed = mutableSession();
+    const first = seed.items['1']!, second = seed.items['4']!, child = seed.items['2']!;
+    first.short = second.short = 'Count cache reads';
+    first.question = 'Count cache reads using Redis for this rollout?';
+    second.question = 'Count cache reads using Postgres for this rollout?';
+    second.topic_id = first.topic_id; child.parent = first.id; child.topic_id = first.topic_id;
+    seed.items['other-waiting'] = { ...structuredClone(child), id: 'other-waiting', parent: second.id, question: 'Which cache expiry should we use?' };
+    transport.capture(seed); await store.start();
+    render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
+    expect(document.querySelector('[data-waiting-item="2"] .waiting-path')!.textContent).toContain('Redis · Count cache reads');
+    expect(document.querySelector('[data-waiting-item="other-waiting"] .waiting-path')!.textContent).toContain('Postgres · Count cache reads');
   });
 
   it('routes waiting/current and original Sent targets, including a topic-only input', async () => {
@@ -753,11 +769,15 @@ describe('source-backed Waiting and Sent panel', () => {
     expect(document.querySelector('.waiting-count')!.textContent).toBe('1');
   });
   it('rings the selected card and offers preference reconciliation', async () => {
-    const { store, transport, drafts } = setup(); transport.capture(withOptions()); await store.start(); const answers = drafts();
+    const { store, transport, drafts } = setup(), seed = withOptions();
+    seed.items['2']!.question = 'Which delivery window should we use for the receipt rollout?';
+    seed.items['2']!.short = 'Delivery window';
+    transport.capture(seed); await store.start(); const answers = drafts();
     const view = render(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} />);
     await act(async () => { await answers.load(); });
     const card = document.querySelector<HTMLElement>('[data-waiting-item="2"]')!;
-    expect(within(card).getByRole('group', { name: 'Answer Which delivery window?' })).toBeTruthy();
+    expect(within(card).getByRole('group', { name: `Answer ${seed.items['2']!.question}` })).toBeTruthy();
+    expect(within(card).queryByRole('group', { name: 'Answer Delivery window' })).toBeNull();
     expect(within(card).queryByRole('group', { name: 'Answer #2' })).toBeNull();
     expect(document.querySelector('[data-waiting-item="2"]')?.getAttribute('aria-current')).toBeNull();
     view.rerender(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} selected={{ ...route, item_id: '2' }} />);

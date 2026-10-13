@@ -105,6 +105,10 @@ async function settle(page: Page) {
 
 /** Opens the frame in the app and puts it in the frame's state. */
 async function openApp(page: Page, origin: string, spec: FrameSpec) {
+  // Every app-only frame uses the same offline source harness as reference captures.
+  // In particular M2 does not request designPage, which has its own routed context.
+  const denied: string[] = [];
+  await route(page.context(), origin, denied);
   await page.setViewportSize({ width: spec.width, height: spec.height });
   await page.clock.setFixedTime(frameNow(spec));
   const params = new URLSearchParams({ frame: spec.id, theme: spec.theme, rail: spec.rail ? '1' : '0' });
@@ -173,6 +177,13 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
     await expect(filters.getByRole('button', { name: /^Filter/ })).toBeVisible();
     await expect(filters.getByRole('combobox')).toHaveCount(0);
   }
+  if (graphFrame(spec)) {
+    await expect(page.locator('.tree-selected-edge')).toHaveCount(0);
+  } else if (await page.locator('.tree-scroll').count()) {
+    await expect(page.locator('.tree-filters > .tree-selected-slot')).toHaveCount(1);
+    await expect(page.locator('.tree-scroll-shell .tree-selected-slot, .tree-scroll-shell .tree-selected-edge')).toHaveCount(0);
+  }
+  expect(denied).toEqual([]);
 }
 
 const railMessage = (page: Page, number: number) => page.locator('.pw-rail-list [data-message-id]').filter({
@@ -203,7 +214,8 @@ async function compactCompare(surface: Locator) {
   await control.scrollIntoViewIfNeeded();
   await expect(control).toHaveAttribute('title', 'Show before and after');
   await expect(control).toHaveAttribute('aria-expanded', 'false');
-  await expect(control.locator('i')).toHaveCount(1);
+  // The bundled Phosphor subset has no compare glyph, so the control draws one inline SVG icon.
+  await expect(control.locator('svg')).toHaveCount(1);
   await expect(control).toHaveText('');
   const measure = () => control.evaluate(element => {
     const rect = element.getBoundingClientRect(), style = getComputedStyle(element);

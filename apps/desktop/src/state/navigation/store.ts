@@ -1006,7 +1006,11 @@ export class NavigationStore {
     if (this.stopped) return;
     this.reading.stop();
     const finalMarks = new Map<string, SeenPatch>();
-    [...this.seenEntries, ...this.seenQueue.values()].forEach(entry => queueSeen(finalMarks, entry));
+    // An upgrade baseline is automatic initialization, not an owner observation.
+    // It can be cancelled on disposal; explicit reads and catch-up must survive.
+    [...this.seenEntries, ...this.seenQueue.values()].forEach(entry => {
+      if (entry.items.length || entry.topics.length) queueSeen(finalMarks, entry);
+    });
     if (this.queuedNavigation) this.finishNavigation(this.queuedNavigation, false);
     this.stopped = true;
     this.textScaleTarget = null;

@@ -13,7 +13,7 @@ import type { DraftEntry } from '../../state/drafts/store';
 import { deliveryLine, deliveryStage, draftStage, quote, type DeliveryLine, type DeliveryStage } from '../answer/delivery';
 import { agentName, dayWord, ownerName } from '../shell/model';
 import { connectionOf } from '../shared/connection';
-import { shortLabel } from '../shared/short';
+import { itemLabels, shortLabel } from '../shared/short';
 
 /** How the card's Retry resolves: prepare a revised draft of a rejected save, or open the item's recovery review. */
 export type RetryKind = 'revise' | 'recovery';
@@ -87,11 +87,12 @@ export function waitingAge(at: number, now: number): string {
 }
 
 /** Project (when several), topic and ancestors; longer than four collapses to the first two, "…" and the last. */
-export function pathText(session: Immutable<Session>, item: Immutable<Item>, project: string | null): string {
-  const ancestors: string[] = [];
-  for (let parent = item.parent ? session.items[item.parent] : undefined; parent; parent = parent.parent ? session.items[parent.parent] : undefined) ancestors.unshift(shortLabel(parent));
+export function pathText(session: Immutable<Session>, item: Immutable<Item>, project: string | null, labels?: ReadonlyMap<string, string>): string {
+  const ancestors: Immutable<Item>[] = [];
+  for (let parent = item.parent ? session.items[item.parent] : undefined; parent; parent = parent.parent ? session.items[parent.parent] : undefined) ancestors.unshift(parent);
+  const names = labels ?? itemLabels(ancestors, session.topics);
   const topic = session.topics[item.topic_id];
-  let parts = [...(project ? [project] : []), topic ? shortLabel(topic) : '', ...ancestors];
+  let parts = [...(project ? [project] : []), topic ? shortLabel(topic) : '', ...ancestors.map(parent => names.get(parent.id)!)];
   if (parts.length > 4) parts = [parts[0], parts[1], '…', parts[parts.length - 1]];
   return parts.join('  ›  ');
 }
@@ -136,7 +137,7 @@ export function waitingModel({ state, draft, presence, health, now }: ModelInput
     const runningHere = live.find(value => value.session.project_id === session.project_id);
     const earlier = !running(captured) && runningHere && runningHere !== captured
       ? `Asked in ${ownerName(session) ? `the “${ownerName(session)}”` : `an earlier ${agentOf(session, item.recipient_binding_id)}`} session. Your answer goes to ${agentOf(runningHere.session, null)}, with this item’s context.` : null;
-    cards.push({ id, route, session, item, chosen, path: pathText(session, item, several ? captured.project.project?.display_name ?? 'Unavailable project' : null),
+    cards.push({ id, route, session, item, chosen, path: '',
       ask: delivery ? null : item.ask, earlier, last: lastRound(session, item),
       age: item.waiting_since ? waitingAge(Date.parse(item.waiting_since), now) : '',
       tag: number === null ? '' : mine ? `#${number}` : `${earlierName(session, item.recipient_binding_id)} #${number}`, delivery });
@@ -190,6 +191,18 @@ export function waitingModel({ state, draft, presence, health, now }: ModelInput
     }
     card(captured, item, `${captured.session.id}:${item.id}:${input.id}`, { ...line, retry: 'recovery' }, input.payload.selected_option_id);
   }
+  const ancestors = new Map<string, Map<string, Immutable<Item>>>();
+  for (const card of cards) {
+    const sessionKey = key(card.route);
+    let items = ancestors.get(sessionKey);
+    if (!items) { items = new Map(); ancestors.set(sessionKey, items); }
+    for (let parent = card.item.parent ? card.session.items[card.item.parent] : undefined; parent && !items.has(parent.id); parent = parent.parent ? card.session.items[parent.parent] : undefined) items.set(parent.id, parent);
+  }
+  const labels = new Map([...ancestors].map(([sessionKey, items]) => [sessionKey, itemLabels([...items.values()], sessions.get(sessionKey)!.session.topics)]));
+  cards.forEach((value, index) => {
+    const captured = sessions.get(key(value.route))!;
+    cards[index] = { ...value, path: pathText(value.session, value.item, several ? captured.project.project?.display_name ?? 'Unavailable project' : null, labels.get(key(value.route))) };
+  });
   const order = (value: WaitingCardModel) => value.item.waiting_since ?? '';
   cards.sort((a, b) => order(a).localeCompare(order(b)));
   const loading = state.status === 'loading', first = !loading && state.status === 'ready' && state.sessions.length === 0;

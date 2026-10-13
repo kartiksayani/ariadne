@@ -8,7 +8,6 @@ import { AppTransport, route, secondId } from './transport';
 import { sessionButton } from './open';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 import { NavigationStore } from '../../../src/state/navigation/store';
-import { shortLabel } from '../../../src/ui/shared/short';
 import { changesFixture } from '../changes/fixture';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -24,13 +23,13 @@ const control = (name: string) => name === 'Back' || name === 'Forward'
   ? screen.getByLabelText<HTMLButtonElement>(name, { selector: 'button' })
   : screen.getByText<HTMLButtonElement>(name, { selector: 'button', exact: true });
 function ready() {
-  expect(screen.getByRole('button', { name: 'Session actions' })).toBeTruthy();
-  expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+  expect(screen.getByLabelText('Session actions', { selector: 'button' })).toBeTruthy();
+  expect(screen.getByLabelText('Session tree', { selector: 'section' }).getAttribute('data-session-status')).toBe('ready');
   expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
 }
 async function openSession(id = route.session_id) {
   await click(await sessionButton({ ...route, session_id: id }));
-  screen.getByRole('region', { name: 'Session tree' }); ready();
+  screen.getByLabelText('Session tree', { selector: 'section' }); ready();
 }
 function selected(id: string) {
   screen.getByLabelText(/^Detail of /, { selector: `[data-detail-item-id="${id}"]` }); ready();
@@ -101,11 +100,17 @@ describe('composed item navigation', { timeout: 10_000 }, () => {
     expect(mark).not.toHaveBeenCalled();
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(mark).toHaveBeenCalledWith(route, '2', transport.sessions.get(route.session_id)!.items['2']!.revision);
-    await click(screen.getByRole('button', { name: 'Close detail' }));
     mark.mockClear();
+    await click(screen.getByRole('button', { name: 'Close detail' }));
+    await pick('2');
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(mark).not.toHaveBeenCalled(); // Reopening the same read revision adds no observation.
+    await click(screen.getByRole('button', { name: 'Close detail' }));
     const session = transport.sessions.get(route.session_id)!;
     ++session.items['2']!.revision; ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    fireEvent.mouseEnter(document.querySelector('[role="treeitem"][data-item-id="2"]')!);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
     expect(mark).not.toHaveBeenCalled();
     await pick('2');
     expect(mark).not.toHaveBeenCalled();
@@ -136,7 +141,7 @@ describe('composed item navigation', { timeout: 10_000 }, () => {
     } else session.topics[session.items['2']!.topic_id]!.archived_at = session.updated_at;
     ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
-    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${shortLabel(session.items['2']!)} · Waiting on me` }));
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['2']!.question} · Waiting on me` }));
     const detail = screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     expect(within(detail).getByRole('region', { name: 'Conversation' })).toBeTruthy();
     expect(detail.querySelector('[data-owner-input]')).toBeNull();
@@ -159,7 +164,7 @@ describe('composed item navigation', { timeout: 10_000 }, () => {
     await setup(transport); await openSession(); await pick('8');
     session.state = 'closed'; session.closed_at = session.updated_at; ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
-    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${shortLabel(session.items['2']!)} · Waiting on me` }));
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['2']!.question} · Waiting on me` }));
     const detail = screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     expect(within(detail).getByRole('region', { name: 'Your answer' })).toBeTruthy();
     expect(within(detail).getByText(sessionClosedReason)).toBeTruthy();
@@ -174,17 +179,17 @@ describe('composed item navigation', { timeout: 10_000 }, () => {
     await setup(transport); await openSession(); await pick('4');
     expect(document.querySelector('[role="treeitem"][data-item-id="1.1"]')).toBeNull();
     const links = document.querySelector<HTMLElement>('.detail-related')!;
-    const hidden = within(links).getByRole('button', { name: `${shortLabel(session.items['1.1']!)} (hidden) · Open` });
+    const hidden = within(links).getByRole('button', { name: `${session.items['1.1']!.question} (hidden) · Open` });
     expect(hidden.classList.contains('is-hidden')).toBe(true);
     await click(hidden); selected('1.1');
     expect(document.querySelector('[role="treeitem"][data-item-id="1.1"]')!.classList.contains('tree-item-hidden')).toBe(true);
     expect(document.querySelector('.tree-hidden-group')!.getAttribute('aria-expanded')).toBe('true');
     expect(view().hidden_item_ids).toEqual(['1']);
     await click(control('Back')); selected('4');
-    expect(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${shortLabel(session.items['1.1']!)} (hidden) · Open` })).toBeTruthy();
+    expect(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['1.1']!.question} (hidden) · Open` })).toBeTruthy();
     await click(control('Forward')); selected('1.1');
     // The reverse connection navigates through the same history even though only item 4 declared it.
-    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${shortLabel(session.items['4']!)} · Open` })); selected('4');
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['4']!.question} · Open` })); selected('4');
     await click(control('Back')); selected('1.1');
     expect(view().hidden_item_ids).toEqual(['1']);
   });
@@ -308,7 +313,7 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
     const before = treeScroll().scrollTop;
     const detail = within(screen.getByLabelText('Item detail'));
     if (entry === 'related link') {
-      await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${shortLabel(session.items['8']!)} · Open` }));
+      await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['8']!.question} · Open` }));
     } else if (entry === 'Markdown reference') {
       await click(detail.getByRole('link', { name: 'continued context' }));
     } else if (entry === 'child link') {
@@ -326,7 +331,7 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
     transport.preferences.sessions[0]!.hidden_item_ids = ['1'];
     await setup(transport); await openSession(); await pick('4'); await readAt(150);
     expect(treeRow('1.1')).toBeNull();
-    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${shortLabel(session.items['1.1']!)} (hidden) · Open` }));
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['1.1']!.question} (hidden) · Open` }));
     selected('1.1'); inTree('1.1');
     expect(treeScroll().scrollTop).toBeGreaterThan(150);
     expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!.hidden_item_ids).toEqual(['1']);
@@ -343,15 +348,36 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
     expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!.selected_item_id).toBe('8');
   });
 
-  it('reveals a clicked search result through the composed search and tree controls', async () => {
+  it('keeps a clicked search-result tree row stationary through the composed controls', async () => {
     treeGeometry(); await setup(); await openSession();
     await act(async () => { fireEvent.change(screen.getByLabelText('Search questions and outcomes'), { target: { value: 'receipt' } }); });
     expect(screen.getByText(/items matching “receipt”/)).toBeTruthy();
     await readAt(600); outsideTree('1.1');
     await pick('1.1');
-    expect(treeScroll().scrollTop).toBeLessThan(600);
-    inTree('1.1');
+    expect(treeScroll().scrollTop).toBe(600);
+    outsideTree('1.1');
     expect(screen.getByLabelText<HTMLInputElement>('Search questions and outcomes').value).toBe('receipt');
+  });
+
+  it('keeps Waiting, linked and history reveals working after opening an archived saved selection', async () => {
+    treeGeometry();
+    const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
+    transport.preferences.sessions[0]!.selected_item_id = '8';
+    session.topics[session.items['8']!.topic_id]!.archived_at = session.updated_at;
+    session.items['2']!.related = ['1.1'];
+    await setup(transport); await openSession();
+    expect(treeRow('8')).toBeNull();
+    await readAt(600);
+    await click(document.querySelector('[data-waiting-item="2"]')!);
+    selected('2'); inTree('2');
+    expect(document.activeElement).toBe(treeRow('2'));
+    await readAt(600);
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['1.1']!.question} · Open` }));
+    selected('1.1'); inTree('1.1');
+    await readAt(600);
+    await click(control('Back')); selected('2'); inTree('2');
+    await readAt(600);
+    await click(control('Forward')); selected('1.1'); inTree('1.1');
   });
 
   it('reveals a native item route opening a session instead of restoring that session’s reading anchor', async () => {

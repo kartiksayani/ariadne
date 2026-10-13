@@ -28,7 +28,7 @@ import { fileLinkTitle, fileReference, safeHref } from '../shared/markdown';
 import { copyText } from '../shared/clipboard';
 import { notices } from '../pages/notices';
 import { isViewConflict } from '../shared/conflictNotice';
-import { shortLabel } from '../shared/short';
+import { itemLabels } from '../shared/short';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { closedSessionQuestion, sessionAnswerBlocked } from '../../selectors/sessionClosed';
 import { SessionClosedChip } from '../shared/SessionClosedChip';
@@ -53,12 +53,18 @@ function focusRoot(itemId: string) {
 export function DetailPath({ store, itemId, onOpenItem }: { readonly store: SessionStore; readonly itemId: string; readonly onOpenItem: (itemId: string) => void }) {
   const session = useSession(store).snapshot?.session;
   const path = session ? detailPath(session, itemId) : [];
+  const labels = itemLabels(path.flatMap(crumb => crumb.itemId && session?.items[crumb.itemId] ? [session.items[crumb.itemId]!] : []), session?.topics);
+  const topicId = session?.items[itemId]?.topic_id;
+  const topicName = topicId ? session?.topics[topicId]?.name : undefined;
   return <nav className="detail-path" aria-label="Item location">
-    {path.map((crumb, index) => <span className="detail-crumb" key={crumb.itemId ?? 'topic'}>
+    {path.map((crumb, index) => {
+      const full = crumb.itemId ? session?.items[crumb.itemId]?.question : topicName;
+      return <span className="detail-crumb" key={crumb.itemId ?? 'topic'}>
       {/* The topic crumb has no reveal target yet; item crumbs open their item. */}
-      <button type="button" onClick={() => { if (crumb.itemId) onOpenItem(crumb.itemId); }}>{crumb.label}</button>
+      <button type="button" title={full} aria-label={full} onClick={() => { if (crumb.itemId) onOpenItem(crumb.itemId); }}>{crumb.itemId ? labels.get(crumb.itemId) : crumb.label}</button>
       {index < path.length - 1 && <i className="ph ph-caret-right" aria-hidden="true" />}
-    </span>)}
+    </span>;
+    })}
   </nav>;
 }
 
@@ -458,10 +464,11 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const disabledActions = model.open?.actions.some(action => action.disabled);
   const dockHint = current.status !== 'ready' || current.error || disabledActions ? model.open?.hint
     : model.chat.some(entry => entry.pending) ? model.delivery?.text : null;
+  const relatedLabels = itemLabels(model.related.flatMap(section => section.items.map(target => session.items[target.id]!)), session.topics);
   return <ItemRefs.Provider value={{ lookup: id => {
     const target = session.items[id];
-    return target && !itemRemoved(session, target.id) ? { label: shortLabel(target), status: displayStatus(session, target) } : null;
-  }, onOpenItem }}><FileRefProject.Provider value={session.project_id}><article className="item-detail" data-detail-item-id={itemId} data-status={model.status} aria-label={`Detail of ${shortLabel(item)}`}>
+    return target && !itemRemoved(session, target.id) ? { label: target.question, status: displayStatus(session, target) } : null;
+  }, onOpenItem }}><FileRefProject.Provider value={session.project_id}><article className="item-detail" data-detail-item-id={itemId} data-status={model.status} aria-label={`Detail of ${item.question}`}>
     <div className="detail-body" ref={body} onScroll={event => {
       const pane = event.currentTarget;
       if (pane.scrollTop !== positionedScroll.current) followingAsk.current = false;
@@ -506,7 +513,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
 
     {model.replaced && <section className="detail-section">
       {sectionLabel('Replaced by')}
-      <button type="button" className="detail-replaced" onClick={() => onOpenItem(model.replaced!.id)}>
+      <button type="button" className="detail-replaced" title={model.replaced.question} aria-label={model.replaced.question} onClick={() => onOpenItem(model.replaced!.id)}>
         <i className="ph ph-arrow-bend-down-right" aria-hidden="true" /><span>{model.replaced.question}</span><StatusBadge status={model.replaced.status} variant="text" />
       </button>
     </section>}
@@ -519,8 +526,8 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     {model.related.map(section => <section key={section.direction} className="detail-section detail-related" aria-label={section.label}>
       {sectionLabel(section.label)}
       {section.items.map(target => <button key={target.id} type="button" className={`detail-related-item${target.hidden ? ' is-hidden' : ''}`}
-        title={target.question} aria-label={`${target.label}${target.hidden ? ' (hidden)' : ''} · ${STATUS[target.status].label}`} onClick={() => onOpenItem(target.id)}>
-        <span className="detail-related-label">{target.label}</span>
+        title={target.question} aria-label={`${target.question}${target.hidden ? ' (hidden)' : ''} · ${STATUS[target.status].label}`} onClick={() => onOpenItem(target.id)}>
+        <span className="detail-related-label">{relatedLabels.get(target.id)}</span>
         {target.hidden && <span className="detail-related-hidden">Hidden</span>}<StatusBadge status={target.status} variant="text" />
       </button>)}
     </section>)}

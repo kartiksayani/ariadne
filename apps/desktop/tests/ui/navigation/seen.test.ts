@@ -691,6 +691,13 @@ describe('owner seen preference batching', () => {
     expect(sessionSeen(store.getSnapshot().preferences, route)?.since).toBe(initialTime);
   });
 
+  it('cancels a queued upgrade baseline on disposal without submitting an owner observation', async () => {
+    const { store, transport } = await setup();
+    store.stop();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(transport.mutations).toHaveLength(0);
+  });
+
   it('ignores absent items and finishes observed reads on disposal without blocking teardown', async () => {
     const { store, transport } = await setup(false);
     store.markItemSeen(route, 'missing');

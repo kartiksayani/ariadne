@@ -2,8 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { immutable } from '../../../src/data';
 import { connectedItems, relatedItems } from '../../../src/selectors/related';
-import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
-import { shortLabel } from '../../../src/ui/shared/short';
+import { DetailPath, ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { setup } from '../history/fixtures';
 
@@ -73,16 +72,16 @@ describe('related item navigation', () => {
     render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={open} hiddenItemIds={['1']} />);
     const related = screen.getByRole('region', { name: 'Related items' });
     expect(within(related).getAllByRole('button')).toHaveLength(3);
-    const window = within(related).getByRole('button', { name: /^Delivery window ·/ });
+    const window = within(related).getByRole('button', { name: `${session.items['2']!.question} · Waiting on agent` });
     expect(window.textContent).toContain('Waiting on agent');
-    const child = within(related).getByRole('button', { name: `${shortLabel(session.items['1.1']!)} (hidden) · Open` });
+    const child = within(related).getByRole('button', { name: `${session.items['1.1']!.question} (hidden) · Open` });
     expect(child.textContent).toContain('Hidden');
     expect(child.classList.contains('is-hidden')).toBe(true);
     expect(window.classList.contains('is-hidden')).toBe(false);
     fireEvent.click(child); fireEvent.click(window);
-    fireEvent.click(within(related).getByRole('button', { name: `${shortLabel(session.items['8']!)} · Open` }));
+    fireEvent.click(within(related).getByRole('button', { name: `${session.items['8']!.question} · Open` }));
     expect(related.textContent).not.toMatch(/#(?:1\.1|2|8)\b/);
-    expect(screen.getByRole('article').getAttribute('aria-label')).toBe(`Detail of ${shortLabel(session.items['1']!)}`);
+    expect(screen.getByRole('article').getAttribute('aria-label')).toBe(`Detail of ${session.items['1']!.question}`);
     expect(open.mock.calls).toEqual([['1.1'], ['2'], ['8']]);
     expect(related.compareDocumentPosition(screen.getByRole('region', { name: 'Conversation' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -103,14 +102,14 @@ describe('related item navigation', () => {
     render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={open} hiddenItemIds={['1']} />);
     const section = screen.getByRole('region', { name: heading });
     expect(within(section).getByText(heading)).toBeTruthy();
-    const target = within(section).getByRole('button', { name: /^Receipt test \(hidden\) ·/ });
+    const target = within(section).getByRole('button', { name: `${session.items['1.1']!.question} (hidden) · Open` });
     expect(target.title).toBe(session.items['1.1']!.question);
     expect(target.classList.contains('detail-related-item')).toBe(true);
     expect(target.classList.contains('is-hidden')).toBe(true);
     expect(within(target).getByText('Hidden')).toBeTruthy();
     const related = screen.getByRole('region', { name: 'Related items' });
     expect(within(related).getAllByRole('button')).toHaveLength(1);
-    expect(within(related).getByRole('button', { name: new RegExp(`^${shortLabel(session.items['2']!)}`) }).classList.contains('is-hidden')).toBe(false);
+    expect(within(related).getByRole('button', { name: `${session.items['2']!.question} · Waiting on me` }).classList.contains('is-hidden')).toBe(false);
     for (const label of ['Affects', 'Affected by', 'Depends on', 'Needed by']) {
       if (label !== heading) expect(screen.queryByRole('region', { name: label })).toBeNull();
     }
@@ -125,5 +124,73 @@ describe('related item navigation', () => {
     for (const label of ['Related items', 'Affects', 'Affected by', 'Depends on', 'Needed by']) {
       expect(screen.queryByRole('region', { name: label })).toBeNull();
     }
+  });
+
+  it('puts distinguishing words first across connection sections and keeps full question accessible names', async () => {
+    const value = setup(); opened.push(value);
+    const session = value.transport.session;
+    session.items['1']!.short = 'Source item';
+    session.items['1']!.related = ['8'];
+    session.items['1']!.affects = ['1.1'];
+    const first = session.items['8']!, second = session.items['1.1']!;
+    first.topic_id = second.topic_id;
+    first.short = second.short = 'Receipt lookup';
+    first.question = 'Keep the receipt lookup in the delivery handler?';
+    second.question = 'Keep the receipt lookup in the retry handler?';
+    await value.store.refresh();
+    const open = vi.fn();
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={open} />);
+    expect(screen.getByRole('article', { name: `Detail of ${session.items['1']!.question}` })).toBeTruthy();
+    for (const [target, visible] of [[first, 'delivery · Receipt lookup'], [second, 'retry · Receipt lookup']] as const) {
+      const button = screen.getByRole('button', { name: `${target.question} · Open` });
+      expect(button.querySelector('.detail-related-label')!.textContent).toBe(visible);
+      expect(button.title).toBe(target.question);
+      fireEvent.click(button);
+    }
+    expect(open.mock.calls).toEqual([['8'], ['1.1']]);
+  });
+
+  it('shows the full replacement question and provides it as the accessible name and tooltip', async () => {
+    const value = setup(); opened.push(value);
+    const session = value.transport.session;
+    session.items['1']!.status = 'replaced'; session.items['1']!.replaced_by = '8';
+    session.items['8']!.short = 'New delivery';
+    await value.store.refresh();
+    const open = vi.fn();
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={open} />);
+    const button = screen.getByRole('button', { name: session.items['8']!.question });
+    expect(button.classList.contains('detail-replaced')).toBe(true);
+    expect(button.textContent).toContain(session.items['8']!.question);
+    expect(button.title).toBe(session.items['8']!.question);
+    fireEvent.click(button); expect(open).toHaveBeenCalledWith('8');
+  });
+
+  it('distinguishes ancestor breadcrumb labels while naming their full questions', async () => {
+    const value = setup(); opened.push(value);
+    const session = value.transport.session, first = session.items['1']!, second = session.items['1.1']!, child = session.items['2']!;
+    child.parent = second.id; child.topic_id = first.topic_id;
+    first.short = second.short = 'Cache lookup';
+    first.question = 'Use Redis for cache lookup?'; second.question = 'Use Postgres for cache lookup?';
+    await value.store.refresh();
+    const open = vi.fn();
+    render(<DetailPath store={value.store} itemId={child.id} onOpenItem={open} />);
+    for (const [target, visible] of [[first, 'Redis · Cache lookup'], [second, 'Postgres · Cache lookup']] as const) {
+      const button = screen.getByRole('button', { name: target.question });
+      expect(button.textContent).toBe(visible); expect(button.title).toBe(target.question);
+      fireEvent.click(button);
+    }
+    expect(open.mock.calls).toEqual([[first.id], [second.id]]);
+  });
+
+  it('keeps authored item-reference text and exposes the full target question in its tooltip', async () => {
+    const value = setup(); opened.push(value);
+    const session = value.transport.session;
+    session.items['1']!.question = 'Read [receipt follow-up](item:1.1).';
+    session.items['1.1']!.short = 'Receipt test';
+    await value.store.refresh();
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={vi.fn()} />);
+    const link = screen.getByRole('link', { name: 'receipt follow-up' });
+    expect(link.title).toBe(`${session.items['1.1']!.question} · Open`);
+    expect(link.textContent).toBe('receipt follow-up');
   });
 });

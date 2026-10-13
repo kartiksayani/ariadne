@@ -1,0 +1,9 @@
+/* App attention colour, distinct from Paperwhite status and error roles. */
+:root,
+[data-theme="dark"] {
+  --attention: #ff966d;
+}
+
+[data-theme="light"] {
+  --attention: #a03d15;
+}

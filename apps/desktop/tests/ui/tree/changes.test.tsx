@@ -152,7 +152,7 @@ describe('Map change markers and next unseen navigation', () => {
     expect(view.selected).not.toHaveBeenCalled();
   });
 
-  it.each([60, 400])('scrolls a %s px N target clear of a sticky topic and the current selection marker', async height => {
+  it.each([60, 400])('scrolls a %s px N target clear of a sticky topic with Selected in the filter bar', async height => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const box = document.querySelector<HTMLElement>('.tree-scroll');
       if (this === box) return new DOMRect(0, 0, 300, 300);
@@ -165,7 +165,7 @@ describe('Map change markers and next unseen navigation', () => {
     const box = document.querySelector<HTMLElement>('.tree-scroll')!;
     box.scrollTop = 200; fireEvent.scroll(box);
     next(); expect(target()).toBe(row('1.1'));
-    expect(row('1.1').getBoundingClientRect().top).toBe(108);
+    expect(row('1.1').getBoundingClientRect().top).toBe(68);
     expect(view.selected).not.toHaveBeenCalled();
   });
 

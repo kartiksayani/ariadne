@@ -68,8 +68,6 @@
   --shadow-md: 0 0 0 1px oklch(0.4 0.008 80), 0 10px 30px rgba(0,0,0,0.4);
   --shadow-lg: 0 0 0 1px oklch(0.45 0.008 80), 0 18px 48px rgba(0,0,0,0.5);
 
-  /* Coral orange attention, distinct from statuses and errors. */
-  --attention: #ff966d;
 
   /* THEMES.dark */
   --a-bg: var(--color-bg);
@@ -100,7 +98,6 @@
 
 /* THEMES.light */
 [data-theme="light"] {
-  --attention: #a03d15;
   --color-bg: oklch(0.958 0.009 85);
   --color-surface: oklch(0.978 0.007 85);
   --color-text: oklch(0.27 0.008 75);
