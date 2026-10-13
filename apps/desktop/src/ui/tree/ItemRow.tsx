@@ -5,7 +5,7 @@
 // top-line text badge.
 import { useCallback, useContext, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { TreeFonts } from './fonts';
-import { ItemReference, ItemRefs, Markdown } from '../shared/MarkdownText';
+import { ItemReference, Markdown } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
 import { StatusBadge } from '../shared/StatusBadge';
 import { ackTitle } from '../shared/ack';
@@ -124,13 +124,13 @@ export interface ItemRowProps {
   readonly onToggle: (id: string) => void;
   readonly onHover: (id: string | null) => void;
   readonly onFocusBranch?: (id: string) => void;
+  readonly names?: ReadonlyMap<string, string>;
   readonly onPeekHover?: (id: string, event: MouseEvent<HTMLDivElement>) => void;
   readonly onPeekLeave?: () => void;
 }
 
-export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, highlight, note, actions, answer, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, onHover, onFocusBranch, onPeekHover, onPeekLeave }: ItemRowProps) {
+export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, highlight, note, actions, answer, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, onHover, onFocusBranch, names, onPeekHover, onPeekLeave }: ItemRowProps) {
   const item = row.item, status = visual(row.status);
-  const name = useContext(ItemRefs)?.lookup(item.id)?.label ?? shortLabel(item);
   const details = preview(row);
   const muted = closed(item.status) || row.context || row.later || row.hidden;
   const actionButton = (action: RowAction) => <button key={action.title} type="button" tabIndex={action.persistent ? 0 : -1}
@@ -162,7 +162,7 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
         {row.sessionClosed && <SessionClosedChip reason={closedReason} />}
         <StatusBadge status={status} label={row.badge} variant="text" /></span></div>
       <PreviewBlock value={details} open={unfolded} onToggle={() => onUnfold(item.id)} />
-      {!item.parent && onFocusBranch && <button type="button" className="tree-focus-action" tabIndex={-1} aria-label={`Focus on ${name}`} disabled={disabled}
+      {!item.parent && onFocusBranch && <button type="button" className="tree-focus-action" tabIndex={-1} aria-label={`Focus on ${names?.get(item.id) ?? shortLabel(item)}`} disabled={disabled}
         onClick={event => { event.stopPropagation(); onFocusBranch(item.id); }}>Focus</button>}
       {row.ack && <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}>{ackTitle(row.ack, item.status)}</div>}
       {delivery(row, fix)}

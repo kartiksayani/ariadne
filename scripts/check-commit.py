@@ -297,6 +297,8 @@ def main(argv=None):
             run("cargo", "llvm-cov", "report", "-p", "ariadne-xtask", "--locked", "--offline", "--lcov",
                 "--ignore-filename-regex", "(^|/)(apps|crates|tests|generated|vendor)/",
                 "--output-path", xtask_report, "--fail-under-lines", "80")
+            # LLVM coverage builds into a separate target; the JS recipe fixture uses ordinary cargo test.
+            run("cargo", "test", "-p", "ariadne-cli", "--locked", "--offline", "--test", "pr_comments_recipe", "--no-run")
             run("npm", "run", "test:coverage")
             covered, total = coverage_counts(reports, ROOT, config)
             print(f"Application line coverage: {covered}/{total} = {100 * covered / total:.2f}%", flush=True)

@@ -27,6 +27,7 @@ import { shortLabel } from '../../../src/ui/shared/short';
 import { peekNames } from '../../../src/ui/peek/names';
 import { RemovalContext, RemovalQueue } from '../../../src/ui/remove/queue';
 import { removeSubject } from '../../../src/ui/remove/model';
+import { ackAllFor } from '../../../src/ui/navigation/ackAllController';
 
 const stores: NavigationStore[] = [];
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); notices.clear(); vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -125,6 +126,46 @@ describe('session tree rows', () => {
     expect(viewOf(transport).focused_item_id).toBe('1');
   });
 
+  it('excludes pending removal from Ack all, restores its count on Undo and acknowledges only the visible finding', async () => {
+    const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
+    Object.values(session.items).forEach(item => { if (item) item.ack_to = null; });
+    for (const id of ['1', '2']) Object.assign(session.items[id]!, {
+      type: 'finding', parent: null, topic_id: session.items['1']!.topic_id,
+      status: 'open', ack_to: 'done', ask: null, question: id === '1' ? 'Finding A' : 'Finding B',
+    });
+    const removal = new RemovalQueue({ service: createDesktopService(transport), notices, read: async () => session });
+    const value = await mount({ transport, removal });
+    vi.useFakeTimers();
+    const target = { kind: 'item' as const, item: { ...route, item_id: '1' } };
+    let operation = '';
+    expect(screen.getByRole('button', { name: 'Ack all (2)' })).toBeTruthy();
+    act(() => { operation = removal.schedule(target, removeSubject(session, target)!); });
+    expect(row('1')).toBeNull(); expect(row('2')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Ack all (1)' })).toBeTruthy();
+    expect(screen.queryByText(/to ack one by one/)).toBeNull();
+    act(() => { removal.undo(operation); });
+    expect(row('1')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Ack all (2)' })).toBeTruthy();
+    act(() => { operation = removal.schedule(target, removeSubject(session, target)!); });
+    const execute = vi.spyOn(value.actions, 'execute').mockImplementation(async command => {
+      if (command.command !== 'ack') throw new Error('Expected an acknowledgment');
+      const item = session.items[command.params.item_id]!;
+      item.status = item.ack_to!; item.ack_to = null; item.revision++; session.revision++;
+      await value.store.refresh(true);
+      return true;
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Ack all (1)' }));
+    expect(screen.getByRole('heading', { name: /Ack 1 results/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Ack all' }));
+    await act(async () => { await ackAllFor(value.actions).flush(); });
+    expect(execute).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ command: 'ack', params: {
+      item_id: '2', expected_revision: session.items['2']!.revision - 1,
+    } }), session.revision - 1);
+    expect(session.items['1']).toMatchObject({ status: 'open', ack_to: 'done' });
+    expect(session.items['2']).toMatchObject({ status: 'done', ack_to: null });
+    act(() => { removal.undo(operation); });
+  });
+
   it('uses shared active-item names for Selected, breadcrumbs and Focus', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const box = document.querySelector<HTMLElement>('.tree-scroll');
@@ -200,6 +241,31 @@ describe('session tree rows', () => {
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
     expect(row('8')).not.toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(row('8')));
+  });
+
+  it('expires a Go to focus request after a failed Focus exit and a different selection', async () => {
+    const view = await mount();
+    fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
+    const exit = structuredClone(viewOf(view.transport));
+    delete exit.focused_item_id;
+    view.transport.failNext = 'preferences_patch';
+    await act(async () => { expect(await view.navigation.saveSessionView(exit, view.transport.preferences.revision)).toBe(false); });
+    expect(view.navigation.getSnapshot().pendingOperationId).not.toBeNull();
+    const target: RevealedItem = { kind: 'item', route: { ...route, item_id: '8' }, store: view.store, temporaryExpandedItemIds: [] };
+    view.rerender({ selectedId: '8', reveal: target });
+    expect(viewOf(view.transport).focused_item_id).toBe('1');
+    expect(row('8')).toBeNull();
+    // A different workspace selection supersedes Go to while its target is still outside Focus.
+    view.rerender({ selectedId: '1', reveal: null });
+    act(() => { row('1').focus(); });
+    expect(document.activeElement).toBe(row('1'));
+    // Retrying the failed view save leaves Focus and finally mounts the old Go to target.
+    await act(async () => { expect(await view.navigation.retryMutation()).toBe(true); });
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+    expect(row('8')).not.toBeNull();
+    expect(row('1').getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(row('1'));
   });
 
   it('keeps newly entered Focus after an earlier external reveal', async () => {

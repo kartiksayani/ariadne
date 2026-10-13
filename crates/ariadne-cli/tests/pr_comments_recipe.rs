@@ -279,9 +279,16 @@ impl Setup {
                     .map(|line| format!("line {line}"))
                     .unwrap_or_else(|| "line no longer available".into());
                 let (ask, context) = reviewer_context(comment, &line);
+                let reply_consequence = if ask
+                    .ends_with("Reply approves its suggested text or your own.")
+                {
+                    "Post the suggested reply shown in this item's conversation, or your own one-line text instead."
+                } else {
+                    "Post only the exact text you approve in this conversation."
+                };
                 let mut request = template(
                     1,
-                    &json!({"topic": topic, "question": comment["question"], "ask": ask, "context": context, "comment_url": comment["url"]}),
+                    &json!({"topic": topic, "question": comment["question"], "ask": ask, "context": context, "reply_consequence": reply_consequence, "comment_url": comment["url"]}),
                 );
                 let current = self
                     .read_all("topics")
@@ -318,6 +325,10 @@ fn recipe_files_one_topic_and_each_open_comment_then_adds_only_new_comments() {
             .map(|o| o["label"].as_str().unwrap())
             .collect();
         assert_eq!(labels, ["Fix", "Reply", "Skip"]);
+        assert_eq!(
+            item["options"][1]["consequence"],
+            "Post only the exact text you approve in this conversation."
+        );
         assert!(!item["question"].as_str().unwrap().contains("discussion_r"));
     }
     setup.import(&fixture);
@@ -474,6 +485,10 @@ fn recipe_suggested_reply_fence_keeps_the_exact_graphql_body() {
     setup.import(&fixture);
     let items = setup.read_all("items");
     let note = setup.context(&items[0]);
+    assert_eq!(
+        items[0]["item"]["options"][1]["consequence"],
+        "Post the suggested reply shown in this item's conversation, or your own one-line text instead."
+    );
     assert_eq!(
         note.split("Suggested reply:\n\n")
             .nth(1)

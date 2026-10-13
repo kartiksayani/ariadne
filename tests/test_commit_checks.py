@@ -301,7 +301,10 @@ class CoverageTests(unittest.TestCase):
                     "--ignore-filename-regex", "(^|/)(apps|crates|tests|generated|vendor)/",
                     "--output-path", paths[2], "--fail-under-lines", "80"))
                 self.assertEqual(calls.index(exports[1]), calls.index(exports[0]) + 1)
-                self.assertIn(("npm", "run", "test:coverage"), calls)
+                prebuild = ("cargo", "test", "-p", "ariadne-cli", "--locked", "--offline",
+                            "--test", "pr_comments_recipe", "--no-run")
+                self.assertEqual(calls.index(prebuild), calls.index(exports[1]) + 1)
+                self.assertEqual(calls.index(("npm", "run", "test:coverage")), calls.index(prebuild) + 1)
                 self.assertIn((commit.sys.executable, "-m", "coverage", "report",
                                "--data-file=coverage/install.coverage", "--fail-under=80"), calls)
                 self.assertIn(("npm", "run", native_command), calls)
@@ -330,6 +333,9 @@ class CoverageTests(unittest.TestCase):
                     commit.main(["--ci", "--base", "main", "--stage", stage])
                 calls = [list(call.args) for call in run.call_args_list]
                 self.assertEqual(calls.count(["cargo", "fetch", "--locked"]), fetches)
+                prebuild = ["cargo", "test", "-p", "ariadne-cli", "--locked", "--offline",
+                            "--test", "pr_comments_recipe", "--no-run"]
+                self.assertEqual(calls.count(prebuild), int(stage in ("all", "coverage")))
                 later = {"coverage": ["env", "CARGO_LLVM_COV_DENY_WARNINGS=1", "cargo", "llvm-cov", "clean"],
                          "native": ["npm", "run", "test:e2e"]}.get(stage)
                 if later:
