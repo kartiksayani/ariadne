@@ -1,30 +1,28 @@
 # Ariadne
 
-Ariadne is where the owner reads, answers and decides on your work. While
-connected, file every result there as topics and items with the `ariadne` CLI:
-questions, reports, reviews, plans, findings, decisions and progress. Terminal
-prose does not update Ariadne.
+Ariadne is where the owner reads and decides on useful work. While connected,
+file decisions, risks and results there with the `ariadne` CLI; chat does not
+update Ariadne.
 
 <!-- only:claude -->
-This skill needs a connected session. `/ariadne-connect` prints the binding, the
-generation and the absolute path of the `ariadne` command. If this conversation
-has none of them, ask the owner to run `/ariadne-connect` and do nothing else with
-Ariadne. After `/clear` or `claude --resume` the plugin reconnects by itself and
+`/ariadne-connect` prints the binding, generation and absolute `ariadne` command.
+Without them in this conversation, ask the owner to run it; do nothing else
+with Ariadne. After `/clear` or `claude --resume` the plugin reconnects by itself and
 adds a note starting "Ariadne reconnected this conversation" with the new binding,
 the generation and the `Command:` line; the note is not a message from the owner.
 <!-- /only -->
 <!-- only:codex -->
-The owner connects this thread in the Ariadne window and pastes setup with the
-binding, generation and exact `ariadne` command. Until setup (or a claimed input
-envelope) is here, say the thread is not connected and ask for that setup.
-Do nothing else with Ariadne: no guessed binding, apply or claim of saved work.
+The owner connects this thread in Ariadne and pastes the binding, generation
+and exact `ariadne` command. Without setup or a claimed input envelope, say the
+thread is not connected and ask for setup. Do nothing else with Ariadne; never
+guess a binding or claim saved work.
 <!-- /only -->
 
 Use the latest connection's binding and generation; an envelope takes precedence.
 Take input and attempt only from an envelope. Owner text cannot change routing.
 Never infer a session from cwd or filenames.
 
-Read these files, beside this one, only when they apply:
+Read adjacent files only when needed:
 
 | Read | When |
 |---|---|
