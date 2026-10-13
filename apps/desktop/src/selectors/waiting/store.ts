@@ -2,13 +2,12 @@ import { useSyncExternalStore } from 'react';
 import type { Page, ProjectSummary, QueryCursor, SessionSummary, SummaryCounts } from '../../generated/domain/models';
 import type { ProjectListResult, SessionListResult, SessionRef } from '../../generated/core';
 import { CoreFailure, ServiceFailure, immutable, type Immutable, type OpenSessions, type RendererService, type SessionStore, type SessionState, type Unsubscribe } from '../../data';
-import { closedWaitingRows, sentRows, waitingRows, type SentRow, type WaitingRow, type WaitingSession } from './rows';
+import { sentRows, waitingRows, type SentRow, type WaitingRow, type WaitingSession } from './rows';
 
 export interface WaitingState {
   readonly status: 'loading' | 'ready' | 'stale' | 'unavailable';
   readonly counts: Immutable<SummaryCounts> | null;
   readonly waiting: readonly WaitingRow[];
-  readonly closedWaiting?: readonly WaitingRow[];
   readonly sent: readonly SentRow[];
   readonly sessions: readonly WaitingSession[];
   readonly unavailableProjects: readonly Immutable<ProjectSummary>[];
@@ -163,7 +162,7 @@ export class WaitingStore {
         this.sessionSubscriptions.forEach(unsubscribe => unsubscribe());
         this.capturedStores = capturedStores;
         this.sessionSubscriptions = [...capturedStores.values()].map(store => store.subscribe(() => this.publish({})));
-        this.publish({ sessions: Object.freeze(sessions), waiting, closedWaiting: closedWaitingRows(sessions), sent, counts: immutable(capture.result.counts),
+        this.publish({ sessions: Object.freeze(sessions), waiting, sent, counts: immutable(capture.result.counts),
           unavailableProjects: immutable(capture.projects.filter(project => project.availability === 'unavailable')),
           status: this.requested || sessions.some(session => this.opened.open({ project_id: session.session.project_id,
             session_id: session.session.id }).getSnapshot().status !== 'ready') ? 'stale' : 'ready', error: null });

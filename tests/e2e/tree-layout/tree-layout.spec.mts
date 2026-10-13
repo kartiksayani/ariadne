@@ -4,6 +4,85 @@ import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 import type { Server } from 'node:http';
 
+for (const theme of ['light', 'dark'] as const) test(`N wraps unread Map targets without opening them and clears sticky bars in ${theme}`, async ({ page }) => {
+  const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+    logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+  try {
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    await openTree(page, `http://127.0.0.1:${address.port}`, '?changes');
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    const child = page.locator('.tree-item[data-item-id="1.1"]');
+    await expect(child).toHaveCount(0);
+    await page.keyboard.press('n');
+    await expect(child).toHaveAttribute('data-next-unseen', 'true');
+    await expect(child.getByRole('img', { name: 'New to you' })).toHaveText('New');
+    const markerColour = await child.locator('.tree-change-marker').evaluate(element => getComputedStyle(element).color);
+    const attention = await child.locator('.tree-change-marker').evaluate(element => {
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+      const context = canvas.getContext('2d')!;
+      const pixels = (colour: string) => {
+        context.clearRect(0, 0, 1, 1); context.fillStyle = colour; context.fillRect(0, 0, 1, 1);
+        return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
+      };
+      const luminance = (rgb: number[]) => rgb.map(value => value / 255)
+        .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
+        .reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0);
+      const style = getComputedStyle(element), text = pixels(style.color), background = pixels(style.backgroundColor);
+      const [low, high] = [luminance(text), luminance(background)].sort((a, b) => a - b);
+      const statuses = ['--st-progress', '--st-done', '--st-decided', '--a-danger'].map(token => {
+        const probe = document.createElement('span'); probe.style.color = `var(${token})`; element.append(probe);
+        const colour = pixels(getComputedStyle(probe).color); probe.remove(); return colour;
+      });
+      return { text, statuses, contrast: (high + .05) / (low + .05) };
+    });
+    expect(attention.contrast, 'small New text remains readable, including while the row pulses').toBeGreaterThanOrEqual(4.5);
+    for (const status of attention.statuses) expect(attention.text).not.toEqual(status);
+    await expect(child).toHaveCSS('outline-color', markerColour);
+    await expect(child).toHaveCSS('outline-width', '2px');
+    await expect(child).toHaveAttribute('aria-selected', 'false');
+    await expect(child).not.toHaveAttribute('data-next-unseen-pulse', 'true', { timeout: 2000 });
+    await expect(child).toHaveAttribute('data-next-unseen', 'true');
+    await expect(child.getByRole('img', { name: 'New to you' })).toBeVisible();
+    await expect(child).toHaveCSS('outline-width', '2px');
+    await expect(child).toHaveCSS('outline-color', markerColour);
+    await expect(page.locator('.shell-detail')).toHaveCount(0);
+    const changed = page.locator('.tree-item[data-item-id="2"]');
+    await page.keyboard.press('n');
+    await expect(changed).toHaveAttribute('data-next-unseen', 'true');
+    // N's ancestry expansion is temporary; leaving this child restores the saved fold.
+    await expect(child).toHaveCount(0);
+    await expect(page.locator('.tree-item[data-next-unseen="true"]')).toHaveCount(1);
+    await expect(changed.getByRole('img', { name: 'Changed since you read it' })).toBeVisible();
+    await expect(changed.locator('.tree-change-marker')).toHaveCSS('background-color', markerColour);
+    const last = page.locator('.tree-item[data-item-id="18"]');
+    await page.keyboard.press('n');
+    await expect(last).toHaveAttribute('data-next-unseen', 'true');
+    await expectRevealedRow(last);
+    await expect(last).not.toHaveAttribute('data-next-unseen-pulse', 'true', { timeout: 2000 });
+    await expect(last).toHaveCSS('outline-width', '2px');
+    await expect(last).toHaveCSS('outline-color', markerColour);
+    await expect(page.locator('.shell-detail')).toHaveCount(0);
+    await page.keyboard.press('n');
+    await expect(child).toHaveAttribute('data-next-unseen', 'true');
+    await expect(last).not.toHaveAttribute('data-next-unseen', 'true');
+    await expect(child.getByRole('img', { name: 'New to you' })).toBeVisible();
+    await expectRevealedRow(child);
+    await expect(page.locator('.shell-detail')).toHaveCount(0);
+    await expect(page.locator('.tree-item[aria-selected="true"]')).toHaveCount(0);
+    await expect(page.locator('.tree-item[data-item-id="3"] .tree-change-marker')).toHaveCount(0);
+    // Opening remains an explicit action; its shared read then clears this tag.
+    await page.keyboard.press('Enter');
+    await expect(child).toHaveAttribute('aria-selected', 'true');
+    await expect(child.getByRole('img', { name: 'New to you' })).toHaveCount(0);
+    // Typing N in the search box leaves the last landed target alone.
+    const search = page.getByRole('textbox', { name: 'Search questions and outcomes' });
+    await search.focus(); await page.keyboard.press('n');
+    await expect(child).toHaveAttribute('data-next-unseen', 'true');
+  } finally { await server.close(); }
+});
+
 // Real-browser checks of the session tree's layout promises: a long preview folds to
 // four lines, hovering a row never rewraps its text, and clicking a row never scrolls.
 async function openTree(page: Page, origin: string, query = '') {

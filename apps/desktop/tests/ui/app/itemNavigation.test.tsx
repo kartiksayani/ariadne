@@ -8,8 +8,9 @@ import { AppTransport, route, secondId } from './transport';
 import { sessionButton } from './open';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 import { NavigationStore } from '../../../src/state/navigation/store';
+import { changesFixture } from '../changes/fixture';
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 async function click(element: Element) {
   await act(async () => { fireEvent.click(element); });
   // These navigation regressions deliberately follow references through their peek.
@@ -26,13 +27,13 @@ const control = (name: string) => name === 'Back' || name === 'Forward'
   ? screen.getByLabelText<HTMLButtonElement>(name, { selector: 'button' })
   : screen.getByText<HTMLButtonElement>(name, { selector: 'button', exact: true });
 function ready() {
-  expect(screen.getByRole('button', { name: 'Session actions' })).toBeTruthy();
-  expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+  expect(screen.getByLabelText('Session actions', { selector: 'button' })).toBeTruthy();
+  expect(screen.getByLabelText('Session tree', { selector: 'section' }).getAttribute('data-session-status')).toBe('ready');
   expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
 }
 async function openSession(id = route.session_id) {
   await click(await sessionButton({ ...route, session_id: id }));
-  screen.getByRole('region', { name: 'Session tree' }); ready();
+  screen.getByLabelText('Session tree', { selector: 'section' }); ready();
 }
 function selected(id: string) {
   screen.getByLabelText(/^Detail of /, { selector: `[data-detail-item-id="${id}"]` }); ready();
@@ -78,18 +79,68 @@ function inTree(id: string) {
 }
 
 describe('composed item navigation', { timeout: 10_000 }, () => {
+  it('opens and focuses the owner answer behind a change, then consumes the jump', async () => {
+    const value = changesFixture(), transport = new AppTransport();
+    transport.sessions.set(value.session.id, value.session);
+    transport.preferences.seen = [value.seen];
+    await setup(transport); await openSession(); await pick('updated-0');
+    const context = screen.getByRole('region', { name: 'What changed' });
+    await click(within(context).getByRole('button', { name: 'Changed after your typed answer ↗' }));
+    selected(value.answer.item_id);
+    expect(document.activeElement?.getAttribute('data-message-id')).toBe(value.answer.message_id);
+    const otherControl = screen.getByRole('button', { name: 'Close detail' });
+    otherControl.focus();
+    const session = transport.sessions.get(route.session_id)!; ++session.revision;
+    session.messages.find(message => message.id === value.answer.message_id)!.body += '\nAdditional words.';
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    expect(document.activeElement).toBe(otherControl);
+  });
   it('marks current details as read and leaves changes unseen while the pane is closed', async () => {
     const mark = vi.spyOn(NavigationStore.prototype, 'markItemSeen');
-    const transport = await setup(); await openSession(); await pick('2');
-    expect(mark).toHaveBeenCalledWith(route, '2');
-    await click(screen.getByRole('button', { name: 'Close detail' }));
+    const transport = await setup(); await openSession();
+    vi.useFakeTimers(); await pick('2');
+    expect(mark).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(999); });
+    expect(mark).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(mark).toHaveBeenCalledWith(route, '2', transport.sessions.get(route.session_id)!.items['2']!.revision);
     mark.mockClear();
+    await click(screen.getByRole('button', { name: 'Close detail' }));
+    await pick('2');
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(mark).not.toHaveBeenCalled(); // Reopening the same read revision adds no observation.
+    await click(screen.getByRole('button', { name: 'Close detail' }));
     const session = transport.sessions.get(route.session_id)!;
     ++session.items['2']!.revision; ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    fireEvent.mouseEnter(document.querySelector('[role="treeitem"][data-item-id="2"]')!);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
     expect(mark).not.toHaveBeenCalled();
     await pick('2');
-    expect(mark).toHaveBeenCalledWith(route, '2');
+    expect(mark).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(mark).toHaveBeenCalledWith(route, '2', transport.sessions.get(route.session_id)!.items['2']!.revision);
+  });
+  it('records detail dwell during pending catch-up so Undo preserves that real read', async () => {
+    const mark = vi.spyOn(NavigationStore.prototype, 'markItemSeen');
+    const value = changesFixture(2), transport = new AppTransport();
+    transport.sessions.set(value.session.id, value.session); transport.preferences.seen = [value.seen];
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime('2026-10-10T02:00:00Z');
+    await setup(transport); await openSession();
+    vi.useFakeTimers(); vi.setSystemTime('2026-10-10T02:00:00Z');
+    await click(screen.getByRole('button', { name: /Since you were here ·/ }));
+    await click(screen.getByRole('button', { name: 'Mark all caught up' }));
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy();
+    await pick('updated-0');
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(mark).toHaveBeenCalledWith(route, 'updated-0', 2);
+    await click(screen.getByRole('button', { name: 'Undo' }));
+    expect(within(treeRow('updated-0')).queryByRole('img', { name: 'Changed since you read it' })).toBeNull();
+    expect(within(treeRow('updated-1')).getByRole('img', { name: 'Changed since you read it' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Since you were here · 1 change/ })).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(transport.preferences.seen![0].items).toEqual([{ item_id: 'updated-0', revision: 2 }]);
+    expect(transport.preferences.seen![0].topics).toEqual([]);
   });
   it.each([
     { archive: 'session', retained: false }, { archive: 'session', retained: true },

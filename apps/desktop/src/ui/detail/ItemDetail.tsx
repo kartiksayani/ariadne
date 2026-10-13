@@ -1,3 +1,6 @@
+import { ItemChanges } from '../changes/ItemChanges';
+import { AnswerChanges } from '../changes/AnswerChanges';
+import { isChangedSinceRead, type SeenState } from '../../selectors/changes/seen';
 import { itemRemoved } from '../../selectors/removed';
 // The item detail panel (handoff README §5 "Item detail"; Ariadne.dc.html
 // lines 324-464), laid out like a chat. The shell's aside holds the header;
@@ -89,6 +92,10 @@ export interface ItemDetailProps {
   /** Where a copied item came from (its Source item button): shown with the item's references, not under the composer. */
   readonly provenance?: ReactNode;
   readonly hiddenItemIds?: readonly string[];
+  readonly seen?: SeenState;
+  readonly answerJump?: { readonly messageId: string; readonly token: number };
+  readonly onAnswerJumpConsumed?: (token: number) => void;
+  readonly onOpenAnswer?: (itemId: string, messageId: string) => void;
 }
 
 const sectionLabel = (text: string) => <div className="detail-label">{text}</div>;
@@ -207,7 +214,7 @@ function ItemLink({ link }: { readonly link: LinkView }) {
   return <div className="detail-link detail-link-plain">{body}</div>;
 }
 
-export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, highlightedMessageIds, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds }: ItemDetailProps) {
+export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, highlightedMessageIds, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds, seen, answerJump, onAnswerJumpConsumed, onOpenAnswer }: ItemDetailProps) {
   const current = useSession(store), session = current.snapshot?.session;
   const item = session?.items[itemId];
   const submit = useDetailSubmit(drafts, store, itemId);
@@ -284,11 +291,20 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   blankShown.current = slots.length === 1 && slots[0]?.id === null;
   const slotKey = (slot: Words) => slot.id === null || slot.id === lead.current ? 'blank' : slot.id;
 
+  const openingChangePositioned = useRef(false);
   // Open at the current ask, even after a long earlier conversation. Once answered, open at the end.
   // The sticky title stays above the ask; arrivals leave a reader where they are.
   const showLatest = () => {
     const pane = body.current;
     if (!pane) return;
+    if (!openingChangePositioned.current) {
+      openingChangePositioned.current = true;
+      if (item && isChangedSinceRead(item, seen)) {
+        pane.scrollTop = 0; positionedScroll.current = 0;
+        followingAsk.current = false; atEnd.current = false;
+        return;
+      }
+    }
     const waiting = pane.querySelector('.detail-turn-now');
     const tag = waiting?.querySelector('.detail-waiting-tag');
     const anchor = tag?.closest('.detail-bubble-agent') ?? waiting;
@@ -308,7 +324,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     positionedScroll.current = pane.scrollTop;
     atEnd.current = nearEnd(pane);
   };
-  useEffect(() => { atEnd.current = true; followingAsk.current = false; positionedScroll.current = null; setTitleExpanded(false); }, [itemId]);
+  useEffect(() => { atEnd.current = true; followingAsk.current = false; positionedScroll.current = null; openingChangePositioned.current = false; setTitleExpanded(false); }, [itemId]);
   const sentJustNow = () => { navigationVisits.record(current.route, itemId, 'answered'); justSent.current = true; showLatest(); };
   const chatKey = model ? model.chat.map(entry => `${entry.id}:${entry.message.body}:${entry.result}:${entry.pending?.input.state}:${entry.asks.map(ask => `${ask.text}:${ask.now}`).join(',')}:${entry.forks.length}`).join('|') : null;
   useEffect(() => {
@@ -352,6 +368,18 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     for (const target of watch.targets) if (!next.has(target)) { watch.observer.unobserve(target); watch.targets.delete(target); }
     for (const target of next) if (!watch.targets.has(target)) { watch.targets.add(target); watch.observer.observe(target); }
   });
+
+  useEffect(() => {
+    if (!answerJump || !body.current) return;
+    const target = body.current.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(answerJump.messageId)}"]`);
+    if (!target) return;
+    followingAsk.current = false; atEnd.current = false;
+    const pane = body.current, head = pane.querySelector('.detail-head')?.getBoundingClientRect().height ?? 0;
+    pane.scrollTop += target.getBoundingClientRect().top - pane.getBoundingClientRect().top - head - 8;
+    target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+    onAnswerJumpConsumed?.(answerJump.token);
+  }, [answerJump?.token, answerJump?.messageId, chatKey, onAnswerJumpConsumed]);
 
   // Words open in the box that fits the status, whichever box the action or a put-back names.
   const openBox = (next: OpenMode) => { setMode(next === 'drop' || !fit ? next : fit); setFocusBox(value => value + 1); };
@@ -469,6 +497,9 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       </button>
     </div>
 
+    <ItemChanges service={drafts.service} store={store} session={session} item={item} seen={seen}
+      onOpenAnswer={onOpenAnswer ?? ((id) => onOpenItem(id))} />
+
     {model.steps && <section className="detail-section detail-steps" aria-label={model.stepsTitle}>
       {sectionLabel(model.stepsTitle)}
       <div className="detail-stepper">{model.steps.map(step => <div className="detail-step" key={step.label}>
@@ -546,6 +577,12 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
               {ask.now && <span className="tag tag-accent detail-waiting-tag">Waiting on you</span>}</div>
             {ask.text && <CopyMessage text={ask.text} />}
           </div>)}
+          {entry.you && (() => {
+            const input = Object.values(session.inputs).find(value => value?.message_id === entry.id);
+            const answer = session.answers.find(value => value.message_id === entry.id);
+            const inputId = input?.id ?? answer?.input_id;
+            return inputId ? <AnswerChanges session={session} inputId={inputId} onOpenItem={onOpenItem} /> : null;
+          })()}
           {entry.note && <div className="detail-chat-marker">{entry.note}</div>}
           {entry.unsent && <NotSentLine line={entry.unsent.line} again={entry.unsent.again || sendingAgain(draftState, session, entry.unsent.input)}
             restoreHint={editable(entry.unsent.input.kind) ? putBackBlocked(session, entry.unsent.input) : null}

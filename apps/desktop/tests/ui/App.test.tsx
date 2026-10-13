@@ -359,15 +359,12 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     const session = transport.sessions.get(route.session_id)!;
     await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(session)));
     await waitFor(() => expect(transport.preferences.sessions[0].rail).toBe('activity'));
-    // The already-open detail may finish its debounced seen mark during hover.
-    // Every other preference and write remains covered by this assertion.
-    const viewPreferences = () => {
-      const preferences = structuredClone(transport.preferences);
-      delete preferences.seen; preferences.revision = 0;
-      return preferences;
-    };
-    const ownerWrites = () => transport.mutations.filter(request => request.command.command !== 'preferences_patch'
-      || request.command.params.entries.some(entry => entry.kind !== 'mark_seen'));
+    // Finish the legitimate opening dwell and its save before observing hover.
+    // A cross-highlight must never start another read, even across tree/graph renders.
+    await waitFor(() => expect(transport.preferences.seen?.find(seen => seen.session.session_id === route.session_id)
+      ?.items.some(item => item.item_id === '1')).toBe(true), { timeout: 4000 });
+    const viewPreferences = () => structuredClone(transport.preferences);
+    const ownerWrites = () => transport.mutations;
     const before = viewPreferences(), writes = ownerWrites().length;
     const mark = vi.spyOn(NavigationStore.prototype, 'markItemSeen');
     const tree = screen.getByRole('tree', { name: 'Session items' }), detail = document.querySelector<HTMLElement>('.shell-detail-scroll')!;
@@ -907,6 +904,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     });
     const { transport } = setup(), invoke = transport.invoke.bind(transport);
     let release!: () => void, entered = false, rejected = false, conflictRevision = 0;
+    let selectionCapture: number | null = null;
     const gate = new Promise<void>(resolve => { release = resolve; });
     vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
       const request = args.request;
@@ -921,6 +919,11 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
         if (code === 'revision_conflict') conflictRevision = ++transport.preferences.revision;
         return { api_version: 1, ok: false, error: { code, message: 'Scroll edit rejected.', hint: 'Choose the view again.',
           retryable: false, field_errors: [] } };
+      }
+      if ('command' in request && request.command.command === 'preferences_patch'
+        && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1')
+        && request.command.params.entries.some(entry => entry.kind === 'set_global')) {
+        selectionCapture = transport.preferences.revision;
       }
       return invoke(name, args);
     });
@@ -943,6 +946,9 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       expect(selections()).toHaveLength(1);
       const selection = selections()[0].command;
       expect(selection.command === 'preferences_patch' && selection.params.expected_preferences_revision).toBeGreaterThanOrEqual(conflictRevision);
+      // A background seen save may commit after selection. Verify the revision at send.
+      expect(selectionCapture).not.toBeNull();
+      expect(selection.command === 'preferences_patch' && selection.params.expected_preferences_revision).toBe(selectionCapture);
       expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1');
     } else {
       await screen.findByRole('button', { name: 'Check again' });

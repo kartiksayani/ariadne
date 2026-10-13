@@ -7,3 +7,11 @@ export function openingTop(viewportHeight: number, rowHeight: number, headerHeig
   const centered = viewportHeight / 2 - Math.min(rowHeight, 120) / 2;
   return Math.max(top, Math.min(centered, lastTop));
 }
+
+/** The least movement that clears the same measured sticky header as opening placement. */
+export function nearestDelta(viewportHeight: number, rowTop: number, rowHeight: number, headerHeight: number, margin = 0): number {
+  const top = headerHeight + margin, bottom = viewportHeight - margin;
+  if (rowTop < top) return rowTop - top;
+  if (rowTop + rowHeight > bottom) return Math.min(rowTop + rowHeight - bottom, rowTop - top);
+  return 0;
+}

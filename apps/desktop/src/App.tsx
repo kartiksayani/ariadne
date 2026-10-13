@@ -1,3 +1,7 @@
+import { useImplicitCaughtUp } from './ui/changes/useCaughtUp';
+import { TopicChanges } from './ui/changes/TopicChanges';
+import { useSeenDwell } from './ui/changes/useSeenDwell';
+import { useReadingSeen } from './state/preferences/reading';
 import { waitForLifecycleReady } from './ui/shared/lifecycleReady';
 import { itemRemoved } from './selectors/removed';
 import { hasStatusFilter } from './selectors/tree/folds';
@@ -171,6 +175,7 @@ interface CenterProps {
   readonly highlightedItems: ReadonlySet<string>; readonly highlightedMessages: ReadonlySet<string>;
   readonly onHoverItem: (itemId: string | null) => void; readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
   readonly onDismissReveal: () => void; readonly onResume: () => void; readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
+  readonly onOpenItem: (itemId: string) => void;
   readonly onClearFilters: () => void; readonly onClearSearch: () => void; readonly onShowArchive: () => void;
   readonly onRemove: (target: TreeRemoveTarget) => void; readonly onRemoveTarget: RemoveHandler;
   readonly onAgentNotRunning: (submission: PendingSubmission) => void;
@@ -179,12 +184,16 @@ function SessionCenter({ application, view, graph, reveal, onRemoveTarget, ...pr
   const state = useSession(view.store), session = state.snapshot?.session;
   const navigation = useNavigation(application.navigation);
   const actions = application.actions.forSession(view.store);
+  const seen = useReadingSeen(application.navigation.reading, navigation.preferences, state.route);
+  useImplicitCaughtUp(application.navigation, session, seen, state.status === 'ready' && state.snapshot?.freshness === 'fresh');
   if (view.preferences?.filters.archived) return <SessionArchive application={application} view={view} onRemove={onRemoveTarget} />;
   const summaries = navigation.sessions?.sessions.items ?? [];
   const recovering = session ? recoveryTargets(session).length > 0 : false;
   const notice = state.status !== 'loading' && <SessionNotice state={state} refresh={() => { void view.store.refresh(); }} />;
   return <TreeView {...props} navigation={application.navigation} store={view.store} actions={actions} drafts={application.drafts}
     reveal={reveal?.store === view.store ? reveal : null} summaries={summaries}
+    topicContent={session ? topicId => <TopicChanges session={session} topicId={topicId} navigation={application.navigation}
+      onOpenItem={props.onOpenItem} /> : undefined}
     notices={notice || recovering ? <div className="tree-notices">{notice}{recovering && <RecoveryPanel actions={actions} />}</div> : null}
     graph={graph && !view.preferences?.filters.archived ? <NavigationGraph navigation={application.navigation} store={view.store} query={props.query}
       tight={props.detailOpen || props.railOpen} onReveal={props.onSelected} onHoverItem={props.onHoverItem} /> : null} />;
@@ -250,9 +259,18 @@ function Workspace({ application }: { application: Application }) {
   const candidateId = currentReveal?.kind === 'item' ? currentReveal.route.item_id : view?.selected_item_id ?? null;
   const selectedId = candidateId && sessionState?.snapshot?.session.items[candidateId] && !itemRemoved(sessionState.snapshot.session, candidateId) ? candidateId : null;
   const seenRevision = selectedId ? sessionState?.snapshot?.session.items[selectedId]?.revision : null;
-  useEffect(() => {
-    if (detailOpen && route && selectedId && sessionState?.status === 'ready' && !sessionState.error) navigation.markItemSeen(route, selectedId);
-  }, [navigation, detailOpen, route, selectedId, seenRevision, sessionState?.status, sessionState?.error]);
+  const readingSeen = useReadingSeen(navigation.reading, state.preferences, route ?? { project_id: '', session_id: '' });
+  const observedSeen = useReadingSeen(navigation.reading, state.preferences, route ?? { project_id: '', session_id: '' }, false);
+  const detailNeedsRead = useMemo(() => selectedId != null && seenRevision != null
+    && (observedSeen?.items.find(item => item.item_id === selectedId)?.revision ?? -1) < seenRevision,
+  [observedSeen, selectedId, seenRevision]);
+  const observeDetail = useCallback(() => {
+    if (route && selectedId) navigation.markItemSeen(route, selectedId, seenRevision ?? undefined);
+  }, [navigation, route?.project_id, route?.session_id, selectedId, seenRevision]);
+  useSeenDwell(detailOpen && detailNeedsRead && route && selectedId && sessionState?.status === 'ready' && !sessionState.error ? `${key}:${selectedId}` : null, seenRevision, observeDetail);
+  const [answerJump, setAnswerJump] = useState<{ route: string; itemId: string; messageId: string; token: number } | null>(null);
+  const answerJumpSequence = useRef(0);
+  const consumeAnswerJump = useCallback((token: number) => setAnswerJump(previous => previous?.token === token ? null : previous), []);
   const ackRequest = useRef(0);
   const ackNoticeId = useRef<string | null>(null);
   const ackActions = store ? application.actions.forSession(store) : null;
@@ -639,7 +657,10 @@ function Workspace({ application }: { application: Application }) {
         onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined}
         onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onBring={() => { void queueBring({ ...route, item_id: selectedId }); }}
         highlightedMessageIds={highlightedMessages} later={later} onAgentNotRunning={onAgentNotRunning} earlierAgent={earlier}
-        hiddenItemIds={view?.hidden_item_ids}
+        hiddenItemIds={view?.hidden_item_ids} seen={readingSeen}
+        answerJump={answerJump?.route === key && answerJump.itemId === selectedId ? answerJump : undefined}
+        onAnswerJumpConsumed={consumeAnswerJump}
+        onOpenAnswer={(itemId, messageId) => { setAnswerJump({ route: key, itemId, messageId, token: ++answerJumpSequence.current }); revealItem({ ...route, item_id: itemId }); }}
         onLater={value => preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)}
         provenance={<CopiedProvenance store={store} itemId={selectedId}
           projectPath={projectId => state.projects?.projects.items.find(project => project.project_id === projectId)?.canonical_root ?? null} revealItem={revealLinkedItem} />} /> : undefined}
@@ -650,6 +671,7 @@ function Workspace({ application }: { application: Application }) {
         historyReveal={historyReveal.current === treeReveal ? historyReveal.current : null}
         selectedId={treeSelectedId} detailOpen={detailOpen && !!selectedId} railOpen={!!view && view.rail !== 'hidden'}
         highlightedItems={highlightedItems} highlightedMessages={highlightedMessages} onHoverItem={hoverItem} onSelected={selected}
+        onOpenItem={itemId => { if (route) revealItem({ ...route, item_id: itemId }); }}
         onDismissReveal={() => setDismissedReveal(currentReveal)} onResume={() => { setDismissedReveal(currentReveal); closeDetail(); }}
         onAct={(intent, target, onReveal) => {
           if (intent === 'bring') void queueBring(target, onReveal);

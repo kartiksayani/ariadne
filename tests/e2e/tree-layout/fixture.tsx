@@ -14,7 +14,7 @@ import { SessionBar } from '../../../apps/desktop/src/ui/tree/SessionBar';
 // Item 1 carries a long finding (it must fold to four lines), item 5 a paragraph that
 // wraps over a few lines (hover must not rewrap it), the rest keep their short text.
 class TreeLayoutTransport extends AppTransport {
-  constructor(gettingAround = false) {
+  constructor({ gettingAround = false, changes = false } = {}) {
     super();
     const items = this.sessions.get(route.session_id)!.items;
     items['1']!.question = 'A long item title with enough words to span several lines in a narrow tree. '.repeat(5);
@@ -40,6 +40,17 @@ class TreeLayoutTransport extends AppTransport {
       const view = this.preferences.sessions.find(value => value.session.session_id === route.session_id)!;
       view.expanded_item_ids.push('19', '20', '21', '22');
       items['4']!.outcome = 'See [the waiting question](item:2).';
+    }
+    if (changes) {
+      const baseline = '2026-10-01T00:00:00.000Z', later = '2026-10-13T09:00:00.000Z';
+      Object.values(items).forEach(item => { if (item) { item.created_at = baseline; item.changes = []; } });
+      items['1.1']!.created_at = later;
+      items['18']!.created_at = later;
+      items['2']!.revision = 2;
+      items['2']!.changes = [{ revision: 2, at: later, cause_message_id: items['2']!.created_message_id, before: { status: 'open' } }];
+      items['3']!.changes = [{ revision: 2, at: later, wording_only: true, cause_message_id: items['3']!.created_message_id, before: { question: 'Original wording' } }];
+      this.preferences.seen = [{ session: route, since: baseline, items: [], topics: [] }];
+      this.preferences.sessions[0]!.expanded_item_ids = [];
     }
   }
 }
@@ -78,4 +89,4 @@ createRoot(document.getElementById('root')!).render(query.has('grid') ? <ActionG
     sessionId: route.session_id, title: 'A long session name that needs to fit in a narrow column', secondary: null,
     description: null, named: true, agent: 'codex', where: 'iTerm', meta: '12 topics', running: false,
     connection: 'not_running', closed: true, archived: true,
-  }} /></div> : <DesktopApp service={createDesktopService(new TreeLayoutTransport(query.has('nav')))} />);
+  }} /></div> : <DesktopApp service={createDesktopService(new TreeLayoutTransport({ gettingAround: query.has('nav'), changes: query.has('changes') }))} />);

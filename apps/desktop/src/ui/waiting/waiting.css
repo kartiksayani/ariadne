@@ -361,13 +361,3 @@
   height: 44px;
   border-radius: var(--radius-md);
 }
-
-.waiting-closed-line {
-  padding: var(--space-4);
-  font-size: calc(11px * var(--text-scale));
-  color: var(--a-label);
-}
-
-.waiting-card-closed {
-  opacity: 0.65;
-}
