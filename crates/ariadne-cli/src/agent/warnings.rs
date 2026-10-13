@@ -3,6 +3,12 @@ use ariadne_core::{ApplyRequest, EntityRef, Operation, UuidRef};
 use ariadne_domain::{models::*, visibility::item_is_removed};
 use std::collections::BTreeSet;
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ProseKind {
+    Markdown,
+    Plain,
+}
+
 pub(super) fn collect(
     before: &Session,
     after: &Session,
@@ -35,6 +41,7 @@ pub(super) fn collect(
     let mut missing_reasons = BTreeSet::new();
     let mut populated_topics = BTreeSet::new();
     let mut prose = vec![request.summary.as_str()];
+    let mut plain_prose = vec![];
     if let Some(result) = &request.input_result {
         prose.push(&result.explanation);
     }
@@ -62,8 +69,8 @@ pub(super) fn collect(
                 prose.extend(add.outcome.as_deref());
                 prose.extend(add.why.as_deref());
                 for option in add.options.iter().flatten() {
-                    prose.push(&option.label);
-                    prose.push(&option.consequence);
+                    plain_prose.push(option.label.as_str());
+                    plain_prose.push(option.consequence.as_str());
                 }
             }
             Operation::ItemEdit {
@@ -108,8 +115,8 @@ pub(super) fn collect(
             Operation::ItemAsk { ask, options, .. } => {
                 prose.push(ask);
                 for option in options {
-                    prose.push(&option.label);
-                    prose.push(&option.consequence);
+                    plain_prose.push(option.label.as_str());
+                    plain_prose.push(option.consequence.as_str());
                 }
             }
             Operation::ItemReplace { outcome, why, .. } => {
@@ -128,11 +135,11 @@ pub(super) fn collect(
                 ) {
                     populated_topics.insert(topic);
                 }
-                prose.push(name);
+                plain_prose.push(name.as_str());
                 prose.extend(brief.as_deref());
             }
             Operation::TopicEdit { name, brief, .. } => {
-                prose.extend(name.as_deref());
+                plain_prose.extend(name.as_deref());
                 prose.extend(brief.as_ref().and_then(|brief| brief.as_deref()));
             }
             _ => {}
@@ -144,16 +151,26 @@ pub(super) fn collect(
         .values()
         .filter(|item| visible(after, item))
         .collect();
-    for text in prose {
+    for (text, kind) in prose
+        .into_iter()
+        .map(|text| (text, ProseKind::Markdown))
+        .chain(plain_prose.into_iter().map(|text| (text, ProseKind::Plain)))
+    {
         for number in bare_numbers(text) {
             if let Some(item) = live.iter().find(|item| item.id.as_str() == number) {
-                if mentioned.insert(item.id.clone()) {
-                    warnings.push(format!(
-                        "Bare item number {}. Use a named link: [{}](item:{}).",
-                        item.id.as_str(),
-                        label(item),
-                        item.id.as_str()
-                    ));
+                if mentioned.insert((item.id.clone(), kind)) {
+                    warnings.push(match kind {
+                        ProseKind::Markdown => format!(
+                            "Bare item number {}. Use a named link: [{}](item:{}).",
+                            item.id.as_str(),
+                            label(item),
+                            item.id.as_str()
+                        ),
+                        ProseKind::Plain => format!(
+                            "Bare item number {}. Name the item instead of its number.",
+                            item.id.as_str()
+                        ),
+                    });
                 }
             }
         }
@@ -867,6 +884,67 @@ mod tests {
         }
         assert_eq!(bare_numbers("1.2 and 3.4 updated."), ["1.2", "3.4"]);
         assert_eq!(bare_numbers("Item 1 needs work."), ["1"]);
+    }
+
+    #[test]
+    fn plain_fields_recommend_naming_items_without_markdown_links() {
+        let session = seed();
+        let topic = session.topics.0.keys().next().unwrap();
+        for op in ["topic.add", "topic.edit", "item.add", "item.ask"] {
+            let fields: &[&str] = if op.starts_with("topic.") {
+                &["name"]
+            } else {
+                &["label", "consequence"]
+            };
+            for field in fields {
+                let mut operation = match op {
+                    "topic.add" => json!({"op":op,"name":"New topic"}),
+                    "topic.edit" => json!({"op":op,"topic":{"id":topic}}),
+                    "item.add" => {
+                        json!({"op":op,"topic":{"id":topic},"type":"decision","question":"Distinct choice","ask":"Choose an approach"})
+                    }
+                    _ => json!({"op":op,"item":{"id":"1"},"ask":"Choose an approach"}),
+                };
+                if *field == "name" {
+                    operation[field] = json!("See item 1");
+                } else {
+                    let mut option = json!({"label":"Proceed","consequence":"Work continues"});
+                    option[field] = json!("See item 1");
+                    operation["options"] = json!([option]);
+                }
+                assert_eq!(
+                    advice(&session, json!({"operations":[operation]})),
+                    ["Bare item number 1. Name the item instead of its number."],
+                    "{op} {field}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bare_reference_advice_is_deduplicated_per_item_and_field_kind() {
+        let mut session = seed();
+        session
+            .items
+            .0
+            .get_mut(&ItemRef::new("1").unwrap())
+            .unwrap()
+            .short = Some("Release choice".into());
+        let topic = session.topics.0.keys().next().unwrap();
+        let markdown = json!({"op":"reply","item":{"id":"1"},"text":"See item 1 and item 1"});
+        let plain = json!({"op":"topic.edit","topic":{"id":topic},"name":"See item 1 and item 1"});
+        for operations in [
+            json!([markdown, plain, markdown, plain]),
+            json!([plain, markdown, plain, markdown]),
+        ] {
+            let warnings = advice(&session, json!({"operations":operations}));
+            assert_eq!(warnings.len(), 2);
+            assert!(warnings.iter().any(|warning| warning
+                == "Bare item number 1. Use a named link: [Release choice](item:1)."));
+            assert!(warnings.iter().any(
+                |warning| warning == "Bare item number 1. Name the item instead of its number."
+            ));
+        }
     }
 
     #[test]
