@@ -158,15 +158,18 @@ fn envelope(output: &Output, exit: i32) -> Value {
     value
 }
 fn repaired_full_envelope(output: &Output) -> Value {
-    let notes = String::from_utf8(output.stderr.clone()).unwrap();
-    assert_eq!(notes.lines().count(), 2, "{notes}");
-    for line in notes.lines() {
-        assert!(line.starts_with("Repair: operations[1]"), "{line}");
-        assert!(line.contains("created open with ack_to `done`"), "{line}");
+    let value = envelope(output, 0);
+    let repairs = value["data"]["repairs"].as_array().unwrap();
+    assert_eq!(repairs.len(), 2, "{repairs:?}");
+    for repair in repairs {
+        let repair = repair.as_str().unwrap();
+        assert!(repair.starts_with("operations[1]"), "{repair}");
+        assert!(
+            repair.contains("created open with ack_to `done`"),
+            "{repair}"
+        );
     }
-    let mut clean = output.clone();
-    clean.stderr.clear();
-    envelope(&clean, 0)
+    value
 }
 fn request(op: u64) -> Value {
     json!({"op_id":id(op),"source_input_id":null,"attempt_id":null,"expected_item_revisions":{},"expected_topic_revisions":{},"summary":"","operations":[],"input_result":null})
@@ -1589,7 +1592,7 @@ fn native_result_request_prints_a_full_raw_receipt_and_replays_without_a_second_
     ];
     let output = setup.call(&args, Some(&body));
     assert_eq!(output.status.code(), Some(0), "{output:?}");
-    assert!(output.stderr.is_empty());
+    assert!(output.stderr.is_empty(), "{output:?}");
     let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(receipt["session_id"], session.id.as_str());
     assert_eq!(receipt["operation_id"], id(0x9000).as_str());
@@ -1621,13 +1624,18 @@ fn native_result_request_prints_a_full_raw_receipt_and_replays_without_a_second_
     );
     let replay = setup.call(&args, Some(&body));
     assert_eq!(replay.status.code(), Some(0), "{replay:?}");
-    assert!(replay.stderr.is_empty());
+    assert_eq!(replay.stderr, output.stderr);
     assert_eq!(replay.stdout, output.stdout);
     assert_eq!(setup.bytes(), saved);
     // The tree helper requests the same saved receipt inside a JSON envelope.
     let mut enveloped_args = args.to_vec();
     enveloped_args.push("--json");
-    let enveloped = envelope(&setup.call(&enveloped_args, Some(&body)), 0);
+    let mut enveloped = envelope(&setup.call(&enveloped_args, Some(&body)), 0);
+    assert_eq!(enveloped["data"]["warnings"], json!([]));
+    enveloped["data"]
+        .as_object_mut()
+        .unwrap()
+        .remove("warnings");
     assert_eq!(enveloped["data"], receipt);
     assert_eq!(setup.bytes(), saved);
 }
@@ -1657,6 +1665,47 @@ fn full_prints_the_complete_saved_receipt_and_a_stated_op_id_replays() {
         full
     );
     assert_eq!(setup.bytes(), saved, "a full replay also writes nothing");
+    let preview = repaired_full_envelope(&setup.apply_with(&["--dry-run", "--full"], &body));
+    assert_eq!(preview["data"]["dry_run"], true);
+    assert_eq!(preview["data"]["replayed"], true);
+    assert_eq!(preview["data"]["repairs"], full["data"]["repairs"]);
+    assert_eq!(setup.bytes(), saved, "a dry-run replay also writes nothing");
+}
+
+#[test]
+fn human_full_keeps_repair_notes_on_preview_apply_and_replay() {
+    let setup = Setup::new(&seed());
+    let body = lenient_with_op(603);
+    let before = setup.bytes();
+    for flags in [
+        &["--json-stdin", "--full", "--dry-run"][..],
+        &["--json-stdin", "--full"][..],
+        &["--json-stdin", "--full"][..],
+        &["--json-stdin", "--full", "--dry-run"][..],
+    ] {
+        let current = setup.bytes();
+        let output = setup.agent(&["apply"], flags, Some(&body));
+        assert_eq!(output.status.code(), Some(0), "{output:?}");
+        let notes = String::from_utf8(output.stderr).unwrap();
+        let repairs: Vec<_> = notes
+            .lines()
+            .filter_map(|line| line.strip_prefix("Repair: "))
+            .collect();
+        assert_eq!(repairs.len(), 2, "{notes}");
+        for repair in repairs {
+            assert!(repair.starts_with("operations[1]"), "{repair}");
+            assert!(
+                repair.contains("created open with ack_to `done`"),
+                "{repair}"
+            );
+        }
+        let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(receipt["data"]["kind"], "apply");
+        assert!(receipt.get("repairs").is_none());
+        if flags.contains(&"--dry-run") || current != before {
+            assert_eq!(setup.bytes(), current, "previews and replays write nothing");
+        }
+    }
 }
 
 #[test]
@@ -1718,7 +1767,15 @@ fn a_derived_op_id_replays_after_generation_rotation_and_a_fresh_explicit_id_fil
 
     // A lost receipt retried after reconnecting is still the saved operation.
     let replay = apply(&[], LENIENT.as_bytes());
-    assert_eq!(replay, as_replay(&first));
+    assert_eq!(first["data"]["warnings"].as_array().unwrap().len(), 1);
+    assert_eq!(replay["data"]["warnings"], json!([]));
+    // Advice is recomputed, not replayed from the saved receipt. A later snapshot
+    // cannot supply advice for the old receipt's exact revision.
+    let canonical = |mut value: Value| {
+        value["data"].as_object_mut().unwrap().remove("warnings");
+        value
+    };
+    assert_eq!(canonical(replay.clone()), canonical(as_replay(&first)));
     assert_eq!(
         setup.bytes(),
         saved,
@@ -1728,7 +1785,9 @@ fn a_derived_op_id_replays_after_generation_rotation_and_a_fresh_explicit_id_fil
     assert_eq!(setup.lenient(&[]), replay);
     let mut dry_replay = replay.clone();
     dry_replay["data"]["dry_run"] = json!(true);
-    assert_eq!(apply(&["--dry-run"], LENIENT.as_bytes()), dry_replay);
+    let preview = apply(&["--dry-run"], LENIENT.as_bytes());
+    assert_eq!(preview["data"]["warnings"], first["data"]["warnings"]);
+    assert_eq!(canonical(preview), canonical(dry_replay));
     assert_eq!(
         setup.bytes(),
         saved,
@@ -1954,24 +2013,55 @@ fn read_items_filters_by_topic_id_or_number_and_by_archived() {
 }
 
 #[test]
-fn the_help_example_uses_explicit_ack_targets_for_the_lenient_fixture() {
+fn the_help_example_has_a_topic_brief_deliberate_ack_and_a_full_owner_question() {
     let help = invoke(Command::new(env!("CARGO_BIN_EXE_ariadne")), None);
     let text = String::from_utf8(help.stdout).unwrap();
     let line = text
         .lines()
         .find(|line| line.starts_with("  printf '%s' '{\"operations\":[{\"op\":\"topic.add\""))
-        .expect("help carries the lenient example");
+        .expect("help carries the apply example");
     let body = line
         .strip_prefix("  printf '%s' '")
         .and_then(|rest| rest.split_once("' | ariadne apply"))
         .expect("printf form")
         .0;
-    let mut expected: Value = serde_json::from_str(LENIENT).unwrap();
-    expected["operations"][1]["status"] = json!("open");
-    expected["operations"][1]["ack_to"] = json!("open");
-    expected["operations"][1]["children"][0]["status"] = json!("open");
-    expected["operations"][1]["children"][0]["ack_to"] = json!("open");
-    assert_eq!(serde_json::from_str::<Value>(body).unwrap(), expected);
+    let example: Value = serde_json::from_str(body).unwrap();
+    assert_eq!(example["operations"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        example["operations"][0],
+        json!({
+            "op":"topic.add", "name":"Choose cache release timing", "short":"Release timing",
+            "brief":"The review found a race between cache writes. Choose whether the fallback should wait for the fix."
+        })
+    );
+    assert_eq!(
+        example["operations"][1],
+        json!({
+            "op":"item.add", "ref":"fill_race", "short":"Fill race", "type":"finding",
+            "question":"Two writers race in fill()", "status":"open", "ack_to":"open",
+            "outcome":"Confirmed", "why":"Reproduced locally",
+            "children":[{"short":"Serialize fills", "type":"task", "question":"Serialize concurrent cache fills"}]
+        })
+    );
+    let decision = &example["operations"][2];
+    assert_eq!(
+        decision["question"],
+        "Choose when to merge the fallback path"
+    );
+    assert_eq!(
+        decision["ask"],
+        "May I merge the fallback now, after the fill fix, or leave it unmerged?"
+    );
+    assert_eq!(decision["note"], "The fallback is ready, but concurrent writes can race. What this means for you: releasing now needs closer monitoring. I recommend waiting for the fill fix (fairly sure) because concurrent writes can race; if that is wrong, we can merge now and monitor cache errors. If you do not answer, I will keep the fallback unmerged. Affects the fill race.");
+    assert_eq!(
+        decision["options"],
+        json!([
+            {"label":"Merge now", "consequence":"Releases today with closer cache monitoring."},
+            {"label":"After fix", "consequence":"Delays release until concurrent fills are safe.", "recommended":true},
+            {"label":"Not now", "consequence":"Keeps the fallback unmerged while other work continues."}
+        ])
+    );
+    assert_eq!(decision["affects"], json!([{"ref":"fill_race"}]));
     for word in [
         "--dry-run",
         "--full",
@@ -3101,4 +3191,190 @@ fn lenient_completed_asks_get_a_real_question_round_and_owner_answer_route() {
             .iter()
             .any(|answer| answer.item_id == ask.id && answer.text == "Keep the draft for now."));
     }
+}
+
+#[test]
+fn unrelated_apply_does_not_repeat_existing_topic_or_waiting_warnings() {
+    let setup = Setup::new(&seed());
+    let first = envelope(
+        &setup.apply(&json!({"operations": (0..4).map(|n| json!({
+            "op":"item.add", "topic":{"id":id(5)}, "type":"question",
+            "question":format!("Choose retry approach {n}"), "ask":"Which approach?"
+        })).collect::<Vec<_>>() })),
+        0,
+    );
+    let warnings = first["data"]["warnings"].as_array().unwrap();
+    assert!(warnings
+        .iter()
+        .any(|warning| warning.as_str().unwrap().contains("no brief")));
+    assert!(warnings
+        .iter()
+        .any(|warning| warning.as_str().unwrap().contains("4 items are waiting")));
+
+    let reply = json!({"expected_item_revisions":{"2":1}, "operations":[{"op":"reply", "item":{"id":"2"}, "text":"Evidence is still available."}]});
+    for output in [
+        setup.agent(
+            &["apply"],
+            &["--json-stdin", "--dry-run", "--json"],
+            Some(&serde_json::to_vec(&reply).unwrap()),
+        ),
+        setup.apply(&reply),
+        setup.apply(&reply),
+    ] {
+        assert_eq!(envelope(&output, 0)["data"]["warnings"], json!([]));
+    }
+    let current = setup.store().read(&id(2)).unwrap();
+    let edited = envelope(
+        &setup.apply(&json!({"expected_item_revisions":{"2":current.items.0[&ItemRef::new("2").unwrap()].revision}, "operations":[{"op":"item.edit", "item":{"id":"2"}, "patch":{"question":"Original evidence remains available"}}]})),
+        0,
+    );
+    assert_eq!(edited["data"]["warnings"], json!([]));
+    let unchanged = envelope(
+        &setup.apply(&json!({"expected_item_revisions":{"3":current.items.0[&ItemRef::new("3").unwrap()].revision}, "operations":[{"op":"item.ask", "item":{"id":"3"}, "ask":"Keep this approach?"}]})),
+        0,
+    );
+    assert_eq!(unchanged["data"]["warnings"], json!([]));
+
+    let added = envelope(
+        &setup.apply(&json!({"operations":[{"op":"item.add", "topic":{"id":id(5)}, "type":"question", "question":"Choose another retry approach", "ask":"Which approach?"}]})),
+        0,
+    );
+    let warnings = added["data"]["warnings"].as_array().unwrap();
+    assert!(warnings
+        .iter()
+        .any(|warning| warning.as_str().unwrap().contains("5 items are waiting")));
+    assert!(warnings
+        .iter()
+        .any(|warning| warning.as_str().unwrap().contains("no brief")));
+}
+
+#[test]
+fn json_apply_warnings_keep_stderr_empty_for_compact_and_full_previews_and_replays() {
+    let bytes = serde_json::to_vec(&json!({
+        "summary":"See item 1 before continuing.",
+        "operations":[{
+            "op":"item.add", "topic":{"id":id(5)}, "type":"task",
+            "question":"Which release approach?"
+        }]
+    }))
+    .unwrap();
+    for full in [false, true] {
+        let setup = Setup::new(&seed());
+        let before = setup.bytes();
+        let mut flags = vec!["--json-stdin", "--json"];
+        if full {
+            flags.push("--full");
+        }
+        let mut dry_flags = flags.clone();
+        dry_flags.push("--dry-run");
+        let preview = envelope(&setup.agent(&["apply"], &dry_flags, Some(&bytes)), 0);
+        let warnings = preview["data"]["warnings"].as_array().unwrap();
+        assert_eq!(warnings.len(), 3, "{preview}");
+        assert_eq!(setup.bytes(), before);
+
+        let applied = envelope(&setup.agent(&["apply"], &flags, Some(&bytes)), 0);
+        assert_eq!(applied["data"]["warnings"], preview["data"]["warnings"]);
+        let saved = setup.bytes();
+        assert_ne!(saved, before);
+        for replay_flags in [&flags, &dry_flags] {
+            let replay = envelope(&setup.agent(&["apply"], replay_flags, Some(&bytes)), 0);
+            assert_eq!(replay["data"]["warnings"], applied["data"]["warnings"]);
+            assert_eq!(setup.bytes(), saved, "replays store no warning metadata");
+        }
+    }
+}
+
+#[test]
+fn apply_warnings_are_visible_in_human_and_json_output_without_changing_saved_state() {
+    let request = json!({"summary":"See item 1 before continuing.", "operations":[
+        {"op":"item.add", "topic":{"id":id(5)}, "type":"task", "question":"Which release approach?"}
+    ]});
+    let bytes = serde_json::to_vec(&request).unwrap();
+    let setup = Setup::new(&seed());
+    let before = setup.bytes();
+    let human = setup.agent(&["apply"], &["--json-stdin", "--dry-run"], Some(&bytes));
+    assert_eq!(human.status.code(), Some(0), "{human:?}");
+    assert!(human.stderr.is_empty(), "{human:?}");
+    let human: Value = serde_json::from_slice(&human.stdout).unwrap();
+    let json = envelope(
+        &setup.agent(
+            &["apply"],
+            &["--json-stdin", "--dry-run", "--json"],
+            Some(&bytes),
+        ),
+        0,
+    );
+    let warnings = json["data"]["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 3, "{warnings:?}");
+    assert_eq!(human["warnings"], json["data"]["warnings"]);
+    for phrase in [
+        "Which release approach? (1)",
+        "[Which release approach?](item:1)",
+        "Topic Release choice (1)",
+    ] {
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.as_str().unwrap().contains(phrase)),
+            "{warnings:?}"
+        );
+    }
+    assert_eq!(
+        before,
+        setup.bytes(),
+        "advisory preview never saves anything"
+    );
+
+    let full_json = envelope(
+        &setup.agent(
+            &["apply"],
+            &["--json-stdin", "--dry-run", "--full", "--json"],
+            Some(&bytes),
+        ),
+        0,
+    );
+    assert_eq!(full_json["data"]["warnings"], json["data"]["warnings"]);
+    let full_human = setup.agent(
+        &["apply"],
+        &["--json-stdin", "--dry-run", "--full"],
+        Some(&bytes),
+    );
+    assert_eq!(full_human.status.code(), Some(0));
+    let notes = String::from_utf8(full_human.stderr).unwrap();
+    assert_eq!(notes.lines().count(), warnings.len());
+    assert!(notes.lines().all(|line| line.starts_with("Warning: ")));
+    assert_eq!(before, setup.bytes());
+
+    let applied = envelope(&setup.apply(&request), 0);
+    assert_eq!(applied["data"]["warnings"], json["data"]["warnings"]);
+    let saved = setup.bytes();
+    let snapshot: Value = serde_json::from_slice(&saved).unwrap();
+    assert!(snapshot.get("warnings").is_none());
+    let session = setup.store().read(&id(2)).unwrap();
+    let receipt = session
+        .operation_receipts
+        .0
+        .values()
+        .flatten()
+        .last()
+        .unwrap();
+    assert!(serde_json::to_value(&receipt.result)
+        .unwrap()
+        .get("warnings")
+        .is_none());
+    assert_eq!(
+        session.items.0[&ItemRef::new("3").unwrap()].question,
+        "Which release approach?"
+    );
+    assert_eq!(
+        envelope(&setup.apply(&request), 0)["data"]["warnings"],
+        applied["data"]["warnings"]
+    );
+    assert_eq!(saved, setup.bytes(), "replay stores no warning metadata");
+
+    let clean = Setup::new(&seed());
+    assert_eq!(
+        envelope(&clean.apply(&json!({"operations":[]})), 0)["data"]["warnings"],
+        json!([])
+    );
 }

@@ -280,10 +280,16 @@ pub fn persisted_race_and_parity(binary: &str, args: &[&str], cli: Option<&str>)
         let output = child.wait_with_output().unwrap();
         assert!(output.status.success(), "{output:?}");
         assert!(output.stderr.is_empty());
+        let mut cli_receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+        // CLI filing advice is output metadata, outside the saved Core/MCP receipt.
         assert_eq!(
-            serde_json::from_slice::<Value>(&output.stdout).unwrap(),
-            receipt
+            cli_receipt["data"]
+                .as_object_mut()
+                .unwrap()
+                .remove("warnings"),
+            Some(json!([]))
         );
+        assert_eq!(cli_receipt, receipt);
     }
 
     let session = setup.store().read(&id(2)).unwrap();

@@ -104,8 +104,8 @@ fn kind(operation: &Value) -> &str {
 }
 
 /// Hold one raw example to the rules it teaches: every created topic and item is
-/// labelled, new results remain open for Ack, and a `note` is set only on an item
-/// that starts in progress.
+/// labelled, new results remain open for Ack, and a `note` describes running
+/// work or accompanies an owner question.
 fn checked(block: &str) -> Value {
     let request: Value = serde_json::from_str(block)
         .unwrap_or_else(|error| panic!("example is not JSON: {error}\n{block}"));
@@ -145,7 +145,10 @@ fn checked(block: &str) -> Value {
             }
         }
         if kind(operation) == "item.add" && operation.get("note").is_some() {
-            assert_eq!(operation["status"], "in_progress", "note on a closed item");
+            assert!(
+                operation["status"] == "in_progress" || operation.get("ask").is_some(),
+                "note outside progress or an owner question"
+            );
         }
     }
     request
@@ -304,6 +307,17 @@ impl Seeded {
         {
             for (item, revision) in guards.iter_mut() {
                 *revision = json!(self.revision(item));
+            }
+        }
+        if let Some(guards) = request
+            .get_mut("expected_topic_revisions")
+            .and_then(Value::as_object_mut)
+        {
+            let session = self.session();
+            for (topic, revision) in guards {
+                *revision = json!(session.topics.0[&UuidV4::new(topic).unwrap()]
+                    .revision
+                    .value());
             }
         }
         request
@@ -540,11 +554,11 @@ fn every_skill_example_passes_the_real_cli_and_together_they_cover_the_surface()
         let request = Seeded::previewed(block);
         for operation in operations(&request) {
             ops.insert(kind(operation).to_owned());
+            asked |= operation.get("ask").is_some();
+            if let Some(target) = operation.get("ack_to") {
+                ack_targets.insert(target.as_str().unwrap().to_owned());
+            }
             if kind(operation) == "item.add" {
-                asked |= operation.get("ask").is_some();
-                if let Some(target) = operation.get("ack_to") {
-                    ack_targets.insert(target.as_str().unwrap().to_owned());
-                }
                 child |= operation.get("parent").is_some() || operation.get("children").is_some();
                 if let Some(owner) = operation.get("owner") {
                     owners.insert(owner["kind"].as_str().unwrap().to_owned());
@@ -690,8 +704,8 @@ fn the_core_and_on_demand_files_stay_small_and_are_each_pointed_at() {
 
 #[test]
 fn the_skill_routes_finishing_a_parent_for_ack_to_the_file_that_teaches_it() {
-    assert!(CHECKLIST.contains("## Finishing the parent"));
-    assert!(CHECKLIST.contains("finishing its children is not acknowledgment"));
+    assert!(CHECKLIST.contains("Finishing children is not Ack"));
+    assert!(CHECKLIST.contains("the same request as its last child"));
     assert!(INPUTS.contains("Finish parents per `checklist.md`."));
     assert!(!REVIEW.contains("closing rule in `inputs.md`"));
     for directory in SKILL_DIRECTORIES {
@@ -709,8 +723,9 @@ fn the_skill_routes_finishing_a_parent_for_ack_to_the_file_that_teaches_it() {
 fn the_core_marks_topic_optional_and_explains_its_defaults() {
     for directory in SKILL_DIRECTORIES {
         let files = generated(directory);
-        assert!(files[0].1.contains("One per concern, not per step."));
-        assert!(files[0].1.contains("Keep this tree for later writes."));
+        assert!(files[0].1.contains("Topics are owner actions"));
+        assert!(files[0].1.contains("Do not repeat Ariadne"));
+        assert!(files[0].1.contains("Update the existing item"));
         let row = files[0]
             .1
             .lines()
@@ -725,13 +740,11 @@ fn the_core_marks_topic_optional_and_explains_its_defaults() {
             .1
             .contains("Set `topic` if neither default applies."));
     }
-    // The opening example omits topic on both the parent and its child. The
-    // real CLI wires both to the sole topic.add, as the core table promises.
+    // The opening example omits topic; the CLI wires its result to the sole topic.add.
     let (seeded, _, _) = Seeded::committed(&examples(RULES)[0]);
     let session = seeded.session();
-    let (topic, items) = topic_items(&session, "Review: notes sync");
-    assert_eq!(by_short(&items, "Review summary").topic_id, topic.id);
-    assert_eq!(by_short(&items, "No jitter").topic_id, topic.id);
+    let (topic, items) = topic_items(&session, "Choose safe retry behavior");
+    assert_eq!(by_short(&items, "Retry checks").topic_id, topic.id);
 }
 
 /// The compact receipt names the values the next request needs.
@@ -746,14 +759,14 @@ fn assert_compact(data: &Value) {
 fn every_terminal_example_commits_on_a_seeded_session() {
     // The core's examples and every kind-of-work example that does not
     // answer a dispatched input.
-    let blocks: Vec<String> = [RULES, ERRORS, REPORT, REVIEW, CHECKLIST]
+    let blocks: Vec<String> = [RULES, ERRORS, REPORT, REVIEW, CHECKLIST, FOLLOW_UP]
         .into_iter()
         .flat_map(examples)
         .collect();
     assert_eq!(
         blocks.len(),
-        8,
-        "expected eight terminal examples including existing-item deletion"
+        7,
+        "expected seven terminal examples including deletion and wording-only edits"
     );
     for block in &blocks {
         let (seeded, request, data) = Seeded::committed(block);
@@ -790,7 +803,7 @@ fn existing_item_delete_example_is_guarded_and_retains_its_reply_and_history() {
     assert!(session.messages.iter().any(|message| {
         message.kind == MessageKind::Reply
             && message.item_id.as_ref() == Some(&item.id)
-            && message.body == "Deleted this duplicate; the original remains."
+            && message.body == "Deleted this duplicate; [retry checks](item:2) remains."
     }));
 }
 
@@ -860,16 +873,43 @@ fn the_cli_help_example_creates_reading_items_open_for_ack_without_repairs() {
     let (seeded, _, data) = Seeded::committed(block);
     assert!(data["repairs"].is_null() || data["repairs"].as_array().unwrap().is_empty());
     let session = seeded.session();
-    let (_, items) = topic_items(&session, "Cache PR review");
-    for label in ["Review result", "Fill race"] {
-        let item = by_short(&items, label);
-        assert_eq!(item.status, ItemStatus::Open);
-        assert_eq!(item.ack_to, Some(AckTarget::Open));
-        assert!(item.outcome.is_some() && item.why.is_some());
-    }
+    let (topic, items) = topic_items(&session, "Choose cache release timing");
+    assert!(topic.brief.is_some());
+    let item = by_short(&items, "Fill race");
+    assert_eq!(item.status, ItemStatus::Open);
+    assert_eq!(item.ack_to, Some(AckTarget::Open));
+    assert!(item.outcome.is_some() && item.why.is_some());
     let decision = by_short(&items, "Fallback merge");
     assert_eq!(decision.status, ItemStatus::WaitingOnMe);
     assert_eq!(decision.ack_to, None);
+    assert_eq!(
+        decision.ask.as_deref(),
+        Some("May I merge the fallback now, after the fill fix, or leave it unmerged?")
+    );
+    assert_eq!(decision.affects, Some(vec![item.id.clone()]));
+    assert_eq!(decision.options.len(), 3);
+    assert_eq!(decision.options[1].label, "After fix");
+    assert!(decision.options[1].recommended);
+    assert!(decision
+        .options
+        .iter()
+        .all(|option| !option.consequence.is_empty()));
+    let note = decision.note.as_deref().unwrap();
+    for part in [
+        "I recommend",
+        "fairly sure",
+        "because",
+        "if that is wrong",
+        "If you do not answer",
+        "What this means for you",
+    ] {
+        assert!(note.contains(part), "missing question guidance {part}");
+    }
+    assert!(note.contains("Affects the fill race."));
+    assert!(
+        !note.contains("(item:"),
+        "new item numbers come from the receipt"
+    );
 }
 
 #[test]
@@ -924,7 +964,7 @@ fn by_short<'a>(items: &[&'a Item], short: &str) -> &'a Item {
 fn the_connection_example_links_only_the_declaring_item() {
     let (seeded, _, _) = Seeded::committed(&examples(ERRORS)[0]);
     let session = seeded.session();
-    let (_, items) = topic_items(&session, "Notes sync");
+    let (_, items) = topic_items(&session, "Read and sync notes");
     let notes = by_short(&items, "Offline notes");
     let sync = by_short(&items, "Sync local notes");
     let cache = &session.items.0[&ItemRef::new("1").unwrap()];
@@ -935,171 +975,125 @@ fn the_connection_example_links_only_the_declaring_item() {
     }
 }
 
-/// The report chooses each Ack target from the work remaining after reading,
-/// retains its evidence, and asks separately for permission to change fixtures.
+/// One result retains all routine checks; the topic brief carries the overview.
 #[test]
-fn the_report_example_files_the_tree_report_md_teaches() {
-    let (seeded, _, _) = Seeded::committed(&examples(REPORT)[0]);
+fn the_report_example_updates_the_brief_and_files_one_result_for_all_checks() {
+    let (seeded, _, data) = Seeded::committed(&examples(REPORT)[0]);
+    assert_compact(&data);
     let session = seeded.session();
-    let (_, items) = topic_items(&session, "Load test");
-    let first = items
-        .iter()
-        .filter(|i| i.parent.is_none())
-        .min_by_key(|i| i.ordinal)
+    let topic = &session.topics.0[&id(5)];
+    assert_eq!(topic.brief.as_deref(), Some("All retry-cap tests pass. We can keep the cap while investigating why clients retry together."));
+    let result = session
+        .items
+        .0
+        .values()
+        .find(|i| i.short.as_deref() == Some("Retry cap checks"))
         .unwrap();
-    assert_eq!(first.short.as_deref(), Some("Result summary"));
-    assert_eq!(first.status, ItemStatus::Open);
-    assert_eq!(first.ack_to, Some(AckTarget::Open));
+    assert_eq!(result.parent, None);
+    assert_eq!(result.item_type, ItemType::Finding);
+    assert_eq!(result.status, ItemStatus::Open);
+    assert_eq!(result.ack_to, Some(AckTarget::Done));
+    assert!(result
+        .outcome
+        .as_deref()
+        .unwrap()
+        .contains("What this means for you"));
+    let checks = result.why.as_deref().unwrap();
+    assert!(checks.contains("Repeated failure") && checks.contains("Success on second try"));
     assert_eq!(
-        first.outcome.as_deref(),
-        Some("The service holds 500 rps with p99 under 200 ms")
+        session.items.0.len(),
+        3,
+        "both checks share one result, without a summary item"
     );
-    assert!(first.why.as_deref().unwrap().contains("11 scenarios"));
-    let waiting = items
-        .iter()
-        .filter(|i| i.status == ItemStatus::WaitingOnMe)
-        .count();
-    assert!(first.question.contains(&format!("{waiting} choice waits")));
-    for item in &items {
-        if item.status == ItemStatus::Open {
-            let groups_asks = items.iter().any(|child| {
-                child.parent.as_ref() == Some(&item.id) && child.status == ItemStatus::WaitingOnMe
-            });
-            assert!(
-                item.ack_to.is_some()
-                    || matches!(item.owner, ItemOwner::Other { .. })
-                    || groups_asks,
-                "{} is open with nothing waiting below it",
-                item.id.as_str()
-            );
-        }
-    }
-    let setup = by_short(&items, "Setup");
-    assert_eq!(setup.status, ItemStatus::Open);
-    assert_eq!(setup.ack_to, Some(AckTarget::Done));
-    assert!(setup.outcome.as_deref().unwrap().contains("staging-2"));
-    let recorded_decision = by_short(&items, "Virtual users");
-    assert_eq!(recorded_decision.status, ItemStatus::Open);
-    assert_eq!(recorded_decision.ack_to, Some(AckTarget::Decided));
-    assert_eq!(recorded_decision.outcome.as_deref(), Some("50 users"));
-    let ruled_out = by_short(&items, "Cache contention");
-    assert_eq!(ruled_out.status, ItemStatus::Open);
-    assert_eq!(ruled_out.ack_to, Some(AckTarget::Dropped));
-    assert_eq!(ruled_out.outcome.as_deref(), Some("No cache bottleneck"));
-    // An ask defaults its owner to `me`, not the agent, and numbers its options.
-    let cleanup = by_short(&items, "Fixture cleanup");
-    assert_eq!(cleanup.owner, ItemOwner::Me {});
-    assert_eq!(cleanup.status, ItemStatus::WaitingOnMe);
-    assert_eq!(cleanup.ack_to, None);
-    assert_eq!(cleanup.parent.as_ref(), Some(&first.id));
-    let options: Vec<_> = cleanup
-        .options
-        .iter()
-        .map(|o| (o.id.as_str(), o.recommended))
-        .collect();
-    assert_eq!(options, [("1", false), ("2", true)]);
 }
 
 #[test]
 fn the_review_and_checklist_examples_default_owner_and_status_as_the_rules_say() {
-    let (seeded, _, data) = Seeded::committed(&examples(REVIEW)[0]);
-    assert_eq!(data["topics"][0]["number"], 2);
+    let (seeded, _, _) = Seeded::committed(&examples(REVIEW)[0]);
     let session = seeded.session();
-    let (_, items) = topic_items(&session, "Review: notes sync");
-    // The parent is a summary with no blanket ask; each decision is its own child.
-    let summary = by_short(&items, "Notes sync review");
-    assert_eq!(summary.status, ItemStatus::Open);
-    assert_eq!(summary.ack_to, Some(AckTarget::Open));
-    assert_eq!(summary.item_type, ItemType::Explanation);
-    assert_eq!(summary.owner, ItemOwner::Agent { binding_id: id(3) });
-    assert!(summary.ask.is_none() && summary.options.is_empty());
-    assert_eq!(summary.links.len(), 1);
-    let verdict = by_short(&items, "Sync verdict");
-    assert_eq!(verdict.parent.as_ref(), Some(&summary.id));
+    let verdict = &session.items.0[&ItemRef::new("1").unwrap()];
     assert_eq!(verdict.owner, ItemOwner::Me {});
     assert_eq!(verdict.status, ItemStatus::WaitingOnMe);
     assert_eq!(verdict.ack_to, None);
     assert_eq!(verdict.item_type, ItemType::Decision);
-    assert_eq!(verdict.options.len(), 2);
-    let comment = by_short(&items, "No jitter");
-    assert_eq!(comment.parent.as_ref(), Some(&summary.id));
-    assert_eq!(comment.owner, ItemOwner::Me {});
-    assert_eq!(comment.status, ItemStatus::WaitingOnMe);
-    assert_eq!(comment.ack_to, None);
-    assert_eq!(comment.item_type, ItemType::Decision);
-    let labels: Vec<_> = comment.options.iter().map(|o| o.label.as_str()).collect();
-    assert_eq!(labels, ["Post it", "Skip", "Edit first"]);
-    let fine = by_short(&items, "Checked, fine");
-    assert_eq!(fine.status, ItemStatus::Open);
-    assert_eq!(fine.ack_to, Some(AckTarget::Done));
-    assert!(fine
-        .outcome
-        .as_deref()
-        .unwrap()
-        .contains("Retry cap is respected"));
-    assert_eq!(fine.owner, ItemOwner::Agent { binding_id: id(3) });
+    assert_eq!(verdict.options.len(), 3);
+    assert_eq!(verdict.options[0].id, "1");
+    assert!(verdict.options[0].recommended);
+    assert!(verdict
+        .options
+        .iter()
+        .all(|option| !option.consequence.is_empty()));
+    let ask = verdict.ask.as_deref().unwrap();
+    for part in [
+        "I recommend",
+        "fairly sure",
+        "because",
+        "if that's wrong",
+        "If you don't answer",
+        "[retry implementation](item:2)",
+    ] {
+        assert!(ask.contains(part), "missing question part {part}");
+    }
+    assert_eq!(verdict.affects, Some(vec![ItemRef::new("2").unwrap()]));
+    assert_eq!(
+        session.items.0.len(),
+        2,
+        "the review updates the risk in place"
+    );
 
     let (seeded, _, _) = Seeded::committed(&examples(CHECKLIST)[0]);
     let session = seeded.session();
-    let (_, items) = topic_items(&session, "Migrate notes sync");
-    let backfill = by_short(&items, "Backfill v2");
-    assert_eq!(backfill.status, ItemStatus::InProgress);
-    assert_eq!(backfill.owner, ItemOwner::Agent { binding_id: id(3) });
+    let (topic, items) = topic_items(&session, "Move notes to the new format");
+    assert!(topic
+        .brief
+        .as_deref()
+        .unwrap()
+        .contains("until verification finishes"));
     assert_eq!(
-        backfill.note.as_deref(),
-        Some("Backfilling: 1.2M of 4M rows")
+        items.len(),
+        2,
+        "routine steps share a checklist; separately owned work is its own item"
     );
-    let switch = by_short(&items, "Switch reads");
-    assert_eq!(switch.status, ItemStatus::WaitingOnMe);
-    assert_eq!(switch.ack_to, None);
-    assert_eq!(switch.options[0].label, "Switch after backfill");
-    assert!(switch.options[0].consequence.contains("Readers use v2"));
-    assert_eq!(switch.owner, ItemOwner::Me {});
-    let drop = by_short(&items, "Drop v1");
-    assert_eq!(drop.status, ItemStatus::Open);
-    assert!(matches!(drop.owner, ItemOwner::Other { .. }));
+    let copy = by_short(&items, "Copy notes checklist");
+    assert_eq!(copy.status, ItemStatus::InProgress);
+    assert_eq!(copy.owner, ItemOwner::Agent { binding_id: id(3) });
+    let note = copy.note.as_deref().unwrap();
+    assert!(
+        note.contains("Count source notes")
+            && note.contains("Copy notes")
+            && note.contains("Compare copied content")
+    );
+    let verification = by_short(&items, "Importer compatibility");
+    assert_eq!(verification.status, ItemStatus::Open);
+    assert!(matches!(verification.owner, ItemOwner::Other { .. }));
 }
 
 #[test]
-fn the_opening_example_files_a_summary_and_the_second_leaves_it_open_for_ack() {
-    let blocks = examples(RULES);
-    let (seeded, _, data) = Seeded::committed(&blocks[0]);
+fn the_opening_example_files_a_topic_brief_and_one_result_for_ack() {
+    let (seeded, _, data) = Seeded::committed(&examples(RULES)[0]);
     let session = seeded.session();
-    let (topic, items) = topic_items(&session, "Review: notes sync");
+    let (topic, items) = topic_items(&session, "Choose safe retry behavior");
     assert_eq!(data["topics"][0]["id"], topic.id.as_str());
-    let ids: Vec<_> = data["items"]
-        .as_array()
+    assert_eq!(topic.revision.value(), 2, "the topic.edit sets the brief");
+    assert_eq!(topic.brief.as_deref(), Some("The retry cap and error handling pass their checks. We can focus the remaining work on retry timing."));
+    assert_eq!(items.len(), 1, "no summary-first item");
+    assert_eq!(data["items"][0]["id"], "3", "receipt id is the item number");
+    let result = by_short(&items, "Retry checks");
+    assert_eq!(result.parent, None);
+    assert_eq!(result.status, ItemStatus::Open);
+    assert_eq!(result.ack_to, Some(AckTarget::Done));
+    assert!(result
+        .outcome
+        .as_deref()
         .unwrap()
-        .iter()
-        .map(|row| row["id"].as_str().unwrap().to_owned())
-        .collect();
-    assert_eq!(ids, ["3", "3.1"], "an item's receipt id is its number");
-    let summary = by_short(&items, "Review summary");
-    assert_eq!(summary.status, ItemStatus::InProgress);
-    let finding = by_short(&items, "No jitter");
-    assert_eq!(finding.parent.as_ref(), Some(&summary.id));
-    assert_eq!(finding.status, ItemStatus::Open);
-    assert_eq!(finding.ack_to, Some(AckTarget::Open));
+        .contains("What this means for you"));
     assert_eq!(
-        finding.outcome.as_deref(),
-        Some("Clients retry in lockstep")
+        result.why.as_deref(),
+        Some("- Retry cap tested\n- Original error preserved")
     );
-    assert_eq!(finding.why.as_deref(), Some("The delay is fixed at 2s."));
-
-    // Run the completion example against the summary just created, using its
-    // current revision instead of the placeholder id and revision.
-    let mut completion = checked(&blocks[1]);
-    completion["expected_item_revisions"] = json!({summary.id.as_str(): summary.revision.value()});
-    completion["operations"][0]["item"]["id"] = json!(summary.id.as_str());
-    seeded.succeeds(&[], &completion);
-    let item = seeded.session().items.0[&summary.id].clone();
-    assert_eq!(item.status, ItemStatus::Open);
-    assert_eq!(item.ack_to, Some(AckTarget::Open));
-    assert_eq!(item.outcome.as_deref(), Some("Notes sync needs one fix"));
 }
 
-/// The closing-parent example settles the last open child of a decision and
-/// leaves the decision awaiting Ack in the same request, each with its guard.
+/// The final child and its parent await Ack together with revision guards.
 #[test]
 fn the_finished_parent_example_leaves_it_and_its_last_child_open_for_ack() {
     let block = &examples(INPUTS)[1];
@@ -1132,6 +1126,7 @@ fn the_inputs_example_replies_decides_and_commits_its_result() {
     let unrelated = seeded.session().items.0[&ItemRef::new("2").unwrap()].clone();
     let request = seeded.bound(checked(&examples(INPUTS)[0]));
     let question_revision = seeded.session().items.0[&ItemRef::new("1").unwrap()].question_revision;
+    let before = seeded.session();
     let data = seeded.succeeds(&[], &request);
     assert_compact(&data);
     assert_eq!(request["summary"], "Answered [owner choice](item:1)");
@@ -1146,6 +1141,11 @@ fn the_inputs_example_replies_decides_and_commits_its_result() {
     assert_eq!(cap.status, ItemStatus::Open);
     assert_eq!(cap.ack_to, Some(AckTarget::Open));
     assert_eq!(cap.outcome.as_deref(), Some("Three attempts"));
+    assert_eq!(
+        item.affects,
+        Some(vec![cap.id.clone(), ItemRef::new("3").unwrap()])
+    );
+    assert_eq!(cap.depends_on, Some(vec![item.id.clone()]));
     let budget = &session.items.0[&ItemRef::new("3").unwrap()];
     assert!(budget.parent.is_none());
     assert_ne!(budget.topic_id, item.topic_id);
@@ -1155,6 +1155,19 @@ fn the_inputs_example_replies_decides_and_commits_its_result() {
         budget.outcome.as_deref(),
         Some("No five-attempt budget needed")
     );
+    for affected in [item, cap, budget] {
+        let changes = affected.changes.as_ref().unwrap();
+        assert!(!changes.is_empty());
+        let new_changes: Vec<_> = changes
+            .iter()
+            .filter(|change| change.revision > before.items.0[&affected.id].revision)
+            .collect();
+        assert!(!new_changes.is_empty());
+        assert!(new_changes.iter().all(|change| change
+            .reason
+            .as_ref()
+            .is_some_and(|reason| !reason.is_empty() && !reason.contains('\n'))));
+    }
     assert_eq!(session.items.0[&unrelated.id], unrelated);
     let input_id = UuidV4::new(request["source_input_id"].as_str().unwrap()).unwrap();
     let input = &session.inputs.0[&input_id];
@@ -1174,7 +1187,9 @@ fn the_inputs_example_replies_decides_and_commits_its_result() {
         .expect("the input has a committed result");
     assert_eq!(result.reply_message_ids.len(), 1);
     assert!(result.followup_item_ids.is_empty());
-    assert!(result.explanation.contains("cap retries at three"));
+    assert!(result
+        .explanation
+        .starts_with("Read as: cap retries at three"));
     assert!(result.explanation.contains("[retry cap](item:1.1)"));
     assert!(result.explanation.contains("[retry budget](item:3)"));
     let reply = session
@@ -1189,41 +1204,30 @@ fn the_inputs_example_replies_decides_and_commits_its_result() {
     );
 }
 
-/// The follow-up example answers a reply on item `1`: two explanation children
-/// of that item, a one-line reply and a result that lists both children.
+/// Rewording keeps the result and status while recording the old wording.
 #[test]
-fn the_followup_example_files_two_children_for_a_delivered_reply() {
-    let (seeded, request, _) = Seeded::committed(&examples(FOLLOW_UP)[0]);
+fn the_followup_example_records_pure_rewording_without_changing_meaning() {
+    let seeded = Seeded::new();
+    let before = seeded.session().items.0[&ItemRef::new("1").unwrap()].clone();
+    let request = seeded.bound(checked(&examples(FOLLOW_UP)[0]));
+    seeded.succeeds(&[], &request);
     let session = seeded.session();
-    let parent = ItemRef::new("1").unwrap();
-    let children: Vec<&Item> = session
-        .items
-        .0
-        .values()
-        .filter(|item| item.parent.as_ref() == Some(&parent))
-        .collect();
-    assert_eq!(children.len(), 2);
-    let q10 = by_short(&children, "Q10 retry cap");
-    assert_eq!(q10.outcome.as_deref(), Some("Yes, after five attempts."));
-    let q11 = by_short(&children, "Q11 jitter");
-    assert_eq!(q11.outcome.as_deref(), Some("No, it is a fixed 2s."));
-    assert_eq!(q10.ack_to, Some(AckTarget::Done));
-    assert_eq!(q11.ack_to, Some(AckTarget::InProgress));
-    for child in &children {
-        assert_eq!(child.item_type, ItemType::Explanation);
-        assert_eq!(child.status, ItemStatus::Open);
-        assert!(child.outcome.is_some() && child.why.is_some());
-    }
-    let input = UuidV4::new(request["source_input_id"].as_str().unwrap()).unwrap();
-    let result = session.inputs.0[&input].attempts[0]
-        .domain_result
-        .as_ref()
-        .expect("the input has a committed result");
-    assert_eq!(result.followup_item_ids.len(), 2);
+    let after = &session.items.0[&before.id];
+    assert_eq!(session.items.0.len(), 2, "rewording updates in place");
+    assert_eq!(after.question, "Retries wait for different lengths of time");
+    assert_eq!(after.short.as_deref(), Some("Varied retry delays"));
+    assert_eq!(after.status, before.status);
+    assert_eq!(after.outcome, before.outcome);
+    assert_eq!(after.why, before.why);
+    let change = after.changes.as_ref().unwrap().last().unwrap();
+    assert!(change.wording_only);
+    assert_eq!(
+        change.reason.as_deref(),
+        Some("Expanded an unfamiliar term without changing the finding")
+    );
 }
 
 fn kind_name(kind: &InputKind) -> &'static str {
-    // Exhaustive on purpose: a new input kind fails to compile until it is named here.
     match kind {
         InputKind::Answer => "answer",
         InputKind::Bring => "bring",
@@ -1263,6 +1267,10 @@ fn rules_explain_every_input_kind_the_owner_can_send() {
 
 #[test]
 fn rules_explain_the_envelope_fields_and_every_error_code_they_name_exists() {
+    for line in RULES.lines().filter(|line| line.starts_with("- `ariadne ")) {
+        assert!(line.contains("--json`"), "agent command omits JSON: {line}");
+    }
+    assert!(RULES.contains("`--json` puts warnings in JSON only"));
     for needle in [
         "`attempt_id`",
         "`owner_message_number`",
@@ -1276,10 +1284,8 @@ fn rules_explain_the_envelope_fields_and_every_error_code_they_name_exists() {
     assert!(ERRORS.contains("the CLI derives the same `op_id`"));
     assert!(ERRORS.contains("A retry of the identical request is safe"));
     assert!(ERRORS.contains("resending declared removed targets prunes them"));
-    assert!(RULES.contains("An unexpected `\"replayed\":true` files nothing new"));
-    assert!(
-        RULES.contains("a fresh explicit `op_id` to deliberately file the identical request again")
-    );
+    assert!(RULES.contains("Unexpected `\"replayed\":true` files nothing new"));
+    assert!(RULES.contains("a fresh explicit `op_id` to file the same request again"));
     assert!(RULES.contains("independent of generation"));
     for needle in [
         "New topics/items need stable `short`",
@@ -1288,10 +1294,11 @@ fn rules_explain_the_envelope_fields_and_every_error_code_they_name_exists() {
         assert!(RULES.contains(needle), "{needle}");
     }
     for needle in [
-        "Set `related` for useful dependencies, duplicates or consequences",
-        "otherwise omit it",
-        "Use `[label](item:3.2)` in prose, never bare",
-        "links do not create `related` connections",
+        "`affects` for consequences",
+        "`depends_on` for prerequisites",
+        "`related`",
+        "never bare item numbers",
+        "Prose links alone declare nothing",
     ] {
         assert!(RULES.contains(needle), "{needle}");
     }
@@ -1466,7 +1473,9 @@ fn cli_repairs_only_existing_ack_proposals_and_reports_preview_and_full_repairs(
     assert_eq!(seeded.session(), before);
     let full = seeded.apply(&["--full"], &serde_json::to_vec(&request).unwrap());
     assert_eq!(full.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&full.stderr).contains("Repair:"));
+    assert!(full.stderr.is_empty(), "{full:?}");
+    let full: Value = serde_json::from_slice(&full.stdout).unwrap();
+    assert_eq!(full["data"]["repairs"], preview["repairs"]);
     let saved = seeded.session();
     let item = &saved.items.0[&ItemRef::new("1").unwrap()];
     assert_eq!(item.status, ItemStatus::Open);
