@@ -17,10 +17,14 @@ declare global { interface Window {
 } }
 
 async function mount() {
-  const frame = new URLSearchParams(window.location.search).get('frame') ?? '';
+  const params = new URLSearchParams(window.location.search), frame = params.get('frame') ?? '';
   const source = await fetch('/source/Ariadne.dc.html');
   if (!source.ok) throw new Error(`Ariadne.dc.html is not served (${source.status})`);
-  const fixture = designFixture(frame, prototypeData(await source.text()));
+  const theme = params.get('theme'), rail = params.get('rail');
+  const fixture = designFixture(frame, prototypeData(await source.text()), {
+    ...(theme === 'light' || theme === 'dark' ? { theme } : {}),
+    ...(rail === '1' || rail === '0' ? { rail: rail === '1' } : {}),
+  });
   window.__designFixture = fixture;
   if (fixture.spec.toast) {
     const id = 'design-session-toast';

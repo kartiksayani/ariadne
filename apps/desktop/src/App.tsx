@@ -327,8 +327,8 @@ function Workspace({ application }: { application: Application }) {
     const opened = navigation.getNavigationCompletion(request);
     const saved = await opened;
     if (navigation.getNavigationRequest() !== request || shortcutSequence.current !== token) return null;
-    if (failure) throw failure;
-    if (!saved || !result) return null;
+    if (!saved) { if (failure) throw failure; return null; }
+    if (!result) return null;
     detailDismissedAt.current = null; setLocalReveal(result); setDetailOpen(true);
     // Continuations use this exact admitted request, including queued reveals.
     return { request, result };

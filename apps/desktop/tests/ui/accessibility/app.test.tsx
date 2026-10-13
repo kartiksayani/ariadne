@@ -128,7 +128,7 @@ it('queues a fresh Bring once with its visible fixed text and reveals its receip
   row.focus(); fireEvent.keyDown(row, { key: 'b' }); fireEvent.keyDown(row, { key: 'b' }); fireEvent.keyDown(row, { key: 'b', repeat: true });
   await waitFor(() => expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(1));
   expect(transport.mutations.find(value => value.command.command === 'input_submit')!.command).toMatchObject({ params: { kind: 'bring', text: 'Bring this up.', target: { item_id: '4' } } });
-  await waitFor(() => expect(within(screen.getByLabelText('Detail of #4')).getByRole('region', { name: 'Your request' })).toBeTruthy());
+  await waitFor(() => expect(within(screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' })).getByRole('region', { name: 'Your request' })).toBeTruthy());
   row.focus(); fireEvent.keyDown(row, { key: 'b' });
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(1);
@@ -143,7 +143,7 @@ it.each([false, true])('opens the item over an existing Bring draft without edit
   const before = structuredClone(transport.preferences.drafts[0]);
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!; row.focus(); fireEvent.keyDown(row, { key: 'b' });
   // Bring it up is one press in the handoff; the detail has no Bring editor to reveal the draft in.
-  expect(await screen.findByLabelText('Detail of #4')).toBeTruthy();
+  expect(await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' })).toBeTruthy();
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
   expect(transport.preferences.drafts[0]).toEqual(before); expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
 });
@@ -174,7 +174,7 @@ it.each(['r', 'b'])('rejects delayed %s before it can undo newer All sessions na
 });
 it('rejects delayed Reply after detail dismissal', async () => {
   const transport = await setup(); fireEvent.click(document.querySelector('[data-item-id="4"]')!);
-  await screen.findByLabelText('Detail of #4'); const pending = await delayedReveal(transport);
+  await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' }); const pending = await delayedReveal(transport);
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
   row.focus(); fireEvent.keyDown(row, { key: 'r' }); await waitFor(() => expect(pending.started()).toBe(true));
   fireEvent.keyDown(row, { key: 'Escape' }); expect(document.querySelector('.shell-detail')).toBeNull();
@@ -237,7 +237,7 @@ it.each(['r', 'b'])('failed preference navigation cannot authorize %s focus or B
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
 });
 it.each([{ key: 'r', id: '4' }, { key: 'b', id: '4' }, { key: 'r', id: '3' }, { key: 'b', id: '3' }])('keeps a dismissed detail closed when dispatched $key selects #$id', async ({ key, id }) => {
-  const transport = await setup(); fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText('Detail of #4');
+  const transport = await setup(); fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' });
   await waitFor(() => expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id).toBe('4'));
   const invoke = transport.invoke.bind(transport); let dispatched = false, release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; }), beforeRevision = transport.preferences.revision;
@@ -259,10 +259,10 @@ it.each([{ key: 'r', id: '4' }, { key: 'b', id: '4' }, { key: 'r', id: '3' }, { 
   expect(transport.mutations.slice(beforeMutations).filter(request => request.command.command !== 'preferences_patch'
     || request.command.params.entries.some(entry => entry.kind !== 'mark_seen'))).toHaveLength(1);
   expect(transport.preferences.drafts).toEqual([]);
-  fireEvent.click(row); expect(await screen.findByLabelText(`Detail of #${id}`)).toBeTruthy();
+  fireEvent.click(row); expect(await screen.findByLabelText(/^Detail of /, { selector: `[data-detail-item-id="${id}"]` })).toBeTruthy();
 });
 it('keeps detail dismissed when shortcut navigation session read completes afterward', async () => {
-  const transport = await setup(); fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText('Detail of #4');
+  const transport = await setup(); fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' });
   const invoke = transport.invoke.bind(transport); let reads = 0, resolving = false, release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
@@ -282,7 +282,7 @@ it('keeps detail dismissed after a dispatched oldest-waiting shortcut changes se
     second.id = secondId; second.title = 'Separate session'; value.sessions.set(secondId, second);
     first.items['2']!.status = 'open';
   });
-  fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText('Detail of #4');
+  fireEvent.click(document.querySelector('[data-item-id="4"]')!); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' });
   await waitFor(() => expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id).toBe('4'));
   const invoke = transport.invoke.bind(transport); let dispatched = false, release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
@@ -301,5 +301,5 @@ it('keeps detail dismissed after a dispatched oldest-waiting shortcut changes se
   expect(transport.preferences.drafts).toEqual([]);
   const tab = document.querySelector<HTMLButtonElement>(`[data-session-tab="${CSS.escape(JSON.stringify([route.project_id, route.session_id]))}"]`)!;
   await waitFor(() => expect(tab.hasAttribute('disabled')).toBe(false)); fireEvent.click(tab);
-  expect(await screen.findByLabelText('Detail of #4')).toBeTruthy();
+  expect(await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' })).toBeTruthy();
 });

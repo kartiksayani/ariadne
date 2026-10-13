@@ -223,6 +223,20 @@ describe('graph model', () => {
     expect(nodes.get('1.1.1')!.short).toBe(shortLabel(session.items['1.1.1']!));
   });
 
+  it('distinguishes colliding visible node labels and restores the short label when its peer is folded', () => {
+    const session = graphSession();
+    const first = session.items['1']!, second = session.items['1.1']!;
+    first.short = second.short = 'Count cache reads';
+    first.question = 'Count cache reads using Redis for this rollout?';
+    second.question = 'Count cache reads using Postgres for this rollout?';
+    const graph = build({ session });
+    expect(graph.nodes.get(first.id)!.short).toBe('Redis · Count cache reads');
+    expect(graph.nodes.get(second.id)!.short).toBe('Postgres · Count cache reads');
+    const folded = build({ session, view: preferences({ expanded_item_ids: [] }) });
+    expect(folded.nodes.has(second.id)).toBe(false);
+    expect(folded.nodes.get(first.id)!.short).toBe('Count cache reads');
+  });
+
   it('labels a topic card with the session agent and day unless it is today', () => {
     expect(sessionChip('codex', 'Yesterday')).toBe('codex · yesterday');
     expect(sessionChip('codex', 'Today, 09:12')).toBeNull();

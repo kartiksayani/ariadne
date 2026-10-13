@@ -197,8 +197,9 @@
 }
 
 .stuck-note > span[role="status"] {
-  flex: 1 1 16em;
-  min-width: min(100%, 16em);
+  /* Wrap controls below when the full explanation and controls cannot fit together.
+     A lone explanation can then shrink to the available width and wrap naturally. */
+  flex: 1 1 max-content;
   overflow-wrap: break-word;
 }
 

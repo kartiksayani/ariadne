@@ -65,6 +65,10 @@ const test = base.extend<Record<never, never>, { origin: string; designPage: Pag
     }, null, { timeout: 180_000 });
     // Ariadne.dc.html:976 scrolls the selection at 400/1200/2500 ms after mount.
     await page.evaluate(async () => { await document.fonts.ready; await new Promise(resolve => setTimeout(resolve, 2600)); });
+    const inline = page.locator('[id="1c"] [data-inline-answer-ready]');
+    await expect(inline).toHaveAttribute('data-inline-answer-ready', 'true');
+    await expect(inline.locator('[data-item-id="2.1.1"]')).toHaveAttribute('aria-selected', 'true');
+    await expect(inline.locator('[data-item-id="2.1.1"] textarea')).toHaveCount(1);
     expect(denied).toEqual([]);
     await use(page);
     await context.close();
@@ -102,7 +106,8 @@ async function settle(page: Page) {
 async function openApp(page: Page, origin: string, spec: FrameSpec) {
   await page.setViewportSize({ width: spec.width, height: spec.height });
   await page.clock.setFixedTime(frameNow(spec));
-  await page.goto(`${origin}/tests/ui/design/gallery.html?frame=${spec.id}`);
+  const params = new URLSearchParams({ frame: spec.id, theme: spec.theme, rail: spec.rail ? '1' : '0' });
+  await page.goto(`${origin}/tests/ui/design/gallery.html?${params}`);
   await page.waitForFunction(() => (window as { __designError?: string }).__designError
     || /\d+ items/.test(document.querySelector('.shell-summary')?.textContent ?? ''), null, { timeout: 60_000 });
   expect(await page.evaluate(() => (window as { __designError?: string }).__designError)).toBeUndefined();
@@ -125,8 +130,11 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
     }, spec.selected!);
     await expect(page.getByText('Showing an item outside your current filters.')).toBeVisible();
   }
+  let answerScroll: number | null = null;
   if (spec.answering) {
+    await settle(page);
     await row(spec.answering).focus();
+    answerScroll = await page.locator('.tree-scroll').evaluate(element => element.scrollTop);
     if (!spec.detail) await page.keyboard.press('Escape');
     await page.keyboard.press('a');
     await expect(page.locator(`[data-item-id="${spec.answering}"] .answer`)).toBeVisible();
@@ -146,6 +154,13 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
   // mouseover is React's mouseenter and leaves the rail's scroll position and the pointer alone.
   if (spec.hoverMsg) await railMessage(page, spec.hoverMsg).dispatchEvent('mouseover');
   await settle(page);
+  if (spec.answering) {
+    const selected = row(spec.answering);
+    await expect(selected).toHaveAttribute('aria-selected', 'true');
+    if (!spec.detail) await expect(page.locator('.shell-detail')).toHaveCount(0);
+    // Closing detail and opening the inline answer keep the owner's reading position.
+    expect(await page.locator('.tree-scroll').evaluate(element => element.scrollTop)).toBe(answerScroll);
+  }
   const sessionBar = page.locator('.tree-session-bar');
   if (await sessionBar.count()) {
     await expect(sessionBar.getByRole('button', { name: 'Session actions' })).toBeVisible();
@@ -156,6 +171,12 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
   if (await filters.count()) {
     await expect(filters.getByRole('button', { name: /^Filter/ })).toBeVisible();
     await expect(filters.getByRole('combobox')).toHaveCount(0);
+  }
+  if (graphFrame(spec)) {
+    await expect(page.locator('.tree-selected-edge')).toHaveCount(0);
+  } else if (await page.locator('.tree-scroll').count()) {
+    await expect(page.locator('.tree-filters > .tree-selected-slot')).toHaveCount(1);
+    await expect(page.locator('.tree-scroll-shell .tree-selected-slot, .tree-scroll-shell .tree-selected-edge')).toHaveCount(0);
   }
 }
 
@@ -228,9 +249,8 @@ async function compare(page: Page, design: Buffer, app: Buffer, regions: readonl
 interface Region { readonly name: string; readonly x: number; readonly y: number; readonly width: number; readonly height: number }
 
 test.describe.configure({ mode: 'parallel' });
-/** The tree row of item `itemId` in a board card: the Item Row whose id label reads it (Item Row.dc.html). */
-const designRow = (designPage: Page, card: string, itemId: string) => designPage.locator(`[id="${card}"] .dv-card [role="treeitem"]`)
-  .filter({ has: designPage.locator('span', { hasText: new RegExp(`^${itemId.replace(/\./g, '\\.')}$`) }) }).first();
+/** Stable identity works even though reference rows no longer print their item numbers. */
+const designRow = (designPage: Page, card: string, itemId: string) => designPage.locator(`[id="${card}"] .dv-card [role="treeitem"][data-item-id="${itemId}"]`).first();
 
 for (const id of [...designFrames, ...variantIds]) {
   test(`frame ${id}`, async ({ page, origin, designPage }) => {
@@ -264,21 +284,27 @@ for (const width of [1920, 1600, 1280]) for (const acceptedFailure of [false, tr
       const layout = await note.evaluate(element => {
         const status = element.querySelector<HTMLElement>(':scope > [role="status"]')!;
         const actions = element.querySelector<HTMLElement>(':scope > .stuck-actions')!;
-        const text = status.firstChild!, content = text.textContent!;
-        const words = [...content.matchAll(/\S+/g)].map(word => {
-          const range = document.createRange();
-          range.setStart(text, word.index); range.setEnd(text, word.index + word[0].length);
-          return { word: word[0], lines: range.getClientRects().length };
-        });
+        const words: { word: string; lines: number }[] = [];
+        const textNodes = document.createTreeWalker(status, NodeFilter.SHOW_TEXT);
+        for (let text = textNodes.nextNode(); text; text = textNodes.nextNode()) {
+          for (const word of text.textContent!.matchAll(/\S+/g)) {
+            const range = document.createRange();
+            range.setStart(text, word.index); range.setEnd(text, word.index + word[0].length);
+            words.push({ word: word[0], lines: range.getClientRects().length });
+          }
+        }
         const box = (node: Element) => {
           const { x, y, width, right, bottom } = node.getBoundingClientRect();
           return { x, y, width, right, bottom };
         };
-        return { note: box(element), status: box(status), actions: box(actions), words,
+        return { note: box(element), status: box(status), actions: box(actions), words, nestedText: status.childElementCount,
           buttons: [...actions.querySelectorAll('button')].map(box) };
       });
       // Enough room for ordinary words: recovery controls must never squeeze the reason to a sliver.
       expect(layout.status.width, `${selector} status width`).toBeGreaterThanOrEqual(190);
+      expect(layout.nestedText, 'the complete explanation is plain sentence text').toBe(0);
+      if (selector.startsWith('.tree-item')) expect(layout.status.x, 'reason uses the existing body column').toBe(layout.note.x);
+      expect(layout.words.map(word => word.word)).toEqual((await note.locator(':scope > [role="status"]').textContent())!.match(/\S+/g));
       for (const word of layout.words) expect(word.lines, `${selector}: ${word.word}`).toBe(1);
       // Controls can sit beside the reason when they fit, or wrap completely below it.
       const beside = layout.actions.x >= layout.status.right;
@@ -295,6 +321,32 @@ for (const width of [1920, 1600, 1280]) for (const acceptedFailure of [false, tr
     expect(denied).toEqual([]);
   });
 }
+
+for (const theme of ['light', 'dark'] as const) test(`Map names and top-line status keep their layout on hover in ${theme}`, async ({ page, origin }) => {
+  const denied: string[] = [];
+  await route(page.context(), origin, denied);
+  await openApp(page, origin, { ...frameSpec('1a'), theme, rail: false, hoverMsg: undefined });
+  const root = page.locator('.tree-item.tree-item-root').first(), child = page.locator('.tree-item.tree-item-child').first();
+  await expect(page.locator('.tree-id')).toHaveCount(0);
+  await expect(root.locator('.tree-top-colour')).toHaveCount(1);
+  await expect(child.locator('.tree-top-colour')).toHaveCount(0);
+  const heading = root.locator('.tree-heading'), title = root.locator('.tree-question'), status = heading.locator('.tree-row-status');
+  await expect(status).toBeVisible();
+  const titleBefore = await title.boundingBox(), statusBefore = await status.boundingBox();
+  expect(statusBefore!.y).toBeLessThan(titleBefore!.y + titleBefore!.height);
+  const topicColour = await page.locator('.tree-topic-name').first().evaluate(element => {
+    const probe = document.createElement('span');
+    probe.style.color = element.hasAttribute('data-earlier') ? 'color-mix(in srgb, var(--a-acc-text) 82%, transparent)' : 'var(--a-acc-text)';
+    element.append(probe);
+    const expected = getComputedStyle(probe).color, actual = getComputedStyle(element).color;
+    probe.remove(); return { actual, expected };
+  });
+  expect(topicColour.actual).toBe(topicColour.expected);
+  await root.hover();
+  expect(await title.boundingBox()).toEqual(titleBefore);
+  expect(await status.boundingBox()).toEqual(statusBefore);
+  expect(denied).toEqual([]);
+});
 
 test('a long waiting conversation opens at its latest ask and keeps the question visible', async ({ page, origin }) => {
   const denied: string[] = [];

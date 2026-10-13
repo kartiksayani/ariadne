@@ -6,6 +6,7 @@ import type { AgentRemoval, Input, ProjectSummary, Session, SessionSummary } fro
 import type { OwnerMutationRequest } from '../../../src/generated/core';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService, useSession } from '../../../src/data';
+import { NavigationStore } from '../../../src/state/navigation/store';
 import { indexSession, revealAncestors } from '../../../src/data/selectors';
 import { OpenSessions, type Immutable } from '../../../src/data/session-store';
 import { SessionActionControllers, type SessionActions } from '../../../src/components/bindings/actions';
@@ -656,7 +657,7 @@ describe('agent removal receipts in the composed app', () => {
     await waitFor(() => expect(rows()).toEqual(['1', '1.1']));
     await waitFor(() => expect(transport.listeners.get('ariadne://route')?.size).toBe(1));
     await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '1.2' }); });
-    const detail = await screen.findByLabelText('Detail of #1.2');
+    const detail = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.2"]' });
     expect(within(detail).getByRole('heading', { name: 'Other child' })).toBeTruthy();
     await waitFor(() => expect(rows()).toEqual(['1', '1.1', '1.2']));
     fireEvent.click(screen.getByRole('button', { name: 'Resume filtered view' }));
@@ -757,7 +758,7 @@ describe('agent removal receipts in the composed app', () => {
     } finally { vi.useRealTimers(); await act(async () => { release(); }); }
   });
 
-  it('reports an unavailable removal View locally and clears Opening without a generic navigation error', async () => {
+  it('reports the specific project-folder failure when removal View cannot open its session', async () => {
     const session = receiptSession(), transport = new BinTransport(session);
     await openApp(transport);
     const receipt = within((await screen.findByText(removalNotice(session, notice()))).closest<HTMLElement>('.pw-note')!);
@@ -768,11 +769,58 @@ describe('agent removal receipts in the composed app', () => {
       return invoke(name, args);
     });
     fireEvent.click(receipt.getByRole('button', { name: 'View' }));
-    await screen.findByText('The bin could not be opened. Try View again.');
+    const message = 'This session could not be opened. Check that its project folder is available, then try again.';
+    await screen.findByText(message);
     expect(screen.queryByText(/Opening the session/)).toBeNull();
     expect(screen.queryByText(/couldn’t read or save/)).toBeNull();
-    expect(screen.getByRole('alert').textContent).toContain('The bin could not be opened. Try View again.');
+    expect(screen.getByRole('alert').textContent).toContain(message);
     expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
+  });
+
+  it('opens the removal bin without an error notice after a failed queued navigation retries and confirms', async () => {
+    const session = receiptSession(), transport = new BinTransport(session);
+    transport.preferences.sessions[0]!.filters.search = 'a question that does not match';
+    await openApp(transport);
+    const receipt = within((await screen.findByText(removalNotice(session, notice()))).closest<HTMLElement>('.pw-note')!);
+    const navigations = vi.spyOn(NavigationStore.prototype, 'navigate');
+    let releaseCapture!: () => void, releaseSave!: () => void, capturing = false, writing = false, captures = 0;
+    const heldCapture = new Promise<void>(resolve => { releaseCapture = resolve; });
+    const heldSave = new Promise<void>(resolve => { releaseSave = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const request = args.request;
+      if (name === 'session_get' && ++captures === 1) {
+        capturing = true; await heldCapture;
+        return { api_version: 1, ok: false, error: { code: 'io_error', message: 'Folder temporarily unavailable', hint: '', retryable: true, field_errors: [] } };
+      }
+      if ('command' in request && request.command.command === 'preferences_patch'
+        && request.command.params.entries.some(entry => entry.kind === 'set_global' && entry.preferences.theme === 'light')) {
+        writing = true; await heldSave;
+      }
+      return invoke(name, args);
+    });
+    let save!: Promise<boolean>;
+    try {
+      fireEvent.click(receipt.getByRole('button', { name: 'View' }));
+      await waitFor(() => expect(capturing).toBe(true));
+      const navigation = navigations.mock.contexts.at(-1) as NavigationStore;
+      expect(navigation).toBeInstanceOf(NavigationStore);
+      const request = navigation.getNavigationRequest();
+      await act(async () => { save = navigation.saveTheme('light', navigation.getSnapshot().preferences!.revision); });
+      await waitFor(() => expect(writing).toBe(true));
+      await act(async () => { releaseCapture(); });
+      expect(navigation.getSnapshot().pendingNavigation).not.toBeNull();
+      expect(screen.queryByText(/The bin could not be opened|This session could not be opened/)).toBeNull();
+      expect(transport.preferences.sessions[0]!.filters.search).toBe('a question that does not match');
+      await act(async () => { releaseSave(); await save; });
+      const fold = await screen.findByRole('button', { name: 'Removed by agent · 4' });
+      await waitFor(() => expect(fold.getAttribute('aria-expanded')).toBe('true'));
+      expect(captures).toBeGreaterThan(1);
+      expect(navigation.getNavigationRequest()).toBe(request);
+      expect(transport.preferences.sessions[0]!.filters.search).toBe('');
+      expect(screen.getByText('Old delivery plans · 4 items')).toBeTruthy();
+      expect(screen.queryByText(/The bin could not be opened|This session could not be opened/)).toBeNull();
+    } finally { await act(async () => { releaseCapture(); releaseSave(); }); }
   });
 
   it('uses the live archived topic state when View opens a notice created before that topic was archived', async () => {

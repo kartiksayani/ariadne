@@ -11,6 +11,7 @@ import { ContinuePicker, ContinueTopicHost, continueTargets, openContinueTopic }
 import { NavigationStore } from '../../../src/state/navigation/store';
 import type { SessionSummary } from '../../../src/generated/domain/models';
 import { CopiedProvenance } from '../../../src/components/history-actions/CopiedProvenance';
+import { shortLabel } from '../../../src/ui/shared/short';
 import { archiveImpact, archiveWarning, closeWarning } from '../../../src/components/history-actions/selectors';
 import { notices } from '../../../src/ui/pages/notices';
 import { route, secondId } from '../app/transport';
@@ -609,6 +610,7 @@ describe('explicit Continue preview and request identity', () => {
     expect(screen.getByText(/isn’t running, so the summary waits until it runs again/)).toBeDefined();
     const summary = screen.getByLabelText('Summary');
     expect(summary.getAttribute('data-summary')).toBe('Approved full snapshot. Keep copied source provenance.');
+    expect(summary.querySelector('.pw-continue-line code')).toBeNull();
     expect(within(summary).getByText(/^Waiting on you · \d+$/)).toBeDefined();
     expect(transport.mutations).toHaveLength(0);
     expect(transport.queries.filter(query => query.request.command === 'topic_continue_preview')).toMatchObject([{ session: null }]);
@@ -726,19 +728,19 @@ describe('saved receipts and copied provenance', () => {
     render(<CopiedProvenance store={store} itemId={item.id} projectPath={id => id === op ? '/work/sync-api' : null} revealItem={async () => {
       throw new CoreFailure({ code, message: 'No such file or directory (os error 2)', hint: 'Check the path.', retryable: false, field_errors: [] });
     }} />);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Source item 77' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Source item' })); });
     const status = screen.getByRole('status').textContent ?? '';
     expect(status).toContain('The original project folder (/work/sync-api) is missing or can’t be read. Restore it or move it back, then try again.');
     expect(status).toContain('Full copied history remains here.');
     expect(status).not.toMatch(/Try again\.|couldn’t read or save|os error/);
     // Another kind of failure is not blamed on the folder.
     code = 'corrupt_session';
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Source item 77' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Source item' })); });
     expect(screen.getByRole('status').textContent).toContain('Original project is unavailable. Ariadne can’t read this session’s saved data.');
     expect(screen.getByRole('status').textContent).not.toContain('folder');
     // The original session was removed or its project is no longer registered (core's not_found): the folder is fine.
     code = 'not_found';
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Source item 77' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Source item' })); });
     const gone = screen.getByRole('status').textContent ?? '';
     expect(gone).toContain('The original item is no longer in Ariadne. Full copied history remains here.');
     expect(gone).not.toMatch(/folder|Restore it|Original project is unavailable/);
@@ -752,9 +754,9 @@ describe('saved receipts and copied provenance', () => {
     render(<CopiedProvenance store={store} itemId={item.id} revealItem={async value => {
       revealed.push(value); if (value.project_id === op) throw new Error('Original unavailable');
     }} />);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Source item 77' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Source item' })); });
     expect(screen.getByText(/Full copied history remains here/)).toBeDefined();
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Open copied item ${item.id}` })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Open copied item: ${shortLabel(item)}` })); });
     expect(revealed).toEqual([{ project_id: op, session_id: op, item_id: '77' }, { ...route, item_id: item.id }]);
     expect(transport.mutations).toHaveLength(0);
   });

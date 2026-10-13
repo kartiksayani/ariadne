@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { notices } from '../../../src/ui/pages/notices';
+import { shortLabel } from '../../../src/ui/shared/short';
 import { AppTransport, route } from '../app/transport';
 
 const original = '00000000-0000-4000-8000-000000000099';
@@ -33,7 +34,7 @@ it.each(['registered lookup', 'source capture', 'navigation capture'] as const)(
       return invoke(name, args);
     });
     render(<DesktopApp service={createDesktopService(transport)} />);
-    const sourceButton = await screen.findByRole<HTMLButtonElement>('button', { name: 'Source item 77' });
+    const sourceButton = await screen.findByRole<HTMLButtonElement>('button', { name: 'Source item' });
     await waitFor(() => expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false'));
     const detail = sourceButton.closest<HTMLElement>('.copied-provenance')!;
     fireEvent.click(sourceButton);
@@ -48,10 +49,10 @@ it.each(['registered lookup', 'source capture', 'navigation capture'] as const)(
     expect(transport.mutations.some(request => request.command.command === 'preferences_patch'
       && request.command.params.entries.some(entry => entry.kind === 'set_global'
         && entry.preferences.selected_navigation.kind === 'session' && entry.preferences.selected_navigation.session.project_id === original))).toBe(false);
-    await act(async () => { fireEvent.click(within(detail).getByRole('button', { name: 'Open copied item 1' })); });
+    await act(async () => { fireEvent.click(within(detail).getByRole('button', { name: `Open copied item: ${shortLabel(copy.items['1']!)}` })); });
     await waitFor(() => expect(screen.queryByText(/Opening the session/)).toBeNull());
     expect(screen.queryByRole('alert')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Source item 77' })).toBe(sourceButton);
+    expect(screen.getByRole('button', { name: 'Source item' })).toBe(sourceButton);
   }, 10_000);
 
 it.each(['waiting card', 'Back history'] as const)('reports an unavailable %s link without changing selection or leaving Opening', async caller => {
@@ -59,11 +60,11 @@ it.each(['waiting card', 'Back history'] as const)('reports an unavailable %s li
   transport.preferences.global.selected_navigation = { kind: 'session', session: route };
   transport.preferences.sessions = [{ ...transport.view(), selected_item_id: '1' }];
   await act(async () => { render(<DesktopApp service={createDesktopService(transport)} />); });
-  await screen.findByLabelText('Detail of #1');
+  await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
   await waitFor(() => expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false'));
   if (caller === 'Back history') {
     await act(async () => { fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1.1"]')!); });
-    await screen.findByLabelText('Detail of #1.1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await waitFor(() => expect(screen.getByLabelText<HTMLButtonElement>('Back', { selector: 'button' }).disabled).toBe(false));
   }
   const selected = transport.preferences.sessions[0].selected_item_id;
@@ -86,7 +87,7 @@ it.each(['waiting card', 'Back history'] as const)('reports an unavailable %s li
   expect(screen.queryByText(/Opening the session/)).toBeNull();
   expect(transport.preferences.sessions[0].selected_item_id).toBe(selected);
   expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
-  expect(screen.getByLabelText(`Detail of #${selected}`)).toBeTruthy();
+  expect(screen.getByLabelText(/^Detail of /, { selector: `[data-detail-item-id="${selected}"]` })).toBeTruthy();
 }, 10_000);
 
 it('discards a delayed unavailable-source failure after Projects supersedes its one-second handoff', async () => {
@@ -96,7 +97,7 @@ it('discards a delayed unavailable-source failure after Projects supersedes its 
   transport.preferences.global.selected_navigation = { kind: 'session', session: route };
   transport.preferences.sessions = [{ ...transport.view(), selected_item_id: '1' }];
   await act(async () => { render(<DesktopApp service={createDesktopService(transport)} />); });
-  const source = await screen.findByRole('button', { name: 'Source item 77' });
+  const source = await screen.findByRole('button', { name: 'Source item' });
   await waitFor(() => expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false'));
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });

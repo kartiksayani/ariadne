@@ -60,7 +60,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
   it('reserves a newer item reveal before resolution and prevents an older queued tab from being submitted', async () => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
-    await screen.findByLabelText('Detail of #1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
     const invoke = transport.invoke.bind(transport);
     let releaseOwner!: () => void, releaseReveal!: () => void, writing = false, resolving = false;
@@ -90,7 +90,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     expect(projectWrites()).toHaveLength(initialProjectWrites);
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
     await act(async () => { releaseReveal(); });
-    await screen.findByLabelText('Detail of #1.1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1'));
     expect(projectWrites()).toHaveLength(initialProjectWrites);
     expect(transport.preferences.global.theme).toBe('light');
@@ -100,7 +100,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
   it('keeps a later tab selection when an earlier item reveal finishes resolving', async () => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
-    await screen.findByLabelText('Detail of #1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
     const invoke = transport.invoke.bind(transport);
     let release!: () => void, resolving = false;
@@ -118,7 +118,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await act(async () => { release(); });
     expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'projects' });
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
-    expect(screen.queryByLabelText('Detail of #1.1')).toBeNull();
+    expect(screen.queryByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' })).toBeNull();
     expect(mutations(transport, 'preferences_patch').some(request => request.command.command === 'preferences_patch'
       && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1'))).toBe(false);
   });
@@ -126,10 +126,10 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
   it('keeps the current selection and history position when a deferred Back target is removed', async () => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1.1"]')!);
-    await screen.findByLabelText('Detail of #1.1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1'));
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="2"]')!);
-    await screen.findByLabelText('Detail of #2');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('2'));
     const invoke = transport.invoke.bind(transport), before = mutations(transport, 'preferences_patch').length;
     let release!: () => void, resolving = false;
@@ -149,7 +149,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await act(async () => { release(); });
     await waitFor(() => expect(screen.getByLabelText<HTMLButtonElement>('Forward', { selector: 'button' }).disabled).toBe(true));
     expect(transport.preferences.sessions[0].selected_item_id).toBe('2');
-    expect(screen.getByLabelText('Detail of #2')).toBeTruthy();
+    expect(screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' })).toBeTruthy();
     expect(back.disabled).toBe(true);
     expect(mutations(transport, 'preferences_patch').slice(before).some(request => request.command.command === 'preferences_patch'
       && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1'))).toBe(false);
@@ -177,11 +177,11 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     });
     await openSession();
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
-    await screen.findByLabelText('Detail of #1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     await waitFor(() => expect(entered).toBe(true), { timeout: 3000 });
     fireEvent.click(await screen.findByRole('button', { name: /^Branched into Add the receipt lookup test/ }));
     // A reveal must finish before this unrelated background response arrives.
-    await screen.findByLabelText('Detail of #1.1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1');
     await act(async () => { release(); await gate; });
     await waitFor(() => {
@@ -190,14 +190,14 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     }, { timeout: 3000 });
     expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull();
     expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(false);
-    expect(screen.getByLabelText('Detail of #1.1')).toBeTruthy();
+    expect(screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' })).toBeTruthy();
   });
 
   it('clears a route loading refusal on a same-revision ready capture', async () => {
     const { transport } = setup();
     await openSession();
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1.1"]')!);
-    await screen.findByLabelText('Detail of #1.1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     const bring = await screen.findByRole<HTMLButtonElement>('button', { name: 'Bring it up' });
     await waitFor(() => expect(bring.disabled).toBe(false));
     const { store } = vi.mocked(TreeView).mock.lastCall![0];
@@ -226,7 +226,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     const { transport } = setup();
     await openSession();
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1.1"]')!);
-    await screen.findByLabelText('Detail of #1.1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     const bring = await screen.findByRole<HTMLButtonElement>('button', { name: 'Bring it up' });
     await waitFor(() => expect(bring.disabled).toBe(false));
     const { store } = vi.mocked(TreeView).mock.lastCall![0];
@@ -250,7 +250,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     const { transport } = setup();
     await openSession();
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1.1"]')!);
-    await screen.findByLabelText('Detail of #1.1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     const bring = await screen.findByRole<HTMLButtonElement>('button', { name: 'Bring it up' });
     await waitFor(() => expect(bring.disabled).toBe(false));
     const invoke = transport.invoke.bind(transport);
@@ -465,7 +465,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await act(async () => { release(); await capture; });
     expect(waiting.getSnapshot().waiting[0].route.session_id).toBe(secondId);
     fireEvent.keyDown(document.querySelector('.product-app')!, { key: 'a' });
-    const detail = await screen.findByLabelText('Detail of #2');
+    const detail = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     await waitFor(() => expect(document.activeElement?.closest('.detail-answer-slot')).toBe(detail.querySelector('.detail-answer-slot')));
     expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: { ...route, session_id: secondId } });
     expect(mutations(transport, 'input_submit')).toHaveLength(0);
@@ -477,7 +477,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Reply' }));
     const editor = await screen.findByLabelText('Reply message');
     fireEvent.change(editor, { target: { value: 'Owner nonce: exact café\nsecond line' } });
-    const send = within(screen.getByLabelText('Detail of #8')).getByRole('button', { name: 'Send reply' });
+    const send = within(screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="8"]' })).getByRole('button', { name: 'Send reply' });
     await waitFor(() => expect(send.hasAttribute('disabled')).toBe(false)); fireEvent.click(send);
     await waitFor(() => expect(mutations(transport, 'input_submit')).toHaveLength(1));
     expect(mutations(transport, 'input_submit')[0]).toMatchObject({ session: route, command: { params: { kind: 'reply', text: 'Owner nonce: exact café\nsecond line' } } });
@@ -761,7 +761,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     expect(screen.queryByRole('group', { name: 'Item actions' })).toBeNull();
     await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '2' }); });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('2'));
-    expect(await screen.findByLabelText('Detail of #2')).toBeTruthy();
+    expect(await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' })).toBeTruthy();
     expect(transport.preferences.sessions[0].filters).toEqual(filters);
   });
   it('retains an enabled Reply submission while its exact draft edit is still saving', async () => {
@@ -781,7 +781,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     });
     fireEvent.change(editor, { target: { value: text } });
     await waitFor(() => expect(entered).toBe(true));
-    const send = within(screen.getByLabelText('Detail of #8')).getByRole('button', { name: 'Send reply' });
+    const send = within(screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="8"]' })).getByRole('button', { name: 'Send reply' });
     expect(send.hasAttribute('disabled')).toBe(false); fireEvent.click(send);
     expect(mutations(transport, 'input_submit')).toHaveLength(0);
     await act(async () => { release(); await gate; });
@@ -824,7 +824,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     });
     await openSession();
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
-    await screen.findByLabelText('Detail of #1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
     const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
     await act(async () => { parent.focus(); });
@@ -856,7 +856,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       expect(document.querySelector('.product-app')).toBeNull();
     } else if (outcome === 'confirmed' || outcome === 'rejected') {
       await waitFor(() => expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(false));
-      await screen.findByLabelText('Detail of #1.1');
+      await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
       expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1');
       // The saved row offset is below its 40 px topic header: 20 - 40.
       if (outcome === 'confirmed') expect(transport.preferences.sessions[0].scroll).toEqual({ item_id: '1', offset: -20 });
@@ -864,12 +864,12 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       if (outcome === 'uncertain') {
         const reconcile = await screen.findByRole('button', { name: 'Check again' });
         const frozen = structuredClone(mutations(transport, 'preferences_patch').at(-1));
-        expect(screen.queryByLabelText('Detail of #1.1')).toBeNull();
+        expect(screen.queryByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' })).toBeNull();
         fireEvent.click(reconcile);
         await waitFor(() => expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(false));
         const reconciliation = mutations(transport, 'preferences_patch').filter(request => request.command.op_id === frozen?.command.op_id);
         expect(reconciliation).toEqual([frozen, frozen]);
-        await screen.findByLabelText('Detail of #1.1');
+        await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
         expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1');
       } else if (outcome === 'shortcut') {
         // Back to Open is one press: the shortcut sends the reopen request for the selected item.
@@ -881,13 +881,13 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       }
       else await waitFor(() => expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(false));
       if (outcome === 'native route') {
-        await screen.findByLabelText('Detail of #2');
+        await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
         expect(transport.queries.some(query => query.request.command === 'reveal_item' && query.request.params.item_id === '2')).toBe(true);
         expect(transport.preferences.sessions[0].selected_item_id).toBe('2');
-        expect(screen.queryByLabelText('Detail of #1.1')).toBeNull();
+        expect(screen.queryByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' })).toBeNull();
       } else if (outcome !== 'uncertain') {
         expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
-        expect(screen.queryByLabelText('Detail of #1.1')).toBeNull();
+        expect(screen.queryByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' })).toBeNull();
       }
     }
     if (!['confirmed', 'rejected', 'uncertain'].includes(outcome)) expect(mutations(transport, 'preferences_patch').some(request => request.command.command === 'preferences_patch'
@@ -919,7 +919,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     });
     await openSession();
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
-    await screen.findByLabelText('Detail of #1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
     const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
     await act(async () => { parent.focus(); });
@@ -930,7 +930,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     const selections = () => mutations(transport, 'preferences_patch').filter(request => request.command.command === 'preferences_patch'
       && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1'));
     if (code === 'revision_conflict') {
-      await screen.findByLabelText('Detail of #1.1');
+      await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
       expect(selections()).toHaveLength(1);
       const selection = selections()[0].command;
       expect(selection.command === 'preferences_patch' && selection.params.expected_preferences_revision).toBe(transport.preferences.revision - 1);
@@ -940,7 +940,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       const writes = mutations(transport, 'preferences_patch').length;
       await act(async () => {});
       await screen.findByRole('button', { name: 'Check again' });
-      expect(screen.queryByLabelText('Detail of #1.1')).toBeNull();
+      expect(screen.queryByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' })).toBeNull();
       expect(selections()).toHaveLength(0);
       expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);
       expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
@@ -949,7 +949,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
   it.each(['parent selection', 'tab close', 'read failure'])('preserves the latest selection after %s during late catalogue completion', async outcome => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[data-item-id="1"]')!);
-    await screen.findByLabelText('Detail of #1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
     let releaseWrite!: () => void, releaseRead!: () => void, writing = false, reading = false, completed = false;
     const writeGate = new Promise<void>(resolve => { releaseWrite = resolve; });
@@ -976,12 +976,12 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     const search = screen.getByLabelText('Search questions and outcomes');
     await waitFor(() => expect(search.hasAttribute('disabled')).toBe(false));
     // The saved theme releases the queued link before its catalogue finishes.
-    await screen.findByLabelText('Detail of #1.1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1'));
     expect(completed).toBe(false);
     if (outcome === 'parent selection') {
       fireEvent.click(document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!);
-      await screen.findByLabelText('Detail of #1');
+      await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
       await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
       await waitFor(() => expect(search.hasAttribute('disabled')).toBe(false));
     } else if (outcome === 'tab close') {
@@ -991,9 +991,9 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await act(async () => { releaseRead(); await readGate; });
     await waitFor(() => expect(completed).toBe(true));
     if (outcome === 'tab close') {
-      expect(screen.queryByLabelText('Detail of #1')).toBeNull();
+      expect(screen.queryByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' })).toBeNull();
       expect(transport.preferences.sessions[0].tab_open).toBe(false);
-    } else expect(await screen.findByLabelText(outcome === 'parent selection' ? 'Detail of #1' : 'Detail of #1.1')).toBeTruthy();
+    } else expect(await screen.findByLabelText(/^Detail of /, { selector: `[data-detail-item-id="${outcome === 'parent selection' ? '1' : '1.1'}"]` })).toBeTruthy();
     // A coalesced successful read after the rejected capture clears its banner.
     if (outcome === 'read failure') await waitFor(() => expect(document.querySelector('.nav-banner[role="alert"]')).toBeNull());
     expect(transport.preferences.global.theme).toBe('light');
@@ -1004,7 +1004,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
   it('retains the newer parent selection when child navigation finishes its late catalogue read', async () => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[data-item-id="1"]')!);
-    await screen.findByLabelText('Detail of #1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
     let release!: () => void, entered = false, completed = false;
     const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
@@ -1018,13 +1018,13 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     });
     fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     await waitFor(() => expect(entered).toBe(true));
-    await screen.findByLabelText('Detail of #1.1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     const search = screen.getByLabelText('Search questions and outcomes');
     await waitFor(() => expect(search.hasAttribute('disabled')).toBe(false));
     expect(completed).toBe(false);
     const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
     fireEvent.click(parent);
-    await screen.findByLabelText('Detail of #1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
     await waitFor(() => expect(search.hasAttribute('disabled')).toBe(false));
     expect(completed).toBe(false);
@@ -1032,14 +1032,14 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => expect(completed).toBe(true));
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
     expect(document.querySelector<HTMLElement>('.shell-detail .item-detail')?.dataset.detailItemId).toBe('1');
-    expect(screen.getByLabelText('Detail of #1')).toBeTruthy();
+    expect(screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' })).toBeTruthy();
     expect(parent.getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('region', { name: 'Child items' })).toBeTruthy();
   });
   it.each(['confirmed', 'reconciled'])('admits parent selection only after child navigation is %s', async completion => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[data-item-id="1"]')!);
-    await screen.findByLabelText('Detail of #1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
     let release!: () => void, entered = false;
     const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
@@ -1068,10 +1068,10 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       expect(transport.queries.filter(query => query.request.command === 'reveal_item')).toHaveLength(revealReads);
       fireEvent.click(reconcile);
     }
-    await screen.findByLabelText('Detail of #1.1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await waitFor(() => expect(parent.hasAttribute('aria-disabled')).toBe(false));
     fireEvent.keyDown(parent, { key: 'Enter' });
-    await screen.findByLabelText('Detail of #1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
     expect(parent.getAttribute('aria-selected')).toBe('true');
   });
@@ -1091,7 +1091,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
   it.each(['confirmed', 'reconciled'])('admits rail Close only after a shared preference write is %s', async completion => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[data-item-id="1"]')!);
-    await screen.findByLabelText('Detail of #1');
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     fireEvent.click(screen.getByRole('button', { name: 'Messages (m)' }));
     await screen.findByRole('log', { name: 'Session messages' });
     await waitFor(() => expect(transport.preferences.sessions[0].rail).toBe('activity'));

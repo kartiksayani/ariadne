@@ -235,7 +235,8 @@ export async function runHistoryActionsAcceptance(configuration) {
   const unavailableProject = `${sourceProject}.unavailable-${randomUUID()}`;
   await rename(sourceProject, unavailableProject);
   try {
-    await click(await browser.$('.copied-provenance').$(`button=Source item ${originalItem.id}`));
+    assert.equal(await detailReference(), copiedItemId, 'Source action must belong to the copied local item');
+    await click(await browser.$('.copied-provenance').$('button=Source item'));
     await wait(async () => (await browser.$('.copied-provenance').getText()).includes('Full copied history remains here'), 'Unavailable original project did not expose copied local fallback');
     const unavailableReason = await browser.$('.copied-provenance').getText();
     // The screen names the missing folder and says what to do (data/plain.ts originalFailure; core sends io_error for a missing folder); the OS
@@ -243,7 +244,7 @@ export async function runHistoryActionsAcceptance(configuration) {
     assert.ok(unavailableReason.includes('The original project folder (') && unavailableReason.includes(basename(sourceProject))
       && unavailableReason.includes('is missing or can’t be read. Restore it or move it back, then try again.'), 'The registered source failure must name the folder and say to restore it');
     assert.ok(!unavailableReason.includes('NotFound'), 'The owner-facing failure must not expose the OS error');
-    await click(await browser.$('.copied-provenance').$(`button=Open copied item ${copiedItemId}`));
+    await click(await browser.$('.copied-provenance').$('button*=Open copied item: '));
     await wait(async () => await detailReference() === copiedItemId, 'Copied provenance fallback did not use the local registered item');
     await (await browser.$('.item-detail [aria-label="Conversation"]')).waitForDisplayed();
     await wait(async () => {

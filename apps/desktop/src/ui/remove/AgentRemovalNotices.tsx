@@ -1,5 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react';
-import type { Immutable } from '../../data';
+import { navigationFailure, type Immutable } from '../../data';
 import type { Session } from '../../generated/domain/models';
 import type { SessionRef } from '../../generated/core';
 import type { SessionActionControllers } from '../../components/bindings/actions';
@@ -47,13 +47,16 @@ export function AgentRemovalNotices({ waiting, controllers, navigation, selected
             });
           } },
           { label: 'View', run: () => {
-            void navigation.navigate({ kind: 'session', session: route }, null, undefined, undefined, () => {
-              notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: 'The bin could not be opened. Try View again.', dismissible: true });
-            });
+            let failure: unknown = null;
+            void navigation.navigate({ kind: 'session', session: route }, null, undefined, undefined, error => { failure = error; });
             const request = navigation.getNavigationRequest();
             const current = () => navigation.getNavigationRequest() === request;
             void navigation.getNavigationCompletion(request).then(async saved => {
-              if (!saved || !current()) return;
+              if (!current()) return;
+              if (!saved) {
+                if (failure) notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: navigationFailure(failure), dismissible: true });
+                return;
+              }
               const actions = controllers.forSession(navigation.opened.open(route));
               const ready = await waitForLifecycleReady(actions);
               if (!current()) return;

@@ -46,7 +46,7 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
     session.items['1.1.1'] = { ...session.items['1.1']!, id: '1.1.1', parent: '1.1', ordinal: 1 };
     saved(transport).selected_item_id = selected; saved(transport).hidden_item_ids = hidden;
     await mount(transport);
-    const pane = await screen.findByLabelText(`Detail of #${selected}`), detail = screen.getByRole('complementary', { name: 'Item detail' });
+    const pane = await screen.findByLabelText(/^Detail of /, { selector: `[data-detail-item-id="${selected}"]` }), detail = screen.getByRole('complementary', { name: 'Item detail' });
     const notice = within(detail).getByRole('status'), body = pane.querySelector<HTMLElement>('.detail-body')!;
     const message = parent ? hidden.includes(selected) ? `Hidden, along with its parent “${session.items[parent]!.question}”.`
       : `Hidden with its parent “${session.items[parent]!.question}”` : 'Hidden — this item is hidden from the list.';
@@ -61,7 +61,7 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['3'])); await ready();
     expect(within(detail).queryByRole('status')).toBeNull();
     expect(detail.classList.contains('shell-detail-hidden')).toBe(false);
-    expect(screen.getByLabelText(`Detail of #${selected}`)).toBe(pane);
+    expect(screen.getByLabelText(/^Detail of /, { selector: `[data-detail-item-id="${selected}"]` })).toBe(pane);
     expect(body.scrollTop).toBe(120); expect(saved(transport).selected_item_id).toBe(selected);
     expect(within(detail).getByRole('button', { name: 'Hide item' }).getAttribute('aria-pressed')).toBe('false');
   });
@@ -70,7 +70,7 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
     const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!, topic = session.items['1.1']!.topic_id;
     if (archived) session.topics[topic]!.archived_at = '2026-10-07T12:00:00Z';
     saved(transport).hidden_item_ids = [topic]; saved(transport).selected_item_id = '1.1';
-    await mount(transport); await screen.findByLabelText('Detail of #1.1');
+    await mount(transport); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     const detail = screen.getByRole('complementary', { name: 'Item detail' });
     expect(within(detail).queryByText(/^Hidden/)).toBeNull();
     expect(within(detail).getByRole('button', { name: 'Hide item' }).getAttribute('aria-pressed')).toBe('false');
@@ -190,7 +190,7 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
 
   it('persists hidden preferences through an app restart and offers the detail header action', async () => {
     const { transport, unmount } = await mount();
-    fireEvent.click(row('4')!); await screen.findByLabelText('Detail of #4'); await ready();
+    fireEvent.click(row('4')!); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' }); await ready();
     fireEvent.click(screen.getByRole('button', { name: 'Hide item' }));
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['4'])); await ready();
     expect(screen.getByRole('button', { name: 'Unhide item' })).toBeTruthy();
@@ -208,7 +208,7 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
     expect(chip('Waiting on me').textContent).toBe(waitingBefore);
     expect(within(group()).getByText('waiting on you')).toBeTruthy();
     const card = document.querySelector<HTMLElement>('[data-waiting-item="2"]')!; expect(card).not.toBeNull();
-    fireEvent.click(card); await screen.findByLabelText('Detail of #2'); await ready();
+    fireEvent.click(card); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' }); await ready();
     expect(group().getAttribute('aria-expanded')).toBe('true');
     expect(row('2')!.classList.contains('tree-item-hidden')).toBe(true);
     expect(saved(transport).hidden_item_ids).toEqual(['2']);
@@ -223,7 +223,7 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
   it('reveals a hidden descendant from a native item route and keeps its preference', async () => {
     const { transport } = await mount(); await hide('1');
     await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '1.1' }); });
-    await screen.findByLabelText('Detail of #1.1'); await ready();
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' }); await ready();
     expect(group().getAttribute('aria-expanded')).toBe('true');
     expect(row('1.1')!.classList.contains('tree-item-hidden')).toBe(true);
     expect(saved(transport).hidden_item_ids).toEqual(['1']);

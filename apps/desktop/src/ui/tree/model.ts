@@ -171,8 +171,10 @@ export interface Guide {
   readonly kind: 'line' | 'elbow';
   readonly x: number;
   readonly on: boolean;
-  readonly through: boolean;
   readonly width: number;
+  /** A rail begins/ends at this row's bullet instead of the row boundary. */
+  readonly fromBullet?: boolean;
+  readonly toBullet?: boolean;
 }
 export interface Count { readonly icon: string; readonly color: string; readonly text: string }
 export interface TopicRow {
@@ -212,6 +214,7 @@ export interface ItemRow {
   readonly collapsed: { readonly waiting: number; readonly open: number; readonly progress: number; readonly closed: number; readonly ids: readonly string[] } | null;
   readonly delivery: Delivery | null;
   readonly badge: string;
+  readonly hue?: number;
 }
 export interface HiddenRow {
   readonly kind: 'hidden';
@@ -398,32 +401,39 @@ export function treeModel(input: TreeInput): TreeModel {
     walk(roots, 1);
   }
 
-  // Guides and the accent thread to the selection (Ariadne.dc.html:1801-1817).
+  // One rail at each parent's bullet, ending at its last direct child's bullet.
+  // A depth stack finds visible parents/last children in one pass (including hidden groups).
   const index = new Map(built.map((row, at) => [row.key, at]));
   const selected = selectedId ? session.items[selectedId] : undefined;
   const chain = selected ? [selected.topic_id, ...ancestors(selected.id).reverse(), selected.id] : [];
   const chainAt = chain.map(key => index.get(key));
   const threaded = chainAt.length > 0 && chainAt.every(value => value !== undefined);
-  const cont = (at: number, depth: number) => {
-    for (let next = at + 1; next < built.length; next++) {
-      const d = built[next].depth;
-      if (d <= depth) return false;
-      if (d === depth + 1) return true;
-    }
-    return false;
-  };
+  const parents: number[][] = [], stack: number[] = [], lastChild = new Map<number, number>();
+  built.forEach((row, at) => {
+    stack.length = row.depth;
+    parents[at] = [...stack];
+    const parent = stack.at(-1);
+    if (parent !== undefined) lastChild.set(parent, at);
+    stack[row.depth] = at;
+  });
+  // Stable per-root decorative hue; selection and status also have shape/text cues.
+  const hue = (key: string) => [...key].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 0) * 139 % 360;
   const rows = built.map((row, at): Row => {
     const guides: Guide[] = [];
-    const width = row.kind === 'item' && row.hasKids ? 14 : 36;
-    for (let k = 0; k < row.depth; k++) {
-      const x = 20 + k * 24, through = cont(at, k);
-      if (k === row.depth - 1) guides.push({ kind: 'elbow', x, on: false, through, width });
-      if (through) guides.push({ kind: 'line', x, on: false, through, width });
-      if (threaded && k + 1 < chainAt.length && chainAt[k]! < at && at <= chainAt[k + 1]!) {
-        guides.push(at === chainAt[k + 1] ? { kind: 'elbow', x, on: true, through: false, width } : { kind: 'line', x, on: true, through: false, width });
+    for (const parentAt of [...parents[at], at]) {
+      const parent = built[parentAt], end = lastChild.get(parentAt);
+      if (end === undefined || at > end) continue;
+      const x = 20 + parent.depth * 24;
+      guides.push({ kind: 'line', x, on: false, width: 24, fromBullet: at === parentAt, toBullet: at === end });
+      const child = at !== parentAt && row.depth === parent.depth + 1;
+      if (child) guides.push({ kind: 'elbow', x, on: false, width: 24 });
+      const chainIndex = chainAt.indexOf(parentAt), next = chainAt[chainIndex + 1];
+      if (threaded && chainIndex >= 0 && next !== undefined && at <= next) {
+        guides.push({ kind: 'line', x, on: true, width: 24, fromBullet: at === parentAt, toBullet: at === next });
+        if (at === next) guides.push({ kind: 'elbow', x, on: true, width: 24 });
       }
     }
-    return { ...row, guides } as Row;
+    return { ...row, guides, ...(row.kind === 'item' && row.depth === 1 ? { hue: hue(row.key) } : {}) } as Row;
   });
 
   // hasReveal (Ariadne.dc.html:2169): only a reveal raises the banner, not a plain selection.

@@ -21,7 +21,6 @@ import { useSubmit, type PendingSubmission } from '../answer/useSubmit';
 import { waitingModel, type SentRowModel, type WaitingCardModel } from './model';
 import { useHidden } from '../remove/queue';
 import { FileRefProject, ItemRefs, Markdown } from '../shared/MarkdownText';
-import { shortLabel } from '../shared/short';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { WaitingFold } from '../shell/fold';
 import { sessionAnswerBlocked, sessionClosedReason } from '../../selectors/sessionClosed';
@@ -187,7 +186,7 @@ function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRu
     : selected ? '0 0 0 1.5px color-mix(in srgb, var(--color-text) 45%, transparent)' : '0 0 0 1px var(--color-divider)';
   return <ItemRefs.Provider value={{ lookup: id => {
     const target = card.session.items[id];
-    return target && !itemRemoved(card.session, target.id) ? { label: shortLabel(target), status: displayStatus(card.session, target) } : null;
+    return target && !itemRemoved(card.session, target.id) ? { label: target.question, status: displayStatus(card.session, target) } : null;
   }, onOpenItem: id => revealItem({ ...card.route, item_id: id }) }}><FileRefProject.Provider value={card.route.project_id}><div className="waiting-card" style={{ boxShadow: `${ring}, var(--a-lift)` }} data-waiting-item={item.id} data-project-id={card.route.project_id} data-session-id={card.route.session_id} aria-current={selected || undefined} onClick={open}>
     <div className="waiting-path">{card.path}</div>
     <Markdown className="waiting-question" text={item.question} />
@@ -198,7 +197,7 @@ function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRu
       {delivery.retry && <button type="button" className="btn btn-secondary waiting-delivery-action" onClick={retry}>Retry</button>}</div>}
     <div onClick={event => event.stopPropagation()}>
       {actions && <PausedNote actions={actions} />}
-      <AnswerControl variant="compact" options={item.options} selected={selection} draft={entry?.draft.text ?? ''} label={`Answer #${item.id}`}
+      <AnswerControl variant="compact" options={item.options} selected={selection} draft={entry?.draft.text ?? ''} label={`Answer ${item.question}`}
         locked={submit.locked || !!delivery || submit.changed} blocked={delivery || submit.changed ? undefined : submit.blocked ?? undefined}
         warn={submit.changed && !delivery ? 'This item changed. Review the current question and options; your text is retained.' : undefined}
         warnAction={submit.changed && !delivery ? { label: 'Review current target', onAction: submit.review } : undefined}

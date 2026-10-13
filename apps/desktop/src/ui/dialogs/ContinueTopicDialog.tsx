@@ -153,7 +153,7 @@ function ContinueTopicDialog({ request, navigation, actions, onSent, onClose }: 
       {error && <div className="pw-dialog-error" role="alert">{error}</div>}
       {prepared && preview && continueGroups(prepared.source, preview).map(group => <div key={group.title} className="pw-continue-group">
         <div className="pw-continue-group-title" style={{ color: group.color }}><i className={group.icon} aria-hidden="true" />{group.title}</div>
-        {group.lines.map(line => <div key={line.id} className="pw-continue-line"><code>{line.id}</code><span>{line.text}</span></div>)}
+        {group.lines.map(line => <div key={line.id} className="pw-continue-line"><span>{line.text}</span></div>)}
       </div>)}
       {preview?.readiness.kind === 'blocked' && <div className="pw-dialog-error" role="alert">{blockedText(preview.readiness.reasons, agent)}</div>}
       {preview?.readiness.kind === 'ready' && !preview.readiness.host_available

@@ -52,7 +52,7 @@ describe('compact row actions', () => {
       expect(actions[index]!.run).toHaveBeenCalledOnce();
     }
     expect(props.onSelect).not.toHaveBeenCalled();
-    expect(container.querySelector('.tree-row-status')?.textContent).toBe('1Open');
+    expect(container.querySelector('.tree-row-status')?.textContent).toBe('Open');
     expect(container.querySelector('.tree-related')?.getAttribute('aria-label')).toBe('2 related items');
     expect(container.querySelector('.tree-round')?.textContent).toBe('Round 3');
   });
@@ -81,7 +81,7 @@ describe('compact row actions', () => {
     expect(container.querySelector('.tree-action-grid')).toBeNull();
     expect(container.querySelector('.tree-actions')).toBeNull();
     expect(container.querySelector('.tree-ack-slot')).toBeNull();
-    expect(container.querySelector('.tree-row-status')?.textContent).toBe('1Open');
+    expect(container.querySelector('.tree-row-status')?.textContent).toBe('Open');
     expect(container.querySelector('.tree-question')?.textContent).toBe('Choose the orchard planting order');
     expect(container.querySelector('.tree-outcome')?.textContent).toBe('Plant the pear trees first.');
   });
