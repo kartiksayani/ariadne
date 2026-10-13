@@ -61,8 +61,8 @@ with no open comments. Item key: canonical comment `url` in `links` as `target`,
 `kind: "pr"`, `label: "Review comment"`. Recorded `Posted reply` links also count
 as seen across logins. Never key by position, body, line number or PR title.
 Reuse a linked item's topic, preserving ask/answer/results; otherwise find by PR
-link, never title. Clarify conflicting identities. Restore archived matches with
-the owner before updating.
+link, never title. Clarify conflicting identities. An archived match needs the
+owner to restore it before updating.
 
 One topic: exact PR title, plain 2–4 word `short` without numbers, brief explaining
 the choice with its PR link. Revision-guard title/brief via `topic.edit`.
@@ -92,7 +92,7 @@ shows replies; progress notes are hidden while deciding.
 
 `question`: your plain-words summary, without URLs, `<`, `[`, `]` or backslashes.
 `ask`: "Fix, reply, or skip? Read the conversation; Reply needs your own text."
-With a suggested reply, end `ask`: "Reply approves its suggested text or your own."
+With a suggested reply, replace its last clause with: "Reply approves its suggested text or your own."
 End context with the same ask to anchor the waiting marker there.
 
 `reply_consequence`: "Post only the exact text you approve in this conversation."
@@ -164,7 +164,7 @@ approved suggestion before acting. No answer means no action.
   Serialize payload to a private file/stdin; use argument arrays for
   `gh api graphql --input <file-or-dash>`. Exact approved body: GraphQL variable,
   never argv. Delete temporary files. GraphQL `errors` mean failure. Save returned
-  URL as a `pr` link, `Posted reply`; preserve existing links. Before retrying an
+  URL as a `pr` link labeled `Posted reply`; preserve existing links. Before retrying an
   uncertain post, read thread with GraphQL; compare author flag, exact body and
   URLs to pre-post snapshot. Older identical replies prove nothing. Record only
   confirmed new replies; otherwise report uncertainty and ask, never blindly
