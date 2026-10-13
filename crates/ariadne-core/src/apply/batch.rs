@@ -212,12 +212,13 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             },
         }
     }
-    fn related(
+    fn link_list(
         &mut self,
         session: &Session,
         source: &ItemRef,
         references: Option<&[EntityRef]>,
         operation: &str,
+        kind: &str,
     ) -> Result<Option<Vec<ItemRef>>, CoreError> {
         let Some(references) = references else {
             return Ok(None);
@@ -226,7 +227,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             return Err(core(
                 CoreErrorCode::InvalidArgument,
                 format!(
-                    "{operation}: item {} has too many related items; use at most 32",
+                    "{operation}: item {} has too many {kind} items; use at most 32",
                     source.as_str()
                 ),
             ));
@@ -248,7 +249,7 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                 return Err(core(
                     CoreErrorCode::InvalidRef,
                     format!(
-                        "{operation}: related item {} is the item itself; remove that link",
+                        "{operation}: {kind} item {} is the item itself; remove that link",
                         target.as_str()
                     ),
                 ));
@@ -257,17 +258,17 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                 return Err(core(
                     CoreErrorCode::InvalidRef,
                     format!(
-                        "{operation}: related item {} appears more than once; list it once",
+                        "{operation}: {kind} item {} appears more than once; list it once",
                         target.as_str()
                     ),
                 ));
             }
             if !session.items.0.contains_key(&target) {
-                let declared = session
-                    .items
-                    .0
-                    .get(source)
-                    .and_then(|item| item.related.as_ref());
+                let declared = session.items.0.get(source).and_then(|item| match kind {
+                    "affects" => item.affects.as_ref(),
+                    "depends_on" => item.depends_on.as_ref(),
+                    _ => item.related.as_ref(),
+                });
                 if declared.is_some_and(|ids| ids.contains(&target)) {
                     let pruned = self.pruned_related.0.entry(source.clone()).or_default();
                     if !pruned.contains(&target) {
@@ -277,12 +278,77 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                 }
                 return Err(core(
                     CoreErrorCode::InvalidRef,
-                    format!("{operation}: related item {} does not exist in this session; remove that link", target.as_str()),
+                    format!("{operation}: {kind} item {} does not exist in this session; remove that link", target.as_str()),
                 ));
             }
             targets.push(target);
         }
         Ok(Some(targets))
+    }
+    fn link_lists(
+        &mut self,
+        session: &Session,
+        source: &ItemRef,
+        references: [Option<&[EntityRef]>; 3],
+        operation: &str,
+    ) -> Result<[Option<Vec<ItemRef>>; 3], CoreError> {
+        let mut resolved = [None, None, None];
+        for (index, kind) in ["related", "affects", "depends_on"].into_iter().enumerate() {
+            resolved[index] =
+                self.link_list(session, source, references[index], operation, kind)?;
+        }
+        let previous = session.items.0.get(source);
+        let old = previous.map(|item| [&item.related, &item.affects, &item.depends_on]);
+        let mut effective: [Vec<ItemRef>; 3] = std::array::from_fn(|index| {
+            resolved[index]
+                .clone()
+                .or_else(|| old.and_then(|lists| lists[index].clone()))
+                .unwrap_or_default()
+        });
+        if let Some(target) = effective[1]
+            .iter()
+            .find(|target| effective[2].contains(target))
+        {
+            return Err(core(
+                CoreErrorCode::InvalidRef,
+                format!(
+                    "{operation}: item {} appears in affects and depends_on; keep it in one list",
+                    target.as_str()
+                ),
+            ));
+        }
+        let specific: BTreeSet<_> = effective[1].iter().chain(&effective[2]).cloned().collect();
+        let overlap: Vec<_> = effective[0]
+            .iter()
+            .filter(|target| specific.contains(*target))
+            .cloned()
+            .collect();
+        if !overlap.is_empty() {
+            let Some(repairs) = &mut self.repairs else {
+                return Err(core(CoreErrorCode::InvalidRef, format!("{operation}: item {} appears in related and a specific link list; keep it in one list", overlap[0].as_str())));
+            };
+            effective[0].retain(|target| !specific.contains(target));
+            for target in overlap {
+                let kind = if effective[1].contains(&target) {
+                    "affects"
+                } else {
+                    "depends_on"
+                };
+                repairs.push(format!(
+                    "item {}: kept {kind} link to {}; removed it from related.",
+                    source.as_str(),
+                    target.as_str()
+                ));
+            }
+            // A repair writes the effective related list even when the caller
+            // omitted it; prune its old dangling declarations on that write.
+            let repaired: Vec<_> = effective[0]
+                .iter()
+                .map(|id| EntityRef::Existing(ExistingRef { id: id.clone() }))
+                .collect();
+            resolved[0] = self.link_list(session, source, Some(&repaired), operation, "related")?;
+        }
+        Ok(resolved)
     }
     pub fn uuid_ref(&self, reference: &UuidRef, topic: bool) -> Result<UuidV4, CoreError> {
         match reference {
@@ -523,7 +589,12 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
     }
     fn operation(&mut self, session: &mut Session, op: &Operation) -> Result<(), CoreError> {
         match op {
-            Operation::TopicAdd { r#ref, name, short } => {
+            Operation::TopicAdd {
+                r#ref,
+                name,
+                short,
+                brief,
+            } => {
                 let short = short_label(short.as_deref())?;
                 let id = self.fresh()?;
                 let order = session.counters.next_topic_order;
@@ -534,6 +605,8 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                         id: id.clone(),
                         name: name.clone(),
                         short,
+                        brief: topic_brief(brief.as_deref())?,
+                        brief_updated_at: brief.as_ref().map(|_| self.at.clone()),
                         order,
                         revision: one(),
                         created_at: self.at.clone(),
@@ -546,12 +619,90 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                 self.topics.insert(id.clone());
                 self.save_ref(r#ref, AllocatedRef::Topic { id })?;
             }
+            Operation::TopicEdit {
+                topic,
+                name,
+                short,
+                brief,
+            } => {
+                let id = self.uuid_ref(topic, true)?;
+                let old = session
+                    .topics
+                    .0
+                    .get(&id)
+                    .ok_or_else(|| core(CoreErrorCode::InvalidRef, "Topic does not exist"))?;
+                if old.archived_at.is_some() {
+                    return Err(self.archived(
+                        "The owner archived this topic; add the item to an active topic instead",
+                    ));
+                }
+                if ariadne_domain::visibility::topic_is_removed(session, old) {
+                    return Err(core(
+                        CoreErrorCode::InvalidTransition,
+                        "This topic is in the bin. Ask the owner to restore it before adding work.",
+                    ));
+                }
+                if !self.refs.0.values().any(|value| matches!(value, AllocatedRef::Topic { id: allocated } if allocated == &id)) && !self.request.expected_topic_revisions.0.contains_key(&id) {
+                    return Err(scope::conflict(session, "Every touched existing topic requires its original expected revision"));
+                }
+                let normalized_short = short
+                    .as_ref()
+                    .map(|value| short_label(value.as_deref()))
+                    .transpose()?;
+                let normalized_brief = brief
+                    .as_ref()
+                    .map(|value| topic_brief(value.as_deref()))
+                    .transpose()?;
+                let topic = session.topics.0.get_mut(&id).unwrap();
+                if let Some(name) = name {
+                    topic.name = name.clone();
+                }
+                if let Some(short) = normalized_short {
+                    topic.short = short;
+                }
+                if let Some(brief) = normalized_brief {
+                    if topic.brief != brief {
+                        topic.brief_updated_at = Some(self.at.clone());
+                    }
+                    topic.brief = brief;
+                }
+                topic.revision = increment(topic.revision)?;
+                self.topics.insert(id);
+            }
             Operation::ItemAdd(draft) => self.add(session, draft)?,
             Operation::ItemDelete { item } => self.delete_item(session, item)?,
             Operation::TopicDelete { topic } => self.delete_topic(session, topic)?,
-            Operation::ItemEdit { item, patch } => {
+            Operation::ItemEdit {
+                item,
+                patch,
+                reason,
+                wording_only,
+            } => {
                 let id = self.item_ref(item)?;
-                let related = self.related(session, &id, patch.related.as_deref(), "item.edit")?;
+                let references = [
+                    patch.related.as_deref(),
+                    patch.affects.as_deref(),
+                    patch.depends_on.as_deref(),
+                ];
+                let [related, affects, depends_on] = if *wording_only {
+                    // Let the transition compare the declared values directly.
+                    // Pruning or repairing first could hide a forbidden change
+                    // or turn an unchanged echo into a changed link list.
+                    let mut resolved = [None, None, None];
+                    for (index, references) in references.into_iter().enumerate() {
+                        resolved[index] = references
+                            .map(|references| {
+                                references
+                                    .iter()
+                                    .map(|reference| self.item_ref(reference))
+                                    .collect::<Result<Vec<_>, _>>()
+                            })
+                            .transpose()?;
+                    }
+                    resolved
+                } else {
+                    self.link_lists(session, &id, references, "item.edit")?
+                };
                 self.change(
                     session,
                     &id,
@@ -562,6 +713,10 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                         note: patch.note.clone(),
                         links: patch.links.clone(),
                         related,
+                        affects,
+                        depends_on,
+                        reason: reason.clone(),
+                        wording_only: *wording_only,
                         short: patch.short.clone(),
                     },
                 )?;
@@ -741,20 +896,25 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
                 "Allocated item ID already exists",
             ));
         }
-        if draft.related.as_ref().is_some_and(|related| {
-            related.iter().any(|reference| {
-                matches!(reference, EntityRef::Local(local) if local.r#ref == draft.r#ref)
-            })
-        }) {
-            return Err(core(
-                CoreErrorCode::InvalidRef,
-                format!(
-                    "item.add: related ref '{}' names item {} itself; remove that link",
-                    draft.r#ref.as_str(),
-                    id.as_str()
-                ),
-            ));
+        for (kind, links) in [
+            ("related", &draft.related),
+            ("affects", &draft.affects),
+            ("depends_on", &draft.depends_on),
+        ] {
+            if links.as_ref().is_some_and(|links| links.iter().any(|reference| matches!(reference, EntityRef::Local(local) if local.r#ref == draft.r#ref))) {
+                return Err(core(CoreErrorCode::InvalidRef, format!("item.add: {kind} ref '{}' names item {} itself; remove that link", draft.r#ref.as_str(), id.as_str())));
+            }
         }
+        let [related, affects, depends_on] = self.link_lists(
+            session,
+            &id,
+            [
+                draft.related.as_deref(),
+                draft.affects.as_deref(),
+                draft.depends_on.as_deref(),
+            ],
+            "item.add",
+        )?;
         let waiting = draft.status == ItemStatus::WaitingOnMe;
         if waiting && draft.owner != (ItemOwner::Me {}) {
             return Err(core(
@@ -801,7 +961,10 @@ impl<F: FnMut() -> UuidV4> Batch<'_, F> {
             note: draft.note.clone(),
             options: draft.options.clone().unwrap_or_default(),
             links: draft.links.clone().unwrap_or_default(),
-            related: self.related(session, &id, draft.related.as_deref(), "item.add")?,
+            related,
+            affects,
+            depends_on,
+            changes: None,
             outcome: draft.outcome.clone(),
             why: draft.why.clone(),
             replaced_by,
@@ -871,6 +1034,19 @@ fn short_label(value: Option<&str>) -> Result<Option<String>, CoreError> {
                 core(
                     CoreErrorCode::InvalidArgument,
                     format!("Invalid short label: {e}"),
+                )
+            })
+        })
+        .transpose()
+}
+
+fn topic_brief(value: Option<&str>) -> Result<Option<String>, CoreError> {
+    value
+        .map(|value| {
+            ariadne_domain::validation::normalize_topic_brief(value, "brief").map_err(|error| {
+                core(
+                    CoreErrorCode::InvalidArgument,
+                    format!("Invalid topic brief: {error}"),
                 )
             })
         })

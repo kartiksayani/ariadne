@@ -85,7 +85,9 @@ fn shape(position: &CursorPosition, view: &QueryView) -> bool {
             matches!(position, CursorPosition::Item { ordinals, .. } if !ordinals.is_empty())
         }
         QueryView::ItemRounds => matches!(position, CursorPosition::Round { .. }),
-        QueryView::ItemStatusHistory => matches!(position, CursorPosition::History { .. }),
+        QueryView::ItemStatusHistory | QueryView::ItemChanges => {
+            matches!(position, CursorPosition::History { .. })
+        }
         QueryView::RoundResults => matches!(position, CursorPosition::Result { .. }),
         _ => matches!(position, CursorPosition::Sequence { .. }),
     }

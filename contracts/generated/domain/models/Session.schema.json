@@ -1254,11 +1254,29 @@
             }
           ]
         },
+        "affects": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
         "ask": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "changes": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemChangeRecord"
+          }
         },
         "created_at": {
           "$ref": "#/$defs/UtcMillis"
@@ -1275,6 +1293,15 @@
               "type": "null"
             }
           ]
+        },
+        "depends_on": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
         },
         "id": {
           "$ref": "#/$defs/ItemRef"
@@ -1477,6 +1504,146 @@
         "current_round_id",
         "source_round_id",
         "origin"
+      ]
+    },
+    "ItemChangeBefore": {
+      "type": "object",
+      "properties": {
+        "affects": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "ask": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "depends_on": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "links": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemLinkTarget"
+          }
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "options": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemOption"
+          }
+        },
+        "outcome": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "question": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "related": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "short": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "why": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ItemChangeRecord": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "before": {
+          "$ref": "#/$defs/ItemChangeBefore"
+        },
+        "cause_message_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "wording_only": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "at",
+        "cause_message_id",
+        "before"
       ]
     },
     "ItemLinkTarget": {
@@ -3062,6 +3229,22 @@
       "type": "object",
       "properties": {
         "archived_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "brief": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "brief_updated_at": {
           "anyOf": [
             {
               "$ref": "#/$defs/UtcMillis"

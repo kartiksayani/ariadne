@@ -1,3 +1,4 @@
+pub mod changes;
 pub mod delivery;
 pub mod entities;
 pub mod primitives;
@@ -5,6 +6,7 @@ pub mod projections;
 pub mod provenance;
 pub mod receipts;
 pub mod wire;
+pub use changes::*;
 pub use delivery::*;
 pub use entities::*;
 pub use primitives::{

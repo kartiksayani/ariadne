@@ -17,15 +17,15 @@ pub const HELP: &str = r#"Agent tools (explicit routing; no cwd/session default)
   ariadne read --binding UUID --generation UUID --view items [--topic ID|NUMBER] [--archived] [--limit 1..100] [--json]
   ariadne read --binding UUID --generation UUID --view topics [--archived] [--limit 1..100] [--json]
   ariadne read --binding UUID --generation UUID --json-stdin [--json]
-  ariadne item messages|rounds --binding UUID --generation UUID --item ITEM [--json]
-  ariadne item messages|rounds --binding UUID --generation UUID --json-stdin [--json]
+  ariadne item messages|changes|rounds --binding UUID --generation UUID --item ITEM [--json]
+  ariadne item messages|changes|rounds --binding UUID --generation UUID --json-stdin [--json]
   ariadne apply --binding UUID --generation UUID --json-stdin [--dry-run] [--full] [--json]
 Read source scope: add both --source-input UUID and --attempt UUID, or neither.
 --topic takes a topic id or its number (the `order` shown by --view topics);
 --archived keeps only archived topics (and the items in them).
 Read omits Bin items and topics; notices report "N removed items not shown"
 and "N removed topics not shown" when applicable.
-Stdin is the complete canonical SessionReadRequest, ItemMessagesRequest,
+Stdin is the complete canonical SessionReadRequest, ItemMessagesRequest, ItemChangesRequest,
 ItemRoundsRequest or ApplyRequest (not an actor/context envelope), at most 512KiB.
 Apply stdin may leave out defaulted fields (below); creation statuses decided,
 done and dropped are repaired to open with ack_to, including recursive children.
@@ -55,14 +55,28 @@ validates it exactly as before):
   reply_refs and followup_item_refs = [].
   Nesting: item.add may carry "children": [item.add objects, recursively]. Each
   child's parent is its enclosing item, its topic is inherited, order is kept.
-  Related items: item.add.related and item.edit.patch.related accept item numbers
+  Item links: related, affects and depends_on on item.add or item.edit.patch accept item numbers
   ("3.2"), {"id":"3.2"}, or batch references "finding" / {"ref":"finding"}.
-  At most 32 related items. Omission keeps links; [] clears them. Duplicate,
+  At most 32 items per list. Omission keeps links; [] clears them. Duplicate,
   self and new missing targets fail. Re-sending a declared missing target prunes
   it; pruned_related in the receipt lists the source and removed item numbers.
   New items can link to later additions, including nested children: the CLI
   assigns those links just after their targets are created. Later explicit edits
-  win. Item ids are their display numbers; read --view items shows related ids.
+  win. Item ids are their display numbers; read --view items shows all three lists.
+  A target has one kind per source. The CLI drops overlaps from related, keeping
+  affects or depends_on and reporting the repair. An affects/depends_on overlap fails.
+  Topic brief: topic.add accepts brief; topic.edit accepts topic (UUID or batch ref),
+  optional name, short and brief. null clears short or brief; omission keeps it.
+  Briefs are trimmed plain text, allow line breaks and have at most 1,200 characters.
+  Guard existing topic edits with expected_topic_revisions. Archived/Bin topics refuse edits.
+  Change reason: item.edit accepts optional one-line reason, at most 280 characters.
+  item.status accepts multiline reason up to 4,096 UTF-8 bytes; its change record
+  keeps a normalized one-line copy up to 280. Item reads include recent before-values
+  and their cause message.
+  Read projection changes is a page; item_pages view item_changes accepts item_id,
+  cursor and limit to continue it independently of updated_messages/status_history.
+  item changes reads the same records without repeating the item's current snapshot.
+  Items stay new throughout their creation batch; edits in later batches record changes.
   Delete: item.delete item accepts "3.2", {"id":"3.2"}, or a batch ref
   "duplicate" / {"ref":"duplicate"}; topic.delete topic accepts a UUID,
   {"id":"UUID"}, or a batch ref. Delete moves the item subtree or topic to
@@ -117,7 +131,15 @@ Retain exact Apply op_id and request bytes for retries; new effects require curr
 pub fn handles(args: &[&str]) -> bool {
     matches!(
         args.first(),
-        Some(&("read" | "session_read" | "item" | "item_messages" | "item_rounds" | "apply"))
+        Some(
+            &("read"
+                | "session_read"
+                | "item"
+                | "item_messages"
+                | "item_changes"
+                | "item_rounds"
+                | "apply")
+        )
     )
 }
 pub fn run(
@@ -140,6 +162,7 @@ pub fn run(
 enum Tool {
     Read(ReadCall),
     Messages(AgentMessagesToolRequest),
+    Changes(AgentChangesToolRequest),
     Rounds(AgentRoundsToolRequest),
     Apply(ApplyCall),
 }
@@ -165,6 +188,7 @@ fn execute(
     match &tool {
         Tool::Read(call) => call.request.validate_wire()?,
         Tool::Messages(request) => request.validate_wire()?,
+        Tool::Changes(request) => request.validate_wire()?,
         Tool::Rounds(request) => request.validate_wire()?,
         Tool::Apply(call) => call.request.validate_wire()?,
     }
@@ -196,6 +220,12 @@ fn execute(
             &call.request.attempt_id,
         ),
         Tool::Messages(request) => (
+            &request.binding_id,
+            &request.generation,
+            &request.source_input_id,
+            &request.attempt_id,
+        ),
+        Tool::Changes(request) => (
             &request.binding_id,
             &request.generation,
             &request.source_input_id,
@@ -253,6 +283,7 @@ fn execute(
                     QueryRequest::SessionRead(params)
                 }
                 Tool::Messages(request) => QueryRequest::ItemMessages(request.params),
+                Tool::Changes(request) => QueryRequest::ItemChanges(request.params),
                 Tool::Rounds(request) => QueryRequest::ItemRounds(request.params),
                 Tool::Apply(_) => unreachable!("handled above"),
             };
@@ -461,6 +492,7 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
     let (method, rest) = match args {
         ["read" | "session_read", rest @ ..] => ("read", rest),
         ["item", "messages", rest @ ..] | ["item_messages", rest @ ..] => ("messages", rest),
+        ["item", "changes", rest @ ..] | ["item_changes", rest @ ..] => ("changes", rest),
         ["item", "rounds", rest @ ..] | ["item_rounds", rest @ ..] => ("rounds", rest),
         ["apply", rest @ ..] => ("apply", rest),
         _ => return Err(invalid("Unknown agent command.")),
@@ -650,7 +682,7 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
                 topic_number,
             }))
         }
-        "messages" | "rounds" => {
+        "messages" | "changes" | "rounds" => {
             if flags.contains_key("--view") {
                 return Err(invalid("Item history has no --view flag."));
             }
@@ -666,6 +698,24 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
                     }
                 };
                 Ok(Tool::Messages(AgentMessagesToolRequest {
+                    binding_id,
+                    generation,
+                    source_input_id,
+                    attempt_id,
+                    params,
+                }))
+            } else if method == "changes" {
+                let params = if let Some(bytes) = bytes {
+                    serde_json::from_slice(&bytes)
+                        .map_err(|error| bad_stdin("ItemChangesRequest", &error))?
+                } else {
+                    ItemChangesRequest {
+                        item_id: item.ok_or_else(|| invalid("Explicit --item is required."))?,
+                        cursor: None,
+                        limit,
+                    }
+                };
+                Ok(Tool::Changes(AgentChangesToolRequest {
                     binding_id,
                     generation,
                     source_input_id,

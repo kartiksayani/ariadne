@@ -61,6 +61,7 @@ pub fn artifacts() -> Result<BTreeMap<PathBuf, String>, String> {
         SessionReadRequest,
         ItemPageRequest,
         ItemMessagesRequest,
+        ItemChangesRequest,
         ItemRoundsRequest,
         RoundPageRequest,
         QueryResult,
@@ -77,6 +78,9 @@ pub fn artifacts() -> Result<BTreeMap<PathBuf, String>, String> {
         ContinueBlockReason,
         PageLimit,
         PreferencesSnapshot,
+        SessionSeen,
+        ItemSeen,
+        TopicSeen,
         GlobalPreferences,
         NotificationEpisode,
         NavigationSelection,
@@ -127,6 +131,7 @@ pub fn artifacts() -> Result<BTreeMap<PathBuf, String>, String> {
         AgentApplyToolRequest,
         AgentReadToolRequest,
         AgentMessagesToolRequest,
+        AgentChangesToolRequest,
         AgentRoundsToolRequest,
         OwnerQueryRequest,
         OwnerMutationRequest
@@ -177,6 +182,7 @@ pub fn artifacts() -> Result<BTreeMap<PathBuf, String>, String> {
     let tools = serde_json::json!({"api_version":1,"tools":[
         {"name":"session_read","inputSchema":schema::<AgentReadToolRequest>(),"output_schema":QueryEnvelope::schema_name()},
         {"name":"item_messages","inputSchema":schema::<AgentMessagesToolRequest>(),"output_schema":QueryEnvelope::schema_name()},
+        {"name":"item_changes","inputSchema":schema::<AgentChangesToolRequest>(),"output_schema":QueryEnvelope::schema_name()},
         {"name":"item_rounds","inputSchema":schema::<AgentRoundsToolRequest>(),"output_schema":QueryEnvelope::schema_name()},
         {"name":"apply","inputSchema":schema::<AgentApplyToolRequest>(),"output_schema":ApplyEnvelope::schema_name()}
     ]});

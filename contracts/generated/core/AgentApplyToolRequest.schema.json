@@ -237,6 +237,24 @@
             }
           ]
         },
+        "affects": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/EntityRef"
+          }
+        },
+        "depends_on": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/EntityRef"
+          }
+        },
         "links": {
           "type": [
             "array",
@@ -379,6 +397,13 @@
         {
           "type": "object",
           "properties": {
+            "brief": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 1200
+            },
             "name": {
               "type": "string"
             },
@@ -408,6 +433,44 @@
         {
           "type": "object",
           "properties": {
+            "brief": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 1200
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "op": {
+              "type": "string",
+              "const": "topic.edit"
+            },
+            "short": {
+              "description": "Absent keeps the label, null clears it, a string replaces it (trimmed).",
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 40
+            },
+            "topic": {
+              "$ref": "#/$defs/UuidRef"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "topic"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
             "ack_to": {
               "anyOf": [
                 {
@@ -418,11 +481,29 @@
                 }
               ]
             },
+            "affects": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/EntityRef"
+              }
+            },
             "ask": {
               "type": [
                 "string",
                 "null"
               ]
+            },
+            "depends_on": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/EntityRef"
+              }
             },
             "links": {
               "type": [
@@ -562,6 +643,16 @@
             },
             "patch": {
               "$ref": "#/$defs/ItemPatch"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 280
+            },
+            "wording_only": {
+              "type": "boolean"
             }
           },
           "additionalProperties": false,

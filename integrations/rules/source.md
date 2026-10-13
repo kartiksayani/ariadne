@@ -34,15 +34,16 @@ Use `[label](item:3.2)` in prose, never bare numbers; links do not create `relat
 
 | `op` | Required | Optional |
 |---|---|---|
-| `topic.add` | `name` | `short`, `ref` |
-| `item.add` | `question`, `type` | `topic` (the only `topic.add`; children inherit their parent's topic), `short`, `status`, `ack_to`, `owner`, `ask`, `options`, `parent`, `note`, `links`, `related`, `outcome`, `why`, `children`, `ref` |
-| `item.edit` | `item`, `patch` | patch: `question`, `type`, `note`, `links`, `related`, `short`, `ack_to` (on an Open/InProgress Ack item) |
-| `item.ask` | `item`, `ask` | `options` |
-| `item.status` | `item`, `status` | `ack_to`, `outcome`, `why`, `reason` |
-| `item.replace` | `item`, `replacement`, `outcome`, `why` | |
+| `topic.add` | `name` | `short,brief,ref` |
+| `topic.edit` | `topic` | `name,short,brief` |
+| `item.add` | `question,type` | `topic` (the only `topic.add`; children inherit their parent's topic), `short,status,ack_to,owner,ask,options,parent,note,links,related,affects,depends_on,outcome,why,children,ref` |
+| `item.edit` | `item,patch` | `reason`; patch: `question,type,note,links,related,affects,depends_on,short,ack_to` (Open/InProgress Ack) |
+| `item.ask` | `item,ask` | `options` |
+| `item.status` | `item,status` | `ack_to,outcome,why,reason` |
+| `item.replace` | `item,replacement,outcome,why` | |
 | `item.delete` | `item` | |
 | `topic.delete` | `topic` | |
-| `reply` | `item`, `text` | `ref`, `round_id` |
+| `reply` | `item,text` | `ref,round_id` |
 | `round.close` | `round_id` | |
 
 Set `topic` if neither default applies.

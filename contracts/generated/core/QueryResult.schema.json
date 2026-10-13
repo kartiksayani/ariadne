@@ -91,6 +91,23 @@
       "type": "object",
       "properties": {
         "data": {
+          "$ref": "#/$defs/ItemChangesProjection"
+        },
+        "kind": {
+          "type": "string",
+          "const": "item_changes"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "data": {
           "$ref": "#/$defs/ItemRoundsProjection"
         },
         "kind": {
@@ -1821,11 +1838,29 @@
             }
           ]
         },
+        "affects": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
         "ask": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "changes": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemChangeRecord"
+          }
         },
         "created_at": {
           "$ref": "#/$defs/UtcMillis"
@@ -1842,6 +1877,15 @@
               "type": "null"
             }
           ]
+        },
+        "depends_on": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
         },
         "id": {
           "$ref": "#/$defs/ItemRef"
@@ -2046,6 +2090,162 @@
         "origin"
       ]
     },
+    "ItemChangeBefore": {
+      "type": "object",
+      "properties": {
+        "affects": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "ask": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "depends_on": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "links": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemLinkTarget"
+          }
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "options": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemOption"
+          }
+        },
+        "outcome": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "question": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "related": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
+        },
+        "short": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "why": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ItemChangeRecord": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "before": {
+          "$ref": "#/$defs/ItemChangeBefore"
+        },
+        "cause_message_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        },
+        "wording_only": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "at",
+        "cause_message_id",
+        "before"
+      ]
+    },
+    "ItemChangesProjection": {
+      "type": "object",
+      "properties": {
+        "changes": {
+          "$ref": "#/$defs/Page_ItemChangeRecord"
+        },
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "changes"
+      ]
+    },
     "ItemLink": {
       "type": "object",
       "properties": {
@@ -2220,6 +2420,16 @@
     "ItemReadProjection": {
       "type": "object",
       "properties": {
+        "changes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Page_ItemChangeRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "item": {
           "$ref": "#/$defs/ItemSnapshot"
         },
@@ -2277,8 +2487,24 @@
         "item_id"
       ]
     },
+    "ItemSeen": {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "revision"
+      ]
+    },
     "ItemSnapshot": {
-      "description": "All current item fields except unbounded updated-message and status-history arrays.",
+      "description": "Current item fields; change records and other history have independent pages.",
       "type": "object",
       "properties": {
         "ack_to": {
@@ -2290,6 +2516,15 @@
               "type": "null"
             }
           ]
+        },
+        "affects": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
         },
         "ask": {
           "type": [
@@ -2312,6 +2547,15 @@
               "type": "null"
             }
           ]
+        },
+        "depends_on": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ItemRef"
+          }
         },
         "id": {
           "$ref": "#/$defs/ItemRef"
@@ -3125,6 +3369,36 @@
         "snapshot_revision"
       ]
     },
+    "Page_ItemChangeRecord": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemChangeRecord"
+          }
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor",
+        "snapshot_revision"
+      ]
+    },
     "Page_ItemLink": {
       "type": "object",
       "properties": {
@@ -3434,6 +3708,12 @@
         "schema_version": {
           "$ref": "#/$defs/SchemaVersion"
         },
+        "seen": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionSeen"
+          }
+        },
         "sessions": {
           "type": "array",
           "items": {
@@ -3667,7 +3947,8 @@
         "round_results",
         "round_forks",
         "item_status_history",
-        "item_updated_messages"
+        "item_updated_messages",
+        "item_changes"
       ]
     },
     "RailView": {
@@ -5168,6 +5449,39 @@
         "session_id"
       ]
     },
+    "SessionSeen": {
+      "description": "Owner browsing state is kept independently of session view preferences.",
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemSeen"
+          },
+          "maxItems": 10000
+        },
+        "session": {
+          "$ref": "#/$defs/SessionRef"
+        },
+        "since": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "topics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TopicSeen"
+          },
+          "maxItems": 1024
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "session",
+        "since",
+        "items",
+        "topics"
+      ]
+    },
     "SessionSnapshot": {
       "type": "object",
       "properties": {
@@ -5451,6 +5765,22 @@
             }
           ]
         },
+        "brief": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "brief_updated_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcMillis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "created_at": {
           "$ref": "#/$defs/UtcMillis"
         },
@@ -5540,6 +5870,22 @@
         "topic_id",
         "source_revision",
         "continued_at"
+      ]
+    },
+    "TopicSeen": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "topic_id",
+        "at"
       ]
     },
     "TurnState": {

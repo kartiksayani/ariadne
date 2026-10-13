@@ -482,14 +482,14 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       <ChildrenBox kids={model.kids} onOpen={onOpenItem} />
     </section>}
 
-    {model.related.length > 0 && <section className="detail-section detail-related" aria-label="Related items">
-      {sectionLabel('Related items')}
-      {model.related.map(target => <button key={target.id} type="button" className={`detail-related-item${target.hidden ? ' is-hidden' : ''}`}
+    {model.related.map(section => <section key={section.direction} className="detail-section detail-related" aria-label={section.label}>
+      {sectionLabel(section.label)}
+      {section.items.map(target => <button key={target.id} type="button" className={`detail-related-item${target.hidden ? ' is-hidden' : ''}`}
         title={target.question} aria-label={`#${target.id} ${target.label}${target.hidden ? ' (hidden)' : ''} · ${STATUS[target.status].label}`} onClick={() => onOpenItem(target.id)}>
         <span className="detail-related-number">#{target.id}</span><span className="detail-related-label">{target.label}</span>
         {target.hidden && <span className="detail-related-hidden">Hidden</span>}<StatusBadge status={target.status} variant="text" />
       </button>)}
-    </section>}
+    </section>)}
 
     {model.links.length > 0 && <section className="detail-section detail-links" aria-label="Item links">
       {sectionLabel('Links')}

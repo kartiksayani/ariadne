@@ -13,11 +13,29 @@
         }
       ]
     },
+    "affects": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/EntityRef"
+      }
+    },
     "ask": {
       "type": [
         "string",
         "null"
       ]
+    },
+    "depends_on": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/EntityRef"
+      }
     },
     "links": {
       "type": [

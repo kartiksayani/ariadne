@@ -15,6 +15,12 @@ git config --local core.hooksPath .githooks
 
 RTK is an outer agent convenience; repository checks and CI do not depend on it.
 
+The pre-push hook reads a local newline-separated word list from the file named
+by `ARIADNE_PRIVATE_WORDS`, or `~/.config/ariadne/private-words.txt`. Keep it outside
+the repo; blank lines and `#` comments are ignored. Literal, case-insensitive
+matches in added lines or pushed commit messages block the push. A missing list
+prints a note and allows the push.
+
 ## Quality and review
 
 Keep each PR coherent and reviewable. There are no numeric commit/PR caps.

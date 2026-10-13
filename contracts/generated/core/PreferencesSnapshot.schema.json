@@ -24,6 +24,12 @@
     "schema_version": {
       "$ref": "#/$defs/SchemaVersion"
     },
+    "seen": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SessionSeen"
+      }
+    },
     "sessions": {
       "type": "array",
       "items": {
@@ -246,6 +252,22 @@
         "project_id",
         "session_id",
         "item_id"
+      ]
+    },
+    "ItemSeen": {
+      "type": "object",
+      "properties": {
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "revision": {
+          "$ref": "#/$defs/PositiveSafeInteger"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "revision"
       ]
     },
     "ItemStatus": {
@@ -547,12 +569,61 @@
         "session_id"
       ]
     },
+    "SessionSeen": {
+      "description": "Owner browsing state is kept independently of session view preferences.",
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ItemSeen"
+          },
+          "maxItems": 10000
+        },
+        "session": {
+          "$ref": "#/$defs/SessionRef"
+        },
+        "since": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "topics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TopicSeen"
+          },
+          "maxItems": 1024
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "session",
+        "since",
+        "items",
+        "topics"
+      ]
+    },
     "Theme": {
       "type": "string",
       "enum": [
         "system",
         "light",
         "dark"
+      ]
+    },
+    "TopicSeen": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/UtcMillis"
+        },
+        "topic_id": {
+          "$ref": "#/$defs/UuidV4"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "topic_id",
+        "at"
       ]
     },
     "UtcMillis": {

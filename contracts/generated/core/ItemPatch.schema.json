@@ -13,6 +13,24 @@
         }
       ]
     },
+    "affects": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/EntityRef"
+      }
+    },
+    "depends_on": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/EntityRef"
+      }
+    },
     "links": {
       "type": [
         "array",

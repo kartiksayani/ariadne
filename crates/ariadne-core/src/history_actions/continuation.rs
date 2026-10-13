@@ -433,6 +433,19 @@ fn copy(
                 .filter_map(|id| item_map.get(id).cloned())
                 .collect()
         });
+        item.affects = old.affects.as_ref().map(|targets| {
+            targets
+                .iter()
+                .filter_map(|id| item_map.get(id).cloned())
+                .collect()
+        });
+        item.depends_on = old.depends_on.as_ref().map(|targets| {
+            targets
+                .iter()
+                .filter_map(|id| item_map.get(id).cloned())
+                .collect()
+        });
+        item.changes = None;
         if item.parent.is_none() {
             item.ordinal =
                 PositiveSafeInteger::new(item.id.as_str().parse().expect("allocated root"))

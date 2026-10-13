@@ -149,6 +149,7 @@ are omitted, while nullable domain/service fields emit explicit null.
 | `session_get` | project_id, session_id | validated full snapshot, revision, freshness |
 | `session_read` | binding or owner session ref, view, filters, cursor, limit | bounded items/topics/messages/inputs projection |
 | `item_messages` | session ref, item_id, cursor | full owner inputs + explicit replies, ordered number; no shared-summary duplicates |
+| `item_changes` | session ref, item_id, cursor, limit | complete change records, oldest first, without repeating the current item |
 | `item_rounds` | session ref, item_id, cursor | ask/choices/replies/result/fork projections |
 | `binding_connect` | op_id, project_id, adapter_id, external_session_id, endpoint config, existing_session_id? | validated session+binding IDs, generation, capabilities, setup instruction |
 | `binding_pause/resume/disconnect` | binding_id, expected_generation, op_id | persisted dispatch state; disconnect does not kill host |
@@ -166,7 +167,7 @@ are omitted, while nullable domain/service fields emit explicit null.
 | `topic_remove` | session ref, topic_id, expected_revision (topic), op_id | hard-deletes the topic's continuation family in every session that holds a copy, in any registered project; one `removed` notice to the latest copy; saved `removal` receipt |
 | `session_remove` | session:null, project_id, session_id, expected_revision, op_id | deletes the session file after a backup, pending inputs included; `Removed` receipt |
 | `project_remove` | session:null, project_id, op_id | unregisters the project and deletes only its Ariadne store after a backup; `Removed` receipt |
-| `preferences_patch` | expected_preferences_revision, patch | UI-only Later, drafts, theme, rail, tabs, geometry |
+| `preferences_patch` | expected_preferences_revision, patch | UI-only Later, drafts, theme, rail, tabs, geometry, seen state |
 | `preferences_get` | none | local owner-only versioned UI preferences, including unsent drafts |
 | `reveal_item` | registered project/session/item IDs | focus route; no mutation |
 
@@ -310,9 +311,10 @@ text with a selected option; the real core validates the frozen question/option.
 Canonical P0.3b records make those projections explicit:
 
 - `ItemSnapshot` contains the stored Item fields except the unbounded
-  `updated_message_ids` and `status_history` arrays.
+  `updated_message_ids`, `status_history` and `changes` arrays.
   `ItemReadProjection={item:ItemSnapshot,updated_messages:Page<Message>,
-  status_history:Page<StatusHistoryEntry>}` preserves both histories separately.
+  status_history:Page<StatusHistoryEntry>,changes?:Page<ItemChangeRecord>}`
+  preserves these histories separately.
 - `RoundSnapshot` contains the stored Round fields except the four historical
   ID lists: owner/agent messages, result inputs and fork items.
   `RoundProjection={round:RoundSnapshot,answers:Page<Answer>,
@@ -424,10 +426,20 @@ drafts) without writing data; the first patch expects1 and saves revision2. Exac
 operation replay precedes revision guards and performs no write; changed same-op
 parameters conflict. Each new valid patch saves effects plus receipt atomically
 and increments once. The complete canonical response envelope must fit1MiB;
-receipt history has no separate hard file quota or pruning. Unrelated patches
+receipt history accepts any consecutive run ending at the snapshot revision.
+Writes retain the newest 256 receipts, trimming larger existing histories on the
+next write. Replay inside that window returns the saved result; an older operation
+is treated as new, so its stale expected revision refuses it. Unrelated patches
 preserve stale/unavailable view routes and exact inert drafts. Malformed/future
 records remain untouched; explicit owner reset/backup recovery remains native
 Settings acceptance. See [ADR-0041](../../adr/ADR-0041-native-core-and-owner-preferences.md).
+
+Owner preferences expose optional `seen`, default empty. Each entry is
+`{session,since,items:[{item_id,revision}],topics:[{topic_id,at}]}`. The new patch
+entry `mark_seen {session,at,items,topics}` merges upward only (maximum revision /
+maximum time), setting since once on the first entry. It refuses more than 10,000
+items or 1,024 topics per session. `set_session_view` leaves this state untouched;
+no seen state is stored in agent session files.
 
 `NativeCoreService` now composes the real Query/Binding/Input/Apply/Delivery and
 preferences delegates behind the existing trait. Trusted native routes, UUIDs,
@@ -456,11 +468,11 @@ under the target lock.
 
 ## 3. Agent API: explicit results and tree operations
 
-Tools: `session_read`, `item_messages`, `item_rounds`, `apply`.
+Tools: `session_read`, `item_messages`, `item_changes`, `item_rounds`, `apply`.
 Public CLI equivalent: `ariadne apply --binding UUID --generation UUID --json-stdin`.
 Agent reads use `ariadne read --binding UUID --generation UUID --view items`,
 `ariadne item messages --binding UUID --generation UUID --item ITEM`, and
-`ariadne item rounds` with the same route/item flags. `--json-stdin` supplies the
+`ariadne item changes` and `ariadne item rounds` with the same route/item flags. `--json-stdin` supplies the
 complete canonical read/history parameters, including every nested continuation;
 it cannot be combined with convenience parameter flags. Read calls may pass the
 paired `--source-input UUID --attempt UUID`; Apply keeps that pair in its canonical
@@ -486,7 +498,7 @@ The MCP server may serve several sessions, so **every call** has explicit routin
 no cwd/latest-session default, global mutable 'current agent', or inferred PID.
 Binding maps to a registered session; callers cannot provide an alternate path.
 
-The optional rmcp stdio transport advertises exactly these four generated tools
+The optional rmcp stdio transport advertises exactly these five generated tools
 and canonical schemas. Native lookup and synchronous Core calls run off the async
 executor through the existing blocking pool. Both installed entrypoints share
 `serve_stdio`; agent CLI and MCP reuse one authoritative native context resolver,
@@ -525,9 +537,10 @@ input_result: ResultDraft|null
 
 | Operation | Required fields and optional fields |
 |---|---|
-| `topic.add` | `ref,name`; optional `short` |
-| `item.add` | `ref,topic,parent?,question,type,status,owner`; optional short/ack_to/ask/options/note/links/related/outcome/why/replaced_by/source_round_id; strict core rejects terminal creation |
-| `item.edit` | `item,patch` restricted to question/type/note/links/related/short/ack_to; expected revision; ack_to changes an existing Open/InProgress Ack choice only |
+| `topic.add` | `ref,name`; optional `short,brief` |
+| `topic.edit` | `topic`; optional `name,short,brief`; null clears short/brief; expected topic revision |
+| `item.add` | `ref,topic,parent?,question,type,status,owner`; optional short/ack_to/ask/options/note/links/related/affects/depends_on/outcome/why/replaced_by/source_round_id; strict core rejects terminal creation |
+| `item.edit` | `item,patch`; optional `reason` and `wording_only` (default false); patch restricted to question/type/note/links/related/affects/depends_on/short/ack_to; expected revision; ack_to changes an existing Open/InProgress Ack choice only |
 | `item.ask` | `item,ask,options,recipient_binding_id`; opens new round + waiting episode, owner=me |
 | `item.status` | `item,status`; optional `ack_to` for open/in_progress with proposed outcome/why; `outcome,why` required for decided/done/dropped; `reason` required for other transitions; replaced uses item.replace; waiting uses item.ask |
 | `item.delete` | `item`; expected root revision; moves the item and subtree to the recoverable bin, idempotent when already removed |
@@ -574,21 +587,62 @@ patch fields emit null when absent and update only when present with a value;
 an empty links array clears links. Scope/reference/revision and domain-transition
 checks belong to the real core, after exact operation replay lookup.
 
-`related` is an optional list of at most 32 item reference objects. In a patch,
+`related`, `affects` and `depends_on` are optional lists of at most 32 item
+reference objects each. A destination may appear in only one of the three lists;
+strict contracts refuse overlap. The CLI keeps the typed kind, drops overlap from
+`related` and reports its repair. In a patch,
 omitted/null keeps it and `[]` clears it. Targets must exist in the current session, may cross
 topics, and must be distinct from the declaring item and one another. The CLI
 also accepts number strings (`"3.2"`) and local ref strings (`"decision"`), and
-expands forward in-batch related refs after their allocations, including nested
+expands forward in-batch connection refs after their allocations, including nested
 children; strict core refs remain
 sequential. The CLI checks the cap before expansion, even for an assignment
 superseded by a later edit. Missing saved targets are tolerated after removal.
 An explicit resend may include a removed target already declared by that item;
-the related-list write prunes it. Its saved receipt and compact summary include
+the list write prunes it. Its saved receipt and compact summary include
 `pruned_related`, mapping declaring item numbers to removed target numbers,
 only when something was pruned. Newly introduced missing targets are refused
 with the operation and offending id, number or ref. Item read outputs include
-only live related ids, which are also their display numbers
+only live connection ids, which are also their display numbers
 ([ADR-0094](../../adr/ADR-0094-item-links.md)).
+
+`topic.edit` advances the topic revision, honours `expected_topic_revisions` and
+refuses archived or binned topics with the same errors as `item.add`. `brief` is
+trimmed text, allows line breaks and has at most 1,200 characters; setting or
+clearing a changed brief updates `brief_updated_at`, while an identical brief does
+not. Topic reads expose both fields when present.
+
+Item reads expose optional `ItemReadProjection.changes: Page<ItemChangeRecord>`,
+oldest first. Records stay out of the fixed `ItemSnapshot`; the nested
+`item_changes {item_id,cursor,limit}` selector continues them within the existing
+response budget, just like status history. All stored records remain readable;
+cursors retain the usual item scope and stale-session checks. Standalone
+`item_changes {item_id,cursor,limit}` reads return
+`ItemChangesProjection={item_id,changes:Page<ItemChangeRecord>}` without repeating
+the current snapshot, so a large previous value and large current value cannot
+compete for the same entity budget. The CLI exposes `ariadne item changes`; MCP
+exposes `item_changes`. Both continue the same scoped cursors. Agent edits, asks,
+status changes and replacements save only changed fields in each record's
+`before` (null for previously empty fields). Every change in the batch that created the item
+adds no record, including deferred CLI connections and explicit edits; records
+start with the first later batch. `item.edit.reason` is trimmed, one line, at most
+280 characters. `item.status.reason` accepts nonblank text, including line breaks,
+up to 4,096 UTF-8 bytes and retains the full text in status history. Only its change
+record copy normalizes whitespace and keeps at most 280 characters. Status falls
+back to why and replacement uses why, with the same normalization and truncation
+for the record while the full why remains stored. Creation, owner
+actions, parent bumps, bin actions and continuation copies add no records.
+
+`item.edit.wording_only` is an optional boolean, default false. It means the
+meaning stays the same while the words change. A wording-only edit may change
+only `question`, `short` and `note`; changing `type`, `ack_to`, `links`, `related`,
+`affects` or `depends_on` refuses the edit with a plain message naming the field.
+Repeating an unchanged value does not count as changing that field. Its change
+record includes `wording_only: true`; false is omitted, so existing records
+round-trip unchanged. Wording-only edits remain in history and are excluded from
+the later owner-facing changed-since-read view. Status, ask and replace never
+carry this flag. The same flag and restrictions apply through strict Core, the
+lenient CLI and MCP.
 
 `ref` is a request-local name `[A-Za-z][A-Za-z0-9_]{0,31}`. Reference objects are
 `{id:"existing-id"}` or `{ref:"earlier-operation-ref"}`. No forward references;

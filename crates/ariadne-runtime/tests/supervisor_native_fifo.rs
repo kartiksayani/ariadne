@@ -324,6 +324,7 @@ impl Setup {
                 r#ref: reference("topic"),
                 name: format!("{name} topic"),
                 short: None,
+                brief: None,
             },
             Operation::ItemAdd(Box::new(ItemAddOperation {
                 r#ref: reference("item"),
@@ -344,6 +345,8 @@ impl Setup {
                 note: None,
                 links: None,
                 related: None,
+                affects: None,
+                depends_on: None,
                 outcome: None,
                 why: None,
                 replaced_by: None,

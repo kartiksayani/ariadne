@@ -155,20 +155,16 @@ pub(super) fn validate_candidate_indexed(
             )?;
         }
     }
-    if let Some(related) = &item.related {
-        require(
-            related.len() <= 32,
-            format!("{path}.related"),
-            ValidationErrorKind::TooMany { maximum: 32 },
-        )?;
-        distinct(related, &format!("{path}.related"))?;
-        require(
-            !related.contains(&item.id),
-            format!("{path}.related"),
-            ValidationErrorKind::InvalidState,
-        )?;
-        // Targets may have been removed; retain the declared relationship.
-    }
+    item_reference_lists(
+        &item.id,
+        [
+            ("related", &item.related),
+            ("affects", &item.affects),
+            ("depends_on", &item.depends_on),
+        ],
+        &path,
+    )?;
+    changes::validate_changes(item, &path)?;
     require(
         item.ack_to.is_none() || !terminal(&item.status),
         format!("{path}.ack_to"),

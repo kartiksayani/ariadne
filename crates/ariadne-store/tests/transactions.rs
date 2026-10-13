@@ -965,3 +965,54 @@ fn preview_runs_the_transaction_checks_and_never_writes() {
         Err(TransactionError::Store(StoreError::OperationReused))
     ));
 }
+
+#[test]
+fn legacy_session_load_and_resave_add_no_optional_fields() {
+    let source = ProjectDir::new();
+    let before = fs::read(source.live()).unwrap();
+    let loaded = source.store().read(&id(2)).unwrap();
+    assert_eq!(fs::read(source.live()).unwrap(), before);
+    let destination = ProjectDir::empty();
+    destination.store().create(&loaded).unwrap();
+    assert_eq!(fs::read(destination.live()).unwrap(), before);
+    let value: serde_json::Value = serde_json::from_slice(&before).unwrap();
+    for item in value["items"].as_object().unwrap().values() {
+        for field in ["affects", "depends_on", "changes"] {
+            assert!(item.get(field).is_none());
+        }
+    }
+    for topic in value["topics"].as_object().unwrap().values() {
+        assert!(topic.get("brief").is_none());
+        assert!(topic.get("brief_updated_at").is_none());
+    }
+}
+
+#[test]
+fn large_session_with_many_items_loads_and_saves_without_truncation() {
+    let project = ProjectDir::empty();
+    let mut session = seed();
+    let template = session.items.0[&item("1")].clone();
+    for number in 3..=800 {
+        let mut next = template.clone();
+        next.id = item(&number.to_string());
+        next.ordinal = PositiveSafeInteger::new(number).unwrap();
+        next.question = format!("Explain the evidence for item {number}");
+        next.note = Some("Evidence remains available for the owner. ".repeat(21));
+        session.messages[0].items_touched.push(next.id.clone());
+        session.items.0.insert(next.id.clone(), next);
+    }
+    session.counters.next_root = PositiveSafeInteger::new(801).unwrap();
+    project.store().create(&session).unwrap();
+    let before = fs::read(project.live()).unwrap();
+    assert!(
+        (1_400_000..1_800_000).contains(&before.len()),
+        "{} bytes",
+        before.len()
+    );
+    assert_eq!(project.store().read(&id(2)).unwrap(), session);
+    transact(&project.store(), "1", 100, Some(1)).unwrap();
+    let saved = project.store().read(&id(2)).unwrap();
+    assert_eq!(saved.items.0.len(), 800);
+    assert_eq!(saved.items.0[&item("800")], session.items.0[&item("800")]);
+    assert_eq!(fs::read(project.backup()).unwrap(), before);
+}

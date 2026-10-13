@@ -81,6 +81,12 @@ pub struct Topic {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub short: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub brief: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub brief_updated_at: Option<UtcMillis>,
     pub order: PositiveSafeInteger,
     pub revision: PositiveSafeInteger,
     pub created_at: UtcMillis,
@@ -124,6 +130,15 @@ pub struct Item {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub related: Option<Vec<ItemRef>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub affects: Option<Vec<ItemRef>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub depends_on: Option<Vec<ItemRef>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub changes: Option<Vec<ItemChangeRecord>>,
     pub outcome: Option<String>,
     pub why: Option<String>,
     pub replaced_by: Option<ItemRef>,

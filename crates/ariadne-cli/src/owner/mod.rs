@@ -11,7 +11,7 @@ pub const HELP: &str = r#"Owner commands (explicit registered routes):
   ariadne binding connect --replay-only --json-stdin [--json]
   ariadne input submit|cancel|resolve --json-stdin [--json]
   ariadne topic archive|restore|restore-removed|continue|continue-preview --json-stdin [--json]
-  ariadne item messages|rounds|reveal|ack|restore --json-stdin [--json]
+  ariadne item messages|changes|rounds|reveal|ack|restore --json-stdin [--json]
   ariadne preferences get|patch [--json-stdin] [--json]
   ariadne remove item|topic|session|project --json-stdin [--json]
 Remove is permanent inside Ariadne; files and the agent's conversation stay.

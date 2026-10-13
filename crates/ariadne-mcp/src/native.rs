@@ -10,7 +10,7 @@ use std::{
     sync::Arc,
 };
 
-pub const HELP: &str = "ariadne-mcp local agent tools\nUsage: ariadne-mcp serve\n       ariadne mcp serve\n       ariadne-mcp [--help|--version]\nTools: session_read, item_messages, item_rounds, apply.\nEach tool requires an explicit registered binding_id and generation.\nARIADNE_HOME is the application data directory; default HOME/.ariadne.\nStdout contains only MCP JSON-RPC while serving.\n";
+pub const HELP: &str = "ariadne-mcp local agent tools\nUsage: ariadne-mcp serve\n       ariadne mcp serve\n       ariadne-mcp [--help|--version]\nTools: session_read, item_messages, item_changes, item_rounds, apply.\nEach tool requires an explicit registered binding_id and generation.\nARIADNE_HOME is the application data directory; default HOME/.ariadne.\nStdout contains only MCP JSON-RPC while serving.\n";
 
 pub fn service_at(path: &Path) -> Result<AgentMcpService, CoreError> {
     let registry = AgentResolver::open_data_directory(path)?;

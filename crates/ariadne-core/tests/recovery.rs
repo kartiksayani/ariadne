@@ -249,6 +249,8 @@ impl Setup {
                     note: None,
                     links: None,
                     related: None,
+                    affects: None,
+                    depends_on: None,
                     outcome: None,
                     why: None,
                     replaced_by: None,

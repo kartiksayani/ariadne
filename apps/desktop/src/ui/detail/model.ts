@@ -14,7 +14,7 @@ import { statusKey, type StatusKey } from '../shared/status';
 import { deliveryLine as deliveryText, deliveryStage, deliverySteps, type DeliveryStage } from '../answer/delivery';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { agentReceived, counted, heldInput, notSent, stoppedAttempt, stuckInput, withdrawn, type NotSent, type Stuck } from '../../selectors/waiting/stuck';
-import { relatedItems } from '../../selectors/related';
+import { relatedItems, type LinkDirection } from '../../selectors/related';
 import { hiddenItems } from '../tree/hidden';
 
 export { statusKey, type StatusKey };
@@ -23,6 +23,13 @@ const TYPE: Readonly<Record<Item['type'], string>> = { question: 'Question', dec
 const OUTLBL: Readonly<Partial<Record<StatusKey, string>>> = { decided: 'Decided', done: 'Done', dropped: 'Dropped', replaced: 'Replaced' };
 const LINKICON: Readonly<Record<string, string>> = { pr: 'ph ph-git-pull-request', file: 'ph ph-file-code', doc: 'ph ph-file-text' };
 const neutral = (percent: number) => `color-mix(in srgb, var(--color-text) ${percent}%, transparent)`;
+const relatedSections: readonly { readonly direction: LinkDirection; readonly label: string }[] = [
+  { direction: 'related', label: 'Related items' },
+  { direction: 'affects', label: 'Affects' },
+  { direction: 'affected_by', label: 'Affected by' },
+  { direction: 'depends_on', label: 'Depends on' },
+  { direction: 'needed_by', label: 'Needed by' },
+];
 
 export type OpenMode = 'reply' | 'drop' | 'note' | 'followup';
 /** The owner's own words (outside an answer) go out as one of these. */
@@ -102,7 +109,9 @@ export interface DetailModel {
   readonly replaced: Kid | null;
   readonly kidLabel: string;
   readonly kids: readonly Kid[];
-  readonly related: readonly { readonly id: string; readonly label: string; readonly question: string; readonly status: StatusKey; readonly hidden: boolean }[];
+  readonly related: readonly { readonly direction: LinkDirection; readonly label: string; readonly items: readonly {
+    readonly id: string; readonly label: string; readonly question: string; readonly status: StatusKey; readonly hidden: boolean;
+  }[] }[];
   readonly links: readonly LinkView[];
   readonly prev: { readonly status: StatusKey; readonly outcome: string } | null;
   /** One transcript in saved message order, including pending messages in place. */
@@ -396,8 +405,9 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     replaced: replacement ? kid(replacement) : null,
     kidLabel: `Branched into ${kids.length} item${kids.length > 1 ? 's' : ''}`,
     kids: kids.map(kid),
-    related: relatedItems(session, item.id).map(target => ({ id: target.id, label: shortLabel(target), question: target.question,
-      status: statusKey[displayStatus(session, target)], hidden: hidden.has(target.id) })),
+    related: relatedSections.map(section => ({ ...section, items: relatedItems(session, item.id, section.direction).map(target => ({
+      id: target.id, label: shortLabel(target), question: target.question, status: statusKey[displayStatus(session, target)], hidden: hidden.has(target.id),
+    })) })).filter(section => section.items.length > 0),
     links: item.links.map(link => ({ kind: link.kind, icon: LINKICON[link.kind] ?? 'ph ph-link', target: link.target, label: link.label, meta: (link as typeof link & { meta?: string }).meta ?? '' })),
     prev: reopened ? { status: statusKey[reopened.old_status], outcome: reopened.previous_outcome ?? '' } : null,
     chat,

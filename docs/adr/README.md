@@ -121,3 +121,7 @@ whole topics into a recoverable bin, with visible owner notices and exact Restor
 [ADR-0098](ADR-0098-stop-waiting-keeps-late-results.md) makes missing-result Skip
 mean Stop waiting: dispatch moves on, while a valid late result from that exact
 accepted, completed attempt still saves its answer and handles the input.
+
+[ADR-0099](ADR-0099-knowledge-transfer-records.md) adds typed item connections,
+bounded change records, topic briefs and owner seen state, and keeps a window of
+the newest preference receipts.

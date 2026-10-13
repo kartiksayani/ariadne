@@ -29,6 +29,67 @@ fn validate(files: &std::collections::BTreeMap<PathBuf, String>, name: &str, val
     );
 }
 #[test]
+fn knowledge_transfer_operations_and_seen_patch_match_generated_schemas() {
+    let files = artifacts().unwrap();
+    let id = "00000000-0000-4000-8000-000000000001";
+    validate(
+        &files,
+        "Operation",
+        &serde_json::json!({
+            "op":"topic.edit", "topic":{"id":id}, "brief":"A short update",
+            "short":null
+        }),
+    );
+    let edit: Operation = serde_json::from_value(serde_json::json!({
+        "op":"item.edit", "item":{"id":"1"}, "reason":"Owner chose the fallback",
+        "patch":{"affects":[{"id":"2"}],"depends_on":[{"id":"3"}]}
+    }))
+    .unwrap();
+    validate(&files, "Operation", &serde_json::to_value(edit).unwrap());
+    validate(
+        &files,
+        "PreferencesPatchEntry",
+        &serde_json::json!({
+            "kind":"mark_seen", "session":{"project_id":id,"session_id":id},
+            "at":"2026-10-13T12:00:00.000Z", "items":[{"item_id":"1","revision":2}],
+            "topics":[{"topic_id":id,"at":"2026-10-13T12:00:00.000Z"}]
+        }),
+    );
+}
+
+#[test]
+fn wording_only_edits_have_an_optional_boolean_generated_contract() {
+    let files = artifacts().unwrap();
+    let legacy: Operation = serde_json::from_value(serde_json::json!({
+        "op":"item.edit", "item":{"id":"1"}, "patch":{"note":"Clearer words"}
+    }))
+    .unwrap();
+    let legacy = serde_json::to_value(legacy).unwrap();
+    assert!(legacy.get("wording_only").is_none());
+    validate(&files, "Operation", &legacy);
+    for flag in [false, true] {
+        let mut wire = legacy.clone();
+        wire["wording_only"] = serde_json::json!(flag);
+        validate(&files, "Operation", &wire);
+        let edit: Operation = serde_json::from_value(wire).unwrap();
+        let saved = serde_json::to_value(edit).unwrap();
+        assert_eq!(
+            saved.get("wording_only"),
+            flag.then_some(&Value::Bool(true))
+        );
+    }
+    let schema: Value =
+        serde_json::from_str(&files[&Path::new(SCHEMAS).join("Operation.schema.json")]).unwrap();
+    let validator = jsonschema::draft202012::options().build(&schema).unwrap();
+    for flag in [Value::Null, serde_json::json!("true"), serde_json::json!(1)] {
+        let mut wire = legacy.clone();
+        wire["wording_only"] = flag;
+        assert!(!validator.is_valid(&wire));
+        assert!(serde_json::from_value::<Operation>(wire).is_err());
+    }
+}
+
+#[test]
 fn shared_cases_validate_against_exact_generated_transport_schemas() {
     let files = artifacts().unwrap();
     let all = ariadne_xtask::artifacts().unwrap();

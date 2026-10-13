@@ -1,13 +1,18 @@
 # Delivery
 
-The owner starts the maintainer on **Astra High**; delegated implementers and
-independent reviewers use **Sol 6.1 High**. Product implementation remains paused
-until the owner resumes it. Do not reactivate old contexts.
+The maintainer is Claude Code on **Opus 5.5**. Implementers are **Codex
+(gpt-6.1-sol, high effort)**, launched through the Codex companion in isolated git
+worktrees with declared, disjoint owned paths; at most **3 Codex jobs** run at once.
+Independent review uses a separate **Opus 5.5** context at the exact head, with one
+targeted re-review after fixes. Use fresh contexts for new assignments.
 
-Claude Code delivery (owner decision, 2026-10-06): the maintainer runs on
-**Fable 5.1**; independent reviewers and critical work use **Opus 5.5**;
-implementers, test runs and documentation use **Sonnet 5.5**. At most seven
-delegates run concurrently. The Codex mapping above still applies to Codex sessions.
+Codex sandbox limits: jobs cannot run browsers (Playwright/Chromium), sockets,
+the app, native e2e, or `git add`/commits. The maintainer runs Playwright, design
+frames and the local native journey, stages and commits, and plans time for it.
+
+Before UI implementation, the maintainer shares a clickable HTML mock under
+`designs/mocks/` and gets owner sign-off. Implementation follows the approved mock.
+
 Owner ruling, 2026-10-06: run the local native journey
 (`env -u NODE_USE_ENV_PROXY node scripts/run-native-e2e.mjs`, about 8 minutes) and
 the relevant local checks first, fix everything, then push once so CI (35–55
@@ -17,8 +22,7 @@ Read CONTRIBUTING, BUILD_HANDOFF, PERSONAL_RELEASE and ROADMAP. Fetch origin/mai
 inspect worktrees and current task PRs, and preserve unrelated edits/history.
 Use fresh isolated worktrees for dependency-eligible parallel modules. Declare
 bounded owned paths, goal, settled contracts, spec and acceptance. Reviewers join
-when ready. Product scheduling waits for the corrected plan and owner resumption.
-No automatic readiness engine or receipt workflow is required.
+when ready. No automatic readiness engine or receipt workflow is required.
 
 Use [HANDOFF](docs/delivery/HANDOFF.md) as the sole current resumption page. Replace
 its one-page state at checkpoints: main SHA, open PR CI/reviews, active owners,
@@ -26,28 +30,16 @@ worktrees/branches/unpushed work, and next three steps. Link CI evidence rather 
 copying logs. Historical records stay intact. Check actual GitHub state for every
 open PR before scheduling.
 
-Prioritize P3.2 → P4.1 → P4.4 with one continuing implementer and P3.3 with a
-second. A stream whose declared implementation prerequisites are already merged
-may progress while composition CI runs; full acceptance retains its original
-dependencies. Follow [ADR-0060](docs/adr/ADR-0060-own-desktop-integration-seams.md)
-for shared ownership. Remaining changes land vertically on merged main, including
-real Core/native acceptance where appropriate. Do not defer wiring to another
-combining PR. Prefer units one PR can finish.
+Schedule dependency-eligible modules with settled contracts and disjoint ownership.
+Follow [ADR-0060](docs/adr/ADR-0060-own-desktop-integration-seams.md) for shared seams.
+Land vertical changes with real Core/native acceptance where appropriate; do not
+defer wiring to a combining PR. Prefer units one PR can finish.
 
 The owner authorizes stacked implementation on reviewed parent code while CI runs.
-Use settled contracts and disjoint ownership; keep each child diff bounded and
-its merge behind its prerequisites. Independent discovery UI work may run as a
-third stream. Use the existing GitHub stack support for linear dependent PRs. The maintainer
-may also order already-reviewed changes in a delivery stack when they share full
-composed-application CI: this is integration order, not a new product-task dependency
-or a restriction on parallel implementation. Keep each child diff bounded and
-independently reviewed, run full required CI on each integrated head, and merge
-parents first. Coordinate parent updates before workers publish; review conflicts
-and interacting upstream changes. The owner requested use of PR stacks; the
-2026-10-05 checkpoint adopts this ordering to avoid restarting every independent
-PR after each main update. Runs 37316408492 and 37322016757 took 47m01s and 44m44s;
-validating successive integrated heads in parallel removes repeated full rounds
-without weakening checks or current-main qualification.
+Keep child diffs bounded and independently reviewed, merge prerequisites first,
+and run required CI on each integrated head. Coordinate parent updates before
+publishing; review conflicts and interacting upstream changes. Stack order does
+not create a product dependency or restrict independent implementation.
 
 ## Delivery feedback rules
 
@@ -102,9 +94,10 @@ assertion fails again, remove that assertion rather than changing product code.
   subtasks may complete independently; their parent remains incomplete until its
   original acceptance passes.
 
-Workers push coherent checkpoints and open draft PRs when ready for review; do not
-trigger CI on every commit. The maintainer adjudicates and merges. List unpushed
-work explicitly in the current handoff. Carry bounded delivery documentation with
+The maintainer commits and pushes coherent checkpoints and opens draft PRs when
+ready for review; do not trigger CI on every commit. The maintainer adjudicates
+and merges. List unpushed work explicitly in the current handoff.
+Carry bounded delivery documentation with
 ongoing product work instead of opening a separate process initiative.
 
 Follow the [implementation order](docs/planning/BUILD_HANDOFF.md#implementation-order)
@@ -128,10 +121,11 @@ do not change shared signatures or semantics unilaterally or maintain duplicate
 contract copies. Important architecture changes get a short ADR; routine compatible
 contract amendments are tracked in the affected PR.
 
-The implementer adds meaningful behavior tests, commits through the cheap hook,
-runs relevant pushed-head checks and opens a reviewable PR with behavior and real
-validation evidence. Routine ownership/spec updates can ride it. Important
-architecture gaps go to the maintainer before dependent work and resulting
+The implementer adds meaningful behavior tests and runs the sandbox-compatible
+checks. The maintainer runs the remaining local checks, commits through the cheap
+hook and opens a reviewable PR with behavior and real validation evidence.
+Routine ownership/spec updates can ride it. Important architecture gaps go to
+the maintainer before dependent work and resulting
 important choices get a short ADR. No mandatory ADR for routine choices.
 
 A separate reviewer context reads the latest GitHub diff and relevant contracts,
@@ -145,7 +139,8 @@ Before squash merge, the maintainer checks:
 - the PR is updated against current main and its current head/base are verified;
 - genuine independent review at that head and resolved required findings;
 - green quality for that integrated head and acceptance evidence;
-- squash merge, then monitor main's CI asynchronously.
+- `gh pr merge --squash --match-head-commit <head>`, then verify main's tree matches
+  the PR head (`git diff --quiet <head> origin/main`) and monitor main's CI asynchronously.
 
 Do not wait for each successful merge's main run before preparing or merging the
 next independently reviewed, green PR integrated against current main. If main
@@ -153,8 +148,11 @@ fails, pause further merges until the failure is diagnosed and corrected.
 
 Changed head/base requires relevant checks and current-head review. If a merge
 reply is lost, read PR/main state before retrying. Only the maintainer merges.
-Update task completion in tasks.json with actual PR links, then regenerate the
-static chart. Preserve historical .delivery records without creating new receipts.
+After merge, tag `v0.1.0-alpha.N` with `-m "Ariadne v0.1.0-alpha.N"`, wait for the
+release workflow, then edit the release notes. Every release includes the fixed
+[How to upgrade block](docs/planning/PERSONAL_RELEASE.md#release-notes).
+Refresh HANDOFF, tasks.json (actual PR links) and the roadmap chart.
+Preserve historical .delivery records without creating new receipts.
 
 A tooling blocker gets one cheap attempt (about 15 minutes), then explain the cost
 and cheaper route to the owner. Change harness/gates only for a demonstrated

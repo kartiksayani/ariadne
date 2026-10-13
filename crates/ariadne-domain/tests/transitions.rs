@@ -70,6 +70,9 @@ fn item(id: &str, parent: Option<&str>, ordinal: u64) -> Item {
         options: vec![],
         links: vec![],
         related: None,
+        affects: None,
+        depends_on: None,
+        changes: None,
         outcome: None,
         why: None,
         replaced_by: None,
@@ -155,6 +158,8 @@ fn session() -> Session {
                     id: uuid(1),
                     name: "Topic".into(),
                     short: None,
+                    brief: None,
+                    brief_updated_at: None,
                     order: positive(1),
                     revision: positive(1),
                     created_at: time(),
@@ -188,6 +193,20 @@ fn context(session: &Session) -> TransitionContext {
         expected_revision: item.revision,
         expected_question_revision: Some(item.question_revision),
     }
+}
+
+fn history_session() -> Session {
+    let mut session = session();
+    session
+        .items
+        .0
+        .get_mut(&reference("1"))
+        .unwrap()
+        .created_message_id = uuid(99);
+    session.messages[0].id = uuid(99);
+    session.messages.push(message(3, 2, MessageAuthor::Agent));
+    session.counters.next_message = positive(3);
+    session
 }
 fn add_owner_input(session: &mut Session, id: u64, number: u64, state: InputState) {
     let message = message(id, number, MessageAuthor::Owner);
@@ -266,6 +285,10 @@ fn ask(round: u64) -> ItemChange {
 }
 fn edit() -> ItemChange {
     ItemChange::Edit {
+        wording_only: false,
+        affects: None,
+        depends_on: None,
+        reason: None,
         ack_to: None,
         question: None,
         item_type: None,
@@ -775,6 +798,10 @@ fn asks_create_new_question_revisions_while_replies_notes_children_do_not() {
     let edited = apply(
         &mut s,
         &ItemChange::Edit {
+            wording_only: false,
+            affects: None,
+            depends_on: None,
+            reason: None,
             ack_to: None,
             question: Some("New question?".into()),
             item_type: Some(ItemType::Decision),
@@ -790,6 +817,10 @@ fn asks_create_new_question_revisions_while_replies_notes_children_do_not() {
     let same = apply(
         &mut s,
         &ItemChange::Edit {
+            wording_only: false,
+            affects: None,
+            depends_on: None,
+            reason: None,
             ack_to: None,
             question: Some(edited.question.clone()),
             item_type: None,
@@ -935,6 +966,10 @@ fn invalid_transition_fields_are_rejected_without_mutation() {
             reason: None,
         },
         ItemChange::Edit {
+            wording_only: false,
+            affects: None,
+            depends_on: None,
+            reason: None,
             ack_to: None,
             question: Some("x".repeat(4097)),
             item_type: None,
@@ -944,6 +979,10 @@ fn invalid_transition_fields_are_rejected_without_mutation() {
             short: None,
         },
         ItemChange::Edit {
+            wording_only: false,
+            affects: None,
+            depends_on: None,
+            reason: None,
             ack_to: None,
             question: None,
             item_type: None,
@@ -1505,6 +1544,10 @@ fn copied_item_history_preserves_source_binding_but_new_transitions_require_targ
 
 fn short_edit(short: Option<Option<&str>>) -> ItemChange {
     ItemChange::Edit {
+        wording_only: false,
+        affects: None,
+        depends_on: None,
+        reason: None,
         ack_to: None,
         question: None,
         item_type: None,
@@ -1671,6 +1714,10 @@ fn archived_session_requires_closed_state_and_close_timestamp() {
 
 fn related_edit(related: Option<Vec<ItemRef>>) -> ItemChange {
     ItemChange::Edit {
+        wording_only: false,
+        affects: None,
+        depends_on: None,
+        reason: None,
         ack_to: None,
         question: None,
         item_type: None,
@@ -1918,5 +1965,679 @@ fn stored_post_ack_prose_survives_nonterminal_agent_status_changes() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn typed_links_share_bounds_self_duplicate_and_cross_list_guards() {
+    for kind in ["affects", "depends_on"] {
+        let mut s = session();
+        s.counters.next_root = positive(3);
+        s.items.0.insert(reference("2"), item("2", None, 2));
+        for targets in [
+            vec![reference("1")],
+            vec![reference("2"), reference("2")],
+            vec![reference("99")],
+            vec![reference("2"); 33],
+        ] {
+            let mut change = related_edit(None);
+            if let ItemChange::Edit {
+                affects,
+                depends_on,
+                ..
+            } = &mut change
+            {
+                *if kind == "affects" {
+                    affects
+                } else {
+                    depends_on
+                } = Some(targets);
+            }
+            assert!(matches!(
+                reject(&s, &change, &context(&s)),
+                TransitionError::Validation(_)
+            ));
+        }
+        let mut change = related_edit(None);
+        if let ItemChange::Edit {
+            affects,
+            depends_on,
+            ..
+        } = &mut change
+        {
+            *if kind == "affects" {
+                affects
+            } else {
+                depends_on
+            } = Some(vec![reference("2")]);
+        }
+        let changed = apply(&mut s, &change);
+        assert_eq!(
+            if kind == "affects" {
+                changed.affects
+            } else {
+                changed.depends_on
+            },
+            Some(vec![reference("2")])
+        );
+        assert!(
+            matches!(reject(&s, &related_edit(Some(vec![reference("2")])), &context(&s)), TransitionError::Validation(error) if error.kind == ValidationErrorKind::Duplicate)
+        );
+        s.items.0.remove(&reference("2"));
+        validate_session_items(&s).unwrap();
+        let kept = apply(&mut s, &short_edit(None));
+        assert_eq!(
+            if kind == "affects" {
+                kept.affects
+            } else {
+                kept.depends_on
+            },
+            Some(vec![reference("2")])
+        );
+        let mut clear = related_edit(None);
+        if let ItemChange::Edit {
+            affects,
+            depends_on,
+            ..
+        } = &mut clear
+        {
+            *if kind == "affects" {
+                affects
+            } else {
+                depends_on
+            } = Some(vec![]);
+        }
+        apply(&mut s, &clear);
+    }
+    let mut s = session();
+    let stored = s.items.0.get_mut(&reference("1")).unwrap();
+    stored.affects = Some(vec![reference("2")]);
+    stored.depends_on = Some(vec![reference("2")]);
+    invalid(&s, ValidationErrorKind::Duplicate);
+}
+
+#[test]
+fn agent_changes_record_only_changed_fields_and_null_empty_values() {
+    let mut s = history_session();
+    let initial = apply(&mut s, &short_edit(None));
+    assert_eq!(initial.changes, None);
+    let mut change = edit();
+    if let ItemChange::Edit {
+        reason, question, ..
+    } = &mut change
+    {
+        *reason = Some("  Better detail  ".into());
+        *question = Some("Updated question".into());
+    }
+    let updated = apply(&mut s, &change);
+    let records = updated.changes.as_ref().unwrap();
+    assert_eq!(records.len(), 1);
+    let record = &records[0];
+    assert_eq!(record.revision, updated.revision);
+    assert_eq!(record.reason.as_deref(), Some("Better detail"));
+    assert_eq!(record.cause_message_id, uuid(3));
+    let before = serde_json::to_value(&record.before).unwrap();
+    assert_eq!(before, json!({"question": initial.question, "note": null}));
+    let roundtrip: ItemChangeRecord =
+        serde_json::from_value(serde_json::to_value(record).unwrap()).unwrap();
+    assert_eq!(&roundtrip, record);
+    assert_eq!(apply(&mut s, &change).changes.as_ref().unwrap().len(), 1);
+    let asked = apply(&mut s, &ask(20));
+    let record = asked.changes.as_ref().unwrap().last().unwrap();
+    assert_eq!(record.reason, None);
+    assert_eq!(record.before.status, Some(Some(ItemStatus::Open)));
+    assert_eq!(record.before.ask, Some(None));
+    assert_eq!(record.before.options, Some(None));
+}
+
+#[test]
+fn change_history_keeps_newest_twenty_and_validates_order_bounds_shape() {
+    let mut s = history_session();
+    for n in 1..=25 {
+        let mut change = edit();
+        if let ItemChange::Edit { note, .. } = &mut change {
+            *note = Some(Some(format!("Update {n}")));
+        }
+        apply(&mut s, &change);
+    }
+    let updated = &s.items.0[&reference("1")];
+    let records = updated.changes.as_ref().unwrap();
+    assert_eq!(records.len(), 20);
+    assert_eq!(records.first().unwrap().revision, positive(7));
+    assert_eq!(records.last().unwrap().revision, positive(26));
+    // Neither a removed activity message nor its old binding is required.
+    let mut independent = s.clone();
+    for record in independent
+        .items
+        .0
+        .get_mut(&reference("1"))
+        .unwrap()
+        .changes
+        .as_mut()
+        .unwrap()
+    {
+        record.cause_message_id = uuid(999);
+    }
+    independent
+        .items
+        .0
+        .get_mut(&reference("1"))
+        .unwrap()
+        .changes
+        .as_mut()
+        .unwrap()[0]
+        .at = UtcMillis::new("2030-01-01T00:00:00.000Z").unwrap();
+    validate_session_items(&independent).unwrap();
+    for bad in [
+        "order",
+        "future",
+        "empty",
+        "null_status",
+        "empty_text",
+        "duplicate_links",
+        "reason",
+        "too_many",
+    ] {
+        let mut invalid_store = s.clone();
+        let changes = invalid_store
+            .items
+            .0
+            .get_mut(&reference("1"))
+            .unwrap()
+            .changes
+            .as_mut()
+            .unwrap();
+        match bad {
+            "order" => changes.swap(0, 1),
+            "future" => changes.last_mut().unwrap().revision = positive(27),
+            "empty" => changes[0].before = ItemChangeBefore::default(),
+            "null_status" => changes[0].before.status = Some(None),
+            "empty_text" => changes[0].before.note = Some(Some(String::new())),
+            "duplicate_links" => {
+                changes[0].before.related = Some(Some(vec![reference("2")]));
+                changes[0].before.affects = Some(Some(vec![reference("2")]));
+            }
+            "reason" => changes[0].reason = Some("a\nb".into()),
+            "too_many" => changes.push(changes.last().unwrap().clone()),
+            _ => unreachable!(),
+        }
+        assert!(validate_session_items(&invalid_store).is_err(), "{bad}");
+    }
+    let mut value = serde_json::to_value(records.first().unwrap()).unwrap();
+    value["before"]["unexpected"] = json!("field");
+    assert!(serde_json::from_value::<ItemChangeRecord>(value).is_err());
+}
+
+#[test]
+fn empty_relation_echoes_do_not_record_changes_or_violate_wording_only() {
+    for field in ["related", "affects", "depends_on"] {
+        for stored in [None, Some(vec![])] {
+            for wording_only in [false, true] {
+                let mut s = history_session();
+                let old = s.items.0.get_mut(&reference("1")).unwrap();
+                *match field {
+                    "related" => &mut old.related,
+                    "affects" => &mut old.affects,
+                    _ => &mut old.depends_on,
+                } = stored.clone();
+                let mut change = short_edit(None);
+                if let ItemChange::Edit {
+                    related,
+                    affects,
+                    depends_on,
+                    wording_only: flag,
+                    ..
+                } = &mut change
+                {
+                    *flag = wording_only;
+                    *match field {
+                        "related" => related,
+                        "affects" => affects,
+                        _ => depends_on,
+                    } = Some(vec![]);
+                }
+                let echoed = apply(&mut s, &change);
+                assert_eq!(echoed.changes, None, "{field}: {stored:?}, {wording_only}");
+                if let ItemChange::Edit { note, .. } = &mut change {
+                    *note = Some(Some("Clearer prose".into()));
+                }
+                let edited = apply(&mut s, &change);
+                let records = edited.changes.as_ref().unwrap();
+                assert_eq!(records.len(), 1);
+                assert_eq!(records[0].wording_only, wording_only);
+                assert_eq!(
+                    serde_json::to_value(&records[0].before).unwrap(),
+                    json!({"note":null}),
+                    "{field}: {stored:?}, {wording_only}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn multiline_status_reasons_preserve_history_and_derive_only_the_change_synopsis() {
+    let prefix = " \tFirst\u{2003}line\r\n";
+    let reason = format!(
+        "{prefix}{}\n ",
+        "é".repeat(1000 - prefix.chars().count() - 2)
+    );
+    assert_eq!(reason.chars().count(), 1000);
+    let expected = format!("First line {}", "é".repeat(269));
+    for status in [ItemStatus::InProgress, ItemStatus::Done] {
+        let mut s = history_session();
+        let mut change = crate::status(status.clone());
+        if let ItemChange::Status {
+            reason: value, why, ..
+        } = &mut change
+        {
+            *value = Some(reason.clone());
+            *why = matches!(status, ItemStatus::Done).then(|| "Different WHY fallback".into());
+        }
+        let updated = apply(&mut s, &change);
+        assert_eq!(
+            updated.status_history.last().unwrap().reason.as_ref(),
+            Some(&reason)
+        );
+        let synopsis = updated.changes.as_ref().unwrap()[0]
+            .reason
+            .as_ref()
+            .unwrap();
+        assert_eq!(synopsis, &expected);
+        assert_eq!(synopsis.chars().count(), 280);
+        assert!(!synopsis.contains(['\n', '\r', '\t', '\u{2003}']));
+    }
+}
+
+#[test]
+fn explicit_reasons_are_bounded_and_derived_reasons_preserve_full_why() {
+    for value in [
+        "a\nb".to_owned(),
+        "a".repeat(281),
+        "  ".into(),
+        "nul\0".into(),
+    ] {
+        let s = session();
+        let mut change = edit();
+        if let ItemChange::Edit { reason, .. } = &mut change {
+            *reason = Some(value);
+        }
+        assert!(matches!(
+            reject(&s, &change, &context(&s)),
+            TransitionError::Validation(_)
+        ));
+    }
+    let why = format!("First line\n{}", "é".repeat(350));
+    let mut s = history_session();
+    let status = ItemChange::Status {
+        status: ItemStatus::Done,
+        ack_to: None,
+        outcome: Some("Done".into()),
+        why: Some(why.clone()),
+        reason: None,
+    };
+    let done = apply(&mut s, &status);
+    assert_eq!(done.why.as_deref(), Some(why.as_str()));
+    let reason = done
+        .changes
+        .as_ref()
+        .unwrap()
+        .last()
+        .unwrap()
+        .reason
+        .as_ref()
+        .unwrap();
+    assert_eq!(reason.chars().count(), 280);
+    assert!(!reason.contains('\n'));
+    let mut s = history_session();
+    s.counters.next_root = positive(3);
+    s.items.0.insert(reference("2"), item("2", None, 2));
+    let replaced = apply(
+        &mut s,
+        &ItemChange::Replace {
+            replacement: reference("2"),
+            outcome: "Replaced".into(),
+            why: why.clone(),
+        },
+    );
+    assert_eq!(replaced.why, Some(why));
+    assert_eq!(
+        replaced
+            .changes
+            .as_ref()
+            .unwrap()
+            .last()
+            .unwrap()
+            .reason
+            .as_ref()
+            .unwrap()
+            .chars()
+            .count(),
+        280
+    );
+}
+
+#[test]
+fn topic_briefs_are_trimmed_multiline_bounded_and_old_fields_are_omitted() {
+    assert_eq!(
+        normalize_topic_brief("  First\nSecond  ", "brief").unwrap(),
+        "First\nSecond"
+    );
+    assert_eq!(
+        normalize_topic_brief(&"é".repeat(1200), "brief")
+            .unwrap()
+            .chars()
+            .count(),
+        1200
+    );
+    for value in [" ".to_owned(), "x".repeat(1201), "nul\0".into()] {
+        assert!(normalize_topic_brief(&value, "brief").is_err());
+    }
+    let original = serde_json::to_value(session()).unwrap();
+    let loaded: Session = serde_json::from_value(original.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&loaded).unwrap(), original);
+    assert!(original["topics"][uuid(1).as_str()].get("brief").is_none());
+    for field in ["affects", "depends_on", "changes"] {
+        assert!(original["items"]["1"].get(field).is_none());
+    }
+    let mut s = loaded;
+    s.topics.0.get_mut(&uuid(1)).unwrap().brief = Some(" padded".into());
+    invalid(&s, ValidationErrorKind::InvalidState);
+}
+
+#[test]
+fn one_edit_snapshots_all_changed_fields_and_cross_topic_links_accept_thirty_two() {
+    let mut s = history_session();
+    let mut topic = s.topics.0[&uuid(1)].clone();
+    topic.id = uuid(50);
+    topic.order = positive(2);
+    s.topics.0.insert(topic.id.clone(), topic);
+    s.counters.next_topic_order = positive(3);
+    s.counters.next_root = positive(35);
+    let targets: Vec<_> = (2..=33).map(|n| reference(&n.to_string())).collect();
+    for n in 2..=34 {
+        let mut target = item(&n.to_string(), None, n);
+        target.topic_id = uuid(50);
+        s.items.0.insert(target.id.clone(), target);
+    }
+    let before = s.items.0.get_mut(&reference("1")).unwrap();
+    before.short = Some("Old label".into());
+    before.note = Some("Old note".into());
+    before.related = Some(vec![reference("34")]);
+    before.links = vec![ItemLinkTarget {
+        kind: LinkKind::Doc,
+        label: "Old link".into(),
+        target: "docs/old.md".into(),
+    }];
+    let edited = apply(
+        &mut s,
+        &ItemChange::Edit {
+            wording_only: false,
+            question: Some("New question".into()),
+            item_type: Some(ItemType::Task),
+            note: Some(None),
+            short: Some(None),
+            links: Some(vec![]),
+            related: Some(vec![]),
+            affects: Some(targets.clone()),
+            depends_on: None,
+            reason: Some("Use new findings".into()),
+            ack_to: None,
+        },
+    );
+    assert_eq!(edited.affects, Some(targets.clone()));
+    assert_eq!(
+        serde_json::to_value(&edited.changes.as_ref().unwrap()[0].before).unwrap(),
+        json!({"question":"Which approach?\nPreserve this exact text.","type":"question","note":"Old note","short":"Old label","links":[{"kind":"doc","label":"Old link","target":"docs/old.md"}],"related":["34"],"affects":null})
+    );
+    let mut oversized = s.clone();
+    oversized
+        .items
+        .0
+        .get_mut(&reference("1"))
+        .unwrap()
+        .affects
+        .as_mut()
+        .unwrap()
+        .push(reference("34"));
+    invalid(&oversized, ValidationErrorKind::TooMany { maximum: 32 });
+    let mut s = history_session();
+    let done = apply(
+        &mut s,
+        &ItemChange::Status {
+            status: ItemStatus::Done,
+            ack_to: None,
+            outcome: Some("Done".into()),
+            why: Some("Full rationale".into()),
+            reason: Some("  Explicit reason  ".into()),
+        },
+    );
+    let record = done.changes.as_ref().unwrap().last().unwrap();
+    assert_eq!(record.reason.as_deref(), Some("Explicit reason"));
+    assert_eq!(
+        serde_json::to_value(&record.before).unwrap(),
+        json!({"status":"open","outcome":null,"why":null})
+    );
+}
+
+#[test]
+fn creation_batch_skips_every_change_then_later_activity_records() {
+    let mut s = session();
+    s.counters.next_root = positive(3);
+    s.items.0.insert(reference("2"), item("2", None, 2));
+    for change in [
+        edit(),
+        ask(20),
+        status(ItemStatus::Done),
+        ItemChange::Replace {
+            replacement: reference("2"),
+            outcome: "Use the new item".into(),
+            why: "Better approach".into(),
+        },
+    ] {
+        let changed = apply(&mut s, &change);
+        assert_eq!(changed.changes, None);
+    }
+    s.messages.push(message(100, 2, MessageAuthor::Agent));
+    s.counters.next_message = positive(3);
+    let mut context = context(&s);
+    context.cause_message_id = uuid(100);
+    let mut change = edit();
+    if let ItemChange::Edit { note, .. } = &mut change {
+        *note = Some(Some("Next batch progress".into()));
+    }
+    let updated = transition_item(&s, &reference("1"), &change, &context).unwrap();
+    let changes = updated.changes.as_ref().unwrap();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].cause_message_id, uuid(100));
+    assert_eq!(changes[0].revision, updated.revision);
+    assert_eq!(changes[0].before.note, Some(Some("Progress".into())));
+    s.items.0.insert(updated.id.clone(), updated);
+    validate_session_items(&s).unwrap();
+}
+
+#[test]
+fn wording_only_edits_record_allowed_actual_changes_and_keep_legacy_records_exact() {
+    let mut s = history_session();
+    let mut change = short_edit(Some(Some(" New label ")));
+    if let ItemChange::Edit {
+        wording_only,
+        question,
+        note,
+        ..
+    } = &mut change
+    {
+        *wording_only = true;
+        *question = Some("The same question, more clearly".into());
+        *note = Some(Some("Clearer supporting words".into()));
+    }
+    let updated = apply(&mut s, &change);
+    let record = &updated.changes.as_ref().unwrap()[0];
+    assert!(record.wording_only);
+    assert_eq!(
+        serde_json::to_value(&record.before).unwrap(),
+        json!({
+            "question": "Which approach?\nPreserve this exact text.", "short": null, "note": null
+        })
+    );
+    let value = serde_json::to_value(record).unwrap();
+    assert_eq!(value["wording_only"], true);
+    assert_eq!(
+        serde_json::from_value::<ItemChangeRecord>(value.clone()).unwrap(),
+        *record
+    );
+    let mut legacy = value;
+    legacy.as_object_mut().unwrap().remove("wording_only");
+    let parsed: ItemChangeRecord = serde_json::from_value(legacy.clone()).unwrap();
+    assert!(!parsed.wording_only);
+    assert_eq!(serde_json::to_value(&parsed).unwrap(), legacy);
+    s.items.0.get_mut(&reference("1")).unwrap().changes = Some(vec![parsed]);
+    validate_session_items(&s).unwrap();
+    let ordinary = apply(&mut s, &edit());
+    let record = ordinary.changes.as_ref().unwrap().last().unwrap();
+    assert!(!record.wording_only);
+    assert!(serde_json::to_value(record)
+        .unwrap()
+        .get("wording_only")
+        .is_none());
+}
+
+#[test]
+fn wording_only_edits_refuse_every_forbidden_changed_field_atomically() {
+    for field in [
+        "type",
+        "ack_to",
+        "links",
+        "related",
+        "affects",
+        "depends_on",
+    ] {
+        let mut s = history_session();
+        s.items.0.get_mut(&reference("1")).unwrap().ack_to = Some(AckTarget::Done);
+        let mut change = edit();
+        if let ItemChange::Edit {
+            wording_only,
+            item_type,
+            ack_to,
+            links,
+            related,
+            affects,
+            depends_on,
+            ..
+        } = &mut change
+        {
+            *wording_only = true;
+            match field {
+                "type" => *item_type = Some(ItemType::Task),
+                "ack_to" => *ack_to = Some(AckTarget::Dropped),
+                "links" => {
+                    *links = Some(vec![ItemLinkTarget {
+                        kind: LinkKind::Item,
+                        label: "Reference".into(),
+                        target: "2".into(),
+                    }])
+                }
+                "related" => *related = Some(vec![reference("2")]),
+                "affects" => *affects = Some(vec![reference("2")]),
+                "depends_on" => *depends_on = Some(vec![reference("2")]),
+                _ => unreachable!(),
+            }
+        }
+        let before = s.clone();
+        let error = reject(&s, &change, &context(&s));
+        assert_eq!(error, TransitionError::WordingOnlyChange { field });
+        assert!(error.to_string().contains(field));
+        assert_eq!(s, before);
+    }
+}
+
+#[test]
+fn wording_only_edits_allow_identical_forbidden_values_including_dangling_lists() {
+    let mut s = history_session();
+    let old = s.items.0.get_mut(&reference("1")).unwrap();
+    old.ack_to = Some(AckTarget::Done);
+    old.related = Some(vec![reference("2")]);
+    old.affects = Some(vec![reference("3")]);
+    old.depends_on = Some(vec![reference("4")]);
+    old.links = vec![ItemLinkTarget {
+        kind: LinkKind::Item,
+        label: "Reference".into(),
+        target: "2".into(),
+    }];
+    let change = ItemChange::Edit {
+        wording_only: true,
+        ack_to: old.ack_to,
+        question: None,
+        item_type: Some(old.item_type.clone()),
+        note: Some(Some("Clearer words".into())),
+        links: Some(old.links.clone()),
+        related: old.related.clone(),
+        affects: old.affects.clone(),
+        depends_on: old.depends_on.clone(),
+        reason: None,
+        short: None,
+    };
+    let changed = apply(&mut s, &change);
+    assert_eq!(changed.related, Some(vec![reference("2")]));
+    assert_eq!(changed.affects, Some(vec![reference("3")]));
+    assert_eq!(changed.depends_on, Some(vec![reference("4")]));
+    let record = &changed.changes.as_ref().unwrap()[0];
+    assert!(record.wording_only);
+    assert_eq!(
+        serde_json::to_value(&record.before).unwrap(),
+        json!({"note": null})
+    );
+}
+
+#[test]
+fn stored_wording_only_records_refuse_forbidden_before_values() {
+    for field in [
+        "type",
+        "status",
+        "ask",
+        "options",
+        "outcome",
+        "why",
+        "links",
+        "related",
+        "affects",
+        "depends_on",
+    ] {
+        let mut s = history_session();
+        let changed = apply(&mut s, &edit());
+        let mut value = serde_json::to_value(&changed.changes.as_ref().unwrap()[0]).unwrap();
+        value["wording_only"] = json!(true);
+        value["before"][field] = match field {
+            "type" => json!("task"),
+            "status" => json!("open"),
+            _ => json!(null),
+        };
+        s.items.0.get_mut(&reference("1")).unwrap().changes =
+            Some(vec![serde_json::from_value(value).unwrap()]);
+        assert!(validate_session_items(&s).is_err(), "{field}");
+    }
+}
+
+#[test]
+fn ask_status_and_replacement_records_are_never_wording_only() {
+    for change in [
+        ask(20),
+        status(ItemStatus::Done),
+        ItemChange::Replace {
+            replacement: reference("2"),
+            outcome: "Replacement".into(),
+            why: "Better option".into(),
+        },
+    ] {
+        let mut s = history_session();
+        s.counters.next_root = positive(3);
+        s.items.0.insert(reference("2"), item("2", None, 2));
+        let changed = apply(&mut s, &change);
+        let record = changed.changes.as_ref().unwrap().last().unwrap();
+        assert!(!record.wording_only);
+        assert!(serde_json::to_value(record)
+            .unwrap()
+            .get("wording_only")
+            .is_none());
     }
 }

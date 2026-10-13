@@ -422,6 +422,17 @@ fn session_query(
                 },
             )))
         }
+        QueryRequest::ItemChanges(request) => {
+            let selected = item(session, &request.item_id)?;
+            if matches!(context.visibility(), QueryVisibility::Agent(_))
+                && item_is_removed(session, selected)
+            {
+                return Err(not_found("Item is removed"));
+            }
+            Ok(QueryResult::ItemChanges(items::changes(
+                session, context, selected, request,
+            )?))
+        }
         QueryRequest::ItemRounds(request) => {
             let selected = item(session, &request.item_id)?;
             if matches!(context.visibility(), QueryVisibility::Agent(_))

@@ -29,6 +29,21 @@ no Node/Rust/Xcode check, same owned inventory and `doctor`. Pushing a tag such 
 verifies install and uninstall under a temporary HOME and creates the pre-release.
 Layout and guards: [scripts/install/README.md](../../scripts/install/README.md).
 
+### Release notes
+
+Every release's notes include this fixed block:
+
+```markdown
+## How to upgrade
+
+1. Quit Ariadne. Your Claude sessions can keep running.
+2. In the folder you unpacked, run `./install.sh`.
+3. Open Ariadne. Sessions show "not connected" until the next step.
+4. In each Claude session, run `/reload-plugins`, then `/ariadne-connect <session>`.
+
+Your projects, sessions and unsent drafts carry over.
+```
+
 ## What the smaller scope does not remove
 
 Both existing-session integrations, full item conversations and rounds, explicit

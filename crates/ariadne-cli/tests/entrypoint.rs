@@ -22,7 +22,13 @@ fn truthful_entrypoint_process_contract() {
         } else {
             assert!(stdout.contains("Usage:"));
             assert!(stdout.contains("ariadne mcp serve"));
-            for tool in ["session_read", "item_messages", "item_rounds", "apply"] {
+            for tool in [
+                "session_read",
+                "item_messages",
+                "item_changes",
+                "item_rounds",
+                "apply",
+            ] {
                 assert!(stdout.contains(tool));
             }
         }
