@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { admissions, cliRequest, snapshot } from './scripted-provider.mjs';
-import { showFullItemQuestion } from './tree.spec.mjs';
+import { goToPeekItem, showFullItemQuestion } from './tree.spec.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const graph = () => browser.$('.graph-view');
@@ -96,13 +96,15 @@ export async function runGraphAcceptance(configuration) {
   samples.push({ action: 'open', nodes: opened.nodes.length, edges: opened.edges.length, collapsed: collapsed.map(value => value.id) });
   await browser.saveScreenshot(join(evidence, 'native-graph-open.png'));
 
-  // Existing detail -> parent -> child routes move the graph selection and centre it.
-  // Crumbs and child buttons carry the stored question (the crumb its short label, "Native branch 10 The…").
-  await detail(canonical, '10.50'); await click('button*=Native branch 10', browser.$('[aria-label="Item location"]')); await detail(canonical, '10');
+  // Detail references preview first; Go to moves the graph selection and centres it.
+  // Accessible names carry the complete question independently of short chip labels.
+  await detail(canonical, '10.50'); await click('button[aria-label^="Native branch 10\\a "]', browser.$('[aria-label="Item location"]'));
+  await goToPeekItem(canonical.items['10'], '10.50'); await detail(canonical, '10');
   await selectedIn('10');
   await wait(async () => (await view(tree)).selected_item_id === '10' && await browser.$('.shell-views').$('button=Graph').isEnabled(),
     'The parent reveal must finish saving before the separate child reveal');
-  await click('button*=Native sentence 10.80', browser.$('[aria-label="Child items"]')); await detail(canonical, '10.80');
+  await click('button[aria-label^="Native sentence 10.80\\a "]', browser.$('[aria-label="Child items"]'));
+  await goToPeekItem(canonical.items['10.80'], '10'); await detail(canonical, '10.80');
   const revealed = await selectedIn('10.80'); assertCentered(revealed, '10.80');
   await wait(async () => (await view(tree)).selected_item_id === '10.80', 'Registered reveal selection was not persisted');
   samples.push({ action: 'registered-reveal', selected: '10.80' });
@@ -118,7 +120,8 @@ export async function runGraphAcceptance(configuration) {
   await wait(async () => (await view(tree)).expanded_item_ids.includes('10'), 'Native expand was not persisted');
   assertGraph(await sample(), canonical, '10', expected);
   samples.push({ action: 'collapse-expand', item: '10' });
-  await click('button*=Native sentence 10.80', browser.$('[aria-label="Child items"]')); await detail(canonical, '10.80'); await selectedIn('10.80');
+  await click('button[aria-label^="Native sentence 10.80\\a "]', browser.$('[aria-label="Child items"]'));
+  await goToPeekItem(canonical.items['10.80'], '10'); await detail(canonical, '10.80'); await selectedIn('10.80');
 
   await (await search()).waitForEnabled(); await (await search()).setValue('Native token_10_80_end');
   await wait(async () => JSON.stringify((await sample()).nodes.map(value => value.id)) === JSON.stringify(['10', '10.80']), 'Graph search must keep the match and its ancestry');

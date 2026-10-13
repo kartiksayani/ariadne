@@ -17,7 +17,7 @@ function itemProps(actions: readonly RowAction[]): ItemRowProps {
     replacedBy: null, rounds: 3, relatedCount: 2, collapsed: null, delivery: null, badge: 'Open' },
   selected: false, focused: true, highlight: null, note: null, actions, answer: null, unfolded: false,
   onUnfold: vi.fn(), remember: vi.fn(), onFocus: vi.fn(), onKeyDown: vi.fn(), onSelect: vi.fn(),
-  onToggle: vi.fn(), onJump: vi.fn(), onHover: vi.fn() };
+  onToggle: vi.fn(), onHover: vi.fn() };
 }
 
 function topicProps(actions: readonly TopicAction[]): TopicRowProps {

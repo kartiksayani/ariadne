@@ -117,6 +117,26 @@ describe('Map change markers and next unseen navigation', () => {
     expect(view.selected).not.toHaveBeenCalled();
   });
 
+  it('leaves Focus for an outside N target without opening it or marking it seen', async () => {
+    const view = await mount(transport => { transport.preferences.sessions[0]!.focused_item_id = '1'; });
+    const before = structuredClone(view.transport.preferences.sessions[0]!);
+    expect(row('2')).toBeNull();
+    next();
+    expect(target()).toBe(row('1.1'));
+    expect(view.transport.preferences.sessions[0]!.focused_item_id).toBe('1');
+    next();
+    await waitFor(() => expect(row('2')).not.toBeNull());
+    await waitFor(() => expect(target()).toBe(row('2')));
+    expect(row('2')).not.toBeNull();
+    expect(document.activeElement).toBe(row('2'));
+    await waitFor(() => expect(view.transport.preferences.sessions[0]!.focused_item_id).toBeUndefined());
+    delete before.focused_item_id;
+    expect(view.transport.preferences.sessions[0]).toEqual(before);
+    expect(view.selected).not.toHaveBeenCalled(); expect(view.hover).not.toHaveBeenCalled();
+    expect(view.transport.preferences.seen![0]!.items).toEqual([]);
+    expect(view.transport.queries.filter(query => query.request.command === 'reveal_item')).toEqual([]);
+  });
+
   it('skips typing, dialogs, modified or composing keys, repeated keys and Graph mode', async () => {
     const view = await mount();
     for (const tag of ['input', 'textarea', 'select']) {
@@ -167,6 +187,43 @@ describe('Map change markers and next unseen navigation', () => {
     next(); expect(target()).toBe(row('1.1'));
     expect(row('1.1').getBoundingClientRect().top).toBe(68);
     expect(view.selected).not.toHaveBeenCalled();
+  });
+
+  it('replaces a Selected reveal hold with the N target and keeps it clear through preview reflow', async () => {
+    let shrink = 0;
+    const callbacks: { run: () => void; targets: Set<Element> }[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      targets = new Set<Element>();
+      constructor(run: () => void) { callbacks.push({ run, targets: this.targets }); }
+      observe(target: Element) { this.targets.add(target); }
+      disconnect() { this.targets.clear(); }
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = document.querySelector<HTMLElement>('.tree-scroll');
+      if (this === box) return new DOMRect(0, 0, 300, 300);
+      if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 60);
+      const index = [...document.querySelectorAll('.tree-item')].indexOf(this);
+      return index >= 0 ? new DOMRect(0, 100 + index * 300 - (box?.scrollTop ?? 0) - (index > 0 ? shrink : 0), 300, 100) : new DOMRect();
+    });
+    try {
+      const view = await mount(undefined, { selectedId: '1' });
+      const box = document.querySelector<HTMLElement>('.tree-scroll')!;
+      box.scrollTop = 500; fireEvent.scroll(box);
+      fireEvent.keyDown(window, { key: 'j', metaKey: true });
+      expect(row('1').getBoundingClientRect().top).toBe(68);
+      const selections = view.selected.mock.calls.length;
+      next(); expect(target()).toBe(row('1.1'));
+      const landed = row('1.1').getBoundingClientRect().top;
+      expect(landed).toBeGreaterThanOrEqual(68);
+      expect(row('1.1').getBoundingClientRect().bottom).toBeLessThanOrEqual(300);
+      shrink = 160;
+      act(() => callbacks.find(callback => callback.targets.has(box) && [...callback.targets].some(node => node.matches('.tree-rows')))!.run());
+      act(() => callbacks.find(callback => !callback.targets.has(box) && [...callback.targets].some(node => node.matches('.tree-rows')))!.run());
+      expect(row('1.1').getBoundingClientRect().top).toBe(landed);
+      expect(view.selected).toHaveBeenCalledTimes(selections);
+      expect(view.transport.preferences.seen![0]!.items).toEqual([]);
+      expect(view.transport.preferences.sessions[0]!.recent_items).toBeUndefined();
+    } finally { vi.unstubAllGlobals(); }
   });
 
   it('renders topic content only under expanded topic headers', async () => {

@@ -2,7 +2,7 @@ import { itemRemoved } from '../../selectors/removed';
 // The "Waiting on me" column (handoff Ariadne.dc.html, aside "Waiting on me"):
 // every open question across sessions, oldest first, each with a compact answer
 // control, with Sent inputs in their own scrolling section below.
-import { useContext, useEffect, useMemo, type MouseEvent, type ReactNode } from 'react';
+import { Fragment, useContext, useEffect, useMemo, type MouseEvent, type ReactNode } from 'react';
 import type { ItemRoute, SessionRef } from '../../generated/core';
 import { plainFailure, type Immutable } from '../../data';
 import type { Input, PresenceObservation } from '../../generated/domain/models';
@@ -20,7 +20,9 @@ import { AnswerControl, defaultSelection } from '../answer/AnswerControl';
 import { useSubmit, type PendingSubmission } from '../answer/useSubmit';
 import { waitingModel, type SentRowModel, type WaitingCardModel } from './model';
 import { useHidden } from '../remove/queue';
-import { FileRefProject, ItemRefs, Markdown } from '../shared/MarkdownText';
+import { FileRefProject, ItemReference, ItemRefs, Markdown } from '../shared/MarkdownText';
+import { ItemRefSession } from '../peek/context';
+import { navigationVisits } from '../navigation/visits';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { WaitingFold } from '../shell/fold';
 import './waiting.css';
@@ -139,7 +141,8 @@ function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRu
 }) {
   const { item, delivery } = card;
   const actions = useMemo(() => sessionStore ? sessionActionsFor(drafts.service, sessionStore) : null, [drafts, sessionStore]);
-  const submit = useSubmit({ drafts, session: card.session, current, itemId: item.id, intent: 'answer', onAgentNotRunning, onSaved, presence });
+  const submit = useSubmit({ drafts, session: card.session, current, itemId: item.id, intent: 'answer', onAgentNotRunning,
+    onSaved: () => { navigationVisits.record(card.route, item.id, 'answered'); onSaved(); }, presence });
   const entry = submit.entry, { another } = submit;
   // A receipt whose captured input answered an earlier round: start this round's draft.
   // The receipt of the current round stays for the detail panel's "Saved" view.
@@ -158,11 +161,12 @@ function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRu
   const selection = frozen !== undefined ? item.options.findIndex(option => option.id === frozen) : defaultSelection(item.options, entry?.draft.selected_option_id);
   const ring = delivery ? '0 0 0 1px color-mix(in srgb, var(--a-warn) 60%, transparent)'
     : selected ? '0 0 0 1.5px color-mix(in srgb, var(--color-text) 45%, transparent)' : '0 0 0 1px var(--color-divider)';
-  return <ItemRefs.Provider value={{ lookup: id => {
+  return <ItemRefSession.Provider value={card.route}><ItemRefs.Provider value={{ lookup: id => {
     const target = card.session.items[id];
     return target && !itemRemoved(card.session, target.id) ? { label: target.question, status: displayStatus(card.session, target) } : null;
-  }, onOpenItem: id => revealItem({ ...card.route, item_id: id }) }}><FileRefProject.Provider value={card.route.project_id}><div className="waiting-card" style={{ boxShadow: `${ring}, var(--a-lift)` }} data-waiting-item={item.id} data-project-id={card.route.project_id} data-session-id={card.route.session_id} aria-current={selected || undefined} onClick={open}>
-    <div className="waiting-path">{card.path}</div>
+  }, route: id => ({ ...card.route, item_id: id }), onOpenItem: id => revealItem({ ...card.route, item_id: id }) }}><FileRefProject.Provider value={card.route.project_id}><div className="waiting-card" style={{ boxShadow: `${ring}, var(--a-lift)` }} data-waiting-item={item.id} data-project-id={card.route.project_id} data-session-id={card.route.session_id} aria-current={selected || undefined} onClick={open}>
+    <div className="waiting-path">{card.pathParts.map((part, index) => <Fragment key={part.itemId ?? index}>{index > 0 && '  ›  '}{part.itemId
+      ? <ItemReference itemId={part.itemId} inline>{part.label}</ItemReference> : part.label}</Fragment>)}</div>
     <Markdown className="waiting-question" text={item.question} />
     {card.ask && <Markdown className="waiting-ask" text={card.ask} />}
     {card.earlier && <div className="waiting-context"><i className="ph ph-clock-counter-clockwise" aria-hidden="true" /><span>{card.earlier}</span></div>}
@@ -182,7 +186,7 @@ function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRu
     {submit.error && !delivery && <p className="waiting-error" role="alert">{submit.error}</p>}
     <div className="waiting-foot"><i className="ph ph-clock" aria-hidden="true" /><span>Waiting {card.age}{card.tag && ` · asked in ${card.tag}`}</span>
       <button type="button" className="btn btn-ghost waiting-details" onClick={open}>Details</button></div>
-  </div></FileRefProject.Provider></ItemRefs.Provider>;
+  </div></FileRefProject.Provider></ItemRefs.Provider></ItemRefSession.Provider>;
 }
 
 function SentRow({ row, drafts, store, open }: { readonly row: SentRowModel; readonly drafts: OwnerDraftStore; readonly store: WaitingStore; readonly open: () => void }) {

@@ -14,7 +14,7 @@ import { SessionBar } from '../../../apps/desktop/src/ui/tree/SessionBar';
 // Item 1 carries a long finding (it must fold to four lines), item 5 a paragraph that
 // wraps over a few lines (hover must not rewrap it), the rest keep their short text.
 class TreeLayoutTransport extends AppTransport {
-  constructor(changes = false) {
+  constructor({ gettingAround = false, changes = false } = {}) {
     super();
     const items = this.sessions.get(route.session_id)!.items;
     items['1']!.question = 'A long item title with enough words to span several lines in a narrow tree. '.repeat(5);
@@ -29,6 +29,18 @@ class TreeLayoutTransport extends AppTransport {
     items['1']!.outcome = Array.from({ length: 20 }, (_, index) => `Line ${index + 1} of a long finding the agent wrote.`).join('\n');
     items['5']!.outcome = 'A decision paragraph that is long enough to wrap over several lines in the tree column, so that any change in the width of its '
       + 'column on hover would move words from one line to the next and show up as a different line count.';
+    if (gettingAround) {
+      items['1']!.question = 'Harbor check'; items['1']!.short = 'Harbor check';
+      const names = ['Review scope', 'Rehearsal notes', 'Evidence check', 'Owner handoff', 'Final check'];
+      names.forEach((name, index) => {
+        const id = String(19 + index);
+        items[id] = { ...items['1.1']!, id, ordinal: 19 + index, parent: index ? String(18 + index) : '1',
+          question: name, short: name, outcome: Array.from({ length: 6 }, () => 'The agent recorded supporting evidence for this step.').join('\n') };
+      });
+      const view = this.preferences.sessions.find(value => value.session.session_id === route.session_id)!;
+      view.expanded_item_ids.push('19', '20', '21', '22');
+      items['4']!.outcome = 'See [the waiting question](item:2).';
+    }
     if (changes) {
       const baseline = '2026-10-01T00:00:00.000Z', later = '2026-10-13T09:00:00.000Z';
       Object.values(items).forEach(item => { if (item) { item.created_at = baseline; item.changes = []; } });
@@ -60,7 +72,7 @@ function ActionGridFixture() {
   ];
   const actions: RowAction[] = definitions.map(action => ({ ...action, run: () => setClicked(action.title) }));
   const props = { focused: false, highlight: null, note: null, answer: null, unfolded: false, onUnfold: () => {},
-    remember: () => {}, onFocus: () => {}, onKeyDown: () => {}, onSelect: () => setSelected(true), onToggle: () => {}, onJump: () => {}, onHover: () => {} };
+    remember: () => {}, onFocus: () => {}, onKeyDown: () => {}, onSelect: () => setSelected(true), onToggle: () => {}, onHover: () => {} };
   return <>
     {/* 560px is the desktop's minimum centre column, including when both side panels are open. */}
     <div className="tree-column" style={{ width: 'min(560px, 100%)' }}>
@@ -77,4 +89,4 @@ createRoot(document.getElementById('root')!).render(query.has('grid') ? <ActionG
     sessionId: route.session_id, title: 'A long session name that needs to fit in a narrow column', secondary: null,
     description: null, named: true, agent: 'codex', where: 'iTerm', meta: '12 topics', running: false,
     connection: 'not_running', closed: true, archived: true,
-  }} /></div> : <DesktopApp service={createDesktopService(new TreeLayoutTransport(query.has('changes')))} />);
+  }} /></div> : <DesktopApp service={createDesktopService(new TreeLayoutTransport({ gettingAround: query.has('nav'), changes: query.has('changes') }))} />);

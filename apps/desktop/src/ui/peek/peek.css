@@ -1,0 +1,153 @@
+.item-peek {
+  position: fixed;
+  z-index: 20;
+  width: 340px;
+  box-sizing: border-box;
+  overflow: auto;
+  padding: 15px;
+  border: 1px solid var(--a-edge);
+  border-radius: 6px;
+  background: var(--a-card);
+  color: var(--color-text);
+  box-shadow: var(--a-pop);
+  font-size: calc(12px * var(--text-scale));
+}
+
+.peek-head,
+.peek-tags,
+.peek-footer,
+.peek-reply {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.peek-head { align-items: flex-start; }
+
+.peek-head h2 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.peek-tags { margin: 8px 0; }
+
+.peek-tags > span:first-child {
+  color: var(--a-label);
+  text-transform: capitalize;
+}
+
+.peek-summary {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: var(--a-label);
+}
+.peek-footer { margin-top: 12px; }
+
+.peek-go { margin-left: auto; }
+
+.peek-answer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-divider);
+}
+
+.peek-options {
+  display: grid;
+  gap: 6px;
+}
+
+.peek-option {
+  padding: 8px;
+  border: 1px solid var(--a-edge);
+  border-radius: 5px;
+  text-align: left;
+  background: var(--a-card);
+}
+
+.peek-option-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.peek-option-pick:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.peek-option small { color: var(--a-acc-text); }
+
+.peek-option .md {
+  display: block;
+  margin-top: 4px;
+  color: var(--a-label);
+}
+.peek-option:hover { border-color: var(--a-acc-text); }
+.peek-reply { margin-top: 10px; }
+
+.peek-reply .input {
+  width: 0;
+  flex: 1;
+}
+.peek-details { margin-top: 6px; }
+
+.peek-hint {
+  margin: 8px 0 0;
+  color: var(--a-label);
+}
+.peek-error { color: var(--a-danger); }
+
+.peek-copy-fallback {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.name-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--a-guide);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--a-acc-text) 7%, var(--a-card));
+  color: var(--a-acc-text);
+  font: inherit;
+  text-align: left;
+  vertical-align: baseline;
+  cursor: pointer;
+}
+
+.name-chip:hover { border-color: var(--a-acc-text); }
+
+.name-chip:focus-visible {
+  outline: 2px solid var(--a-acc-text);
+  outline-offset: 2px;
+}
+
+/* References inside text share its line box; the button keeps peek semantics. */
+.name-chip-inline {
+  display: inline;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  line-height: inherit;
+  appearance: none;
+}
+
+.name-chip-inline:hover { text-decoration: underline; }

@@ -6,28 +6,44 @@ import { fileLinkTitle, fileReference, fileReferences, parseMarkdown, safeHref, 
 import './markdown.css';
 import type { DisplayStatus } from '../../selectors/waiting/replied';
 import { STATUS, statusKey } from './status';
+import type { ItemRoute } from '../../generated/core';
+import { ItemRefSession, usePeek } from '../peek/context';
 
 /** Opens a checked external URL; the composition supplies the desktop's opener. */
 export const LinkOpener = createContext<(url: string) => void>(() => {});
 
 /** Same-session item lookup and selection, supplied only around agent text. */
 export interface ItemReferenceNavigation {
-  lookup(itemId: string): { readonly label: string; readonly status: DisplayStatus } | null;
+  lookup(itemId: string): { readonly label: string; readonly name?: string; readonly status: DisplayStatus } | null;
   onOpenItem(itemId: string): void;
+  /** The canonical route lets a global peek work through a local text provider. */
+  route?(itemId: string): ItemRoute;
 }
-export const ItemRefs = createContext<ItemReferenceNavigation | null>(null);
+// An absent provider permits session-scoped chips; explicit null keeps owner text plain.
+export const ItemRefs = createContext<ItemReferenceNavigation | null | undefined>(undefined);
 
 /** An in-app item link, shared by Markdown and the item's Links section. */
-export function ItemReference({ itemId, children, className }: { readonly itemId: string; readonly children: ReactNode; readonly className?: string }) {
-  const navigation = useContext(ItemRefs);
-  if (!navigation) return className ? <span className={className}>{children}</span> : <>{children}</>;
-  const item = navigation.lookup(itemId);
+export function ItemReference({ itemId, children, className, inline = false, preserveContent = false, ariaLabel, title: customTitle }: {
+  readonly itemId: string; readonly children?: ReactNode; readonly className?: string; readonly preserveContent?: boolean;
+  readonly ariaLabel?: string; readonly title?: string;
+  readonly inline?: boolean;
+}) {
+  const navigation = useContext(ItemRefs), scope = useContext(ItemRefSession), peek = usePeek();
+  if (navigation === null) return className ? <span className={className}>{children}</span> : <>{children}</>;
+  const route = navigation?.route?.(itemId) ?? (scope ? { ...scope, item_id: itemId } : null);
+  const preview = peek && route ? peek.reference(route) : null;
+  const item = preview ? { label: preview.question, name: preview.name, status: preview.status } : navigation?.lookup(itemId);
+  if (!navigation && !preview && !(peek && route)) return className ? <span className={className}>{children}</span> : <>{children}</>;
   if (!item) {
-    const content = <>{children} <span className="md-item-missing">(item not found)</span></>;
+    const content = <>{children} <span className="md-item-missing">{peek && route ? '(item unavailable)' : '(item not found)'}</span></>;
     return className ? <span className={className}>{content}</span> : content;
   }
-  const title = `${item.label} · ${STATUS[statusKey[item.status]].label}`;
-  return <a className={className ? `md-link ${className}` : 'md-link'} {...fileLinkProps(title, () => navigation.onOpenItem(itemId))}>{children}</a>;
+  const title = customTitle ?? `${item.label} · ${STATUS[statusKey[item.status]].label}`;
+  const content = preserveContent ? children : item.name ?? children ?? item.label;
+  if (preview || preserveContent) return <button type="button" className={`name-chip${inline ? ' name-chip-inline' : ''}${className ? ` ${className}` : ''}`} title={title}
+    aria-label={ariaLabel ?? `${item.label} · ${STATUS[statusKey[item.status]].label}`} aria-haspopup={peek && route ? 'dialog' : undefined}
+    {...(peek && route ? peek.chipProps(route) : { onClick: (event: MouseEvent<HTMLElement>) => { event.preventDefault(); event.stopPropagation(); navigation?.onOpenItem(itemId); } })}>{content}</button>;
+  return <a className={className ? `md-link ${className}` : 'md-link'} {...fileLinkProps(title, () => navigation?.onOpenItem(itemId))}>{content}</a>;
 }
 
 /**
@@ -91,7 +107,7 @@ function Spans({ nodes, plain = false }: { readonly nodes: readonly Inline[]; /*
       case 'strong': return <strong key={index}><Spans nodes={node.children} plain={plain} /></strong>;
       case 'em': return <em key={index}><Spans nodes={node.children} plain={plain} /></em>;
       case 'del': return <del key={index}><Spans nodes={node.children} plain={plain} /></del>;
-      case 'item': return plain ? <Spans key={index} nodes={node.children} plain /> : <ItemReference key={index} itemId={node.itemId}><Spans nodes={node.children} plain /></ItemReference>;
+      case 'item': return plain ? <Spans key={index} nodes={node.children} plain /> : <ItemReference key={index} itemId={node.itemId} inline><Spans nodes={node.children} plain /></ItemReference>;
       case 'link': {
         const click = (event: MouseEvent<HTMLAnchorElement>) => {
           event.preventDefault(); event.stopPropagation();

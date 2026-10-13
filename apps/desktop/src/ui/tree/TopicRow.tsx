@@ -21,10 +21,18 @@ export interface TopicRowProps {
   readonly reply?: ReactNode;
   /** A stopped delivery's inline fix (ui/answer/StuckNote), below the sticky status. */
   readonly fix?: ReactNode;
+  readonly ackAll?: ReactNode;
+  /** Number of acknowledgments represented by the bulk control. */
+  readonly ackAllCount?: number;
 }
 
-export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onKeyDown, onToggle, reply, fix }: TopicRowProps) {
+export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onKeyDown, onToggle, reply, fix, ackAll, ackAllCount = 0 }: TopicRowProps) {
   const topic = row.topic;
+  const counts = row.counts.flatMap(count => {
+    if (!ackAll || ackAllCount <= 0 || !count.text.endsWith('to ack')) return [count];
+    const remaining = Number.parseInt(count.text, 10) - ackAllCount;
+    return remaining > 0 ? [{ ...count, text: `${remaining} to ack one by one` }] : [];
+  });
   // A click focuses the band, which tints it and shows its actions; the chevron folds.
   return <><div ref={element => remember(row.key, element)} role="treeitem" aria-level={1} aria-expanded={row.expanded} aria-label={topic.name}
     tabIndex={focused ? 0 : -1} className="tree-row tree-topic" data-topic-id={topic.id} data-row={row.key} data-first={row.first || undefined}
@@ -41,7 +49,7 @@ export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onK
           onClick={event => { event.stopPropagation(); action.run(); }}><i className={action.icon} /></button>)}</span>
       </span>}
     </div>
-    {row.counts.length > 0 && <div className="tree-topic-counts">{row.counts.map(count => <span key={count.text} className="tree-count"><i className={count.icon} style={{ color: count.color }} />{count.text}</span>)}</div>}
+    {(counts.length > 0 || ackAll) && <div className="tree-topic-counts">{counts.map(count => <span key={count.text} className="tree-count"><i className={count.icon} style={{ color: count.color }} />{count.text}</span>)}{ackAll}</div>}
     {row.delivery && <div className="tree-topic-line tree-topic-status" style={{ color: row.delivery.color }}><i className={row.delivery.icon} /><span>{row.delivery.text}</span></div>}
   </div>
   {(fix || prompt || reply) && <div className="tree-topic-content"><Guides guides={row.guides.filter(guide => guide.kind === 'line').map(guide => ({ ...guide, fromBullet: false }))} />

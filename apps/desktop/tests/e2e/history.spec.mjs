@@ -6,6 +6,7 @@ import { historyFailureFacts, withFailureEvidence } from './history-evidence.mjs
 import { folded } from './owner-reply.mjs';
 import { admissions, assertSlimEnvelope, awaitConnected, cliRequest, completeTurn, journeyResultRequest, snapshot } from './scripted-provider.mjs';
 import { openSessionButton } from './session-button.mjs';
+import { goToPeekItem } from './tree.spec.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
@@ -239,8 +240,10 @@ async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
     // The fork sits on its creation message, with its canonical source round.
     const source = saved.rounds[saved.items[id].source_round_id]; assert.ok(source);
     assert.ok(source.fork_item_ids.includes(id));
-    const fork = await browser.$(`.detail-chat-list [data-message-id="${saved.items[id].created_message_id}"]`).$(`button.detail-fork*=${saved.items[id].question.split('\n')[0]}`);
+    const fork = await browser.$(`.detail-chat-list [data-message-id="${saved.items[id].created_message_id}"]`).$('button.detail-fork');
+    assert.equal(await fork.getAttribute('title'), saved.items[id].question, 'The creation-message fork keeps its complete saved question');
     await fork.scrollIntoView(); await fork.click();
+    await goToPeekItem(saved.items[id], '1');
     await waitForHistoryItem(saved.items[id], `after-fork-${id}`);
     await selectParent(saved.items['1']);
   }
@@ -350,7 +353,15 @@ async function rail(history, saved, paged) {
   };
   const beforeUnpin = await nonSeenPreferences();
   await unpinHistoryMessage(card, parentMessage);
-  assert.deepEqual(await nonSeenPreferences(), beforeUnpin, 'Unpin must not write saved navigation or selection');
+  // Sample through the deferred preference-write window so a late save cannot
+  // slip past one immediate observation. Every sample must match the baseline.
+  const unpinObservedAt = Date.now();
+  let unpinObservationDuration;
+  do {
+    assert.deepEqual(await nonSeenPreferences(), beforeUnpin, 'Unpin must not write saved navigation or selection');
+    unpinObservationDuration = Date.now() - unpinObservedAt;
+    if (unpinObservationDuration < 1000) await new Promise(resolve => setTimeout(resolve, 100));
+  } while (unpinObservationDuration < 1000);
   await closeHistoryRailReferences(parentMessage);
   await toggle.waitForEnabled(); await toggle.click();
   await wait(async () => (await browser.$$('.pw-rail-list [data-message-id]')).length === saved.messages.length, 'Reopened rail did not reload the complete canonical history');

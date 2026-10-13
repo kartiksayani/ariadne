@@ -13,6 +13,10 @@ import { changesFixture } from '../changes/fixture';
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 async function click(element: Element) {
   await act(async () => { fireEvent.click(element); });
+  // These navigation regressions deliberately follow references through their peek.
+  if (element.classList.contains('name-chip')) {
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Go to' })); });
+  }
 }
 async function keyDown(element: Element, key: string, metaKey = false) {
   await act(async () => { fireEvent.keyDown(element, { key, metaKey }); });
@@ -218,7 +222,7 @@ describe('composed item navigation', { timeout: 10_000 }, () => {
   it('records tree, detail child and breadcrumb selections, traverses without pushing, and branches after a new selection', async () => {
     await setup(); await openSession(); await pick('1');
     expect(control('Back').disabled).toBe(true); expect(control('Forward').disabled).toBe(true);
-    await click(within(screen.getByLabelText('Item detail')).getByRole('button', { name: /^Branched into Add the receipt lookup test/ })); selected('1.1');
+    await click(within(screen.getByLabelText('Item detail')).getByRole('button', { name: /^Branched into Add the receipt lookup/ })); selected('1.1');
     expect(control('Back').disabled).toBe(false);
     await click(document.querySelectorAll<HTMLButtonElement>('.detail-path button')[1]); await selected('1');
     await click(control('Back')); await selected('1.1');
@@ -336,9 +340,9 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
     if (entry === 'related link') {
       await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['8']!.question} · Open` }));
     } else if (entry === 'Markdown reference') {
-      await click(detail.getByRole('link', { name: 'continued context' }));
+      await click(within(document.querySelector<HTMLElement>('.detail-question')!).getByRole('button', { name: `${session.items['8']!.question} · Open` }));
     } else if (entry === 'child link') {
-      await click(detail.getByRole('button', { name: /^Branched into Add the receipt lookup test/ }));
+      await click(detail.getByRole('button', { name: /^Branched into Add the receipt lookup/ }));
     } else await click(document.querySelectorAll<HTMLButtonElement>('.detail-path button')[1]);
     selected(target);
     expect(treeScroll().scrollTop).not.toBe(before);

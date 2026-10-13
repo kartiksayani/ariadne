@@ -241,6 +241,8 @@ fn setting_session_view_cannot_overwrite_seen_state() {
         rail: RailView::Activity,
         scroll: None,
         collapsed_topic_ids: vec![],
+        focused_item_id: None,
+        recent_items: vec![],
     };
     s.service()
         .patch(

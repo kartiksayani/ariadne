@@ -87,6 +87,8 @@ pub fn artifacts() -> Result<BTreeMap<PathBuf, String>, String> {
         Theme,
         WindowGeometry,
         SessionPreferences,
+        RecentItem,
+        RecentAction,
         ViewFilters,
         RailView,
         ScrollAnchor,

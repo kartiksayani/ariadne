@@ -66,6 +66,7 @@ export function AgentRemovalNotices({ waiting, controllers, navigation, selected
               const preferences = navigation.getSnapshot().preferences;
               const view = preferences?.sessions.find(value => sameSession(value.session, route));
               const opened = preferences && view && await navigation.saveSessionView({ ...structuredClone(view),
+                recent_items: view.recent_items?.map(entry => ({ ...entry })),
                 expanded_item_ids: [...view.expanded_item_ids], hidden_item_ids: view.hidden_item_ids ? [...view.hidden_item_ids] : undefined,
                 collapsed_topic_ids: view.collapsed_topic_ids ? [...view.collapsed_topic_ids] : undefined, filters: {
                 ...structuredClone(view.filters), archived: scope !== null && topic?.archived_at != null,

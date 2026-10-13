@@ -363,6 +363,23 @@ fn layout_bounds(entry: &PreferencesPatchEntry) -> Result<(), CoreError> {
             }
         }
         PreferencesPatchEntry::SetSessionView { preferences } => {
+            if preferences.recent_items.len() > RECENT_ITEMS_CAPACITY {
+                return Err(errors::local(
+                    CoreErrorCode::CapacityExceeded,
+                    "Recent items exceed the 15 entry bound",
+                ));
+            }
+            let mut recent = BTreeSet::new();
+            if !preferences
+                .recent_items
+                .iter()
+                .all(|entry| recent.insert(&entry.item_id))
+            {
+                return Err(errors::local(
+                    CoreErrorCode::InvalidArgument,
+                    "Duplicate recent item",
+                ));
+            }
             if preferences.collapsed_topic_ids.len() > COLLAPSED_TOPICS_CAPACITY {
                 return Err(errors::local(
                     CoreErrorCode::CapacityExceeded,

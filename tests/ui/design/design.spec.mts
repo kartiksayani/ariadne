@@ -135,11 +135,11 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
     }, spec.selected!);
     await expect(page.getByText('Showing an item outside your current filters.')).toBeVisible();
   }
-  let answerScroll: number | null = null;
+  let answerTop: number | null = null;
   if (spec.answering) {
     await settle(page);
     await row(spec.answering).focus();
-    answerScroll = await page.locator('.tree-scroll').evaluate(element => element.scrollTop);
+    answerTop = await row(spec.answering).evaluate(element => element.getBoundingClientRect().top);
     if (!spec.detail) await page.keyboard.press('Escape');
     await page.keyboard.press('a');
     await expect(page.locator(`[data-item-id="${spec.answering}"] .answer`)).toBeVisible();
@@ -163,8 +163,9 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
     const selected = row(spec.answering);
     await expect(selected).toHaveAttribute('aria-selected', 'true');
     if (!spec.detail) await expect(page.locator('.shell-detail')).toHaveCount(0);
-    // Closing detail and opening the inline answer keep the owner's reading position.
-    expect(await page.locator('.tree-scroll').evaluate(element => element.scrollTop)).toBe(answerScroll);
+    // Closing detail and opening the inline answer keep the owner's reading position: the answered row
+    // stays where it was on screen. scrollTop may change, since rows above re-wrap when the Map widens.
+    expect(await selected.evaluate(element => element.getBoundingClientRect().top)).toBe(answerTop);
   }
   const sessionBar = page.locator('.tree-session-bar');
   if (await sessionBar.count()) {
@@ -489,6 +490,52 @@ for (const theme of ['light', 'dark'] as const) test(`Map names and top-line sta
   await root.hover();
   expect(await title.boundingBox()).toEqual(titleBefore);
   expect(await status.boundingBox()).toEqual(statusBefore);
+  expect(denied).toEqual([]);
+});
+
+for (const theme of ['light', 'dark'] as const) test(`Getting around preserves the Map while peeking and focusing in ${theme}`, async ({ page, origin }) => {
+  const denied: string[] = [];
+  await route(page.context(), origin, denied);
+  await openApp(page, origin, { ...frameSpec('1a'), theme, rail: false, hoverMsg: undefined });
+  const root = page.locator('.tree-item.tree-item-root').first(), scroller = page.locator('.tree-scroll');
+  const sourceId = await root.getAttribute('data-item-id');
+  await root.click();
+  const detail = page.locator('.item-detail');
+  await expect(detail).toHaveAttribute('data-detail-item-id', sourceId!);
+  const fullTitle = await detail.locator('.detail-question').getAttribute('title');
+  const before = await scroller.evaluate(element => element.scrollTop);
+  await root.focus();
+  await page.keyboard.press('Space');
+  const peek = page.getByRole('dialog', { name: /^Peek:/ });
+  await expect(peek).toBeVisible();
+  const heading = peek.getByRole('heading', { level: 2 });
+  await expect(heading).toHaveText(fullTitle!);
+  await expect(heading).toHaveCSS('white-space', 'pre-wrap');
+  expect(await heading.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await expect(peek.getByRole('button', { name: 'Copy reference' })).toBeVisible();
+  await expect(peek.getByRole('button', { name: 'Go to' })).toBeVisible();
+  const box = (await peek.boundingBox())!, chrome = (await page.locator('.shell-header').boundingBox())!, viewport = page.viewportSize()!;
+  expect(box.y).toBeGreaterThanOrEqual(chrome.y + chrome.height);
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+  await page.keyboard.press('Escape');
+  await expect(root).toBeFocused();
+  expect(await scroller.evaluate(element => element.scrollTop)).toBe(before);
+  const waiting = await page.locator('[data-waiting-item]').count();
+  await root.getByRole('button', { name: /^Focus on / }).click();
+  await expect(page.getByText(/^Focused:/)).toBeVisible();
+  expect(await page.locator('[data-waiting-item]').count()).toBe(waiting);
+  await expect(page.locator(`.tree-item-root:not([data-item-id="${sourceId}"])`)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Leave Focus' }).click();
+  await page.keyboard.press('Meta+e');
+  const recent = page.getByRole('dialog', { name: 'Recent items' });
+  await expect(recent).toBeVisible();
+  await recent.getByRole('button', { name: 'Changed only' }).click();
+  await expect(recent.getByRole('button', { name: 'Changed only' })).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  const crumbs = (await page.getByRole('navigation', { name: 'Map ancestors' }).boundingBox())!, rows = (await scroller.boundingBox())!;
+  expect(crumbs.y + crumbs.height).toBeLessThanOrEqual(rows.y + 1);
   expect(denied).toEqual([]);
 });
 

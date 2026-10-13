@@ -4298,6 +4298,36 @@
         }
       ]
     },
+    "RecentAction": {
+      "type": "string",
+      "enum": [
+        "viewed",
+        "peeked",
+        "answered",
+        "acked"
+      ]
+    },
+    "RecentItem": {
+      "description": "Local browsing trail; it never creates a domain Input or acknowledgement.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/RecentAction"
+        },
+        "item_id": {
+          "$ref": "#/$defs/ItemRef"
+        },
+        "visited_at": {
+          "$ref": "#/$defs/UtcMillis"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "action",
+        "visited_at"
+      ]
+    },
     "RemovalTarget": {
       "description": "A session-qualified topic (family member) or notice input.",
       "type": "object",
@@ -5580,6 +5610,16 @@
         "filters": {
           "$ref": "#/$defs/ViewFilters"
         },
+        "focused_item_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "hidden_item_ids": {
           "type": "array",
           "items": {
@@ -5588,6 +5628,13 @@
         },
         "rail": {
           "$ref": "#/$defs/RailView"
+        },
+        "recent_items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecentItem"
+          },
+          "maxItems": 15
         },
         "scroll": {
           "anyOf": [

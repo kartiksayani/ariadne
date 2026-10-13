@@ -6,7 +6,44 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { assertStatusFilters, choose, observeTreeAnchor, observeTreeClickReadiness, openStatusFilterMenu, publishTreeRequest, showFullItemQuestion, treeBatch, treeCompletionBatch, treeClickReadinessStatus, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
+import { assertStatusFilters, choose, goToPeekItem, observeTreeAnchor, observeTreeClickReadiness, openStatusFilterMenu, publishTreeRequest, showFullItemQuestion, treeBatch, treeCompletionBatch, treeClickReadinessStatus, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
+
+for (const scenario of ['complete', 'hidden', 'truncated', 'premature-navigation', 'lingering-peek']) {
+  test(`reference navigation requires full visible peek, unchanged detail and deliberate Go to: ${scenario}`, async () => {
+    const item = { id: 'child', question: 'Complete child question\nRetain the exact second line.' }, calls = [];
+    let open = true;
+    const heading = { isDisplayed: async () => true, textContent: scenario === 'truncated' ? 'Complete child question…' : item.question };
+    const go = {
+      waitForEnabled: async () => calls.push('enabled'), scrollIntoView: async () => calls.push('scroll'),
+      click: async () => { calls.push('go'); if (scenario !== 'lingering-peek') open = false; },
+    };
+    const peek = { isDisplayed: async () => scenario !== 'hidden', isExisting: async () => open,
+      $: selector => { assert.equal(selector, 'button=Go to'); return go; } };
+    const action = runInNewContext(`(${goToPeekItem.toString()})(item, 'parent')`, {
+      item, assert, browser: {
+        execute: async (callback, element) => callback(element),
+        $: selector => {
+          if (selector === '.item-peek') return peek;
+          if (selector === '.item-peek .peek-head h2') return heading;
+          assert.equal(selector, '.item-detail');
+          return { getAttribute: async name => {
+            assert.equal(name, 'data-detail-item-id'); calls.push('selection');
+            return scenario === 'premature-navigation' ? item.id : 'parent';
+          } };
+        },
+      }, wait: async (condition, message) => assert.ok(await condition(), message),
+    });
+    if (scenario === 'hidden' || scenario === 'truncated') {
+      await assert.rejects(action, /peek did not show the complete saved question/); assert.deepEqual(calls, []);
+    } else if (scenario === 'premature-navigation') {
+      await assert.rejects(action, /preserve the selected detail until Go to/); assert.deepEqual(calls, ['selection']);
+    } else {
+      if (scenario === 'lingering-peek') await assert.rejects(action, /Go to did not close/);
+      else await action;
+      assert.deepEqual(calls, ['selection', 'enabled', 'scroll', 'go']);
+    }
+  });
+}
 
 for (const scenario of ['compact', 'expanded', 'incomplete', 'wrong-tooltip']) {
   test(`full item question checks saved text before opening and complete rendered words: ${scenario}`, async () => {

@@ -150,7 +150,7 @@ describe('related item navigation', () => {
     expect(open.mock.calls).toEqual([['8'], ['1.1']]);
   });
 
-  it('shows the full replacement question and provides it as the accessible name and tooltip', async () => {
+  it('shows the replacement name chip and keeps the full question as its accessible name and tooltip', async () => {
     const value = setup(); opened.push(value);
     const session = value.transport.session;
     session.items['1']!.status = 'replaced'; session.items['1']!.replaced_by = '8';
@@ -160,7 +160,8 @@ describe('related item navigation', () => {
     render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={open} />);
     const button = screen.getByRole('button', { name: session.items['8']!.question });
     expect(button.classList.contains('detail-replaced')).toBe(true);
-    expect(button.textContent).toContain(session.items['8']!.question);
+    expect(button.textContent).toContain('New delivery');
+    expect(button.classList.contains('name-chip')).toBe(true);
     expect(button.title).toBe(session.items['8']!.question);
     fireEvent.click(button); expect(open).toHaveBeenCalledWith('8');
   });
@@ -192,5 +193,16 @@ describe('related item navigation', () => {
     const link = screen.getByRole('link', { name: 'receipt follow-up' });
     expect(link.title).toBe(`${session.items['1.1']!.question} · Open`);
     expect(link.textContent).toBe('receipt follow-up');
+  });
+
+  it('disambiguates breadcrumb names against items outside the ancestor path', async () => {
+    const value = setup(); opened.push(value);
+    const session = value.transport.session, ancestor = session.items['1']!, elsewhere = session.items['8']!;
+    ancestor.short = elsewhere.short = 'Cache lookup'; elsewhere.topic_id = ancestor.topic_id;
+    ancestor.question = 'Use Redis for cache lookup?'; elsewhere.question = 'Use Postgres for cache lookup?';
+    await value.store.refresh();
+    render(<DetailPath store={value.store} itemId="1.1" onOpenItem={vi.fn()} />);
+    expect(screen.getByRole('button', { name: ancestor.question }).textContent).toBe('Redis · Cache lookup');
+    expect(screen.queryByRole('button', { name: elsewhere.question })).toBeNull();
   });
 });

@@ -2080,7 +2080,7 @@ describe('the item detail reads like a chat', () => {
     expect(chat()!.textContent).toContain('Agent raised this');
     expect(chat()!.querySelector('.detail-msg-result')).toBeNull();
     expect(document.body.textContent).not.toMatch(/Round \d|Back and forth|\d+ rounds?/);
-    expect(within(chat()!).getByRole('button', { name: /Branched into Add the receipt lookup test/ })).toBeTruthy();
+    expect(within(chat()!).getByRole('button', { name: /Branched into Add the receipt lookup/ })).toBeTruthy();
   });
   it('shows a first, unanswered ask as the open one, marked Waiting on you', async () => {
     const { chat } = await view('2', session => {

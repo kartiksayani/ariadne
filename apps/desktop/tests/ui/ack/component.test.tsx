@@ -22,6 +22,7 @@ class AckTransport extends AppTransport {
   constructor() {
     super();
     const session = this.sessions.get(route.session_id)!;
+    session.items['1.1']!.type = 'finding';
     session.items['1.1']!.ack_to = 'done';
     session.items['1.1']!.question = 'Record the retry limits';
     session.items['1.1']!.ask = null;
@@ -124,7 +125,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
         expect(!!within(host).queryByRole('button', { name: /^Ack/ })).toBe(available);
         expect(!!within(host).queryByText(/^Ack →/)).toBe(available);
       }
-      expect(!!screen.queryByText('1 to ack')).toBe(available);
+      expect(!!screen.queryByText('Ack all (1)')).toBe(available);
       fireEvent.keyDown(row(), { key: 'g' }); await screen.findByText('One graph per topic');
       expect(!!within(row()).queryByText(/^Ack →/)).toBe(available);
       expect(acks(transport)).toHaveLength(0);
@@ -140,8 +141,9 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe(target === 'in_progress' ? 'progress' : 'open'));
     await waitFor(() => expect(within(detail()).queryByRole('button', { name: /^Ack/ })).toBeNull());
     expect(acks(transport)).toHaveLength(1);
+    await waitFor(() => expect(transport.preferences.sessions[0].recent_items?.find(entry => entry.item_id === item.id)?.action).toBe('acked'));
     expect(item.status).toBe(target); expect(item.ack_to).toBeNull();
-    expect(screen.queryByText('1 to ack')).toBeNull();
+    expect(screen.queryByText('Ack all (1)')).toBeNull();
     const counts = row().closest('.tree-topic-group')!.querySelector<HTMLElement>('.tree-topic-counts')!;
     expect(counts.textContent).toContain(target === 'open' ? '2 open' : '1 open');
     expect(counts.textContent).toContain(target === 'open' ? '1 in progress' : '2 in progress');
@@ -217,7 +219,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     const linked = within(related).getByRole('button', { name: `${session.items['1.1']!.question} · Open` });
     expect(linked.textContent).toContain('Retry limits');
     expect(linked.textContent).toContain('Open');
-    fireEvent.click(linked); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
+    fireEvent.click(linked); fireEvent.click(screen.getByRole('button', { name: 'Go to' })); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await act(async () => { fireEvent.click(within(detail()).getByRole('button', { name: 'Ack → Done' })); });
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe('done'));
     expect(acks(transport)).toHaveLength(1);
@@ -234,7 +236,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     expect(button.closest('.tree-ack-slot')).not.toBeNull();
     expect(button.closest('.tree-actions')).toBeNull();
     expect(button.classList.contains('tree-action-ack')).toBe(true);
-    expect(screen.getByText('1 to ack')).toBeTruthy();
+    expect(screen.getByText('Ack all (1)')).toBeTruthy();
     expect(within(row('2')).queryByRole('button', { name: /^Ack/ })).toBeNull();
     expect(document.querySelector('.shell-footer')?.textContent).toContain('ack / answer');
     const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
@@ -261,7 +263,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     expect(within(detail()).queryByRole('button', { name: /^Ack/ })).toBeNull();
     expect(within(detail()).getByRole('button', { name: /^Follow up/ })).toBeTruthy();
     expect(within(detail()).getByRole<HTMLButtonElement>('button', { name: /^Back to Open/ }).disabled).toBe(false);
-    expect(screen.queryByText('1 to ack')).toBeNull();
+    expect(screen.queryByText('Ack all (1)')).toBeNull();
     fireEvent.click(within(detail()).getByRole('button', { name: /^Follow up/ }));
     await waitFor(() => expect(within(detail()).getByRole('textbox')).toBeTruthy());
   });
@@ -270,7 +272,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     const transport = await mount();
     fireEvent.click(within(row()).getByRole('button', { name: 'Hide (x)' }));
     await waitFor(() => expect(row()).toBeNull());
-    expect(screen.getByText('1 to ack')).toBeTruthy();
+    expect(screen.getByText('Ack all (1)')).toBeTruthy();
     const view = () => transport.preferences.sessions.find(value => value.session.session_id === route.session_id)!;
     expect(view().hidden_item_ids).toContain('1.1');
     await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '1.1' }); });
@@ -283,7 +285,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe('done'));
     expect(view().hidden_item_ids).toContain('1.1');
     expect(row().classList.contains('tree-item-hidden')).toBe(true);
-    expect(screen.queryByText('1 to ack')).toBeNull();
+    expect(screen.queryByText('Ack all (1)')).toBeNull();
   });
 
   it.each(['tree', 'detail', 'key'] as const)('keeps one %s Ack click through a stale-store wait and uses the refreshed revision', async source => {

@@ -22,6 +22,10 @@ import type { OwnerFocusRequest, PendingSubmission } from './ui/answer/useSubmit
 import { agentNotRunning } from './ui/answer/notRunning';
 import { DetailPath, ItemDetail } from './ui/detail/ItemDetail';
 import { WaitingColumn } from './ui/waiting/WaitingColumn';
+import { PeekProvider } from './ui/peek/Peek';
+import { ItemRefSession } from './ui/peek/context';
+import { navigationVisits } from './ui/navigation/visits';
+import { attachAckAll, stopAckAll } from './ui/navigation/ackAllController';
 import { MessageRail } from './ui/rail/MessageRail';
 import { SessionActionControllers } from './components/bindings/actions';
 import { RecoveryPanel, recoveryTargets } from './components/recovery/RecoveryPanel';
@@ -59,6 +63,7 @@ const adapters: readonly AdapterChoice[] = [
   { adapter_id: 'codex', label: 'Codex', configuration: { namespace: 'codex', values: {} } },
 ];
 const routeKey = (route: SessionRef) => JSON.stringify([route.project_id, route.session_id]);
+const recordViewed = (result: RevealedItem) => { if (result.kind === 'item') navigationVisits.record(result.route, result.route.item_id, 'viewed'); };
 const noSubscription = () => () => {};
 const noSession = () => null;
 interface Application {
@@ -196,6 +201,7 @@ function SessionCenter({ application, view, graph, reveal, onRemoveTarget, ...pr
 }
 function Workspace({ application }: { application: Application }) {
   const navigation = application.navigation, state = useNavigation(navigation);
+  useEffect(() => navigationVisits.bind(navigation), [navigation]);
   const removals = application.removals;
   const hidden = useSyncExternalStore(removals.subscribe, removals.getSnapshot, removals.getSnapshot);
   // The configured Codex socket becomes the connect dialog's default; absent when Codex is unconfigured.
@@ -347,6 +353,7 @@ function Workspace({ application }: { application: Application }) {
     if (navigation.getNavigationRequest() !== request || shortcutSequence.current !== token) return null;
     if (!saved) { if (failure) throw failure; return null; }
     if (!result) return null;
+    recordViewed(result);
     detailDismissedAt.current = null; setLocalReveal(result); setDetailOpen(true);
     // Continuations use this exact admitted request, including queued reveals.
     return { request, result };
@@ -354,6 +361,7 @@ function Workspace({ application }: { application: Application }) {
   // Tree and graph already save their own selection through navigation.
   // The graph's ↑/↓ and "−" move the selection without opening detail (Ariadne.dc.html `select`).
   const selected = (result: RevealedItem, openDetail = true) => {
+    recordViewed(result);
     historyReveal.current = null;
     invalidateOwnerRequest(); setLocalReveal(result);
     if (openDetail) { detailDismissedAt.current = null; setDetailOpen(true); }
@@ -593,6 +601,7 @@ function Workspace({ application }: { application: Application }) {
       const attempted = ++ackRequest.current;
       notices.dismiss(id);
       void acknowledge(actions, item.id, () => attempted !== ackRequest.current).then(saved => {
+        if (saved) navigationVisits.record(target, item.id, 'acked');
         const error = actions.getSnapshot().error;
         if (attempted === ackRequest.current && !saved && error && !isViewConflict(error)) notices.push({ id, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: ackFailure(error) });
       }).catch(error => {
@@ -624,7 +633,10 @@ function Workspace({ application }: { application: Application }) {
   // Keys pressed while focus is on <body> (after launch or a click on a non-focusable area) still reach the keymap.
   const appRoot = useRef<HTMLDivElement>(null);
   useWindowKeys(appRoot, historyControls, intent => changeTextSize(nextTextSize(textSizeIntent.current ?? navigation.getSnapshot().preferences?.global.text_scale, intent)));
-  return <ItemHistoryContext.Provider value={historyControls}><RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys}>
+  return <PeekProvider lookup={target => navigation.opened.open(target)} drafts={application.drafts} onGoTo={revealItem} onAgentNotRunning={onAgentNotRunning}
+    onPeekSeen={(target, observedRevision) => navigation.markItemSeen(target, target.item_id, observedRevision)}
+    onVisit={(target, action) => { if (action !== 'opened') navigationVisits.record(target, target.item_id, action === 'peek' ? 'peeked' : 'answered'); }}>
+    <ItemRefSession.Provider value={route ?? null}><ItemHistoryContext.Provider value={historyControls}><RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys}>
     <DraftConflictNotices drafts={application.drafts} opened={navigation.opened} selectedSession={route ?? null} />
     <AgentRemovalNotices waiting={application.waiting} controllers={application.actions} navigation={navigation}
       selectedSession={sessionState?.snapshot?.session ?? null} onTree={showBinTree} />
@@ -681,7 +693,7 @@ function Workspace({ application }: { application: Application }) {
       if (route && routeKey(target) === key && archived) showView('tree');
     }} />
     <AgentNotRunningHost navigation={navigation} />
-  </div></RemovalContext.Provider></ItemHistoryContext.Provider>;
+  </div></RemovalContext.Provider></ItemHistoryContext.Provider></ItemRefSession.Provider></PeekProvider>;
 }
 
 // Construction happens in an effect, so StrictMode's discarded render creates
@@ -712,10 +724,11 @@ export function DesktopApp({ service }: { service: RendererService }) {
     const next: Application = { service, navigation, waiting, removals,
       drafts: new OwnerDraftStore(service, undefined, navigation.preferenceWrites), actions, discovery: new DiscoveryController(service) };
     const detach = removals.attach();
+    const detachAckAll = attachAckAll(service);
     const detachLinkFailures = listenForLinkFailures(service);
     setApplication(next);
     // Leaving the app runs the removals still in their window rather than dropping them.
-    return () => { detachLinkFailures(); detach(); void removals.flush(); next.discovery.dispose(); next.waiting.stop(); next.navigation.stop(); };
+    return () => { detachLinkFailures(); detach(); detachAckAll(); void removals.flush(); next.discovery.dispose(); next.waiting.stop(); void stopAckAll(service).finally(() => next.navigation.stop()); };
   }, [service]);
   // Links in agent text open in the system browser; a failure leaves the app where it is and says so.
   const openLink = useMemo(() => linkOpener(service), [service]);

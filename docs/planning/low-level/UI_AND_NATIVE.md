@@ -141,7 +141,7 @@ token. Wording-only records remain available in history without a marker. Readin
 never changes waiting status or counts.
 
 Opening detail starts a roughly one-second dwell for the captured item revision;
-future preview consumers use the same rule. Leaving the item or closing the
+item peeks use the same rule. Leaving the item or closing the
 surface cancels that dwell. Save only the revision actually presented, so a later
 agent update remains unseen. The shared seen state clears its Map marker and
 updates every corresponding Since you were here card. A card displays `✓ Seen`
@@ -201,13 +201,25 @@ text across unrelated confirmed writes. Discard the preview on route change,
 reopen or explicit reset; restored state comes from canonical preferences.
 See [ADR-0066](../../adr/ADR-0066-project-local-search-before-save-confirmation.md).
 
-Selecting from Waiting, Sent, search, tree, graph, archive, rail, tray, or notification calls a single `revealItem`: switch to project/session, load validated snapshot, select item, temporarily reveal ancestry, mark it outside current filters if applicable, and open detail. Opening or restoring a session restores a saved scroll anchor if present, otherwise brings the selected row into view once. Deliberate navigation from Waiting/Details, search, Back/Forward history, links and native reveal requests brings the target into view, including repeated requests for the same item and item routes opening a session with a saved reading anchor. Clicking an ordinary tree row, or opening or closing detail, never scrolls the Map. Keyboard row movement scrolls only enough to keep the focused row visible; the Selected tag and Cmd+J explicitly scroll to the selection. Preserve filter values and offer an explicit clear action. Replacement/fork/source references use this route. If the item no longer exists, show its session and an explanatory banner.
+Selecting from Waiting, Sent, search, tree, graph, archive, rail, tray, or notification calls a single `revealItem`: switch to project/session, load validated snapshot, select item, temporarily reveal ancestry, mark it outside current filters if applicable, and open detail. Opening or restoring a session restores a saved scroll anchor if present, otherwise brings the selected row into view once. Deliberate navigation from Waiting/Details, search, Back/Forward history, links and native reveal requests brings the target into view, including repeated requests for the same item and item routes opening a session with a saved reading anchor. Clicking an ordinary tree row, or opening or closing detail, never scrolls the Map. Keyboard row movement scrolls only enough to keep the focused row visible; the selected-item edge marker and Cmd+J explicitly scroll to the selection. Preserve filter values and offer an explicit clear action. Go to from a peek and Recent entries use this route. Replacement/fork/source references open a name-chip peek before deliberate navigation. If the item no longer exists, show its session and an explanatory banner.
 
-All Map reveals clear the pinned session/filter controls and the target topic's measured sticky header, including wrapped topic names and delivery lines. Centered reveals clamp the row's top below that header and keep the full row within the usable scroller viewport when it fits. An oversized row aligns its top below the header. Nearest keyboard reveals use the same measured header clearance while scrolling only as far as needed. Showing or hiding the selected tag does not change this usable viewport.
+All Map reveals clear the pinned session/filter controls and the target topic's measured sticky header, including wrapped topic names and delivery lines. Centered reveals clamp the row's top below that header and keep the full row within the usable scroller viewport when it fits. An oversized row aligns its top below the header. Nearest keyboard reveals use the same measured header clearance while scrolling only as far as needed. Showing or hiding the selected-item edge marker does not change this usable viewport.
 
-Finish opening placement on success, failure or timeout, including a saved item in an archived topic that never mounts. Opening restoration calls `onSelected(result, false)`, preserves the detail state, and suppresses its error notice. Deliberate reveals may overtake a pending opening read. Keep the first visible reading anchor through panel/width changes and run normal offset correction after reflow. Search does not change the row-click scroll policy.
+Finish opening placement on success, failure or timeout, including a saved item in an archived topic that never mounts. Opening restoration calls `onSelected(result, false)`, preserves the detail state, and suppresses its error notice. Deliberate reveals may overtake a pending opening read. Clear any saved opening target on owner scroll, and when its row is still absent after opening finishes. Keep the first visible reading anchor through panel/width changes and run normal offset correction after reflow. Search does not change the row-click scroll policy.
 
-Measure preview text-node line rectangles independently of paragraph/list margins and code padding. Six text lines remain complete; seven fold after the fourth complete line. Observe the unclipped content size and font readiness/loading events so a fixed-height fold does not mask reflow. Expand an agent link's folded body on `:focus-visible` keyboard focus; mouse focus preserves the fold. Answer options stay outside the folded preview.
+Measure preview text-node line rectangles independently of paragraph/list margins and code padding. Six text lines remain complete; seven fold after the fourth complete line. Observe the unclipped content size and share one tree-level font readiness/loading subscription so a fixed-height fold does not mask reflow. Expand an agent link's folded body on `:focus-visible` keyboard focus; mouse focus preserves the fold. Answer options stay outside the folded preview.
+
+Name chips resolve labels through itemLabels, including Markdown item links, related/affects/depends-on and Waiting paths. Chips and focused Map rows accept Space; chips also accept click and Command-hover after 500 ms. Plain hover never opens a preview. Peek is a labelled dialog with managed keyboard focus, Escape/focus return and viewport placement below the top bar. Its heading and accessible dialog name use the full item title, wrapping without truncation or a repeated short name; chips retain disambiguated short names. It includes type/status, short summary, Copy reference and Go to. Go to selects, opens detail and reveals clear of sticky elements. Peek's onPeekSeen route callback supplies the revision captured when the item first appears, fires once after 1000 ms uninterrupted viewing, and resets on item change or close. App persists that observation through navigation.markItemSeen and the shared reading lane, without acknowledging later agent revisions.
+
+Compact Markdown references and Waiting/detail paths use the inline name-chip variant: display inline, zero padding and border, inherited line height. Breadcrumb and trail buttons also add no padding or box. Peek measures the bottom of the header, tabs and ancestor slot, includes its border in measured height, and clamps its border box within the viewport. Explicit reveals capture the target row’s offset after positioning and retain that offset through later preview-clamp reflow; edge/breadcrumb observers must not rebase it before the layout observer corrects the row; owner key, pointer or wheel input immediately restores the ordinary first-visible anchor. Closing detail holds the visible selected or answered row through width reflow. Disable CSS scroll anchoring so Chromium exercises the same application hold as WKWebView. The Focus action follows preview links and Show more in DOM order, uses `tabIndex=-1` and is labelled `Focus on <name>`.
+
+Peek answering uses OwnerDraftStore and useSubmit with the same question/binding revision, draft save, operation identity and uncertainty checks as detail. Offer only option picks and a one-line text input. Multi-line drafts remain intact and require Open details; do not flatten or truncate owner text. A close keeps the draft and an input receipt locks the current question against another send.
+
+A fixed 28 px ancestor slot sits outside the scroller, reserving its space even when empty. Derive at most three nearest ancestors from the first row fully visible below the pinned topic header and within the scroller/window bounds. Keep this reference separate from the partially visible reading anchor and recompute it after reflow; show no ancestors when no row fits. Breadcrumb reveals and selected-item edge-marker activation use preventScroll focus; deliberate reveal handles scrolling separately. The selected-item control is labelled separately from Filter items.
+
+Recent is a distinct-item list, newest first and capped at 15 per session, with a three-item trail and Next for oldest waiting. Resolve current names through the shared session-cached peekNames/itemLabels pass. Changed only uses isNewToOwner/isChangedSinceRead from the Alpha.14.3 selectors with the optimistic reading-lane seen view. Visits from other sessions' peeks or acknowledgements go through the shared serialized preference writer. Focus stores an optional top-level item reference per session and filters only Map rows. Double-click bullet and the visible Focus action enter; the notice exits. Clear a missing Focus root only after ready raw session data confirms removal, preserving cold loads and pending-removal Undo. Explicit reveals outside the branch leave Focus; Waiting remains global.
+
+Ack all reviews only ackTarget-eligible finding/explanation items in the topic. Its confirmation captures exact proposals. Keep the plain to-ack count when none qualify; otherwise show Ack all and any remaining count as to ack one by one. Core has no reverse acknowledgement, so Undo cancels a five-second hold before the first command. The session-owned queue survives component unmounts, flushes confirmed holds on stop/unload before readers close, sends acknowledgements sequentially, and skips an unchanged result already acknowledged by hand. It stops visibly on stale proposals, failed or uncertain saves. Retry reuses an uncertain operation's exact identity; completed entries never re-enter the queue.
 
 Start with variable-height DOM rows memoized by item revision. Add virtualization only if the recorded large-fixture performance evidence shows a real problem; virtualize the flattened visible list with measured heights and keep ARIA focus and scroll anchoring.
 
@@ -339,6 +351,15 @@ deleting selection, expansion, filters, scroll or drafts. A rejected write keeps
 the last valid view. Unknown completion retains the original operation ID and
 exact patch for explicit same-operation reconciliation.
 
+Alpha.14.2b adds two defaulted fields to SessionPreferences without a schema-version change:
+`focused_item_id?: ItemRef` (omitted when Focus is off) and `recent_items?: RecentItem[]`
+(omitted when empty). Each RecentItem holds `item_id`, `action` (`viewed`, `peeked`,
+`answered`, or `acked`) and `visited_at: UtcMillis`. The list is newest first,
+contains unique item references, and has a hard bound of 15. Rust DTOs, generated
+TypeScript and JSON schemas own this additive contract; older preference files
+continue to load. Views ignore unavailable Focus targets and recent items and
+resolve names from current session data rather than persisting a second copy.
+
 Manual connection explicitly chooses a new Ariadne session or an existing
 registered session in that project. A fresh Claude conversation may attach to
 Session X while retaining its topics, items and history; unfinished topics/items
@@ -371,7 +392,9 @@ Keyboard navigation works when focus is outside editable controls:
 | Left / h | Collapse or move to parent |
 | Home / End | First / last visible row |
 | Cmd+J | Reveal and scroll to the selected item, including from editable controls |
-| `n` | Select/reveal the next unseen item, wrapping; leave it unseen until opened |
+| Space | Peek at the focused Map item or name chip |
+| Cmd+E | Open Recent with Changed only filtering |
+| `n` | Highlight/reveal the next unseen item, wrapping; leave it unseen until opened |
 | Enter | Open detail, expand/collapse topic, or activate focused navigation control |
 | `a` | Ack the focused eligible item; otherwise focus answer control for waiting item or oldest waiting item |
 | `1`–`9` | Select an answer option; never submit |

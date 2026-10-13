@@ -406,6 +406,20 @@ describe('registered global capture', () => {
 });
 
 describe('source-backed Waiting and Sent panel', () => {
+  it('keeps the full Sent question in one navigation control without a nested name chip', async () => {
+    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
+    const revealItem = vi.fn();
+    render(<WaitingColumn store={store} drafts={drafts()} revealItem={revealItem} openSession={vi.fn()} />);
+    const sent = store.getSnapshot().sent.find(row => row.route?.item_id === '3')!;
+    const element = document.querySelector<HTMLElement>(`[data-sent-input="${sent.input.id}"]`)!;
+    expect(element.querySelector('.waiting-sent-question')?.textContent).toBe(sent.input.payload.target_snapshot.item_question);
+    expect(element.querySelector('.waiting-sent-question button')).toBeNull();
+    fireEvent.click(element);
+    expect(revealItem).toHaveBeenCalledWith(sent.route);
+    revealItem.mockClear();
+    fireEvent.keyDown(element, { key: 'Enter' });
+    expect(revealItem).toHaveBeenCalledWith(sent.route);
+  });
   it.each(['item', 'topic', 'session', 'project'] as const)('hides Sent during %s removal and restores the same row on Undo without sending', async kind => {
     const { store, transport, drafts } = setup(); transport.capture(); await store.start();
     const session = store.getSnapshot().sessions[0]!.session;

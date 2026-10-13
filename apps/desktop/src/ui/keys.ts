@@ -8,7 +8,7 @@ export type IntentKind =
   | 'move-down' | 'move-up' | 'first' | 'last' | 'unfold' | 'fold' | 'enter' | 'send'
   | 'answer' | 'choose' | 'choose-send' | 'answer-words' | 'bring' | 'respond' | 'drop' | 'later' | 'hide' | 'reopen' | 'archive'
   | 'search' | 'graph' | 'messages' | 'waiting' | 'escape' | 'remove' | 'history-back' | 'history-forward'
-  | 'text-smaller' | 'text-larger' | 'text-default';
+  | 'text-smaller' | 'text-larger' | 'text-default' | 'peek' | 'recent';
 
 export type WorkspaceIntent =
   | { readonly kind: Exclude<IntentKind, 'choose' | 'choose-send'> }
@@ -28,7 +28,7 @@ const plain: Readonly<Record<string, Exclude<IntentKind, 'choose' | 'choose-send
   ArrowDown: 'move-down', j: 'move-down', ArrowUp: 'move-up', k: 'move-up', Home: 'first', End: 'last',
   ArrowRight: 'unfold', l: 'unfold', ArrowLeft: 'fold', h: 'fold', Enter: 'enter',
   a: 'answer', b: 'bring', r: 'respond', d: 'drop', z: 'later', x: 'hide', o: 'reopen', e: 'archive',
-  '/': 'search', g: 'graph', m: 'messages', w: 'waiting', Escape: 'escape', Backspace: 'remove', Delete: 'remove',
+  '/': 'search', g: 'graph', m: 'messages', w: 'waiting', Escape: 'escape', Backspace: 'remove', Delete: 'remove', ' ': 'peek',
 };
 
 /** The intent a key press means, or null when it is not a workspace key. */
@@ -40,6 +40,7 @@ export function workspaceIntent(event: KeyLike): WorkspaceIntent | null {
     if (!event.shiftKey && event.key === '[') return { kind: 'history-back' };
     if (!event.shiftKey && event.key === ']') return { kind: 'history-forward' };
     if (event.key.toLowerCase() === 'f') return { kind: 'search' };
+    if (!event.shiftKey && event.key.toLowerCase() === 'e') return { kind: 'recent' };
     if (event.key === 'Enter') return { kind: 'send' };
     return null;
   }

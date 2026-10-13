@@ -43,6 +43,10 @@ async function openSession(id = route.session_id, pending = false) {
     expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
   });
 }
+async function goToChip(element: Element) {
+  await act(async () => { fireEvent.click(element); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Go to' })); });
+}
 async function allSessions() {
   const button = screen.getByRole('button', { name: /^All sessions/ });
   await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false)); fireEvent.click(button);
@@ -53,10 +57,53 @@ function setup(strict = false) {
   const app = <DesktopApp service={service} />;
   return { transport, ...render(strict ? <StrictMode>{app}</StrictMode> : app) };
 }
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 // These composed journeys include independent seen saves under default file parallelism.
 describe('ordinary desktop composition', { timeout: 10_000 }, () => {
+  it('clears the New tag and Since card only after a full peek dwell, leaving an early close unread', async () => {
+    const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!, target = session.items['1.1']!;
+    const baseline = new Date(Date.now() - 60_000).toISOString();
+    target.created_at = new Date(Date.now() - 30_000).toISOString(); target.changes = []; target.short = 'New receipt branch';
+    session.updated_at = target.created_at; session.items['1']!.why = 'Review [the new branch](item:1.1).';
+    transport.preferences.seen = [{ session: route, since: baseline, items: [], topics: [] }];
+    render(<DesktopApp service={createDesktopService(transport)} />); await openSession();
+    fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
+    const detail = await screen.findByRole('article', { name: `Detail of ${session.items['1']!.question}` });
+    const row = () => document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1.1"]')!;
+    expect(within(row()).getByRole('img', { name: 'New to you' })).toBeTruthy();
+    const since = screen.getAllByRole('region', { name: 'Since you were here' }).find(region => within(region).queryByRole('button', { name: /^Since you were here/ }))!;
+    fireEvent.click(within(since).getByRole('button', { name: /^Since you were here/ }));
+    expect(within(since).getByRole('button', { name: 'New receipt branch' })).toBeTruthy();
+    const chip = within(detail).getByRole('button', { name: `${target.question} · Open` });
+    vi.useFakeTimers(); fireEvent.click(chip); act(() => vi.advanceTimersByTime(999));
+    expect(within(row()).getByRole('img', { name: 'New to you' })).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' }); act(() => vi.advanceTimersByTime(10));
+    expect(within(row()).getByRole('img', { name: 'New to you' })).toBeTruthy();
+    expect(within(since).getByRole('button', { name: 'New receipt branch' })).toBeTruthy();
+    fireEvent.click(chip); await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(within(row()).queryByRole('img', { name: 'New to you' })).toBeNull();
+    expect(within(since).queryByRole('button', { name: 'New receipt branch' })).toBeNull();
+    expect(within(since).getByText('All caught up')).toBeTruthy();
+    expect(screen.getByRole('article').getAttribute('data-detail-item-id')).toBe('1');
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(transport.preferences.seen![0].items).toContainEqual({ item_id: target.id, revision: target.revision });
+  });
+
+  it('keeps owner reply item-reference words plain inside the composed detail peek scope', async () => {
+    const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!, answer = session.answers[0]!;
+    answer.selected_option_id = null; answer.text = 'Keep [my exact branch words](item:2).\nPreserve the next line.';
+    const input = session.inputs[answer.input_id]!;
+    input.payload.selected_option_id = null; input.payload.text = answer.text;
+    session.messages.find(message => message.id === answer.message_id)!.body = answer.text;
+    render(<DesktopApp service={createDesktopService(transport)} />); await openSession();
+    fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
+    const chat = await screen.findByRole('region', { name: 'Conversation' }), bubble = chat.querySelector(`[data-message-id="${answer.message_id}"]`)!;
+    expect(bubble.textContent).toContain('Keep my exact branch words.\nPreserve the next line.');
+    expect(within(bubble as HTMLElement).queryByRole('button', { name: `${session.items['2']!.question} · Waiting on me` })).toBeNull();
+    expect(bubble.querySelector('a, .name-chip')).toBeNull();
+  });
+
   it('reserves a newer item reveal before resolution and prevents an older queued tab from being submitted', async () => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
@@ -83,7 +130,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     fireEvent.click(screen.getByRole('button', { name: 'Switch to light' }));
     await waitFor(() => expect(writing).toBe(true));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Projects' })); });
-    await act(async () => { fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ })); });
+    await goToChip(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     expect(projectWrites()).toHaveLength(initialProjectWrites);
     await act(async () => { releaseOwner(); });
     await waitFor(() => expect(resolving).toBe(true));
@@ -111,7 +158,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       }
       return invoke(name, args);
     });
-    await act(async () => { fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ })); });
+    await goToChip(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     await waitFor(() => expect(resolving).toBe(true));
     fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
     await screen.findByRole('heading', { name: 'Projects' });
@@ -179,7 +226,8 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     await waitFor(() => expect(entered).toBe(true), { timeout: 3000 });
-    fireEvent.click(await screen.findByRole('button', { name: /^Branched into Add the receipt lookup test/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Branched into Add the receipt lookup/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Go to' }));
     // A reveal must finish before this unrelated background response arrives.
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1');
@@ -826,15 +874,17 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
     await act(async () => { parent.focus(); });
     expect(document.activeElement).toBe(parent);
-    const fork = await screen.findByRole('button', { name: /^Branched into Add the receipt lookup test/ });
+    const fork = await screen.findByRole('button', { name: /^Branched into Add the receipt lookup/ });
     expect(fork.hasAttribute('disabled')).toBe(false);
     await act(async () => {
       if (ordering === 'click then focus') { fireEvent.click(fork); fork.focus(); }
       else { fork.focus(); fireEvent.click(fork); }
     });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Go to' })); });
     await waitFor(() => expect(entered).toBe(true));
     expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(true);
-    expect(transport.queries.some(query => query.request.command === 'reveal_item' && query.request.params.item_id === '1.1')).toBe(true);
+    // Opening the peek already blurred the row; Go to waits for that write before resolving.
+    expect(transport.queries.some(query => query.request.command === 'reveal_item' && query.request.params.item_id === '1.1')).toBe(false);
     if (outcome === 'uncertain') transport.failNext = 'preferences_patch';
     if (outcome === 'rejected') reject = true;
     if (outcome === 'shortcut') {
@@ -896,7 +946,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       return this.matches('[role="treeitem"]') ? new DOMRect(0, 20, 300, 40) : rectangle.call(this);
     });
     const { transport } = setup(), invoke = transport.invoke.bind(transport);
-    let release!: () => void, entered = false, rejected = false;
+    let release!: () => void, entered = false, rejected = false, conflictRevision = 0;
     let selectionCapture: number | null = null;
     const gate = new Promise<void>(resolve => { release = resolve; });
     vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
@@ -909,12 +959,13 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
         && request.command.params.entries.every(entry => entry.kind === 'set_session_view' && entry.preferences.scroll !== null)) {
         entered = true; await gate; rejected = true; transport.mutations.push(structuredClone(request));
         // A native-side writer advanced the document without notifying the renderer.
-        if (code === 'revision_conflict') ++transport.preferences.revision;
+        if (code === 'revision_conflict') conflictRevision = ++transport.preferences.revision;
         return { api_version: 1, ok: false, error: { code, message: 'Scroll edit rejected.', hint: 'Choose the view again.',
           retryable: false, field_errors: [] } };
       }
       if ('command' in request && request.command.command === 'preferences_patch'
-        && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1')) {
+        && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1')
+        && request.command.params.entries.some(entry => entry.kind === 'set_global')) {
         selectionCapture = transport.preferences.revision;
       }
       return invoke(name, args);
@@ -925,16 +976,19 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
     const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
     await act(async () => { parent.focus(); });
-    const fork = await screen.findByRole('button', { name: /^Branched into Add the receipt lookup test/ });
+    const fork = await screen.findByRole('button', { name: /^Branched into Add the receipt lookup/ });
     await act(async () => { fireEvent.click(fork); fork.focus(); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Go to' })); });
     await waitFor(() => expect(entered).toBe(true));
     await act(async () => { release(); await gate; });
     const selections = () => mutations(transport, 'preferences_patch').filter(request => request.command.command === 'preferences_patch'
-      && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1'));
+      && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1')
+      && request.command.params.entries.some(entry => entry.kind === 'set_global'));
     if (code === 'revision_conflict') {
       await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
       expect(selections()).toHaveLength(1);
       const selection = selections()[0].command;
+      expect(selection.command === 'preferences_patch' && selection.params.expected_preferences_revision).toBeGreaterThanOrEqual(conflictRevision);
       // A background seen save may commit after selection. Verify the revision at send.
       expect(selectionCapture).not.toBeNull();
       expect(selection.command === 'preferences_patch' && selection.params.expected_preferences_revision).toBe(selectionCapture);
@@ -973,7 +1027,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Switch to light' }));
     await waitFor(() => expect(writing).toBe(true));
-    await act(async () => { fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ })); });
+    await goToChip(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(true);
     await act(async () => { releaseWrite(); await writeGate; });
     await waitFor(() => expect(reading).toBe(true));
@@ -1020,7 +1074,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       if (hold) completed = true;
       return response;
     });
-    fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
+    await goToChip(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     await waitFor(() => expect(entered).toBe(true));
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     const search = screen.getByLabelText('Search questions and outcomes');
@@ -1055,7 +1109,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       }
       return invoke(name, args);
     });
-    fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
+    await goToChip(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     await waitFor(() => expect(entered).toBe(true));
     const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
     expect(parent.getAttribute('aria-disabled')).toBe('true');

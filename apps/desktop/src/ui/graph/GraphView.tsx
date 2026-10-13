@@ -158,7 +158,7 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
     if (!error) { notices.dismiss(errorNoticeId); return; }
     notices.push({ id: errorNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: error });
   }, [errorNoticeId, error]);
-  const [scrollTarget, setScrollTarget] = useState<{ id: string; center: boolean } | null>(null);
+  const [scrollTarget, setScrollTarget] = useState<{ id: string; center: boolean; focus?: boolean } | null>(null);
   const mounted = useRef(true), request = useRef(0);
   const offered = localReveal ?? reveal;
   const currentReveal = offered === dismissedReveal ? null : offered;
@@ -184,7 +184,7 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
     setLocalReveal(null);
     if (reveal?.store !== store || reveal.kind !== 'item') return;
     if (reveal.route.item_id === own.current) own.current = null;
-    else setScrollTarget({ id: reveal.route.item_id, center: true });
+    else setScrollTarget({ id: reveal.route.item_id, center: true, focus: true });
   }, [reveal]);
   useLayoutEffect(() => { ++request.current; setLocalReveal(null); setPending(null); setInflight(null); setError(null); }, [store]);
 
@@ -284,7 +284,7 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
     if (!scroller.current || !element) return;
     setScrollTarget(null);
     scrollToNode(scroller.current, element, scrollTarget.center);
-    if (scroller.current.contains(document.activeElement)) element.focus({ preventScroll: true });
+    if (scrollTarget.focus || scroller.current.contains(document.activeElement)) element.focus({ preventScroll: true });
   }, [scrollTarget, graph]);
   useEffect(() => () => onHoverItem?.(null), [store, onHoverItem]);
 

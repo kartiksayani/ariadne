@@ -3,8 +3,10 @@
 // four lines, with Show more) and under them the delivery of the owner's latest
 // message, the collapsed note, the inline answer box, the round tag, hover actions, the
 // top-line text badge.
-import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
-import { Markdown } from '../shared/MarkdownText';
+import { useCallback, useContext, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { TreeFonts } from './fonts';
+import { ItemReference, ItemRefs, Markdown } from '../shared/MarkdownText';
+import { shortLabel } from '../shared/short';
 import { StatusBadge } from '../shared/StatusBadge';
 import { ackTitle } from '../shared/ack';
 import { SessionClosedChip } from '../shared/SessionClosedChip';
@@ -37,13 +39,13 @@ function PreviewText({ text }: { readonly text: string }) {
 }
 
 /** The item's own details under the title, by priority (Item Row.dc.html:68-75). A delivery never takes this place. */
-function preview(row: Row, jump: () => void): Preview | null {
+function preview(row: Row): Preview | null {
   const item = row.item;
   if (row.later) return { text: null, node: <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}><i className="ph ph-clock" /><span>Parked for later · still open</span></div> };
   if (item.status === 'waiting_on_me' && item.ask) return { text: item.ask, node: <div className="tree-line tree-ask"><PreviewText text={item.ask} /></div> };
   if (item.status === 'replaced' && row.replacedBy) {
     return { text: null, node: <div className="tree-line" style={{ color: neutral(66) }}><i className="ph ph-arrow-bend-down-right tree-line-small" /><span>Replaced by</span>
-      <button type="button" className="tree-jump" title={row.replacedBy.question} aria-label={row.replacedBy.question} onClick={event => { event.stopPropagation(); jump(); }}>{row.replacedBy.question}</button>
+      <ItemReference itemId={row.replacedBy.id} className="tree-jump" inline>{row.replacedBy.question}</ItemReference>
       <StatusBadge status={visual(row.replacedBy.status)} variant="text" /></div> };
   }
   if ((closed(item.status) || item.status === 'open' || item.status === 'in_progress') && item.outcome) {
@@ -66,6 +68,7 @@ function delivery(row: Row, fix: ReactNode): ReactNode {
 
 /** Clamp the body only when folding hides at least three lines. */
 function PreviewBlock({ value, open, onToggle }: { value: Preview | null; open: boolean; onToggle: () => void }) {
+  const fonts = useContext(TreeFonts);
   const box = useRef<HTMLDivElement>(null);
   const [clamp, setClamp] = useState({ lines: 0, height: 0 });
   const long = clamp.lines >= CLAMP_LINES + MIN_HIDDEN_LINES;
@@ -75,18 +78,14 @@ function PreviewBlock({ value, open, onToggle }: { value: Preview | null; open: 
     const next = excerpt ? measurePreviewLines(excerpt, CLAMP_LINES) : { lines: 0, height: 0 };
     setClamp(previous => previous.lines === next.lines && previous.height === next.height ? previous : next);
   }, [text]);
-  useLayoutEffect(() => { measure(); }, [measure]);
+  useLayoutEffect(() => { measure(); }, [measure, fonts]);
   useLayoutEffect(() => {
     const excerpt = text == null ? null : box.current?.querySelector<HTMLElement>('.tree-clamp');
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
     if (excerpt) observer?.observe(excerpt);
     const content = excerpt?.querySelector<HTMLElement>('.tree-clamp-content');
     if (content) observer?.observe(content);
-    const fonts = document.fonts;
-    let live = true;
-    void fonts?.ready.then(() => { if (live) measure(); });
-    fonts?.addEventListener('loadingdone', measure);
-    return () => { live = false; observer?.disconnect(); fonts?.removeEventListener('loadingdone', measure); };
+    return () => { observer?.disconnect(); };
   }, [text, measure]);
   return <div ref={box} className="tree-preview" data-open={open || undefined} data-clamped={long && !open || undefined}
     style={{ '--tree-clamp': CLAMP_LINES, '--tree-clamp-height': `${clamp.height}px` } as CSSProperties}
@@ -123,13 +122,16 @@ export interface ItemRowProps {
   readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
   readonly onSelect: (id: string) => void;
   readonly onToggle: (id: string) => void;
-  readonly onJump: (id: string) => void;
   readonly onHover: (id: string | null) => void;
+  readonly onFocusBranch?: (id: string) => void;
+  readonly onPeekHover?: (id: string, event: MouseEvent<HTMLDivElement>) => void;
+  readonly onPeekLeave?: () => void;
 }
 
-export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, highlight, note, actions, answer, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, onJump, onHover }: ItemRowProps) {
+export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, highlight, note, actions, answer, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, onHover, onFocusBranch, onPeekHover, onPeekLeave }: ItemRowProps) {
   const item = row.item, status = visual(row.status);
-  const details = preview(row, () => { if (row.replacedBy) onJump(row.replacedBy.id); });
+  const name = useContext(ItemRefs)?.lookup(item.id)?.label ?? shortLabel(item);
+  const details = preview(row);
   const muted = closed(item.status) || row.context || row.later || row.hidden;
   const actionButton = (action: RowAction) => <button key={action.title} type="button" tabIndex={action.persistent ? 0 : -1}
     className={`tree-action${action.persistent ? ' tree-action-ack' : ''}`} title={action.title} aria-label={action.title} disabled={action.disabled}
@@ -140,7 +142,8 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
     data-open={unfolded || undefined} data-item-id={item.id} data-row={row.key} data-highlight={highlight ?? undefined}
     data-next-unseen={nextUnseen || undefined} data-next-unseen-pulse={nextUnseenPulse || undefined}
     style={{ paddingLeft: 12 + row.depth * 24 }} onFocus={event => { if (event.target === event.currentTarget) onFocus(row.key); }}
-    onKeyDown={onKeyDown} onClick={() => onSelect(item.id)} onMouseEnter={() => onHover(item.id)} onMouseLeave={() => onHover(null)}>
+    onKeyDown={onKeyDown} onClick={() => onSelect(item.id)} onMouseEnter={event => { onHover(item.id); onPeekHover?.(item.id, event); }}
+    onMouseMove={event => onPeekHover?.(item.id, event)} onMouseLeave={() => { onHover(null); onPeekLeave?.(); }}>
     <div className="tree-mark" />
     {row.hue !== undefined && <span aria-hidden="true" className="tree-top-colour" style={{ background: `hsl(${row.hue} 48% 58%)` }} />}
     <Guides guides={row.guides} />
@@ -148,7 +151,7 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
       ? <button type="button" className="tree-chevron" tabIndex={-1} aria-label="Expand or collapse"
         onClick={event => { event.stopPropagation(); onToggle(item.id); }}><i className={row.expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} /></button>
       : <span className="tree-chevron-space" />}
-    <span className="tree-icon"><StatusBadge status={status} variant="icon" /></span>
+    <span className="tree-icon" onDoubleClick={event => { if (!item.parent && onFocusBranch) { event.stopPropagation(); onFocusBranch(item.id); } }}><StatusBadge status={status} variant="icon" /></span>
     <div className="tree-body">
       <div className="tree-heading"><div className="tree-question" style={{ color: muted ? neutral(64) : 'var(--color-text)' }}>
         {row.segments.map((segment, index) => <span key={index} className={segment.hit ? 'tree-hit' : undefined}>{segment.text}</span>)}
@@ -159,6 +162,8 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
         {row.sessionClosed && <SessionClosedChip reason={closedReason} />}
         <StatusBadge status={status} label={row.badge} variant="text" /></span></div>
       <PreviewBlock value={details} open={unfolded} onToggle={() => onUnfold(item.id)} />
+      {!item.parent && onFocusBranch && <button type="button" className="tree-focus-action" tabIndex={-1} aria-label={`Focus on ${name}`} disabled={disabled}
+        onClick={event => { event.stopPropagation(); onFocusBranch(item.id); }}>Focus</button>}
       {row.ack && <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}>{ackTitle(row.ack, item.status)}</div>}
       {delivery(row, fix)}
       {note && <button type="button" className="tree-collapsed" tabIndex={-1} data-weak={highlight === 'weak' || undefined}

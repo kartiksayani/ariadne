@@ -110,6 +110,8 @@ export class NavigationStore {
   private timer: ReturnType<typeof setInterval> | null = null;
   private pending: PendingMutation | null = null;
   private activeMutation: Promise<boolean> | null = null;
+  private preparingRecent = false;
+  private recentFlight: Promise<boolean> | null = null;
   private textScaleTarget: { value: number; expectedRevision: number | null } | null = null;
   private textScaleFlight: Promise<boolean> | null = null;
   private readonly seenQueue = new Map<string, SeenPatch>();
@@ -142,6 +144,7 @@ export class NavigationStore {
   // Observe only the already executing write; uncertain operations still need
   // explicit reconciliation. This neither schedules nor retries a mutation.
   readonly getWritingCompletion = () => !this.stopped && this.state.writing ? this.activeMutation : null;
+  readonly isWritingRecent = () => this.state.writing && this.activeMutation !== null && this.activeMutation === this.recentFlight;
   readonly getRefreshCompletion = () => this.flight;
   readonly hasQueuedTextScale = () => this.textScaleTarget !== null;
   readonly subscribe = (receive: () => void): Unsubscribe => {
@@ -658,6 +661,37 @@ export class NavigationStore {
       } }]);
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
+  /** Waiting previews retain their trail without opening a tab or changing navigation. */
+  async saveRecentItems(session: SessionRef, recentItems: NonNullable<SessionPreferences['recent_items']>, expectedPreferencesRevision: number): Promise<boolean> {
+    try {
+      const preferences = await this.editingPreferences(expectedPreferencesRevision);
+      if (!preferences || this.stopped || this.pending) return false;
+      const current = preferences.sessions.find(view => sameRoute(view.session, session));
+      let view: SessionPreferences;
+      if (current) view = structuredClone(current);
+      else {
+        const opened = this.opened.get(session)?.getSnapshot().snapshot?.session;
+        const snapshot = opened ?? (await this.service.query({ session, request: { command: 'session_get', params: {} } })).session;
+        if (!sameRoute(session, { project_id: snapshot.project_id, session_id: snapshot.id })) throw new ServiceFailure('invalid_response');
+        if (this.stopped || this.pending) return false;
+        // Match the existing unopened-view defaults used by hiding and opening a session.
+        view = { session, tab_open: false, selected_item_id: null,
+          tab_order: Math.max(-1, ...preferences.sessions.map(saved => saved.tab_order)) + 1,
+          expanded_item_ids: [...initialExpansion(snapshot)],
+          filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null };
+      }
+      const entries: ReplayEntries = fresh => {
+        const saved = fresh.sessions.find(value => sameRoute(value.session, session));
+        const base = saved ?? { ...view, tab_order: Math.max(-1, ...fresh.sessions.map(value => value.tab_order)) + 1 };
+        return [{ kind: 'set_session_view', preferences: { ...base, recent_items: structuredClone(recentItems) } }];
+      };
+      this.preparingRecent = true;
+      let completion: Promise<boolean>;
+      try { completion = this.patch(preferences, entries(preferences)!, undefined, entries); }
+      finally { this.preparingRecent = false; }
+      return await completion;
+    } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
+  }
   /** Hiding is an owner view preference; no domain mutation reaches the agent. */
   async setHidden(item: ItemRoute, hidden: boolean, expectedPreferencesRevision: number): Promise<boolean> {
     ++this.ownerPreparing;
@@ -887,6 +921,12 @@ export class NavigationStore {
     ++this.epoch;
     const operation: Promise<boolean> = Promise.resolve().then(() => this.completeMutation(pending));
     this.activeMutation = operation;
+    if (this.preparingRecent) {
+      this.recentFlight = operation;
+      // A background visit can invalidate an in-flight catalogue capture.
+      // Retain its requested refresh rather than waiting for the next poll.
+      if (this.flight) this.requested = true;
+    }
     this.seenAdvance = null;
     this.publish({ writing: true, pendingOperationId: pending.request.command.op_id, error: null });
     const clear = () => {

@@ -28,7 +28,6 @@ import { fileLinkTitle, fileReference, safeHref } from '../shared/markdown';
 import { copyText } from '../shared/clipboard';
 import { notices } from '../pages/notices';
 import { isViewConflict } from '../shared/conflictNotice';
-import { itemLabels } from '../shared/short';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { closedSessionQuestion, sessionAnswerBlocked } from '../../selectors/sessionClosed';
 import { SessionClosedChip } from '../shared/SessionClosedChip';
@@ -37,6 +36,9 @@ import { StatusBadge } from '../shared/StatusBadge';
 import { actionText, boxText, detailModel, detailPath, type ActionKey, type Kid, type LinkView, type OpenMode, type PendingView, type WordsKind } from './model';
 import { useDetailSubmit, type DraftTarget, type Words } from './submit';
 import './detail.css';
+import { ItemRefSession, usePeek } from '../peek/context';
+import { peekNames } from '../peek/names';
+import { navigationVisits } from '../navigation/visits';
 
 /** The pane is scrolled to (nearly) its end. */
 const nearEnd = (pane: HTMLElement) => pane.scrollHeight - pane.scrollTop - pane.clientHeight < 80;
@@ -53,19 +55,23 @@ function focusRoot(itemId: string) {
 export function DetailPath({ store, itemId, onOpenItem }: { readonly store: SessionStore; readonly itemId: string; readonly onOpenItem: (itemId: string) => void }) {
   const session = useSession(store).snapshot?.session;
   const path = session ? detailPath(session, itemId) : [];
-  const labels = itemLabels(path.flatMap(crumb => crumb.itemId && session?.items[crumb.itemId] ? [session.items[crumb.itemId]!] : []), session?.topics);
+  const labels = session ? peekNames(session) : new Map<string, string>();
   const topicId = session?.items[itemId]?.topic_id;
   const topicName = topicId ? session?.topics[topicId]?.name : undefined;
-  return <nav className="detail-path" aria-label="Item location">
+  return <ItemRefSession.Provider value={session ? { project_id: session.project_id, session_id: session.id } : null}><ItemRefs.Provider value={{
+    lookup: id => { const target = session?.items[id]; return session && target && !itemRemoved(session, id) ? { label: target.question, status: displayStatus(session, target) } : null; },
+    route: id => ({ project_id: session!.project_id, session_id: session!.id, item_id: id }), onOpenItem,
+  }}><nav className="detail-path" aria-label="Item location">
     {path.map((crumb, index) => {
       const full = crumb.itemId ? session?.items[crumb.itemId]?.question : topicName;
       return <span className="detail-crumb" key={crumb.itemId ?? 'topic'}>
       {/* The topic crumb has no reveal target yet; item crumbs open their item. */}
-      <button type="button" title={full} aria-label={full} onClick={() => { if (crumb.itemId) onOpenItem(crumb.itemId); }}>{crumb.itemId ? labels.get(crumb.itemId) : crumb.label}</button>
+      {crumb.itemId !== null ? <ItemReference itemId={crumb.itemId} title={full} ariaLabel={full} inline preserveContent>{labels.get(crumb.itemId)}</ItemReference>
+        : <button type="button" title={full} aria-label={full}>{crumb.label}</button>}
       {index < path.length - 1 && <i className="ph ph-caret-right" aria-hidden="true" />}
     </span>;
     })}
-  </nav>;
+  </nav></ItemRefs.Provider></ItemRefSession.Provider>;
 }
 
 export interface ItemDetailProps {
@@ -160,14 +166,17 @@ function YouSaid({ how, text, note = '' }: { readonly how: PendingView['how']; r
   </>;
 }
 
-function KidButton({ kid, onOpen }: { readonly kid: Kid; readonly onOpen: (id: string) => void }) {
-  return <button type="button" className={`detail-kid${kid.closed ? ' detail-kid-closed' : ''}`} onClick={() => onOpen(kid.id)}>
-    <span className="detail-kid-icon"><StatusBadge status={kid.status} variant="icon" size={15} /></span><span className="detail-kid-text">{kid.question}</span>
-  </button>;
+function KidButton({ kid }: { readonly kid: Kid }) {
+  const peek = useContext(ItemRefs), scope = useContext(ItemRefSession);
+  const navigation = usePeek();
+  const name = scope ? navigation?.reference({ ...scope, item_id: kid.id })?.name : undefined;
+  return <ItemReference itemId={kid.id} className={`detail-kid${kid.closed ? ' detail-kid-closed' : ''}`} ariaLabel={kid.question} preserveContent>
+    <span className="detail-kid-icon"><StatusBadge status={kid.status} variant="icon" size={15} /></span><span className="detail-kid-text">{name ?? peek?.lookup(kid.id)?.name ?? kid.question}</span>
+  </ItemReference>;
 }
 
 /** A short child list scrolls independently; its fade disappears once the last row is visible. */
-function ChildrenBox({ kids, onOpen }: { readonly kids: readonly Kid[]; readonly onOpen: (id: string) => void }) {
+function ChildrenBox({ kids }: { readonly kids: readonly Kid[] }) {
   const box = useRef<HTMLDivElement>(null);
   const [more, setMore] = useState(false);
   const measure = () => { const node = box.current; if (node) setMore(node.scrollHeight - node.clientHeight - node.scrollTop > 1); };
@@ -184,7 +193,7 @@ function ChildrenBox({ kids, onOpen }: { readonly kids: readonly Kid[]; readonly
       if (row.bottom > bounds.bottom) node.scrollTop += row.bottom - bounds.bottom;
       else if (row.top < bounds.top) node.scrollTop -= bounds.top - row.top;
       measure();
-    }}>{kids.map(kid => <KidButton key={kid.id} kid={kid} onOpen={onOpen} />)}</div>
+    }}>{kids.map(kid => <KidButton key={kid.id} kid={kid} />)}</div>
   </div>;
 }
 
@@ -316,7 +325,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     atEnd.current = nearEnd(pane);
   };
   useEffect(() => { atEnd.current = true; followingAsk.current = false; positionedScroll.current = null; openingChangePositioned.current = false; setTitleExpanded(false); }, [itemId]);
-  const sentJustNow = () => { justSent.current = true; showLatest(); };
+  const sentJustNow = () => { navigationVisits.record(current.route, itemId, 'answered'); justSent.current = true; showLatest(); };
   const chatKey = model ? model.chat.map(entry => `${entry.id}:${entry.message.body}:${entry.result}:${entry.pending?.input.state}:${entry.asks.map(ask => `${ask.text}:${ask.now}`).join(',')}:${entry.forks.length}`).join('|') : null;
   useEffect(() => {
     if (chatKey === null) return;
@@ -464,11 +473,11 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
   const disabledActions = model.open?.actions.some(action => action.disabled);
   const dockHint = current.status !== 'ready' || current.error || disabledActions ? model.open?.hint
     : model.chat.some(entry => entry.pending) ? model.delivery?.text : null;
-  const relatedLabels = itemLabels(model.related.flatMap(section => section.items.map(target => session.items[target.id]!)), session.topics);
-  return <ItemRefs.Provider value={{ lookup: id => {
+  const relatedLabels = peekNames(session);
+  return <ItemRefSession.Provider value={{ project_id: session.project_id, session_id: session.id }}><ItemRefs.Provider value={{ lookup: id => {
     const target = session.items[id];
     return target && !itemRemoved(session, target.id) ? { label: target.question, status: displayStatus(session, target) } : null;
-  }, onOpenItem }}><FileRefProject.Provider value={session.project_id}><article className="item-detail" data-detail-item-id={itemId} data-status={model.status} aria-label={`Detail of ${item.question}`}>
+  }, route: id => ({ project_id: session.project_id, session_id: session.id, item_id: id }), onOpenItem }}><FileRefProject.Provider value={session.project_id}><article className="item-detail" data-detail-item-id={itemId} data-status={model.status} aria-label={`Detail of ${item.question}`}>
     <div className="detail-body" ref={body} onScroll={event => {
       const pane = event.currentTarget;
       if (pane.scrollTop !== positionedScroll.current) followingAsk.current = false;
@@ -513,23 +522,23 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
 
     {model.replaced && <section className="detail-section">
       {sectionLabel('Replaced by')}
-      <button type="button" className="detail-replaced" title={model.replaced.question} aria-label={model.replaced.question} onClick={() => onOpenItem(model.replaced!.id)}>
-        <i className="ph ph-arrow-bend-down-right" aria-hidden="true" /><span>{model.replaced.question}</span><StatusBadge status={model.replaced.status} variant="text" />
-      </button>
+      <ItemReference itemId={model.replaced.id} className="detail-replaced" title={model.replaced.question} ariaLabel={model.replaced.question} preserveContent>
+        <i className="ph ph-arrow-bend-down-right" aria-hidden="true" /><span>{relatedLabels.get(model.replaced.id)}</span><StatusBadge status={model.replaced.status} variant="text" />
+      </ItemReference>
     </section>}
 
     {model.kids.length > 0 && <section className="detail-section detail-kids" aria-label="Child items">
       {sectionLabel(model.kidLabel)}
-      <ChildrenBox kids={model.kids} onOpen={onOpenItem} />
+      <ChildrenBox kids={model.kids} />
     </section>}
 
     {model.related.map(section => <section key={section.direction} className="detail-section detail-related" aria-label={section.label}>
       {sectionLabel(section.label)}
-      {section.items.map(target => <button key={target.id} type="button" className={`detail-related-item${target.hidden ? ' is-hidden' : ''}`}
-        title={target.question} aria-label={`${target.question}${target.hidden ? ' (hidden)' : ''} · ${STATUS[target.status].label}`} onClick={() => onOpenItem(target.id)}>
+      {section.items.map(target => <ItemReference key={target.id} itemId={target.id} className={`detail-related-item${target.hidden ? ' is-hidden' : ''}`} preserveContent
+        title={target.question} ariaLabel={`${target.question}${target.hidden ? ' (hidden)' : ''} · ${STATUS[target.status].label}`}>
         <span className="detail-related-label">{relatedLabels.get(target.id)}</span>
         {target.hidden && <span className="detail-related-hidden">Hidden</span>}<StatusBadge status={target.status} variant="text" />
-      </button>)}
+      </ItemReference>)}
     </section>)}
 
     {model.links.length > 0 && <section className="detail-section detail-links" aria-label="Item links">
@@ -589,8 +598,9 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
               return outcome;
             }} />}
           {entry.result && <div className="detail-msg detail-msg-result"><span aria-hidden="true">↳</span><Markdown className="detail-msg-text" text={entry.result} inline /><CopyMessage text={entry.result} /></div>}
-          {entry.forks.map(fork => <button type="button" className="detail-fork" key={fork.id} onClick={() => onOpenItem(fork.id)}>
-            <i className="ph ph-git-fork" aria-hidden="true" /><span>Branched into {fork.question}</span><StatusBadge status={fork.status} variant="text" /></button>)}
+          {entry.forks.map(fork => <ItemReference itemId={fork.id} className="detail-fork" key={fork.id} preserveContent title={fork.question}
+            ariaLabel={`Branched into ${relatedLabels.get(fork.id)} · ${STATUS[fork.status].label}`}>
+            <i className="ph ph-git-fork" aria-hidden="true" /><span>Branched into {relatedLabels.get(fork.id)}</span><StatusBadge status={fork.status} variant="text" /></ItemReference>)}
         </li>)}
       </ol>
     </section>}
@@ -600,7 +610,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
     {(ackTo || model.open || model.followUp) && <div className="detail-quick-actions">
     {ackTo && <section className="detail-section detail-ack" aria-label="Acknowledge item">
       <button type="button" className="btn btn-secondary detail-action" title={ackTitle(ackTo, item.status)} aria-label={ackTitle(ackTo, item.status)}
-        disabled={ack.busy} onClick={() => { void ack.run(item.id); }}>
+        disabled={ack.busy} onClick={() => { void ack.run(item.id).then(saved => { if (saved) navigationVisits.record(current.route, item.id, 'acked'); }); }}>
         <i className="ph ph-check" aria-hidden="true" />{ackTitle(ackTo, item.status)}<span className="detail-key" aria-hidden="true">a</span>
       </button>
     </section>}
@@ -658,5 +668,5 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
       {draftState.preferenceUncertain && <button type="button" className="btn btn-secondary" onClick={() => { void drafts.retryPreferences(); }}>Try saving your draft again</button>}
     </section>}
     </div>}
-  </article></FileRefProject.Provider></ItemRefs.Provider>;
+  </article></FileRefProject.Provider></ItemRefs.Provider></ItemRefSession.Provider>;
 }
