@@ -683,7 +683,8 @@ export function TreeView(props: TreeViewProps) {
       openingPlacement.current = null;
       scrollRequested.current = id;
     }
-    if (reveal?.kind === 'item' && reveal !== previous.reveal) { setKbd(false); focusRow(id); }
+    // Leaving Focus can mount the target on the next render. Keep the handoff until its row exists.
+    if (reveal?.kind === 'item' && reveal !== previous.reveal) { setKbd(false); focusRequested.current = id; }
   }, [reveal, selectedId, graph]);
   // Hold the saved reading position while fonts and initial rows settle. Selection or panel changes
   // end this restoration, as do the owner's scrolling, clicking or keyboard navigation.
