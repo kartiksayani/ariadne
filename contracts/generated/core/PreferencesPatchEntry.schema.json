@@ -94,6 +94,23 @@
     {
       "type": "object",
       "properties": {
+        "input_id": {
+          "$ref": "#/$defs/UuidV4"
+        },
+        "kind": {
+          "type": "string",
+          "const": "resolve_unsent_input"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "input_id"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
         "at": {
           "$ref": "#/$defs/UtcMillis"
         },

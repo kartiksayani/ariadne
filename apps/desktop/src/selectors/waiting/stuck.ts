@@ -47,7 +47,8 @@ function cancelledInput(session: Immutable<Session>, message: Immutable<Message>
   return input && input.state === 'cancelled' ? input : undefined;
 }
 /**
- * Only an edit sent again leaves the history: a later message carries its words.
+ * Only an edit sent again leaves the history: a later item message carries its words,
+ * or a later topic reply replaces the topic message after editing.
  * Every owner cancellation stays visible, including stores from before core recorded a cause.
  */
 export function withdrawn(session: Immutable<Session>, message: Immutable<Message>): boolean {
@@ -61,22 +62,23 @@ export interface NotSent {
   readonly input: Immutable<Input>;
   /** The plain reason and, for an owner cancellation, whether the agent may have seen it. */
   readonly line: string;
-  /** The owner already sent these same words again to the same item or topic, so "Put back in reply box" has nothing left to do. */
+  /** The owner sent these words again, or sent a later topic reply after taking this one back to edit. */
   readonly again: boolean;
 }
 const notSentLine = { owner_edit: 'Taken back to edit', agent_removed: 'Not sent: cancelled when the agent removed this work', topic_archived: 'Not sent: cancelled when you archived this topic',
   session_closed: 'Not sent: cancelled when you closed this session' } as const;
-/** A later message of the owner's to the same item or topic carries the same words and is not itself cancelled: it was put back and sent. */
+/** An item resend carries the same words; a topic edit is resolved by a later reply even when its words changed. */
 function sentAgain(session: Immutable<Session>, input: Immutable<Input>): boolean {
   const text = input.payload.text.trim(), option = input.payload.selected_option_id;
+  const topicEdit = input.cancel_cause === 'owner_edit' && input.kind === 'topic_reply' && input.target.item_id === null;
   return (!!text || !!option) && Object.values(session.inputs).some(other => !!other && other.seq > input.seq
     && other.target.topic_id === input.target.topic_id && other.target.item_id === input.target.item_id
     && other.state !== 'cancelled' && other.state !== 'skipped'
-    && other.payload.text.trim() === text && other.payload.selected_option_id === option);
+    && (topicEdit ? other.kind === 'topic_reply' : other.payload.text.trim() === text && other.payload.selected_option_id === option));
 }
 /**
  * Owner cancellations keep their words and explain whether a delivery was attempted. Archive and close keep
- * their line; one taken back to edit is hidden instead once its words were sent again (`withdrawn`).
+ * their line; one taken back to edit is hidden once it was sent again (`withdrawn`), including an edited topic reply.
  */
 export function notSent(session: Immutable<Session>, message: Immutable<Message>): NotSent | null {
   const input = cancelledInput(session, message);

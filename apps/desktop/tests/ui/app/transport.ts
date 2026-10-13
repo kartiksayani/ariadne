@@ -64,6 +64,9 @@ export class AppTransport implements DesktopTransport {
       const command = request.command;
       if (command.command === 'preferences_patch') {
         for (const entry of command.params.entries) {
+          if (entry.kind === 'resolve_unsent_input') this.preferences.resolved_unsent_input_ids = [...new Set([
+            ...(this.preferences.resolved_unsent_input_ids ?? []), entry.input_id,
+          ])];
           if (entry.kind === 'mark_seen') applySeen(this.preferences, entry);
           if (entry.kind === 'set_global') this.preferences.global = structuredClone(entry.preferences);
           if (entry.kind === 'set_session_view') {

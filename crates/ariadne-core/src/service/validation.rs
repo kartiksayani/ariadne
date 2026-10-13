@@ -384,6 +384,28 @@ impl OwnerCommand {
                 text(&params.summary, 16 * 1024, true)?;
             }
             Self::PreferencesPatch { params, .. } => {
+                let recovery_entries = params
+                    .entries
+                    .iter()
+                    .filter(|entry| {
+                        matches!(entry, PreferencesPatchEntry::ResolveUnsentInput { .. })
+                    })
+                    .count();
+                if recovery_entries > 0 {
+                    if recovery_entries != params.entries.len() {
+                        return Err(invalid(
+                            "Recovery markers must be saved separately from other preferences",
+                        ));
+                    }
+                    let mut inputs = std::collections::BTreeSet::new();
+                    for entry in &params.entries {
+                        if let PreferencesPatchEntry::ResolveUnsentInput { input_id } = entry {
+                            if !inputs.insert(input_id) {
+                                return Err(invalid("Duplicate resolved unsent input"));
+                            }
+                        }
+                    }
+                }
                 for entry in &params.entries {
                     match entry {
                         PreferencesPatchEntry::SetGlobal { preferences } => {
@@ -509,7 +531,8 @@ impl OwnerCommand {
                             }
                         }
                         PreferencesPatchEntry::SetLater { .. }
-                        | PreferencesPatchEntry::DeleteDraft { .. } => {}
+                        | PreferencesPatchEntry::DeleteDraft { .. }
+                        | PreferencesPatchEntry::ResolveUnsentInput { .. } => {}
                     }
                 }
             }
@@ -1138,7 +1161,9 @@ impl QueryResult {
                 }
                 text(&result.summary, 1024 * 1024, true)?;
             }
-            (Self::PreferencesGet(_), QueryRequest::PreferencesGet {}) => {}
+            (Self::PreferencesGet(snapshot), QueryRequest::PreferencesGet {}) => {
+                crate::native::validate_preferences_response(snapshot)?;
+            }
             (Self::RevealItem(result), QueryRequest::RevealItem { item_id }) => {
                 let QueryVisibility::Owner(owner) = context.visibility() else {
                     return Err(scope_error());
@@ -1156,7 +1181,7 @@ impl QueryResult {
             _ => return Err(scope_error()),
         }
         // session_get is local full snapshot; bounded read responses retain caps.
-        if !matches!(self, Self::SessionGet(_)) {
+        if !matches!(self, Self::SessionGet(_) | Self::PreferencesGet(_)) {
             size(self, 1024 * 1024)?;
         }
         Ok(())

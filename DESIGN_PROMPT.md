@@ -34,10 +34,11 @@ Items must make sense to someone who doesn't remember any codes. Every item read
 **Screens and views:**
 1. **Tree view (main).** A collapsible outline. Each row shows the question and, once closed, its outcome, both in full sentences, plus a status badge. Closed branches (decided, done, dropped, replaced) collapse by default and look dimmed. A replaced item clearly points to its replacement.
 2. **"Waiting on me" panel.** Pinned, and always visible. It lists only the items waiting on my answer across all topics, oldest first, each with its plain-language path ("SDK cache PR › test fixtures › fallback-merge test"). This answers "what do I still have to decide?"
-3. **Item detail.** The question, the outcome, the reasoning, the links, and a **timeline** of the chat messages that created and touched the item, with excerpts. This answers "this message relates to that item, which came from that earlier message."
+3. **Item detail.** The question, the outcome, the reasoning, the links, and the **complete item conversation**, including prior replies and rounds. This answers "this message relates to that item, which came from that earlier message."
 4. **Answer inline.** For an item waiting on me: the agent's options as buttons with its recommendation marked, each showing its consequence, plus a free-text box. Answering moves the item along, and the agent picks it up.
 5. **Graph view (secondary).** The same items as connected nodes, to see how far one question branched out.
-6. **Message rail (optional).** A narrow list of chat messages. Hovering a message highlights the items it touched, and hovering an item highlights its messages.
+
+The agent's general chat stays in its terminal. Each item's conversation stays in item detail. Topic messages that touch no item and lifecycle activity remain stored without a separate conversation view. Persistent unsent-message notices and recovery actions remain reachable.
 
 **Interactions.** Keyboard first: arrows to move, Enter for detail, `a` to answer, `/` to search the text. Filters by status, topic and owner. It updates live as the agent writes. Fast answering matters more than anything else.
 
@@ -45,7 +46,7 @@ Items must make sense to someone who doesn't remember any codes. Every item read
 
 **What to deliver.**
 - The tree view with the Waiting-on-me panel.
-- Item detail with its timeline.
+- Item detail with its complete conversation.
 - The inline answer state.
 - The graph view.
 - Empty and loading states.

@@ -74,6 +74,7 @@ fn queue(rows: Vec<WaitingRow>, complete: bool) -> WaitingCapture {
 
 fn preferences(global: GlobalPreferences, revision: u64) -> PreferencesSnapshot {
     PreferencesSnapshot {
+        resolved_unsent_input_ids: vec![],
         schema_version: SchemaVersion::new(1).unwrap(),
         revision: PositiveSafeInteger::new(revision).unwrap(),
         global,

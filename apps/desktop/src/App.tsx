@@ -624,7 +624,7 @@ function Workspace({ application }: { application: Application }) {
     onPeekSeen={(target, observedRevision) => navigation.markItemSeen(target, target.item_id, observedRevision)}
     onVisit={(target, action) => { if (action !== 'opened') navigationVisits.record(target, target.item_id, action === 'peek' ? 'peeked' : 'answered'); }}>
     <ItemRefSession.Provider value={route ?? null}><ItemHistoryContext.Provider value={historyControls}><RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys}>
-    <UnsentMessageNotices waiting={application.waiting} drafts={application.drafts} opened={navigation.opened}
+    <UnsentMessageNotices waiting={application.waiting} drafts={application.drafts} opened={navigation.opened} navigation={navigation}
       selectedStore={store ?? null} />
     <DraftConflictNotices drafts={application.drafts} opened={navigation.opened} selectedSession={route ?? null} />
     <AgentRemovalNotices waiting={application.waiting} controllers={application.actions} navigation={navigation}

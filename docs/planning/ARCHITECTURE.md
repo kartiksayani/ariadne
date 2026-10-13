@@ -143,7 +143,10 @@ the proposed extension without making it a v1 acceptance gate.
 ## Design grounding and scope
 
 Implement the actual waiting panel, tabs/project lists, sentence-based tree,
-item detail, rounds/forks, message rail, graph, owner actions and edge states.
+item detail with complete conversations and rounds/forks, graph, owner actions
+and edge states. The agent's general chat stays in the terminal; topic messages
+that touch no item and lifecycle activity remain stored without a separate view.
+Persistent unsent-message notices and recovery actions remain reachable.
 Archive/close are guarded against hiding unresolved work. Continue creates a
 provenance-linked snapshot copy, not a cross-file shared mutable topic. Exact
 source-to-component mapping and intentional differences are in [DESIGN](DESIGN.md).

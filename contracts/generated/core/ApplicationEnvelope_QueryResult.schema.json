@@ -3815,6 +3815,13 @@
             "$ref": "#/$defs/ItemRoute"
           }
         },
+        "resolved_unsent_input_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          },
+          "maxItems": 10000
+        },
         "revision": {
           "$ref": "#/$defs/PositiveSafeInteger"
         },

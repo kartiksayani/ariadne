@@ -6,6 +6,7 @@ pub use agent::AgentResolver;
 mod errors;
 mod preferences;
 pub(crate) use preferences::session_preferences_without_legacy_rail;
+pub(crate) use preferences::validate_preferences_response;
 pub use preferences::PreferencesService;
 
 use crate::{

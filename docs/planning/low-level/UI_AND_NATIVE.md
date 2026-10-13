@@ -43,6 +43,20 @@ dispatch. See [ADR-0041](../../adr/ADR-0041-native-core-and-owner-preferences.md
 The canonical owner-only preference read and typed revision-checked patch records
 are published by [CoreService](API_AND_MCP.md#service-owned-read-and-preference-records).
 
+Cancelled messages without an item conversation use the owner-only
+`resolved_unsent_input_ids` preference ledger to keep Dismiss and confirmed
+Put back resolved across restarts, without waiting for a later submitted
+message. Put back first confirms the restored draft, then saves a separate
+`resolve_unsent_input` patch; an unconfirmed marker leaves the recovery notice
+available. The bounded monotonic ledger is stored in fixed `ui-recovery.json`
+under the same `ui.lock` as `ui.json`. Companion-first publication and receipt
+roll-forward preserve markers through interrupted writes and saves by older
+binaries. The disk adapter writes each session's legacy `rail: "hidden"` while
+the current API and renderer contracts omit rail state.
+Ordinary preferences keep their 1MiB response budget, with a separate bounded
+400KiB recovery-ID and revision metadata allowance so a valid near-limit save by an older binary
+cannot make drafts or markers unreadable. Other response budgets are unchanged.
+
 ## 2. Snapshot and event synchronization
 
 ### Module service and route contract

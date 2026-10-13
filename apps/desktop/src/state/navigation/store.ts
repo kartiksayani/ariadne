@@ -28,7 +28,7 @@ type QueuedNavigation = { selection: NavigationSelection; reveal: RevealedItem |
   request: number; started: number; running: boolean; confirmed: boolean; fresh: boolean;
   resolve: (saved: boolean) => void; completion: Promise<boolean>; confirm: (saved: boolean) => void;
   timer: ReturnType<typeof setTimeout> };
-type NavigationPatch = Extract<PreferencesPatchEntry, { kind: 'set_global' | 'set_session_view' | 'set_later' }>;
+type NavigationPatch = Extract<PreferencesPatchEntry, { kind: 'set_global' | 'set_session_view' | 'set_later' | 'resolve_unsent_input' }>;
 type ReplayEntries = (preferences: PreferencesSnapshot) => NavigationPatch[] | null;
 /** Draft bookkeeping shares seen admission and provenance with navigation. */
 export interface PreferencesWriteCoordination {
@@ -563,9 +563,11 @@ export class NavigationStore {
             const index = saved.sessions.findIndex(view => sameRoute(view.session, entry.preferences.session));
             if (index < 0) saved.sessions.push(structuredClone(entry.preferences));
             else saved.sessions[index] = structuredClone(entry.preferences);
-          } else {
+          } else if (entry.kind === 'set_later') {
             saved.later = saved.later.filter(item => !sameRoute(item, entry.item) || item.item_id !== entry.item.item_id);
             if (entry.later) saved.later.push(structuredClone(entry.item));
+          } else {
+            saved.resolved_unsent_input_ids = [...new Set([...(saved.resolved_unsent_input_ids ?? []), entry.input_id])];
           }
         }
         this.seenAdvance = null;
@@ -646,6 +648,15 @@ export class NavigationStore {
       const preferences = await this.editingPreferences(expectedPreferencesRevision);
       if (!preferences || this.stopped || this.pending) return false;
       return await this.patch(preferences, [{ kind: 'set_global', preferences: { ...preferences.global, ...change } }]);
+    } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
+  }
+  /** Permanently resolves one unsent notice after dismissal or a confirmed put-back. */
+  async resolveUnsentInput(inputId: string): Promise<boolean> {
+    try {
+      if (this.stopped || this.pending || !this.state.preferences) return false;
+      const preferences = this.preferences();
+      if (preferences.resolved_unsent_input_ids?.includes(inputId)) return true;
+      return await this.patch(preferences, [{ kind: 'resolve_unsent_input', input_id: inputId }]);
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
   async saveSessionView(view: SessionPreferences, expectedPreferencesRevision: number): Promise<boolean> {
@@ -957,13 +968,13 @@ export class NavigationStore {
       this.pending = null;
       if (this.state.writing || this.state.pendingOperationId !== null) this.publish({ writing: false, pendingOperationId: null });
       this.flushNavigation();
-      // View/Later receipts already publish the exact saved preferences. Their
+      // View/Later/recovery receipts already publish the exact saved preferences. Their
       // completion must not wait for unrelated catalogue reads, which can remain
       // busy under periodic reconciliation. Navigation/global and domain edits
       // retain their immediate refresh; view edits reconcile on the normal timer.
       const command = pending.request.command;
       const viewOnly = command.command === 'preferences_patch' && command.params.entries.every(entry =>
-        entry.kind === 'set_session_view' || entry.kind === 'set_later');
+        entry.kind === 'set_session_view' || entry.kind === 'set_later' || entry.kind === 'resolve_unsent_input');
       if (!viewOnly) await this.refresh();
       if ('project_id' in receipt && pending.followupIntent === this.navigationIntent) {
         void this.navigate({ kind: 'project', project_id: receipt.project_id });
