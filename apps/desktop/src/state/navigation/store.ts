@@ -6,6 +6,7 @@ import type { ItemStatus } from '../../generated/domain/models';
 import { RegisteredRoutes } from '../../data/routes';
 import { immutable, OpenSessions, type Immutable, type SessionStore } from '../../data/session-store';
 import { CoreFailure, ServiceFailure, type RendererService, type Unsubscribe } from '../../data/service';
+import { navigationFailure, OwnFailure } from '../../data/plain';
 import { initialExpansion } from '../../selectors/tree/rows';
 import * as catalogue from './catalogue';
 import { applySeen, queueSeen, sessionSeen, type SeenPatch } from '../preferences/seen';
@@ -22,8 +23,10 @@ type PendingMutation = { request: OwnerMutationRequest; confirmed: (receipt: Mut
   current?: () => boolean };
 type QueuedNavigation = { selection: NavigationSelection; reveal: RevealedItem | null; isCurrent: () => boolean;
   resolveReveal?: () => Promise<RevealedItem | null>;
+  failed?: (failure: Failure) => void;
   request: number; started: number; running: boolean; confirmed: boolean; fresh: boolean;
-  resolve: (saved: boolean) => void; timer: ReturnType<typeof setTimeout> };
+  resolve: (saved: boolean) => void; completion: Promise<boolean>; confirm: (saved: boolean) => void;
+  timer: ReturnType<typeof setTimeout> };
 type NavigationPatch = Extract<PreferencesPatchEntry, { kind: 'set_global' | 'set_session_view' | 'set_later' }>;
 type ReplayEntries = (preferences: PreferencesSnapshot) => NavigationPatch[] | null;
 /** Draft bookkeeping shares seen admission and provenance with navigation. */
@@ -337,6 +340,7 @@ export class NavigationStore {
       // navigation capture. Read immediately before each background attempt.
       const preferences = await this.service.query({ session: null, request: { command: 'preferences_get', params: {} } });
       if (this.stopped) return false;
+      this.observeSeenCommit(preferences);
       if (this.pending || this.ownerPreparing) {
         entries.forEach(entry => queueSeen(this.seenQueue, entry));
         this.seenDue = true;
@@ -698,28 +702,35 @@ export class NavigationStore {
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
   navigate(selection: NavigationSelection, reveal: RevealedItem | null = null, isCurrent: () => boolean = () => true,
-    resolveReveal?: () => Promise<RevealedItem | null>): Promise<boolean> {
+    resolveReveal?: () => Promise<RevealedItem | null>, failed?: (failure: Failure) => void): Promise<boolean> {
     if (this.stopped || !isCurrent()) return Promise.resolve(false);
     ++this.navigationIntent;
     this.startupRoute = null;
     const request = ++this.navigationRequest;
     const previous = this.queuedNavigation;
-    if (previous) { clearTimeout(previous.timer); previous.resolve(false); }
+    if (previous) this.finishNavigation(previous, false);
+    let confirm!: (saved: boolean) => void;
+    const completion = new Promise<boolean>(resolve => { confirm = resolve; });
     const result = new Promise<boolean>(resolve => {
       // Return control even if an existing operation loses its response. Keep
       // the destination visible and resume it after explicit reconciliation;
       // this timeout never retries or changes an uncertain operation.
       const timer = setTimeout(() => resolve(false), 1000);
-      this.queuedNavigation = { selection: structuredClone(selection), reveal, resolveReveal, isCurrent, request, started: Date.now(),
-        running: false, confirmed: false, fresh: !!this.pending, resolve, timer };
+      this.queuedNavigation = { selection: structuredClone(selection), reveal, resolveReveal, failed, isCurrent, request, started: Date.now(),
+        running: false, confirmed: false, fresh: !!this.pending, resolve, completion, confirm, timer };
     });
     this.publish({ pendingNavigation: immutable(selection) });
     this.flushNavigation();
     return result;
   }
+  /** Reveals with a continuation follow confirmation, even after the bounded UI handoff. */
+  getNavigationCompletion(request: number): Promise<boolean> {
+    return this.queuedNavigation?.request === request ? this.queuedNavigation.completion : Promise.resolve(false);
+  }
   private finishNavigation(queued: QueuedNavigation, saved: boolean): void {
     clearTimeout(queued.timer);
     queued.resolve(saved);
+    queued.confirm(saved);
     if (this.queuedNavigation === queued) {
       this.queuedNavigation = null;
       this.publish({ pendingNavigation: null });
@@ -798,12 +809,25 @@ export class NavigationStore {
         if (selection.kind === 'session') { this.opened.open(selection.session); this.initializeSeen(selection.session); }
       }, replay, seenWaited, current);
       return saved && current();
-    } catch (error: unknown) { if (current()) this.publish({ error: fail(error) }); return false; }
+    } catch (error: unknown) {
+      if (current()) {
+        const failure = fail(error);
+        if (queued.failed) queued.failed(failure);
+        else this.publish({ error: failure instanceof CoreFailure
+          ? new OwnFailure({ ...failure.error, message: navigationFailure(failure), hint: '' }) : failure });
+      }
+      return false;
+    }
     finally { --this.ownerPreparing; if (this.seenDue) void this.flushSeen(); }
   }
   async closeTab(route: SessionRef): Promise<boolean> {
     if (this.stopped || this.pending) return false;
-    ++this.navigationRequest;
+    const queued = this.queuedNavigation;
+    if (queued?.selection.kind === 'session' && sameRoute(queued.selection.session, route)) {
+      ++this.navigationRequest;
+      ++this.navigationIntent;
+      this.finishNavigation(queued, false);
+    }
     try {
       if (this.stopped || this.pending) return false;
       const preferences = this.preferences();
@@ -812,6 +836,9 @@ export class NavigationStore {
       const entries: NavigationPatch[] = [{ kind: 'set_session_view', preferences: { ...view, tab_open: false } }];
       const selected = preferences.global.selected_navigation;
       if (selected.kind === 'session' && sameRoute(selected.session, route)) {
+        // Closing the displayed destination ends its continuations, but cannot
+        // replace a different destination the owner has already queued.
+        if (!queued) ++this.navigationRequest;
         entries.push({ kind: 'set_global', preferences: { ...preferences.global, selected_navigation: { kind: 'projects' } } });
       }
       return await this.patch(preferences, entries, () => { this.opened.close(route); this.publish({ reveal: null }); });
@@ -888,6 +915,15 @@ export class NavigationStore {
       return true;
     } catch (error: unknown) {
       const failure = fail(error);
+      // Preparation cannot have saved anything. Release the writer rather than
+      // retaining an unsent command as an uncertain operation to check again.
+      if (!pending.attempted) {
+        if (pending.current && !pending.current()) return this.discardNavigation();
+        this.pending = null;
+        this.mutationFailure = failure;
+        this.publish({ writing: false, pendingOperationId: null, error: failure });
+        return false;
+      }
       if (failure instanceof CoreFailure && !['commit_uncertain', 'delivery_uncertain'].includes(failure.error.code)
         && pending.current && !pending.current()) {
         const discarded = this.discardNavigation();

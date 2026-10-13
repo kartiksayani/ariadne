@@ -49,6 +49,15 @@ export function registrationFailure(failure: unknown): string {
 /** A failure Ariadne raised itself, whose message is already written for the owner. */
 export class OwnFailure extends CoreFailure {}
 
+/** Opening a link failed before any owner change was sent. */
+export function navigationFailure(failure: unknown): string {
+  if (failure instanceof CoreFailure && !(failure instanceof OwnFailure)) {
+    if (failure.error.code === 'io_error') return 'This session could not be opened. Check that its project folder is available, then try again.';
+    if (failure.error.code === 'not_found') return 'This session or item is no longer available.';
+  }
+  return plainFailure(failure, 'This session could not be opened. Try again.');
+}
+
 /**
  * What to say when opening the original of a copied item failed. Core sends `io_error` when the project's folder is
  * missing or can't be read: say which folder and what to do. It sends `not_found` when the original session was removed

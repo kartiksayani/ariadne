@@ -714,6 +714,67 @@ describe('agent removal receipts in the composed app', () => {
     expect(screen.getByText('Old delivery plans · 4 items')).toBeTruthy();
   });
 
+  it.each([false, true])('retains a delayed View continuation unless superseded (superseded: %s)', async superseded => {
+    const session = receiptSession(), transport = new BinTransport(session);
+    transport.preferences.sessions[0]!.filters.search = 'a question that does not match';
+    await openApp(transport);
+    const receipt = within((await screen.findByText(removalNotice(session, notice()))).closest<HTMLElement>('.pw-note')!);
+    const theme = within(document.querySelector<HTMLElement>('.shell-header')!).getByRole<HTMLButtonElement>('button', { name: 'Switch to light' });
+    await waitFor(() => expect(theme.disabled).toBe(false));
+    let release!: () => void, writing = false;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const request = args.request;
+      if ('command' in request && request.command.command === 'preferences_patch'
+        && request.command.params.entries.some(entry => entry.kind === 'set_global' && entry.preferences.theme === 'light')) {
+        writing = true; await held;
+      }
+      return invoke(name, args);
+    });
+    try {
+      fireEvent.click(theme);
+      await waitFor(() => expect(writing).toBe(true));
+      vi.useFakeTimers();
+      fireEvent.click(receipt.getByRole('button', { name: 'View' }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+      expect(screen.getByText('Opening the session…')).toBeTruthy();
+      expect(transport.preferences.sessions[0].filters.search).toBe('a question that does not match');
+      if (superseded) fireEvent.click(within(screen.getByLabelText('Projects and sessions')).getByRole('button', { name: 'Projects' }));
+      vi.useRealTimers();
+      await act(async () => { release(); });
+      if (superseded) {
+        await waitFor(() => expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'projects' }));
+        await waitFor(() => expect(screen.queryByText('Opening Projects…')).toBeNull());
+        expect(transport.preferences.sessions[0].filters.search).toBe('a question that does not match');
+        expect(screen.queryByText('Old delivery plans · 4 items')).toBeNull();
+      } else {
+        const fold = await screen.findByRole('button', { name: 'Removed by agent · 4' });
+        await waitFor(() => expect(fold.getAttribute('aria-expanded')).toBe('true'));
+        expect(transport.preferences.sessions[0].filters.search).toBe('');
+        expect(screen.getByText('Old delivery plans · 4 items')).toBeTruthy();
+      }
+    } finally { vi.useRealTimers(); await act(async () => { release(); }); }
+  });
+
+  it('reports an unavailable removal View locally and clears Opening without a generic navigation error', async () => {
+    const session = receiptSession(), transport = new BinTransport(session);
+    await openApp(transport);
+    const receipt = within((await screen.findByText(removalNotice(session, notice()))).closest<HTMLElement>('.pw-note')!);
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'session_get') return { api_version: 1, ok: false,
+        error: { code: 'io_error', message: 'Folder missing', hint: '', retryable: false, field_errors: [] } };
+      return invoke(name, args);
+    });
+    fireEvent.click(receipt.getByRole('button', { name: 'View' }));
+    await screen.findByText('The bin could not be opened. Try View again.');
+    expect(screen.queryByText(/Opening the session/)).toBeNull();
+    expect(screen.queryByText(/couldn’t read or save/)).toBeNull();
+    expect(screen.getByRole('alert').textContent).toContain('The bin could not be opened. Try View again.');
+    expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
+  });
+
   it('uses the live archived topic state when View opens a notice created before that topic was archived', async () => {
     const session = receiptSession(), transport = new BinTransport(session); await openApp(transport);
     const text = removalNotice(session, notice()); await screen.findByText(text);
