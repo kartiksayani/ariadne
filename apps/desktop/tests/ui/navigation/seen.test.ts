@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OwnerMutationRequest, PreferencesPatchEntry } from '../../../src/generated/core';
+import type { OwnerMutationRequest, PreferencesPatchEntry, ProjectListResult, SessionPreferences } from '../../../src/generated/core';
 import { createDesktopService, type DesktopTransport } from '../../../src/data/service';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { NavigationStore } from '../../../src/state/navigation/store';
@@ -68,7 +68,8 @@ describe('owner seen preference batching', () => {
         : action === 'hidden' ? store.setHidden({ ...route, item_id: '1' }, true, before.revision)
           : action === 'later' ? store.setLater({ ...route, item_id: '1' }, true, before.revision)
             : store.navigate({ kind: 'all_sessions' });
-    // The owner edit completes even while the background transport is held.
+    // A stalled background write delays the owner only for the bounded wait.
+    await vi.advanceTimersByTimeAsync(500);
     expect(await saving).toBe(true);
     expect(transport.mutations).toHaveLength(1);
     transport.holdSeen = null; release();
@@ -92,15 +93,315 @@ describe('owner seen preference batching', () => {
     });
     await vi.advanceTimersByTimeAsync(1000);
     expect(transport.preferences.revision).toBe(2);
-    // The delayed receipt leaves navigation at its old capture. Its normal
-    // owner conflict rebase preserves the marks and saves the requested theme.
-    expect(await store.saveTheme('dark', 1)).toBe(true);
+    // The delayed receipt leaves navigation at its old capture. After the bounded
+    // wait, the owner reads the committed marks before saving its requested theme.
+    const saving = store.saveTheme('dark', 1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await saving).toBe(true);
     const saved = store.getSnapshot().preferences!;
     expect(saved.revision).toBe(3);
     release();
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getSnapshot().preferences).toBe(saved);
     expect(store.getSnapshot().preferences!.global.theme).toBe('dark');
+    expect(store.getSnapshot()).toMatchObject({ error: null, writing: false, pendingOperationId: null });
+  });
+
+  it('persists an item selection after an in-flight seen write commits', async () => {
+    const { store, transport } = await setup();
+    let release!: () => void;
+    transport.holdSeen = new Promise<void>(resolve => { release = resolve; });
+    store.markItemSeen(route, '1');
+    await vi.advanceTimersByTimeAsync(1000);
+    const saving = store.saveSessionView({ ...transport.view(), selected_item_id: '2' }, 1);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(transport.mutations).toHaveLength(0);
+    expect(store.getSnapshot().error).toBeNull();
+    transport.holdSeen = null; release();
+    expect(await saving).toBe(true);
+    expect(transport.mutations).toHaveLength(2);
+    const command = transport.mutations[1].command;
+    expect(command.command === 'preferences_patch' && command.params.expected_preferences_revision).toBe(2);
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('2');
+    expect(sessionSeen(store.getSnapshot().preferences, route)?.items.map(item => item.item_id)).toEqual(['1']);
+    expect(store.getSnapshot()).toMatchObject({ error: null, writing: false, pendingOperationId: null });
+  });
+
+  it('refreshes a session before selection preparation prunes a newly created foreign hidden item', async () => {
+    const transport = new SeenTransport(), session = transport.sessions.get(route.session_id)!;
+    delete session.items['3'];
+    const { store } = await setup(true, transport);
+    const rendered = store.getSnapshot().preferences!;
+    let release!: () => void;
+    transport.holdSeen = new Promise<void>(resolve => { release = resolve; });
+    await vi.advanceTimersByTimeAsync(1000);
+    const view = structuredClone(rendered.sessions[0]) as SessionPreferences;
+    const saving = store.saveSessionView({ ...view, selected_item_id: '2' }, rendered.revision);
+    session.items['3'] = { ...session.items['2']!, id: '3', ordinal: 3 };
+    ++session.revision;
+    transport.preferences.sessions[0].hidden_item_ids = ['3'];
+    ++transport.preferences.revision;
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await saving).toBe(true);
+    expect(transport.preferences.sessions[0]).toMatchObject({ selected_item_id: '2', hidden_item_ids: ['3'] });
+    expect(store.opened.get(route)!.getSnapshot().snapshot?.session.items['3']?.id).toBe('3');
+    expect(store.getSnapshot()).toMatchObject({ error: null, writing: false, pendingOperationId: null });
+    transport.holdSeen = null; release();
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
+  it.each(['theme', 'layout'] as const)('retains a newly registered foreign project expansion while preparing a %s save', async action => {
+    const { store, transport } = await setup();
+    const rendered = store.getSnapshot().preferences!;
+    const foreignProjectId = '00000000-0000-4000-8000-000000000099';
+    let registered = false, release!: () => void;
+    transport.holdSeen = new Promise<void>(resolve => { release = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const result = await invoke(name, args);
+      if (registered && 'request' in args.request && args.request.request.command === 'project_list') {
+        const response = result as { data: { data: ProjectListResult } };
+        const projects = response.data.data.projects;
+        projects.items.push({ ...projects.items[0], project_id: foreignProjectId });
+        ++projects.snapshot_revision;
+      }
+      return result;
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    const saving = action === 'theme' ? store.saveTheme('dark', rendered.revision)
+      : store.saveLayout({ waiting_collapsed: true }, rendered.revision);
+    registered = true;
+    transport.preferences.global.session_archive_expanded_project_ids = [foreignProjectId];
+    ++transport.preferences.revision;
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await saving).toBe(true);
+    expect(transport.preferences.global.session_archive_expanded_project_ids).toEqual([foreignProjectId]);
+    expect(store.getSnapshot().preferences?.global).toMatchObject(action === 'theme' ? { theme: 'dark' } : { waiting_collapsed: true });
+    expect(store.getSnapshot().projects?.projects.items.some(project => project.project_id === foreignProjectId)).toBe(true);
+    expect(store.getSnapshot()).toMatchObject({ error: null, writing: false, pendingOperationId: null });
+    transport.holdSeen = null; release();
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
+  it('accepts the rendered revision after refresh observes a seen commit whose receipt is held', async () => {
+    const { store, transport } = await setup();
+    const rendered = store.getSnapshot().preferences!;
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void;
+    const receipt = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const result = await invoke(name, args);
+      if ('command' in args.request && args.request.command.command === 'preferences_patch'
+        && args.request.command.params.entries.every(entry => entry.kind === 'mark_seen')) await receipt;
+      return result;
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(transport.preferences.revision).toBe(2);
+    await store.refresh();
+    expect(store.getSnapshot().preferences?.revision).toBe(2);
+    const view = structuredClone(rendered.sessions[0]) as SessionPreferences;
+    const saving = store.saveSessionView({ ...view, selected_item_id: '2' }, rendered.revision);
+    expect(store.getSnapshot().error).toBeNull();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await saving).toBe(true);
+    expect(transport.mutations).toHaveLength(2);
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('2');
+    const saved = store.getSnapshot().preferences;
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getSnapshot().preferences).toBe(saved);
+    expect(store.getSnapshot()).toMatchObject({ error: null, writing: false, pendingOperationId: null });
+  });
+
+  it('recovers a failed seen-conflict classification read without leaving the owner writer pending', async () => {
+    const { store, transport } = await setup();
+    let release!: () => void, committed!: () => void;
+    transport.holdSeen = new Promise<void>(resolve => { release = resolve; });
+    const seenCommitted = new Promise<void>(resolve => { committed = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    let ownerAttempts = 0, failedReads = 0, failClassification = false;
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const request = args.request;
+      if ('request' in request && request.request.command === 'preferences_get' && failClassification) {
+        failClassification = false;
+        ++failedReads;
+        throw new Error('Classification read lost');
+      }
+      if ('command' in request && request.command.command === 'preferences_patch') {
+        if (request.command.params.entries.every(entry => entry.kind === 'mark_seen')) {
+          const result = await invoke(name, args);
+          committed();
+          return result;
+        }
+        if (++ownerAttempts === 1) {
+          transport.holdSeen = null; release();
+          await seenCommitted;
+          failClassification = true;
+        }
+      }
+      return invoke(name, args);
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    const saving = store.saveSessionView({ ...transport.view(), selected_item_id: '2' }, 1);
+    // Observe a rejected promise as well as a false result: either must settle
+    // the writer, and this recoverable read failure should still save the edit.
+    const settled = saving.then(value => ({ value }), error => ({ error }));
+    await vi.advanceTimersByTimeAsync(500);
+    expect(failedReads).toBe(1);
+    expect(store.getSnapshot()).toMatchObject({ error: null, writing: false, pendingOperationId: null });
+    expect(await settled).toEqual({ value: true });
+    expect(ownerAttempts).toBe(2);
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('2');
+  });
+
+  it.each([false, true])('rebases a seen commit between an owner read and send despite a changed navigation intent (delayed receipt: %s)', async delayedReceipt => {
+    const { store, transport } = await setup();
+    let release!: () => void, committed!: () => void, releaseReceipt!: () => void;
+    transport.holdSeen = new Promise<void>(resolve => { release = resolve; });
+    const seenCommitted = new Promise<void>(resolve => { committed = resolve; });
+    const receipt = new Promise<void>(resolve => { releaseReceipt = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    let interleaved = false;
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const request = args.request;
+      if ('command' in request && request.command.command === 'preferences_patch') {
+        if (request.command.params.entries.every(entry => entry.kind === 'mark_seen')) {
+          const result = await invoke(name, args);
+          committed();
+          if (delayedReceipt) await receipt;
+          return result;
+        }
+        if (!interleaved) {
+          interleaved = true;
+          // An admitted preference edit keeps its fields even if a newer route
+          // intent cannot enter the occupied owner writer.
+          expect(await store.navigate({ kind: 'all_sessions' })).toBe(false);
+          transport.holdSeen = null; release();
+          await seenCommitted;
+        }
+      }
+      return invoke(name, args);
+    });
+    store.markItemSeen(route, '1');
+    await vi.advanceTimersByTimeAsync(1000);
+    const saving = store.saveSessionView({ ...transport.view(), selected_item_id: '2' }, 1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await saving).toBe(true);
+    expect(transport.mutations).toHaveLength(3);
+    expect(transport.mutations[2].command.op_id).not.toBe(transport.mutations[1].command.op_id);
+    const command = transport.mutations[2].command;
+    expect(command.command === 'preferences_patch' && command.params.expected_preferences_revision).toBe(2);
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('2');
+    expect(sessionSeen(store.getSnapshot().preferences, route)?.items.map(item => item.item_id)).toEqual(['1']);
+    const saved = store.getSnapshot().preferences;
+    releaseReceipt();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getSnapshot().preferences).toBe(saved);
+    expect(store.getSnapshot()).toMatchObject({ error: null, writing: false, pendingOperationId: null });
+  });
+
+  it('keeps only the latest navigation requested during the seen wait', async () => {
+    const { store, transport } = await setup();
+    let release!: () => void;
+    transport.holdSeen = new Promise<void>(resolve => { release = resolve; });
+    await vi.advanceTimersByTimeAsync(1000);
+    const first = store.navigate({ kind: 'session', session: { ...route, session_id: secondId } });
+    await vi.advanceTimersByTimeAsync(100);
+    const latest = store.navigate({ kind: 'all_sessions' });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(transport.mutations).toHaveLength(0);
+    transport.holdSeen = null; release();
+    expect(await first).toBe(false);
+    expect(await latest).toBe(true);
+    expect(transport.mutations).toHaveLength(2);
+    expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'all_sessions' });
+    expect(store.getSnapshot()).toMatchObject({ error: null, writing: false, pendingOperationId: null });
+  });
+
+  it.each([1, 2])('keeps the ordinary foreign-conflict retry budget after a seen conflict (%s foreign conflicts)', async foreignConflicts => {
+    const { store, transport } = await setup();
+    let release!: () => void, committed!: () => void;
+    transport.holdSeen = new Promise<void>(resolve => { release = resolve; });
+    const seenCommitted = new Promise<void>(resolve => { committed = resolve; });
+    const invoke = transport.invoke.bind(transport);
+    let ownerAttempts = 0;
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const request = args.request;
+      if ('command' in request && request.command.command === 'preferences_patch') {
+        if (request.command.params.entries.every(entry => entry.kind === 'mark_seen')) {
+          const result = await invoke(name, args);
+          committed();
+          return result;
+        }
+        ++ownerAttempts;
+        if (ownerAttempts === 1) {
+          transport.holdSeen = null; release();
+          await seenCommitted;
+        } else if (ownerAttempts <= foreignConflicts + 1) {
+          transport.preferences.global.pinned = true;
+          ++transport.preferences.revision;
+        }
+      }
+      return invoke(name, args);
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    const saving = store.saveSessionView({ ...transport.view(), selected_item_id: '2' }, 1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await saving).toBe(foreignConflicts === 1);
+    expect(ownerAttempts).toBe(3);
+    expect(transport.preferences.global.pinned).toBe(true);
+    expect(transport.preferences.sessions[0].selected_item_id).toBe(foreignConflicts === 1 ? '2' : null);
+    if (foreignConflicts === 1) expect(store.getSnapshot().error).toBeNull();
+    else expect(store.getSnapshot().error).toMatchObject({ error: { code: 'revision_conflict' } });
+    expect(store.getSnapshot()).toMatchObject({ writing: false, pendingOperationId: null });
+  });
+
+  it('keeps a selection save unaffected by a seen failure while the owner write is pending', async () => {
+    const { store, transport } = await setup();
+    let releaseSeen!: () => void, releaseOwner!: () => void;
+    transport.holdSeen = new Promise<void>(resolve => { releaseSeen = resolve; });
+    transport.holdPatch = new Promise<void>(resolve => { releaseOwner = resolve; });
+    transport.failSeen = async () => { throw new Error('Lost seen response'); };
+    store.markItemSeen(route, '1');
+    await vi.advanceTimersByTimeAsync(1000);
+    const saving = store.saveSessionView({ ...transport.view(), selected_item_id: '2' }, 1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(store.getSnapshot()).toMatchObject({ writing: true, error: null });
+    transport.holdSeen = null; releaseSeen();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getSnapshot()).toMatchObject({ writing: true, error: null });
+    expect(store.getMutationFailure()).toBeNull();
+    transport.failSeen = null;
+    transport.holdPatch = null; releaseOwner();
+    expect(await saving).toBe(true);
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('2');
+    expect(store.getMutationFailure()).toBeNull();
+    expect(store.getSnapshot()).toMatchObject({ error: null, writing: false, pendingOperationId: null });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(transport.mutations).toHaveLength(3);
+    expect(sessionSeen(store.getSnapshot().preferences, route)?.items.map(item => item.item_id)).toEqual(['1']);
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('2');
+  });
+
+  it('bounds a hung seen wait and retains marks when the delayed batch conflicts', async () => {
+    const { store, transport } = await setup();
+    let release!: () => void;
+    transport.holdSeen = new Promise<void>(resolve => { release = resolve; });
+    store.markItemSeen(route, '1');
+    await vi.advanceTimersByTimeAsync(1000);
+    const saving = store.saveSessionView({ ...transport.view(), selected_item_id: '2' }, 1);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(transport.mutations).toHaveLength(0);
+    store.markItemSeen(route, '2');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await saving).toBe(true);
+    expect(transport.mutations).toHaveLength(1);
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('2');
+    transport.holdSeen = null; release();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(transport.mutations).toHaveLength(3);
+    expect(seenEntries(transport.mutations[2])[0].items.map(item => item.item_id).sort()).toEqual(['1', '2']);
+    expect(sessionSeen(store.getSnapshot().preferences, route)?.items.map(item => item.item_id).sort()).toEqual(['1', '2']);
     expect(store.getSnapshot()).toMatchObject({ error: null, writing: false, pendingOperationId: null });
   });
 
