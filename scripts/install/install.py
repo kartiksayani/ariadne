@@ -210,6 +210,8 @@ def inventory(root):
 
 
 SKILL_LINK = ".agents/skills/ariadne"
+PR_COMMENTS_SKILL_LINK = ".agents/skills/ariadne-pr-comments"
+SKILL_LINKS = (SKILL_LINK, PR_COMMENTS_SKILL_LINK)
 # "rules" no longer ships (the skills hold the rules) but stays recognised so the
 # inventory of an earlier install still validates for upgrade and uninstall.
 INTEGRATION_ROOTS = ("rules", "claude-mod", "codex-skills")
@@ -339,7 +341,8 @@ def links(home):
     return {
         **{f".local/bin/{name}": f"../share/ariadne/current/bin/{name}" for name in BINARIES},
         # Codex discovers personal skills in ~/.agents/skills/<name>/SKILL.md (ADR-0070).
-        SKILL_LINK: "../../.local/share/ariadne/current/integrations/codex-skills/ariadne",
+        **{name: f"../../.local/share/ariadne/current/integrations/codex-skills/{Path(name).name}"
+           for name in SKILL_LINKS},
     }
 
 
@@ -351,13 +354,13 @@ def link_is_ours(home, name, target, known):
     return not path.exists() or any(item["owned_links"].get(name) == target for item in known)
 
 
-def skill_link_conflict(home, known, target):
+def skill_link_conflict(home, known, name, target):
     """Return why the Codex skill link must be skipped, or None when it is ours or absent."""
-    path = home / SKILL_LINK
+    path = home / name
     for parent in (home / ".agents", path.parent):
         if exists(parent) and (parent.is_symlink() or not parent.is_dir()):
             return f"{parent} is not a plain directory"
-    if exists(path) and not link_is_ours(home, SKILL_LINK, target, known):
+    if exists(path) and not link_is_ours(home, name, target, known):
         return f"{path} already exists and is not Ariadne's link"
     return None
 
@@ -376,12 +379,12 @@ def external_plan(home, root, known, bundle_id):
         path = home / name
         if name.startswith(".local/bin/") and not exists(path.parent):
             continue
-        if name == SKILL_LINK:
-            conflict = skill_link_conflict(home, known, target)
+        if name in SKILL_LINKS:
+            conflict = skill_link_conflict(home, known, name, target)
             if conflict:
-                notes.append(f"Skipped the Codex skill link: {conflict}. Codex will not see the Ariadne skill. "
+                notes.append(f"Skipped the Codex skill link: {conflict}. Codex will not see {Path(name).name}. "
                              f"Move that path aside and run ./install.sh again, or link {path} to "
-                             f"{root / 'current/integrations/codex-skills/ariadne'} yourself.")
+                             f"{root / 'current/integrations/codex-skills' / Path(name).name} yourself.")
                 continue
         if exists(path):
             require(link_is_ours(home, name, target, known), f"Foreign or edited install path: {path}")

@@ -26,7 +26,7 @@ const REVIEW: &str = include_str!("../../../integrations/rules/review.md");
 const CHECKLIST: &str = include_str!("../../../integrations/rules/checklist.md");
 const FOLLOW_UP: &str = include_str!("../../../integrations/rules/follow-up.md");
 
-const ON_DEMAND: [&str; 7] = [
+const ON_DEMAND: [&str; 8] = [
     "inputs.md",
     "errors.md",
     "reconnect.md",
@@ -34,6 +34,7 @@ const ON_DEMAND: [&str; 7] = [
     "review.md",
     "checklist.md",
     "follow-up.md",
+    "pr-comments.md",
 ];
 const SKILL_DIRECTORIES: [&str; 2] = ["claude/plugin/skills/ariadne", "codex/skills/ariadne"];
 
@@ -70,6 +71,9 @@ fn examples(text: &str) -> Vec<String> {
 fn agent_examples(directory: &str) -> Vec<String> {
     generated(directory)
         .iter()
+        // PR import templates need fixture substitutions and have their own
+        // real-CLI scenario in pr_comments_recipe.rs.
+        .filter(|(name, _)| name != "pr-comments.md")
         .flat_map(|(_, text)| examples(text))
         .collect()
 }
@@ -674,7 +678,8 @@ fn the_core_and_on_demand_files_stay_small_and_are_each_pointed_at() {
             "{description}"
         );
         for (name, text) in &files[1..] {
-            assert!(text.len() <= 5 * 1024, "{name} is {} bytes", text.len());
+            let limit = if name == "pr-comments.md" { 10 } else { 5 } * 1024;
+            assert!(text.len() <= limit, "{name} is {} bytes", text.len());
             if ["report.md", "review.md", "checklist.md", "follow-up.md"].contains(&name.as_str()) {
                 assert!(text.len() <= 3 * 1024, "{name} is {} bytes", text.len());
                 assert!(

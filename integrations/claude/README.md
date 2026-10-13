@@ -26,6 +26,14 @@ then validates the saved receipt and scoped `bridge connection-status` projectio
 Native qualification owns canonical `Connected` evidence. The Mod never invents
 endpoint fingerprints or treats control reachability as provider readiness.
 
+`/ariadne-pr-comments <PR>` validates a PR number or github.com PR URL and starts
+the `pr-comments.md` recipe in the connected conversation. The agent uses its
+own `gh` to fetch unresolved review comments and files one topic per PR and one
+decision per comment. Only the owner's Reply choice authorizes posting that
+comment's exact approved text. The Mod invokes no GitHub process or network API.
+The shared authored recipe also generates the standalone Codex
+`ariadne-pr-comments` skill; setup/doctor include all of these resources.
+
 Use `/ariadne-connect <session-id>` in a fresh conversation to explicitly attach
 an existing active Ariadne session in the registered project. Its previous binding
 must be paused/disconnected with no queued, in-flight or needs-attention input.
