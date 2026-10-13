@@ -47,40 +47,8 @@ fn literal_text(text: &str) -> String {
     result
 }
 
-// Preserve matched code before applying the recipe's literal escaping. This
-// fixture interpreter is not a production Markdown renderer.
-fn reviewer_inline(text: &str) -> String {
-    let mut runs = Vec::new();
-    let mut chars = text.char_indices().peekable();
-    while let Some((start, ch)) = chars.next() {
-        if ch == '\\' {
-            chars.next();
-        } else if ch == '`' {
-            let mut length = 1;
-            while chars.peek().is_some_and(|(_, ch)| *ch == '`') {
-                chars.next();
-                length += 1;
-            }
-            runs.push((start, length));
-        }
-    }
-    let mut result = String::new();
-    let (mut start, mut index) = (0, 0);
-    while index < runs.len() {
-        let (open, length) = runs[index];
-        if let Some(close) = (index + 1..runs.len()).find(|&at| runs[at].1 == length) {
-            let end = runs[close].0 + length;
-            result.push_str(&literal_text(&text[start..open]));
-            result.push_str(&text[open..end]);
-            start = end;
-            index = close;
-        }
-        index += 1;
-    }
-    result.push_str(&literal_text(&text[start..]));
-    result
-}
-
+// Preserve only fences; everything else uses the same literal escaping without
+// trying to reproduce the renderer's inline runs.
 fn reviewer_text(text: &str) -> String {
     fn fence(line: &str) -> Option<(char, usize, &str)> {
         let trimmed = line.trim_start_matches(' ');
@@ -94,7 +62,7 @@ fn reviewer_text(text: &str) -> String {
         let length = trimmed.chars().take_while(|c| *c == ch).count();
         (length >= 3).then(|| (ch, length, &trimmed[length..]))
     }
-    let (mut result, mut prose) = (String::new(), String::new());
+    let mut result = String::new();
     let mut open = None;
     for line in text.split_inclusive('\n') {
         let marker = fence(line);
@@ -106,15 +74,12 @@ fn reviewer_text(text: &str) -> String {
         } else if let Some((ch, length, _)) =
             marker.filter(|(ch, _, rest)| *ch != '`' || !rest.contains('`'))
         {
-            result.push_str(&reviewer_inline(&prose));
-            prose.clear();
             result.push_str(line);
             open = Some((ch, length));
         } else {
-            prose.push_str(line);
+            result.push_str(&literal_text(line));
         }
     }
-    result.push_str(&reviewer_inline(&prose));
     result
 }
 
@@ -452,7 +417,7 @@ fn recipe_questions_are_plain_summaries_without_markdown_escapes() {
 }
 
 #[test]
-fn recipe_notes_preserve_reviewer_code_and_escape_only_surrounding_text() {
+fn recipe_notes_preserve_fences_and_escape_all_other_reviewer_text() {
     let setup = Setup::empty();
     let mut fixture: Value = serde_json::from_str(FIXTURE).unwrap();
     fixture["threads"][0]["comments"][0]["body"] = json!(
@@ -461,10 +426,13 @@ fn recipe_notes_preserve_reviewer_code_and_escape_only_surrounding_text() {
     setup.import(&fixture);
     let items = setup.read_all("items");
     let note = items[0]["item"]["note"].as_str().unwrap();
-    assert!(note.contains(r"> Use `arr[i]` and `https://x`. Outside arr\[i\] https\://x"));
+    assert!(note.contains(r"> Use \`arr\[i\]\` and \`https\://x\`. Outside arr\[i\] https\://x"));
     assert!(note.contains("> ```suggestion\n> arr[i] = \"https://x\";\n> ```"));
     assert!(note.contains(r"> Unmatched \`arr\[i\] https\://x"));
-    assert_eq!(reviewer_text("`arr[i]\nhttps://x`"), "`arr[i]\nhttps://x`");
+    assert_eq!(
+        reviewer_text("`arr[i]\nhttps://x`"),
+        "\\`arr\\[i\\]\nhttps\\://x\\`"
+    );
 }
 
 #[test]

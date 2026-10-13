@@ -24,11 +24,11 @@ Skip does nothing on GitHub. Never resolve threads, approve the PR or merge it.
 
 Keep all owner-visible titles, notes, choices and results in plain words. Internal
 IDs belong only in routing/receipts and link targets, never prose or labels.
-In Markdown notes, copy matched backtick spans and fenced code blocks (including
-GitHub suggestions) unchanged: delimiters and contents. Escape only outside
-code; unmatched inline backticks are ordinary text. For literal reviewer text,
-paths and quoted titles: double existing backslashes; backslash-escape `<`, `[`,
-`]` and ordinary backticks; change case-insensitive `http://` / `https://` to
+In Markdown notes, copy only fenced code blocks (backtick or tilde fences,
+including GitHub suggestions) unchanged: delimiters and contents. Escape
+everything else, including inline backticks and their contents. For reviewer
+text, paths and quoted titles: double existing backslashes; backslash-escape `<`, `[`,
+`]` and backticks; change case-insensitive `http://` / `https://` to
 `http\://` / `https\://`, retaining case. These display as text, without URL links.
 Never use HTML entities. Plain-text topic names need no escaping.
 
@@ -112,7 +112,7 @@ Item template:
 or backslashes. Reword instead of escaping: "Fix the first vector lookup" rather
 than "Fix vec[0] lookup". `note` starts with "Where: src/sync.rs, line 24", a summary
 and reviewer text quoted line by line using `> `. Format the whole body as above
-before quoting, preserving code across lines; escape paths and quoted titles.
+before quoting, preserving only fenced code across lines; escape paths and quoted titles.
 Explain the suggested
 action, why, confidence and cost if wrong. Show the exact proposed response
 as "Suggested reply"; picking Reply approves that text.

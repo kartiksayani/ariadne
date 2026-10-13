@@ -11,35 +11,19 @@ function literalText(text) {
     .replace(/https?:\/\//gi, scheme => scheme.replace(':', '\\:'));
 }
 
-function reviewerInline(source) {
-  const runs = [...source.matchAll(/\\.|`+/gs)].filter(match => match[0].startsWith('`'));
-  let result = '', start = 0;
-  for (let index = 0; index < runs.length; index++) {
-    const open = runs[index];
-    const closeIndex = runs.findIndex((run, at) => at > index && run[0].length === open[0].length);
-    if (closeIndex < 0) continue;
-    const end = runs[closeIndex].index + open[0].length;
-    result += literalText(source.slice(start, open.index)) + source.slice(open.index, end);
-    start = end;
-    index = closeIndex;
-  }
-  return result + literalText(source.slice(start));
-}
-
 function reviewerText(source) {
-  let result = '', prose = '', fence = null;
+  let result = '', fence = null;
   for (const line of source.match(/[^\n]*\n|[^\n]+$/g) ?? []) {
     const marker = /^ {0,3}(`{3,}|~{3,})([^\n]*)\n?$/.exec(line);
     if (fence) {
       result += line;
       if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
     } else if (marker && (marker[1][0] !== '`' || !marker[2].includes('`'))) {
-      result += reviewerInline(prose) + line;
-      prose = '';
+      result += line;
       fence = marker[1];
-    } else prose += line;
+    } else result += literalText(line);
   }
-  return result + reviewerInline(prose);
+  return result;
 }
 
 function links(value) {
@@ -86,19 +70,17 @@ describe('PR comments recipe Markdown escaping', () => {
     expect(text(parsed)).toBe(original);
   });
 
-  it('preserves matched reviewer code verbatim while escaping the same text outside code', () => {
+  it('escapes inline backticks and their contents just like other reviewer text', () => {
     const original = '`arr[i]` and `https://x` outside: arr[i] https://x';
     const escaped = reviewerText(original);
-    expect(escaped).toBe('`arr[i]` and `https://x` outside: arr\\[i\\] https\\://x');
+    expect(escaped).toBe('\\`arr\\[i\\]\\` and \\`https\\://x\\` outside: arr\\[i\\] https\\://x');
     const parsed = inline(escaped, 0);
-    expect(parsed.filter(node => node.t === 'code')).toEqual([
-      { t: 'code', text: 'arr[i]' }, { t: 'code', text: 'https://x' },
-    ]);
-    expect(text(parsed)).toBe('arr[i] and https://x outside: arr[i] https://x');
+    expect(parsed.filter(node => node.t === 'code')).toEqual([]);
+    expect(text(parsed)).toBe(original);
     expect(links(parsed)).toEqual([]);
     const multipleTicks = reviewerText('``arr[`i`] https://x``');
-    expect(multipleTicks).toBe('``arr[`i`] https://x``');
-    expect(inline(multipleTicks, 0)).toEqual([{ t: 'code', text: 'arr[`i`] https://x' }]);
+    expect(text(inline(multipleTicks, 0))).toBe('``arr[`i`] https://x``');
+    expect(links(parseMarkdown(multipleTicks))).toEqual([]);
   });
 
   it('preserves fenced suggestions verbatim across quoted lines without links', () => {
@@ -124,5 +106,18 @@ describe('PR comments recipe Markdown escaping', () => {
       expect(links(parsed)).toEqual([]);
       expect(parsed.filter(node => node.t === 'code')).toEqual([]);
     }
+  });
+
+  it.each([
+    ['paragraph breaks', '`a\n\nhttps://evil.test/x `'],
+    ['emphasis', '*`a* https://evil.test/x `'],
+    ['strikethrough', '~~`a~~ https://evil.test/x `'],
+    ['headings', '`a\n# https://evil.test/x `'],
+    ['table cells', 'a | b\n--- | ---\n`x | https://evil.test/x`'],
+  ])('defuses reviewer URLs across inline-run boundaries: %s', (_name, body) => {
+    const escaped = reviewerText(body);
+    expect(escaped).toContain('https\\://evil.test/x');
+    const quoted = escaped.split('\n').map(line => `> ${line}`).join('\n');
+    expect(links(parseMarkdown(quoted))).toEqual([]);
   });
 });
