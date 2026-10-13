@@ -844,7 +844,9 @@ export function TreeView(props: TreeViewProps) {
   };
   useLayoutEffect(() => {
     const target = focusRequested.current;
-    if (!target || !elements.current.has(target)) return;
+    if (!target) return;
+    if (selectedId !== target) { focusRequested.current = null; return; }
+    if (!elements.current.has(target)) return;
     focusRequested.current = null;
     focusRow(target);
   }, [rows, selectedId, reveal]);
@@ -992,10 +994,12 @@ export function TreeView(props: TreeViewProps) {
     const item = session?.items[id];
     return item && session && !itemRemoved(session, item.id) ? { label: names.get(id) ?? shortLabel(item), status: displayStatus(session, item) } : null;
   }, onOpenItem: id => select(id, false) }}><div role="tree" aria-label="Session items" aria-busy={state.status === 'loading'} className="tree-rows" onBlur={saveScroll}>
-    {sections.map(({ topic: row, items }) => <div key={row.key} className="tree-topic-group" role="presentation">
+    {sections.map(({ topic: row, items }) => {
+      const eligible = !archivedMode && session ? ackAllItems(session, row.topic.id) : [];
+      return <div key={row.key} className="tree-topic-group" role="presentation">
       <TopicRow row={row} focused={focusKey === row.key} actions={topicActions(row)}
-        ackAllCount={!archivedMode && session ? ackAllItems(session, row.topic.id).length : 0}
-        ackAll={!archivedMode ? <AckAll actions={actions} topicId={row.topic.id} topicName={row.topic.name} disabled={viewBusy} /> : undefined}
+        ackAllCount={eligible.length}
+        ackAll={!archivedMode ? <AckAll actions={actions} topicId={row.topic.id} topicName={row.topic.name} items={eligible} disabled={viewBusy} /> : undefined}
         prompt={row.allClosed && !archivedMode ? () => lifecycle.archive(row.topic.id) : null}
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
         reply={replying === row.topic.id && !archivedMode ? <TopicReply drafts={drafts} store={store} actions={actions} topicId={row.topic.id}
@@ -1008,14 +1012,14 @@ export function TreeView(props: TreeViewProps) {
         note={row.collapsed ? collapsedNote(row.collapsed) : null}
         actions={itemActions(row)} answer={answering === row.key ? answerControl : null} fix={fixOf(row)}
         unfolded={isUnfolded(row.key)} onUnfold={unfold}
-        onFocusBranch={focusBranch}
+        onFocusBranch={focusBranch} names={names}
         onPeekHover={(id, event) => { const handlers = peek?.chipProps({ ...route, item_id: id });
           if (event.type === 'mouseenter') handlers?.onMouseEnter(event); else handlers?.onMouseMove(event);
         }}
         onPeekLeave={() => peek?.chipProps({ ...route, item_id: '' }).onMouseLeave?.()}
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onSelect={select} onToggle={toggleItem} />)}
       {session && <AgentBin session={session} actions={actions} topicId={row.topic.id} onRemove={onRemove} />}
-    </div>)}
+    </div>; })}
   </div></ItemRefs.Provider></TreeFonts.Provider>;
 
   const loading = !session && state.status === 'loading';

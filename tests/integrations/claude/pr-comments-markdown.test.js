@@ -14,24 +14,42 @@ const fixture = JSON.parse(readFileSync(new URL('../../../crates/ariadne-cli/tes
 const normalize = source => source.replace(/\r\n?/g, '\n');
 let saved;
 
-beforeAll(() => {
-  const directory = mkdtempSync(join(tmpdir(), 'ariadne-pr-comments-render-'));
-  const output = join(directory, 'stored.json');
+function runRecipeFixture(output, run = execFileSync) {
   try {
-    // Rust interprets the recipe templates against the real CLI/Core/Store.
-    // Render its saved messages; there is no JS copy of the recipe formatter.
-    execFileSync('cargo', ['test', '-p', 'ariadne-cli', '--locked', '--offline', '--test', 'pr_comments_recipe',
+    run('cargo', ['test', '-p', 'ariadne-cli', '--locked', '--offline', '--test', 'pr_comments_recipe',
       'recipe_exports_cli_stored_messages_for_markdown', '--', '--exact'], {
       cwd: fileURLToPath(new URL('../../../', import.meta.url)),
       env: { ...process.env, ARIADNE_PR_COMMENTS_RENDER_FIXTURE: output },
       timeout: 120_000,
       stdio: 'pipe',
     });
+  } catch (error) {
+    throw new Error('PR comments fixture failed. Prebuild it from the repository root, then rerun:\n'
+      + 'cargo test -p ariadne-cli --locked --offline --test pr_comments_recipe --no-run', { cause: error });
+  }
+}
+
+beforeAll(() => {
+  const directory = mkdtempSync(join(tmpdir(), 'ariadne-pr-comments-render-'));
+  const output = join(directory, 'stored.json');
+  try {
+    // Rust interprets the recipe templates against the real CLI/Core/Store.
+    // Render its saved messages; there is no JS copy of the recipe formatter.
+    // check-commit.py prebuilds this binary before CI coverage; local runs build it here.
+    runRecipeFixture(output);
     saved = JSON.parse(readFileSync(output, 'utf8'));
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 }, 130_000);
+
+it.each(['ETIMEDOUT', 'ENOENT'])('reports the exact fixture prebuild command on %s', code => {
+  const cause = Object.assign(new Error('Fixture process failed'), { code });
+  expect(() => runRecipeFixture('stored.json', () => { throw cause; })).toThrow(expect.objectContaining({
+    message: expect.stringContaining('cargo test -p ariadne-cli --locked --offline --test pr_comments_recipe --no-run'),
+    cause,
+  }));
+});
 
 function stored(name) {
   const value = saved.find(value => value.name === name);
@@ -81,6 +99,9 @@ describe('PR comments saved waiting conversation', () => {
     expect(item.ask.length).toBeLessThan(100);
     expect(item.ask).not.toContain(comment.body);
     expect(model.answer.options.map(option => option.label)).toEqual(['Fix', 'Reply', 'Skip']);
+    expect(model.answer.options.find(option => option.label === 'Reply').consequence).toBe(
+      "Post the suggested reply shown in this item's conversation, or your own one-line text instead.",
+    );
     const context = model.chat.find(entry => entry.id === reply.id);
     expect(context.message.body).toBe(reply.body);
     expect(context.asks).toEqual([{ text: '', now: true, ordinal: 1 }]);
@@ -139,6 +160,9 @@ describe('PR comments saved waiting conversation', () => {
     expect(Buffer.byteLength(reply.body)).toBeLessThanOrEqual(4096);
     expect(reply.body).not.toContain('Suggested reply:');
     expect(item.ask).toContain('Reply needs your own text.');
+    expect(item.options.find(option => option.label === 'Reply').consequence).toBe(
+      'Post only the exact text you approve in this conversation.',
+    );
     expect(rendered(reply.body)).toHaveLength(1);
   });
 });

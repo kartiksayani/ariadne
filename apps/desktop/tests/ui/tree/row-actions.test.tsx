@@ -5,6 +5,8 @@ import type { Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
 import { ItemRow, type ItemRowProps, type RowAction } from '../../../src/ui/tree/ItemRow';
 import { TopicRow, type TopicAction, type TopicRowProps } from '../../../src/ui/tree/TopicRow';
+import { ItemRefs } from '../../../src/ui/shared/MarkdownText';
+import { peekNames } from '../../../src/ui/peek/names';
 
 afterEach(cleanup);
 
@@ -30,6 +32,29 @@ function topicProps(actions: readonly TopicAction[]): TopicRowProps {
 }
 
 describe('compact row actions', () => {
+  it('reads cached names only for visible Focus buttons without looking up display status', () => {
+    const session = structuredClone(demo) as Session;
+    session.items['1']!.short = 'Shared name';
+    session.items['2']!.short = 'Shared name';
+    const names = peekNames(immutable(session)), get = vi.spyOn(names, 'get'), lookup = vi.fn();
+    const props = itemProps([]), onFocusBranch = vi.fn();
+    const show = (parent: string | null, focus = true) => <ItemRefs.Provider value={{ lookup, onOpenItem: vi.fn() }}>
+      <ItemRow {...props} row={{ ...props.row, item: { ...props.row.item, parent } }} names={names} onFocusBranch={focus ? onFocusBranch : undefined} />
+    </ItemRefs.Provider>;
+    const mounted = render(show(null));
+    const label = names.get('1')!;
+    expect(label).not.toBe('Shared name');
+    fireEvent.click(within(mounted.container).getByRole('button', { name: `Focus on ${label}` }));
+    expect(onFocusBranch).toHaveBeenCalledWith('1');
+    get.mockClear();
+    mounted.rerender(show('2'));
+    expect(within(mounted.container).queryByRole('button', { name: /^Focus on/ })).toBeNull();
+    mounted.rerender(show(null, false));
+    expect(get).not.toHaveBeenCalled();
+    expect(lookup).not.toHaveBeenCalled();
+    get.mockRestore();
+  });
+
   it('keeps every item action in its existing order with the same names, tab behavior and callbacks', () => {
     const names = ['Ack → Done', 'Bring it up (b)', 'Reply (r)', 'Drop (d)', 'Later (z)', 'Back to Open (o)', 'Hide (x)', 'Remove (⌫)'];
     const actions: RowAction[] = names.map((title, index) => ({ title, icon: 'ph ph-check', run: vi.fn(),

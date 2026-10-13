@@ -29,20 +29,24 @@ class LayoutTransport extends AppTransport {
         session.messages.push({ ...structuredClone(owner), id: messageId, number: 80 + ordinal, body: said, input_id: null, round_id: id });
       }
     }
-    if (new URL(window.location.href).searchParams.has('largeTree')) {
+    const largeTree = new URL(window.location.href).searchParams.has('largeTree');
+    if (largeTree || new URL(window.location.href).searchParams.has('scrollTree')) {
+      // Bar geometry needs scrolling and the same detail target, without 2,000 mounted rows.
+      const roots = largeTree ? Array.from({ length: 20 }, (_, index) => index + 1) : [10];
+      const children = largeTree ? 100 : 51;
       const template = structuredClone(session.items['1']!);
       session.items = {};
       session.inputs = {}; session.operation_receipts = {};
-      for (let root = 1; root <= 20; ++root) {
-        for (let child = 0; child < 100; ++child) {
+      for (const root of roots) {
+        for (let child = 0; child < children; ++child) {
           const id = child ? `${root}.${child}` : String(root);
           session.items[id] = { ...structuredClone(template), id, ordinal: child || root, parent: child ? String(root) : null,
             question: `Sentence ${id}: ${'Variable height context. '.repeat(1 + child % 7)}`, status: child % 3 ? 'open' : 'done',
             owner: child % 2 ? { kind: 'other', name: 'Native collaborator' } : { kind: 'me' },
-            current_round_id: null, next_child: child ? 1 : 100 };
+            current_round_id: null, next_child: child ? 1 : children };
         }
       }
-      this.preferences.sessions[0]!.expanded_item_ids = Array.from({ length: 20 }, (_, index) => String(index + 1));
+      this.preferences.sessions[0]!.expanded_item_ids = roots.map(String);
       this.preferences.global.selected_navigation = { kind: 'project', project_id: route.project_id };
     }
   }

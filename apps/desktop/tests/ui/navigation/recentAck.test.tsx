@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { SessionStore } from '../../../src/data/session-store';
+import { immutable, SessionStore } from '../../../src/data/session-store';
 import { createDesktopService } from '../../../src/data/service';
 import { SessionActions } from '../../../src/components/bindings/actions';
 import type { MutationReceipt, OwnerMutationRequest, OwnerQueryRequest, SessionSeen } from '../../../src/generated/core';
@@ -11,6 +11,7 @@ import { navigationVisits } from '../../../src/ui/navigation/visits';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { notices } from '../../../src/ui/pages/notices';
 import { AppTransport, route } from '../app/transport';
+import * as ack from '../../../src/selectors/ack';
 
 const stores: SessionStore[] = [];
 afterEach(() => { cleanup(); stores.forEach(store => store.close()); stores.length = 0; notices.clear(); vi.useRealTimers(); vi.restoreAllMocks(); });
@@ -91,9 +92,37 @@ it('Recent trail shows three names/actions and Next reveals the supplied waiting
 it('Ack all includes only eligible findings/explanations from the selected live topic', async () => {
   const { session, topicId } = await ready();
   for (const [id, type] of [['2', 'question'], ['3', 'decision']] as const) Object.assign(session.items[id]!, { type, status: 'open', ack_to: 'done', ask: null });
-  expect(ackAllItems(session, topicId).map(item => item.id)).toEqual(['1', '1.1']);
-  session.items['1.1']!.ask = 'Unanswered question'; expect(ackAllItems(session, topicId).map(item => item.id)).toEqual(['1']);
-  session.topics[topicId]!.archived_at = session.updated_at; expect(ackAllItems(session, topicId)).toEqual([]);
+  expect(ackAllItems(immutable(session), topicId).map(item => item.id)).toEqual(['1', '1.1']);
+  session.items['1.1']!.ask = 'Unanswered question'; expect(ackAllItems(immutable(session), topicId).map(item => item.id)).toEqual(['1']);
+  session.topics[topicId]!.archived_at = session.updated_at; expect(ackAllItems(immutable(session), topicId)).toEqual([]);
+});
+
+it('shares one eligibility pass across topics and rerenders for a 2000-item snapshot', async () => {
+  const { session, topicId, actions } = await ready(), base = session.items['1']!, topic = session.topics[topicId]!;
+  session.items = {};
+  const topics = Array.from({ length: 20 }, (_, index) => `topic-${index}`);
+  topics.forEach(id => { session.topics[id] = { ...topic, id }; });
+  for (let index = 0; index < 2000; index++) {
+    const id = `result-${index}`;
+    session.items[id] = { ...base, id, ordinal: 2000 - index, parent: null, topic_id: topics[index % topics.length]! };
+  }
+  const first = immutable(session), eligibility = vi.spyOn(ack, 'ackTarget');
+  const items = topics.map(id => ackAllItems(first, id));
+  const controls = () => topics.map(id => <AckAll key={id} actions={actions} topicId={id} topicName={id} items={ackAllItems(first, id)} />);
+  const mounted = render(<>{controls()}</>);
+  expect(screen.getAllByRole('button', { name: 'Ack all (100)' })).toHaveLength(20);
+  mounted.rerender(<>{controls()}</>);
+  topics.forEach((id, index) => {
+    expect(ackAllItems(first, id)).toBe(items[index]);
+    expect(items[index]![0]!.ordinal).toBeLessThan(items[index]!.at(-1)!.ordinal);
+  });
+  expect(eligibility).toHaveBeenCalledTimes(2000);
+  session.items['result-0']!.ack_to = null;
+  const next = immutable(session);
+  expect(ackAllItems(next, topics[0]!)).toHaveLength(99);
+  expect(ackAllItems(next, topics[1]!)).toHaveLength(100);
+  expect(eligibility).toHaveBeenCalledTimes(4000);
+  expect(ackAllItems(first, topics[0]!)).toHaveLength(100);
 });
 
 it('Undo cancels the complete hold with no domain mutation and double confirm admits once', async () => {
@@ -108,7 +137,7 @@ it('Undo cancels the complete hold with no domain mutation and double confirm ad
 
 it('Ack all remains queued after unmount and sends each result once sequentially', async () => {
   const { actions, controller, transport, topicId } = await ready(); vi.useFakeTimers();
-  const mounted = render(<AckAll actions={actions} topicId={topicId} topicName="Results" />);
+  const mounted = render(<AckAll actions={actions} topicId={topicId} topicName="Results" items={ackAllItems(actions.session.getSnapshot().snapshot!.session, topicId)} />);
   fireEvent.click(screen.getByRole('button', { name: 'Ack all (2)' }));
   expect(screen.getByRole('dialog', { name: 'Acknowledge results in Results' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Ack all' }));
