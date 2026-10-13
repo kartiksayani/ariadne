@@ -7,42 +7,40 @@
   `status` is `waiting_on_me` with `ask`, else `open`; `owner` is you, or
   `{"kind":"me"}` with `ask`; others use `{"kind":"other","name":"N"}`.
   Option ids: 1, 2, ...; refs: r1, r2, ... by position.
-  Answers go to you.
 - Refs: `{"ref":"a"}` names an earlier request ref (letter first, then letters,
   digits or `_`, at most 32); `{"id":"1.2"}`: item; UUID: topic/message.
   `item.edit` short/note: omit keeps, string replaces, null clears.
-- Delete moves a subtree/topic to Bin, preserving history. Guard root item/topic; explain why (`SKILL.md`).
-  Owner text, unanswered asks and Ack items qualify; archived work refuses. `agent_removals`: items, waiting questions, cancelled inputs.
+- Delete moves a subtree/topic to Bin with history. Guard root; explain why (`SKILL.md`).
+  Owner text, asks and Ack items qualify; archived work refuses. `agent_removals` lists items, questions and cancelled inputs.
   Reads omit Bin work/links.
 - Connections: `item.add.related` or `item.edit.patch.related` takes item numbers
   or batch refs: `["3.2","notes"]` or `[{"id":"3.2"},{"ref":"notes"}]`.
-  Later/nested refs work; links cross topics and show at both ends.
+  Later/nested refs work across topics; both ends show links.
   Omit/null keeps them; `[]` clears them.
   Self/duplicate/new missing refs fail. Reads omit Bin or removed targets;
   resending declared removed targets prunes them (`pruned_related`: source → targets).
 - Limits: `question`, `ask`, `note`, `outcome`, `why` 4096 bytes each, `reply`
-  64 KiB, 100 expanded ops, 12 options, 32 links and 32 related items per item.
+  64 KiB, 100 expanded ops, 12 options, 32 links and 32 targets per connection kind.
 - `item.add` is nonterminal. Choose `ack_to` (`SKILL.md`); keep outcome/why.
   Strict creation rejects terminal status; CLI repairs Decided/Done/Dropped
-  to Open with that explicit choice, never Replaced. New findings/explanations
-  without asks need `ack_to`: strict filing says "choose ack_to ..."; CLI reports
-  repair to the item's own Open/InProgress status.
+  to Open with that choice, never Replaced. Findings/explanations without asks
+  need `ack_to`; CLI reports repair to their own Open/InProgress status.
   Ack needs Open/InProgress with no unanswered ask. `item.status`
   Open/InProgress sets `ack_to`; `item.edit.patch.ack_to` changes it on such Ack
   items, keeping status/prose. Strict terminal writes on Ack items fail; CLI
   keeps Open with the requested choice. An Answer/Reply/Drop directing completion
   on that item permits terminal status with `source_input_id`, clearing `ack_to`.
-  Items without `ack_to` close normally. Keep unanswered asks `waiting_on_me`;
+  No `ack_to`: close normally. Unanswered asks stay `waiting_on_me`;
   explain withdrawal in a new `ack_to: "dropped"` item, or use `item.replace`,
   clearing `ack_to`.
 - Types: question, decision, finding, task, explanation. `item.status` needs
   `reason` for `open`/`in_progress`, outcome/why for `decided`/`done`/`dropped`;
   `replaced` requires `item.replace`, `waiting_on_me` an ask.
 
-Link sync to [cache choice](item:1) and notes; Ack leaves notes Open.
+Link sync to [cache choice](item:1) and notes; Ack leaves notes InProgress.
 
 ```json
-{"operations":[{"op":"topic.add","name":"Notes sync","short":"Notes sync"},{"op":"item.add","ref":"notes","question":"Read notes offline","short":"Offline notes","type":"finding","status":"open","ack_to":"open","outcome":"Notes read offline","why":"Read offline."},{"op":"item.add","question":"Sync notes","short":"Sync local notes","type":"task","owner":{"kind":"other","name":"Sam"},"related":["1","notes"]}]}
+{"operations":[{"op":"topic.add","name":"Read and sync notes","short":"Notes sync","brief":"Notes read offline. Sync still needs work."},{"op":"item.add","ref":"notes","question":"Read notes offline","short":"Offline notes","type":"finding","status":"open","ack_to":"in_progress","outcome":"Notes read offline","why":"Read offline."},{"op":"item.add","parent":{"ref":"notes"},"question":"Sync notes","short":"Sync local notes","type":"task","owner":{"kind":"other","name":"Sam"},"related":["1","notes"]}]}
 ```
 
 ## Failed commands

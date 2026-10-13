@@ -7,13 +7,15 @@ this bypasses validation and can make the session unreadable.
 - `ariadne read --binding B --generation G --view items|topics|messages|inputs --json`:
   20/page, `--limit N` up to 100; `--view items --topic <id|number>`
   for one topic, `--archived` for an archived one.
-- `ariadne item messages|rounds --binding B --generation G --item ID --json`:
+- `ariadne item messages|rounds|changes --binding B --generation G --item ID --json`:
   one item's history.
 - `ariadne apply --binding B --generation G --json-stdin --json`: stdin (quoted
   heredoc); `--dry-run` validates without saving. Receipts list
   `op_id` and changed topic/item `id`, `short`, `revision`, `created`; topics have `number`.
 
-An unexpected `"replayed":true` files nothing new; use a fresh explicit `op_id` to deliberately file the identical request again.
+`--json` puts warnings in JSON only; they never change saved work.
+
+Unexpected `"replayed":true` files nothing new; use a fresh explicit `op_id` to file the same request again.
 
 ## Request
 
@@ -28,16 +30,12 @@ One JSON object; `operations` is required.
 
 Reuse receipt revisions/numbers as `{"id":...}`.
 
-Set `related` for useful dependencies, duplicates or consequences, once on either
-item in this session; otherwise omit it.
-Use `[label](item:3.2)` in prose, never bare numbers; links do not create `related` connections.
-
 | `op` | Required | Optional |
 |---|---|---|
 | `topic.add` | `name` | `short,brief,ref` |
 | `topic.edit` | `topic` | `name,short,brief` |
 | `item.add` | `question,type` | `topic` (the only `topic.add`; children inherit their parent's topic), `short,status,ack_to,owner,ask,options,parent,note,links,related,affects,depends_on,outcome,why,children,ref` |
-| `item.edit` | `item,patch` | `reason`; patch: `question,type,note,links,related,affects,depends_on,short,ack_to` (Open/InProgress Ack) |
+| `item.edit` | `item,patch` | `reason,wording_only`; patch: `question,type,note,links,related,affects,depends_on,short,ack_to` (Open/InProgress Ack) |
 | `item.ask` | `item,ask` | `options` |
 | `item.status` | `item,status` | `ack_to,outcome,why,reason` |
 | `item.replace` | `item,replacement,outcome,why` | |
@@ -52,23 +50,53 @@ Defaults, children, refs, transitions, limits: `errors.md`.
 Delete accepts number/UUID strings, `{id}`, earlier batch refs or `{ref}`.
 Guard the existing root item/topic; history stays.
 
-New topics/items need stable `short`: 2-4 words, at most 40 characters.
+New topics/items need stable `short`: 2–4 words, at most 40 characters.
 
 Markdown text; plain topic names, `short`, option labels.
 
 ## Shape the work
 
-When connected or told "use Ariadne", file there.
+Owner instructions win; apply these rules while connected or told "use Ariadne".
 
-- **File as you go.** Start a topic with an `in_progress` summary; update items
-  in place. Finish `open` with `ack_to`, result/evidence; never repeat a report.
-- **Route.** File findings and multi-point results. Chat: 1-3 lines pointing
-  at the topic. Owner instructions win.
-- **Topic.** One per concern, not per step.
-- **Tree.** Summary first: result and what waits on the owner, then decisions/sections
-  in reading order. Points are children, each once with its ask. Keep this tree for later writes.
-- **Type and status.** Never create `decided`, `done`, `dropped` or `replaced`
-  items; results start `open` for Ack.
+1. **Keep only useful work.** File decisions, risks and results the owner needs.
+   Otherwise use chat. Put routine lists the owner needs in one
+   checklist; split only for independent discussion/tracking. Chat points to
+   filed work in 1–3 lines.
+2. **One point, one place.** Update the existing item instead of repeating it in
+   reports/follow-ups. Answering a point once settles it everywhere. Merge
+   duplicates with `item.replace`; children need independent usefulness.
+3. **Topics are owner actions.** Name the owner action plainly, without
+   codes/ticket numbers. `topic.edit` keeps a 2–3 sentence `brief`: where
+   things stand and what it means. Do not repeat Ariadne's decided/waiting/replaced
+   lists or add a summary item.
+4. **Make questions easy to answer.** In this order: the decision in plain words;
+   "I recommend X (fairly sure / not sure) because Y; if that's wrong, Z";
+   2–3 real options with a consequence each; "If you don't answer, I'll …";
+   named affected items and `affects`. Mark the
+   recommendation `recommended`; include "Not now"/"Neither" when real.
+   Put questions in Ariadne; no options means free text.
+5. **Ask only what needs the owner.** Explore the code and evidence before asking,
+   ask scope up front before building if it is not already settled, and keep
+   at most three questions `waiting_on_me` at once. Continue independent work;
+   no-answer defaults respect permissions and never assume consent.
+6. **Layer the explanation.** Use a clear `question` title, bottom line first,
+   "What this means for you", then details. Define every
+   term on first use; keep paragraphs to three sentences or fewer.
+7. **Name connections.** Write `[retry cap](item:3.2)`, never bare item numbers.
+   Prose links need receipt item numbers; use batch refs in `affects`/`depends_on`/`related` for new items, then add prose links.
+   Use `affects` for consequences, `depends_on` for prerequisites, `related`
+   for other useful connections. Prose links alone declare nothing;
+   leave unrelated items alone.
+8. **Carry answers through.** After an owner answer, update every affected item
+   across topics in one request, with a one-line `reason` per edit/status change
+   and useful `affects`/`depends_on`. Pure rewording uses
+   `item.edit` with `wording_only: true` (only `question`, `short`, `note`).
+   For free text, start `input_result.explanation` with "Read as: …" and name
+   affected items. Ask before reversing an owner decision elsewhere; ambiguity
+   becomes a question on the item (`inputs.md`).
+9. **Leave results for Ack.** New results start `open` with a deliberate `ack_to`,
+   result/evidence; never create `decided`, `done`, `dropped` or `replaced`.
+   Keep unanswered asks `waiting_on_me`.
 
 | Point | Type | New status / Ack choice |
 |---|---|---|
@@ -82,61 +110,32 @@ When connected or told "use Ariadne", file there.
 | Work for later or someone else | task | `open`, owner `other` |
 | Something you will not do | any | `open`, `ack_to: "dropped"` |
 
-- **Ack.** Choose `ack_to`: `open` for reading while work runs,
-  `in_progress` if underway, `done`/`decided` only if finished once read,
-  `dropped` if ruled out. Type never chooses it. New findings/explanations without
-  asks require it: strict filing says "choose ack_to ..."; CLI reports repair to
-  its own `open` or `in_progress` status. Open/InProgress items with
-  `outcome`/`why` need it too. Ack clears it, sets that status, sends no input.
-  `item.edit.patch.ack_to` changes an Open/InProgress Ack choice, keeping prose
-  and status. Completion/replacement exceptions: `errors.md`. Unanswered asks
-  stay `waiting_on_me`. Permission needs an ask and a "Got it, go ahead" option.
-  Finished tasks also await Ack.
-- **Fields.** `question`: heading; `ask`/`options`: answer box; `outcome`/`why`:
-  result/evidence; `note`: progress; `links`: `pr`, `file`, `doc`; `reply`: detail.
-- **Ask.** One decision per item: `item.add` with `ask` starts `waiting_on_me`,
-  owned by the owner. Each option needs `label` and `consequence`; at most one
-  is `recommended`. Without options the answer is free text. Ask questions
-  there, not in chat. `item.ask` starts another round on an existing item.
-- **Proposals** (comments to post, fixes to apply): one child each with `ask` and options; parent summary has no ask.
-  Never file them `done` under a parent ask.
-- **Choice notes.** Free text overrides the consequence; ask there if ambiguous
-  and reflect it in `input_result` (`inputs.md`).
-- **Ripple updates.** After owner answer/reply, update affected items across topics
-  together; name each as `[label](item:<id>)` in `input_result`.
-  Ask before reversing an owner decision elsewhere. Leave unrelated work alone.
-- **Spend few tokens.** One request per result, nested `children`; data nobody discusses
-  row by row is one item with a table.
-- **Delete.** Delete clearly wrong, duplicate or obsolete work you created, or work
-  the owner asks to delete. Prefer Drop/Replace for real work no longer needed. Explain what/why: `reply` before item deletion; for an empty topic,
-  explain in your next reply on a live item or in turn text.
-  Include `input_result` in the same request when deleting because the owner
-  asked (`inputs.md`).
-  Reads omit Bin work, with a notice; owner Restore: `errors.md`.
+**Ack:** type never chooses it. Findings/explanations without asks and
+Open/InProgress results need `ack_to`; Ack sets its target and sends no input.
+`item.edit.patch.ack_to` changes that choice without changing prose/status.
+Finished tasks await Ack. Strict validation, CLI repairs and exceptions: `errors.md`.
+
+**Fields:** `ask`/`options`: answer box (`label`, `consequence`, at most one
+`recommended`); `item.ask`: new round. `outcome`/`why`: result/evidence; `note`:
+progress; `links`: `pr`, `file`, `doc`; `reply`: detail. Permission needs an ask
+with "Got it, go ahead".
+
+**Delete:** remove clearly wrong/duplicate/obsolete work you created or the
+owner asks to delete; prefer Drop/Replace for real work. Explain with `reply`
+before item deletion; for empty topics, use a live item or chat. Owner requests
+include `input_result` in that request (`inputs.md`). Reads omit Bin work with
+a notice; owner Restore: `errors.md`.
 
 ## Examples
 
-Start a topic with an in-progress summary and finding:
+A brief replaces summary items; related checks stay together.
 
 ```json
-{"summary":"Started the retry review","operations":[{"op":"topic.add","name":"Review: notes sync retries","short":"Notes sync review"},{"op":"item.add","question":"Notes sync retry review","short":"Review summary","type":"task","status":"in_progress","note":"Reading the diff","children":[{"question":"Backoff has no jitter","short":"No jitter","type":"finding","status":"open","ack_to":"open","outcome":"Clients retry in lockstep","why":"The delay is fixed at 2s."}]}]}
+{"summary":"Reviewed retry safety","operations":[{"op":"topic.add","ref":"review","name":"Choose safe retry behavior","short":"Retry behavior"},{"op":"topic.edit","topic":{"ref":"review"},"brief":"The retry cap and error handling pass their checks. We can focus the remaining work on retry timing."},{"op":"item.add","question":"Retry checks pass","short":"Retry checks","type":"finding","status":"open","ack_to":"done","outcome":"The cap and error handling work. What this means for you: the remaining change can stay small.","why":"- Retry cap tested\n- Original error preserved"}]}
 ```
 
-Ack leaves the finding and summary Open while the fix is tracked. File with
-receipt revision 3:
+Delete a duplicate at revision 3, explaining first:
 
 ```json
-{"expected_item_revisions":{"1":3},"operations":[{"op":"item.status","item":{"id":"1"},"status":"open","ack_to":"open","reason":"Review ready to read","outcome":"Notes sync needs one fix","why":"See [no jitter](item:1.1)."}]}
-```
-
-Delete a duplicate; explain why first:
-
-```json
-{"operations":[{"op":"topic.add","name":"Duplicate review","short":"Duplicate review","ref":"t"},{"op":"item.add","ref":"i","short":"Duplicate item","question":"Duplicate review","type":"finding","status":"open","ack_to":"open"},{"op":"reply","item":{"ref":"i"},"text":"Deleted duplicate work; the original review is filed."},{"op":"item.delete","item":"i"},{"op":"topic.delete","topic":"t"}]}
-```
-
-Delete a duplicate at revision 3:
-
-```json
-{"expected_item_revisions":{"1":3},"operations":[{"op":"reply","item":{"id":"1"},"text":"Deleted this duplicate; the original remains."},{"op":"item.delete","item":{"id":"1"}}]}
+{"expected_item_revisions":{"1":3},"operations":[{"op":"reply","item":{"id":"1"},"text":"Deleted this duplicate; [retry checks](item:2) remains."},{"op":"item.delete","item":{"id":"1"}},{"op":"topic.add","ref":"empty","name":"Remove duplicate work","short":"Duplicate cleanup"},{"op":"topic.delete","topic":{"ref":"empty"}}]}
 ```

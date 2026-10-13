@@ -1,5 +1,6 @@
 //! Thin installed agent tools; native facts come from Registry, semantics from Core.
 mod lenient;
+mod warnings;
 
 use ariadne_core::{
     apply::summarize,
@@ -7,6 +8,7 @@ use ariadne_core::{
     *,
 };
 use ariadne_domain::models::*;
+use ariadne_store::session::Store;
 
 use std::{
     collections::BTreeMap,
@@ -106,14 +108,16 @@ validates it exactly as before):
   Still required: type and question on item.add; outcome and why when changing
   an existing item to done/decided/dropped; expected_item_revisions for every
   existing item you touch.
-Example (a topic, a summary item with one child, one ask with two options):
-  printf '%s' '{"operations":[{"op":"topic.add","name":"Cache PR review","short":"Cache PR"},{"op":"item.add","short":"Review result","type":"finding","question":"Review finished: one race, one choice","status":"open","ack_to":"open","outcome":"Reviewed","why":"Read every changed file","children":[{"short":"Fill race","type":"finding","question":"Two writers race in fill()","status":"open","ack_to":"open","outcome":"Confirmed","why":"Reproduced locally"}]},{"op":"item.add","short":"Fallback merge","type":"decision","question":"Merge the fallback path now?","ask":"Merge now or wait?","options":[{"label":"Merge now","consequence":"Ships today"},{"label":"Wait","consequence":"Ships next week"}]}]}' | ariadne apply --binding "$B" --generation "$G" --json-stdin --json
+Example (a topic brief, a finding with one child task, one full owner question):
+  printf '%s' '{"operations":[{"op":"topic.add","name":"Choose cache release timing","short":"Release timing","brief":"The review found a race between cache writes. Choose whether the fallback should wait for the fix."},{"op":"item.add","ref":"fill_race","short":"Fill race","type":"finding","question":"Two writers race in fill()","status":"open","ack_to":"open","outcome":"Confirmed","why":"Reproduced locally","children":[{"short":"Serialize fills","type":"task","question":"Serialize concurrent cache fills"}]},{"op":"item.add","short":"Fallback merge","type":"decision","question":"Choose when to merge the fallback path","note":"The fallback is ready, but concurrent writes can race. What this means for you: releasing now needs closer monitoring. I recommend waiting for the fill fix (fairly sure) because concurrent writes can race; if that is wrong, we can merge now and monitor cache errors. If you do not answer, I will keep the fallback unmerged. Affects the fill race.","ask":"May I merge the fallback now, after the fill fix, or leave it unmerged?","options":[{"label":"Merge now","consequence":"Releases today with closer cache monitoring."},{"label":"After fix","consequence":"Delays release until concurrent fills are safe.","recommended":true},{"label":"Not now","consequence":"Keeps the fallback unmerged while other work continues."}],"affects":[{"ref":"fill_race"}]}]}' | ariadne apply --binding "$B" --generation "$G" --json-stdin --json
 Receipt (default, compact; data of the --json envelope):
-  {"op_id":"...","session_revision":3,"topics":[{"id":"UUID","number":2,"short":"Cache PR","revision":1,"created":true}],"items":[{"id":"4","short":"Review result","revision":1,"created":true},{"id":"4.1","short":"Fill race","revision":1,"created":true}]}
+  {"op_id":"...","session_revision":3,"topics":[{"id":"UUID","number":2,"short":"Release timing","revision":1,"created":true}],"items":[{"id":"3","short":"Fill race","revision":2,"created":true},{"id":"3.1","short":"Serialize fills","revision":1,"created":true},{"id":"4","short":"Fallback merge","revision":1,"created":true}],"warnings":[]}
   An item id is its number (1.2). revision is the value to send as the next
   expected_item_revisions entry. --full prints the complete saved receipt
-  (allocated_refs, messages, every revision). Repairs are explained in the compact
-  receipt's repairs array, or as stderr notes with --full, including retries.
+  (allocated_refs, messages, every revision). Repairs are explained in repairs
+  (including --full --json), or as stderr notes with human --full, including retries.
+  Non-blocking warnings appear in warnings (including --full --json), or as stderr
+  notes with human --full. They suggest clearer filing and never change what is saved.
   --dry-run runs every check against
   the current session, commits nothing and prints the same compact form with
   "dry_run":true (--full adds the full receipt shape).
@@ -175,6 +179,7 @@ struct ApplyCall {
     request: AgentApplyToolRequest,
     dry_run: bool,
     full: bool,
+    json: bool,
     /// Set when the CLI chose the `op_id` itself.
     generated_op_id: Option<UuidV4>,
     repairs: Vec<String>,
@@ -255,20 +260,19 @@ fn execute(
     match tool {
         Tool::Apply(call) => {
             let generated = call.generated_op_id.clone();
-            let notes = if call.full {
-                call.repairs.clone()
-            } else {
-                vec![]
-            };
-            let result = run_apply(&core, context, call, errors)
-                .map_err(|error| name_generated_op(error, generated));
-            if result.is_ok() {
-                for note in notes {
-                    // Advisory stderr must not turn a saved receipt into an apply failure.
-                    let _ = writeln!(errors, "Repair: {note}");
-                }
-            }
-            result
+            let before = catalogue
+                .projects
+                .iter()
+                .filter_map(|project| project.result.as_ref().ok())
+                .filter_map(|project| project.sessions.as_ref().ok())
+                .flatten()
+                .filter_map(|session| session.result.as_ref().ok())
+                .find(|session| {
+                    session.id == *context.session().session_id()
+                        && session.project_id == *context.session().project_id()
+                });
+            run_apply(&core, context, call, before, errors)
+                .map_err(|error| name_generated_op(error, generated))
         }
         query => {
             let request = match query {
@@ -368,17 +372,21 @@ fn run_apply(
     core: &NativeCoreService,
     context: AgentContext,
     mut call: ApplyCall,
+    before: Option<&Session>,
     errors: &mut dyn Write,
 ) -> Result<serde_json::Value, CoreError> {
     let request = call.request.request;
     if call.dry_run {
         let (preview, repairs) = core.apply_preview_lenient(&context, &request)?;
-        if call.full {
-            for repair in &repairs {
+        call.repairs.extend(repairs);
+        if call.full && !call.json {
+            for repair in &call.repairs {
                 let _ = writeln!(errors, "Repair: {repair}");
             }
         }
-        call.repairs.extend(repairs);
+        let warnings = before
+            .map(|before| warnings::collect(before, &preview.session, &request, &preview.receipt))
+            .unwrap_or_default();
         let mut shown = if call.full {
             value(serde_json::to_value(&preview.receipt))?
         } else {
@@ -392,19 +400,34 @@ fn run_apply(
             if preview.replayed {
                 object.insert("replayed".into(), true.into());
             }
-            if !call.full && !call.repairs.is_empty() {
+            if (!call.full || call.json) && !call.repairs.is_empty() {
                 object.insert("repairs".into(), serde_json::json!(call.repairs));
             }
         }
+        show_warnings(&mut shown, &warnings, call.full && !call.json, errors);
         return Ok(shown);
     }
     let (receipt, replayed, repairs) = core.apply_lenient(&context, &request)?;
-    if call.full {
-        for repair in &repairs {
+    call.repairs.extend(repairs);
+    if call.full && !call.json {
+        for repair in &call.repairs {
             let _ = writeln!(errors, "Repair: {repair}");
         }
     }
-    call.repairs.extend(repairs);
+    // Advisory reads must never make a successfully saved apply look failed.
+    // Match the receipt revision so a concurrent writer cannot change this advice.
+    let warnings = before
+        .and_then(|before| {
+            let after = Store::open_registered(
+                &core.registry().project_dir(context.session().project_id()),
+                context.session().project_id().clone(),
+            )
+            .and_then(|store| store.read(context.session().session_id()))
+            .ok()?;
+            (after.revision == receipt.revision)
+                .then(|| warnings::collect(before, &after, &request, &receipt))
+        })
+        .unwrap_or_default();
     let mut shown = None;
     if !call.full {
         // The commit already happened: a failed summary must not read as a failed apply.
@@ -421,12 +444,28 @@ fn run_apply(
             object.insert("replayed".into(), true.into());
         }
     }
-    if !call.full && !call.repairs.is_empty() {
+    if (!call.full || call.json) && !call.repairs.is_empty() {
         if let Some(object) = shown.as_object_mut() {
             object.insert("repairs".into(), serde_json::json!(call.repairs));
         }
     }
+    show_warnings(&mut shown, &warnings, call.full && !call.json, errors);
     Ok(shown)
+}
+
+fn show_warnings(
+    shown: &mut serde_json::Value,
+    warnings: &[String],
+    full: bool,
+    errors: &mut dyn Write,
+) {
+    if full {
+        for warning in warnings {
+            let _ = writeln!(errors, "Warning: {warning}");
+        }
+    } else if let Some(object) = shown.as_object_mut() {
+        object.insert("warnings".into(), serde_json::json!(warnings));
+    }
 }
 
 /// Number of a topic as `--view topics` shows it (`order`) to its id.
@@ -620,6 +659,7 @@ fn parse(args: &[&str], input: &mut dyn Read) -> Result<Tool, CoreError> {
             let expanded = lenient::expand(&bytes, &binding_id)?;
             expanded.request.validate_wire()?;
             Ok(Tool::Apply(ApplyCall {
+                json: flags.contains_key("--json"),
                 request: AgentApplyToolRequest {
                     binding_id,
                     generation,
@@ -808,6 +848,65 @@ fn invalid(message: &str) -> CoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apply_advice_uses_the_resolved_session_when_another_registered_store_breaks() {
+        let session: Session = serde_json::from_str(include_str!(
+            "../../../../fixtures/domain/history/seed.json"
+        ))
+        .unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let unrelated_root = tempfile::tempdir().unwrap();
+        let registry = ariadne_store::registry::Registry::open(home.path()).unwrap();
+        let uuid = |n| UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap();
+        registry
+            .register(root.path(), &uuid(99), || session.project_id.clone())
+            .unwrap();
+        registry
+            .register(unrelated_root.path(), &uuid(100), || uuid(101))
+            .unwrap();
+        let store = Store::open_registered(
+            &registry.project_dir(&session.project_id),
+            session.project_id.clone(),
+        )
+        .unwrap();
+        store.create(&session).unwrap();
+        let context = AgentResolver::resolve(&registry, uuid(3), uuid(4), None, None).unwrap();
+        // The route was resolved while all registrations were readable. Failure
+        // elsewhere after that must not suppress advice for the saved target.
+        std::fs::remove_file(registry.project_dir(&uuid(101)).join("project.json")).unwrap();
+        let core = NativeCoreService::new(
+            registry,
+            || UuidV4::new(uuid::Uuid::new_v4().to_string()).unwrap(),
+            || UtcMillis::new("2026-10-13T12:00:00.000Z").unwrap(),
+            |_| unreachable!("apply does not verify a host"),
+        );
+        let mut body = &br#"{"operations":[{"op":"item.add","topic":{"id":"00000000-0000-4000-8000-000000000005"},"type":"task","question":"Inspect retry evidence"}]}"#[..];
+        let Tool::Apply(call) = parse(
+            &[
+                "apply",
+                "--binding",
+                uuid(3).as_str(),
+                "--generation",
+                uuid(4).as_str(),
+                "--json-stdin",
+                "--json",
+            ],
+            &mut body,
+        )
+        .unwrap() else {
+            unreachable!()
+        };
+        let shown = run_apply(&core, context, call, Some(&session), &mut Vec::new()).unwrap();
+        assert!(shown["warnings"].as_array().unwrap().iter().any(|warning| {
+            warning
+                .as_str()
+                .unwrap()
+                .contains("Topic Release choice (1)")
+        }));
+        assert_eq!(store.read(&session.id).unwrap().items.0.len(), 3);
+    }
 
     #[test]
     fn read_notices_never_claim_counts_from_another_revision() {

@@ -8,7 +8,8 @@ import { WebSocketServer } from 'ws';
 
 export const thread = 'ariadne-scripted-existing-thread';
 export async function cliRequest(cli, args, request, env = process.env) {
-  const child = spawn(cli, args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const explicitJson = args.includes('--json');
+  const child = spawn(cli, explicitJson ? args : [...args, '--json'], { env, stdio: ['pipe', 'pipe', 'pipe'] });
   let output = '', errors = '';
   child.stdout.on('data', bytes => { output += bytes; });
   child.stderr.on('data', bytes => { errors += bytes; });
@@ -19,7 +20,12 @@ export async function cliRequest(cli, args, request, env = process.env) {
       child.once('error', reject); child.once('close', resolve);
     });
     assert.equal(errors, '', `Scripted journey CLI diagnostic: ${errors}`);
-    return { code, output, value: JSON.parse(output) };
+    const response = JSON.parse(output);
+    // Unflagged agent reads/applies previously returned raw data; owner stdin
+    // commands and explicit --json callers already consumed the envelope.
+    const value = !explicitJson && ['read', 'apply'].includes(args[0]) && code === 0 && response.ok === true
+      ? response.data : response;
+    return { code, output, value, response };
   } finally { clearTimeout(timer); }
 }
 export async function snapshot(configuration) {

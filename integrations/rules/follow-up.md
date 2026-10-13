@@ -1,38 +1,22 @@
-# Answering the owner
+# Owner follow-ups
 
-For follow-ups, dispatched (`inputs.md`) or not. Follow `SKILL.md`; shape answers
-like a first report.
+Follow `SKILL.md`; dispatched inputs also use `inputs.md`.
 
-- **Short answer about the item itself**: a `reply` on it.
-- **Answer with two or more points the owner could comment on separately** (for
-  example "what are Q10 and Q11?"): file each as a child
-  `explanation`, `open` with a deliberate `ack_to`, of that item (an ask if it
-  waits on the owner). Reading may leave it Open if follow-up work continues.
-  Keep the `reply` to a 1-2 line
-  pointer and list the children in `followup_item_refs`.
-- **Related items**: apply the ripple updates in `SKILL.md` across the session;
-  if another item carries an owner decision, ask there before reversing it.
-- **The answer changes the result**: update its `outcome` and `why`; the earlier
-  outcome stays in history. Leave the result `open` with its `ack_to` for the
-  owner to Ack.
-- **`bring`** on an open item: ask it now with `item.ask` and options.
-- **`reopen`**: `item.status` `open` with a `reason`, redo the work, then finish a
-  read-only result `open` with `ack_to`, `outcome` and `why`.
-- **Topic reply** ("approve the PR", "clean all of it up"): do it across the
-  topic, settle each ask with `item.status` (the outcome says what you did),
-  leaving any item with `ack_to` open, and finish with one `input_result`;
-  `reply_refs` and `followup_item_refs`
-  may be empty.
-- **One part of a multi-part choice**: act on that part; finish the parent for Ack
-  when its last part is decided.
+Reply on the existing item for a short answer. Update that item when its result
+changes; create children only for points needing independent discussion, and
+list new refs in `followup_item_refs`. Carry answers through affected items and
+refresh the topic brief in the same request; keep changed results `open` with Ack.
+
+`bring` uses `item.ask`; `reopen` uses `item.status` `open` with `reason`, then
+redo the work and leave its result for Ack. A topic-wide instruction applies to
+all its relevant items, settling asks with outcomes and one `input_result`.
+An existing Ack remains the owner's; finish parents per `checklist.md`.
 
 ## Example
 
-The owner replied on [retry questions](item:1) (revision 1): "what are Q10 and
-Q11?". No other items are affected. Use the parent's topic id from `ariadne read`.
-The cap explanation is complete once read (`done`); the jitter finding
-stays active (`in_progress`) while its follow-up investigation is underway.
+A pure rewording keeps the same meaning and is recorded without marking the item
+changed for the owner. Only `question`, `short` and `note` may change this way.
 
 ```json
-{"source_input_id":"00000000-0000-4000-8000-000000000010","attempt_id":"00000000-0000-4000-8000-000000000011","expected_item_revisions":{"1":1},"summary":"Explained Q10 and Q11","operations":[{"op":"item.add","ref":"q10","topic":{"id":"00000000-0000-4000-8000-000000000005"},"parent":{"id":"1"},"question":"Q10: do retries stop after a cap?","short":"Q10 retry cap","type":"explanation","status":"open","ack_to":"done","outcome":"Yes, after five attempts.","why":"`MAX_RETRIES` in `src/retry.rs`."},{"op":"item.add","ref":"q11","topic":{"id":"00000000-0000-4000-8000-000000000005"},"parent":{"id":"1"},"question":"Q11: is the delay jittered?","short":"Q11 jitter","type":"explanation","status":"open","ack_to":"in_progress","outcome":"No, it is a fixed 2s.","why":"See `backoff()` in `src/retry.rs`."},{"op":"reply","ref":"r1","item":{"id":"1"},"text":"Retries stop after five attempts; the delay is fixed at 2s."}],"input_result":{"outcome":"answered","explanation":"Explained Q10 and Q11 as two items.","reply_refs":[{"ref":"r1"}],"followup_item_refs":[{"ref":"q10"},{"ref":"q11"}],"handled_through_message_number":7}}
+{"expected_item_revisions":{"1":3},"summary":"Clarified the retry heading","operations":[{"op":"item.edit","item":{"id":"1"},"reason":"Expanded an unfamiliar term without changing the finding","wording_only":true,"patch":{"question":"Retries wait for different lengths of time","short":"Varied retry delays"}}]}
 ```

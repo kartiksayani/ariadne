@@ -1,0 +1,358 @@
+{
+  "description": "Fictional notes sync session. Every agent write is an ariadne apply request; the owner answer is submitted through InputService, with accepted and completed delivery simulated through DeliveryService without contacting a host. Check results describe this scripted scenario, not a real service. Topic identity placeholders are resolved from earlier apply receipts; dispatched input IDs and its handled message number come from Core setup. Item revision guards are explicit and checked as written.",
+  "steps": [
+    {
+      "name": "Frame the owner choices and their consequences",
+      "request": {
+        "op_id": "00000000-0000-4000-8000-000000000101",
+        "summary": "Filed the retry and launch choices with their affected risks",
+        "operations": [
+          {
+            "op": "topic.add",
+            "ref": "behavior",
+            "name": "Choose retry behavior",
+            "short": "Sync behavior",
+            "brief": "Notes sync can retain queued notes while retrying for a bounded time. Choose the retry ceiling so outage pressure and the future pilot use the same limit."
+          },
+          {
+            "op": "item.add",
+            "ref": "ceiling",
+            "topic": {
+              "ref": "behavior"
+            },
+            "question": "How long should sync retry?",
+            "short": "Retry ceiling",
+            "type": "decision",
+            "ask": "Bottom line: how many attempts should notes sync make before pausing?\nWhat this means for you: choose how long a failed sync keeps trying.\nI recommend three attempts (fairly sure) because the scripted outage check keeps notes queued after the ceiling; if that’s wrong, a brief outage could require manual resume.\nIf you don’t answer, I’ll keep sync off. This affects retry pressure and pilot backlog.\nDetails: the options trade automatic recovery time against pressure during an outage.",
+            "options": [
+              {
+                "id": "three",
+                "label": "Three attempts",
+                "consequence": "Bounds outage pressure; a longer interruption needs resume.",
+                "recommended": true
+              },
+              {
+                "id": "five",
+                "label": "Five attempts",
+                "consequence": "Recovers more short interruptions but keeps outage traffic running longer."
+              },
+              {
+                "id": "manual",
+                "label": "Manual resume",
+                "consequence": "Stops after the first failure and asks the user to resume."
+              }
+            ],
+            "affects": [
+              "pressure",
+              "backlog"
+            ]
+          },
+          {
+            "op": "item.add",
+            "ref": "pressure",
+            "topic": {
+              "ref": "behavior"
+            },
+            "question": "Retries can prolong an outage",
+            "short": "Retry pressure",
+            "type": "finding",
+            "status": "open",
+            "ack_to": "open",
+            "outcome": "Bottom line: five attempts keep failed sync traffic running longer.\nWhat this means for you: the retry ceiling controls how much outage pressure you accept.\nDetails: queued notes remain available after retries stop.",
+            "why": "The scripted outage check retained queued notes but continued attempting sync until its ceiling.",
+            "affects": [
+              "backlog"
+            ]
+          },
+          {
+            "op": "topic.add",
+            "ref": "launch",
+            "name": "Choose who gets sync",
+            "short": "Sync launch",
+            "brief": "Notes sync stays off until you choose its first audience. A small pilot limits exposure while pilot readiness checks retry and pause behavior."
+          },
+          {
+            "op": "item.add",
+            "ref": "scope",
+            "topic": {
+              "ref": "launch"
+            },
+            "question": "How widely should we enable sync?",
+            "short": "Launch scope",
+            "type": "decision",
+            "ask": "Bottom line: who should receive notes sync first?\nWhat this means for you: choose the size of the first rollout.\nI recommend a small pilot (not sure) because the scripted checks cover outages and recovery but not every usage pattern; if that’s wrong, pilot users may need to resume queued notes manually.\nIf you don’t answer, I’ll keep sync off. This affects pilot backlog and pilot readiness.\nDetails: a pilot provides feedback with fewer people exposed, while a broad launch delivers sync sooner.",
+            "options": [
+              {
+                "id": "pilot",
+                "label": "Small pilot",
+                "consequence": "Limits exposure and leaves a pause path while feedback arrives.",
+                "recommended": true
+              },
+              {
+                "id": "everyone",
+                "label": "Everyone",
+                "consequence": "Delivers sync sooner but exposes all users to unobserved failure patterns."
+              },
+              {
+                "id": "off",
+                "label": "Keep sync off",
+                "consequence": "Avoids rollout risk while delaying sync for all users."
+              }
+            ],
+            "affects": [
+              "backlog",
+              "checks"
+            ],
+            "depends_on": [
+              "ceiling"
+            ]
+          },
+          {
+            "op": "item.add",
+            "ref": "backlog",
+            "topic": {
+              "ref": "launch"
+            },
+            "question": "Long retries enlarge the pilot backlog",
+            "short": "Pilot backlog",
+            "type": "finding",
+            "status": "open",
+            "ack_to": "open",
+            "outcome": "Bottom line: a long retry window leaves the pilot retrying during an outage.\nWhat this means for you: settle the retry ceiling before the launch scope.\nDetails: pause recovery has not yet been checked.",
+            "why": "The scripted launch review starts with the five-attempt proposal and an untested pause path.",
+            "affects": [
+              "checks"
+            ]
+          },
+          {
+            "op": "item.add",
+            "ref": "checks",
+            "topic": {
+              "ref": "launch"
+            },
+            "question": "Check pilot readiness",
+            "short": "Pilot readiness",
+            "type": "task",
+            "status": "in_progress",
+            "note": "Bottom line: readiness checks are underway.\nWhat this means for you: no rollout starts before your launch scope answer.\nDetails:\n- [ ] Confirm retries stop at the chosen ceiling without losing queued notes.\n- [ ] Confirm pause and resume sync queued notes once.",
+            "depends_on": [
+              "ceiling"
+            ],
+            "affects": [
+              "scope"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "Apply the owner answer across both topics",
+      "owner_answer": {
+        "item": "1",
+        "selected_option_id": "three",
+        "text": "Use three attempts, and keep sync off until I choose the launch scope."
+      },
+      "request": {
+        "op_id": "00000000-0000-4000-8000-000000000102",
+        "source_input_id": "00000000-0000-4000-8000-000000000010",
+        "attempt_id": "00000000-0000-4000-8000-000000000011",
+        "expected_item_revisions": {
+          "1": 3,
+          "2": 2,
+          "4": 2
+        },
+        "summary": "Applied [retry ceiling](item:1) to [retry pressure](item:2) and [pilot backlog](item:4)",
+        "operations": [
+          {
+            "op": "reply",
+            "ref": "answer",
+            "item": {
+              "id": "1"
+            },
+            "text": "Bottom line: three attempts, then pause; sync stays off.\nWhat this means for you: your [retry ceiling](item:1) updates [retry pressure](item:2) and [pilot backlog](item:4).\nDetails: [launch scope](item:3) remains unanswered."
+          },
+          {
+            "op": "item.status",
+            "item": {
+              "id": "1"
+            },
+            "status": "open",
+            "ack_to": "decided",
+            "reason": "The owner chose three attempts and kept launch disabled.",
+            "outcome": "Bottom line: use three attempts, then pause.\nWhat this means for you: sync remains off until your [launch scope](item:3) answer.\nDetails: the choice now bounds [retry pressure](item:2) and [pilot backlog](item:4).",
+            "why": "Your selected option and note both require bounded retries without starting rollout."
+          },
+          {
+            "op": "item.edit",
+            "item": {
+              "id": "2"
+            },
+            "reason": "The owner's retry ceiling bounds outage pressure.",
+            "patch": {
+              "question": "Three attempts bound outage pressure",
+              "affects": [
+                "4",
+                "5"
+              ]
+            }
+          },
+          {
+            "op": "item.status",
+            "item": {
+              "id": "2"
+            },
+            "status": "open",
+            "ack_to": "open",
+            "reason": "The owner's retry ceiling bounds outage pressure.",
+            "outcome": "Bottom line: outage retries now stop after three attempts.\nWhat this means for you: pressure is bounded, but a longer outage may need manual resume.\nDetails: [pilot readiness](item:5) verifies this choice before launch.",
+            "why": "The owner selected the shorter ceiling in [retry ceiling](item:1)."
+          },
+          {
+            "op": "item.edit",
+            "item": {
+              "id": "4"
+            },
+            "reason": "The owner shortened retries without authorizing launch.",
+            "patch": {
+              "question": "The pilot has a bounded retry window",
+              "affects": [
+                "5"
+              ]
+            }
+          },
+          {
+            "op": "item.status",
+            "item": {
+              "id": "4"
+            },
+            "status": "open",
+            "ack_to": "open",
+            "reason": "The owner shortened retries without authorizing launch.",
+            "outcome": "Bottom line: a future pilot uses the shorter retry window.\nWhat this means for you: rollout remains off and pause recovery still needs evidence.\nDetails: [pilot readiness](item:5) records the remaining checks.",
+            "why": "The answer to [retry ceiling](item:1) changed the risk and explicitly preserved the launch decision."
+          }
+        ],
+        "input_result": {
+          "outcome": "answered",
+          "explanation": "Read as: three attempts, then pause; do not start rollout. Recorded [retry ceiling](item:1), updated [retry pressure](item:2) and [pilot backlog](item:4), and kept [launch scope](item:3) waiting.",
+          "reply_refs": [
+            {
+              "ref": "answer"
+            }
+          ],
+          "handled_through_message_number": 1
+        }
+      }
+    },
+    {
+      "name": "Advance the readiness checklist",
+      "request": {
+        "op_id": "00000000-0000-4000-8000-000000000103",
+        "expected_item_revisions": {
+          "5": 1
+        },
+        "summary": "Advanced the [pilot readiness](item:5) checklist",
+        "operations": [
+          {
+            "op": "item.edit",
+            "item": {
+              "id": "5"
+            },
+            "reason": "The chosen retry ceiling passed the scripted outage check.",
+            "patch": {
+              "note": "Bottom line: the retry check passed; pause recovery is next.\nWhat this means for you: three failures pause retries while preserving queued notes.\nDetails:\n- [x] Confirm retries stop at the chosen ceiling without losing queued notes.\n- [ ] Confirm pause and resume sync queued notes once."
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Finish the checklist and replace the obsolete risk",
+      "request": {
+        "op_id": "00000000-0000-4000-8000-000000000104",
+        "expected_item_revisions": {
+          "4": 4,
+          "5": 2
+        },
+        "expected_topic_revisions": {
+          "2": 1
+        },
+        "summary": "Filed pause recovery evidence; [launch scope](item:3) still waits on you",
+        "operations": [
+          {
+            "op": "item.status",
+            "item": {
+              "id": "5"
+            },
+            "status": "open",
+            "ack_to": "done",
+            "reason": "Both readiness checks are complete; launch still needs the owner.",
+            "outcome": "Bottom line: both pilot checks passed.\nWhat this means for you: the pilot is ready for your [launch scope](item:3) decision and remains off.\nDetails:\n- [x] Retry stop preserves queued notes after three failures.\n- [x] Pause recovery resumes without duplicate notes.",
+            "why": "Both scripted checks finished; their evidence is available for acknowledgment."
+          },
+          {
+            "op": "item.add",
+            "ref": "recovery",
+            "topic": "$launch_topic",
+            "question": "The pilot pause path preserves notes",
+            "short": "Pilot pause result",
+            "type": "finding",
+            "status": "open",
+            "ack_to": "done",
+            "outcome": "Bottom line: the pilot can pause without losing queued notes.\nWhat this means for you: the remaining decision is [launch scope](item:3).\nDetails: this replaces the earlier untested [pilot backlog](item:4) risk with checked evidence.",
+            "why": "The scripted retry and pause checks passed with the owner's chosen ceiling.",
+            "affects": [
+              "3"
+            ],
+            "depends_on": [
+              "5"
+            ],
+            "related": [
+              "2"
+            ]
+          },
+          {
+            "op": "item.replace",
+            "item": {
+              "id": "4"
+            },
+            "replacement": {
+              "ref": "recovery"
+            },
+            "outcome": "Replaced the untested pilot risk with the pilot pause result.",
+            "why": "Pause recovery now has evidence, so the old risk no longer describes readiness."
+          },
+          {
+            "op": "topic.edit",
+            "topic": "$launch_topic",
+            "brief": "The pilot checks passed: retries stop at your chosen ceiling, and pause recovery preserved queued notes. The service remains off until you choose [launch scope](item:3)."
+          }
+        ]
+      }
+    },
+    {
+      "name": "Clarify wording without changing the decision",
+      "request": {
+        "op_id": "00000000-0000-4000-8000-000000000105",
+        "expected_item_revisions": {
+          "2": 4
+        },
+        "summary": "Clarified the title of [retry pressure](item:2)",
+        "operations": [
+          {
+            "op": "item.edit",
+            "item": {
+              "id": "2"
+            },
+            "wording_only": true,
+            "reason": "Clarified the same bounded retry risk for quick reading.",
+            "patch": {
+              "question": "The retry ceiling bounds outage pressure",
+              "short": "Bounded retry pressure"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
