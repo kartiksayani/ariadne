@@ -3,13 +3,14 @@ import { useSessionActions, type SessionActions } from '../../components/binding
 import type { Immutable } from '../../data/session-store';
 import type { Item } from '../../generated/domain/models';
 import { Dialog } from '../dialogs/Dialog';
-import { ackAllFor, ackAllItems } from './ackAllController';
+import { ackAllFor } from './ackAllController';
 import './navigation.css';
 
-export function AckAll({ actions, topicId, topicName, disabled = false }: {
+export function AckAll({ actions, topicId, topicName, items, disabled = false }: {
   readonly actions: SessionActions;
   readonly topicId: string;
   readonly topicName: string;
+  readonly items: readonly Immutable<Item>[];
   readonly disabled?: boolean;
 }) {
   const sessionState = useSyncExternalStore(actions.session.subscribe, actions.session.getSnapshot, actions.session.getSnapshot);
@@ -17,7 +18,6 @@ export function AckAll({ actions, topicId, topicName, disabled = false }: {
   const controller = ackAllFor(actions), state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const [reviewed, setReviewed] = useState<readonly Immutable<Item>[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const session = sessionState.snapshot?.session, items = session ? ackAllItems(session, topicId) : [];
   const busy = ['holding', 'saving', 'failed'].includes(state.phase);
   const confirm = () => {
     if (!reviewed) return;

@@ -9,11 +9,26 @@ import { notices } from '../pages/notices';
 import { navigationVisits } from './visits';
 
 export const ACK_ALL_HOLD_MS = 5000;
+const eligibleBySession = new WeakMap<Immutable<Session>, ReadonlyMap<string, readonly Immutable<Item>[]>>();
+const NO_ITEMS: readonly Immutable<Item>[] = [];
+/** Headers and their bulk controls share one eligibility pass per immutable snapshot. */
+function ackAllByTopic(session: Immutable<Session>): ReadonlyMap<string, readonly Immutable<Item>[]> {
+  const cached = eligibleBySession.get(session);
+  if (cached) return cached;
+  const topics = new Map<string, Immutable<Item>[]>();
+  for (const item of activeItems(session)) {
+    const topic = session.topics[item.topic_id];
+    if (!topic || topic.archived_at != null || (item.type !== 'finding' && item.type !== 'explanation') || !ackTarget(session, item)) continue;
+    let items = topics.get(item.topic_id);
+    if (!items) { items = []; topics.set(item.topic_id, items); }
+    items.push(item);
+  }
+  topics.forEach(items => items.sort((a, b) => a.ordinal - b.ordinal || a.id.localeCompare(b.id)));
+  eligibleBySession.set(session, topics);
+  return topics;
+}
 export function ackAllItems(session: Immutable<Session>, topicId: string): readonly Immutable<Item>[] {
-  if (!session.topics[topicId] || session.topics[topicId].archived_at != null) return [];
-  return activeItems(session).filter(item => item.topic_id === topicId
-    && (item.type === 'finding' || item.type === 'explanation') && !!ackTarget(session, item))
-    .sort((a, b) => a.ordinal - b.ordinal || a.id.localeCompare(b.id));
+  return ackAllByTopic(session).get(topicId) ?? NO_ITEMS;
 }
 const proposal = (item: Immutable<Item>) => JSON.stringify([item.revision, item.type, item.topic_id,
   item.question, item.ask, item.ack_to, item.outcome, item.why]);

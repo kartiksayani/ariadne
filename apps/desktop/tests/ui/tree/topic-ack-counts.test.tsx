@@ -28,10 +28,10 @@ async function topic(types: readonly Item['type'][]) {
   const row: Row = { kind: 'topic', key: topicId, topic: session.topics[topicId]!, depth: 0,
     expanded: true, first: true, guides: [], earlier: false, chip: null, allClosed: false, delivery: null,
     counts: topicCounts(types.map(() => 'open'), types.length) };
-  const eligible = ackAllItems(store.getSnapshot().snapshot!.session, topicId).length;
+  const items = ackAllItems(store.getSnapshot().snapshot!.session, topicId), eligible = items.length;
   const element = <TopicRow row={row} focused actions={[]} prompt={null} remember={() => {}}
     onFocus={() => {}} onKeyDown={() => {}} onToggle={() => {}} ackAllCount={eligible}
-    ackAll={<AckAll actions={actions} topicId={topicId} topicName={row.topic.name} />} />;
+    ackAll={<AckAll actions={actions} topicId={topicId} topicName={row.topic.name} items={items} />} />;
   return { element, eligible };
 }
 
