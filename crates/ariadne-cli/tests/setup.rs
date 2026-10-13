@@ -242,6 +242,10 @@ fn host_commands_preserve_spaces_and_keep_trust_explicit() {
         "read /home/private profile/current/integrations/codex-skills/ariadne/SKILL.md first"
     ));
     assert!(!commands[4].contains("rules/codex.md"));
+    assert!(commands[4].contains("$ariadne-pr-comments <PR>"));
+    assert!(commands[4].contains(
+        "read /home/private profile/current/integrations/codex-skills/ariadne-pr-comments/SKILL.md"
+    ));
     assert_eq!(
         resources::host_commands(Path::new("/home/private/current/integrations"), "codex").len(),
         1

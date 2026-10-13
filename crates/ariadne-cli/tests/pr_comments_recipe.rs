@@ -11,6 +11,59 @@ use std::{
 const RECIPE: &str = include_str!("../../../integrations/rules/pr-comments.md");
 const FIXTURE: &str = include_str!("fixtures/pr-comments.json");
 
+fn reviewer_text(text: &str) -> String {
+    let escaped = text
+        .replace('\\', "\\\\")
+        .replace('<', "\\<")
+        .replace('[', "\\[")
+        .replace(']', "\\]");
+    let mut result = String::new();
+    let mut remaining = escaped.as_str();
+    while !remaining.is_empty() {
+        let scheme = if remaining
+            .get(..8)
+            .is_some_and(|s| s.eq_ignore_ascii_case("https://"))
+        {
+            5
+        } else if remaining
+            .get(..7)
+            .is_some_and(|s| s.eq_ignore_ascii_case("http://"))
+        {
+            4
+        } else {
+            0
+        };
+        if scheme > 0 {
+            result.push_str(&remaining[..scheme]);
+            result.push_str("\\://");
+            remaining = &remaining[scheme + 3..];
+        } else {
+            let ch = remaining.chars().next().unwrap();
+            result.push(ch);
+            remaining = &remaining[ch.len_utf8()..];
+        }
+    }
+    result
+}
+
+// Fresh conversations recover the thread from the stored comment URL, rather
+// than trying to reply to a child comment through the REST endpoint.
+fn reply_payload(fixture: &Value, comment_url: &Value, body: &str) -> Value {
+    let thread = fixture["threads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|thread| {
+            thread["comments"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["url"] == *comment_url)
+        })
+        .expect("stored comment URL belongs to a fetched thread");
+    template(2, &json!({"thread": thread["id"], "body": body}))
+}
+
 fn id(n: u64) -> UuidV4 {
     UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
 }
@@ -147,6 +200,12 @@ impl Setup {
             .filter(|t| t["isResolved"] == false)
         {
             for comment in thread["comments"].as_array().unwrap() {
+                if comment["viewerDidAuthor"]
+                    .as_bool()
+                    .expect("fetch must include viewerDidAuthor")
+                {
+                    continue;
+                }
                 let items = self.read_all("items");
                 if items.iter().any(|row| {
                     row["item"]["links"]
@@ -166,24 +225,17 @@ impl Setup {
                     .as_str()
                     .unwrap()
                     .lines()
-                    .map(|line| {
-                        format!(
-                            "> {}",
-                            line.replace('&', "&amp;")
-                                .replace('<', "&lt;")
-                                .replace('[', "\\[")
-                        )
-                    })
+                    .map(|line| format!("> {}", reviewer_text(line)))
                     .collect::<Vec<_>>()
                     .join("\n");
                 let note = format!(
                     "Where: {}, {line}\n\nReviewer said:\n{quoted}\n\nSuggested action: {}",
-                    comment["path"].as_str().unwrap(),
+                    reviewer_text(comment["path"].as_str().unwrap()),
                     comment["suggestion"].as_str().unwrap()
                 );
                 let mut request = template(
                     1,
-                    &json!({"topic": topic, "question": comment["question"], "note": note, "comment_url": comment["url"]}),
+                    &json!({"topic": topic, "question": reviewer_text(comment["question"].as_str().unwrap()), "note": note, "comment_url": comment["url"]}),
                 );
                 let current = self
                     .read_all("topics")
@@ -287,4 +339,81 @@ fn same_title_prs_have_separate_topics_and_empty_prs_reuse_their_topic() {
     fixture["url"] = json!("https://github.com/example/harbor/pull/43");
     setup.import(&fixture);
     assert_eq!(setup.read_all("topics").len(), 2);
+}
+
+#[test]
+fn recipe_escapes_reviewer_text_and_where_path_without_html_entities() {
+    let setup = Setup::empty();
+    let mut fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    fixture["threads"][0]["comments"][0]["question"] = fixture["markdown_title"].clone();
+    setup.import(&fixture);
+    let items = setup.read_all("items");
+    let note = items[0]["item"]["note"].as_str().unwrap();
+    assert!(note.contains(r"Where: src/\[\<https\://docs.example.test/guide>\]/sync.rs, line 24"));
+    assert!(note.contains(r"> Please keep \<original> & \[saved\] values. See https\://docs.example.test/guide and HTTP\://docs.example.test/notes; \[guide\](https\://docs.example.test/guide)."));
+    assert!(!note.contains("&lt;"));
+    assert!(!note.contains("&amp;"));
+    assert_eq!(
+        items[0]["item"]["question"],
+        r"Harbor \[sync\] \<notes> https\://docs.example.test/review"
+    );
+    assert_eq!(
+        reviewer_text(r"\[saved] \<https://docs.example.test>"),
+        r"\\\[saved\] \\\<https\://docs.example.test>"
+    );
+}
+
+#[test]
+fn recipe_rerun_skips_own_and_recorded_posted_replies() {
+    let setup = Setup::empty();
+    let mut fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    setup.import(&fixture);
+    let before = setup.read_all("items");
+    // Model the successful GitHub Reply result. Author filtering works even
+    // before its receipt is recorded locally (an interrupted conversation).
+    let posted = fixture["posted_reply"].clone();
+    fixture["threads"][0]["comments"]
+        .as_array_mut()
+        .unwrap()
+        .push(posted.clone());
+    setup.import(&fixture);
+    assert_eq!(setup.read_all("items"), before);
+
+    let item = &before[1]["item"];
+    let mut links = item["links"].as_array().unwrap().clone();
+    links.push(json!({"kind": "pr", "label": "Posted reply", "target": posted["url"]}));
+    setup.cli(
+        "apply",
+        &json!({
+            "expected_item_revisions": {item["id"].as_str().unwrap(): item["revision"]},
+            "operations": [{"op": "item.edit", "item": {"id": item["id"]}, "patch": {"links": links}}]
+        }),
+    );
+    let recorded = setup.read_all("items");
+    assert_eq!(recorded[1]["item"]["links"][0], item["links"][0]);
+    assert_eq!(recorded[1]["item"]["links"][1]["label"], "Posted reply");
+    // A different gh login sees that posted reply as somebody else's comment.
+    fixture["threads"][0]["comments"][2]["viewerDidAuthor"] = json!(false);
+    setup.import(&fixture);
+    assert_eq!(setup.read_all("items"), recorded);
+    assert_eq!(setup.read_all("topics").len(), 1);
+}
+
+#[test]
+fn recipe_replies_to_child_comment_using_refetched_thread_and_exact_body_variable() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let top_level = &fixture["threads"][0]["comments"][0];
+    let child = &fixture["threads"][0]["comments"][1];
+    let body = "  Keep \"saved\" values.\n\\ $(touch injected) <original>  ";
+    let payload = reply_payload(&fixture, &child["url"], body);
+    assert_eq!(payload["variables"]["thread"], fixture["threads"][0]["id"]);
+    assert_eq!(payload, reply_payload(&fixture, &top_level["url"], body));
+    assert_eq!(payload["variables"]["body"], body);
+    let query = payload["query"].as_str().unwrap();
+    assert!(query.contains("addPullRequestReviewThreadReply"));
+    assert!(query.contains("pullRequestReviewThreadId:$thread,body:$body"));
+    assert!(!query.contains(body));
+    let stdin_payload: Value =
+        serde_json::from_slice(&serde_json::to_vec(&payload).unwrap()).unwrap();
+    assert_eq!(stdin_payload["variables"]["body"], body);
 }

@@ -245,6 +245,8 @@ organises topics and items itself.
 In a connected Claude conversation, run `/ariadne-pr-comments 42`, or use the
 PR's `https://github.com/.../pull/...` URL for the current repository. In a
 connected Codex thread, invoke `$ariadne-pr-comments 42` with the installed skill.
+`ariadne setup --agent codex` prints the skill's path: if Codex cannot discover
+it, ask the agent to read that file and follow the recipe with your PR argument.
 
 The agent makes a topic named for the PR and an item for each open review
 comment. Each shows what was asked, the file and line, and a suggested action.
