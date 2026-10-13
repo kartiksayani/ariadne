@@ -2,7 +2,7 @@
 // the real DesktopApp in the same state. Writes coverage/design/<frame>-design.png,
 // -app.png and -diff.png, a per-frame result that teardown.ts gathers into
 // report.json, and fails a frame whose mismatch ratio exceeds thresholds.json.
-import { test as base, expect, type BrowserContext, type Page } from '@playwright/test';
+import { test as base, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { createHash } from 'node:crypto';
@@ -12,6 +12,7 @@ import { dirname, extname, resolve, sep } from 'node:path';
 import { answerFrameIds, designNow, detailMask, detailMasked, dockFrameIds, frameNow, frameSpec, graphFrame, toastFrameIds, variantIds, type FrameSpec } from './frames';
 import { handoffMembers, prefix, repo, sourceRoot } from './source.mts';
 import thresholds from './thresholds.json' with { type: 'json' };
+import { changeNames, interpretation, ownerWords } from './changes-fixture';
 
 // Pixels whose channels differ by more than this count as mismatched.
 const tolerance = 16;
@@ -176,6 +177,143 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
 
 const railMessage = (page: Page, number: number) => page.locator('.pw-rail-list [data-message-id]').filter({
   has: page.locator('.pw-excerpt-number', { hasText: new RegExp(`^#${number}$`) }) });
+
+/** Check actual wrapped boxes; text assertions alone cannot detect clipped change cards. */
+async function changesFit(surface: Locator) {
+  await expect(surface).toBeVisible();
+  const layout = await surface.evaluate(element => {
+    const card = element.getBoundingClientRect();
+    return { overflow: element.scrollWidth - element.clientWidth,
+      children: [...element.querySelectorAll('.change-name, .change-read-as, .brief-text, .change-comparison, .since-seen')].map(child => {
+        const rect = child.getBoundingClientRect();
+        return { text: child.textContent, left: rect.left - card.left, right: rect.right - card.right,
+          overflow: child.scrollWidth - child.clientWidth };
+      }) };
+  });
+  expect(layout.overflow, 'change surface does not scroll horizontally').toBeLessThanOrEqual(1);
+  for (const child of layout.children) {
+    expect(child.left, `${child.text} starts inside its card`).toBeGreaterThanOrEqual(-1);
+    expect(child.right, `${child.text} ends inside its card`).toBeLessThanOrEqual(1);
+    expect(child.overflow, `${child.text} wraps instead of clipping`).toBeLessThanOrEqual(1);
+  }
+}
+
+async function compactCompare(surface: Locator) {
+  const control = surface.getByRole('button', { name: 'Show before and after', exact: true }).first();
+  await control.scrollIntoViewIfNeeded();
+  await expect(control).toHaveAttribute('title', 'Show before and after');
+  await expect(control).toHaveAttribute('aria-expanded', 'false');
+  await expect(control.locator('i')).toHaveCount(1);
+  await expect(control).toHaveText('');
+  const measure = () => control.evaluate(element => {
+    const rect = element.getBoundingClientRect(), style = getComputedStyle(element);
+    return { width: rect.width, height: rect.height, color: style.color, background: style.backgroundColor };
+  });
+  const closed = await measure();
+  expect(closed.width).toBeGreaterThanOrEqual(24); expect(closed.width).toBeLessThanOrEqual(32);
+  expect(closed.height).toBeGreaterThanOrEqual(24); expect(closed.height).toBeLessThanOrEqual(32);
+  await control.click();
+  await expect(control).toHaveAttribute('aria-expanded', 'true');
+  const comparison = surface.page().locator(`[id="${await control.getAttribute('aria-controls')}"]`);
+  await expect(comparison).toBeVisible();
+  await expect(comparison.locator('del').first()).toBeVisible();
+  await expect(comparison.locator('mark').first()).toBeVisible();
+  const opened = await measure();
+  expect(opened.width).toBe(closed.width); expect(opened.height).toBe(closed.height);
+  expect(opened.color).not.toBe(closed.color); expect(opened.background).not.toBe(closed.background);
+  await changesFit(surface);
+  return opened;
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`M2 typed answer names and uniform compact comparisons (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec('changes-typed'), theme });
+    const answer = page.getByRole('region', { name: 'What your answer changed', exact: true });
+    await answer.scrollIntoViewIfNeeded();
+    await expect(answer.locator('.change-owner-words')).toHaveText(ownerWords);
+    await expect(answer.locator('.change-read-as')).toHaveText(interpretation);
+    const words = await answer.locator('.change-owner-words').boundingBox(), read = await answer.locator('.change-read-as').boundingBox();
+    expect(words).not.toBeNull(); expect(read).not.toBeNull();
+    expect(words!.y + words!.height).toBeLessThanOrEqual(read!.y);
+    expect(await answer.locator('.change-owner-words').evaluate(element => getComputedStyle(element).whiteSpace)).toBe('pre-wrap');
+    await expect(answer.locator('.change-name')).toHaveText(changeNames.slice(0, 5));
+    await expect(answer.getByRole('heading', { name: 'New', exact: true })).toHaveCount(0);
+    await answer.getByRole('button', { name: 'and 3 more: 3 new', exact: true }).click();
+    await expect(answer.locator('.change-name')).toHaveText(changeNames);
+    await expect(answer.getByRole('heading', { name: 'New', exact: true })).toBeVisible();
+    await changesFit(answer);
+    const answerControl = await compactCompare(answer);
+    const current = page.getByRole('region', { name: 'What changed', exact: true });
+    const currentControl = await compactCompare(current);
+    await page.locator('.change-history > summary').click();
+    const older = page.locator('.change-history-entry').first();
+    await expect(older).toContainText('Rewording');
+    const historyControl = await compactCompare(older);
+    const since = page.getByRole('region', { name: 'Since you were here', exact: true });
+    await since.getByRole('button', { name: /^Since you were here ·/ }).click();
+    const sinceCard = since.locator('.since-card').filter({ has: page.getByRole('button', { name: 'Retry schedule', exact: true }) });
+    const sinceControl = await compactCompare(sinceCard);
+    expect([currentControl, historyControl, sinceControl]).toEqual([answerControl, answerControl, answerControl]);
+    await testInfo.attach(`changes-comparisons-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+
+  test(`M2 chosen answer and attributed topic lists (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec('changes-choice'), theme });
+    const answer = page.getByRole('region', { name: 'What your answer changed', exact: true });
+    await answer.scrollIntoViewIfNeeded();
+    await expect(answer).toContainText('Because you chose Keep retries quiet:');
+    await expect(answer.locator('.change-owner-words, .change-read-as')).toHaveCount(0);
+    await changesFit(answer);
+    const brief = page.getByRole('region', { name: 'Topic brief', exact: true });
+    await brief.scrollIntoViewIfNeeded();
+    await expect(brief.locator('.brief-attribution')).toContainText('By the agent · as of');
+    await expect(brief.locator('time')).toHaveAttribute('datetime', '2026-10-07T15:02:00.000Z');
+    await expect(brief.locator('.brief-list').nth(0).locator('.change-name')).toHaveText(['Recovery policy']);
+    await expect(brief.locator('.brief-list').nth(1).locator('.change-name')).toHaveText(['Recovery question']);
+    const replaced = brief.locator('.brief-list').nth(2);
+    await expect(replaced.locator('del')).toHaveText('Old retry policy');
+    await expect(replaced).toContainText('replaced by Recovery policy');
+    expect(await replaced.locator('del').evaluate(element => getComputedStyle(element).textDecorationLine)).toContain('line-through');
+    const columns = await brief.locator('.brief-list').evaluateAll(elements => elements.map(element => ({
+      label: element.querySelector('strong')!.getBoundingClientRect().x, links: element.querySelector('ul')!.getBoundingClientRect().x,
+    })));
+    expect(new Set(columns.map(column => column.label)).size).toBe(1);
+    expect(new Set(columns.map(column => column.links)).size).toBe(1);
+    await changesFit(brief);
+    await testInfo.attach(`changes-brief-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+
+  test(`M2 Since cards acknowledge Seen before leaving (${theme})`, async ({ page, origin }) => {
+    await openApp(page, origin, { ...frameSpec('changes-typed'), theme });
+    const since = page.getByRole('region', { name: 'Since you were here', exact: true });
+    await since.getByRole('button', { name: /^Since you were here ·/ }).click();
+    const card = since.locator('.since-card').filter({ has: page.getByRole('button', { name: 'Retry schedule', exact: true }) });
+    await changesFit(card);
+    await card.getByRole('button', { name: 'Seen', exact: true }).click();
+    await expect(card.getByRole('button', { name: '✓ Seen', exact: true })).toBeVisible();
+    await expect(card.getByRole('button', { name: '✓ Seen', exact: true })).toBeDisabled();
+    await expect(card).toHaveCount(0, { timeout: 6000 });
+    await expect(page.locator('[data-item-id="3.9"]')).toContainText('Recovery question');
+  });
+
+  test(`M2 long absence puts the brief first and offers reversible catch-up (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec('changes-away'), theme });
+    const brief = page.getByRole('region', { name: 'Topic brief', exact: true });
+    const since = page.getByRole('region', { name: 'Since you were here', exact: true });
+    await expect(since).toContainText('8 changes while you were away');
+    await expect(since.locator('.since-card')).toHaveCount(0);
+    const briefBox = await brief.boundingBox(), sinceBox = await since.boundingBox();
+    expect(briefBox).not.toBeNull(); expect(sinceBox).not.toBeNull();
+    expect(briefBox!.y + briefBox!.height).toBeLessThan(sinceBox!.y);
+    await changesFit(brief); await changesFit(since);
+    await since.getByRole('button', { name: 'Mark all seen', exact: true }).click();
+    await expect(since).toContainText('All caught up');
+    await since.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect(since).toContainText('8 changes while you were away');
+    await expect(brief.locator('.brief-list').nth(1).locator('.change-name')).toHaveText(['Recovery question']);
+    await testInfo.attach(`changes-away-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+}
 
 /**
  * Puts the app's rail where the design's rail sits. The prototype scrolls its rail to the bottom 60 ms after

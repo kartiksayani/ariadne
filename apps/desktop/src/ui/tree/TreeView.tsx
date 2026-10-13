@@ -10,6 +10,7 @@ import type { RevealedItem } from '../../data/routes';
 import type { ItemRoute, SessionPreferences } from '../../generated/core';
 import type { Input, SessionSummary } from '../../generated/domain/models';
 import { NavigationStore, useNavigation } from '../../state/navigation/store';
+import { useReadingSeen } from '../../state/preferences/reading';
 import { OwnerDraftStore, useOwnerDrafts } from '../../state/drafts/store';
 import type { SessionActions } from '../../components/bindings/actions';
 import { DispatchChip } from '../../components/bindings/DispatchChip';
@@ -19,7 +20,7 @@ import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { AnswerControl } from '../answer/AnswerControl';
 import type { PendingSubmission } from '../answer/useSubmit';
 import { notices as noticeStore } from '../pages/notices';
-import { chipsOf, closed, collapsedNote, oldestWaiting, parentKey, sessionBar, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
+import { chipsOf, closed, collapsedNote, mapChanges, nextMarkedItem, oldestWaiting, parentKey, sessionBar, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
 import { HiddenRow } from './HiddenRow';
 import { hiddenGroupKey, hiddenGroupsFor } from './hidden';
 import { HideIcon } from '../shared/HideIcon';
@@ -66,6 +67,8 @@ export interface TreeViewProps {
   readonly graph?: ReactNode;
   /** Notices above the rows: stale data, recovery. */
   readonly notices?: ReactNode;
+  /** Expanded topic information below its sticky header, above the item rows. */
+  readonly topicContent?: (topicId: string) => ReactNode;
   readonly highlightedItems: ReadonlySet<string>;
   readonly highlightedMessages: ReadonlySet<string>;
   readonly summaries: readonly Immutable<SessionSummary>[];
@@ -131,6 +134,13 @@ export function TreeView(props: TreeViewProps) {
   const hiddenFocus = useRef<string | null>(null);
   const [expandedHiddenGroups, setExpandedHiddenGroups] = useState<ReadonlySet<string>>(new Set());
   const [focusKey, setFocusKey] = useState<string | null>(selectedId);
+  const [nextTarget, setNextTarget] = useState<{ readonly id: string; readonly step: number } | null>(null);
+  const [nextRevealId, setNextRevealId] = useState<string | null>(null);
+  const [nextPulse, setNextPulse] = useState(false);
+  const [noUnseen, setNoUnseen] = useState(false);
+  const nextScroll = useRef<string | null>(null);
+  const seen = useReadingSeen(navigation.reading, preferences, route);
+  const changes = useMemo(() => session ? mapChanges(session, seen) : null, [session, seen]);
   const [kbd, setKbd] = useState(false);
   const [answering, setAnswering] = useState<string | null>(null);
   const [continuing, setContinuing] = useState<string | null>(null);
@@ -193,8 +203,8 @@ export function TreeView(props: TreeViewProps) {
   const temporary = reveal?.kind === 'item' ? reveal.temporaryExpandedItemIds : null;
   const model = useMemo(() => session && view ? treeModel({ session, view, search: query, later, collapsedTopics: closedTopics, selectedId, revealId,
     filterCollapsedItemIds: filterFolds.items, filterCollapsedTopicIds: filterFolds.topics,
-    expandedHiddenGroups, temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute }) : null,
-  [session, view, query, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, presence, health, summaries, minute]);
+    attentionRevealId: nextRevealId, expandedHiddenGroups, temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute }) : null,
+  [session, view, query, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, nextRevealId, presence, health, summaries, minute]);
   const summary = summaries.find(value => value.project_id === route.project_id && value.session_id === route.session_id) ?? null;
   const bar = sessionBar(session, summary, presence);
   const rows = useMemo(() => model?.rows ?? [], [model]);
@@ -226,6 +236,7 @@ export function TreeView(props: TreeViewProps) {
     });
   }, [session?.id, selectedId, reveal, props.historyReveal]);
   const toggleHiddenGroup = (key: string) => {
+    setNextRevealId(null);
     onDismissReveal();
     setExpandedHiddenGroups(previous => {
       const next = new Set(previous);
@@ -306,6 +317,7 @@ export function TreeView(props: TreeViewProps) {
   const toggleItem = (id: string) => {
     const row = latest.current.rows.find(value => value.key === id);
     if (!row || row.kind !== 'item' || !row.hasKids) return;
+    setNextRevealId(null);
     if (model?.filtering) filterFolds.setFold('items', id, row.expanded);
     if (row.expanded) onDismissReveal();
     void saveView(next => {
@@ -315,6 +327,7 @@ export function TreeView(props: TreeViewProps) {
     });
   };
   const toggleTopic = (id: string) => {
+    setNextRevealId(null);
     const expanded = latest.current.rows.find(row => row.kind === 'topic' && row.key === id)?.expanded ?? !closedTopics.has(id);
     if (expanded) onDismissReveal();
     if (model?.filtering) filterFolds.setFold('topics', id, expanded);
@@ -324,10 +337,12 @@ export function TreeView(props: TreeViewProps) {
     void saveView(saved => { saved.collapsed_topic_ids = kept; });
   };
   const setChip = (chip: Chip) => {
+    setNextRevealId(null);
     onDismissReveal();
     void saveView(next => { next.filters.statuses = toggleChip(next.filters.statuses, chip); });
   };
   const resume = () => {
+    setNextRevealId(null);
     const outsideSelected = selectedId !== null && selectedId === revealId;
     onResume();
     if (outsideSelected) void saveView(next => { next.selected_item_id = null; });
@@ -505,13 +520,18 @@ export function TreeView(props: TreeViewProps) {
   };
   // The least scrolling that brings a row into view (`block: 'nearest'`): none when it is in view already; a row
   // taller than the tree lines up its top instead of running past it.
-  const nearest = (key: string, margin = 0) => {
+  const nearest = (key: string, margin = 0, clearSelectionMarker = false) => {
     const box = scroller.current, element = elements.current.get(key);
     if (!box || !element) return;
     const a = box.getBoundingClientRect(), b = element.getBoundingClientRect();
-    const top = a.top + headerHeight(element) + margin;
+    // N can scroll the selection offscreen and bring its edge marker into view in the same layout.
+    // Reserve that compact marker's height up front so the arriving row is never underneath it.
+    const markerRoom = clearSelectionMarker && selectedId && selectedId !== key
+      ? (box.parentElement?.querySelector('.tree-selected-edge')?.getBoundingClientRect().height || 32) + 8 : 0;
+    const top = a.top + headerHeight(element) + margin + markerRoom;
+    const bottom = a.bottom - margin - markerRoom;
     if (b.top < top) box.scrollTop -= top - b.top;
-    else if (b.bottom > a.bottom - margin) box.scrollTop += Math.min(b.bottom - a.bottom + margin, b.top - top);
+    else if (b.bottom > bottom) box.scrollTop += Math.min(b.bottom - bottom, b.top - top);
   };
   const centered = useRef(false), settled = useRef(false), openingReveal = useRef<string | null>(null);
   // Show more / Show less on a long preview. The owner is steering, so the view stops holding its anchor; folding
@@ -585,7 +605,7 @@ export function TreeView(props: TreeViewProps) {
     if (!focusKey || !kbd) return;
     if (focusKey !== anchor?.key) settled.current = true;
     // Keyboard moves scroll only when the new row is off-screen, and by the least amount.
-    nearest(focusKey, 8);
+    nearest(focusKey, 8, nextTarget?.id === focusKey);
   }, [focusKey]);
   // The tree never jumps on its own: what the owner is reading stays put when rows above it grow, shrink, arrive or
   // leave (a live edit, a message landing, fonts loading). WKWebView has no `overflow-anchor`, so the first visible row
@@ -683,6 +703,53 @@ export function TreeView(props: TreeViewProps) {
     scrollRequested.current = null;
     settled.current = true; setAnchor(null); nearest(target, 8); remembering(); updateEdge();
   }, [rows, selectedId, reveal, graph]);
+  const nextCallbacks = useRef<() => void>(() => {});
+  nextCallbacks.current = () => {
+    if (!changes || !session || state.status !== 'ready') return;
+    const after = nextTarget?.id ?? (focusKey && session.items[focusKey] ? focusKey : selectedId);
+    const id = nextMarkedItem(changes.order, changes.markers, after);
+    settled.current = true; centered.current = true; setAnchor(null);
+    scrollRequested.current = null;
+    setNoUnseen(id === null);
+    setNextRevealId(id);
+    if (!id) {
+      setNextTarget(null); setNextPulse(false); nextScroll.current = null;
+      noticeStore.push({ id: 'tree-no-unseen', icon: 'ph ph-check', dismissible: true, text: 'No unseen items.' });
+      return;
+    }
+    noticeStore.dismiss('tree-no-unseen');
+    nextScroll.current = id;
+    setKbd(true);
+    setNextPulse(false);
+    setNextTarget(previous => ({ id, step: (previous?.step ?? 0) + 1 }));
+  };
+  useLayoutEffect(() => {
+    const id = nextScroll.current;
+    if (!id || graph || !elements.current.has(id)) return;
+    nextScroll.current = null;
+    focusRow(id); nearest(id, 8, true); remembering(); updateEdge();
+  }, [rows, nextTarget, graph]);
+  useEffect(() => {
+    if (!nextTarget) return;
+    const start = setTimeout(() => setNextPulse(true), 0);
+    const timer = setTimeout(() => setNextPulse(false), 900);
+    return () => { clearTimeout(start); clearTimeout(timer); };
+  }, [nextTarget]);
+  useEffect(() => {
+    setNextTarget(null); setNextRevealId(null); setNextPulse(false); setNoUnseen(false); nextScroll.current = null;
+    return () => noticeStore.dismiss('tree-no-unseen');
+  }, [route.project_id, route.session_id]);
+  useEffect(() => {
+    if (graph) return;
+    const shortcut = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.key.toLowerCase() !== 'n') return;
+      if (event.target instanceof Element && event.target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[role="dialog"],[role="alertdialog"]')) return;
+      event.preventDefault();
+      if (!event.repeat) nextCallbacks.current();
+    };
+    window.addEventListener('keydown', shortcut);
+    return () => window.removeEventListener('keydown', shortcut);
+  }, [graph]);
   const edgeCallbacks = useRef({ updateEdge, revealSelected });
   edgeCallbacks.current = { updateEdge, revealSelected };
   const topicKeys = JSON.stringify(sections.map(section => section.topic.key));
@@ -771,9 +838,11 @@ export function TreeView(props: TreeViewProps) {
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
         reply={replying === row.topic.id && !archivedMode ? <TopicReply drafts={drafts} store={store} actions={actions} topicId={row.topic.id}
           agent={bar?.agent ?? 'the agent'} onClose={() => { setReplying(null); focusRow(row.key); }} /> : null} fix={fixOf(row)} />
+      {row.expanded && props.topicContent?.(row.topic.id)}
       {items.map(row => row.kind === 'hidden'
         ? <HiddenRow key={row.key} row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleHiddenGroup} />
         : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={viewBusy} closedReason={session ? sessionAnswerBlocked(session) : undefined}
+        changeMarker={changes?.markers.get(row.key)} nextUnseen={nextTarget?.id === row.key} nextUnseenPulse={nextPulse && nextTarget?.id === row.key}
         highlight={highlightedItems.has(row.key) ? 'strong' : row.collapsed?.ids.some(id => highlightedItems.has(id)) ? 'weak' : null}
         note={row.collapsed ? collapsedNote(row.collapsed, { items: highlightedItems, message: touchedMessage }) : null}
         actions={itemActions(row)} answer={answering === row.key ? answerControl : null} fix={fixOf(row)}
@@ -819,6 +888,7 @@ export function TreeView(props: TreeViewProps) {
 
   return <section className="tree-column" aria-label="Session tree" data-session-status={state.status} data-kbd={kbd || undefined}
     onKeyDownCapture={() => { if (!kbd) setKbd(true); }} onMouseDownCapture={() => { if (kbd) setKbd(false); }}>
+    <span role="status" className="tree-unseen-announcement">{noUnseen ? 'No unseen items.' : ''}</span>
     {bar && !archivedMode && <SessionBar bar={bar} busy={lifecycle.busy || !session} onClose={lifecycle.session}
       onRename={session ? lifecycle.rename : undefined}
       dispatch={<DispatchChip actions={actions} onDetails={() => setSending(true)} />} />}

@@ -55,7 +55,7 @@ The bundled WOFF2 files are the complete, unmodified Phosphor fonts; `phosphor.c
 | --- | --- | --- |
 | Global chrome | Ariadne spiral/name, registered project or session context, evidence-based binding state, search, Tree/Graph/Archive view, message-rail toggle, theme control; project/session tabs; footer with implemented keyboard hints and scoped counts | README `Global chrome`; board 1a, 1aa, 1ab, 1z |
 | Projects / project / all sessions | Registered-root cards and project/session groupings, active/closed sessions, topic counts, Open/Go to tab/Close/Reopen controls, first-launch empty-registration state | README `Projects screen`, `Project page`, `All sessions`; board 1p, 1ab, 1ac, 1z |
-| Waiting on me | Cross-session queue where item status is Waiting and there is no Answer for the current question revision whose input is not cancelled/skipped; oldest waiting episode first; plain-language path; question and ask; previous-round/earlier-session context; compact answer; Sent inputs; empty state. A new ask can be Waiting while an older input for that item remains Sent. Archived topics cannot contain waiting items because archive is guarded | README `Waiting on me`; board 1a, 1c, 1l |
+| Waiting on me | Active-session queue where item status is Waiting and there is no Answer for the current question revision whose input is not cancelled/skipped; oldest waiting episode first; plain-language path; question and ask; previous-round/earlier-session context; compact answer; Sent inputs; empty state. A new ask can be Waiting while an older input for that item remains Sent. Closed-session questions appear only in their own Map history, never in Waiting or its counts | README `Waiting on me`; board 1a, 1c, 1l |
 | Session tree | Session evidence bar; status chips and topic selector; topic counts/actions; 24 px nested rows with status, question, outcome/supporting line, selected ancestry, active-descendant summary, search/filter context and local Later marker | README `Session tab`; board 1a, 1n, 1t, 1u, 1w, 1aa |
 | Item row and status badge | Named title with adjacent status; question and closed outcome; one priority supporting line; descendants summary; hover actions; unique status shape plus text; selected, focus, search, touched-message, open-answer states | README `Components`; `Item Row.dc.html`, `Status Badge.dc.html`; board 1j, 1k |
 | Item detail | Breadcrumbs, type/status/next actor, question, outcome, why/note, prior reopen snapshot, replacement, children, links, answer/delivery history, complete message timeline, and Back and forth rounds with answer/result/message references and child forks | README `Item detail`; board 1b, 1e, 1q, 1r, 1u, 1v |
@@ -70,21 +70,70 @@ Full item history is not inferred from a single excerpt. Preserve each message's
 
 Item references in Ariadne-owned text and accessible labels use `shortLabel` names; numeric item references do not appear in rows, detail navigation, Waiting controls, or the Continue preview. Long reference labels truncate within their available width. Keep numeric identities in routes, provenance, agent-written content, the exact summary sent by Continue, and the explicit Copy reference action.
 
-Tree rows put the status next to the title. The body shows the full text unless a four-line preview hides at least three additional lines; then it offers expansion. Ancestry rails stay continuous across row content and supporting lines. Neutral rails show structure, accent rails mark the selected path, and a stable hue for each top-level root is decorative. Clicking a tree row selects it without scrolling the reader. Opening or restoring a session restores its saved scroll anchor; without one, it brings the selected row into view once. Deliberate navigation from Waiting, search, history, item links and native reveal requests brings the target into view, overriding a saved reading anchor when an item route opens another session. Detail opening and closing keep the scroll position. Keyboard movement uses the least scrolling needed to keep the new row visible. When selection is outside the viewport, a solid edge marker and Cmd+J return to it.
+Tree rows put the status next to the title. The body shows the full text unless a four-line preview hides at least three additional lines; then it offers expansion. Ancestry rails stay continuous across row content and supporting lines. Neutral rails show structure, accent rails mark the selected path, and a stable hue for each top-level root is decorative. Clicking a tree row selects it without scrolling the reader. Opening or restoring a session restores its saved scroll anchor; without one, it brings the selected row into view once. Deliberate navigation from Waiting, search, history, item links and native reveal requests brings the target into view, overriding a saved reading anchor when an item route opens another session. Detail opening and closing keep the scroll position. Keyboard movement uses the least scrolling needed to keep the new row visible. When selection is outside the viewport, a compact Selected tag in the Map's top bar and Cmd+J return to it. The tag never overlays rows; every reveal clears sticky elements.
+
+### Seeing changes (Alpha.14.4, mock M2)
+
+Use one coral-orange attention token for the eye-catching `New` tag and filled
+changed-since-read dot. Waiting status is separate and clears only when answered.
+Wording-only edits stay in history and create no attention marker.
+
+Under the owner's answer, show the saved option and any typed words, followed by
+`Because you chose X:` or the agent's `Read as: …` interpretation for typed
+answers. Group affected item names as updated, replaced, new or now blocked.
+Use a card-wide budget of five names, filling groups in Updated, Replaced, New,
+Now blocked order. A group may show some of its names; omit headings with none
+shown. Never hide exactly one name, so a six-name card shows all six. Summarize
+hidden names once, in the same group order, such as
+`and N more: 1 replaced, 2 new`; reveal shows them all. Each name opens its item.
+All comparisons use a small compare icon with `Show before and after` as its
+tooltip, highlighted while expanded.
+
+The topic brief is the agent's 2–3 sentence bottom line, labelled
+`By the agent · as of …`. Ariadne derives the linked Decided, Your turn and Replaced
+lists; replacements strike through the old name and name its replacement.
+`Since you were here` comes from saved change records since the topic's caught-up
+baseline. After more than two days or at least 30 changes, lead with the brief
+and offer Mark all seen with Undo.
+
+Seen is one shared state. Opening an item marks its captured revision seen after
+about one second; a future item preview follows the same dwell rule. Its marker
+clears everywhere and its change card leaves the list. A card marked with its
+Seen button briefly says `✓ Seen`, then leaves after about three seconds.
+When a topic has no unseen item changes remaining, record
+its caught-up baseline automatically. Seen, Mark all caught up and Mark all seen
+remain optional shortcuts. A bulk action updates shared seen state immediately
+and defers its monotonic preference write for the five-second Undo window; Undo
+survives navigation and reverts only those pending marks, preserving later reads
+and new changes. A topic mark uses the observation time only when the rendered
+session revision is still current; an older bulk capture marks its shown items
+while leaving newer unread batches eligible.
+
+N wraps from the last unseen item to the first, reporting `No unseen items` when
+none remain. Landing via N focuses and reveals the row without opening detail or
+a preview and leaves it unseen. The row pulses briefly, then keeps a distinct
+outline until the next N. Clicking it or pressing Enter opens it and starts the
+seen dwell.
+
+Closed-session questions show `Session closed` without answer controls only in
+that session's own Map history. Waiting has no hidden-question line, Show toggle
+or historical cards; its Sent rows also omit those questions. Unavailable-session
+notices use a known session name or plain words, never an ID. The mock's former
+closed-session Waiting tour step 21 is removed from the Alpha.14.4 contract.
 
 The design gallery preserves the immutable archive and applies intentional row changes through `tests/ui/design/row-chrome.ts`, called by `source.mts`; setup regenerates `coverage/design/source/`. Alpha.14 Map references use named titles with adjacent status, reserved actions, and accent topic titles with the existing dimming for earlier topics. The app also has continuous grey rails, accent selection paths and decorative root marks from mock M1. The inline-answer reference replays session opening with detail visible, then closes detail and opens the answer without scrolling, matching the app gallery. It waits for fonts and layout before that transition and never recenters the expanded editor. Initial selection placement is retained; scroll drift is not an intentional visual difference. Keep screenshot thresholds unchanged.
 
 ## Input, state, and navigation rules
 
 - Owner messages, including messages on closed items, become durable session-scoped input requests. Ack records local owner activity and status history without creating an input. The UI labels the request kind and target; one FIFO queue preserves submission order. Delivery and receipt are separate from item status.
-- Waiting counts use `waiting_unanswered`: item status is Waiting and there is no Answer for the current question revision whose input is other than cancelled or skipped. Once answered, that episode stays out of Waiting even after the input is handled. Sent shows one row per queued, in-flight, or needs-attention input, including generic requests. A new ask can re-enter Waiting while an older input on the same item remains in Sent. Raw status counts remain separate from actionable Waiting counts.
+- Waiting counts use `waiting_unanswered`: in an active, unarchived session, item status is Waiting and there is no Answer for the current question revision whose input is other than cancelled or skipped. Once answered, that episode stays out of Waiting even after the input is handled. Sent shows one row per queued, in-flight, or needs-attention input, including generic requests, but excludes closed-session question inputs. A new ask can re-enter Waiting while an older input on the same item remains in Sent. Raw status counts remain separate from actionable Waiting counts.
 - Use API `SummaryCounts` consistently: global/project/tray Waiting count is `waiting_unanswered`; Sent counts inputs by queued/in-flight/needs-attention; `items_by_status` is the separate raw status count. Topic and selected-session chips count nonarchived items before local search/filter. Footer shows visible and total scope. Archive has separate topic counts. Partial/inaccessible sources show an incomplete marker, never a false zero. The UI/API mapping for design operation names such as `input.submit` to transport command names is in `low-level/API_AND_MCP.md`.
 - Agent operations update status; owner Ack applies the recorded `ack_to` target once no question needs an answer. New read-only items start Open with a target and show a quiet Ack button; topic counts include “N to ack”, and graph nodes carry an Ack marker. An accepted answer remains visible in Sent until handled (successful matching host turn plus committed domain result), or explicitly cancelled/skipped. Received and Reply published are intermediate labels within Sent. Uncertain delivery blocks later queue work until explicitly resolved. Resend uses the same operation identity when the runtime proves the first delivery did not occur; uncertainty offers explicit recovery and a duplicate-work explanation.
 - `Later` only changes local visibility. It does not change owner/status fields or send a request.
 - Archive requires all topic items terminal and no queued, in-flight, or needs-attention input. Close session requires all items terminal, no unresolved inputs, and dispatch paused; show blockers and offer an explicit Pause then Close flow. Neither operation kills, closes, or types into a terminal process. Restore/reopen only restores Ariadne metadata.
 - Continue makes a copy in the target session with immutable source references. Preview and owner confirmation precede send. A failed target write leaves the source untouched.
 - Search is local to the selected session and includes question, outcome, why, topic, and message excerpts; it excludes provider raw activity and secrets. Status/topic/owner filters combine with AND; values within each filter combine with OR. A reveal temporarily expands ancestry and displays an outside-filter banner without clearing filters or overwriting the owner's saved expansion choices.
-- Use the same reveal route from Waiting, search, tree links, graph, tray, notifications, archive, and message timeline. Selection and opening detail keep the Map's reading position; only keyboard row movement, the selected-item edge marker, or Cmd+J scroll to the selection. Preserve selection, focus, scroll anchor, and drafts through live snapshots.
+- Use the same reveal route from Waiting, search, tree links, graph, tray, notifications, archive, and message timeline. Selection and opening detail keep the Map's reading position; deliberate reveal, keyboard row movement, the Selected tag, or Cmd+J scroll the target clear of sticky elements. Preserve selection, focus, scroll anchor, and drafts through live snapshots.
 
 Keyboard behavior is specified in `low-level/UI_AND_NATIVE.md`; the footer only advertises release-one bindings. A recommended option is visual guidance only. Number keys select; they never submit. Enter opens the selected item or activates ordinary navigation; Cmd+Enter submits the focused valid owner input. Escape closes the topmost detail/overlay while keeping drafts.
 
@@ -95,6 +144,12 @@ The tray count and quick list use `waiting_unanswered`, not raw items with Waiti
 ## Required visual states
 
 Capture at 1600 × 960 in both themes: Projects, project page, All sessions, session tree, selected terminal item, waiting detail, option answer, free-text answer, queued/sent/received and uncertain delivery, full Back and forth rounds with forks, graph, message rail hover/pin/follow-latest, archive/restore, continue preview/commit, session close/reopen guard, first registration, empty session, loading, all-clear, no results, filter reveal, stale/unavailable binding, malformed store, write failure with retained draft, changed question during an answer, and native-route recovery.
+
+Alpha.14.4 adds captures for New and changed markers, grouped answer effects
+(including typed words and Read as), expanded comparison icons, topic brief and
+Since you were here cards, transient Seen and bulk Undo, long-absence catch-up,
+N arrival without detail or seen, the top-bar Selected tag, closed-session Map
+history without answer controls, and Waiting without closed questions or IDs.
 
 Use deterministic clocks and the canonical fixture from `DESIGN_PROMPT.md`. Compare layout, text wrapping, indentation, icons, colors, focus, selected ancestry, rail interactions, and responsive overflow to the supplied references. Raster antialiasing differences are acceptable. Missing states, lost history, clipped controls, inaccurate status/delivery claims, and spacing drift are not. Trace each board frame and requirement to an acceptance ID in `DESIGN_TRACEABILITY.md`.
 

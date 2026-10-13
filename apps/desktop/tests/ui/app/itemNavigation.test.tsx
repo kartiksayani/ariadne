@@ -9,8 +9,9 @@ import { sessionButton } from './open';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { shortLabel } from '../../../src/ui/shared/short';
+import { changesFixture } from '../changes/fixture';
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 async function click(element: Element) {
   await act(async () => { fireEvent.click(element); });
 }
@@ -75,10 +76,31 @@ function inTree(id: string) {
 }
 
 describe('composed item navigation', { timeout: 10_000 }, () => {
+  it('opens and focuses the owner answer behind a change, then consumes the jump', async () => {
+    const value = changesFixture(), transport = new AppTransport();
+    transport.sessions.set(value.session.id, value.session);
+    transport.preferences.seen = [value.seen];
+    await setup(transport); await openSession(); await pick('updated-0');
+    const context = screen.getByRole('region', { name: 'What changed' });
+    await click(within(context).getByRole('button', { name: 'Changed after your typed answer ↗' }));
+    selected(value.answer.item_id);
+    expect(document.activeElement?.getAttribute('data-message-id')).toBe(value.answer.message_id);
+    const otherControl = screen.getByRole('button', { name: 'Close detail' });
+    otherControl.focus();
+    const session = transport.sessions.get(route.session_id)!; ++session.revision;
+    session.messages.find(message => message.id === value.answer.message_id)!.body += '\nAdditional words.';
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    expect(document.activeElement).toBe(otherControl);
+  });
   it('marks current details as read and leaves changes unseen while the pane is closed', async () => {
     const mark = vi.spyOn(NavigationStore.prototype, 'markItemSeen');
-    const transport = await setup(); await openSession(); await pick('2');
-    expect(mark).toHaveBeenCalledWith(route, '2');
+    const transport = await setup(); await openSession();
+    vi.useFakeTimers(); await pick('2');
+    expect(mark).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(999); });
+    expect(mark).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(mark).toHaveBeenCalledWith(route, '2', transport.sessions.get(route.session_id)!.items['2']!.revision);
     await click(screen.getByRole('button', { name: 'Close detail' }));
     mark.mockClear();
     const session = transport.sessions.get(route.session_id)!;
@@ -86,7 +108,9 @@ describe('composed item navigation', { timeout: 10_000 }, () => {
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
     expect(mark).not.toHaveBeenCalled();
     await pick('2');
-    expect(mark).toHaveBeenCalledWith(route, '2');
+    expect(mark).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(mark).toHaveBeenCalledWith(route, '2', transport.sessions.get(route.session_id)!.items['2']!.revision);
   });
   it.each([
     { archive: 'session', retained: false }, { archive: 'session', retained: true },

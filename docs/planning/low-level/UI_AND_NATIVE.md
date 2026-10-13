@@ -92,7 +92,7 @@ Subscribe before loading. Keep one immutable validated snapshot store per opened
 
 Watch registered session-store parent directories, debounce changes, validate snapshots in the backend, and emit IDs/revisions rather than file contents. Reconcile on app focus, wake, watcher error, and a bounded fallback poll. Selected session gets priority. V1 session discovery reads only known-provider session metadata and Mod announcements; it never imports private terminal transcripts or chooses a binding automatically. Qualified host state and heartbeat freshness supply liveness. Explicit CLI/MCP messages and bridge lifecycle evidence are authoritative.
 
-Global Waiting contains an item only when its status is `waiting_on_me` and it has no Answer for the current `question_revision` whose input is in any state other than `cancelled` or `skipped`. A handled answer continues to suppress that waiting episode until a new ask changes the question revision. Sort eligible rows by the current waiting-episode timestamp, then project/session and stable item order. Sent shows one row per input in `queued`, `in_flight`, or `needs_attention`, including generic non-answer requests, and links each row to its target question snapshot. A new ask on an item can appear in Waiting while an older input for that item remains in Sent.
+Global Waiting contains an item only in an active, unarchived session, when its status is `waiting_on_me` and it has no Answer for the current `question_revision` whose input is in any state other than `cancelled` or `skipped`. A handled answer continues to suppress that waiting episode until a new ask changes the question revision. Sort eligible rows by the current waiting-episode timestamp, then project/session and stable item order. Sent shows one row per input in `queued`, `in_flight`, or `needs_attention`, including generic non-answer requests, and links each row to its target question snapshot. A new ask on an item can appear in Waiting while an older input for that item remains in Sent. Closed-session questions and their Sent inputs appear nowhere in Waiting or its actionable counts; retain them only as history in their own session's Map with `Session closed` and no answer controls. Do not offer a hidden-question count, Show toggle or historical Waiting cards. Unavailable-session notices use a known title or plain words, never a session ID.
 
 A message that hasn't been sent yet (`queued`) offers Edit and Delete wherever it shows: the item detail tracker, its topic band for a topic reply, and the Waiting rail's Sent row. Delete is `input_cancel`. Edit is `input_cancel` with `purpose: "edit"`, and it cancels first: only once core confirmed the cancel does the message's text and chosen option go into the owner's draft for that item (answer, reply, note or follow-up box; other kinds go to the reply box) or topic. The draft never holds a queued message's words while that message can still be sent, so the same words never go out twice. When the draft already holds different text, Edit cancels nothing and offers the old text to copy; a draft that gained other text during the cancel is never overwritten either. A refused cancel (the message already left the queue) says "This message was already sent, so it can't be edited."; an unconfirmed one changes nothing, says "Couldn't take this message back. Try again." and offers Check again. A held message labels Edit "Review and send again". In-flight messages keep Cancel, and stopped ones keep their recovery choices. An owner message the owner deleted before any delivery attempt leaves the timeline, the rounds and the message rail. One taken back to edit (`cancel_cause` `owner_edit`) stays, with "Taken back to edit" and "Put back in reply box" (which follows the same never-overwrite rule), until a later message carries the same words; one cancelled by archive or close keeps its "Not sent" line. None of these ever counts as an answer. Core never claims a cancelled input, and a cancel racing a claim gets `revision_conflict`.
 
@@ -121,7 +121,7 @@ Determine initial expansion once per session view: active branches expanded, ful
 
 Ariadne-owned visible references and accessible labels use item `shortLabel` names, with long labels truncated to available width. Do not display numeric item references in rows, detail navigation, Waiting answer labels, copied-item actions, or the Continue preview. The Source item action has a generic label when the source name is unavailable locally; the fallback names the local copied item. Retain identity in route/data attributes, durable provenance, agent-written text, the actual Continue summary, and Copy reference (`item.id — item.question`).
 
-Draw continuous ancestry rails across all row content. Rails are neutral by default and accent on the selected path. A stable hue assigned to each top-level root is decorative and does not encode status. Clicking a visible tree row selects it without changing the reader's scroll position. Show an edge marker when selection is outside the viewport; clicking it or pressing Cmd+J reveals and scrolls to the selected item.
+Draw continuous ancestry rails across all row content. Rails are neutral by default and accent on the selected path. A stable hue assigned to each top-level root is decorative and does not encode status. Clicking a visible tree row selects it without changing the reader's scroll position. When selection is outside the viewport, show a compact Selected tag in the Map's top bar; clicking it or pressing Cmd+J reveals and scrolls to the selected item clear of sticky elements. Never overlay a marker on tree rows.
 
 Item detail renders full item history in two linked forms:
 
@@ -129,6 +129,54 @@ Item detail renders full item history in two linked forms:
 - **Timeline:** deduplicated session-local messages with author, timestamp, excerpt, touched items, and origin/created/updated role. Message numbers are Ariadne provenance numbers, not host transcript line numbers.
 
 The rail uses the same stored history, newest at bottom. Hovering a message highlights touched items; clicking pins that highlight. Selecting/hovering an item highlights its messages. Scrolling upward pauses follow; show `N new messages · Jump to latest`. Live updates never steal keyboard focus or scroll an owner away from older content.
+
+### Seeing changes and shared seen state (Alpha.14.4)
+
+Project owner-only preference `seen` through the shared change selectors, keeping
+the session file untouched. New items use a `New` tag; substantive changes newer
+than the seen revision use a filled dot. Both use one coral-orange attention
+token. Wording-only records remain available in history without a marker. Reading
+never changes waiting status or counts.
+
+Opening detail starts a roughly one-second dwell for the captured item revision;
+future preview consumers use the same rule. Leaving the item or closing the
+surface cancels that dwell. Save only the revision actually presented, so a later
+agent update remains unseen. The shared seen state clears its Map marker and
+updates every corresponding Since you were here card. A card displays `✓ Seen`
+briefly, then disappears after a few seconds. A replacement card leaves when
+its item is read; the replacement keeps its own New card and marker until read.
+Optional Seen remains available.
+
+When no unseen item changes remain in a topic, write its caught-up mark automatically
+through the existing monotonic preference patch. The baseline measures when the
+topic was caught up, explicitly or implicitly, not when it was opened. Keep
+optional Mark all caught up and Mark all seen. Bulk actions mark shared UI state
+immediately and defer the monotonic preference write for a five-second Undo
+window; Undo survives folding/navigation and removes only pending bulk marks,
+preserving later reads and new changes. Topic catch-up records the observation
+time only if the rendered session revision is still current. A bulk action on
+an older capture still marks its displayed items, without covering newer batches.
+After more than two days or at least 30 changes, lead with the agent's
+brief. Label the brief
+`By the agent · as of …` and derive the linked Decided, Your turn and Replaced lists
+from current canonical facts.
+
+Under the saved owner answer, derive effects from correlated activity message
+IDs and creation/change records. Show the owner's saved choice and typed words
+before `Because you chose X:` or `Read as: …` from the agent's existing free-text
+input-result explanation. Group named targets as updated, replaced, new or now
+blocked. Fill a card-wide five-name budget in Updated, Replaced, New, Now blocked
+order, allowing partially shown groups but no headings with zero shown names.
+Never hide exactly one name: show all six on a six-name card. Summarize the
+hidden names once in group order with counts/kinds in `and N more: …`; reveal
+shows all names.
+Small compare icons use the tooltip `Show before and after`, reflect expanded
+state, and toggle recorded before/current values everywhere comparisons appear.
+
+N walks unseen items in Map order and wraps, or announces `No unseen items`.
+It reveals and focuses without opening detail or a preview and without marking
+the arrival seen. Pulse the landed row briefly and retain a distinct outline
+until the next N; an owner click or Enter opens it and starts its seen dwell.
 
 Search normalizes NFKC and locale-independent lowercase for indexing only; stored text is unchanged. Every whitespace token must match the combined question, outcome, why, topic name, or message excerpt. It excludes transient provider activity, raw tool input/result, and credentials. Preview typed search on the next normal renderer update; debounce its durable preference write by 100ms. Status/topic/owner filters combine with AND; choices within one filter combine with OR. Include matching items and labelled contextual ancestors. No-results offers Clear search/filters.
 
@@ -143,7 +191,7 @@ text across unrelated confirmed writes. Discard the preview on route change,
 reopen or explicit reset; restored state comes from canonical preferences.
 See [ADR-0066](../../adr/ADR-0066-project-local-search-before-save-confirmation.md).
 
-Selecting from Waiting, Sent, search, tree, graph, archive, rail, tray, or notification calls a single `revealItem`: switch to project/session, load validated snapshot, select item, temporarily reveal ancestry, mark it outside current filters if applicable, and open detail. Opening or restoring a session restores a saved scroll anchor if present, otherwise brings the selected row into view once. Deliberate navigation from Waiting/Details, search, Back/Forward history, links and native reveal requests brings the target into view, including repeated requests for the same item and item routes opening a session with a saved reading anchor. Clicking an ordinary tree row, or opening or closing detail, never scrolls the Map. Keyboard row movement scrolls only enough to keep the focused row visible; the selected-item edge marker and Cmd+J explicitly scroll to the selection. Preserve filter values and offer an explicit clear action. Replacement/fork/source references use this route. If the item no longer exists, show its session and an explanatory banner.
+Selecting from Waiting, Sent, search, tree, graph, archive, rail, tray, or notification calls a single `revealItem`: switch to project/session, load validated snapshot, select item, temporarily reveal ancestry, mark it outside current filters if applicable, and open detail. Opening or restoring a session restores a saved scroll anchor if present, otherwise brings the selected row into view once. Deliberate navigation from Waiting/Details, search, Back/Forward history, links and native reveal requests brings the target into view, including repeated requests for the same item and item routes opening a session with a saved reading anchor. Clicking an ordinary tree row, or opening or closing detail, never scrolls the Map. Keyboard row movement scrolls only enough to keep the focused row visible; the Selected tag and Cmd+J explicitly scroll to the selection. Every reveal clears sticky elements. Preserve filter values and offer an explicit clear action. Replacement/fork/source references use this route. If the item no longer exists, show its session and an explanatory banner.
 
 Start with variable-height DOM rows memoized by item revision. Add virtualization only if the recorded large-fixture performance evidence shows a real problem; virtualize the flattened visible list with measured heights and keep ARIA focus and scroll anchoring.
 
@@ -307,6 +355,7 @@ Keyboard navigation works when focus is outside editable controls:
 | Left / h | Collapse or move to parent |
 | Home / End | First / last visible row |
 | Cmd+J | Reveal and scroll to the selected item, including from editable controls |
+| `n` | Select/reveal the next unseen item, wrapping; leave it unseen until opened |
 | Enter | Open detail, expand/collapse topic, or activate focused navigation control |
 | `a` | Ack the focused eligible item; otherwise focus answer control for waiting item or oldest waiting item |
 | `1`–`9` | Select an answer option; never submit |

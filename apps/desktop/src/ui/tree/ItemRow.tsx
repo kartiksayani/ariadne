@@ -9,7 +9,7 @@ import { StatusBadge } from '../shared/StatusBadge';
 import { ackTitle } from '../shared/ack';
 import { SessionClosedChip } from '../shared/SessionClosedChip';
 import { shortLabel } from '../shared/short';
-import { closed, visual, type Guide, type ItemRow as Row } from './model';
+import { closed, visual, type ChangeMarker, type Guide, type ItemRow as Row } from './model';
 
 export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly disabled?: boolean; readonly persistent?: boolean }
 
@@ -90,6 +90,10 @@ export interface ItemRowProps {
   readonly row: Row;
   readonly selected: boolean;
   readonly focused: boolean;
+  readonly changeMarker?: ChangeMarker;
+  /** The last N target keeps its outline after its brief arrival pulse. */
+  readonly nextUnseen?: boolean;
+  readonly nextUnseenPulse?: boolean;
   /** Selection is held while a view write is unconfirmed. */
   readonly disabled?: boolean;
   readonly closedReason?: string;
@@ -112,7 +116,7 @@ export interface ItemRowProps {
   readonly onHover: (id: string | null) => void;
 }
 
-export function ItemRow({ row, selected, focused, disabled = false, closedReason, highlight, note, actions, answer, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, onJump, onHover }: ItemRowProps) {
+export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, highlight, note, actions, answer, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, onJump, onHover }: ItemRowProps) {
   const item = row.item, status = visual(row.status);
   const details = preview(row, () => { if (row.replacedBy) onJump(row.replacedBy.id); });
   const muted = closed(item.status) || row.context || row.later || row.hidden;
@@ -123,6 +127,7 @@ export function ItemRow({ row, selected, focused, disabled = false, closedReason
   return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={row.depth + 1} aria-selected={selected} aria-disabled={disabled || undefined}
     aria-expanded={row.hasKids ? row.expanded : undefined} tabIndex={focused ? 0 : -1} className={`tree-row tree-item ${row.depth === 1 ? 'tree-item-root' : 'tree-item-child'}${row.hidden ? ' tree-item-hidden' : ''}`}
     data-open={unfolded || undefined} data-item-id={item.id} data-row={row.key} data-highlight={highlight ?? undefined}
+    data-next-unseen={nextUnseen || undefined} data-next-unseen-pulse={nextUnseenPulse || undefined}
     style={{ paddingLeft: 12 + row.depth * 24 }} onFocus={event => { if (event.target === event.currentTarget) onFocus(row.key); }}
     onKeyDown={onKeyDown} onClick={() => onSelect(item.id)} onMouseEnter={() => onHover(item.id)} onMouseLeave={() => onHover(null)}>
     <div className="tree-mark" />
@@ -137,6 +142,9 @@ export function ItemRow({ row, selected, focused, disabled = false, closedReason
       <div className="tree-heading"><div className="tree-question" style={{ color: muted ? neutral(64) : 'var(--color-text)' }}>
         {row.segments.map((segment, index) => <span key={index} className={segment.hit ? 'tree-hit' : undefined}>{segment.text}</span>)}
       </div><span className="tree-row-status">
+        {changeMarker && <span className={`tree-change-marker tree-change-${changeMarker}`} role="img"
+          aria-label={changeMarker === 'new' ? 'New to you' : 'Changed since you read it'} title={changeMarker === 'new' ? 'New to you' : 'Changed since you read it'}>
+          {changeMarker === 'new' ? 'New' : null}</span>}
         {row.sessionClosed && <SessionClosedChip reason={closedReason} />}
         <StatusBadge status={status} label={row.badge} variant="text" /></span></div>
       <PreviewBlock value={details} open={unfolded} onToggle={() => onUnfold(item.id)} />

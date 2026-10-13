@@ -7,8 +7,7 @@ import type { Attempt, Input, ProjectSummary, QueryCursor, Session, SessionSumma
 import type { CoreError, QueryEnvelope } from '../../../src/generated/core';
 import { createDesktopService, immutable, OpenSessions, ServiceFailure, type DesktopTransport, type HintPayloads } from '../../../src/data';
 import { deliveryEvidence } from '../../../src/selectors/waiting/delivery';
-import { closedWaitingRows, sentRows, waitingRows } from '../../../src/selectors/waiting/rows';
-import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
+import { sentRows, waitingRows } from '../../../src/selectors/waiting/rows';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { WaitingColumn } from '../../../src/ui/waiting/WaitingColumn';
@@ -99,10 +98,19 @@ describe('current Waiting and immutable Sent selection', () => {
     if (state === 'archived') seed.session.archived_at = seed.session.updated_at;
     const before = structuredClone(seed.session);
     expect(waitingRows([seed])).toEqual([]);
-    expect(closedWaitingRows([seed]).map(row => row.item.id)).toEqual(state === 'closed' ? ['2'] : []);
     expect(seed.session).toEqual(before);
   });
-  it('reveals muted closed questions below Waiting with disabled answers and the saved draft', async () => {
+  it('excludes closed-session question inputs from Sent while retaining generic recovery messages', () => {
+    const seed = fixture(), questionInput = seed.session.inputs[inputId('74')]!;
+    questionInput.target.item_id = '2';
+    expect(sentRows([seed]).some(row => row.input.id === questionInput.id)).toBe(true);
+    seed.session.state = 'closed';
+    const rows = sentRows([seed]);
+    expect(rows.some(row => row.input.id === questionInput.id)).toBe(false);
+    expect(rows.some(row => row.route === null)).toBe(true);
+    expect(questionInput.state).toBe('needs_attention');
+  });
+  it('keeps a closed session question out of Waiting and its count while preserving its saved draft and history', async () => {
     const { store, transport, drafts: loadDrafts } = setup(), seed = withOptions();
     seed.state = 'closed';
     transport.capture(seed); await store.start();
@@ -111,20 +119,18 @@ describe('current Waiting and immutable Sent selection', () => {
     drafts.edit(entry, { text: 'Keep this draft', selected_option_id: 'yes' });
     render(<WaitingColumn store={store} drafts={drafts} revealItem={vi.fn()} openSession={vi.fn()} />);
     expect(document.querySelector('[data-waiting-item="2"]')).toBeNull();
-    expect(screen.getByText(/1 question from closed sessions is hidden/)).toBeTruthy();
     expect(store.getSnapshot().waiting).toEqual([]);
-    fireEvent.click(screen.getByRole('button', { name: 'Show' }));
-    const question = document.querySelector<HTMLElement>('[data-closed-question="2"]')!;
-    expect(question.classList.contains('waiting-card-closed')).toBe(true);
-    expect(within(question).getByText('Session closed').title).toBe(sessionClosedReason);
-    expect(within(question).getByText(sessionClosedReason)).toBeTruthy();
-    const text = within(question).getByRole('textbox') as HTMLTextAreaElement;
-    expect(text.value).toBe('Keep this draft'); expect(text.disabled).toBe(true);
-    expect(within(question).getByRole('button', { name: /Send “Keep the design”/ }).hasAttribute('disabled')).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
+    expect(document.querySelector('.waiting-count')!.textContent).toBe('0');
+    expect(screen.queryByText(/questions? from closed sessions/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Show' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Send answer|Send “Keep the design”/ })).toBeNull();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.getByRole('region', { name: 'Waiting questions' }).textContent).not.toContain(seed.items['2']!.question);
+    expect(store.getSnapshot().sessions[0].session.items['2']!.status).toBe('waiting_on_me');
+    expect(store.getSnapshot().sessions[0].session.items['2']!.question).toBe(seed.items['2']!.question);
     expect(drafts.find(route, '2', 'answer')?.draft.text).toBe('Keep this draft');
   });
-  it.each(['closed', 'archived'] as const)('keeps an answered %s question out of the waiting and hidden question lists', async state => {
+  it.each(['closed', 'archived'] as const)('keeps an answered %s question out of Waiting', async state => {
     const { store, transport, drafts: loadDrafts } = setup(), seed = withOptions();
     const answer = structuredClone(seed.answers[seed.answers.length - 1]!);
     answer.id = crypto.randomUUID(); answer.item_id = '2'; answer.question_revision = seed.items['2']!.question_revision;
@@ -135,7 +141,6 @@ describe('current Waiting and immutable Sent selection', () => {
     const drafts = loadDrafts(); await drafts.load();
     render(<WaitingColumn store={store} drafts={drafts} revealItem={vi.fn()} openSession={vi.fn()} />);
     expect(store.getSnapshot().waiting).toEqual([]);
-    expect(store.getSnapshot().closedWaiting).toEqual([]);
     expect(screen.queryByText(/questions? from closed sessions/)).toBeNull();
     expect(document.querySelector('[data-closed-question="2"]')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Show' })).toBeNull();
@@ -568,7 +573,9 @@ describe('source-backed Waiting and Sent panel', () => {
     transport.push('project_list', projects); transport.push('session_list', sessions); transport.push('session_get', loaded(seed)); await store.start();
     render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
     expect(screen.getByText(/Queue counts are incomplete/)).toBeTruthy();
-    expect(screen.getByText(`Unavailable session ${inputId('99')}`)).toBeTruthy();
+    expect(screen.getByText('Some sessions couldn’t be read.')).toBeTruthy();
+    expect(screen.queryByText(inputId('99'), { exact: false })).toBeNull();
+    expect(document.querySelector('.waiting-notice')!.textContent).not.toContain(inputId('99'));
     expect(screen.queryByText('Nothing waiting on you')).toBeNull();
     const stopped = sentRow('Replace the old retry question');
     expect(stopped.textContent).toMatch(/You sent “Old choice”/);

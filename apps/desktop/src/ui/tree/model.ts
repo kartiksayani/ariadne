@@ -22,6 +22,38 @@ import { agentRunning, connectionOf, type Connection } from '../shared/connectio
 import { connectedItems } from '../../selectors/related';
 import { ackTarget } from '../../selectors/ack';
 import { FILTER_STATUSES, hasStatusFilter, matchExpansion } from '../../selectors/tree/folds';
+import { changeTreeOrder, type SeenState } from '../../selectors/changes/seen';
+
+export type ChangeMarker = 'new' | 'changed';
+
+/** Derive once per session/seen snapshot, never once per rendered row. New takes precedence over changed. */
+export function mapChanges(session: Immutable<Session>, seen: SeenState): {
+  readonly order: readonly string[]; readonly markers: ReadonlyMap<string, ChangeMarker>;
+} {
+  const order = changeTreeOrder(session);
+  const markers = new Map<string, ChangeMarker>();
+  if (!seen) return { order, markers };
+  const baseline = Date.parse(seen.since);
+  const read = new Map(seen.items.map(value => [value.item_id, value.revision]));
+  for (const id of order) {
+    const item = session.items[id]!;
+    // Same predicates as selectors/changes/seen, with the read index shared across every item.
+    if (Date.parse(item.created_at) > baseline && !read.has(id)) markers.set(id, 'new');
+    else if ((item.changes ?? []).some(change => !change.wording_only
+      && change.revision > (read.get(id) ?? 0) && Date.parse(change.at) > baseline)) markers.set(id, 'changed');
+  }
+  return { order, markers };
+}
+
+/** Walk the complete Map preorder, wrapping once, even when the previous target has since been read. */
+export function nextMarkedItem(order: readonly string[], markers: ReadonlyMap<string, ChangeMarker>, after: string | null): string | null {
+  const start = after === null ? -1 : order.indexOf(after);
+  for (let step = 1; step <= order.length; step++) {
+    const id = order[(start + step) % order.length]!;
+    if (markers.has(id)) return id;
+  }
+  return null;
+}
 
 export const visual = (status: DisplayStatus): StatusKey => statusKey[status];
 const CLOSED: ReadonlySet<ItemStatus> = new Set(['decided', 'done', 'dropped', 'replaced']);
@@ -243,6 +275,8 @@ export interface TreeInput {
   readonly selectedId: string | null;
   /** An item revealed from elsewhere (a link, the waiting panel). */
   readonly revealId: string | null;
+  /** N reveals a row without selecting it, opening detail or changing saved folds. */
+  readonly attentionRevealId?: string | null;
   readonly temporaryExpanded: readonly string[];
   readonly presence: Immutable<PresenceObservation> | null;
   /** The desktop supervisor's health for the session's binding, when known. */
@@ -305,14 +339,16 @@ export function badgeLabel(item: Immutable<Item>, later: boolean, status: Displa
 
 export function treeModel(input: TreeInput): TreeModel {
   const { session, view, later, selectedId, revealId } = input, filters = view.filters;
+  const revealIds = [revealId, input.attentionRevealId].filter((id): id is string => !!id);
   const indexes = indexSession(session), all = items(session);
   const explicitHidden = new Set(view.hidden_item_ids ?? []);
   const hidden = hiddenItems(session, explicitHidden);
   const hiddenGroups = new Set(input.expandedHiddenGroups ?? []);
-  if (revealId) hiddenGroupsFor(session, explicitHidden, revealId).forEach(key => hiddenGroups.add(key));
+  revealIds.forEach(id => hiddenGroupsFor(session, explicitHidden, id).forEach(key => hiddenGroups.add(key)));
   const terms = words(input.search);
   const chips = chipsOf(filters.statuses);
-  const topics = topicList(session).filter(topic => filters.archived ? topic.archived_at !== null : topic.archived_at === null);
+  const attentionTopic = input.attentionRevealId ? session.items[input.attentionRevealId]?.topic_id : null;
+  const topics = topicList(session).filter(topic => topic.id === attentionTopic || (filters.archived ? topic.archived_at !== null : topic.archived_at === null));
   const shown = new Set(topics.map(topic => topic.id));
   const live = all.filter(item => shown.has(item.topic_id));
   const base = (item: Immutable<Item>) => {
@@ -335,7 +371,7 @@ export function treeModel(input: TreeInput): TreeModel {
   const matched = new Set<string>(), forced = new Set<string>(), include = new Set<string>();
   const ancestors = (id: string) => { const out: string[] = []; for (let parent = session.items[id]?.parent; parent; parent = session.items[parent]?.parent) out.push(parent); return out; };
   if (filtering) {
-    for (const id of [revealId, selectedId]) if (id && session.items[id] && !itemRemoved(session, id)) forced.add(id);
+    for (const id of [...revealIds, selectedId]) if (id && session.items[id] && !itemRemoved(session, id)) forced.add(id);
     for (const item of live) {
       const match = base(item) && statusMatch(item);
       if (match) matched.add(item.id);
@@ -344,8 +380,8 @@ export function treeModel(input: TreeInput): TreeModel {
   }
   const expanded = matchExpansion(view.expanded_item_ids, input.temporaryExpanded,
     [...include].flatMap(ancestors), filtering, input.filterCollapsedItemIds);
-  const revealTopic = revealId ? session.items[revealId]?.topic_id : undefined;
-  if (revealId) ancestors(revealId).forEach(id => expanded.add(id));
+  const revealTopics = new Set(revealIds.map(id => session.items[id]?.topic_id));
+  revealIds.forEach(id => ancestors(id).forEach(id => expanded.add(id)));
   const kids = (id: string | null) => indexes.childrenByParent.get(id) ?? [];
   const rootsOf = (topicId: string) => kids(null).filter(item => item.topic_id === topicId);
 
@@ -355,7 +391,7 @@ export function treeModel(input: TreeInput): TreeModel {
     // A topic with no items yet (or none left) still shows its band; filters hide topics without a match.
     // A session with no items at all shows its empty state instead (frame 1g).
     if (filtering && !roots.some(item => include.has(item.id))) continue;
-    const open = topic.id === revealTopic || (filtering ? !input.filterCollapsedTopicIds?.has(topic.id) : !input.collapsedTopics.has(topic.id));
+    const open = revealTopics.has(topic.id) || (filtering ? !input.filterCollapsedTopicIds?.has(topic.id) : !input.collapsedTopics.has(topic.id));
     const topicItems = all.filter(item => item.topic_id === topic.id), statuses = topicItems.map(display);
     const chipValue = topicChip(session, topic, input.summaries, input.now);
     const delivery = deliveryLine(session, { topicId: topic.id, itemId: null }, input.presence, input.health);
@@ -437,7 +473,7 @@ export function treeModel(input: TreeInput): TreeModel {
   });
 
   // hasReveal (Ariadne.dc.html:2169): only a reveal raises the banner, not a plain selection.
-  const outside = filtering && rows.length > 0 && !!revealId && forced.has(revealId) && !matched.has(revealId);
+  const outside = filtering && rows.length > 0 && revealIds.some(id => forced.has(id) && !matched.has(id));
   return { rows, filtering, searchCount: scoped.filter(item => !hidden.has(item.id) && statusMatch(item)).length, hiddenCount: scoped.filter(item => hidden.has(item.id) && statusMatch(item)).length, itemCount: live.filter(item => !hidden.has(item.id)).length, outside, noMatch: live.length > 0 && rows.length === 0, empty: Object.keys(session.items).length === 0 && !Object.values(session.topics).some(topic => topic?.removed_at), chips, counts };
 }
 

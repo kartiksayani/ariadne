@@ -38,6 +38,8 @@ export interface FrameSpec {
   readonly toast?: boolean;
   /** Opens Waiting even when the window squeezes the centre column. */
   readonly peekWaiting?: boolean;
+  /** App-only M2 changes states, independent of the original handoff baselines. */
+  readonly changes?: 'typed' | 'choice' | 'away';
 }
 
 const wide = { width: 1600, height: 960 } as const, narrow = { width: 1280, height: 800 } as const;
@@ -92,6 +94,9 @@ const specs: readonly FrameSpec[] = [
   { ...base, ...narrow, id: 'session-toast-detail', selected: '3.1', detail: true, toast: true },
   { ...base, width: 1920, id: 'session-toast-detail-wide', selected: '3.1', detail: true, detailWidth: 800, toast: true },
   { ...base, width: 1080, height: 800, id: 'session-toast-narrow', selected: '3.1', detail: true, peekWaiting: true, toast: true },
+  { ...base, width: 1280, height: 900, id: 'changes-typed', selected: '3.1', detail: true, changes: 'typed' },
+  { ...base, width: 1280, height: 900, id: 'changes-choice', selected: '3.1', detail: true, changes: 'choice' },
+  { ...base, width: 1000, height: 800, id: 'changes-away', changes: 'away' },
 ];
 
 /** Harness states drawn from another board frame's card (FrameSpec.design). */

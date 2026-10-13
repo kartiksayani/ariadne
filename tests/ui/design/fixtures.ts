@@ -1,13 +1,14 @@
 // Frame -> application state for the design fidelity harness. The data is the
 // prototype's own: prototypeData() evaluates the data block of the immutable
-// handoff (Ariadne.dc.html lines 529-822, TOPICS through SESSIONS), so nothing
-// here is a hand copy. designFixture() turns one frame's scenario into domain
+// handoff (Ariadne.dc.html lines 529-822, TOPICS through SESSIONS). App-only changes
+// states are added by changes-fixture.ts. designFixture() turns a scenario into domain
 // sessions, catalogue summaries and preferences behind the real DesktopApp.
 import demo from '../../../fixtures/domain/demo/session.json';
 import { AppTransport, assertOwnerWire } from '../../../apps/desktop/tests/ui/app/transport';
 import type { ContinuePreview, ItemRoute, OwnerMutationRequest, OwnerQueryRequest, SessionPreferences, SessionRef } from '../../../apps/desktop/src/generated/core';
 import type { Answer, Attempt, Binding, Input, Item, ItemStatus, Message, Page, ProjectSummary, Round, Session, SessionSummary, SummaryCounts, Topic } from '../../../apps/desktop/src/generated/domain/models';
 import { designNow, frameNow, frameSpec, type FrameSpec } from './frames';
+import { addChangesFixture } from './changes-fixture';
 
 export interface ProtoOption { readonly id: string; readonly label: string; readonly consequence: string; readonly rec?: boolean }
 export interface ProtoLink { readonly kind: 'pr' | 'file' | 'doc'; readonly label: string; readonly meta?: string }
@@ -357,6 +358,7 @@ export function designFixture(frame: string, data: PrototypeData, presentation: 
       active_attempt_id: attemptId, resolution_history: [] };
     binding.active_input_id = inputId;
   }
+  const changesSeen = spec.changes ? addChangesFixture(sessions.find(session => session.items['3.1'])!, spec.changes) : null;
   const summaries = sessions.map((session, index): SessionSummary => {
     const binding = session.bindings[session.active_binding_id!]!, running = world.sessions[index].running;
     return { project_id: session.project_id, session_id: session.id, title: session.title, state: session.state, revision: session.revision,
@@ -383,6 +385,7 @@ export function designFixture(frame: string, data: PrototypeData, presentation: 
     return [...ids];
   };
   const transport = new DesignTransport(sessions, projects, summaries, spec.state === 'loading' ? route : null);
+  if (changesSeen) transport.preferences.seen = [changesSeen];
   transport.preferences.global = { theme: spec.theme, text_scale: 100, window: null, pinned: false, notification_watermark: null,
     selected_navigation: spec.scenario === 'sessions' ? { kind: 'all_sessions' } : spec.scenario === 'projects' || spec.scenario === 'first' ? { kind: 'projects' }
       : spec.scenario === 'projectpage' ? { kind: 'project', project_id: projectIds.get('notes')! } : { kind: 'session', session: route! } };
@@ -442,7 +445,9 @@ export class DesignTransport extends AppTransport {
         || message.items_touched.includes(query.params.item_id)), session.revision),
       timeline_context: { parent_item_id: item?.parent ?? null, created_message: session.messages.find(message => message.id === item?.created_message_id) ?? null, source_round_id: null } };
     }
-    if (query.command === 'item_rounds') return { item_id: query.params.item_id, rounds: page([], session.revision) };
+    if (query.command === 'item_rounds') return { item_id: query.params.item_id, rounds: page(session.items[query.params.item_id]?.changes?.length
+      ? Object.values(session.rounds).filter(round => round?.item_id === query.params.item_id) : [], session.revision) };
+    if (query.command === 'item_changes') return { item_id: query.params.item_id, changes: page(session.items[query.params.item_id]?.changes ?? [], session.revision) };
     if (query.command === 'session_read') {
       const selection = query.params.selection;
       if (selection.view === 'messages') return { view: 'messages', page: page(session.messages, session.revision) };

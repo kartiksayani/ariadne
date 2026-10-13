@@ -691,15 +691,47 @@ describe('owner seen preference batching', () => {
     expect(sessionSeen(store.getSnapshot().preferences, route)?.since).toBe(initialTime);
   });
 
-  it('ignores absent items and cancels unsaved debounce work on disposal', async () => {
+  it('ignores absent items and finishes observed reads on disposal without blocking teardown', async () => {
     const { store, transport } = await setup(false);
     store.markItemSeen(route, 'missing');
     await vi.advanceTimersByTimeAsync(1000);
     expect(transport.mutations).toHaveLength(0);
     store.markItemSeen(route, '1');
     store.stop();
+    expect(store.getSnapshot().writing).toBe(false);
     await vi.advanceTimersByTimeAsync(1000);
     store.markTopicCaughtUp(route, 'missing');
-    expect(transport.mutations).toHaveLength(0);
+    expect(transport.mutations).toHaveLength(1);
+    expect(seenEntries(transport.mutations[0])[0].items).toEqual([{ item_id: '1', revision: transport.sessions.get(route.session_id)!.items['1']!.revision }]);
+  });
+
+  it('records a displayed revision when a newer revision arrives before the dwell callback', async () => {
+    const { store, transport } = await setup(false);
+    const session = transport.sessions.get(route.session_id)!;
+    session.items['1']!.revision = 3;
+    ++session.revision;
+    await store.opened.open(route).refresh();
+    session.items['1']!.revision = 4;
+    ++session.revision;
+    await store.opened.open(route).refresh();
+    store.markItemSeen(route, '1', 3);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(seenEntries(transport.mutations[0])[0].items).toEqual([{ item_id: '1', revision: 3 }]);
+  });
+
+  it('finishes pending catch-up on disposal, rebases a conflict and keeps errors silent', async () => {
+    const { store, transport } = await setup(false);
+    const session = transport.sessions.get(route.session_id)!, topicId = Object.keys(session.topics)[0];
+    store.reading.catchUp({ kind: 'mark_seen', session: route, at: initialTime,
+      items: [{ item_id: '1', revision: session.items['1']!.revision }], topics: [{ topic_id: topicId, at: session.updated_at }] });
+    transport.beforePatch = () => { transport.preferences.global.pinned = true; ++transport.preferences.revision; };
+    store.stop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transport.mutations).toHaveLength(2);
+    expect(sessionSeen(transport.preferences, route)?.topics).toEqual([{ topic_id: topicId, at: session.updated_at }]);
+    expect(transport.preferences.global.pinned).toBe(true);
+    expect(store.getSnapshot()).toMatchObject({ error: null, writing: false });
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(transport.mutations).toHaveLength(2);
   });
 });

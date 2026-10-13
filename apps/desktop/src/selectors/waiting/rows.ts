@@ -38,10 +38,10 @@ function itemOrder(left: string, right: string): number {
   for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i] - b[i];
   return a.length - b.length;
 }
-function questionRows(sessions: readonly WaitingSession[], closed: boolean): readonly WaitingRow[] {
+export function waitingRows(sessions: readonly WaitingSession[]): readonly WaitingRow[] {
   const rows: WaitingRow[] = [];
   for (const { project, summary, session } of sessions) {
-    if (session.archived_at != null || sessionEnded(session) !== closed) continue;
+    if (sessionEnded(session)) continue;
     for (const item of Object.values(session.items)) {
       if (!item || itemRemoved(session, item.id) || session.topics[item.topic_id]?.archived_at !== null || !unanswered(session, item)) continue;
       const round = item.current_round_id ? session.rounds[item.current_round_id] : undefined;
@@ -58,9 +58,6 @@ function questionRows(sessions: readonly WaitingSession[], closed: boolean): rea
     || itemOrder(a.item.id, b.item.id));
   return Object.freeze(rows);
 }
-export const waitingRows = (sessions: readonly WaitingSession[]): readonly WaitingRow[] => questionRows(sessions, false);
-/** Archived questions remain in Archive; ended, unarchived sessions can be revealed below Waiting. */
-export const closedWaitingRows = (sessions: readonly WaitingSession[]): readonly WaitingRow[] => questionRows(sessions, true);
 export function sentRows(sessions: readonly WaitingSession[]): readonly SentRow[] {
   const rows: SentRow[] = [];
   for (const { project, summary, session } of sessions) {
@@ -69,6 +66,9 @@ export function sentRows(sessions: readonly WaitingSession[]): readonly SentRow[
       if (!input || !['queued', 'in_flight', 'needs_attention'].includes(input.state)) continue;
       if (session.topics[input.target.topic_id]?.removed_at || input.target.item_id && itemRemoved(session, input.target.item_id)) continue;
       const item = input.target.item_id ? session.items[input.target.item_id] ?? null : null;
+      // Closed-session questions belong only to that session's own history,
+      // including legacy unanswered inputs retained before the close guard.
+      if (sessionEnded(session) && item?.status === 'waiting_on_me') continue;
       rows.push(Object.freeze({ id: input.id,
         session: Object.freeze({ project_id: session.project_id, session_id: session.id }),
         route: input.target.item_id ? Object.freeze({ project_id: session.project_id, session_id: session.id, item_id: input.target.item_id }) : null,

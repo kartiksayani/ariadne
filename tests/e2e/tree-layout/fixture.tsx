@@ -14,7 +14,7 @@ import { SessionBar } from '../../../apps/desktop/src/ui/tree/SessionBar';
 // Item 1 carries a long finding (it must fold to four lines), item 5 a paragraph that
 // wraps over a few lines (hover must not rewrap it), the rest keep their short text.
 class TreeLayoutTransport extends AppTransport {
-  constructor() {
+  constructor(changes = false) {
     super();
     const items = this.sessions.get(route.session_id)!.items;
     items['1']!.question = 'A long item title with enough words to span several lines in a narrow tree. '.repeat(5);
@@ -24,6 +24,17 @@ class TreeLayoutTransport extends AppTransport {
     items['1']!.outcome = Array.from({ length: 20 }, (_, index) => `Line ${index + 1} of a long finding the agent wrote.`).join('\n');
     items['5']!.outcome = 'A decision paragraph that is long enough to wrap over several lines in the tree column, so that any change in the width of its '
       + 'column on hover would move words from one line to the next and show up as a different line count.';
+    if (changes) {
+      const baseline = '2026-10-01T00:00:00.000Z', later = '2026-10-13T09:00:00.000Z';
+      Object.values(items).forEach(item => { if (item) { item.created_at = baseline; item.changes = []; } });
+      items['1.1']!.created_at = later;
+      items['18']!.created_at = later;
+      items['2']!.revision = 2;
+      items['2']!.changes = [{ revision: 2, at: later, cause_message_id: items['2']!.created_message_id, before: { status: 'open' } }];
+      items['3']!.changes = [{ revision: 2, at: later, wording_only: true, cause_message_id: items['3']!.created_message_id, before: { question: 'Original wording' } }];
+      this.preferences.seen = [{ session: route, since: baseline, items: [], topics: [] }];
+      this.preferences.sessions[0]!.expanded_item_ids = [];
+    }
   }
 }
 /** All available actions together, including combinations that normal statuses split across rows. */
@@ -61,4 +72,4 @@ createRoot(document.getElementById('root')!).render(query.has('grid') ? <ActionG
     sessionId: route.session_id, title: 'A long session name that needs to fit in a narrow column', secondary: null,
     description: null, named: true, agent: 'codex', where: 'iTerm', meta: '12 topics', running: false,
     connection: 'not_running', closed: true, archived: true,
-  }} /></div> : <DesktopApp service={createDesktopService(new TreeLayoutTransport())} />);
+  }} /></div> : <DesktopApp service={createDesktopService(new TreeLayoutTransport(query.has('changes')))} />);
