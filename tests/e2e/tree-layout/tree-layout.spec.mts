@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
@@ -17,6 +17,42 @@ async function openTree(page: Page, origin: string) {
   await expect(page.locator('.tree-session-bar').getByRole('button', { name: 'Session actions' })).toBeEnabled();
   await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-status', 'ready');
   await expect(page.locator('.tree-session-bar')).toHaveAttribute('aria-busy', 'false');
+}
+
+async function expectRevealedRow(row: Locator) {
+  await expect.poll(() => row.evaluate(element => {
+    const box = element.closest('.tree-scroll')!.getBoundingClientRect();
+    const bounds = element.getBoundingClientRect();
+    const header = element.closest('.tree-topic-group')!.querySelector('.tree-topic')!.getBoundingClientRect();
+    const viewportBottom = Math.min(box.bottom, window.innerHeight);
+    const usableTop = Math.max(box.top, header.bottom);
+    return {
+      clearsHeader: bounds.top >= usableTop - 0.5,
+      fits: bounds.height > viewportBottom - usableTop || bounds.bottom <= viewportBottom + 0.5,
+    };
+  })).toEqual({ clearsHeader: true, fits: true });
+}
+
+async function expectSolidMarker(marker: Locator) {
+  const colour = await marker.evaluate(element => {
+    const surface = getComputedStyle(element).backgroundColor;
+    const probe = document.createElement('span');
+    probe.style.backgroundColor = 'var(--a-card)';
+    probe.style.position = 'absolute';
+    element.append(probe);
+    const expected = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    // Let the browser resolve its own colour syntax, including oklch and color().
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext('2d')!;
+    context.fillStyle = surface;
+    context.fillRect(0, 0, 1, 1);
+    return { surface, expected, alpha: context.getImageData(0, 0, 1, 1).data[3] };
+  });
+  expect(colour.surface).toBe(colour.expected);
+  expect(colour.alpha).toBe(255);
+  await expect(marker).toHaveCSS('opacity', '1');
 }
 
 test('folds a long preview to four lines, never rewraps on hover and never scrolls on a click', async ({ page }) => {
@@ -139,6 +175,99 @@ test('gives the title and status at least 60% of the row with all actions and ke
   } finally { await server.close(); }
 });
 
+test('holds the reading anchor when a row click opens detail and when the window narrows', async ({ page }) => {
+  const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+    logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+  try {
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    await openTree(page, `http://127.0.0.1:${address.port}`);
+    await page.evaluate(async () => { await document.fonts.ready; });
+    const close = page.getByRole('button', { name: 'Close detail' });
+    if (await close.count()) await close.click();
+    const scroller = page.locator('.tree-scroll'), anchored = page.locator('.tree-item[data-item-id="7"]');
+    await anchored.evaluate(element => {
+      const box = element.closest('.tree-scroll')!;
+      const header = element.closest('.tree-topic-group')!.querySelector('.tree-topic')!;
+      box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top - header.getBoundingClientRect().height;
+    });
+    // Let the scroll event record the reading anchor before the layout-changing click.
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect(anchored).toBeInViewport();
+    const position = () => anchored.evaluate(element => element.getBoundingClientRect().top - element.closest('.tree-scroll')!.getBoundingClientRect().top);
+    const before = await position(), width = (await scroller.boundingBox())!.width;
+    await anchored.locator('.tree-question').click();
+    await expect(page.locator('.item-detail')).toBeVisible();
+    await expect.poll(async () => (await scroller.boundingBox())!.width).toBeLessThan(width);
+    await expect.poll(async () => Math.abs(await position() - before)).toBeLessThanOrEqual(3);
+    // Widen first so the following window resize demonstrably changes the tree's text width.
+    await page.setViewportSize({ width: 1500, height: 700 });
+    await expect.poll(async () => Math.abs(await position() - before)).toBeLessThanOrEqual(3);
+    const wide = (await scroller.boundingBox())!.width;
+    await page.setViewportSize({ width: 1100, height: 700 });
+    await expect.poll(async () => (await scroller.boundingBox())!.width).toBeLessThan(wide);
+    await expect.poll(async () => Math.abs(await position() - before)).toBeLessThanOrEqual(3);
+  } finally { await server.close(); }
+});
+
+test('counts paragraph, list and code text lines exactly, and unfolds links only for keyboard focus', async ({ page }) => {
+  const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+    logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+  try {
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    await openTree(page, `http://127.0.0.1:${address.port}`);
+    await page.evaluate(async () => { await document.fonts.ready; });
+    for (const scale of ['1', '1.5']) {
+      await page.evaluate(value => document.documentElement.style.setProperty('--text-scale', value), scale);
+      for (const [id, count, kind] of [[11, 6, 'paragraph'], [12, 7, 'paragraph'], [13, 6, 'list'], [14, 7, 'list'], [15, 6, 'code'], [16, 7, 'code'], [17, 7, 'mixed']] as const) {
+        const row = page.locator(`.tree-item[data-item-id="${id}"]`), excerpt = row.locator('.tree-clamp');
+        await expect(row.getByRole('button', { name: 'Show more' })).toHaveCount(count === 7 ? 1 : 0);
+        // Markdown's inline mode renders the single mixed paragraph as a span;
+        // multi-paragraph bodies, lists and fenced code retain their block elements.
+        await expect(excerpt.locator(kind === 'mixed' ? 'span.tree-clamp-content' : kind === 'paragraph' ? 'p' : kind === 'list' ? 'li' : 'pre')).toHaveCount(kind === 'code' || kind === 'mixed' ? 1 : count);
+        await expect.poll(() => excerpt.evaluate(element => {
+          const box = element.getBoundingClientRect(), rectangles: DOMRect[] = [];
+          const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), range = document.createRange();
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            if (!node.textContent?.trim()) continue;
+            range.selectNodeContents(node);
+            rectangles.push(...[...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0));
+          }
+          rectangles.sort((a, b) => a.top - b.top);
+          const lines: { top: number; bottom: number }[] = [];
+          for (const rectangle of rectangles) {
+            const line = lines.at(-1);
+            if (line && Math.min(line.bottom, rectangle.bottom) - Math.max(line.top, rectangle.top) > 1) {
+              line.top = Math.min(line.top, rectangle.top); line.bottom = Math.max(line.bottom, rectangle.bottom);
+            } else lines.push({ top: rectangle.top, bottom: rectangle.bottom });
+          }
+          return {
+            lines: lines.length,
+            visible: lines.filter(rect => rect.bottom <= box.bottom + 0.5).length,
+            cutLines: rectangles.filter(rect => rect.top < box.bottom - 0.5 && rect.bottom > box.bottom + 0.5).length,
+          };
+        })).toEqual({ lines: count, visible: count === 7 ? 4 : 6, cutLines: 0 });
+      }
+    }
+    await page.evaluate(() => document.documentElement.style.setProperty('--text-scale', '1'));
+    const row = page.locator('.tree-item[data-item-id="17"]'), link = row.getByRole('link', { name: 'Read the evidence' });
+    await row.evaluate(element => {
+      const box = element.closest('.tree-scroll')!;
+      const header = element.closest('.tree-topic-group')!.querySelector('.tree-topic')!;
+      box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top - header.getBoundingClientRect().height - 16;
+    });
+    await link.click();
+    await expect(row.getByRole('button', { name: 'Show more' })).toBeVisible();
+    await row.evaluate(element => (element as HTMLElement).focus({ preventScroll: true }));
+    await page.keyboard.press('Tab');
+    await expect(link).toBeFocused();
+    await expect(row.getByRole('button', { name: 'Show less' })).toBeVisible();
+  } finally { await server.close(); }
+});
+
 test('keeps the session menu inside a narrow column with Restore and a long name', async ({ page }) => {
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
     logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
@@ -162,7 +291,7 @@ test('keeps the session menu inside a narrow column with Restore and a long name
 });
 
 
-for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails, clamp threshold and solid selection markers in ${theme}`, async ({ page }) => {
+for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails, clamp threshold, reserved selection tags and clear reveals in ${theme}`, async ({ page }) => {
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
     logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
   try {
@@ -221,61 +350,103 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
         await row.getByRole('button', { name: 'Show more' }).click();
         expect((await body.boundingBox())!.height).toBeCloseTo(line * 7, 0);
         await row.getByRole('button', { name: 'Show less' }).click();
-        // A closed preview tracks text scaling even before an observer can remeasure it.
+        // A closed preview tracks text scaling through its natural-content observer.
         for (const scale of [0.8, 1, 1.2]) {
           await page.evaluate(scale => document.documentElement.style.setProperty('--text-scale', String(scale)), scale);
           const scaledLine = await body.evaluate(element => parseFloat(getComputedStyle(element).lineHeight));
-          expect((await body.boundingBox())!.height).toBeCloseTo(scaledLine * 4, 0);
+          // Text rectangles and line boxes round independently at scaled font sizes.
+          // Allow at most one CSS pixel for that rounding, while separately proving
+          // four complete text lines are visible and no glyph rectangle is clipped.
+          await expect.poll(async () => Math.abs((await body.boundingBox())!.height - scaledLine * 4)).toBeLessThanOrEqual(1);
+          await expect.poll(() => body.evaluate(element => {
+            const bottom = element.getBoundingClientRect().bottom, rectangles: DOMRect[] = [];
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), range = document.createRange();
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+              if (!node.textContent?.trim()) continue;
+              range.selectNodeContents(node);
+              rectangles.push(...[...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0));
+            }
+            return {
+              visible: rectangles.filter(rect => rect.bottom <= bottom + 0.5).length,
+              cutLines: rectangles.filter(rect => rect.top < bottom - 0.5 && rect.bottom > bottom + 0.5).length,
+            };
+          })).toEqual({ visible: 4, cutLines: 0 });
         }
         await page.evaluate(() => document.documentElement.style.setProperty('--text-scale', '1'));
       }
     }
-    const scroller = page.locator('.tree-scroll');
-    await scroller.evaluate(element => { element.scrollTop = element.scrollHeight; });
-    const marker = page.locator('.tree-selected-edge');
-    await expect(marker).toContainText('↑ Selected: A long item title');
-    const colour = await marker.evaluate(element => {
-      const surface = getComputedStyle(element).backgroundColor;
-      const probe = document.createElement('span');
-      probe.style.backgroundColor = 'var(--a-card)';
-      probe.style.position = 'absolute';
-      element.append(probe);
-      const expected = getComputedStyle(probe).backgroundColor;
-      probe.remove();
-      // Let the browser resolve its own colour syntax, including oklch and color().
-      const canvas = document.createElement('canvas');
-      canvas.width = canvas.height = 1;
-      const context = canvas.getContext('2d')!;
-      context.fillStyle = surface;
-      context.fillRect(0, 0, 1, 1);
-      return { surface, expected, alpha: context.getImageData(0, 0, 1, 1).data[3] };
-    });
-    const { surface } = colour;
-    expect(surface).toBe(colour.expected);
-    expect(colour.alpha).toBe(255);
-    await expect(marker).toHaveCSS('opacity', '1');
-    await marker.hover(); await expect(marker).toHaveCSS('background-color', surface);
-    await expect(marker).toHaveCSS('opacity', '1');
-    await marker.focus(); await expect(marker).toHaveCSS('background-color', surface);
-    await expect(marker).toHaveCSS('opacity', '1');
-    await page.mouse.down(); await expect(marker).toHaveCSS('background-color', surface);
-    await expect(marker).toHaveCSS('opacity', '1'); await page.mouse.up();
+    const scroller = page.locator('.tree-scroll'), filters = page.locator('.tree-filters');
+    const slot = page.locator('.tree-filters > .tree-selected-slot'), marker = slot.locator('.tree-selected-edge');
+    const last = page.locator('.tree-item[data-item-id="18"]');
+    await scroller.evaluate(element => { element.scrollTop = 0; });
     await expect(marker).toHaveCount(0);
-    await expect(root.locator('.tree-question')).toBeInViewport();
+    await expect(slot).toHaveCount(1);
+    await expect(page.locator('.tree-scroll-shell .tree-selected-slot, .tree-scroll-shell .tree-selected-edge')).toHaveCount(0);
+    const geometry = async () => ({
+      scroller: await scroller.boundingBox(), filters: await filters.boundingBox(), slot: await slot.boundingBox(),
+      scroll: await scroller.evaluate(element => ({ width: element.clientWidth, height: element.clientHeight, contentHeight: element.scrollHeight })),
+      rows: await Promise.all([root, child, last].map(row => row.evaluate(element => {
+        const bounds = element.getBoundingClientRect();
+        return { width: bounds.width, height: bounds.height };
+      }))),
+    });
+    const hiddenGeometry = await geometry();
+    const expectReservedMarker = async (edge: 'above' | 'below', label: string) => {
+      await expect(marker).toHaveAttribute('data-edge', edge);
+      await expect(marker).toContainText(`${edge === 'above' ? '↑' : '↓'} Selected: ${label}`);
+      const tag = (await marker.boundingBox())!, reserved = (await slot.boundingBox())!, bar = (await filters.boundingBox())!;
+      expect(tag.x).toBeGreaterThanOrEqual(reserved.x);
+      expect(tag.x + tag.width).toBeLessThanOrEqual(reserved.x + reserved.width);
+      expect(tag.y).toBeGreaterThanOrEqual(bar.y);
+      expect(tag.y + tag.height).toBeLessThanOrEqual(bar.y + bar.height);
+      expect(tag.y + tag.height).toBeLessThanOrEqual((await scroller.boundingBox())!.y);
+      expect(tag.width).toBeLessThan(reserved.width);
+      expect(await geometry()).toEqual(hiddenGeometry);
+      await expectSolidMarker(marker);
+      await marker.hover(); await expectSolidMarker(marker);
+      await marker.focus(); await expectSolidMarker(marker);
+      await page.mouse.down();
+      await expect.poll(() => marker.evaluate(element => element.matches(':active'))).toBe(true);
+      await expectSolidMarker(marker);
+      expect(await geometry()).toEqual(hiddenGeometry);
+      await page.mouse.up();
+      await expect(marker).toHaveCount(0);
+      await expect(slot).toHaveCount(1);
+      expect(await geometry()).toEqual(hiddenGeometry);
+    };
+
+    await scroller.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await expect(marker).toContainText('↑ Selected: A long item title');
+    const longLabel = marker.locator('.tree-selected-label');
+    await expect(longLabel).toHaveCSS('text-overflow', 'ellipsis');
+    await expect(longLabel).toHaveCSS('overflow', 'hidden');
+    await expect(longLabel).toHaveCSS('white-space', 'nowrap');
+    expect(await longLabel.evaluate(element => element.scrollWidth)).toBeGreaterThan(await longLabel.evaluate(element => element.clientWidth));
+    await expectReservedMarker('above', 'A long item title');
+    await expectRevealedRow(root);
     await scroller.evaluate(element => { element.scrollTop = element.scrollHeight; });
     await expect(marker).toBeVisible();
     // The shortcut works while the session's other panel has focus.
     await page.locator('.item-detail').getByRole('button', { name: 'Copy reference' }).focus();
     await page.keyboard.press('Meta+j');
     await expect(marker).toHaveCount(0);
-    await expect(root.locator('.tree-question')).toBeInViewport();
+    await expectRevealedRow(root);
+    // Nearest keyboard reveal also clears the actual sticky header, without centering the row.
+    await root.evaluate(element => (element as HTMLElement).focus({ preventScroll: true }));
+    await child.evaluate(element => {
+      const box = element.closest('.tree-scroll')!;
+      const header = element.closest('.tree-topic-group')!.querySelector('.tree-topic')!;
+      box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top - header.getBoundingClientRect().height / 2;
+    });
+    expect(await child.evaluate(element => element.getBoundingClientRect().top < element.closest('.tree-topic-group')!.querySelector('.tree-topic')!.getBoundingClientRect().bottom)).toBe(true);
+    await page.keyboard.press('ArrowDown');
+    await expect(child).toBeFocused();
+    await expectRevealedRow(child);
     // A selection below the viewport uses the other edge and remains fully opaque.
-    const last = page.locator('.tree-item[data-item-id="18"]');
     await last.locator('.tree-question').click();
     await expect(last).toHaveAttribute('aria-selected', 'true');
     await scroller.evaluate(element => { element.scrollTop = 0; });
-    await expect(marker).toContainText('↓ Selected: Another item');
-    await expect(marker).toHaveCSS('background-color', surface);
-    await marker.click(); await expect(marker).toHaveCount(0);
+    await expectReservedMarker('below', 'Another item');
+    await expectRevealedRow(last);
   } finally { await server.close(); }
 });

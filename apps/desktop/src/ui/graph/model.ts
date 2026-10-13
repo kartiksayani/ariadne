@@ -7,7 +7,7 @@ import type { Item, Session, Topic } from '../../generated/domain/models';
 import type { SessionPreferences } from '../../generated/core';
 import { indexSession, type Immutable } from '../../data';
 import { normalizeSearch, sentenceRows, type SentenceRow } from '../../selectors/tree/rows';
-import { shortLabel } from '../shared/short';
+import { itemLabels } from '../shared/short';
 import { displayStatus, type DisplayStatus } from '../../selectors/waiting/replied';
 import { waitingOnOwner } from '../../selectors/sessionClosed';
 import { hiddenItems } from '../tree/hidden';
@@ -147,6 +147,7 @@ export function sessionGraph(input: GraphInput): SessionGraph {
   const filtering = isFiltering(view.filters);
   const hidden = hiddenItems(session, new Set(view.hidden_item_ids ?? []));
   const rows = sentenceRows(session, view, later, input.temporaryExpandedItemIds ?? [], input.revealedItemId ?? null, input.filterCollapsedItemIds).rows;
+  const labels = itemLabels(rows.map(row => row.item), session.topics);
   const visible = new Map<string, SentenceRow>(rows.map(row => [row.item.id, row]));
   const children = new Map<string, string[]>();
   for (const row of rows) {
@@ -196,7 +197,7 @@ export function sessionGraph(input: GraphInput): SessionGraph {
       }
       const below = descendantCount(session, item.id), shown = (children.get(item.id)?.length ?? 0) > 0;
       const collapsed = row.childCount > 0 && !shown, selected = selectedId === item.id;
-      const node: GraphNode = { item, status: graphStatus(displayStatus(session, item)), short: shortLabel(item), x: at.x, y: at.y, below,
+      const node: GraphNode = { item, status: graphStatus(displayStatus(session, item)), short: labels.get(item.id)!, x: at.x, y: at.y, below,
         collapsed: collapsed && below > 0, canCollapse: !collapsed && below > 0, selected,
         onThread: thread.has(item.id) && !selected, closed: isClosed(item.status), dimmed: filtering && row.context && !selected,
         hidden: hidden.has(item.id), ack: ackTarget(session, item) };

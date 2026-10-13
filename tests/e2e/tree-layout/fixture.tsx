@@ -21,6 +21,11 @@ class TreeLayoutTransport extends AppTransport {
     for (let n = 9; n <= 18; n++) items[String(n)] = { ...items['8']!, id: String(n), ordinal: n, question: `Another item ${n}`, outcome: 'A short result.' };
     items['9']!.outcome = Array.from({ length: 6 }, (_, index) => `Body line ${index + 1}`).join('\n');
     items['10']!.outcome = Array.from({ length: 7 }, (_, index) => `Body line ${index + 1}`).join('\n');
+    for (const [id, lines, kind] of [[11, 6, 'paragraph'], [12, 7, 'paragraph'], [13, 6, 'list'], [14, 7, 'list'], [15, 6, 'code'], [16, 7, 'code']] as const) {
+      const body = Array.from({ length: lines }, (_, index) => `${kind === 'list' ? '- ' : ''}Short line ${index + 1}`);
+      items[String(id)]!.outcome = kind === 'code' ? `\`\`\`\n${body.join('\n')}\n\`\`\`` : body.join(kind === 'paragraph' ? '\n\n' : '\n');
+    }
+    items['17']!.outcome = '[Read the evidence](https://example.com)\n' + Array.from({ length: 6 }, (_, index) => `**Evidence** \`code\` line ${index + 1}`).join('\n');
     items['1']!.outcome = Array.from({ length: 20 }, (_, index) => `Line ${index + 1} of a long finding the agent wrote.`).join('\n');
     items['5']!.outcome = 'A decision paragraph that is long enough to wrap over several lines in the tree column, so that any change in the width of its '
       + 'column on hover would move words from one line to the next and show up as a different line count.';

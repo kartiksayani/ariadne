@@ -188,7 +188,6 @@
 .tree-filters {
   display: flex;
   flex: none;
-  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 10px 16px 8px;
@@ -201,6 +200,7 @@
   justify-content: center;
   width: 28px;
   height: 28px;
+  flex: none;
   padding: 0;
   border: 0;
   border-radius: 7px;
@@ -759,13 +759,16 @@
 }
 .tree-line > .tree-clamp { flex: 1; }
 
+.tree-clamp-content { display: block; }
+
 .tree-preview[data-clamped] .tree-clamp {
-  max-height: calc(var(--tree-preview-line, 21px) * var(--tree-clamp, 4));
+  max-height: var(--tree-clamp-height);
   overflow: hidden;
 }
 
 .tree-preview .md-pre {
-  font-size: 0.88em;
+  max-height: none;
+  overflow: visible;
 }
 
 .tree-more {
@@ -1107,7 +1110,6 @@
 }
 
 .tree-scroll-shell {
-  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -1121,16 +1123,26 @@
   left: calc(-1em - 8px);
 }
 
-/* An opaque surface in every interactive state, including the global button reset. */
+/* Reserve the same top-bar height with or without the tag; it never covers or shifts rows. */
+.tree-selected-slot {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+}
+
+/* Content width, with an opaque surface in every state, including the global button reset. */
 .tree-selected-edge,
 .tree-selected-edge:hover,
 .tree-selected-edge:focus,
 .tree-selected-edge:active {
-  position: absolute;
-  z-index: 4;
-  left: 12px;
-  right: 24px;
-  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: min(100%, 34ch);
+  height: 28px;
+  padding: 0 8px;
   border: 1px solid var(--color-divider);
   border-radius: 5px;
   background: var(--a-card);
@@ -1144,8 +1156,15 @@
   cursor: pointer;
 }
 
-.tree-selected-edge[data-edge="above"] { top: 8px; }
-.tree-selected-edge[data-edge="below"] { bottom: 8px; }
+.tree-selected-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-selected-edge > span:first-child {
+  flex: none;
+}
 
 .tree-selected-edge:focus-visible {
   outline: 2px solid var(--color-accent);

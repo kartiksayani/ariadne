@@ -172,6 +172,12 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
     await expect(filters.getByRole('button', { name: /^Filter/ })).toBeVisible();
     await expect(filters.getByRole('combobox')).toHaveCount(0);
   }
+  if (graphFrame(spec)) {
+    await expect(page.locator('.tree-selected-edge')).toHaveCount(0);
+  } else if (await page.locator('.tree-scroll').count()) {
+    await expect(page.locator('.tree-filters > .tree-selected-slot')).toHaveCount(1);
+    await expect(page.locator('.tree-scroll-shell .tree-selected-slot, .tree-scroll-shell .tree-selected-edge')).toHaveCount(0);
+  }
 }
 
 const railMessage = (page: Page, number: number) => page.locator('.pw-rail-list [data-message-id]').filter({

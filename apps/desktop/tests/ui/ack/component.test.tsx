@@ -214,14 +214,17 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     await mount(transport);
     fireEvent.click(row('1')); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     const related = screen.getByRole('region', { name: 'Related items' });
-    const linked = within(related).getByRole('button', { name: /^Retry limits ·/ });
+    const linked = within(related).getByRole('button', { name: `${session.items['1.1']!.question} · Open` });
+    expect(linked.textContent).toContain('Retry limits');
     expect(linked.textContent).toContain('Open');
     fireEvent.click(linked); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await act(async () => { fireEvent.click(within(detail()).getByRole('button', { name: 'Ack → Done' })); });
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe('done'));
     expect(acks(transport)).toHaveLength(1);
     fireEvent.click(row('1')); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
-    expect(within(screen.getByRole('region', { name: 'Related items' })).getByRole('button', { name: /^Retry limits ·/ }).textContent).toContain('Done');
+    const acknowledged = within(screen.getByRole('region', { name: 'Related items' })).getByRole('button', { name: `${session.items['1.1']!.question} · Done` });
+    expect(acknowledged.textContent).toContain('Retry limits');
+    expect(acknowledged.textContent).toContain('Done');
   });
 
   it('offers a quiet row Ack with a target tooltip and a topic count, while questions keep their answer controls', async () => {

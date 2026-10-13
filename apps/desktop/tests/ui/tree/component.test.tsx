@@ -22,7 +22,6 @@ import { LinkOpener } from '../../../src/ui/shared/MarkdownText';
 import { RecoveryPanel } from '../../../src/components/recovery/RecoveryPanel';
 import { Notices, notices } from '../../../src/ui/pages/notices';
 import { NavigationGraph } from '../../../src/ui/graph/NavigationGraph';
-import { shortLabel } from '../../../src/ui/shared/short';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 
 const stores: NavigationStore[] = [];
@@ -32,6 +31,7 @@ const now = () => Date.parse('2026-10-07T12:00:00Z');
 
 interface Recorded {
   selected: RevealedItem[]; hovered: (string | null)[]; acts: [RowIntent, ItemRoute][];
+  openedDetail: boolean[];
   dismissed: number; resumed: number; cleared: number; archive: number; removed: number;
 }
 async function mount({ transport = new AppTransport(), configure, props = {}, load = true }: {
@@ -44,14 +44,14 @@ async function mount({ transport = new AppTransport(), configure, props = {}, lo
   const store = navigation.opened.open(route);
   if (load) await store.refresh();
   const actions = new SessionActionControllers(service).forSession(store), drafts = new OwnerDraftStore(service);
-  const calls: Recorded = { selected: [], hovered: [], acts: [], dismissed: 0, resumed: 0, cleared: 0, archive: 0, removed: 0 };
+  const calls: Recorded = { selected: [], openedDetail: [], hovered: [], acts: [], dismissed: 0, resumed: 0, cleared: 0, archive: 0, removed: 0 };
   const openLink = vi.fn();
   const hover = (id: string | null) => { calls.hovered.push(id); };
   function Harness(extra: Partial<TreeViewProps>) {
     const [selected, setSelected] = useState<string | null>(null);
     return <LinkOpener.Provider value={openLink}><TreeView navigation={navigation} store={store} actions={actions} drafts={drafts} query="" reveal={null} selectedId={selected}
       detailOpen={false} railOpen={false} highlightedItems={none} highlightedMessages={none} summaries={[]} now={now} onHoverItem={hover}
-      onSelected={result => { calls.selected.push(result); if (result.kind === 'item') setSelected(result.route.item_id); }}
+      onSelected={(result, openDetail = true) => { calls.selected.push(result); calls.openedDetail.push(openDetail); if (result.kind === 'item') setSelected(result.route.item_id); }}
       onDismissReveal={() => { calls.dismissed++; }} onResume={() => { calls.resumed++; }} onAct={(intent, target) => { calls.acts.push([intent, target]); }}
       onClearFilters={() => { calls.cleared++; }} onShowArchive={() => { calls.archive++; }}
       onRemove={() => { calls.removed++; }} {...props} {...extra} /></LinkOpener.Provider>;
@@ -1254,12 +1254,54 @@ describe('session tree reading position', () => {
   });
   it('places an opening selection after its hidden row mounts, when there is no saved anchor', async () => {
     layout();
-    await mount({ configure: transport => {
+    const view = await mount({ configure: transport => {
       const view = viewOf(transport);
       view.selected_item_id = '8'; view.scroll = null; view.hidden_item_ids = ['8'];
     }, props: { selectedId: '8' } });
     await waitFor(() => expect(row('8')).not.toBeNull());
     expect(top('8')).toBe(180);
+    expect(view.calls.openedDetail).toEqual([false]);
+  });
+  it.each(['Waiting/link', 'Back/Forward'] as const)('allows later %s reveals after a saved archived selection cannot mount', async path => {
+    layout();
+    const view = await mount({ configure: transport => {
+      const saved = viewOf(transport), session = transport.sessions.get(route.session_id)!;
+      saved.selected_item_id = '8'; saved.scroll = null;
+      session.topics[session.items['8']!.topic_id]!.archived_at = session.updated_at;
+    }, props: { selectedId: '8' } });
+    await waitFor(() => expect(view.calls.openedDetail).toEqual([false]));
+    expect(row('8')).toBeNull();
+    const box = document.querySelector<HTMLElement>('.tree-scroll')!;
+    box.scrollTop = 600; fireEvent.scroll(box);
+    const target: RevealedItem = { kind: 'item', route: { ...route, item_id: '2' }, store: view.store, temporaryExpandedItemIds: [] };
+    view.rerender({ selectedId: '2', reveal: target, historyReveal: path === 'Back/Forward' ? target : null });
+    expect(top('2')).toBe(8);
+    expect(document.activeElement).toBe(row('2'));
+    expect(notices.getSnapshot().some(notice => notice.id === 'tree-reveal-failed')).toBe(false);
+  });
+  it('finishes a timed-out opening quietly and allows a subsequent deliberate reveal', async () => {
+    layout(); vi.useFakeTimers();
+    const transport = new AppTransport(), invoke = transport.invoke.bind(transport);
+    let release!: () => void, delayed = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'reveal_item' && !delayed) { delayed = true; await gate; }
+      return invoke(name, args);
+    });
+    const view = await mount({ transport, configure: transport => {
+      const saved = viewOf(transport); saved.selected_item_id = '1.1'; saved.expanded_item_ids = []; saved.scroll = null;
+    }, props: { selectedId: '1.1' } });
+    expect(delayed).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(view.calls.selected).toHaveLength(0);
+    expect(notices.getSnapshot().some(notice => notice.id === 'tree-reveal-failed')).toBe(false);
+    const box = document.querySelector<HTMLElement>('.tree-scroll')!;
+    box.scrollTop = 600; fireEvent.scroll(box);
+    const target: RevealedItem = { kind: 'item', route: { ...route, item_id: '2' }, store: view.store, temporaryExpandedItemIds: [] };
+    view.rerender({ selectedId: '2', reveal: target });
+    expect(top('2')).toBe(8); expect(document.activeElement).toBe(row('2'));
+    await act(async () => { release(); });
+    expect(view.calls.selected).toHaveLength(0);
   });
   it('cancels unfinished opening placement when a visible row is clicked', async () => {
     layout();
@@ -1286,6 +1328,32 @@ describe('session tree reading position', () => {
     expect(view.calls.selected).toHaveLength(1);
     expect(box.scrollTop).toBe(150);
   });
+
+  it.each(['1.1', '2', 'graph'] as const)('cancels an active opening read when an external reveal mounts target %s', async destination => {
+    const id = destination === 'graph' ? '2' : destination;
+    layout();
+    const transport = new AppTransport(), invoke = transport.invoke.bind(transport);
+    let release!: () => void, delayed = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'reveal_item' && !delayed) { delayed = true; await gate; }
+      return invoke(name, args);
+    });
+    const view = await mount({ transport, configure: transport => {
+      const saved = viewOf(transport); saved.selected_item_id = '1.1'; saved.expanded_item_ids = []; saved.scroll = null;
+    }, props: { selectedId: '1.1' } });
+    expect(delayed).toBe(true); expect(row('1.1')).toBeNull();
+    // Mount the folded row in the same render as a deliberate request, including the same target.
+    const target: RevealedItem = { kind: 'item', route: { ...route, item_id: id }, store: view.store, temporaryExpandedItemIds: ['1'] };
+    view.rerender({ selectedId: id, reveal: target, ...(destination === 'graph' ? { graph: <p>Graph destination</p> } : {}) });
+    if (destination === 'graph') expect(screen.getByText('Graph destination')).toBeTruthy();
+    else expect(row('1.1')).not.toBeNull();
+    const box = document.querySelector<HTMLElement>('.tree-scroll'), scroll = box?.scrollTop;
+    await act(async () => { release(); });
+    expect(view.calls.selected).toHaveLength(0);
+    expect(box?.scrollTop).toBe(scroll);
+    expect(notices.getSnapshot().some(notice => notice.id === 'tree-reveal-failed')).toBe(false);
+  });
   it('keeps an offscreen selection in place when detail opens', async () => {
     layout();
     const { rerender } = await mount({ configure: savedAtTop, props: { selectedId: '8' } });
@@ -1306,7 +1374,7 @@ describe('session tree reading position', () => {
     expect(top('3')).toBe(before);
   });
 
-  it.each(['detail', 'messages'] as const)('never restores the saved anchor again after %s changes and text reflows', async change => {
+  it.each(['detail', 'messages', 'window'] as const)('keeps the reading anchor when %s changes and text reflows', async change => {
     let width = 300, spacing = 100;
     const observers: { run: () => void; targets: Set<Element> }[] = [];
     vi.stubGlobal('ResizeObserver', class {
@@ -1329,23 +1397,35 @@ describe('session tree reading position', () => {
       }, props: { selectedId: '8' } });
       const box = document.querySelector<HTMLElement>('.tree-scroll')!;
       expect(box.scrollTop).toBe(380);
-      view.rerender(change === 'detail' ? { detailOpen: true } : { railOpen: true });
+      if (change !== 'window') view.rerender(change === 'detail' ? { detailOpen: true } : { railOpen: true });
       expect(box.scrollTop).toBe(380);
       // The native layout's observer arrives after the panel state has rendered.
       width = 200; spacing = 120;
       act(() => observers.filter(observer => observer.targets.size).forEach(observer => observer.run()));
-      expect(box.scrollTop).toBe(380);
-      expect(top('4')).toBe(100);
+      expect(box.scrollTop).toBe(460);
+      expect(top('4')).toBe(20);
     } finally { vi.unstubAllGlobals(); }
   });
 });
 
 describe('item details in the tree', () => {
   const long = Array.from({ length: 20 }, (_, index) => `Line ${index + 1} of a long finding the agent wrote.`).join('\n');
-  // jsdom has no layout: text over 100 characters reports a tall scrollHeight, anything shorter fits.
-  const measure = () => vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) {
-    return this.classList.contains('tree-clamp') && (this.textContent?.length ?? 0) > 100 ? 420 : 20;
-  });
+  // jsdom has no native text geometry. Supply rendered text lines; container pixels are irrelevant.
+  const measure = (count: (node: Node) => number = node => (node.parentElement?.closest('.tree-clamp')?.textContent?.length ?? 0) > 100 ? 20 : 1,
+    lineHeight = () => 21) => {
+    vi.spyOn(document, 'createRange').mockImplementation(() => {
+      const range = new Range(); let node: Node;
+      range.selectNodeContents = target => { node = target; };
+      range.getClientRects = () => Object.assign(Array.from({ length: count(node) }, (_, index) => new DOMRect(0, index * lineHeight() + 3, 120, lineHeight() - 6)), { item: () => null });
+      return range;
+    });
+    const computed = window.getComputedStyle;
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
+      const style = document.createElement('span').style; style.cssText = computed(element, pseudo).cssText;
+      if (element.closest('.tree-clamp')) { style.lineHeight = `${lineHeight()}px`; style.fontSize = '14px'; }
+      return style;
+    });
+  };
   const longOutcome = (transport: AppTransport) => { transport.sessions.get(route.session_id)!.items['1']!.outcome = long; };
   const more = (id: string) => within(row(id)).queryByRole('button', { name: /^Show (more|less)$/ });
 
@@ -1389,9 +1469,7 @@ describe('item details in the tree', () => {
   });
 
   it.each([4, 5, 6, 7, 8])('clamps %s body lines only if at least three would be hidden', async lines => {
-    vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) {
-      return this.closest('[data-item-id="4"]') && this.classList.contains('tree-clamp') ? lines * 21 : 20;
-    });
+    measure(node => node.parentElement?.closest('[data-item-id="4"]') ? lines : 1);
     await mount({ configure: transport => { transport.sessions.get(route.session_id)!.items['4']!.outcome = 'Body with a measured height.'; } });
     expect(!!more('4')).toBe(lines >= 7);
     expect(row('4').querySelector('.tree-preview')!.hasAttribute('data-clamped')).toBe(lines >= 7);
@@ -1403,8 +1481,8 @@ describe('item details in the tree', () => {
     }
   });
 
-  it('remeasures the hidden-line threshold after text size changes, without caching a pixel clamp height', async () => {
-    let line = 21;
+  it('remeasures real lines and the complete fourth-line boundary after the clipped text resizes', async () => {
+    let line = 21, lines = 7;
     const observers: { run: () => void; targets: Set<Element> }[] = [];
     vi.stubGlobal('ResizeObserver', class {
       targets = new Set<Element>();
@@ -1412,22 +1490,17 @@ describe('item details in the tree', () => {
       observe(target: Element) { this.targets.add(target); }
       disconnect() { this.targets.clear(); }
     });
-    const computed = window.getComputedStyle;
-    vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => element.closest('[data-item-id="4"]') && element.classList.contains('tree-clamp')
-      ? { lineHeight: String(line) } as CSSStyleDeclaration : computed(element, pseudo));
-    vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) {
-      return this.closest('[data-item-id="4"]') && this.classList.contains('tree-clamp') ? 147 : 20;
-    });
+    measure(node => node.parentElement?.closest('[data-item-id="4"]') ? lines : 1, () => line);
     try {
       await mount({ configure: transport => { transport.sessions.get(route.session_id)!.items['4']!.outcome = 'Body with a measured height.'; } });
       const excerpt = row('4').querySelector('.tree-clamp')!;
       expect(more('4')).not.toBeNull();
-      line = 25.2; act(() => observers.find(observer => observer.targets.has(excerpt))!.run());
+      lines = 6; line = 25.2; act(() => observers.find(observer => observer.targets.has(excerpt))!.run());
       expect(more('4')).toBeNull();
-      expect(row('4').querySelector<HTMLElement>('.tree-preview')!.style.getPropertyValue('--tree-preview-line')).toBe('');
+      expect(parseFloat(row('4').querySelector<HTMLElement>('.tree-preview')!.style.getPropertyValue('--tree-clamp-height'))).toBeCloseTo(100.8);
       const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
       expect(css).toContain('--tree-preview-line: calc(21px * var(--text-scale))');
-      expect(css).toContain('max-height: calc(var(--tree-preview-line, 21px) * var(--tree-clamp, 4))');
+      expect(css).toContain('max-height: var(--tree-clamp-height)');
     } finally { vi.unstubAllGlobals(); }
   });
 
@@ -1453,6 +1526,8 @@ describe('item details in the tree', () => {
     await mount({ configure: transport => { transport.sessions.get(route.session_id)!.items['1']!.outcome = `${long}\n[Read the evidence](https://example.com)`; } });
     expect(row('1').querySelector('.tree-preview[data-clamped]')).not.toBeNull();
     const link = within(row('1')).getByRole('link', { name: 'Read the evidence' });
+    const matches = link.matches.bind(link);
+    vi.spyOn(link, 'matches').mockImplementation(selector => selector === ':focus-visible' || matches(selector));
     act(() => link.focus());
     expect(document.activeElement).toBe(link);
     expect(row('1').querySelector('.tree-preview[data-clamped]')).toBeNull();
@@ -1628,6 +1703,15 @@ describe('scrolling the tree', () => {
     expect(scroller().scrollTop).toBe(150);
   });
 
+  it('never scrolls when a search-result tree row is clicked or its selection echoes back', async () => {
+    const view = await opened({ props: { query: 'receipt' } });
+    const box = scroller(); box.scrollTop = 600; fireEvent.scroll(box);
+    fireEvent.click(row('1.1'));
+    await waitFor(() => expect(view.calls.selected).toHaveLength(1));
+    view.rerender({ reveal: view.calls.selected[0], selectedId: '1.1', detailOpen: true });
+    expect(box.scrollTop).toBe(600);
+  });
+
   it('never scrolls on a click after keyboard row navigation', async () => {
     const view = await opened();
     row('3').focus(); fireEvent.keyDown(row('3'), { key: 'End' });
@@ -1710,7 +1794,7 @@ describe('scrolling the tree', () => {
       const item = transport.sessions.get(route.session_id)!.items['4']!;
       item.status = 'replaced'; item.replaced_by = '8';
     } });
-    fireEvent.click(within(row('4')).getByRole('button', { name: shortLabel(view.transport.sessions.get(route.session_id)!.items['8']!) }));
+    fireEvent.click(within(row('4')).getByRole('button', { name: view.transport.sessions.get(route.session_id)!.items['8']!.question }));
     await waitFor(() => expect(view.calls.selected).toHaveLength(1));
     view.rerender({ reveal: view.calls.selected[0], selectedId: '8', detailOpen: true });
     expect(scroller().scrollTop).toBe(448);
@@ -1747,13 +1831,19 @@ describe('scrolling the tree', () => {
     expect(scroller().scrollTop).toBe(150);
   });
 
-  it.each(['above', 'below'] as const)('reveals the %s edge marker on click and ⌘J from an editor', async edge => {
+  it.each(['above', 'below'] as const)('keeps the %s selection tag in its reserved top-bar slot and reveals on click and ⌘J', async edge => {
     await opened({ props: { selectedId: edge === 'above' ? '1' : '8' } });
     fireEvent.scroll(scroller());
     const marker = () => screen.getByRole('button', { name: edge === 'above' ? /^↑ Selected:/ : /^↓ Selected:/ });
     expect(marker().getAttribute('data-edge')).toBe(edge);
+    const slot = document.querySelector('.tree-filters > .tree-selected-slot')!;
+    expect(slot.contains(marker())).toBe(true);
+    expect(document.querySelector('.tree-scroll-shell')!.contains(marker())).toBe(false);
+    expect(marker().querySelector('.tree-selected-label')?.textContent).not.toBe('');
     fireEvent.click(marker());
     expect(screen.queryByRole('button', { name: /Selected:/ })).toBeNull();
+    expect(document.querySelector('.tree-selected-slot')).toBe(slot);
+    expect(slot.children).toHaveLength(0);
     const revealed = scroller().scrollTop;
     scroller().scrollTop = 150; fireEvent.scroll(scroller());
     const editor = document.createElement('textarea'); document.body.append(editor); editor.focus();
@@ -1765,6 +1855,70 @@ describe('scrolling the tree', () => {
     const solid = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(([, selector]) => selector!.includes('.tree-selected-edge:active'))!;
     for (const state of ['', ':hover', ':focus', ':active']) expect(solid[1]).toContain(`.tree-selected-edge${state}`);
     expect(solid[2]).toContain('background: var(--a-card)'); expect(solid[2]).not.toContain('transparent');
+    expect(solid[2]).not.toMatch(/position:\s*(absolute|fixed)|(?:left|right|top|bottom):/);
+    expect(solid[2]).toContain('max-width: min(100%, 34ch)');
+    expect(css).toMatch(/\.tree-selected-slot\s*\{[^}]*height: 28px/);
+  });
+
+  it('uses the full selected question for accessibility and distinguishing words before tag truncation', async () => {
+    const view = await opened({ configure: transport => {
+      const items = transport.sessions.get(route.session_id)!.items;
+      items['1']!.short = items['4']!.short = 'Count cache reads';
+      items['1']!.question = 'Count cache reads for Redis';
+      items['4']!.question = 'Count cache reads for Postgres';
+    }, props: { selectedId: '1' } });
+    fireEvent.scroll(scroller());
+    const first = screen.getByRole('button', { name: '↑ Selected: Count cache reads for Redis' });
+    expect(first.querySelector('.tree-selected-label')!.textContent).toBe('Redis · Count cache reads');
+    expect(first.title).toContain('Count cache reads for Redis');
+    view.rerender({ selectedId: '4' });
+    scroller().scrollTop = 600; fireEvent.scroll(scroller());
+    const second = screen.getByRole('button', { name: '↑ Selected: Count cache reads for Postgres' });
+    expect(second.querySelector('.tree-selected-label')!.textContent).toBe('Postgres · Count cache reads');
+  });
+
+  it.each(['opening', 'navigation', 'tag', '⌘J'] as const)('lands %s reveals clear of the pinned bars and a tall sticky topic', async path => {
+    layout();
+    const rectangle = vi.mocked(HTMLElement.prototype.getBoundingClientRect).getMockImplementation()!;
+    // Session/filter bars end at 150; the scroller starts below them, with a 220 px topic band.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.tree-session-bar')) return new DOMRect(0, 0, 300, 104);
+      if (this.matches('.tree-filters')) return new DOMRect(0, 104, 300, 46);
+      if (this.matches('.tree-topic')) return new DOMRect(0, 150, 300, 220);
+      const rect = rectangle.call(this);
+      if (this.matches('.tree-scroll, [role="treeitem"][data-item-id]')) return new DOMRect(rect.x, rect.y + 150, rect.width, rect.height);
+      return rect;
+    });
+    const view = await mount({ props: { selectedId: '8' } });
+    if (path !== 'opening') {
+      scroller().scrollTop = 750; fireEvent.scroll(scroller());
+      expect(row('8').getBoundingClientRect().top).toBeLessThan(topicRow('Delivery decisions').getBoundingClientRect().bottom);
+      if (path === 'navigation') view.rerender({ reveal: link(view, '8'), selectedId: '8' });
+      else if (path === 'tag') fireEvent.click(screen.getByRole('button', { name: /^↑ Selected:/ }));
+      else fireEvent.keyDown(window, { key: 'j', metaKey: true });
+    }
+    const target = row('8').getBoundingClientRect();
+    expect(target.top).toBeGreaterThanOrEqual(topicRow('Delivery decisions').getBoundingClientRect().bottom + 8);
+    expect(target.bottom).toBeLessThanOrEqual(scroller().getBoundingClientRect().bottom - 8);
+    expect(screen.queryByRole('button', { name: /Selected:/ })).toBeNull();
+  });
+
+  it('keeps the selection tag in a reserved top bar when viewing archived topics', async () => {
+    await opened({ configure: transport => {
+      const session = transport.sessions.get(route.session_id)!;
+      for (const topic of Object.values(session.topics)) if (topic) topic.archived_at = session.updated_at;
+      viewOf(transport).filters.archived = true;
+    }, props: { selectedId: '8' } });
+    fireEvent.scroll(scroller());
+    const tag = screen.getByRole('button', { name: /^↓ Selected:/ });
+    expect(tag.closest('.tree-filters > .tree-selected-slot')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /^Filter/ })).toBeNull();
+  });
+
+  it('does not add a Map selection tag or slot to the graph', async () => {
+    await mount({ props: { selectedId: '8', graph: <p>Graph content</p> } });
+    expect(document.querySelector('.tree-selected-slot')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Selected:/ })).toBeNull();
   });
 
   it('reveals the selected row with ⌘J inside the real topic reply editor that stops bubbling keys', async () => {

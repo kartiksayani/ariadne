@@ -3,13 +3,13 @@
 // four lines, with Show more) and under them the delivery of the owner's latest
 // message, the collapsed note, the inline answer box, the round tag, hover actions, the
 // top-line text badge.
-import { useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { Markdown } from '../shared/MarkdownText';
 import { StatusBadge } from '../shared/StatusBadge';
 import { ackTitle } from '../shared/ack';
 import { SessionClosedChip } from '../shared/SessionClosedChip';
-import { shortLabel } from '../shared/short';
 import { closed, visual, type Guide, type ItemRow as Row } from './model';
+import { measurePreviewLines } from './clamp';
 
 export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly disabled?: boolean; readonly persistent?: boolean }
 
@@ -28,27 +28,30 @@ export function Guides({ guides }: { guides: readonly Guide[] }) {
 /** Lines of an item's preview before "Show more" folds the rest away. */
 const CLAMP_LINES = 4;
 const MIN_HIDDEN_LINES = 3;
-/** Row height of the preview text (tree.css `.tree-line`), when the browser reports none. */
-const PREVIEW_LINE = 21;
 
 interface Preview { readonly node: ReactNode; /** The long text the clamp applies to, if any. */ readonly text: string | null }
+
+/** The outer box clips; the inner Markdown keeps its natural height for ResizeObserver. */
+function PreviewText({ text }: { readonly text: string }) {
+  return <div className="tree-clamp"><Markdown className="tree-clamp-content" text={text} inline /></div>;
+}
 
 /** The item's own details under the title, by priority (Item Row.dc.html:68-75). A delivery never takes this place. */
 function preview(row: Row, jump: () => void): Preview | null {
   const item = row.item;
   if (row.later) return { text: null, node: <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}><i className="ph ph-clock" /><span>Parked for later · still open</span></div> };
-  if (item.status === 'waiting_on_me' && item.ask) return { text: item.ask, node: <div className="tree-line tree-ask"><Markdown className="tree-clamp" text={item.ask} inline /></div> };
+  if (item.status === 'waiting_on_me' && item.ask) return { text: item.ask, node: <div className="tree-line tree-ask"><PreviewText text={item.ask} /></div> };
   if (item.status === 'replaced' && row.replacedBy) {
     return { text: null, node: <div className="tree-line" style={{ color: neutral(66) }}><i className="ph ph-arrow-bend-down-right tree-line-small" /><span>Replaced by</span>
-      <button type="button" className="tree-jump" title={row.replacedBy.question} onClick={event => { event.stopPropagation(); jump(); }}>{shortLabel(row.replacedBy)}</button>
+      <button type="button" className="tree-jump" title={row.replacedBy.question} aria-label={row.replacedBy.question} onClick={event => { event.stopPropagation(); jump(); }}>{row.replacedBy.question}</button>
       <StatusBadge status={visual(row.replacedBy.status)} variant="text" /></div> };
   }
   if ((closed(item.status) || item.status === 'open' || item.status === 'in_progress') && item.outcome) {
     return { text: item.outcome, node: <div className="tree-line tree-outcome"><i className="ph ph-arrow-elbow-down-right" style={{ color: `var(--st-${visual(item.status)})` }} />
-      <Markdown className="tree-clamp" text={item.outcome} inline /></div> };
+      <PreviewText text={item.outcome} /></div> };
   }
   if (item.status === 'in_progress' && item.note) {
-    return { text: item.note, node: <div className="tree-line tree-line-tight" style={{ color: 'var(--st-progress)' }}><i className="ph ph-robot" /><Markdown className="tree-clamp" text={item.note} inline /></div> };
+    return { text: item.note, node: <div className="tree-line tree-line-tight" style={{ color: 'var(--st-progress)' }}><i className="ph ph-robot" /><PreviewText text={item.note} /></div> };
   }
   return null;
 }
@@ -64,22 +67,30 @@ function delivery(row: Row, fix: ReactNode): ReactNode {
 /** Clamp the body only when folding hides at least three lines. */
 function PreviewBlock({ value, open, onToggle }: { value: Preview | null; open: boolean; onToggle: () => void }) {
   const box = useRef<HTMLDivElement>(null);
-  const [long, setLong] = useState(false);
+  const [clamp, setClamp] = useState({ lines: 0, height: 0 });
+  const long = clamp.lines >= CLAMP_LINES + MIN_HIDDEN_LINES;
   const text = value?.text;
+  const measure = useCallback(() => {
+    const excerpt = text == null ? null : box.current?.querySelector<HTMLElement>('.tree-clamp');
+    const next = excerpt ? measurePreviewLines(excerpt, CLAMP_LINES) : { lines: 0, height: 0 };
+    setClamp(previous => previous.lines === next.lines && previous.height === next.height ? previous : next);
+  }, [text]);
+  useLayoutEffect(() => { measure(); }, [measure]);
   useLayoutEffect(() => {
     const excerpt = text == null ? null : box.current?.querySelector<HTMLElement>('.tree-clamp');
-    const measure = () => {
-      const line = excerpt ? parseFloat(getComputedStyle(excerpt).lineHeight) || PREVIEW_LINE : PREVIEW_LINE;
-      setLong(!!excerpt && excerpt.scrollHeight >= line * (CLAMP_LINES + MIN_HIDDEN_LINES) - 1);
-    };
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
-    if (excerpt) observer.observe(excerpt);
-    return () => observer.disconnect();
-  }, [text]);
-  return <div ref={box} className="tree-preview" data-open={open || undefined} data-clamped={long && !open || undefined} style={{ '--tree-clamp': CLAMP_LINES } as CSSProperties}
-    onFocus={event => { if (long && !open && event.target.closest('.tree-clamp')) onToggle(); }}>
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    if (excerpt) observer?.observe(excerpt);
+    const content = excerpt?.querySelector<HTMLElement>('.tree-clamp-content');
+    if (content) observer?.observe(content);
+    const fonts = document.fonts;
+    let live = true;
+    void fonts?.ready.then(() => { if (live) measure(); });
+    fonts?.addEventListener('loadingdone', measure);
+    return () => { live = false; observer?.disconnect(); fonts?.removeEventListener('loadingdone', measure); };
+  }, [text, measure]);
+  return <div ref={box} className="tree-preview" data-open={open || undefined} data-clamped={long && !open || undefined}
+    style={{ '--tree-clamp': CLAMP_LINES, '--tree-clamp-height': `${clamp.height}px` } as CSSProperties}
+    onFocus={event => { if (long && !open && event.target.closest('.tree-clamp') && event.target.matches(':focus-visible')) onToggle(); }}>
     {value?.node}
     {long && <button type="button" className="tree-more" aria-expanded={open}
       onClick={event => { event.stopPropagation(); onToggle(); }}>{open ? 'Show less' : 'Show more'}</button>}
