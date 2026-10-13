@@ -1,10 +1,11 @@
 import { itemRemoved } from '../../selectors/removed';
 import { useEffect, useSyncExternalStore } from 'react';
-import type { MutationReceipt, OwnerDraft, OwnerMutationRequest, PreferencesPatchEntry, SessionRef } from '../../generated/core';
+import type { MutationReceipt, OwnerDraft, OwnerMutationRequest, PreferencesPatchEntry, PreferencesSnapshot, SessionRef } from '../../generated/core';
 import type { Item, InputKind, SavedReceipt, Session } from '../../generated/domain/models';
 import { immutable, type Immutable } from '../../data/session-store';
 import { CoreFailure, ServiceFailure, type RendererService } from '../../data/service';
 import { OwnFailure } from '../../data/plain';
+import type { PreferencesWriteCoordination } from '../navigation/store';
 
 /** A reply to a whole topic (target item_id null). */
 export const TOPIC_REPLY: InputKind = 'topic_reply';
@@ -112,7 +113,8 @@ export class OwnerDraftStore {
   private readonly flights = new Map<string, Promise<boolean>>();
   private loadFlight: Promise<void> | null = null;
   /** `service` is public so owner controls reach the session's write barrier (sessionActionsFor). */
-  constructor(readonly service: RendererService, private readonly operationId: () => string = () => crypto.randomUUID()) {}
+  constructor(readonly service: RendererService, private readonly operationId: () => string = () => crypto.randomUUID(),
+    private readonly preferenceWrites?: PreferencesWriteCoordination) {}
   readonly getSnapshot = () => this.state;
   readonly subscribe = (receive: () => void) => { this.listeners.add(receive); return () => { this.listeners.delete(receive); }; };
   private publish(update: Partial<DraftState>): void {
@@ -297,21 +299,39 @@ export class OwnerDraftStore {
   private async writePreferences(entries: PreferencesPatchEntry[]): Promise<boolean> {
     // A definite revision_conflict means the patch was not applied (an interleaved
     // navigation patch bumped the revision). Re-read and re-issue the same draft
-    // bookkeeping entries under a fresh patch op_id, at most three attempts. Draft
+    // bookkeeping entries under a fresh patch op_id. Foreign conflicts have the
+    // existing three-attempt limit; our own seen commits never consume it. Draft
     // entries are keyed by draft op_id, so replay is idempotent. input_submit is
     // never involved and commit_uncertain is never retried.
-    for (let attempt = 1; ; attempt++) {
-      try {
-        const preferences = await this.service.query({ session: null, request: { command: 'preferences_get', params: {} } });
-        this.pendingPreference = { session: null, command: { api_version: 1, command: 'preferences_patch', op_id: this.operationId(), params: { expected_preferences_revision: preferences.revision, entries: structuredClone(entries) } } };
-        this.pendingPreferenceEntries = entries;
-        if (await this.commitPreferences()) return true;
-        const reason = this.state.error;
-        if (attempt >= 3 || this.pendingPreference || !(reason instanceof CoreFailure) || reason.error.code !== 'revision_conflict') return false;
-      } catch (error: unknown) { this.publish({ error: failure(error) }); return false; }
-    }
+    const preparation = this.preferenceWrites?.prepare();
+    try {
+      await preparation?.ready;
+      let preferences: PreferencesSnapshot | null = null;
+      for (let attempt = 1; ;) {
+        let revision: number | null = null;
+        try {
+          preferences ??= await this.service.query({ session: null, request: { command: 'preferences_get', params: {} } });
+          revision = preferences.revision;
+          preferences = null;
+          this.pendingPreference = { session: null, command: { api_version: 1, command: 'preferences_patch', op_id: this.operationId(), params: { expected_preferences_revision: revision, entries: structuredClone(entries) } } };
+          this.pendingPreferenceEntries = entries;
+          return await this.commitPreferences(true);
+        } catch (error: unknown) {
+          const reason = failure(error);
+          if (revision !== null && !this.pendingPreference && reason instanceof CoreFailure && reason.error.code === 'revision_conflict') {
+            if (this.preferenceWrites) {
+              preferences = await this.service.query({ session: null, request: { command: 'preferences_get', params: {} } });
+              if (this.preferenceWrites.seenOnlySince(revision, preferences)) continue;
+            }
+            if (attempt++ < 3) continue;
+          }
+          this.publish({ error: reason }); return false;
+        }
+      }
+    } catch (error: unknown) { this.publish({ error: failure(error) }); return false; }
+    finally { preparation?.release(); }
   }
-  private async commitPreferences(): Promise<boolean> {
+  private async commitPreferences(retryConflict = false): Promise<boolean> {
     if (!this.pendingPreference) return true;
     try {
       const receipt = await this.service.executeOwner(this.pendingPreference);
@@ -330,6 +350,9 @@ export class OwnerDraftStore {
     } catch (error: unknown) {
       const reason = failure(error), uncertain = unknownCommit(reason);
       if (!uncertain) { this.pendingPreference = null; this.pendingPreferenceEntries = []; }
+      // Automatic preference retries are bookkeeping, never a failed Send to
+      // show the owner. The caller publishes a rejection only at its retry bound.
+      if (retryConflict && reason instanceof CoreFailure && reason.error.code === 'revision_conflict') throw reason;
       this.publish({ preferenceUncertain: uncertain, error: reason }); return false;
     }
   }

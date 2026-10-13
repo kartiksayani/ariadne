@@ -694,7 +694,7 @@ export function DesktopApp({ service }: { service: RendererService }) {
         void waiting.refresh();
       } });
     const next: Application = { service, navigation, waiting, removals,
-      drafts: new OwnerDraftStore(service), actions, discovery: new DiscoveryController(service) };
+      drafts: new OwnerDraftStore(service, undefined, navigation.preferenceWrites), actions, discovery: new DiscoveryController(service) };
     const detach = removals.attach();
     const detachLinkFailures = listenForLinkFailures(service);
     setApplication(next);

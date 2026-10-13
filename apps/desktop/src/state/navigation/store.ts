@@ -19,6 +19,11 @@ type PendingMutation = { request: OwnerMutationRequest; confirmed: (receipt: Mut
   prepare?: () => Promise<PendingMutation> };
 type NavigationPatch = Extract<PreferencesPatchEntry, { kind: 'set_global' | 'set_session_view' | 'set_later' }>;
 type ReplayEntries = (preferences: PreferencesSnapshot) => NavigationPatch[] | null;
+/** Draft bookkeeping shares seen admission and provenance with navigation. */
+export interface PreferencesWriteCoordination {
+  prepare(): { ready: Promise<void>; release(): void };
+  seenOnlySince(revision: number, preferences: PreferencesSnapshot): boolean;
+}
 export interface NavigationState {
   readonly preferences: Immutable<PreferencesSnapshot> | null;
   readonly projects: Immutable<ProjectListResult> | null;
@@ -406,6 +411,24 @@ export class NavigationStore {
       void flight.then(finish, finish);
     });
   }
+  readonly preferenceWrites: PreferencesWriteCoordination = {
+    prepare: () => {
+      // Reserve before yielding so a due seen batch cannot start during a draft
+      // preferences read or any of its definite-conflict retries.
+      ++this.ownerPreparing;
+      let released = false;
+      return { ready: this.waitForSeen(), release: () => {
+        if (released) return;
+        released = true;
+        --this.ownerPreparing;
+        if (this.seenDue) void this.flushSeen();
+      } };
+    },
+    seenOnlySince: (revision, preferences) => {
+      this.observeSeenCommit(preferences);
+      return this.onlySeenSince(revision, preferences.revision);
+    },
+  };
   private async capturePreferences(): Promise<PreferencesSnapshot> {
     const preferences = await this.service.query({ session: null, request: { command: 'preferences_get', params: {} } });
     if (this.stopped) return preferences;
