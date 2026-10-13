@@ -173,10 +173,13 @@ records independently as optional `ItemReadProjection.changes`, selected with
 six valid before-values containing large link lists can exceed its byte budget.
 Standalone `ItemChangesProjection={item_id,changes:Page<ItemChangeRecord>}` reads
 continue the same cursors without repeating the current item, preserving access
-when current and previous values cannot fit together. Explicit edit/status reasons
-are trimmed, one line and at most 280 characters. Status falls back to why and
-Replace uses why; these derived reasons normalize whitespace and take at most
-280 characters, preserving the full stored why. Ask supplies no reason.
+when current and previous values cannot fit together. Edit reasons are trimmed,
+one line and at most 280 characters. Status reasons retain their existing
+nonblank, multiline contract (at most 4,096 UTF-8 bytes on the wire) and remain
+complete in status history; only the change record's copy normalizes whitespace
+and takes at most 280 characters. Status falls back to why and Replace uses why,
+with the same normalization and truncation while preserving the full stored why.
+Ask supplies no reason.
 Edit accepts optional `wording_only`, default false: only question, short and
 note may actually change. A change to type, ack_to or any link list is refused
 with a plain message naming the field. The record includes `wording_only: true`

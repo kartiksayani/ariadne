@@ -277,6 +277,9 @@ fn apply_schema_exposes_topic_briefs_reasons_and_every_link_kind() {
         operation("item.edit")["properties"]["reason"]["maxLength"],
         280
     );
+    assert!(operation("item.status")["properties"]["reason"]
+        .get("maxLength")
+        .is_none());
     assert_eq!(
         operation("item.edit")["properties"]["wording_only"]["type"],
         "boolean"

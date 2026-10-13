@@ -302,8 +302,7 @@ impl ApplyRequest {
                             "item.status ack_to is allowed only with open or in_progress",
                         ));
                     }
-                    change_reason(reason.as_deref())?;
-                    for value in [outcome, why].into_iter().flatten() {
+                    for value in [outcome, why, reason].into_iter().flatten() {
                         text(value, 4096, true)?;
                     }
                 }

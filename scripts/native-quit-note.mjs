@@ -43,16 +43,36 @@ function run(args) {
   if (permission !== 0) throw new Error('System Events automation permission is unavailable (' + permission + '); no prompt was requested');
   if (args[0] === 'preflight') return JSON.stringify({ serviceRunning: true, accessibility: true, automation: true });
   const pid = Number(args[1]);
-  const processes = Application('System Events').applicationProcesses.whose({ unixId: pid })();
-  if (processes.length !== 1 || processes[0].unixId() !== pid) throw new Error('Owned native process is unavailable');
+  // Never evaluate an element collection: JXA materializes name-based handles,
+  // which can resolve to another Ariadne process. Keep the unixId predicate in
+  // every descendant specifier and read only scalar attributes.
+  const processes = Application('System Events').applicationProcesses.whose({ unixId: pid });
+  if (processes.length !== 1) throw new Error('Owned native process is unavailable');
+  const process = processes.at(0);
+  if (process.unixId() !== pid) throw new Error('Owned native process is unavailable');
+  function descendants(parent, elements) {
+    const children = parent.uiElements;
+    for (let index = 0; index < children.length; index++) {
+      const child = children.at(index);
+      elements.push(child);
+      descendants(child, elements);
+    }
+    return elements;
+  }
   const dialogs = [], buttons = [];
-  for (const window of processes[0].windows()) {
+  const windows = process.windows;
+  for (let index = 0; index < windows.length; index++) {
+    const window = windows.at(index);
     if (window.subrole() !== 'AXDialog') continue;
-    const contents = window.entireContents();
+    const contents = descendants(window, []);
     const targets = contents.filter(element => element.role() === 'AXButton');
     dialogs.push({
       texts: contents.filter(element => element.role() === 'AXStaticText').map(element => element.value()),
-      buttons: targets.map(button => ({ name: button.name(), enabled: button.enabled(), actions: button.actions().map(action => action.name()) })),
+      buttons: targets.map(button => {
+        const actions = [];
+        for (let index = 0; index < button.actions.length; index++) actions.push(button.actions.at(index).name());
+        return { name: button.name(), enabled: button.enabled(), actions };
+      }),
     });
     buttons.push(targets);
   }

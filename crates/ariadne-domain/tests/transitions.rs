@@ -2169,6 +2169,87 @@ fn change_history_keeps_newest_twenty_and_validates_order_bounds_shape() {
 }
 
 #[test]
+fn empty_relation_echoes_do_not_record_changes_or_violate_wording_only() {
+    for field in ["related", "affects", "depends_on"] {
+        for stored in [None, Some(vec![])] {
+            for wording_only in [false, true] {
+                let mut s = history_session();
+                let old = s.items.0.get_mut(&reference("1")).unwrap();
+                *match field {
+                    "related" => &mut old.related,
+                    "affects" => &mut old.affects,
+                    _ => &mut old.depends_on,
+                } = stored.clone();
+                let mut change = short_edit(None);
+                if let ItemChange::Edit {
+                    related,
+                    affects,
+                    depends_on,
+                    wording_only: flag,
+                    ..
+                } = &mut change
+                {
+                    *flag = wording_only;
+                    *match field {
+                        "related" => related,
+                        "affects" => affects,
+                        _ => depends_on,
+                    } = Some(vec![]);
+                }
+                let echoed = apply(&mut s, &change);
+                assert_eq!(echoed.changes, None, "{field}: {stored:?}, {wording_only}");
+                if let ItemChange::Edit { note, .. } = &mut change {
+                    *note = Some(Some("Clearer prose".into()));
+                }
+                let edited = apply(&mut s, &change);
+                let records = edited.changes.as_ref().unwrap();
+                assert_eq!(records.len(), 1);
+                assert_eq!(records[0].wording_only, wording_only);
+                assert_eq!(
+                    serde_json::to_value(&records[0].before).unwrap(),
+                    json!({"note":null}),
+                    "{field}: {stored:?}, {wording_only}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn multiline_status_reasons_preserve_history_and_derive_only_the_change_synopsis() {
+    let prefix = " \tFirst\u{2003}line\r\n";
+    let reason = format!(
+        "{prefix}{}\n ",
+        "é".repeat(1000 - prefix.chars().count() - 2)
+    );
+    assert_eq!(reason.chars().count(), 1000);
+    let expected = format!("First line {}", "é".repeat(269));
+    for status in [ItemStatus::InProgress, ItemStatus::Done] {
+        let mut s = history_session();
+        let mut change = crate::status(status.clone());
+        if let ItemChange::Status {
+            reason: value, why, ..
+        } = &mut change
+        {
+            *value = Some(reason.clone());
+            *why = matches!(status, ItemStatus::Done).then(|| "Different WHY fallback".into());
+        }
+        let updated = apply(&mut s, &change);
+        assert_eq!(
+            updated.status_history.last().unwrap().reason.as_ref(),
+            Some(&reason)
+        );
+        let synopsis = updated.changes.as_ref().unwrap()[0]
+            .reason
+            .as_ref()
+            .unwrap();
+        assert_eq!(synopsis, &expected);
+        assert_eq!(synopsis.chars().count(), 280);
+        assert!(!synopsis.contains(['\n', '\r', '\t', '\u{2003}']));
+    }
+}
+
+#[test]
 fn explicit_reasons_are_bounded_and_derived_reasons_preserve_full_why() {
     for value in [
         "a\nb".to_owned(),

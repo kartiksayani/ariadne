@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { acknowledgeQuitNote, quitNoteScript, selectQuitNote } from '../../../scripts/native-quit-note.mjs';
-import { identity } from '../../../scripts/run-native-e2e.mjs';
 
 const pid = 4242;
 const message = 'Host work already sent can continue after Ariadne quits.';
@@ -13,17 +12,32 @@ const dialog = () => ({ texts: [message, informative], buttons: [{ name: 'OK', e
 
 // Run the actual JXA adapter with an observed native hierarchy fixture, retaining
 // whether a native action was requested. No App, AX permission or service calls.
-function nativeFixture({ dialogs = [dialog()], actualPid = pid, trusted = true, permission = 0, serviceRunning = true } = {}) {
+function nativeFixture({ dialogs = [dialog()], actualPid = pid, trusted = true, permission = 0, serviceRunning = true, sameNamePeer = false, processCount = 1 } = {}) {
   let pressed = 0, applicationCalls = 0, permissionChecks = 0;
+  const accesses = [];
+  const collection = (elements, path) => {
+    // Evaluated collections lose their anchored specifiers in JXA. Make the
+    // mock reject that operation even when only one process happens to exist.
+    const query = () => assert.fail(`Materialized native handles at ${path}`);
+    Object.defineProperty(query, 'length', { get: () => { accesses.push({ pid, path }); return elements.length; } });
+    query.at = index => { accesses.push({ pid, path }); assert.ok(index >= 0 && index < elements.length); return elements[index]; };
+    query.byName = name => { accesses.push({ pid, path }); return elements.find(element => element.name() === name); };
+    return query;
+  };
+  const children = (elements, path) => collection(elements, `${path}.uiElements`);
   const windows = dialogs.map(dialog => {
-    const texts = dialog.texts.map(value => ({ role: () => 'AXStaticText', value: () => value }));
+    const texts = dialog.texts.map(value => ({ role: () => 'AXStaticText', value: () => value, uiElements: children([], 'text') }));
     const buttons = dialog.buttons.map(button => {
-      const actions = () => button.actions.map(name => ({ name: () => name }));
-      actions.byName = name => ({ perform: () => { assert.equal(name, 'AXPress'); pressed++; } });
-      return { role: () => 'AXButton', name: () => button.name, enabled: () => button.enabled, actions };
+      const actions = collection(button.actions.map(name => ({ name: () => name,
+        perform: () => { assert.equal(name, 'AXPress'); pressed++; } })), 'button.actions');
+      return { role: () => 'AXButton', name: () => button.name, enabled: () => button.enabled, actions, uiElements: children([], 'button') };
     });
-    return { subrole: () => 'AXDialog', entireContents: () => [...texts, ...buttons] };
+    // A group forces the adapter to retain the PID anchor through descendants.
+    const group = { role: () => 'AXGroup', uiElements: children([...texts, ...buttons], 'group') };
+    return { subrole: () => 'AXDialog', uiElements: children([group], 'window') };
   });
+  const processes = [{ name: 'Ariadne', unixId: actualPid, windows }];
+  if (sameNamePeer) processes.unshift({ name: 'Ariadne', unixId: pid + 1, windows: [] });
   const context = {
     ObjC: { import() {}, bindFunction() {} },
     $: {
@@ -47,13 +61,17 @@ function nativeFixture({ dialogs = [dialog()], actualPid = pid, trusted = true, 
       assert.equal(name, 'System Events'); applicationCalls++;
       return { applicationProcesses: { whose: selector => {
         assert.equal(selector.unixId, pid);
-        return () => [{ unixId: () => actualPid, windows: () => windows }];
+        const matching = processes.filter(process => process.unixId === actualPid).slice(0, processCount);
+        if (processCount > 1) matching.push(matching[0]);
+        return collection(matching.map(process => ({ unixId: () => process.unixId,
+          windows: collection(process.windows, `unixId=${selector.unixId}.windows`) })), `unixId=${selector.unixId}`);
       } } };
     },
   };
   return {
     run: mode => JSON.parse(runInNewContext(`${quitNoteScript}\nrun(${JSON.stringify([mode, String(pid)])})`, context)),
     effects: () => ({ pressed, applicationCalls, permissionChecks }),
+    accesses: () => accesses,
   };
 }
 
@@ -63,6 +81,23 @@ test('owned actual dialog text and sole enabled OK produce a native AXPress rece
   assert.equal(native.effects().pressed, 0);
   assert.deepEqual(native.run('press'), { pid, message, informative, button: 'OK', action: 'AXPress', pressed: true });
   assert.equal(native.effects().pressed, 1);
+});
+
+test('PID-filtered specifiers survive every window, nested element and action access with one or two identically named apps', () => {
+  for (const sameNamePeer of [false, true]) {
+    const native = nativeFixture({ sameNamePeer });
+    assert.equal(native.run('press').pressed, true);
+    assert.equal(native.effects().pressed, 1);
+    const accesses = native.accesses();
+    assert.ok(accesses.every(access => access.pid === pid));
+    for (const path of [`unixId=${pid}`, `unixId=${pid}.windows`, 'window.uiElements', 'group.uiElements', 'button.actions'])
+      assert.ok(accesses.some(access => access.path === path), `Expected anchored traversal at ${path}`);
+  }
+  for (const processCount of [0, 2]) {
+    const native = nativeFixture({ processCount });
+    assert.throws(() => native.run('press'), /Owned native process is unavailable/);
+    assert.equal(native.effects().pressed, 0);
+  }
 });
 
 test('wrong PID, extra or duplicate note text, multiple dialogs, extra buttons and unavailable OK never press', () => {
@@ -136,21 +171,30 @@ test('acknowledgement refreshes prerequisites at owned Quit and revalidates the 
 
 test('request nonce/PID, process birth and launcher ancestry gate acknowledgement before native access', async () => {
   const root = await mkdtemp('/private/tmp/ariadne-note-witness-');
-  const owned = identity(process.pid), nonce = 'owned-native-launch';
+  const owned = { pid, exe: '/owned/Ariadne', birth: 'owned birth' }, nonce = 'owned-native-launch';
   const save = (name, value) => writeFile(join(root, name), JSON.stringify(value));
+  const acknowledge = runInNewContext(`(${acknowledgeQuitNote.toString()})`, {
+    join, readFile,
+    identity: () => owned,
+    observeOwned: async (_root, _binary, _nonce, launcherPid) => {
+      if (launcherPid !== 10) throw new Error('Process is outside the owned launcher ancestry');
+      return owned;
+    },
+    preflightQuitNote: async () => {}, native: () => assert.fail('Rejected witness must not access native UI'),
+  });
   const signal = new globalThis.AbortController().signal;
   try {
-    await save('launcher.json', { pid: process.ppid });
+    await save('launcher.json', { pid: 10 });
     await save('startup.json', { pid: owned.pid, nonce });
     for (const request of [{ pid: owned.pid + 1, nonce }, { pid: owned.pid, nonce: 'stale' }]) {
       await save('quit-request.json', request);
-      await assert.rejects(acknowledgeQuitNote(root, owned.exe, nonce, owned, signal), /request identity mismatch/);
+      await assert.rejects(acknowledge(root, owned.exe, nonce, owned, signal), /request identity mismatch/);
     }
     await save('quit-request.json', { pid: owned.pid, nonce });
-    await assert.rejects(acknowledgeQuitNote(root, owned.exe, nonce, { ...owned, birth: 'stale birth' }, signal), /changed native process identity/);
+    await assert.rejects(acknowledge(root, owned.exe, nonce, { ...owned, birth: 'stale birth' }, signal), /changed native process identity/);
     await save('launcher.json', { pid: 2 });
-    await assert.rejects(acknowledgeQuitNote(root, owned.exe, nonce, owned, signal), /outside the owned launcher ancestry/);
+    await assert.rejects(acknowledge(root, owned.exe, nonce, owned, signal), /outside the owned launcher ancestry/);
     const interrupted = new globalThis.AbortController(); interrupted.abort(new Error('Owned runner cancelled'));
-    await assert.rejects(acknowledgeQuitNote(root, owned.exe, nonce, owned, interrupted.signal), /Owned runner cancelled/);
+    await assert.rejects(acknowledge(root, owned.exe, nonce, owned, interrupted.signal), /Owned runner cancelled/);
   } finally { await rm(root, { recursive: true }); }
 });

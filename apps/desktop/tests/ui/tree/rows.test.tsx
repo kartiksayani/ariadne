@@ -4,7 +4,7 @@ import type { SessionPreferences } from '../../../src/generated/core';
 import type { Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
 import { initialExpansion, normalizeSearch, sentenceRows } from '../../../src/selectors/tree/rows';
-import { chipsOf, toggleChip, topicCounts } from '../../../src/ui/tree/model';
+import { chipsOf, toggleChip, topicCounts, treeModel } from '../../../src/ui/tree/model';
 
 function seed() { return structuredClone(demo) as Session; }
 function view(session: Session): SessionPreferences {
@@ -52,6 +52,23 @@ describe('saved topic and explicit filter folds', () => {
 });
 
 describe('canonical sentence tree projection', () => {
+  it('counts every link direction once per connected item in the tree badge', () => {
+    const session = seed(), preferences = view(session);
+    for (const item of Object.values(session.items)) if (item) {
+      delete item.related; delete item.affects; delete item.depends_on;
+    }
+    session.items['1']!.related = ['2'];
+    session.items['1']!.affects = ['3'];
+    session.items['1']!.depends_on = ['4'];
+    session.items['5']!.affects = ['1'];
+    session.items['6']!.depends_on = ['1'];
+    session.items['2']!.affects = ['1'];
+    const rows = treeModel({ session: immutable(session), view: preferences, search: '', later: new Set(),
+      collapsedTopics: new Set(), selectedId: null, revealId: null, temporaryExpanded: [], presence: null,
+      summaries: [], now: Date.parse('2026-10-07T12:00:00Z') }).rows;
+    expect(rows.find(row => row.kind === 'item' && row.item.id === '1')).toMatchObject({ relatedCount: 5 });
+    expect(rows.find(row => row.kind === 'item' && row.item.id === '2')).toMatchObject({ relatedCount: 1 });
+  });
   it('orders numeric siblings and topics without changing domain IDs or stored text', () => {
     const session = seed(), preferences = view(session);
     session.items['10'] = { ...session.items['1']!, id: '10', ordinal: 10 };

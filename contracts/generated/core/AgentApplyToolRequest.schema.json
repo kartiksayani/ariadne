@@ -724,8 +724,7 @@
               "type": [
                 "string",
                 "null"
-              ],
-              "maxLength": 280
+              ]
             },
             "status": {
               "$ref": "#/$defs/ItemStatus"

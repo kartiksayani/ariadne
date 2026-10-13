@@ -4439,6 +4439,113 @@ fn wording_only_batch_records_text_and_refuses_forbidden_changes_without_publica
 }
 
 #[test]
+fn empty_relation_echoes_create_no_record_and_allow_wording_only_prose_edits() {
+    for kind in ["related", "affects", "depends_on"] {
+        for stored in [None, Some(vec![])] {
+            for wording_only in [false, true] {
+                let mut source = seed();
+                let root = source.items.0.get_mut(&item("1")).unwrap();
+                *match kind {
+                    "related" => &mut root.related,
+                    "affects" => &mut root.affects,
+                    _ => &mut root.depends_on,
+                } = stored.clone();
+                let setup = Setup::new(&source);
+                let mut patch = serde_json::json!({});
+                patch[kind] = serde_json::json!([]);
+                let mut r = guarded(995, "1", 1);
+                r.operations = vec![serde_json::from_value(serde_json::json!({
+                    "op":"item.edit", "item":{"id":"1"}, "patch":patch,
+                    "wording_only":wording_only
+                }))
+                .unwrap()];
+                setup.execute(&r).unwrap();
+                assert_eq!(
+                    setup.saved().items.0[&item("1")].changes,
+                    None,
+                    "{kind}: {stored:?}, {wording_only}"
+                );
+                patch["note"] = serde_json::json!("Clearer prose");
+                let mut r = guarded(996, "1", 2);
+                r.operations = vec![serde_json::from_value(serde_json::json!({
+                    "op":"item.edit", "item":{"id":"1"}, "patch":patch,
+                    "wording_only":wording_only
+                }))
+                .unwrap()];
+                setup.execute(&r).unwrap();
+                let saved = setup.saved();
+                let records = saved.items.0[&item("1")].changes.as_ref().unwrap();
+                assert_eq!(records.len(), 1);
+                assert_eq!(records[0].wording_only, wording_only);
+                assert_eq!(
+                    serde_json::to_value(&records[0].before).unwrap(),
+                    serde_json::json!({"note": source.items.0[&item("1")].note})
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn status_reason_wire_validation_preserves_the_original_utf8_byte_bound() {
+    for (reason, accepted) in [
+        ("a".repeat(4096), true),
+        ("é".repeat(2048), true),
+        (format!("{}\nX", "é".repeat(2047)), true),
+        ("a".repeat(4097), false),
+        (format!("{}X", "é".repeat(2048)), false),
+        (" \n\t ".into(), false),
+        ("nul\0".into(), false),
+    ] {
+        let mut request = guarded(998, "1", 1);
+        request.operations = vec![Operation::ItemStatus {
+            item: existing("1"),
+            status: ItemStatus::InProgress,
+            ack_to: None,
+            outcome: None,
+            why: None,
+            reason: Some(reason.clone()),
+        }];
+        assert_eq!(
+            request.validate_wire().is_ok(),
+            accepted,
+            "{} bytes",
+            reason.len()
+        );
+    }
+}
+
+#[test]
+fn multiline_status_reason_is_saved_exactly_with_a_short_change_synopsis() {
+    let setup = Setup::new(&seed());
+    let prefix = " \tFirst\u{2003}line\r\n";
+    let reason = format!(
+        "{prefix}{}\n ",
+        "é".repeat(1000 - prefix.chars().count() - 2)
+    );
+    let mut r = guarded(997, "1", 1);
+    r.operations = vec![Operation::ItemStatus {
+        item: existing("1"),
+        status: ItemStatus::InProgress,
+        ack_to: None,
+        outcome: None,
+        why: None,
+        reason: Some(reason.clone()),
+    }];
+    setup.execute(&r).unwrap();
+    let saved = setup.saved();
+    let changed = &saved.items.0[&item("1")];
+    assert_eq!(
+        changed.status_history.last().unwrap().reason.as_ref(),
+        Some(&reason)
+    );
+    assert_eq!(
+        changed.changes.as_ref().unwrap()[0].reason.as_deref(),
+        Some(format!("First line {}", "é".repeat(269)).as_str())
+    );
+}
+
+#[test]
 fn wording_only_echoes_keep_dangling_relations_and_never_hide_changes_through_pruning_or_repair() {
     for kind in ["related", "affects", "depends_on"] {
         let mut source = seed();

@@ -625,10 +625,12 @@ exposes `item_changes`. Both continue the same scoped cursors. Agent edits, asks
 status changes and replacements save only changed fields in each record's
 `before` (null for previously empty fields). Every change in the batch that created the item
 adds no record, including deferred CLI connections and explicit edits; records
-start with the first later batch. `item.edit.reason` and
-`item.status.reason` are trimmed, one line, at most 280 characters; status falls
-back to why and replacement uses why. Derived reasons normalize whitespace and
-keep at most 280 characters while the full why remains stored. Creation, owner
+start with the first later batch. `item.edit.reason` is trimmed, one line, at most
+280 characters. `item.status.reason` accepts nonblank text, including line breaks,
+up to 4,096 UTF-8 bytes and retains the full text in status history. Only its change
+record copy normalizes whitespace and keeps at most 280 characters. Status falls
+back to why and replacement uses why, with the same normalization and truncation
+for the record while the full why remains stored. Creation, owner
 actions, parent bumps, bin actions and continuation copies add no records.
 
 `item.edit.wording_only` is an optional boolean, default false. It means the

@@ -69,8 +69,10 @@ validates it exactly as before):
   optional name, short and brief. null clears short or brief; omission keeps it.
   Briefs are trimmed plain text, allow line breaks and have at most 1,200 characters.
   Guard existing topic edits with expected_topic_revisions. Archived/Bin topics refuse edits.
-  Change reason: item.edit and item.status accept optional one-line reason, at most
-  280 characters. Item reads include recent before-values and their cause message.
+  Change reason: item.edit accepts optional one-line reason, at most 280 characters.
+  item.status accepts multiline reason up to 4,096 UTF-8 bytes; its change record
+  keeps a normalized one-line copy up to 280. Item reads include recent before-values
+  and their cause message.
   Read projection changes is a page; item_pages view item_changes accepts item_id,
   cursor and limit to continue it independently of updated_messages/status_history.
   item changes reads the same records without repeating the item's current snapshot.

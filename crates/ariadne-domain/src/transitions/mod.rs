@@ -143,21 +143,21 @@ pub fn transition_item(
                     ),
                     (
                         "related",
-                        related
-                            .as_ref()
-                            .is_some_and(|value| Some(value) != old.related.as_ref()),
+                        related.as_ref().is_some_and(|value| {
+                            value.as_slice() != old.related.as_deref().unwrap_or_default()
+                        }),
                     ),
                     (
                         "affects",
-                        affects
-                            .as_ref()
-                            .is_some_and(|value| Some(value) != old.affects.as_ref()),
+                        affects.as_ref().is_some_and(|value| {
+                            value.as_slice() != old.affects.as_deref().unwrap_or_default()
+                        }),
                     ),
                     (
                         "depends_on",
-                        depends_on
-                            .as_ref()
-                            .is_some_and(|value| Some(value) != old.depends_on.as_ref()),
+                        depends_on.as_ref().is_some_and(|value| {
+                            value.as_slice() != old.depends_on.as_deref().unwrap_or_default()
+                        }),
                     ),
                 ] {
                     if changed {
@@ -260,8 +260,7 @@ pub fn transition_item(
         } => {
             reason = status_reason
                 .as_deref()
-                .map(|reason| validation::normalize_change_reason(reason, "status.reason"))
-                .transpose()?
+                .map(derived_reason)
                 .or_else(|| why.as_deref().map(derived_reason));
             if matches!(status, ItemStatus::WaitingOnMe | ItemStatus::Replaced)
                 || old.status == ItemStatus::Replaced
@@ -458,10 +457,11 @@ fn increment(value: PositiveSafeInteger) -> Result<PositiveSafeInteger, Transiti
         .ok_or(TransitionError::CounterOverflow)
 }
 
-fn derived_reason(why: &str) -> String {
-    // Preserve the existing full multiline `why`; its history reason is a short
-    // synopsis, so deriving one does not narrow that established prose contract.
-    why.split_whitespace()
+fn derived_reason(prose: &str) -> String {
+    // Preserve full multiline status reasons and WHY; only the change record
+    // gets a short synopsis of that established prose contract.
+    prose
+        .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
         .chars()
@@ -505,6 +505,15 @@ fn record_change(
             }
         };
     }
+    macro_rules! reference_list {
+        ($field:ident) => {
+            if item.$field.as_deref().unwrap_or_default()
+                != old.$field.as_deref().unwrap_or_default()
+            {
+                before.$field = Some(old.$field.clone().filter(|value| !value.is_empty()));
+            }
+        };
+    }
     required!(question);
     required!(item_type);
     required!(status);
@@ -513,9 +522,9 @@ fn record_change(
     optional!(ask);
     optional!(outcome);
     optional!(why);
-    optional!(related);
-    optional!(affects);
-    optional!(depends_on);
+    reference_list!(related);
+    reference_list!(affects);
+    reference_list!(depends_on);
     list!(options);
     list!(links);
     if before != ItemChangeBefore::default() {

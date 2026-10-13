@@ -127,7 +127,6 @@ pub enum Operation {
         ack_to: Option<AckTarget>,
         outcome: Option<String>,
         why: Option<String>,
-        #[schemars(length(max = 280))]
         reason: Option<String>,
     },
     #[serde(rename = "item.replace")]

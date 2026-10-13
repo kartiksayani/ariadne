@@ -101,15 +101,78 @@ test('failure evidence is best effort and cannot replace the original failure, i
   assert.deepEqual(blocks.results[1].error, { message: 'Plain failure', stack: null });
 }));
 
-test('fatal shutdown failures propagate unchanged and never publish a completed phase, even after acceptance failures', async () => fixture(async evidence => {
+test('the final failed block recovers its UI before shutdown even when dependent blocks were skipped', async () => fixture(async evidence => {
+  const order = [];
+  const blocks = acceptanceBlocks({ evidence, reset: async () => { order.push('reset'); }, capture: async () => {} });
+  await blocks.run('remove', async () => { order.push('remove'); throw new Error('Removal modal assertion failed'); });
+  await blocks.run('dependent', () => assert.fail('Skipped action must not run'), ['remove']);
+  await assert.rejects(blocks.finish(async () => {
+    order.push('shutdown');
+    await assert.rejects(stat(join(evidence, 'block-results.json')), { code: 'ENOENT' });
+  }), /remove: failed: Removal modal assertion failed/);
+  assert.deepEqual(order, ['remove', 'reset', 'shutdown']);
+  assert.deepEqual(await savedResults(evidence), blocks.results);
+}));
+
+test('shutdown failure publishes fatal results and aggregates all acceptance and shutdown errors', async () => fixture(async evidence => {
   const fatal = new Error('Native Quit failed');
-  const blocks = acceptanceBlocks({ evidence, reset: async () => {}, capture: async () => {} });
-  await blocks.run('tree', async () => { throw new Error('Tree failed'); });
-  await assert.rejects(blocks.finish(async () => { throw fatal; }), error => error === fatal);
-  await assert.rejects(stat(join(evidence, 'block-results.json')), { code: 'ENOENT' });
+  const tree = new Error('Tree failed\nTree details'), history = new Error('History failed'), order = [];
+  const blocks = acceptanceBlocks({ evidence, reset: async () => { order.push('reset'); }, capture: async () => {} });
+  await blocks.run('tree', async () => { throw tree; });
+  await blocks.run('history', async () => { throw history; });
+  await assert.rejects(blocks.finish(async () => { order.push('shutdown'); throw fatal; }), error => {
+    assert.ok(error instanceof AggregateError);
+    assert.equal(error.message, 'Native acceptance blocks failed:\ntree: failed: Tree failed\nhistory: failed: History failed\nshutdown: fatal: Native Quit failed');
+    assert.deepEqual(error.errors.map(failure => failure.message), [tree.message, history.message, fatal.message]);
+    assert.equal(error.errors[0].stack, tree.stack); assert.equal(error.errors[1].stack, history.stack);
+    assert.equal(error.errors[2], fatal);
+    return true;
+  });
+  assert.deepEqual(order, ['reset', 'reset', 'shutdown']);
+  const results = await savedResults(evidence);
+  assert.deepEqual(results, blocks.results);
+  assert.deepEqual(results.map(result => result.status), ['failed', 'failed', 'fatal']);
+  assert.equal(results[2].error.stack, fatal.stack);
+  const execution = failedCommand();
+  await assert.rejects(completedBlockResults(evidence, execution), error => error === execution);
+  await assert.rejects(completedBlockResults(evidence, null), /shutdown: fatal: Native Quit failed/);
+}));
+
+test('failed pending reset still attempts shutdown and publishes both fatal failures with the original block error', async () => fixture(async evidence => {
+  const order = [], resetError = new Error('Modal recovery failed'), shutdownError = new Error('Shutdown proof failed');
+  const blocks = acceptanceBlocks({ evidence,
+    reset: async () => { order.push('reset'); throw resetError; }, capture: async () => {} });
+  await blocks.run('remove', async () => { throw new Error('Remove failed'); });
+  await assert.rejects(blocks.finish(async () => { order.push('shutdown'); throw shutdownError; }), error => {
+    assert.ok(error instanceof AggregateError);
+    assert.deepEqual(error.errors.map(failure => failure.message), ['Remove failed', resetError.message, shutdownError.message]);
+    assert.equal(error.errors[1], resetError); assert.equal(error.errors[2], shutdownError);
+    assert.match(error.message, /acceptance-ui-reset: fatal: Modal recovery failed\nshutdown: fatal: Shutdown proof failed/);
+    return true;
+  });
+  assert.deepEqual(order, ['reset', 'shutdown']);
+  assert.deepEqual((await savedResults(evidence)).map(result => result.status), ['failed', 'fatal', 'fatal']);
   const execution = failedCommand();
   await assert.rejects(completedBlockResults(evidence, execution), error => error === execution);
 }));
+
+test('shutdown-only and recovery-only fatal results remain fatal even with passing blocks or successful shutdown', async () => {
+  for (const resetFails of [false, true]) await fixture(async evidence => {
+    let shutdownCalled = false;
+    const blocks = acceptanceBlocks({ evidence, reset: async () => { throw new Error('Reset failed'); }, capture: async () => {} });
+    await blocks.run('tree', async () => { if (resetFails) throw new Error('Tree failed'); });
+    await assert.rejects(blocks.finish(async () => {
+      shutdownCalled = true;
+      if (!resetFails) throw new Error('Shutdown failed');
+    }), /fatal: (Reset|Shutdown) failed/);
+    assert.equal(shutdownCalled, true);
+    const results = await savedResults(evidence);
+    assert.equal(results.at(-1).name, resetFails ? 'acceptance-ui-reset' : 'shutdown');
+    assert.equal(results.at(-1).status, 'fatal');
+    const execution = failedCommand();
+    await assert.rejects(completedBlockResults(evidence, execution), error => error === execution);
+  });
+});
 
 test('missing dependency declarations stay fatal rather than silently passing or skipping', async () => fixture(async evidence => {
   const blocks = acceptanceBlocks({ evidence, reset: async () => {}, capture: async () => {} });

@@ -157,6 +157,9 @@ fixed item projection's byte budget. A standalone `item_changes` read continues
 the same history without repeating the current item, so large current and
 previous values remain independently readable.
 
-Explicit reasons obey the new one-line, 280-character rule. Reasons derived from
-existing `why` prose normalize whitespace and keep at most 280 characters while
+`item.edit.reason` obeys the new one-line, 280-character rule. `item.status.reason`
+keeps its existing contract: nonblank text, including line breaks, up to 4,096
+UTF-8 bytes on the wire. Its full text remains in status history. Only the change
+record's copy normalizes whitespace and keeps at most 280 characters. Reasons
+derived from existing `why` prose receive the same normalization and truncation,
 preserving the full `why`, whose existing contract permits multiline text.
