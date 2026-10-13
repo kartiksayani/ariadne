@@ -51,7 +51,7 @@ export function closeImpact(session: Immutable<Session>): CloseImpact {
 }
 /** "1 question is still open, 2 of your messages haven’t reached codex and 1 is being delivered — closing cancels those messages." */
 export function closeWarning({ questions, unsent, delivering }: CloseImpact, agent: string, action: 'closing' | 'archiving' = 'closing'): string | null {
-  const waiting = action === 'archiving' && questions ? `${questions} question${questions === 1 ? ' is' : 's are'} waiting for your answer; ${questions === 1 ? 'it leaves' : 'they leave'} Waiting until you restore the session.` : '';
+  const waiting = action === 'archiving' && questions ? `${questions} question${questions === 1 ? ' is' : 's are'} still open. Restore and reopen the session before answering.` : '';
   const open = action === 'archiving' ? '' : questions ? `${questions} question${questions === 1 ? ' is' : 's are'} still open` : '';
   const sent = unsent ? `${unsent} of your messages ${unsent === 1 ? 'hasn’t' : 'haven’t'} reached ${agent}` : '';
   const being = !delivering ? '' : `${delivering}${sent ? '' : ' of your messages'} ${delivering === 1 ? 'is' : 'are'} being delivered${sent ? '' : ` to ${agent}`}`;

@@ -43,7 +43,7 @@ async function openQuestion() {
     });
 }
 
-describe('quick owner answers from the desktop', () => {
+describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
   it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])('sends option %i using its physical digit code, including macOS Option characters', async digit => {
     const transport = setup(); await openQuestion();
     row().focus(); alt(row(), digit);

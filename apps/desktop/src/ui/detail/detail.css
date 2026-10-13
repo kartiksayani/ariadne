@@ -107,6 +107,13 @@
   grid-row: 1;
 }
 
+.detail-badge-session-closed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .detail-meta {
   display: none;
   grid-column: 1 / -1;

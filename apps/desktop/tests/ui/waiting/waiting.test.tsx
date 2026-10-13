@@ -7,7 +7,8 @@ import type { Attempt, Input, ProjectSummary, QueryCursor, Session, SessionSumma
 import type { CoreError, QueryEnvelope } from '../../../src/generated/core';
 import { createDesktopService, immutable, OpenSessions, ServiceFailure, type DesktopTransport, type HintPayloads } from '../../../src/data';
 import { deliveryEvidence } from '../../../src/selectors/waiting/delivery';
-import { sentRows, waitingRows } from '../../../src/selectors/waiting/rows';
+import { closedWaitingRows, sentRows, waitingRows } from '../../../src/selectors/waiting/rows';
+import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { WaitingColumn } from '../../../src/ui/waiting/WaitingColumn';
@@ -92,6 +93,36 @@ const sentRow = (text: string) => screen.getAllByRole('button').find(element => 
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); sessions.splice(0).forEach(opened => opened.closeAll()); vi.useRealTimers(); });
 
 describe('current Waiting and immutable Sent selection', () => {
+  it.each(['closed', 'archived'] as const)('excludes %s sessions from waiting without changing their questions', state => {
+    const seed = fixture();
+    seed.session.state = 'closed';
+    if (state === 'archived') seed.session.archived_at = seed.session.updated_at;
+    const before = structuredClone(seed.session);
+    expect(waitingRows([seed])).toEqual([]);
+    expect(closedWaitingRows([seed]).map(row => row.item.id)).toEqual(state === 'closed' ? ['2'] : []);
+    expect(seed.session).toEqual(before);
+  });
+  it('reveals muted closed questions below Waiting with disabled answers and the saved draft', async () => {
+    const { store, transport, drafts: loadDrafts } = setup(), seed = withOptions();
+    seed.state = 'closed';
+    transport.capture(seed); await store.start();
+    const drafts = loadDrafts(); await drafts.load();
+    const entry = drafts.begin(seed, '2', 'answer')!;
+    drafts.edit(entry, { text: 'Keep this draft', selected_option_id: 'yes' });
+    render(<WaitingColumn store={store} drafts={drafts} revealItem={vi.fn()} openSession={vi.fn()} />);
+    expect(document.querySelector('[data-waiting-item="2"]')).toBeNull();
+    expect(screen.getByText(/1 question from closed sessions is hidden/)).toBeTruthy();
+    expect(store.getSnapshot().waiting).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Show' }));
+    const question = document.querySelector<HTMLElement>('[data-closed-question="2"]')!;
+    expect(question.classList.contains('waiting-card-closed')).toBe(true);
+    expect(within(question).getByText('Session closed').title).toBe(sessionClosedReason);
+    const text = within(question).getByRole('textbox') as HTMLTextAreaElement;
+    expect(text.value).toBe('Keep this draft'); expect(text.disabled).toBe(true);
+    expect(within(question).getByRole('button', { name: /Send “Keep the design”/ }).hasAttribute('disabled')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
+    expect(drafts.find(route, '2', 'answer')?.draft.text).toBe('Keep this draft');
+  });
   it.each(['bring', 'reopen'] as const)('a handled %s requests an ask without answering it', kind => {
     const seed = fixture(), old = seed.session.inputs[inputId('71')]!;
     old.kind = kind; old.payload.intent = kind;

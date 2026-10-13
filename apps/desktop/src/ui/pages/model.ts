@@ -12,6 +12,7 @@ import type { SupervisorHealth } from '../../data/service';
 import { dispatchStatus, type DispatchStatus } from '../../components/bindings/dispatch';
 import { unsentOf } from '../remove/model';
 import { displayStatus } from '../../selectors/waiting/replied';
+import { sessionEnded, waitingOnOwner } from '../../selectors/sessionClosed';
 
 export type VisualStatus = 'open' | 'waiting' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
 export const ICON: Readonly<Record<VisualStatus, string>> = {
@@ -124,7 +125,7 @@ export function topicChips(session: Immutable<Session>, movedOn: ReadonlySet<str
     const items = topicItems(session, topic.id), moved = movedOn.has(`${session.id}:${topic.id}`);
     // A question the owner already replied to waits on the agent, not on them: it counts as open, like everywhere else.
     const shown = items.map(item => ({ item, status: displayStatus(session, item) }));
-    const waiting = shown.filter(({ status }) => status === 'waiting_on_me').length;
+    const waiting = items.filter(item => waitingOnOwner(session, item)).length;
     const open = shown.filter(({ status }) => status === 'open' || status === 'in_progress' || status === 'waiting_on_agent').length;
     const closed = items.filter(item => closedStatuses.has(item.status)).length;
     const counts = topic.archived_at !== null ? 'archived' : moved ? 'continued later'
@@ -186,13 +187,13 @@ export function archivedTopics(summaries: readonly Immutable<SessionSummary>[], 
     return sortedTopics(session).filter(topic => topic.archived_at !== null).flatMap(topic => {
       const items = topicItems(session, topic.id).sort(byId);
       if (needle && !`${topic.name} ${items.map(item => `${item.question} ${item.outcome ?? ''}`).join(' ')}`.toLowerCase().includes(needle)) return [];
-      const parts = partOrder.map(([status, word]) => { const count = items.filter(item => item.status === status).length; return count ? `${count} ${word}` : ''; })
+      const parts = partOrder.map(([status, word]) => { const count = status === 'waiting_on_me' && sessionEnded(session) ? 0 : items.filter(item => item.status === status).length; return count ? `${count} ${word}` : ''; })
         .filter(Boolean).join(' · ');
       return [{ source: routeOf(summary), topic, name: topic.name,
         meta: `From ${from} · archived ${relativeDay(Date.parse(topic.archived_at!), now)}${parts ? ` · ${parts}` : ''}`,
         lines: items.slice(0, 3).map(item => ({ id: item.id, status: visualStatus(item.status), text: item.outcome || item.question })),
         more: items.length > 3 ? `and ${items.length - 3} more` : null, items: items.length,
-        waiting: items.filter(item => item.status === 'waiting_on_me').length,
+        waiting: items.filter(item => waitingOnOwner(session, item)).length,
         sourceAgent: agentOf(summary), sourceRunning: isRunning(summary), sourceClosed: summary.state === 'closed' }];
     });
   }).sort((a, b) => Date.parse(b.topic.archived_at!) - Date.parse(a.topic.archived_at!));
@@ -226,7 +227,7 @@ export function sessionRemoval(session: Immutable<Session> | null, shared: Reado
   const topics = Object.values(session.topics).filter((topic): topic is Immutable<Topic> => !!topic), own = topics.filter(topic => !shared.has(`${session.id}:${topic.id}`));
   const ownIds = new Set(own.map(topic => topic.id));
   const items = Object.values(session.items).filter((item): item is Immutable<Item> => !!item && ownIds.has(item.topic_id));
-  return { topics: own.length, items: items.length, shared: topics.length - own.length, waiting: items.filter(item => item.status === 'waiting_on_me' && !itemRemoved(session, item.id)).length,
+  return { topics: own.length, items: items.length, shared: topics.length - own.length, waiting: items.filter(item => waitingOnOwner(session, item) && !itemRemoved(session, item.id)).length,
     unsent: unsentOf([session]) };
 }
 
@@ -234,5 +235,5 @@ export function sessionRemoval(session: Immutable<Session> | null, shared: Reado
 export function projectRemoval(sessions: readonly Immutable<Session>[]) {
   const items = sessions.flatMap(session => Object.values(session.items).filter((item): item is Immutable<Item> => !!item));
   return { topics: sessions.reduce((sum, session) => sum + Object.keys(session.topics).length, 0), items: items.length,
-    waiting: sessions.reduce((count, session) => count + activeItems(session).filter(item => item.status === 'waiting_on_me').length, 0), unsent: unsentOf(sessions) };
+    waiting: sessions.reduce((count, session) => count + activeItems(session).filter(item => waitingOnOwner(session, item)).length, 0), unsent: unsentOf(sessions) };
 }

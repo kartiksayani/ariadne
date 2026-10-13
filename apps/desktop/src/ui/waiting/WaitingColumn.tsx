@@ -2,7 +2,7 @@ import { itemRemoved } from '../../selectors/removed';
 // The "Waiting on me" column (handoff Ariadne.dc.html, aside "Waiting on me"):
 // every open question across sessions, oldest first, each with a compact answer
 // control, with Sent inputs in their own scrolling section below.
-import { useContext, useEffect, useMemo, type MouseEvent, type ReactNode } from 'react';
+import { useContext, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
 import type { ItemRoute, SessionRef } from '../../generated/core';
 import { plainFailure, type Immutable } from '../../data';
 import type { Input, PresenceObservation } from '../../generated/domain/models';
@@ -24,6 +24,8 @@ import { FileRefProject, ItemRefs, Markdown } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { WaitingFold } from '../shell/fold';
+import { sessionClosedReason } from '../../selectors/sessionClosed';
+import { SessionClosedChip } from '../shared/SessionClosedChip';
 import './waiting.css';
 
 export interface WaitingColumnProps {
@@ -73,6 +75,7 @@ const same = (a: ItemRoute | null | undefined, b: ItemRoute) => !!a && a.project
 
 export function WaitingColumn({ store, drafts, revealItem, openSession, selected, onAgentNotRunning, notice, now }: WaitingColumnProps) {
   const state = useWaiting(store), draftState = useOwnerDrafts(drafts);
+  const [showClosed, setShowClosed] = useState(false);
   useEffect(() => { void store.start(); }, [store]);
   useEffect(() => { if (!drafts.getSnapshot().ready) void drafts.load(); }, [drafts]);
   useEffect(() => {
@@ -102,6 +105,10 @@ export function WaitingColumn({ store, drafts, revealItem, openSession, selected
   const incomplete = state.counts?.completeness === 'partial' || state.unavailableProjects.length > 0;
   const current = state.status === 'ready' && !state.error;
   const loading = state.status === 'loading';
+  const closedQuestions = (state.closedWaiting ?? []).filter(row => {
+    const session = state.sessions.find(value => value.session.id === row.route.session_id && value.session.project_id === row.route.project_id)?.session;
+    return session && !hidden.item(row.route, session, row.item.id);
+  });
   return <WaitingFrame count={model.count} loading={loading} sent={<section className={`waiting-sent-section${model.sent.length === 0 ? ' waiting-sent-section-empty' : ''}`} aria-label="Sent · waiting for the agent to pick up">
     <div className="waiting-sent-label">Sent<span>· waiting for the agent to pick up</span></div>
     <div className="waiting-sent-scroll">
@@ -128,6 +135,23 @@ export function WaitingColumn({ store, drafts, revealItem, openSession, selected
     {model.cards.map(card => <WaitingCard key={card.id} card={card} drafts={drafts} current={current} selected={same(selected, card.route)}
       revealItem={revealItem} onAgentNotRunning={onAgentNotRunning} onSaved={() => { void store.refresh(); }} sessionStore={store.storeOf(card.route)}
       presence={card.session.active_binding_id ? store.sessionState(card.route)?.presence[card.session.active_binding_id] ?? null : null} />)}
+    {closedQuestions.length > 0 && <div className="waiting-closed-line">
+      {closedQuestions.length} {closedQuestions.length === 1 ? 'question' : 'questions'} from closed sessions
+      {!showClosed && ` ${closedQuestions.length === 1 ? 'is' : 'are'} hidden`} ·{' '}
+      <button type="button" className="btn btn-ghost" aria-expanded={showClosed} onClick={() => setShowClosed(value => !value)}>{showClosed ? 'Hide' : 'Show'}</button>
+    </div>}
+    {showClosed && closedQuestions.map(row => {
+      const draft = draftState.ready ? drafts.find(row.route, row.item.id, 'answer')?.draft : undefined;
+      return <div className="waiting-card waiting-card-closed" key={row.id} data-closed-question={row.item.id}>
+        <div className="waiting-path">{row.projectLabel} › {row.sessionLabel}</div>
+        <SessionClosedChip />
+        <Markdown className="waiting-question" text={row.item.question} />
+        <AnswerControl variant="full" options={row.item.options} selected={defaultSelection(row.item.options, draft?.selected_option_id)}
+          draft={draft?.text ?? ''} label="Answer" locked blocked={sessionClosedReason}
+          onSelect={() => {}} onDraft={() => {}} onSendOption={() => {}} onSendText={() => {}} />
+        <button type="button" className="btn btn-ghost waiting-details" onClick={() => revealItem({ ...row.route })}>Details</button>
+      </div>;
+    })}
   </WaitingFrame>;
 }
 

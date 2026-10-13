@@ -33,6 +33,8 @@ fn add(target: &mut NonnegativeSafeInteger, value: u64) -> Result<(), CoreError>
 }
 /// Canonical unanswered predicate shared by global counts and native queue rows.
 /// Topic archive eligibility remains the caller's scope filter.
+/// Closed and archived sessions cannot receive owner inputs and leave the queue
+/// without changing the saved question or its waiting status.
 ///
 /// An item stops waiting on the owner once the owner sent anything to its current
 /// question (answer, reply, note, drop...) that is on its way (queued or in
@@ -41,7 +43,9 @@ fn add(target: &mut NonnegativeSafeInteger, value: u64) -> Result<(), CoreError>
 /// attention), cancelled and skipped inputs need the owner again. Mirrors the
 /// TypeScript `ownerReplied` selector.
 pub fn waiting_unanswered(session: &Session, item: &Item) -> bool {
-    !item_is_removed(session, item)
+    session.state == SessionState::Active
+        && session.archived_at.is_none()
+        && !item_is_removed(session, item)
         && item.status == ItemStatus::WaitingOnMe
         && question_unanswered(session, item)
 }
@@ -268,6 +272,36 @@ mod tests {
     #[test]
     fn waits_on_the_owner_until_something_is_sent() {
         assert!(waiting(&seed()));
+    }
+
+    #[test]
+    fn closed_or_archived_sessions_leave_the_queue_but_keep_the_unanswered_question() {
+        let mut session = seed();
+        let original_items = session.items.clone();
+        let original_rounds = session.rounds.clone();
+        let before = super::session(&session).unwrap();
+        for (state, archived) in [
+            (SessionState::Closed, false),
+            (SessionState::Closed, true),
+            (SessionState::Active, true),
+        ] {
+            session.state = state;
+            session.archived_at = archived.then(|| session.updated_at.clone());
+            assert!(!waiting(&session));
+            assert!(question_unanswered(
+                &session,
+                &session.items.0[&ItemRef::new(ITEM).unwrap()]
+            ));
+            let counts = super::session(&session).unwrap();
+            assert_eq!(counts.waiting_unanswered.value(), 0);
+            assert_eq!(counts.items_by_status, before.items_by_status);
+            assert_eq!(session.items, original_items);
+            assert_eq!(session.rounds, original_rounds);
+        }
+        session.state = SessionState::Active;
+        session.archived_at = None;
+        assert!(waiting(&session));
+        assert_eq!(super::session(&session).unwrap(), before);
     }
 
     #[test]

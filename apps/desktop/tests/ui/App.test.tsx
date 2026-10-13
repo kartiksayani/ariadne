@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import App, { DesktopApp } from '../../src/App';
 import { createDesktopService } from '../../src/data/service';
 import { RegisteredRoutes } from '../../src/data/routes';
+import { NavigationStore } from '../../src/state/navigation/store';
 import { OwnFailure } from '../../src/data/plain';
 import { WaitingStore } from '../../src/selectors/waiting/store';
 import { MessageRail } from '../../src/ui/rail/MessageRail';
@@ -32,7 +33,8 @@ vi.mock('../../src/ui/tree/TreeView', async importOriginal => {
   return { ...actual, TreeView: vi.fn(actual.TreeView) };
 });
 
-const mutations = (transport: AppTransport, command: string) => transport.mutations.filter(request => request.command.command === command);
+const mutations = (transport: AppTransport, command: string) => transport.mutations.filter(request => request.command.command === command
+  && (request.command.command !== 'preferences_patch' || request.command.params.entries.some(entry => entry.kind !== 'mark_seen')));
 async function openSession(id = route.session_id, pending = false) {
   fireEvent.click(await sessionButton({ project_id: route.project_id, session_id: id }));
   await screen.findByRole('region', { name: 'Session tree' });
@@ -53,7 +55,8 @@ function setup(strict = false) {
 }
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-describe('ordinary desktop composition', () => {
+// These composed journeys include independent seen saves under default file parallelism.
+describe('ordinary desktop composition', { timeout: 10_000 }, () => {
   it('clears a route loading refusal on a same-revision ready capture', async () => {
     const { transport } = setup();
     await openSession();
@@ -62,7 +65,11 @@ describe('ordinary desktop composition', () => {
     const bring = await screen.findByRole<HTMLButtonElement>('button', { name: 'Bring it up' });
     await waitFor(() => expect(bring.disabled).toBe(false));
     const { store } = vi.mocked(TreeView).mock.lastCall![0];
+    await act(async () => { await store.refresh(); });
     const before = store.getSnapshot();
+    // Own the next capture: a periodic read can otherwise clear this notice
+    // before the assertion observes it under parallel file execution.
+    const refresh = vi.spyOn(store, 'refresh').mockResolvedValue();
     const loading = "Ariadne is still loading this session's latest changes. Try again.";
     vi.spyOn(RegisteredRoutes.prototype, 'revealItem').mockRejectedValueOnce(new OwnFailure({
       code: 'snapshot_changed', message: loading, hint: '', retryable: true, field_errors: [],
@@ -70,6 +77,7 @@ describe('ordinary desktop composition', () => {
     fireEvent.click(bring);
     expect(await screen.findByText(loading)).toBeTruthy();
     expect(store.getSnapshot().status).toBe('ready');
+    refresh.mockRestore();
     await act(async () => { await store.refresh(); });
     expect(store.getSnapshot().status).toBe('ready');
     expect(store.getSnapshot().snapshot).not.toBe(before.snapshot);
@@ -210,7 +218,17 @@ describe('ordinary desktop composition', () => {
     const session = transport.sessions.get(route.session_id)!;
     await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(session)));
     await waitFor(() => expect(transport.preferences.sessions[0].rail).toBe('activity'));
-    const before = structuredClone(transport.preferences), writes = transport.mutations.length;
+    // The already-open detail may finish its debounced seen mark during hover.
+    // Every other preference and write remains covered by this assertion.
+    const viewPreferences = () => {
+      const preferences = structuredClone(transport.preferences);
+      delete preferences.seen; preferences.revision = 0;
+      return preferences;
+    };
+    const ownerWrites = () => transport.mutations.filter(request => request.command.command !== 'preferences_patch'
+      || request.command.params.entries.some(entry => entry.kind !== 'mark_seen'));
+    const before = viewPreferences(), writes = ownerWrites().length;
+    const mark = vi.spyOn(NavigationStore.prototype, 'markItemSeen');
     const tree = screen.getByRole('tree', { name: 'Session items' }), detail = document.querySelector<HTMLElement>('.shell-detail-scroll')!;
     tree.scrollTop = 50; detail.scrollTop = 70; log.scrollTop = 123;
     const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
@@ -221,7 +239,7 @@ describe('ordinary desktop composition', () => {
     const card = log.querySelector<HTMLElement>(`[data-message-id="${message.id}"]`)!;
     const lit = (node: Element = row) => node.getAttribute('data-highlight');
     const unchanged = () => {
-      expect(transport.preferences).toEqual(before); expect(transport.mutations).toHaveLength(writes);
+      expect(viewPreferences()).toEqual(before); expect(ownerWrites()).toHaveLength(writes); expect(mark).not.toHaveBeenCalled();
       expect(tree.scrollTop).toBe(50); expect(detail.scrollTop).toBe(70); expect(log.scrollTop).toBe(123);
     };
     fireEvent.click(screen.getByRole('button', { name: 'Follow up' }));
@@ -254,7 +272,7 @@ describe('ordinary desktop composition', () => {
     const returned = await screen.findByRole('tree', { name: 'Session items' });
     expect(lit(returned.querySelector('[data-item-id="2"]')!)).toBe('strong');
     expect(card.classList.contains('pw-excerpt-active')).toBe(true);
-    expect(transport.preferences).toEqual(before); expect(transport.mutations).toHaveLength(writes);
+    expect(viewPreferences()).toEqual(before); expect(ownerWrites()).toHaveLength(writes); expect(mark).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Hide messages' }));
     await waitFor(() => expect(lit(returned.querySelector('[data-item-id="2"]')!)).toBeNull());
   }, 15_000); // Full tree/graph/detail/rail composition needs headroom under CI coverage.

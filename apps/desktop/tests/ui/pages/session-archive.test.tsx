@@ -158,7 +158,7 @@ describe('Session lifecycle write readiness', () => {
     expect(commands(fixture.transport)).toEqual(['binding_pause']);
     await act(async () => { gates.presence(); await write; });
     expect(screen.getByText('The session changed. Check the updated details, then confirm again.')).toBeTruthy();
-    expect(screen.getByText(new RegExp(`${closeImpact(fixture.session).questions} questions are waiting`))).toBeTruthy();
+    expect(screen.getByText(new RegExp(`${closeImpact(fixture.session).questions} questions are still open`))).toBeTruthy();
     expect(fixture.onSaved).not.toHaveBeenCalled();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Archive session' })); });
     expect(commands(fixture.transport)).toEqual(['binding_pause', 'session_archive']);
@@ -502,7 +502,7 @@ describe('Session archive cards', () => {
     session.inputs = Object.fromEntries(pending.map(input => [input!.id, input!]));
     await archive(false);
     expect(screen.getByText(/1 of your messages hasn’t reached .+ and 1 is being delivered — archiving cancels them/)).toBeTruthy();
-    expect(screen.getByText(/question.*waiting for your answer;.*leaves? Waiting until you restore/)).toBeTruthy();
+    expect(screen.getByText(/questions? (?:is|are) still open\. Restore and reopen the session before answering\./)).toBeTruthy();
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
     expect(commands(transport)).toEqual([]);
     await archive();
@@ -596,7 +596,7 @@ describe('Session archive cards', () => {
     if (confirm) {
       const dialog = await screen.findByRole('dialog');
       expect(commands(transport)).toEqual([]);
-      if (waiting) expect(within(dialog).getByText('1 question is waiting for your answer; it leaves Waiting until you restore the session.')).toBeTruthy();
+      if (waiting) expect(within(dialog).getByText('1 question is still open. Restore and reopen the session before answering.')).toBeTruthy();
     } else {
       await screen.findByRole('button', { name: 'Archived · 1' });
       expect(screen.queryByRole('dialog')).toBeNull();

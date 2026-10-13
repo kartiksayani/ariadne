@@ -36,6 +36,7 @@ import { useLifecycle } from './Lifecycle';
 import { ItemRefs } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
 import { displayStatus } from '../../selectors/waiting/replied';
+import { sessionEnded, sessionClosedReason } from '../../selectors/sessionClosed';
 import { useUnfolded } from './unfold';
 import type { RemoveTarget } from '../dialogs/remove';
 import { ContinuePicker, continueTargets, openContinueTopic } from '../dialogs/ContinueTopicDialog';
@@ -122,8 +123,9 @@ export function TreeView(props: TreeViewProps) {
   const filterFolds = useFilterFolds(navigation.routes, route, (graph ? savedView : view)?.filters, query);
   const viewBusy = nav.writing || nav.pendingOperationId !== null;
   const archivedMode = view?.filters.archived ?? false;
-  const later = useMemo(() => new Set(preferences?.later.filter(item => item.project_id === route.project_id && item.session_id === route.session_id)
-    .map(item => item.item_id) ?? []), [preferences, route.project_id, route.session_id]);
+  const savedLater = preferences?.later;
+  const later = useMemo(() => new Set(savedLater?.filter(item => item.project_id === route.project_id && item.session_id === route.session_id)
+    .map(item => item.item_id) ?? []), [savedLater, route.project_id, route.session_id]);
   const savedFolds = view?.collapsed_topic_ids;
   const closedTopics = useMemo(() => new Set(savedFolds ?? []), [savedFolds]);
   const hiddenFocus = useRef<string | null>(null);
@@ -348,8 +350,8 @@ export function TreeView(props: TreeViewProps) {
   const options = answerRow?.item.options ?? [];
   const pickedIndex = entry?.draft.selected_option_id ? options.findIndex(option => option.id === entry.draft.selected_option_id) : -1;
   const chosen = pickedIndex >= 0 ? pickedIndex : options.findIndex(option => option.recommended);
-  const blocked = session?.archived_at != null ? 'This session is archived. Restore it, then reopen it to answer.'
-    : session?.state !== 'active' ? 'This session is closed. Reopen it to answer.'
+  const blocked = session && sessionEnded(session) ? sessionClosedReason
+    : session?.state !== 'active' ? sessionClosedReason
     : bar?.connection === 'reconnecting' ? reconnectingNote(bar.agent) : null;
   const focusRow = (key: string) => { setFocusKey(key); elements.current.get(key)?.focus({ preventScroll: true }); };
   const send = (change: { selected_option_id: string | null; text: string }) => {
@@ -374,7 +376,7 @@ export function TreeView(props: TreeViewProps) {
   };
   const answerControl = answerRow ? <AnswerControl variant="full" selected={chosen} draft={entry?.draft.text ?? ''}
     options={options.map(option => ({ id: option.id, label: option.label, consequence: option.consequence, recommended: option.recommended }))}
-    warn={entry?.error ? plainFailure(entry.error) : undefined} blocked={blocked ?? undefined} locked={!entry || entry.saving}
+    warn={entry?.error ? plainFailure(entry.error) : undefined} blocked={blocked ?? undefined} locked={!entry || entry.saving || !!session && sessionEnded(session)}
     onSelect={index => { if (entry && options[index]) drafts.edit(entry.draft.op_id, { selected_option_id: options[index].id }); focusRow(answerRow.key); }}
     onDraft={text => { if (entry) drafts.edit(entry.draft.op_id, { text }); }}
     onSendOption={sendOption} onSendText={text => send({ selected_option_id: null, text })}

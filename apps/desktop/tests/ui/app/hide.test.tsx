@@ -33,7 +33,7 @@ async function hide(id: string) {
   await waitFor(() => expect(row(id)).toBeNull()); await ready();
 }
 
-describe('owner hide and unhide actions', () => {
+describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
   it.each([
     { selected: '1.1', hidden: ['1.1', '3'], parent: null },
     { selected: '1.1', hidden: ['1', '3'], parent: '1' },

@@ -7,6 +7,7 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEve
 import { Markdown } from '../shared/MarkdownText';
 import { StatusBadge } from '../shared/StatusBadge';
 import { ackTitle } from '../shared/ack';
+import { SessionClosedChip } from '../shared/SessionClosedChip';
 import { closed, visual, type Guide, type ItemRow as Row } from './model';
 
 export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly disabled?: boolean; readonly persistent?: boolean }
@@ -150,6 +151,7 @@ export function ItemRow({ row, selected, focused, disabled = false, highlight, n
         {hover.length > 0 && <span className="tree-actions">{hover.map(actionButton)}</span>}
       </span>}
       <span className="tree-row-status"><span className="tree-id">{item.id}</span>
+        {row.sessionClosed && <SessionClosedChip />}
         <StatusBadge status={status} label={row.badge} variant="text" /></span>
     </div>
   </div>;

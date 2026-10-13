@@ -9,6 +9,7 @@ import { indexSession, type Immutable } from '../../data';
 import { normalizeSearch, sentenceRows, type SentenceRow } from '../../selectors/tree/rows';
 import { shortLabel } from '../shared/short';
 import { displayStatus, type DisplayStatus } from '../../selectors/waiting/replied';
+import { waitingOnOwner } from '../../selectors/sessionClosed';
 import { hiddenItems } from '../tree/hidden';
 import { connectedItems } from '../../selectors/related';
 import { ackTarget } from '../../selectors/ack';
@@ -115,7 +116,8 @@ export function topicCounts(items: readonly Immutable<Item>[], session?: Immutab
   const count = (status: DisplayStatus) => items.filter(item => shown(item) === status).length;
   const closed = items.filter(item => isClosed(item.status)).length;
   const ack = session ? items.filter(item => ackTarget(session, item)).length : 0;
-  return [[count('waiting_on_me'), 'waiting on you'], [count('waiting_on_agent'), 'waiting on agent'], [ack, 'to ack'],
+  const waiting = session ? items.filter(item => waitingOnOwner(session, item)).length : count('waiting_on_me');
+  return [[waiting, 'waiting on you'], [count('waiting_on_agent'), 'waiting on agent'], [ack, 'to ack'],
     [count('open'), 'open'], [count('in_progress'), 'in progress'], [closed, 'closed']]
     .filter(([n]) => n).map(([n, words]) => `${n} ${words}`).join(' · ');
 }

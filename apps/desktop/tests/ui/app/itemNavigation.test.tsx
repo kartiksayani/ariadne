@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
@@ -6,8 +6,10 @@ import { immutable } from '../../../src/data/session-store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { AppTransport, route, secondId } from './transport';
 import { sessionButton } from './open';
+import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
+import { NavigationStore } from '../../../src/state/navigation/store';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 async function click(element: Element) {
   await act(async () => { fireEvent.click(element); });
 }
@@ -41,7 +43,20 @@ async function setup(transport = new AppTransport()) {
   return transport;
 }
 
-describe('composed item navigation', () => {
+describe('composed item navigation', { timeout: 10_000 }, () => {
+  it('marks current details as read and leaves changes unseen while the pane is closed', async () => {
+    const mark = vi.spyOn(NavigationStore.prototype, 'markItemSeen');
+    const transport = await setup(); await openSession(); await pick('2');
+    expect(mark).toHaveBeenCalledWith(route, '2');
+    await click(screen.getByRole('button', { name: 'Close detail' }));
+    mark.mockClear();
+    const session = transport.sessions.get(route.session_id)!;
+    ++session.items['2']!.revision; ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    expect(mark).not.toHaveBeenCalled();
+    await pick('2');
+    expect(mark).toHaveBeenCalledWith(route, '2');
+  });
   it.each([
     { archive: 'session', retained: false }, { archive: 'session', retained: true },
     { archive: 'topic', retained: false }, { archive: 'topic', retained: true },
@@ -92,7 +107,7 @@ describe('composed item navigation', () => {
     await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: /^#2 / }));
     const detail = screen.getByLabelText('Detail of #2');
     expect(within(detail).getByRole('region', { name: 'Your answer' })).toBeTruthy();
-    expect(within(detail).getByText('This session is closed. Reopen it to answer.')).toBeTruthy();
+    expect(within(detail).getByText(sessionClosedReason)).toBeTruthy();
     expect(transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(0);
   });
 

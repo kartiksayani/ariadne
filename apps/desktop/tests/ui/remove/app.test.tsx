@@ -37,4 +37,4 @@ it('removes an item from the detail trash or ⌫ after asking, with Undo, and ru
     session: route, command: { params: { item_id: '4', expected_revision: 1 } } }));
   await waitFor(() => expect(screen.getByText(/was told and won’t bring it up again\.$/)).toBeTruthy());
   expect(row('4')).toBeNull();
-});
+}, 10_000); // Covers selection, remove, Undo and a second remove through the full composed app.

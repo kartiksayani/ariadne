@@ -9,6 +9,7 @@ import { AnswerSlot } from '../../../src/ui/detail/AnswerSlot';
 import { useDetailSubmit } from '../../../src/ui/detail/submit';
 import { AppTransport, route } from '../app/transport';
 import { Notices, notices } from '../../../src/ui/pages/notices';
+import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 
 const stores: SessionStore[] = [];
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.close()); notices.clear(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -24,6 +25,24 @@ async function setup() {
 }
 
 describe('detail actions while the owner view is stale', () => {
+  it('keeps a closed waiting question and draft visible with a closed chip and disabled controls', async () => {
+    const { transport, store, drafts } = await setup();
+    const source = transport.sessions.get(route.session_id)!;
+    const entry = drafts.begin(source, '2', 'answer')!;
+    drafts.edit(entry, { text: 'My unsent answer' });
+    source.state = 'closed';
+    ++source.revision; await store.refresh();
+    render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
+    expect(screen.getByText('Session closed').title).toBe(sessionClosedReason);
+    expect(screen.getByText('Waiting on me')).toBeTruthy();
+    const answer = await screen.findByRole('group', { name: 'Answer' });
+    const textarea = within(answer).getByRole('textbox') as HTMLTextAreaElement;
+    expect(textarea.value).toBe('My unsent answer'); expect(textarea.disabled).toBe(true);
+    expect(within(answer).getByRole('button', { name: 'Send as a reply only' }).hasAttribute('disabled')).toBe(true);
+    expect(within(answer).getByText(sessionClosedReason)).toBeTruthy();
+    expect(sends(transport)).toEqual([]);
+    expect(drafts.find(route, '2', 'answer')?.draft.text).toBe('My unsent answer');
+  });
   it('copies an item with generic toast feedback and a stable copy button', async () => {
     const { store, drafts } = await setup();
     const writeText = vi.fn(async () => {});

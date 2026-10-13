@@ -221,21 +221,33 @@ function Workspace({ application }: { application: Application }) {
   const [highlightedMessages, setHighlightedMessages] = useState<ReadonlySet<string>>(new Set());
   const [searchEdit, setSearchEdit] = useState<{ route: string; text: string; attempted: boolean } | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
+  const routeFailureCapture = useRef(sessionState?.snapshot);
+  const reportRouteError = (error: string) => {
+    routeFailureCapture.current = navigation.selectedSession()?.getSnapshot().snapshot;
+    setRouteError(error);
+  };
   useEffect(() => () => notices.dismiss('route-open-failed'), []);
   useEffect(() => {
     if (routeError) notices.push({ id: 'route-open-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)', text: routeError });
     else notices.dismiss('route-open-failed');
   }, [routeError]);
   useEffect(() => {
-    if (ownerReady) {
+    // A ready effect can lag behind the store while a refusal is reported.
+    // Only the current capture can clear it; an older effect must not win.
+    if (ownerReady && sessionState?.snapshot === navigation.selectedSession()?.getSnapshot().snapshot
+      && sessionState?.snapshot !== routeFailureCapture.current) {
       setRouteError(error => error === "Ariadne is still loading this session's latest changes. Try again." ? null : error);
     }
-  }, [ownerReady, sessionState?.snapshot]);
+  }, [navigation, ownerReady, sessionState?.snapshot]);
   const graph = graphModes[key] ?? false;
   const currentReveal = localReveal?.store === store ? localReveal : state.reveal?.store === store ? state.reveal : null;
   const treeReveal = currentReveal === dismissedReveal ? null : currentReveal;
   const candidateId = currentReveal?.kind === 'item' ? currentReveal.route.item_id : view?.selected_item_id ?? null;
   const selectedId = candidateId && sessionState?.snapshot?.session.items[candidateId] && !itemRemoved(sessionState.snapshot.session, candidateId) ? candidateId : null;
+  const seenRevision = selectedId ? sessionState?.snapshot?.session.items[selectedId]?.revision : null;
+  useEffect(() => {
+    if (detailOpen && route && selectedId && sessionState?.status === 'ready' && !sessionState.error) navigation.markItemSeen(route, selectedId);
+  }, [navigation, detailOpen, route, selectedId, seenRevision, sessionState?.status, sessionState?.error]);
   const ackRequest = useRef(0);
   const ackNoticeId = useRef<string | null>(null);
   const ackActions = store ? application.actions.forSession(store) : null;
@@ -331,7 +343,7 @@ function Workspace({ application }: { application: Application }) {
   const revealItem = (target: ItemRoute) => {
     setRouteError(null);
     void navigation.routes.revealItem(target).then(result => { if (result) reveal(result); })
-      .catch((error: unknown) => setRouteError(plainFailure(error, 'This registered item could not be opened.')));
+      .catch((error: unknown) => reportRouteError(plainFailure(error, 'This registered item could not be opened.')));
   };
   const navigateHistory = (direction: HistoryDirection) => {
     if (!route || state.writing || state.pendingOperationId !== null) return false;
@@ -343,7 +355,7 @@ function Workspace({ application }: { application: Application }) {
         if (result?.kind !== 'item' || shortcutSequence.current !== token || navigation.getNavigationRequest() !== request) return false;
         return await reveal(result, token, true) !== null;
       } catch (error: unknown) {
-        if (shortcutSequence.current === token) setRouteError(plainFailure(error, 'This registered item could not be opened.'));
+        if (shortcutSequence.current === token) reportRouteError(plainFailure(error, 'This registered item could not be opened.'));
         return false;
       }
     });
@@ -369,7 +381,7 @@ function Workspace({ application }: { application: Application }) {
       if (openedRequest === null || shortcutSequence.current !== token || navigation.getNavigationRequest() !== openedRequest) return;
       published = true;
       setOwnerFocus({ route: routeKey(target), itemId: target.item_id, intent, token, optionIndex, sendOption: quick === 'send', ownWords: quick === 'words', answerTarget });
-    }).catch((error: unknown) => setRouteError(plainFailure(error, 'This registered item could not be opened.'))).finally(() => {
+    }).catch((error: unknown) => reportRouteError(plainFailure(error, 'This registered item could not be opened.'))).finally(() => {
       if (quickRequests.current.get(identity) === token && (!published || shortcutSequence.current !== token)) quickRequests.current.delete(identity);
     });
   };
@@ -412,7 +424,7 @@ function Workspace({ application }: { application: Application }) {
       if (shortcutSequence.current !== token || navigation.getNavigationRequest() !== openedRequest) return;
       const current = result.store.getSnapshot(), session = current.snapshot?.session;
       if (!session || current.status !== 'ready' || current.error) {
-        setRouteError("Ariadne is still loading this session's latest changes. Try again.");
+        reportRouteError("Ariadne is still loading this session's latest changes. Try again.");
         return;
       }
       const existing = application.drafts.find(target, target.item_id, 'bring');
@@ -423,7 +435,7 @@ function Workspace({ application }: { application: Application }) {
       if (!operation) return;
       application.drafts.edit(operation, { text: 'Bring this up.' });
       await application.drafts.submit(operation);
-    } catch (error: unknown) { setRouteError(plainFailure(error, 'This registered item could not be opened.')); }
+    } catch (error: unknown) { reportRouteError(plainFailure(error, 'This registered item could not be opened.')); }
     finally { bringing.current.delete(identity); }
   };
   const saveView = (change: Partial<SessionPreferences>) => {

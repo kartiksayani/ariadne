@@ -5,6 +5,7 @@ import sessionsFixture from '../../../../../fixtures/domain/projections/sessions
 import type { OwnerMutationRequest, OwnerQueryRequest, PreferencesSnapshot, SessionPreferences } from '../../../src/generated/core';
 import type { ItemReadProjection, Page, ProjectSummary, Session, SessionSummary, SummaryCounts } from '../../../src/generated/domain/models';
 import type { DesktopTransport, HintPayloads } from '../../../src/data/service';
+import { applySeen } from '../../../src/state/preferences/seen';
 
 export const secondId = '00000000-0000-4000-8000-000000000003';
 const page = <T,>(items: T[], revision: number): Page<T> => ({ items, next_cursor: null, snapshot_revision: revision });
@@ -63,6 +64,7 @@ export class AppTransport implements DesktopTransport {
       const command = request.command;
       if (command.command === 'preferences_patch') {
         for (const entry of command.params.entries) {
+          if (entry.kind === 'mark_seen') applySeen(this.preferences, entry);
           if (entry.kind === 'set_global') this.preferences.global = structuredClone(entry.preferences);
           if (entry.kind === 'set_session_view') {
             this.preferences.sessions = this.preferences.sessions.filter(view => view.session.session_id !== entry.preferences.session.session_id);

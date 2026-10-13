@@ -3,7 +3,8 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { Chip } from '../../../src/ui/pages/SessionLists';
 import type { Immutable } from '../../../src/data/session-store';
 import type { Session } from '../../../src/generated/domain/models';
-import { topicChips } from '../../../src/ui/pages/model';
+import { projectRemoval, sessionRemoval, topicChips } from '../../../src/ui/pages/model';
+import demo from '../../../../../fixtures/domain/demo/session.json';
 
 const topic = (id: string, order: number, name: string, short: string | null) =>
   ({ id, name, short, order, revision: 1, created_at: 0, archived_at: null, origin: null });
@@ -11,6 +12,15 @@ const topic = (id: string, order: number, name: string, short: string | null) =>
 afterEach(cleanup);
 
 describe('session card topic chips', () => {
+  it.each(['closed', 'archived'] as const)('excludes %s waiting questions from topic, session and project counts', state => {
+    const session = structuredClone(demo) as Session;
+    session.state = 'closed';
+    if (state === 'archived') session.archived_at = session.updated_at;
+    expect(topicChips(session, new Set()).every(chip => !chip.counts.includes('waiting'))).toBe(true);
+    expect(sessionRemoval(session, new Set()).waiting).toBe(0);
+    expect(projectRemoval([session]).waiting).toBe(0);
+    expect(session.items['2']!.status).toBe('waiting_on_me');
+  });
   it('label each topic with its short label, cutting a long name without one', () => {
     const session = { id: 's', items: {}, topics: {
       a: topic('a', 1, "Reviewer's comments on the SDK cache PR (#226)", 'SDK cache PR'),

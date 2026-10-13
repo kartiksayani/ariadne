@@ -718,6 +718,105 @@ fn waiting_count(setup: &Setup) -> u64 {
     .waiting_unanswered
     .value()
 }
+
+#[test]
+fn session_lifecycle_suppresses_waiting_projections_without_rewriting_questions() {
+    use ariadne_core::history_actions::HistoryActionService;
+
+    let initial = ask(seed(), 201, 101);
+    let setup = Setup::new(&initial);
+    let assert_projection = |expected: u64| {
+        let before = fs::read(setup.path()).unwrap();
+        let project_list = projects(
+            setup
+                .query(
+                    &registry_owner(),
+                    &QueryRequest::ProjectList(ProjectListRequest {
+                        cursor: None,
+                        limit: limit(100),
+                    }),
+                )
+                .unwrap(),
+        );
+        assert_eq!(project_list.counts.waiting_unanswered.value(), expected);
+        assert_eq!(
+            project_list.projects.items[0]
+                .counts
+                .waiting_unanswered
+                .value(),
+            expected
+        );
+        let session_list = sessions(
+            setup
+                .query(
+                    &registry_owner(),
+                    &QueryRequest::SessionList(SessionListRequest {
+                        project_id: None,
+                        state: None,
+                        cursor: None,
+                        limit: limit(100),
+                    }),
+                )
+                .unwrap(),
+        );
+        assert_eq!(session_list.counts.waiting_unanswered.value(), expected);
+        let summary = &session_list.sessions.items[0];
+        assert_eq!(summary.counts.waiting_unanswered.value(), expected);
+        assert_eq!(summary.counts.items_by_status.waiting_on_me.value(), 1);
+        let QueryResult::SessionGet(snapshot) =
+            setup.query(&owner(), &QueryRequest::SessionGet {}).unwrap()
+        else {
+            panic!("session snapshot")
+        };
+        assert_eq!(snapshot.session.items, initial.items);
+        assert_eq!(snapshot.session.rounds, initial.rounds);
+        assert_eq!(snapshot.session.answers, initial.answers);
+        assert_eq!(fs::read(setup.path()).unwrap(), before);
+    };
+    assert_projection(1);
+    for (index, action, expected) in [
+        (0, "close", 0),
+        (1, "archive", 0),
+        (2, "restore", 0),
+        (3, "reopen", 1),
+    ] {
+        let params = SessionLifecycleParams {
+            expected_revision: setup.saved().revision,
+        };
+        let api_version = SchemaVersion::new(1).unwrap();
+        let op_id = id(300 + index);
+        let command = match action {
+            "close" => OwnerCommand::SessionClose {
+                api_version,
+                op_id,
+                params,
+            },
+            "archive" => OwnerCommand::SessionArchive {
+                api_version,
+                op_id,
+                params,
+            },
+            "restore" => OwnerCommand::SessionRestore {
+                api_version,
+                op_id,
+                params: SessionRestoreParams {
+                    expected_revision: params.expected_revision,
+                    reopen: false,
+                },
+            },
+            _ => OwnerCommand::SessionReopen {
+                api_version,
+                op_id,
+                params,
+            },
+        };
+        HistoryActionService::new(&setup.registry)
+            .execute(&owner_context(), &command, initial.updated_at.clone())
+            .unwrap();
+        assert_projection(expected);
+    }
+}
+
 #[test]
 fn waiting_uses_current_unsuperseded_eligible_answer_without_changing_status_filter() {
     let setup = Setup::new(&ask(seed(), 201, 101));

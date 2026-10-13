@@ -115,6 +115,15 @@
   margin-left: auto;
 }
 
+.session-closed-chip {
+  display: inline-block;
+  padding: 2px 5px;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  font-size: calc(11px * var(--text-scale));
+  color: var(--a-label);
+}
+
 .pw-excerpt-text {
   display: -webkit-box;
   overflow: hidden;
