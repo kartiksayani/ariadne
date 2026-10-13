@@ -348,6 +348,45 @@ for (const theme of ['light', 'dark'] as const) test(`Map names and top-line sta
   expect(denied).toEqual([]);
 });
 
+for (const theme of ['light', 'dark'] as const) test(`Getting around preserves the Map while peeking and focusing in ${theme}`, async ({ page, origin }) => {
+  const denied: string[] = [];
+  await route(page.context(), origin, denied);
+  await openApp(page, origin, { ...frameSpec('1a'), theme, rail: false, hoverMsg: undefined });
+  const root = page.locator('.tree-item.tree-item-root').first(), scroller = page.locator('.tree-scroll');
+  const sourceId = await root.getAttribute('data-item-id');
+  await root.click();
+  const before = await scroller.evaluate(element => element.scrollTop);
+  await root.focus();
+  await page.keyboard.press('Space');
+  const peek = page.getByRole('dialog', { name: /^Peek:/ });
+  await expect(peek).toBeVisible();
+  await expect(peek.getByRole('button', { name: 'Copy reference' })).toBeVisible();
+  await expect(peek.getByRole('button', { name: 'Go to' })).toBeVisible();
+  const box = (await peek.boundingBox())!, chrome = (await page.locator('.shell-header').boundingBox())!, viewport = page.viewportSize()!;
+  expect(box.y).toBeGreaterThanOrEqual(chrome.y + chrome.height);
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+  await page.keyboard.press('Escape');
+  await expect(root).toBeFocused();
+  expect(await scroller.evaluate(element => element.scrollTop)).toBe(before);
+  const waiting = await page.locator('[data-waiting-item]').count();
+  await root.getByRole('button', { name: 'Focus', exact: true }).click();
+  await expect(page.getByText(/^Focused:/)).toBeVisible();
+  expect(await page.locator('[data-waiting-item]').count()).toBe(waiting);
+  await expect(page.locator(`.tree-item-root:not([data-item-id="${sourceId}"])`)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Leave Focus' }).click();
+  await page.keyboard.press('Meta+e');
+  const recent = page.getByRole('dialog', { name: 'Recent items' });
+  await expect(recent).toBeVisible();
+  await recent.getByRole('button', { name: 'Changed only' }).click();
+  await expect(recent.getByRole('button', { name: 'Changed only' })).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  const crumbs = (await page.getByRole('navigation', { name: 'Map ancestors' }).boundingBox())!, rows = (await scroller.boundingBox())!;
+  expect(crumbs.y + crumbs.height).toBeLessThanOrEqual(rows.y + 1);
+  expect(denied).toEqual([]);
+});
+
 test('a long waiting conversation opens at its latest ask and keeps the question visible', async ({ page, origin }) => {
   const denied: string[] = [];
   await route(page.context(), origin, denied);

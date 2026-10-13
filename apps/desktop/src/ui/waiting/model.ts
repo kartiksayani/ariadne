@@ -27,6 +27,7 @@ export interface WaitingCardModel {
   /** The option of a failed input still awaiting recovery; the card shows it chosen. */
   readonly chosen: string | null;
   readonly path: string;
+  readonly pathParts: readonly { readonly label: string; readonly itemId: string | null }[];
   readonly ask: string | null;
   readonly earlier: string | null;
   readonly last: string | null;
@@ -87,15 +88,18 @@ export function waitingAge(at: number, now: number): string {
 }
 
 /** Project (when several), topic and ancestors; longer than four collapses to the first two, "…" and the last. */
-export function pathText(session: Immutable<Session>, item: Immutable<Item>, project: string | null, labels?: ReadonlyMap<string, string>): string {
+export function pathParts(session: Immutable<Session>, item: Immutable<Item>, project: string | null, labels?: ReadonlyMap<string, string>): readonly { readonly label: string; readonly itemId: string | null }[] {
   const ancestors: Immutable<Item>[] = [];
   for (let parent = item.parent ? session.items[item.parent] : undefined; parent; parent = parent.parent ? session.items[parent.parent] : undefined) ancestors.unshift(parent);
   const names = labels ?? itemLabels(ancestors, session.topics);
   const topic = session.topics[item.topic_id];
-  let parts = [...(project ? [project] : []), topic ? shortLabel(topic) : '', ...ancestors.map(parent => names.get(parent.id)!)];
-  if (parts.length > 4) parts = [parts[0], parts[1], '…', parts[parts.length - 1]];
-  return parts.join('  ›  ');
+  let parts = [...(project ? [{ label: project, itemId: null }] : []), { label: topic ? shortLabel(topic) : '', itemId: null }, ...ancestors.map(parent => ({ label: names.get(parent.id)!, itemId: parent.id }))];
+  if (parts.length > 4) parts = [parts[0]!, parts[1]!, { label: '…', itemId: null }, parts[parts.length - 1]!];
+  return parts;
 }
+
+export const pathText = (session: Immutable<Session>, item: Immutable<Item>, project: string | null, labels?: ReadonlyMap<string, string>): string =>
+  pathParts(session, item, project, labels).map(part => part.label).join('  ›  ');
 
 /** "Round 3 · last time you replied “…”" when the open round follows an answered one. */
 export function lastRound(session: Immutable<Session>, item: Immutable<Item>): string | null {
@@ -137,7 +141,7 @@ export function waitingModel({ state, draft, presence, health, now }: ModelInput
     const runningHere = live.find(value => value.session.project_id === session.project_id);
     const earlier = !running(captured) && runningHere && runningHere !== captured
       ? `Asked in ${ownerName(session) ? `the “${ownerName(session)}”` : `an earlier ${agentOf(session, item.recipient_binding_id)}`} session. Your answer goes to ${agentOf(runningHere.session, null)}, with this item’s context.` : null;
-    cards.push({ id, route, session, item, chosen, path: '',
+    cards.push({ id, route, session, item, chosen, path: '', pathParts: [],
       ask: delivery ? null : item.ask, earlier, last: lastRound(session, item),
       age: item.waiting_since ? waitingAge(Date.parse(item.waiting_since), now) : '',
       tag: number === null ? '' : mine ? `#${number}` : `${earlierName(session, item.recipient_binding_id)} #${number}`, delivery });
@@ -201,7 +205,8 @@ export function waitingModel({ state, draft, presence, health, now }: ModelInput
   const labels = new Map([...ancestors].map(([sessionKey, items]) => [sessionKey, itemLabels([...items.values()], sessions.get(sessionKey)!.session.topics)]));
   cards.forEach((value, index) => {
     const captured = sessions.get(key(value.route))!;
-    cards[index] = { ...value, path: pathText(value.session, value.item, several ? captured.project.project?.display_name ?? 'Unavailable project' : null, labels.get(key(value.route))) };
+    const parts = pathParts(value.session, value.item, several ? captured.project.project?.display_name ?? 'Unavailable project' : null, labels.get(key(value.route)));
+    cards[index] = { ...value, path: parts.map(part => part.label).join('  ›  '), pathParts: parts };
   });
   const order = (value: WaitingCardModel) => value.item.waiting_since ?? '';
   cards.sort((a, b) => order(a).localeCompare(order(b)));

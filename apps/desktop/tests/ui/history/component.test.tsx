@@ -107,7 +107,7 @@ describe('item detail panel', () => {
     expect(chat.textContent).toContain('Retain the full history, including earlier outcomes.');
     expect(chat.textContent).toContain('The full history is retained.');
     expect(chat.textContent).not.toContain('Recorded the original reply and receipt-test follow-up.');
-    fireEvent.click(within(chat).getByRole('button', { name: /Branched into Add the receipt lookup test/ }));
+    fireEvent.click(within(chat).getByRole('button', { name: /Branched into Add the receipt lookup/ }));
     expect(open).toHaveBeenCalledWith('1.1');
     fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     expect(open).toHaveBeenCalledTimes(2);

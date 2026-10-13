@@ -1,0 +1,192 @@
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
+import type { ItemRoute } from '../../generated/core';
+import { useSession, type SessionStore } from '../../data/session-store';
+import type { OwnerDraftStore } from '../../state/drafts/store';
+import { displayStatus, ownerReplied } from '../../selectors/waiting/replied';
+import { itemRemoved } from '../../selectors/removed';
+import { sessionAnswerBlocked } from '../../selectors/sessionClosed';
+import { useSubmit, type PendingSubmission } from '../answer/useSubmit';
+import { FileRefProject, ItemRefs, Markdown } from '../shared/MarkdownText';
+import { StatusBadge } from '../shared/StatusBadge';
+import { statusKey } from '../shared/status';
+import { copyText } from '../shared/clipboard';
+import { ItemRefSession, PeekContext, type PeekNavigation } from './context';
+import { peekPosition } from './position';
+import { peekNames } from './names';
+import './peek.css';
+
+export { usePeek } from './context';
+export type PeekVisit = 'peek' | 'opened' | 'answered';
+export interface PeekProviderProps {
+  readonly lookup: (route: ItemRoute) => SessionStore | null;
+  readonly drafts: OwnerDraftStore;
+  readonly onGoTo: (route: ItemRoute) => void;
+  readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
+  /** A future seen-state owner can consume this after one uninterrupted second. */
+  readonly onPeekSeen?: (route: ItemRoute) => void;
+  readonly onVisit?: (route: ItemRoute, action: PeekVisit) => void;
+  readonly children: ReactNode;
+}
+type OpenPeek = { readonly route: ItemRoute; readonly anchor: HTMLElement; readonly store: SessionStore; readonly focus: boolean };
+type Hover = { readonly route: ItemRoute; readonly anchor: HTMLElement };
+
+export function PeekProvider({ lookup, drafts, onGoTo, onAgentNotRunning, onPeekSeen, onVisit, children }: PeekProviderProps) {
+  const [shown, setShown] = useState<OpenPeek | null>(null);
+  const hover = useRef<Hover | null>(null), timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const source = useRef<HTMLElement | null>(null);
+  const current = useRef({ lookup, onVisit }); current.current = { lookup, onVisit };
+  const command = useRef(false), card = useRef<HTMLDivElement>(null);
+  const cancelHover = useCallback(() => { if (timer.current) clearTimeout(timer.current); timer.current = null; }, []);
+  const close = useCallback((restore = true) => {
+    cancelHover();
+    if (restore && source.current?.isConnected) source.current.focus({ preventScroll: true });
+    source.current = null;
+    setShown(null);
+  }, [cancelHover]);
+  const show = useCallback((route: ItemRoute, anchor: HTMLElement, focus: boolean) => {
+    cancelHover();
+    if (document.querySelector('[aria-modal="true"]')) return;
+    const store = current.current.lookup(route);
+    if (!store) return;
+    source.current = anchor;
+    setShown({ route: { ...route }, anchor, store, focus });
+    current.current.onVisit?.(route, 'peek');
+  }, [cancelHover]);
+  const schedule = useCallback(() => {
+    cancelHover();
+    const source = hover.current;
+    if (!source || !command.current || document.querySelector('[aria-modal="true"]')) return;
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      if (hover.current === source && command.current && source.anchor.isConnected) show(source.route, source.anchor, false);
+    }, 500);
+  }, [cancelHover, show]);
+  useEffect(() => {
+    const keydown = (event: globalThis.KeyboardEvent) => {
+      if (document.querySelector('[aria-modal="true"]')) { cancelHover(); return; }
+      if (event.key === 'Escape' && card.current) { event.preventDefault(); event.stopPropagation(); close(); return; }
+      if (event.key === 'Meta' && !command.current) { command.current = true; schedule(); }
+    };
+    const keyup = (event: globalThis.KeyboardEvent) => { if (event.key === 'Meta' || !event.metaKey) { command.current = false; cancelHover(); } };
+    const outside = (event: globalThis.MouseEvent) => {
+      if (document.querySelector('[aria-modal="true"]')) return;
+      if (event.target instanceof Node && !card.current?.contains(event.target) && !shown?.anchor.contains(event.target)) close(false);
+    };
+    const blurred = () => { command.current = false; hover.current = null; cancelHover(); };
+    document.addEventListener('keydown', keydown, true);
+    document.addEventListener('keyup', keyup, true);
+    document.addEventListener('mousedown', outside);
+    window.addEventListener('blur', blurred);
+    return () => { document.removeEventListener('keydown', keydown, true); document.removeEventListener('keyup', keyup, true); document.removeEventListener('mousedown', outside); window.removeEventListener('blur', blurred); cancelHover(); };
+  }, [shown, schedule, cancelHover, close]);
+  const navigation = useMemo<PeekNavigation>(() => ({
+    open: (route, anchor) => show(route, anchor, true), close,
+    reference: route => {
+      const session = current.current.lookup(route)?.getSnapshot().snapshot?.session, item = session?.items[route.item_id];
+      if (!session || !item || itemRemoved(session, item.id)) return null;
+      const labels = peekNames(session);
+      return { name: labels.get(item.id)!, question: item.question, status: displayStatus(session, item) };
+    },
+    chipProps: route => ({
+      onClick: event => { event.preventDefault(); event.stopPropagation(); show(route, event.currentTarget, true); },
+      onKeyDown: event => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) { event.preventDefault(); event.stopPropagation(); show(route, event.currentTarget, true); } },
+      onMouseEnter: event => { hover.current = { route, anchor: event.currentTarget }; command.current = event.metaKey; schedule(); },
+      onMouseMove: event => { if (command.current !== event.metaKey) { command.current = event.metaKey; if (!hover.current) hover.current = { route, anchor: event.currentTarget }; schedule(); } },
+      onMouseLeave: () => { hover.current = null; cancelHover(); },
+    }),
+  }), [show, close, schedule, cancelHover]);
+  return <PeekContext.Provider value={navigation}>{children}{shown && createPortal(<PeekCard key={JSON.stringify(shown.route)} shown={shown} drafts={drafts} card={card}
+    onClose={close} onGoTo={() => { close(false); onVisit?.(shown.route, 'opened'); onGoTo(shown.route); }} onAgentNotRunning={onAgentNotRunning}
+    onPeekSeen={onPeekSeen} onAnswered={() => onVisit?.(shown.route, 'answered')} />, document.body)}</PeekContext.Provider>;
+}
+
+function PeekCard({ shown, drafts, card, onClose, onGoTo, onAgentNotRunning, onPeekSeen, onAnswered }: {
+  readonly shown: OpenPeek; readonly drafts: OwnerDraftStore; readonly card: RefObject<HTMLDivElement | null>;
+  readonly onClose: () => void; readonly onGoTo: () => void; readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
+  readonly onPeekSeen?: (route: ItemRoute) => void; readonly onAnswered: () => void;
+}) {
+  const state = useSession(shown.store), session = state.snapshot?.session, item = session?.items[shown.route.item_id];
+  const labels = useMemo(() => session ? peekNames(session) : null, [session]);
+  const [position, setPosition] = useState({ left: 12, top: 12, maxWidth: 340, maxHeight: 500 });
+  const [copied, setCopied] = useState(false), [copyFailed, setCopyFailed] = useState(false);
+  const valid = !!session && !!item && !itemRemoved(session, item.id);
+  const seenCallback = useRef(onPeekSeen); seenCallback.current = onPeekSeen;
+  useEffect(() => {
+    if (!valid) return;
+    const timer = setTimeout(() => seenCallback.current?.(shown.route), 1000);
+    return () => clearTimeout(timer);
+  }, [shown, valid]);
+  useLayoutEffect(() => {
+    const element = card.current;
+    if (!element) return;
+    const measure = () => {
+      const chromeBottom = Math.max(0, ...Array.from(document.querySelectorAll('.shell-header, .shell-tabs, .tree-breadcrumb'),
+        chrome => chrome.getBoundingClientRect().bottom));
+      const style = getComputedStyle(element);
+      // scrollHeight includes padding, but the fixed card's border also needs room.
+      const height = element.scrollHeight + (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
+      setPosition(peekPosition(shown.anchor.getBoundingClientRect(), 340, height, window.innerWidth, window.innerHeight, chromeBottom));
+    };
+    measure();
+    if (shown.focus) element.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
+    window.addEventListener('resize', measure); window.addEventListener('scroll', measure, true);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure); observer?.observe(element);
+    return () => { window.removeEventListener('resize', measure); window.removeEventListener('scroll', measure, true); observer?.disconnect(); };
+  }, [shown, card]);
+  const name = item ? labels?.get(item.id) ?? item.question : 'Item unavailable';
+  return <div ref={card} className="item-peek" role="dialog" aria-label={`Peek: ${name}`} style={{ left: position.left, top: position.top, maxWidth: position.maxWidth, maxHeight: position.maxHeight }}
+    onKeyDown={event => event.stopPropagation()}>
+    <div className="peek-head"><h2>{name}</h2><button type="button" className="btn btn-ghost btn-icon" aria-label="Close peek" title="Close peek (Esc)" onClick={onClose}><i className="ph ph-x" aria-hidden="true" /></button></div>
+    {valid ? <ItemRefSession.Provider value={shown.route}><ItemRefs.Provider value={{ lookup: id => { const target = session.items[id]; return target && !itemRemoved(session, id) ? { label: target.question, name: labels?.get(id), status: displayStatus(session, target) } : null; }, route: id => ({ ...shown.route, item_id: id }), onOpenItem: onGoTo }}><FileRefProject.Provider value={session.project_id}>
+      <div className="peek-tags"><span>{item.type}</span><StatusBadge status={statusKey[displayStatus(session, item)]} /></div>
+      <Markdown className="peek-summary" text={item.outcome || item.ask || item.why || 'No summary yet.'} compact />
+      {item.status === 'waiting_on_me' && !ownerReplied(session, item) && session.state === 'active' && session.archived_at == null
+        ? <PeekAnswer drafts={drafts} store={shown.store} itemId={item.id} onAgentNotRunning={onAgentNotRunning} onAnswered={onAnswered} onGoTo={onGoTo} />
+        : item.status === 'waiting_on_me' && !ownerReplied(session, item) && session.state !== 'active' && <p className="peek-hint">{sessionAnswerBlocked(session)}</p>}
+      <div className="peek-footer"><button type="button" className="btn btn-secondary" onClick={() => {
+        void copyText(`${item.id} — ${item.question}`).then(() => { setCopied(true); setCopyFailed(false); }, () => setCopyFailed(true));
+      }}>{copied ? 'Copied' : 'Copy reference'}</button><button type="button" className="btn btn-primary peek-go" onClick={onGoTo}>Go to</button></div>
+      {copyFailed && <label className="peek-copy-fallback">Select and copy reference<input className="input" readOnly value={`${item.id} — ${item.question}`} onFocus={event => event.currentTarget.select()} /></label>}
+    </FileRefProject.Provider></ItemRefs.Provider></ItemRefSession.Provider> : <p role="status">{state.status === 'loading' ? 'Loading item…' : 'This item is unavailable.'}</p>}
+  </div>;
+}
+
+function PeekAnswer({ drafts, store, itemId, onAgentNotRunning, onAnswered, onGoTo }: {
+  readonly drafts: OwnerDraftStore; readonly store: SessionStore; readonly itemId: string;
+  readonly onAgentNotRunning?: (submission: PendingSubmission) => void; readonly onAnswered: () => void; readonly onGoTo: () => void;
+}) {
+  const state = useSession(store), session = state.snapshot?.session, item = session?.items[itemId];
+  const submit = useSubmit({ drafts, session, current: state.status === 'ready' && !state.error, itemId, intent: 'answer', onAgentNotRunning,
+    onSaved: () => { onAnswered(); void store.refresh(); }, presence: session?.active_binding_id ? state.presence[session.active_binding_id] ?? null : null });
+  const receipt = submit.entry?.receipt?.data.kind === 'input_submit' ? session?.inputs[submit.entry.receipt.data.input_id] : undefined;
+  const oldRound = receipt && receipt.payload.context.round_id !== item?.current_round_id ? submit.entry!.draft.op_id : null;
+  const { another } = submit;
+  useEffect(() => { if (oldRound) another(); }, [oldRound]);
+  const text = submit.entry?.draft.text ?? '', multiline = /[\r\n]/.test(text);
+  const disabled = submit.locked || submit.changed || !!submit.blocked || !!submit.entry?.receipt;
+  if (!item) return null;
+  return <section className="peek-answer" aria-label="Answer question">
+    <div className="peek-options">{item.options.map(option => <div key={option.id} className="peek-option">
+      <button type="button" className="peek-option-pick" disabled={disabled || multiline}
+        aria-pressed={submit.entry?.draft.selected_option_id === option.id} onClick={() => submit.sendOption(option.id)}>
+        {option.label}{option.recommended && <>{' '}<small>Recommended</small></>}
+      </button>{option.consequence && <Markdown text={option.consequence} compact />}
+    </div>)}</div>
+    {multiline ? <p className="peek-hint">Your longer draft is saved. Open details to finish it.</p> : <form className="peek-reply" onSubmit={event => { event.preventDefault(); if (!disabled) submit.sendText(text); }}>
+      <input type="text" className="input" aria-label="One-line answer" placeholder="Reply in your own words…" value={text} disabled={submit.locked || !!submit.entry?.receipt}
+        onChange={event => submit.write(event.currentTarget.value)} onPaste={event => {
+          const pasted = event.clipboardData.getData('text');
+          if (!/[\r\n]/.test(pasted)) return;
+          event.preventDefault();
+          const input = event.currentTarget, start = input.selectionStart ?? text.length, end = input.selectionEnd ?? start;
+          submit.write(`${text.slice(0, start)}${pasted}${text.slice(end)}`);
+        }} />
+      <button type="submit" className="btn btn-secondary" disabled={disabled || !text.trim()}>Send</button>
+    </form>}
+    {submit.changed && <p className="peek-hint">This question changed. Review it in details; your draft is kept.</p>}
+    {submit.blocked && <p className="peek-hint">{submit.blocked}</p>}
+    {submit.error && <p className="peek-error" role="alert">{submit.error}</p>}
+    <button type="button" className="btn btn-ghost peek-details" onClick={onGoTo}>Open details</button>
+  </section>;
+}

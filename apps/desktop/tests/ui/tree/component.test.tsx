@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { routeWindowKey } from '../../../src/ui/shell/windowKeys';
-import type { ItemRoute } from '../../../src/generated/core';
+import type { ItemRoute, SessionPreferences } from '../../../src/generated/core';
 import { createDesktopService } from '../../../src/data/service';
 import type { RevealedItem } from '../../../src/data/routes';
 import { NavigationStore } from '../../../src/state/navigation/store';
@@ -23,6 +23,7 @@ import { RecoveryPanel } from '../../../src/components/recovery/RecoveryPanel';
 import { Notices, notices } from '../../../src/ui/pages/notices';
 import { NavigationGraph } from '../../../src/ui/graph/NavigationGraph';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
+import { shortLabel } from '../../../src/ui/shared/short';
 
 const stores: NavigationStore[] = [];
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); notices.clear(); vi.restoreAllMocks(); vi.useRealTimers(); });
@@ -91,6 +92,104 @@ async function staleTree(value: Awaited<ReturnType<typeof mount>>) {
 }
 
 describe('session tree rows', () => {
+  it('enters Focus by visible action, remembers it on remount, and leaves through the notice', async () => {
+    const view = await mount();
+    fireEvent.click(within(row('1')).getByRole('button', { name: 'Focus' }));
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
+    expect(ids()).toEqual(['1', '1.1']);
+    expect(screen.getByText(/^Focused:/).textContent).toContain(shortLabel(view.transport.sessions.get(route.session_id)!.items['1']!));
+    cleanup(); await mount({ transport: view.transport });
+    expect(ids()).toEqual(['1', '1.1']);
+    fireEvent.click(screen.getByRole('button', { name: 'Leave Focus' }));
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+    expect(ids()).toContain('8');
+  });
+
+  it('focuses a top-level bullet on double click and exits Focus for an external reveal', async () => {
+    const view = await mount();
+    fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
+    const target: RevealedItem = { kind: 'item', route: { ...route, item_id: '8' }, store: view.store, temporaryExpandedItemIds: [] };
+    view.rerender({ selectedId: '8', reveal: target });
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+    expect(row('8')).not.toBeNull();
+  });
+
+  it('keeps newly entered Focus after an earlier external reveal', async () => {
+    const view = await mount();
+    const target: RevealedItem = { kind: 'item', route: { ...route, item_id: '8' }, store: view.store, temporaryExpandedItemIds: [] };
+    view.rerender({ selectedId: '8', reveal: target });
+    fireEvent.click(within(row('1')).getByRole('button', { name: 'Focus' }));
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
+    expect(ids()).toEqual(['1', '1.1']);
+    expect(screen.getByRole('button', { name: /^↓ Selected:/ })).toBeTruthy();
+  });
+
+  it('returns Selected keyboard focus after revealing a row outside Focus', async () => {
+    const view = await mount({ props: { selectedId: '8' } });
+    fireEvent.click(within(row('1')).getByRole('button', { name: 'Focus' }));
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
+    const tag = screen.getByRole('button', { name: /^↓ Selected:/ });
+    tag.focus(); await userEvent.keyboard('{Enter}');
+    await waitFor(() => expect(view.calls.selected.at(-1)).toMatchObject({ kind: 'item', route: { item_id: '8' } }));
+    await waitFor(() => expect(document.activeElement).toBe(row('8')));
+    expect(viewOf(view.transport).focused_item_id).toBeUndefined();
+  });
+
+  it.each(['row', 'Recent', 'Selected'] as const)('keeps a %s navigation request through a held automatic Recent save', async surface => {
+    const view = await mount({ props: { selectedId: '8' }, configure: transport => {
+      if (surface === 'Selected') viewOf(transport).focused_item_id = '1';
+      viewOf(transport).recent_items = [{ item_id: '2', action: 'viewed', visited_at: '2026-10-13T11:00:00.000Z' }];
+    } });
+    if (surface === 'Selected') await waitFor(() => expect(view.calls.selected).toHaveLength(1));
+    let release!: () => void, entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
+    vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'preferences_patch'
+        && args.request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.recent_items?.[0]?.item_id === '1')) {
+        entered = true; await gate;
+      }
+      return invoke(name, args);
+    });
+    const selectionsBefore = view.calls.selected.length;
+    const saving = view.navigation.saveRecentItems(route, [{ item_id: '1', action: 'peeked', visited_at: '2026-10-13T12:00:00.000Z' }], view.transport.preferences.revision);
+    await waitFor(() => expect(entered).toBe(true));
+    expect(view.navigation.isWritingRecent()).toBe(true);
+    if (surface === 'row') fireEvent.click(row('3'));
+    else if (surface === 'Recent') {
+      fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
+      fireEvent.click(within(screen.getByRole('dialog', { name: 'Recent items' })).getByRole('button', { name: / · viewed/ }));
+    } else {
+      const tag = screen.getByRole('button', { name: /^↓ Selected:/ });
+      tag.focus(); await userEvent.keyboard('{Enter}');
+    }
+    expect(view.calls.selected).toHaveLength(selectionsBefore);
+    await act(async () => { release(); await saving; });
+    if (surface === 'Selected') {
+      await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+      await waitFor(() => expect(document.activeElement).toBe(row('8')));
+    } else await waitFor(() => expect(view.calls.selected.at(-1)).toMatchObject({ kind: 'item', route: { item_id: surface === 'row' ? '3' : '2' } }));
+  });
+
+  it('subscribes to font loading once for the whole Map, including after row rerenders', async () => {
+    const previous = Object.getOwnPropertyDescriptor(document, 'fonts');
+    const fonts = new EventTarget();
+    Object.defineProperty(fonts, 'ready', { value: Promise.resolve() });
+    Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
+    const add = vi.spyOn(fonts, 'addEventListener'), remove = vi.spyOn(fonts, 'removeEventListener');
+    try {
+      const view = await mount();
+      expect(add.mock.calls.filter(([event]) => event === 'loadingdone')).toHaveLength(1);
+      view.rerender({ selectedId: '3' });
+      act(() => fonts.dispatchEvent(new Event('loadingdone')));
+      expect(add.mock.calls.filter(([event]) => event === 'loadingdone')).toHaveLength(1);
+      cleanup();
+      expect(remove.mock.calls.filter(([event]) => event === 'loadingdone')).toHaveLength(1);
+    } finally {
+      if (previous) Object.defineProperty(document, 'fonts', previous); else Reflect.deleteProperty(document, 'fonts');
+    }
+  });
+
   it('keeps closed questions in the tree with their status and a quiet chip, excluding waiting counts', async () => {
     await mount({ configure: transport => { transport.sessions.get(route.session_id)!.state = 'closed'; } });
     const question = row('2');
@@ -459,7 +558,7 @@ describe('session tree rows', () => {
     expect(calls.acts.map(([intent, target]) => `${intent}:${target.item_id}`)).toEqual(['bring:1.1', 'later:1.1', 'reopen:5', 'followup:5']);
     expect(calls.removed).toBe(1);
     // A delivery on its way still permits owner-only Hide and Remove.
-    expect(within(row('3')).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Hide (x)', 'Remove (⌫)']);
+    expect(within(row('3')).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Focus', 'Hide (x)', 'Remove (⌫)']);
     fireEvent.keyDown(row('1.1'), { key: 'b' }); expect(calls.acts).toHaveLength(4);
   });
 });
@@ -1279,6 +1378,26 @@ describe('session tree reading position', () => {
     expect(document.activeElement).toBe(row('2'));
     expect(notices.getSnapshot().some(notice => notice.id === 'tree-reveal-failed')).toBe(false);
   });
+  it.each([true, false])('clears absent opening placement before View archive (owner scrolled: %s)', async scroll => {
+    layout();
+    const view = await mount({ configure: transport => {
+      const saved = viewOf(transport), session = transport.sessions.get(route.session_id)!;
+      saved.selected_item_id = '8'; saved.scroll = null;
+      session.topics[session.items['8']!.topic_id]!.archived_at = session.updated_at;
+    }, props: { selectedId: '8' } });
+    await waitFor(() => expect(view.calls.openedDetail).toEqual([false]));
+    const box = document.querySelector<HTMLElement>('.tree-scroll')!;
+    box.scrollTop = 175;
+    if (scroll) fireEvent.scroll(box);
+    await act(async () => {
+      const saved = view.navigation.getSnapshot().preferences!;
+      const next = structuredClone(saved.sessions.find(value => value.session.session_id === route.session_id)!) as SessionPreferences;
+      next.filters.archived = true;
+      await view.navigation.saveSessionView(next, saved.revision);
+    });
+    expect(row('8')).not.toBeNull();
+    expect(box.scrollTop).toBe(175);
+  });
   it('finishes a timed-out opening quietly and allows a subsequent deliberate reveal', async () => {
     layout(); vi.useFakeTimers();
     const transport = new AppTransport(), invoke = transport.invoke.bind(transport);
@@ -1534,6 +1653,22 @@ describe('item details in the tree', () => {
     expect(more('1')!.textContent).toBe('Show less');
   });
 
+  it('tabs from a top-level row to its preview link before the discoverable Focus action', async () => {
+    measure();
+    await mount({ configure: transport => { transport.sessions.get(route.session_id)!.items['1']!.outcome = `[Read the evidence](https://example.com)\n${long}`; } });
+    const link = within(row('1')).getByRole('link', { name: 'Read the evidence' });
+    const matches = link.matches.bind(link);
+    vi.spyOn(link, 'matches').mockImplementation(selector => selector === ':focus-visible' || matches(selector));
+    act(() => row('1').focus());
+    await userEvent.tab();
+    expect(document.activeElement).toBe(link);
+    expect(row('1').querySelector('.tree-preview[data-clamped]')).toBeNull();
+    await userEvent.tab();
+    expect(document.activeElement).toBe(more('1'));
+    await userEvent.tab();
+    expect(document.activeElement).toBe(within(row('1')).getByRole('button', { name: /^Focus/ }));
+  });
+
   it('preserves full Markdown structure and agent-written item links without selecting their row', async () => {
     const { calls, openLink } = await mount({ configure: transport => {
       transport.sessions.get(route.session_id)!.items['1']!.outcome = '**Bold** and `code`, [website](https://example.com) and [next item](item:4).\n\n| Name | Value |\n| --- | --- |\n| Result | **Ready** |';
@@ -1628,6 +1763,139 @@ describe('item details in the tree', () => {
 });
 
 describe('scrolling the tree', () => {
+  it('keeps a breadcrumb reveal below the pinned header when its chain shortens and an edge callback precedes reflow correction', async () => {
+    let shrink = 0;
+    const callbacks: { run: () => void; targets: Set<Element> }[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      targets = new Set<Element>();
+      constructor(run: () => void) { callbacks.push({ run, targets: this.targets }); }
+      observe(target: Element) { this.targets.add(target); }
+      disconnect() { this.targets.clear(); }
+    });
+    const rectangle = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = document.querySelector<HTMLElement>('.tree-scroll');
+      if (this === box) return new DOMRect(0, 100, 300, 400);
+      if (this.matches('.tree-topic')) return new DOMRect(0, 100, 300, 60);
+      const id = this.getAttribute('data-item-id'), at = id ? ids().indexOf(id) : -1, target = ids().indexOf('deep-1');
+      if (at >= 0 && this.getAttribute('role') === 'treeitem') {
+        return new DOMRect(0, 100 + at * 200 - (box?.scrollTop ?? 0) - (at >= target ? shrink : 0), 300, at === target - 1 ? 200 - shrink : 100);
+      }
+      return rectangle.call(this);
+    });
+    try {
+      const view = await mount({ configure: transport => {
+        const session = transport.sessions.get(route.session_id)!, saved = viewOf(transport);
+        for (let level = 0; level < 5; level++) {
+          const id = `deep-${level}`;
+          session.items[id] = { ...session.items['1.1']!, id, ordinal: 100 + level, parent: level ? `deep-${level - 1}` : '1', question: `Level ${level}`, short: `Level ${level}` };
+          saved.expanded_item_ids.push(id);
+        }
+      } });
+      const box = scroller(), slot = screen.getByRole('navigation', { name: 'Map ancestors' });
+      box.scrollTop = ids().indexOf('deep-4') * 200 - 70; fireEvent.scroll(box);
+      expect(within(slot).getAllByRole('button').map(button => button.textContent)).toEqual(['Level 1', 'Level 2', 'Level 3']);
+      fireEvent.click(within(slot).getByRole('button', { name: 'Level 1' }));
+      await waitFor(() => expect(view.calls.selected.at(-1)).toMatchObject({ kind: 'item', route: { item_id: 'deep-1' } }));
+      expect(row('deep-1').getBoundingClientRect().top).toBe(168);
+      expect(within(slot).getAllByRole('button')).toHaveLength(2);
+      // A late preview clamp runs after the breadcrumb changed; the edge observer
+      // may see that new geometry before the observer that repairs the reading anchor.
+      shrink = 108;
+      act(() => callbacks.find(callback => callback.targets.has(box) && [...callback.targets].some(target => target.matches('.tree-rows')))!.run());
+      act(() => callbacks.find(callback => !callback.targets.has(box) && [...callback.targets].some(target => target.matches('.tree-rows')))!.run());
+      expect(row('deep-1').getBoundingClientRect().top).toBe(168);
+      expect(row('deep-1').getBoundingClientRect().bottom).toBeLessThanOrEqual(box.getBoundingClientRect().bottom);
+      expect(within(slot).getAllByRole('button')).toHaveLength(2);
+      // The window's Cmd+J capture must survive the same event reaching the tree.
+      fireEvent.keyDown(row('deep-1'), { key: 'j', metaKey: true });
+      shrink = 140;
+      act(() => callbacks.find(callback => callback.targets.has(box) && [...callback.targets].some(target => target.matches('.tree-rows')))!.run());
+      act(() => callbacks.find(callback => !callback.targets.has(box) && [...callback.targets].some(target => target.matches('.tree-rows')))!.run());
+      expect(row('deep-1').getBoundingClientRect().top).toBe(168);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('keeps ancestor names in a permanent slot outside rows and reveals the chosen ancestor', async () => {
+    layout();
+    const view = await mount({ configure: transport => {
+      const session = transport.sessions.get(route.session_id)!, saved = viewOf(transport);
+      for (let level = 0; level < 5; level++) {
+        const id = `deep-${level}`;
+        session.items[id] = { ...session.items['1.1']!, id, ordinal: 100 + level, parent: level ? `deep-${level - 1}` : '1', question: `Level ${level}`, short: `Level ${level}` };
+        saved.expanded_item_ids.push(id);
+      }
+    } });
+    const slot = screen.getByRole('navigation', { name: 'Map ancestors' });
+    expect(document.querySelector('.tree-scroll')!.contains(slot)).toBe(false);
+    const box = scroller();
+    box.scrollTop = ids().indexOf('deep-4') * 100; fireEvent.scroll(box);
+    expect(within(slot).getAllByRole('button').map(button => button.textContent)).toEqual(['Level 1', 'Level 2', 'Level 3']);
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    expect(css).toMatch(/\.tree-breadcrumb\s*\{[^}]*height: 28px/);
+    fireEvent.click(within(slot).getByRole('button', { name: 'Level 2' }));
+    await waitFor(() => expect(view.calls.selected.at(-1)).toMatchObject({ kind: 'item', route: { item_id: 'deep-2' } }));
+    expect(screen.getByRole('navigation', { name: 'Map ancestors' })).toBe(slot);
+  });
+
+  it('returns keyboard focus to the selected row when Enter activates its tag', async () => {
+    await opened({ props: { selectedId: '8' } });
+    fireEvent.scroll(scroller());
+    const tag = screen.getByRole('button', { name: /^↓ Selected:/ });
+    tag.focus(); await userEvent.keyboard('{Enter}');
+    expect(document.activeElement).toBe(row('8'));
+    expect(row('8').getBoundingClientRect().top).toBeGreaterThanOrEqual(8);
+  });
+
+  it('names ancestors of the first fully visible row below pinned chrome, skipping a clipped predecessor after reflow', async () => {
+    let predecessorGrowth = 0;
+    let viewportHeight = 400;
+    const callbacks: { run: () => void; targets: Set<Element> }[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      targets = new Set<Element>();
+      constructor(run: () => void) { callbacks.push({ run, targets: this.targets }); }
+      observe(target: Element) { this.targets.add(target); }
+      disconnect() { this.targets.clear(); }
+    });
+    const rectangle = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = document.querySelector<HTMLElement>('.tree-scroll');
+      if (this === box) return new DOMRect(0, 100, 300, viewportHeight);
+      if (this.matches('.tree-topic')) return new DOMRect(0, 100, 300, 60);
+      const id = this.getAttribute('data-item-id'), at = id ? ids().indexOf(id) : -1;
+      if (at >= 0 && this.getAttribute('role') === 'treeitem') {
+        return new DOMRect(0, 100 + at * 100 - (box?.scrollTop ?? 0) + (id === 'deep-4' ? predecessorGrowth : 0), 300, id === 'deep-3' ? 100 + predecessorGrowth : 40);
+      }
+      return rectangle.call(this);
+    });
+    try {
+      await mount({ configure: transport => {
+        const session = transport.sessions.get(route.session_id)!, saved = viewOf(transport);
+        for (let level = 0; level < 5; level++) {
+          const id = `deep-${level}`;
+          session.items[id] = { ...session.items['1.1']!, id, ordinal: 100 + level, parent: level ? `deep-${level - 1}` : '1', question: `Level ${level}`, short: `Level ${level}` };
+          saved.expanded_item_ids.push(id);
+        }
+      } });
+      const box = scroller(), slot = screen.getByRole('navigation', { name: 'Map ancestors' });
+      box.scrollTop = ids().indexOf('deep-4') * 100 - 68; fireEvent.scroll(box);
+      expect(row('deep-3').getBoundingClientRect().bottom).toBe(168);
+      expect(row('deep-4').getBoundingClientRect().top).toBe(168);
+      expect(within(slot).getAllByRole('button').map(button => button.textContent)).toEqual(['Level 1', 'Level 2', 'Level 3']);
+      predecessorGrowth = 20;
+      act(() => callbacks.find(callback => [...callback.targets].some(target => target.matches('.tree-rows')) && !callback.targets.has(box))!.run());
+      expect(row('deep-4').getBoundingClientRect().top).toBe(188);
+      expect(within(slot).getAllByRole('button').map(button => button.textContent)).toEqual(['Level 1', 'Level 2', 'Level 3']);
+      // An item hidden by the pinned topic is not the first fully visible row.
+      box.scrollTop += 40; fireEvent.scroll(box);
+      expect(within(slot).queryAllByRole('button').map(button => button.textContent)).not.toEqual(['Level 1', 'Level 2', 'Level 3']);
+      // Neither is a row whose bottom is outside the window.
+      box.scrollTop -= 40; fireEvent.scroll(box);
+      viewportHeight = 100;
+      act(() => callbacks.find(callback => [...callback.targets].some(target => target.matches('.tree-rows')) && !callback.targets.has(box))!.run());
+      expect(within(slot).queryAllByRole('button')).toHaveLength(0);
+    } finally { vi.unstubAllGlobals(); }
+  });
   // A 400 px tree over rows 100 px apart that move with its scrollTop, scrolled 150 px down.
   const layout = () => {
     const rectangle = HTMLElement.prototype.getBoundingClientRect;
@@ -1648,6 +1916,51 @@ describe('scrolling the tree', () => {
   };
   const link = (view: Awaited<ReturnType<typeof mount>>, id: string): RevealedItem =>
     ({ kind: 'item', route: { ...route, item_id: id }, store: view.store, temporaryExpandedItemIds: [] });
+
+  it('holds a revealed ancestor below the sticky header when detail-width clamping shrinks its preceding row', async () => {
+    let shrink = 0;
+    const callbacks: { run: () => void; targets: Set<Element> }[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      targets = new Set<Element>();
+      constructor(run: () => void) { callbacks.push({ run, targets: this.targets }); }
+      observe(target: Element) { this.targets.add(target); }
+      disconnect() { this.targets.clear(); }
+    });
+    const rectangle = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = document.querySelector<HTMLElement>('.tree-scroll');
+      if (this === box) return new DOMRect(0, 0, 300, 200);
+      if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 60);
+      const id = this.getAttribute('data-item-id'), at = id ? ids().indexOf(id) : -1, target = ids().indexOf('8');
+      if (at >= 0 && this.getAttribute('role') === 'treeitem') {
+        const height = at === target - 1 ? 100 - shrink : at === target ? 140 : 40;
+        return new DOMRect(0, at * 100 - (box?.scrollTop ?? 0) - (at >= target ? shrink : 0), 300, height);
+      }
+      return rectangle.call(this);
+    });
+    try {
+      const view = await mount();
+      scroller().scrollTop = 150; fireEvent.scroll(scroller());
+      view.rerender({ reveal: link(view, '8'), selectedId: '8', detailOpen: true });
+      expect(row('8').getBoundingClientRect().top).toBe(68);
+      // The preceding row still ends eight pixels below the header, then loses eighty pixels.
+      shrink = 80;
+      act(() => callbacks.find(callback => [...callback.targets].some(target => target.matches('.tree-rows')) && !callback.targets.has(scroller()))!.run());
+      expect(row('8').getBoundingClientRect().top).toBe(68);
+      const top = scroller().scrollTop;
+      fireEvent.pointerDown(row('8'));
+      shrink = 90;
+      act(() => callbacks.find(callback => [...callback.targets].some(target => target.matches('.tree-rows')) && !callback.targets.has(scroller()))!.run());
+      expect(scroller().scrollTop).toBe(top);
+      expect(row('8').getBoundingClientRect().top).toBe(58);
+      fireEvent.wheel(scroller());
+      scroller().scrollTop -= 20; fireEvent.scroll(scroller());
+      shrink = 95;
+      act(() => callbacks.find(callback => [...callback.targets].some(target => target.matches('.tree-rows')) && !callback.targets.has(scroller()))!.run());
+      expect(scroller().scrollTop).toBe(top - 20);
+      expect(row('8').getBoundingClientRect().top).toBe(73);
+    } finally { vi.unstubAllGlobals(); }
+  });
 
   it('observes sticky topic headers arriving after a saved search starts loading', async () => {
     const observers: Set<Element>[] = [];
@@ -1794,7 +2107,7 @@ describe('scrolling the tree', () => {
       const item = transport.sessions.get(route.session_id)!.items['4']!;
       item.status = 'replaced'; item.replaced_by = '8';
     } });
-    fireEvent.click(within(row('4')).getByRole('button', { name: view.transport.sessions.get(route.session_id)!.items['8']!.question }));
+    fireEvent.click(within(row('4')).getByRole('link', { name: view.transport.sessions.get(route.session_id)!.items['8']!.question }));
     await waitFor(() => expect(view.calls.selected).toHaveLength(1));
     view.rerender({ reveal: view.calls.selected[0], selectedId: '8', detailOpen: true });
     expect(scroller().scrollTop).toBe(448);
@@ -1837,10 +2150,13 @@ describe('scrolling the tree', () => {
     const marker = () => screen.getByRole('button', { name: edge === 'above' ? /^↑ Selected:/ : /^↓ Selected:/ });
     expect(marker().getAttribute('data-edge')).toBe(edge);
     const slot = document.querySelector('.tree-filters > .tree-selected-slot')!;
+    expect(slot.getAttribute('aria-label')).toBe('Selected item navigation');
+    expect(slot.closest('[aria-label="Filter items"]')).toBeNull();
     expect(slot.contains(marker())).toBe(true);
     expect(document.querySelector('.tree-scroll-shell')!.contains(marker())).toBe(false);
     expect(marker().querySelector('.tree-selected-label')?.textContent).not.toBe('');
     fireEvent.click(marker());
+    expect(document.activeElement).toBe(row(edge === 'above' ? '1' : '8'));
     expect(screen.queryByRole('button', { name: /Selected:/ })).toBeNull();
     expect(document.querySelector('.tree-selected-slot')).toBe(slot);
     expect(slot.children).toHaveLength(0);

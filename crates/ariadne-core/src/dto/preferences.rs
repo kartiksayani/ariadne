@@ -101,6 +101,7 @@ pub const DETAIL_WIDTH_MIN: u32 = 320;
 pub const DETAIL_WIDTH_MAX: u32 = 2400;
 /// Most folded topic bands kept per session.
 pub const COLLAPSED_TOPICS_CAPACITY: usize = 256;
+pub const RECENT_ITEMS_CAPACITY: usize = 15;
 pub const SESSION_ARCHIVE_EXPANSION_CAPACITY: usize = 256;
 
 pub const NOTIFICATION_LEDGER_CAPACITY: usize = 256;
@@ -143,6 +144,13 @@ pub struct SessionPreferences {
     pub session: SessionRef,
     pub tab_open: bool,
     pub selected_item_id: Option<ItemRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub focused_item_id: Option<ItemRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = 15))]
+    #[ts(as = "Option<Vec<RecentItem>>", optional)]
+    pub recent_items: Vec<RecentItem>,
     pub tab_order: NonnegativeSafeInteger,
     pub expanded_item_ids: Vec<ItemRef>,
     // Items the owner hid in this session; descendants inherit their parent's visibility.
@@ -157,6 +165,22 @@ pub struct SessionPreferences {
     #[schemars(length(max = 256))]
     #[ts(as = "Option<Vec<UuidV4>>", optional)]
     pub collapsed_topic_ids: Vec<UuidV4>,
+}
+/// Local browsing trail; it never creates a domain Input or acknowledgement.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct RecentItem {
+    pub item_id: ItemRef,
+    pub action: RecentAction,
+    pub visited_at: UtcMillis,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum RecentAction {
+    Viewed,
+    Peeked,
+    Answered,
+    Acked,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]

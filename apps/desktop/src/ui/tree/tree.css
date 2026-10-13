@@ -1162,11 +1162,85 @@
   text-overflow: ellipsis;
 }
 
+.tree-selected-edge:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* The fixed slot is outside the scroller: changing its names neither overlaps rows nor moves them. */
+.tree-breadcrumb {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  min-width: 0;
+  padding: 0 16px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: calc(12px * var(--text-scale));
+}
+
+.tree-breadcrumb > span {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 4px;
+}
+
+.tree-breadcrumb button,
+.tree-focus-action {
+  min-width: 0;
+  padding: 2px 5px;
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+  font-size: calc(12px * var(--text-scale));
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  color: var(--a-acc-text);
+  background: transparent;
+}
+
+.tree-focus-action {
+  align-self: flex-start;
+  height: 24px;
+  box-sizing: border-box;
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+}
+
+.tree-breadcrumb button {
+  padding: 0;
+  line-height: inherit;
+}
+
 .tree-selected-edge > span:first-child {
   flex: none;
 }
 
-.tree-selected-edge:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+.tree-recent > button {
+  flex: none;
+  font-size: calc(12px * var(--text-scale));
+}
+
+.tree-focus-action:hover {
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.tree-breadcrumb button:hover { text-decoration: underline; }
+
+.tree-recent {
+  display: flex;
+  flex: none;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  padding: 4px 16px 0;
+}
+
+.tree-recent > nav {
+  flex: 1;
+  min-width: 0;
 }

@@ -84,6 +84,8 @@ fn view() -> SessionPreferences {
         session: reference(700),
         tab_open: false,
         selected_item_id: Some(ItemRef::new("1").unwrap()),
+        focused_item_id: None,
+        recent_items: vec![],
         tab_order: NonnegativeSafeInteger::new(4).unwrap(),
         expanded_item_ids: vec![ItemRef::new("1").unwrap()],
         hidden_item_ids: vec![],
@@ -315,6 +317,86 @@ fn legacy_session_preferences_default_hidden_items_without_rewriting_or_changing
         .is_empty());
     assert_eq!(service.patch(&owner(), &command).unwrap(), saved);
     assert_eq!(fs::read(s.live()).unwrap(), before);
+}
+
+#[test]
+fn recent_and_focus_preferences_are_additive_bounded_and_survive_reopening() {
+    let s = Setup::new();
+    let mut preferences = view();
+    let legacy = serde_json::to_value(&preferences).unwrap();
+    assert!(legacy.get("focused_item_id").is_none());
+    assert!(legacy.get("recent_items").is_none());
+    let decoded: SessionPreferences = serde_json::from_value(legacy.clone()).unwrap();
+    assert!(decoded.focused_item_id.is_none() && decoded.recent_items.is_empty());
+    assert_eq!(serde_json::to_value(decoded).unwrap(), legacy);
+    preferences.focused_item_id = Some(ItemRef::new("1.2").unwrap());
+    preferences.recent_items = (1..=RECENT_ITEMS_CAPACITY)
+        .map(|index| RecentItem {
+            item_id: ItemRef::new(index.to_string()).unwrap(),
+            action: match index % 4 {
+                0 => RecentAction::Viewed,
+                1 => RecentAction::Peeked,
+                2 => RecentAction::Answered,
+                _ => RecentAction::Acked,
+            },
+            visited_at: at(),
+        })
+        .collect();
+    let saved = s
+        .preferences()
+        .patch(
+            &owner(),
+            &patch(
+                190,
+                1,
+                vec![PreferencesPatchEntry::SetSessionView {
+                    preferences: preferences.clone(),
+                }],
+            ),
+        )
+        .unwrap();
+    let reopened = Registry::open(s.home.path()).unwrap();
+    let restored = PreferencesService::new(&reopened).get(&owner()).unwrap();
+    assert_eq!(restored.schema_version.value(), 1);
+    assert_eq!(restored.revision, saved.preferences_revision);
+    assert_eq!(restored.sessions[0], preferences);
+    let bytes = fs::read(s.live()).unwrap();
+    for invalid in [
+        {
+            let mut value = preferences.clone();
+            value.recent_items.push(value.recent_items[0].clone());
+            value
+        },
+        {
+            let mut value = preferences.clone();
+            value.recent_items[1].item_id = value.recent_items[0].item_id.clone();
+            value
+        },
+    ] {
+        assert!(s
+            .preferences()
+            .patch(
+                &owner(),
+                &patch(
+                    191,
+                    2,
+                    vec![PreferencesPatchEntry::SetSessionView {
+                        preferences: invalid
+                    }]
+                )
+            )
+            .is_err());
+        assert_eq!(fs::read(s.live()).unwrap(), bytes);
+    }
+    for (field, invalid) in [
+        ("item_id", serde_json::json!("bad")),
+        ("action", serde_json::json!("opened")),
+        ("visited_at", serde_json::json!("yesterday")),
+    ] {
+        let mut wire = serde_json::to_value(&preferences).unwrap();
+        wire["recent_items"][0][field] = invalid;
+        assert!(serde_json::from_value::<SessionPreferences>(wire).is_err());
+    }
 }
 
 #[test]

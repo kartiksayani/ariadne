@@ -44,7 +44,7 @@ export function sentAs(status: StatusKey): WordsKind {
   return status === 'open' || status === 'waiting' ? 'reply' : status === 'progress' ? 'note' : 'followup';
 }
 
-export interface Crumb { readonly label: string; readonly itemId: string | null }
+export type Crumb = { readonly label: string; readonly itemId: null } | { readonly itemId: string };
 export interface Step { readonly label: string; readonly dotBg: string; readonly dotRing: string; readonly color: string; readonly weight: number; readonly line: boolean; readonly lineBg: string }
 export interface DeliveryLine { readonly icon: string; readonly text: string; readonly color: string }
 export type ActionKey = 'bring' | 'reply' | 'drop' | 'later' | 'note' | 'followup' | 'reopen';
@@ -111,7 +111,7 @@ export interface DetailModel {
   readonly kidLabel: string;
   readonly kids: readonly Kid[];
   readonly related: readonly { readonly direction: LinkDirection; readonly label: string; readonly items: readonly {
-    readonly id: string; readonly label: string; readonly question: string; readonly status: StatusKey; readonly hidden: boolean;
+    readonly id: string; readonly question: string; readonly status: StatusKey; readonly hidden: boolean;
   }[] }[];
   readonly links: readonly LinkView[];
   readonly prev: { readonly status: StatusKey; readonly outcome: string } | null;
@@ -211,7 +211,7 @@ export function detailPath(session: Immutable<Session>, itemId: string): Crumb[]
   if (!item || itemRemoved(session, item.id)) return [];
   const topic = session.topics[item.topic_id], ancestors: Immutable<Item>[] = [];
   for (let parent = item.parent ? session.items[item.parent] : undefined; parent; parent = parent.parent ? session.items[parent.parent] : undefined) ancestors.unshift(parent);
-  return [...(topic ? [{ label: shortLabel(topic), itemId: null }] : []), ...ancestors.map(value => ({ label: shortLabel(value), itemId: value.id }))];
+  return [...(topic ? [{ label: shortLabel(topic), itemId: null }] : []), ...ancestors.map(value => ({ itemId: value.id }))];
 }
 
 /** The detail panel for one item, or null when the item is not in the snapshot. */
@@ -407,7 +407,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     kidLabel: `Branched into ${kids.length} item${kids.length > 1 ? 's' : ''}`,
     kids: kids.map(kid),
     related: relatedSections.map(section => ({ ...section, items: relatedItems(session, item.id, section.direction).map(target => ({
-      id: target.id, label: shortLabel(target), question: target.question, status: statusKey[displayStatus(session, target)], hidden: hidden.has(target.id),
+      id: target.id, question: target.question, status: statusKey[displayStatus(session, target)], hidden: hidden.has(target.id),
     })) })).filter(section => section.items.length > 0),
     links: item.links.map(link => ({ kind: link.kind, icon: LINKICON[link.kind] ?? 'ph ph-link', target: link.target, label: link.label, meta: (link as typeof link & { meta?: string }).meta ?? '' })),
     prev: reopened ? { status: statusKey[reopened.old_status], outcome: reopened.previous_outcome ?? '' } : null,

@@ -22,7 +22,7 @@ describe('workspace keymap', () => {
     expect(kinds(['/', 'g', 'm', 'w', 'Escape', 'Backspace', 'Delete'])).toEqual(['search', 'graph', 'messages', 'waiting', 'escape', 'remove', 'remove']);
     expect(workspaceIntent({ key: '1' })).toEqual({ kind: 'choose', index: 0 });
     expect(workspaceIntent({ key: '9' })).toEqual({ kind: 'choose', index: 8 });
-    expect(kinds(['0', 'A', 'X', 'Tab', ' '])).toEqual([null, null, null, null, null]);
+    expect(kinds(['0', 'A', 'X', 'Tab', ' '])).toEqual([null, null, null, null, 'peek']);
   });
 
   it('accepts Cmd+F, Cmd+Enter and item history chords among modified keys', () => {

@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ItemRow, type ItemRowProps } from '../../../src/ui/tree/ItemRow';
 import type { ItemRow as Row } from '../../../src/ui/tree/model';
-import { LinkOpener } from '../../../src/ui/shared/MarkdownText';
+import { ItemRefs, LinkOpener } from '../../../src/ui/shared/MarkdownText';
 import { AppTransport, route } from '../app/transport';
+import { shortLabel } from '../../../src/ui/shared/short';
+import { TreeFonts, useTreeFonts } from '../../../src/ui/tree/fonts';
 
 const originalFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
 afterEach(() => {
@@ -47,15 +49,16 @@ function mount(body: string, extra: Partial<ItemRowProps> = {}) {
   const row: Row = { kind: 'item', key: 'item:1', item, status: 'open', ack: null, depth: 1, hasKids: false, expanded: false,
     context: false, guides: [], later: false, hidden: false, segments: [{ text: 'Complete question', hit: false }],
     replacedBy: null, rounds: 1, relatedCount: 0, collapsed: null, delivery: null, badge: 'Open' };
-  const onSelect = vi.fn(), onJump = vi.fn(), openLink = vi.fn();
+  const onSelect = vi.fn(), openItem = vi.fn(), openLink = vi.fn();
   function Harness() {
     const [unfolded, setUnfolded] = useState(false);
-    return <LinkOpener.Provider value={openLink}><ItemRow row={row} selected={false} focused={true} highlight={null} note={null}
+    const epoch = useTreeFonts();
+    return <ItemRefs.Provider value={{ lookup: id => { const value = extra.row?.replacedBy; return value?.id === id ? { label: value.question, name: shortLabel(value), status: value.status } : null; }, onOpenItem: openItem }}><TreeFonts.Provider value={epoch}><LinkOpener.Provider value={openLink}><ItemRow row={row} selected={false} focused={true} highlight={null} note={null}
       actions={[]} answer={null} unfolded={unfolded} onUnfold={() => setUnfolded(value => !value)} remember={() => {}}
-      onFocus={() => {}} onKeyDown={() => {}} onSelect={onSelect} onToggle={() => {}} onJump={onJump} onHover={() => {}} {...extra} /></LinkOpener.Provider>;
+      onFocus={() => {}} onKeyDown={() => {}} onSelect={onSelect} onToggle={() => {}} onHover={() => {}} {...extra} /></LinkOpener.Provider></TreeFonts.Provider></ItemRefs.Provider>;
   }
   const view = render(<Harness />);
-  return { ...view, row, onSelect, onJump, openLink, preview: () => document.querySelector<HTMLElement>('.tree-preview')! };
+  return { ...view, row, onSelect, openItem, openLink, preview: () => document.querySelector<HTMLElement>('.tree-preview')! };
 }
 
 describe('rendered preview lines', () => {
@@ -185,16 +188,16 @@ describe('rendered preview lines', () => {
     expect(css).toMatch(/\.tree-preview \.md-pre\s*\{\s*max-height: none;\s*overflow: visible;/);
   });
 
-  it('displays the replacement full question with its full accessible name', () => {
+  it('displays the replacement as a short name reference with the complete question in its title', () => {
     const replacement = { ...new AppTransport().sessions.get(route.session_id)!.items['4']!, question: 'A complete replacement question that is much longer than the old short label'.repeat(3) };
     const base = mount(''); base.unmount();
     const row = { ...base.row, item: { ...base.row.item, status: 'replaced' as const }, replacedBy: replacement };
     const view = mount('', { row });
-    const link = screen.getByRole('button', { name: replacement.question });
-    expect(link.textContent).toBe(replacement.question);
-    expect(link.getAttribute('title')).toBe(replacement.question);
+    const link = screen.getByRole('link', { name: shortLabel(replacement) });
+    expect(link.textContent).toBe(shortLabel(replacement));
+    expect(link.getAttribute('title')).toContain(replacement.question);
     fireEvent.click(link);
-    expect(view.onJump).toHaveBeenCalledWith(replacement.id);
+    expect(view.openItem).toHaveBeenCalledWith(replacement.id);
     expect(view.onSelect).not.toHaveBeenCalled();
   });
 });

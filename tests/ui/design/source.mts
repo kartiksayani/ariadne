@@ -8,6 +8,7 @@ import { sessionChrome } from './session-chrome';
 import { graphChrome } from './graph-chrome';
 import { footerChrome } from './footer-chrome';
 import { itemRowChrome, topicRowChrome } from './row-chrome';
+import { gettingAroundChrome, gettingAroundItemChrome } from './getting-around-chrome';
 
 export const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 export const archive = resolve(repo, 'designs/Ariadne-UI-mockups-v2.zip');
@@ -22,8 +23,8 @@ import json, sys, zipfile
 with zipfile.ZipFile(sys.argv[1]) as archive:
     print(json.dumps({name.removeprefix(sys.argv[2]): archive.read(name).decode('utf-8') for name in archive.namelist() if not name.endswith('/')}))
 `, archive, prefix], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })) as Record<string, string>;
-  members['Ariadne.dc.html'] = footerChrome(graphChrome(topicRowChrome(sessionChrome(members['Ariadne.dc.html']!))));
-  members['Item Row.dc.html'] = itemRowChrome(members['Item Row.dc.html']!);
+  members['Ariadne.dc.html'] = gettingAroundChrome(footerChrome(graphChrome(topicRowChrome(sessionChrome(members['Ariadne.dc.html']!)))));
+  members['Item Row.dc.html'] = gettingAroundItemChrome(itemRowChrome(members['Item Row.dc.html']!));
   return members;
 }
 

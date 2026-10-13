@@ -21,9 +21,10 @@ export interface TopicRowProps {
   readonly reply?: ReactNode;
   /** A stopped delivery's inline fix (ui/answer/StuckNote), below the sticky status. */
   readonly fix?: ReactNode;
+  readonly ackAll?: ReactNode;
 }
 
-export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onKeyDown, onToggle, reply, fix }: TopicRowProps) {
+export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onKeyDown, onToggle, reply, fix, ackAll }: TopicRowProps) {
   const topic = row.topic;
   // A click focuses the band, which tints it and shows its actions; the chevron folds.
   return <><div ref={element => remember(row.key, element)} role="treeitem" aria-level={1} aria-expanded={row.expanded} aria-label={topic.name}
@@ -41,7 +42,7 @@ export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onK
           onClick={event => { event.stopPropagation(); action.run(); }}><i className={action.icon} /></button>)}</span>
       </span>}
     </div>
-    {row.counts.length > 0 && <div className="tree-topic-counts">{row.counts.map(count => <span key={count.text} className="tree-count"><i className={count.icon} style={{ color: count.color }} />{count.text}</span>)}</div>}
+    {(row.counts.length > 0 || ackAll) && <div className="tree-topic-counts">{row.counts.filter(count => !ackAll || !count.text.endsWith('to ack')).map(count => <span key={count.text} className="tree-count"><i className={count.icon} style={{ color: count.color }} />{count.text}</span>)}{ackAll}</div>}
     {row.delivery && <div className="tree-topic-line tree-topic-status" style={{ color: row.delivery.color }}><i className={row.delivery.icon} /><span>{row.delivery.text}</span></div>}
   </div>
   {(fix || prompt || reply) && <div className="tree-topic-content"><Guides guides={row.guides.filter(guide => guide.kind === 'line').map(guide => ({ ...guide, fromBullet: false }))} />

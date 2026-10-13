@@ -435,6 +435,17 @@ impl OwnerCommand {
                             }
                         }
                         PreferencesPatchEntry::SetSessionView { preferences } => {
+                            if preferences.recent_items.len() > RECENT_ITEMS_CAPACITY {
+                                return Err(invalid("Recent items exceed the 15 entry bound"));
+                            }
+                            let mut recent = std::collections::BTreeSet::new();
+                            if !preferences
+                                .recent_items
+                                .iter()
+                                .all(|entry| recent.insert(&entry.item_id))
+                            {
+                                return Err(invalid("Duplicate recent item"));
+                            }
                             let mut hidden = std::collections::BTreeSet::new();
                             if !preferences
                                 .hidden_item_ids

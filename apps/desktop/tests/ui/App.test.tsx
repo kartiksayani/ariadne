@@ -43,6 +43,10 @@ async function openSession(id = route.session_id, pending = false) {
     expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
   });
 }
+async function goToChip(element: Element) {
+  await act(async () => { fireEvent.click(element); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Go to' })); });
+}
 async function allSessions() {
   const button = screen.getByRole('button', { name: /^All sessions/ });
   await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false)); fireEvent.click(button);
@@ -83,7 +87,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     fireEvent.click(screen.getByRole('button', { name: 'Switch to light' }));
     await waitFor(() => expect(writing).toBe(true));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Projects' })); });
-    await act(async () => { fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ })); });
+    await goToChip(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     expect(projectWrites()).toHaveLength(initialProjectWrites);
     await act(async () => { releaseOwner(); });
     await waitFor(() => expect(resolving).toBe(true));
@@ -111,7 +115,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       }
       return invoke(name, args);
     });
-    await act(async () => { fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ })); });
+    await goToChip(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     await waitFor(() => expect(resolving).toBe(true));
     fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
     await screen.findByRole('heading', { name: 'Projects' });
@@ -179,7 +183,8 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     await waitFor(() => expect(entered).toBe(true), { timeout: 3000 });
-    fireEvent.click(await screen.findByRole('button', { name: /^Branched into Add the receipt lookup test/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Branched into Add the receipt lookup/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Go to' }));
     // A reveal must finish before this unrelated background response arrives.
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1');
@@ -829,15 +834,17 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
     await act(async () => { parent.focus(); });
     expect(document.activeElement).toBe(parent);
-    const fork = await screen.findByRole('button', { name: /^Branched into Add the receipt lookup test/ });
+    const fork = await screen.findByRole('button', { name: /^Branched into Add the receipt lookup/ });
     expect(fork.hasAttribute('disabled')).toBe(false);
     await act(async () => {
       if (ordering === 'click then focus') { fireEvent.click(fork); fork.focus(); }
       else { fork.focus(); fireEvent.click(fork); }
     });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Go to' })); });
     await waitFor(() => expect(entered).toBe(true));
     expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(true);
-    expect(transport.queries.some(query => query.request.command === 'reveal_item' && query.request.params.item_id === '1.1')).toBe(true);
+    // Opening the peek already blurred the row; Go to waits for that write before resolving.
+    expect(transport.queries.some(query => query.request.command === 'reveal_item' && query.request.params.item_id === '1.1')).toBe(false);
     if (outcome === 'uncertain') transport.failNext = 'preferences_patch';
     if (outcome === 'rejected') reject = true;
     if (outcome === 'shortcut') {
@@ -899,7 +906,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       return this.matches('[role="treeitem"]') ? new DOMRect(0, 20, 300, 40) : rectangle.call(this);
     });
     const { transport } = setup(), invoke = transport.invoke.bind(transport);
-    let release!: () => void, entered = false, rejected = false;
+    let release!: () => void, entered = false, rejected = false, conflictRevision = 0;
     const gate = new Promise<void>(resolve => { release = resolve; });
     vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
       const request = args.request;
@@ -911,7 +918,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
         && request.command.params.entries.every(entry => entry.kind === 'set_session_view' && entry.preferences.scroll !== null)) {
         entered = true; await gate; rejected = true; transport.mutations.push(structuredClone(request));
         // A native-side writer advanced the document without notifying the renderer.
-        if (code === 'revision_conflict') ++transport.preferences.revision;
+        if (code === 'revision_conflict') conflictRevision = ++transport.preferences.revision;
         return { api_version: 1, ok: false, error: { code, message: 'Scroll edit rejected.', hint: 'Choose the view again.',
           retryable: false, field_errors: [] } };
       }
@@ -923,17 +930,19 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
     const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
     await act(async () => { parent.focus(); });
-    const fork = await screen.findByRole('button', { name: /^Branched into Add the receipt lookup test/ });
+    const fork = await screen.findByRole('button', { name: /^Branched into Add the receipt lookup/ });
     await act(async () => { fireEvent.click(fork); fork.focus(); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Go to' })); });
     await waitFor(() => expect(entered).toBe(true));
     await act(async () => { release(); await gate; });
     const selections = () => mutations(transport, 'preferences_patch').filter(request => request.command.command === 'preferences_patch'
-      && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1'));
+      && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id === '1.1')
+      && request.command.params.entries.some(entry => entry.kind === 'set_global'));
     if (code === 'revision_conflict') {
       await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
       expect(selections()).toHaveLength(1);
       const selection = selections()[0].command;
-      expect(selection.command === 'preferences_patch' && selection.params.expected_preferences_revision).toBe(transport.preferences.revision - 1);
+      expect(selection.command === 'preferences_patch' && selection.params.expected_preferences_revision).toBeGreaterThanOrEqual(conflictRevision);
       expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1');
     } else {
       await screen.findByRole('button', { name: 'Check again' });
@@ -969,7 +978,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Switch to light' }));
     await waitFor(() => expect(writing).toBe(true));
-    await act(async () => { fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ })); });
+    await goToChip(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(true);
     await act(async () => { releaseWrite(); await writeGate; });
     await waitFor(() => expect(reading).toBe(true));
@@ -1016,7 +1025,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       if (hold) completed = true;
       return response;
     });
-    fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
+    await goToChip(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     await waitFor(() => expect(entered).toBe(true));
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     const search = screen.getByLabelText('Search questions and outcomes');
@@ -1051,7 +1060,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       }
       return invoke(name, args);
     });
-    fireEvent.click(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
+    await goToChip(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     await waitFor(() => expect(entered).toBe(true));
     const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
     expect(parent.getAttribute('aria-disabled')).toBe('true');

@@ -46,6 +46,12 @@ import { visibleSession } from '../remove/model';
 import { reconnectingNote } from '../shared/connection';
 import { useFilterFolds } from '../shared/filterFolds';
 import { isViewConflict } from '../shared/conflictNotice';
+import { TreeFonts, useTreeFonts } from './fonts';
+import { branchItems, breadcrumbItems, focusedRows } from './gettingAround';
+import { usePeek } from '../peek/Peek';
+import { RecentDialog, RecentTrail } from '../navigation/Recent';
+import { navigationVisits } from '../navigation/visits';
+import { AckAll } from '../navigation/AckAll';
 import './tree.css';
 
 export type RowIntent = 'bring' | 'reply' | 'drop' | 'note' | 'followup' | 'reopen' | 'later' | 'hide';
@@ -102,6 +108,8 @@ export function TreeView(props: TreeViewProps) {
     summaries, onHoverItem, onSelected, onDismissReveal, onResume, onAct, onClearFilters, onClearSearch, onShowArchive,
     onAgentNotRunning, onRemove } = props;
   const state = useSession(store), raw = state.snapshot?.session ?? null;
+  const fontEpoch = useTreeFonts();
+  const peek = usePeek();
   const nav = useNavigation(navigation), preferences = nav.preferences;
   const route = state.route;
   // Rows of a pending removal are gone at once; Undo brings them back.
@@ -137,11 +145,16 @@ export function TreeView(props: TreeViewProps) {
   const [continuing, setContinuing] = useState<string | null>(null);
   const [replying, setReplying] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [recentOpen, setRecentOpen] = useState(false);
+  useEffect(() => navigationVisits.bind(navigation), [navigation]);
   useOwnerDrafts(drafts, raw);
   const lifecycle = useLifecycle(actions);
   const ack = useAck(actions, selectedId);
   const [ackItemId, setAckItemId] = useState<string | null>(null);
-  const runAck = (itemId: string) => { setAckItemId(itemId); return ack.run(itemId); };
+  const runAck = (itemId: string) => { setAckItemId(itemId); return ack.run(itemId).then(saved => {
+    if (saved) navigationVisits.record(route, itemId, 'acked');
+    return saved;
+  }); };
   const noticeCallbacks = useRef({ lifecycle, onShowArchive });
   noticeCallbacks.current = { lifecycle, onShowArchive };
   const archivedNotice = lifecycle.archived;
@@ -180,6 +193,8 @@ export function TreeView(props: TreeViewProps) {
   }, [lifecycleNoticeId, lifecycleNotice]);
   const elements = useRef(new Map<string, HTMLDivElement>()), scroller = useRef<HTMLDivElement>(null);
   const scrollRequested = useRef<string | null>(null);
+  const revealedAnchor = useRef<{ readonly key: string; readonly offset: number } | null>(null);
+  const focusRequested = useRef<string | null>(null);
   const mounted = useRef(true), request = useRef(0);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, [store]);
   // Unmounting or swapping the rows for the graph leaves no row to fire mouseleave.
@@ -198,12 +213,13 @@ export function TreeView(props: TreeViewProps) {
   [session, view, query, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, presence, health, summaries, minute]);
   const summary = summaries.find(value => value.project_id === route.project_id && value.session_id === route.session_id) ?? null;
   const bar = sessionBar(session, summary, presence);
-  const rows = useMemo(() => model?.rows ?? [], [model]);
-  const selectedItem = selectedId ? session?.items[selectedId] : null;
+  const focusedItem = view?.focused_item_id ? session?.items[view.focused_item_id] : null;
+  const focusedId = focusedItem && !focusedItem.parent && session && !itemRemoved(session, focusedItem.id) ? focusedItem.id : null;
+  const focusedBranch = useMemo(() => session && focusedId ? branchItems(session, focusedId) : null, [session, focusedId]);
+  const rows = useMemo(() => session ? focusedRows(model?.rows ?? [], session, focusedId) : model?.rows ?? [], [model, session, focusedId]);
   const names = useMemo(() => itemLabels([
-    ...rows.flatMap(row => row.kind === 'item' ? [row.item] : []),
-    ...selectedItem ? [selectedItem] : [],
-  ], session?.topics), [rows, selectedItem, session?.topics]);
+    ...Object.values(session?.items ?? {}).filter(item => !!item),
+  ], session?.topics), [session?.items, session?.topics]);
   const sections = useMemo(() => {
     const groups: { topic: Extract<Row, { kind: 'topic' }>; items: Exclude<Row, { kind: 'topic' }> [] }[] = [];
     for (const row of rows) {
@@ -278,8 +294,10 @@ export function TreeView(props: TreeViewProps) {
   }, [pendingEdits, writingEdits, viewBusy, savedView, preferences, navigation]);
   const clickedReveal = useRef<RevealedItem | null>(null);
   const select = (id: string, fromRow = true, opening = false) => {
-    if (viewBusy) return;
+    if (fromRow && viewBusy && !navigation.isWritingRecent()) return false;
+    releaseReveal();
     const call = ++request.current;
+    focusRequested.current = null;
     openingRequest.current = opening ? call : null;
     if (!opening) { centered.current = true; settled.current = true; openingPlacement.current = null; setAnchor(null); }
     scrollRequested.current = null;
@@ -290,6 +308,12 @@ export function TreeView(props: TreeViewProps) {
     let expired = false;
     const loading = () => new OwnFailure({ code: 'snapshot_changed', message: "Ariadne is still loading this session's latest changes. Try again.", hint: '', retryable: true, field_errors: [] });
     const reveal = async () => {
+      while (navigation.getSnapshot().writing) {
+        const completion = navigation.getWritingCompletion();
+        if (!completion) break;
+        await completion;
+        if (expired || !mounted.current || call !== request.current) return null;
+      }
       if (store.getSnapshot().status !== 'ready' || store.getSnapshot().error) await store.refresh(true);
       if (expired || !mounted.current || call !== request.current) return null;
       if (store.getSnapshot().status !== 'ready' || store.getSnapshot().error) throw loading();
@@ -304,12 +328,17 @@ export function TreeView(props: TreeViewProps) {
       clickedReveal.current = fromRow || opening ? result : null;
       if (opening) {
         openingRequest.current = null;
-        if (result.kind === 'item') openingPlacement.current = result.route.item_id;
+        if (result.kind === 'item' && !settled.current) openingPlacement.current = result.route.item_id;
       }
       onSelected(result, !opening);
-      if (result.kind === 'item' && latest.current.view?.selected_item_id !== id) void saveView(next => { next.selected_item_id = id; });
+      if (!opening && result.kind === 'item') navigationVisits.record(route, id, 'viewed');
+      if (result.kind === 'item') void saveView(next => {
+        next.selected_item_id = id;
+        if (!opening && !fromRow && focusedBranch && !focusedBranch.has(id)) delete next.focused_item_id;
+      });
     }).catch((error: unknown) => {
       if (opening || !mounted.current || call !== request.current) return;
+      focusRequested.current = null;
       noticeStore.push({ id: 'tree-reveal-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
         text: `“${latest.current.session?.items[id] ? shortLabel(latest.current.session.items[id]!) : 'This item'}” could not be opened. ${plainFailure(error, 'Try again.')}` });
     }).finally(() => {
@@ -320,7 +349,32 @@ export function TreeView(props: TreeViewProps) {
         setOpeningFinished(previous => previous + 1);
       }
     });
+    return true;
   };
+  const focusBranch = (id: string | null) => {
+    if (viewBusy && !navigation.isWritingRecent()) return;
+    if (id && (!session?.items[id] || session.items[id]!.parent)) return;
+    settled.current = true; openingPlacement.current = null; setAnchor(null);
+    void saveView(next => {
+      if (id) next.focused_item_id = id; else delete next.focused_item_id;
+      if (id && session?.items[id]) {
+        if (!next.expanded_item_ids.includes(id)) next.expanded_item_ids.push(id);
+        next.collapsed_topic_ids = next.collapsed_topic_ids?.filter(topic => topic !== session.items[id]!.topic_id);
+      }
+    });
+    if (id) focusRow(id);
+  };
+  // Deliberate navigation can leave Focus; ordinary saved selection is independent of it.
+  const focusReveal = useRef<RevealedItem | null>(null);
+  useEffect(() => {
+    if (focusReveal.current === reveal) return;
+    focusReveal.current = reveal;
+    if (!focusedBranch || !revealId || focusedBranch.has(revealId) || reveal === clickedReveal.current) return;
+    void saveView(next => { delete next.focused_item_id; });
+  }, [reveal, revealId, focusedId]);
+  useEffect(() => {
+    if (view?.focused_item_id && !focusedId) void saveView(next => { delete next.focused_item_id; });
+  }, [view?.focused_item_id, focusedId]);
   const toggleItem = (id: string) => {
     const row = latest.current.rows.find(value => value.key === id);
     if (!row || row.kind !== 'item' || !row.hasKids) return;
@@ -381,6 +435,7 @@ export function TreeView(props: TreeViewProps) {
     // The change is saved only when the input goes out: a cancelled "not running" dialog keeps the draft as typed.
     const submit = () => { drafts.edit(id, change); return drafts.submit(id).then(saved => {
       if (saved && mounted.current) {
+        if (itemKey) navigationVisits.record(route, itemKey, 'answered');
         setAnswering(current => current === itemKey ? null : current);
         if (itemKey) focusRow(itemKey);
       }
@@ -439,6 +494,12 @@ export function TreeView(props: TreeViewProps) {
       if (answering === row.key && chosen >= 0) { sendOption(chosen); return true; }
       select(row.item.id); return true;
     }),
+    peek: onRow((row, _index, _intent, event) => {
+      if (row.kind !== 'item' || !peek) return false;
+      if (!event.repeat) peek.open({ ...route, item_id: row.item.id }, event.currentTarget);
+      return true;
+    }),
+    recent: () => { setRecentOpen(true); return true; },
     answer: onRow((row, _index, _intent, event) => {
       if (row.kind === 'item' && session && ackTarget(session, row.item)) {
         if (!event.repeat) {
@@ -574,7 +635,8 @@ export function TreeView(props: TreeViewProps) {
   }, [rows.length, graph, viewBusy]);
   useLayoutEffect(() => {
     const key = openingPlacement.current;
-    if (!centered.current || !key || !elements.current.has(key) || graph) return;
+    if (!centered.current || !key || graph) return;
+    if (!elements.current.has(key)) { openingPlacement.current = null; return; }
     openingPlacement.current = null;
     const target: Anchor = { key, offset: null };
     place(target); setAnchor(target);
@@ -615,7 +677,7 @@ export function TreeView(props: TreeViewProps) {
     const observer = new ResizeObserver(() => { if (!settled.current) place(anchor); });
     const content = box.querySelector('.tree-rows');
     observer.observe(box); if (row) observer.observe(row); if (content) observer.observe(content);
-    const settle = () => { settled.current = true; };
+    const settle = () => { settled.current = true; openingPlacement.current = null; };
     box.addEventListener('wheel', settle, { passive: true }); box.addEventListener('pointerdown', settle);
     return () => { observer.disconnect(); box.removeEventListener('wheel', settle); box.removeEventListener('pointerdown', settle); };
   }, [anchor]);
@@ -629,6 +691,7 @@ export function TreeView(props: TreeViewProps) {
   // leave (a live edit, a message landing, fonts loading). WKWebView has no `overflow-anchor`, so the first visible row
   // is remembered with its offset (and the scroll position it was seen at) and put back after every layout change.
   const held = useRef<{ readonly key: string; readonly offset: number; readonly scrollTop: number } | null>(null);
+  const [breadcrumb, setBreadcrumb] = useState<readonly string[]>([]);
   const placed = useRef<Anchor | null>(null);
   placed.current = anchor;
   const remembering = () => {
@@ -641,10 +704,35 @@ export function TreeView(props: TreeViewProps) {
       const middle = (low + high) >> 1, element = elements.current.get(list[middle]!.key);
       if (!element || element.getBoundingClientRect().bottom > top) high = middle; else low = middle + 1;
     }
-    const key = list[low]?.key, element = key ? elements.current.get(key) : undefined;
-    held.current = key && element ? { key, offset: element.getBoundingClientRect().top - top, scrollTop: box.scrollTop } : null;
+    const key = list[low]?.key;
+    // A deliberate reveal holds its own row through detail-width and preview-clamp changes.
+    // The previous row may still peek out below the sticky header's eight-pixel margin.
+    if (revealedAnchor.current && !elements.current.has(revealedAnchor.current.key)) revealedAnchor.current = null;
+    const revealed = revealedAnchor.current;
+    const holdKey = revealed?.key ?? key, holdElement = holdKey ? elements.current.get(holdKey) : undefined;
+    // Edge/breadcrumb observation may run before reflow correction. Preserve the
+    // reveal's original offset instead of adopting its temporarily obscured top.
+    held.current = holdKey && holdElement ? { key: holdKey, offset: revealed?.offset ?? holdElement.getBoundingClientRect().top - top, scrollTop: box.scrollTop } : null;
+    // Reading keeps a partially visible row anchored, but breadcrumb names belong to
+    // the first complete row below the pinned topic, not that clipped predecessor.
+    const first = key ? elements.current.get(key) : undefined;
+    const completeKey = list[low + (first && first.getBoundingClientRect().top >= top ? 0 : 1)]?.key;
+    const complete = completeKey ? elements.current.get(completeKey)?.getBoundingClientRect() : undefined;
+    const breadcrumbKey = complete && complete.top >= top && complete.bottom <= Math.min(box.getBoundingClientRect().bottom, window.innerHeight)
+      ? completeKey : null;
+    const currentSession = latest.current.session;
+    const next = breadcrumbKey && currentSession ? breadcrumbItems(currentSession, breadcrumbKey).filter(id => {
+      const ancestor = elements.current.get(id);
+      return !ancestor || ancestor.getBoundingClientRect().top < top;
+    }) : [];
+    setBreadcrumb(previous => previous.length === next.length && previous.every((id, index) => id === next[index]) ? previous : next);
   };
   const layoutState = useRef({ selectedId, reveal, detailOpen, railOpen });
+  const releaseReveal = () => {
+    if (!revealedAnchor.current) return;
+    revealedAnchor.current = null;
+    remembering();
+  };
   layoutState.current = { selectedId, reveal, detailOpen, railOpen };
   const previousLayout = useRef(layoutState.current);
   const previousWidth = useRef<number | null>(null);
@@ -698,27 +786,40 @@ export function TreeView(props: TreeViewProps) {
       if (b.top < readingTop()) edge = 'above';
       else if (b.top >= a.bottom) edge = 'below';
     }
+    if (box && !element && selectedId && session?.items[selectedId] && !graph) edge = 'below';
     // The tag's reserved slot keeps its appearance from resizing the content or moving the reading anchor.
     remembering();
     setSelectedEdge(previous => previous === edge ? previous : edge);
   };
   useLayoutEffect(updateEdge);
-  const revealSelected = () => {
+  const retainReveal = (key: string) => {
+    const element = elements.current.get(key);
+    revealedAnchor.current = element ? { key, offset: element.getBoundingClientRect().top - readingTop() } : null;
+    remembering(); updateEdge();
+  };
+  const revealSelected = (returnFocus = false) => {
     if (!selectedId || graph) return;
     if (!elements.current.has(selectedId)) {
       // Reuse the temporary reveal route when the owner has folded the selection away.
-      select(selectedId, false);
+      if (select(selectedId, false) && returnFocus) focusRequested.current = selectedId;
       return;
     }
-    settled.current = true; setAnchor(null); nearest(selectedId, 8); remembering(); updateEdge();
+    settled.current = true; setAnchor(null); nearest(selectedId, 8); retainReveal(selectedId);
+    if (returnFocus) focusRow(selectedId);
   };
+  useLayoutEffect(() => {
+    const target = focusRequested.current;
+    if (!target || !elements.current.has(target)) return;
+    focusRequested.current = null;
+    focusRow(target);
+  }, [rows, selectedId, reveal]);
   useLayoutEffect(() => {
     const target = scrollRequested.current;
     if (!target || graph) return;
     if (selectedId !== target) { scrollRequested.current = null; return; }
     if (!elements.current.has(target)) return;
     scrollRequested.current = null;
-    settled.current = true; setAnchor(null); nearest(target, 8); remembering(); updateEdge();
+    settled.current = true; setAnchor(null); nearest(target, 8); retainReveal(target);
   }, [rows, selectedId, reveal, graph]);
   const edgeCallbacks = useRef({ updateEdge, revealSelected });
   edgeCallbacks.current = { updateEdge, revealSelected };
@@ -734,10 +835,13 @@ export function TreeView(props: TreeViewProps) {
     return () => observer.disconnect();
   }, [hasRows, graph, topicKeys]);
   useEffect(() => {
-    if (graph) return;
     const shortcut = (event: globalThis.KeyboardEvent) => {
       if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
         event.preventDefault(); edgeCallbacks.current.revealSelected();
+      }
+      if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'e'
+        && !(event.target instanceof Element && event.target.closest('[role="dialog"],[role="alertdialog"]'))) {
+        event.preventDefault(); setRecentOpen(true);
       }
     };
     window.addEventListener('keydown', shortcut, true);
@@ -798,27 +902,33 @@ export function TreeView(props: TreeViewProps) {
   const fixOf = (row: Row) => row.delivery?.stuck ? <div className="tree-fix" onKeyDown={event => event.stopPropagation()}>
     <StuckNote actions={actions} input={row.delivery.stuck.input} stuck={row.delivery.stuck.note}
       onEdit={row.kind === 'topic' ? editTopicReply(row.delivery.stuck.input) : undefined} /></div> : null;
-  const tree = model && rows.length > 0 && <ItemRefs.Provider value={{ lookup: id => {
+  const tree = model && rows.length > 0 && <TreeFonts.Provider value={fontEpoch}><ItemRefs.Provider value={{ route: id => ({ ...route, item_id: id }), lookup: id => {
     const item = session?.items[id];
-    return item && session && !itemRemoved(session, item.id) ? { label: item.question, status: displayStatus(session, item) } : null;
+    return item && session && !itemRemoved(session, item.id) ? { label: names.get(id) ?? shortLabel(item), status: displayStatus(session, item) } : null;
   }, onOpenItem: id => select(id, false) }}><div role="tree" aria-label="Session items" aria-busy={state.status === 'loading'} className="tree-rows" onBlur={saveScroll}>
     {sections.map(({ topic: row, items }) => <div key={row.key} className="tree-topic-group" role="presentation">
       <TopicRow row={row} focused={focusKey === row.key} actions={topicActions(row)}
+        ackAll={!archivedMode ? <AckAll actions={actions} topicId={row.topic.id} topicName={row.topic.name} disabled={viewBusy} /> : undefined}
         prompt={row.allClosed && !archivedMode ? () => lifecycle.archive(row.topic.id) : null}
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
         reply={replying === row.topic.id && !archivedMode ? <TopicReply drafts={drafts} store={store} actions={actions} topicId={row.topic.id}
           agent={bar?.agent ?? 'the agent'} onClose={() => { setReplying(null); focusRow(row.key); }} /> : null} fix={fixOf(row)} />
       {items.map(row => row.kind === 'hidden'
         ? <HiddenRow key={row.key} row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleHiddenGroup} />
-        : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={viewBusy} closedReason={session ? sessionAnswerBlocked(session) : undefined}
+        : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={viewBusy && !navigation.isWritingRecent()} closedReason={session ? sessionAnswerBlocked(session) : undefined}
         highlight={highlightedItems.has(row.key) ? 'strong' : row.collapsed?.ids.some(id => highlightedItems.has(id)) ? 'weak' : null}
         note={row.collapsed ? collapsedNote(row.collapsed, { items: highlightedItems, message: touchedMessage }) : null}
         actions={itemActions(row)} answer={answering === row.key ? answerControl : null} fix={fixOf(row)}
         unfolded={isUnfolded(row.key)} onUnfold={unfold}
-        remember={remember} onFocus={setFocusKey} onKeyDown={keys} onSelect={select} onToggle={toggleItem} onJump={id => select(id, false)} onHover={onHoverItem} />)}
+        onFocusBranch={focusBranch}
+        onPeekHover={(id, event) => { const handlers = peek?.chipProps({ ...route, item_id: id });
+          if (event.type === 'mouseenter') handlers?.onMouseEnter(event); else handlers?.onMouseMove(event);
+        }}
+        onPeekLeave={() => peek?.chipProps({ ...route, item_id: '' }).onMouseLeave?.()}
+        remember={remember} onFocus={setFocusKey} onKeyDown={keys} onSelect={select} onToggle={toggleItem} onHover={onHoverItem} />)}
       {session && <AgentBin session={session} actions={actions} topicId={row.topic.id} onRemove={onRemove} />}
     </div>)}
-  </div></ItemRefs.Provider>;
+  </div></ItemRefs.Provider></TreeFonts.Provider>;
 
   const loading = !session && state.status === 'loading';
   // Stopped deliveries answered on a row the owner can see; the recovery banner lists the rest
@@ -854,23 +964,39 @@ export function TreeView(props: TreeViewProps) {
     body = <div className="tree-no-match"><div className="tree-no-match-title">No archived topics in this session.</div></div>;
   } else body = tree;
 
-  const selectedTag = !graph && <div className="tree-selected-slot">
+  const selectedTag = !graph && <div className="tree-selected-slot" role="group" aria-label="Selected item navigation">
     {selectedEdge && selectedId && session?.items[selectedId] && <button type="button" className="tree-selected-edge" data-edge={selectedEdge}
       aria-label={`${selectedEdge === 'above' ? '↑' : '↓'} Selected: ${session.items[selectedId]!.question}`}
-      title={`Reveal selected item · ⌘J · ${session.items[selectedId]!.question}`} onClick={revealSelected}>
+      title={`Reveal selected item · ⌘J · ${session.items[selectedId]!.question}`} onClick={() => revealSelected(true)}>
       <span>{selectedEdge === 'above' ? '↑' : '↓'} Selected:</span>{' '}
       <span className="tree-selected-label">{names.get(selectedId)}</span></button>}
   </div>;
 
   return <section className="tree-column" aria-label="Session tree" data-session-status={state.status} data-kbd={kbd || undefined}
-    onKeyDownCapture={() => { if (!kbd) setKbd(true); }} onMouseDownCapture={() => { if (kbd) setKbd(false); }}>
+    onKeyDownCapture={event => {
+      // Window capture has already positioned the selection for Cmd+J. That
+      // same event must not cancel the reveal before its preview reflows.
+      const retainedJump = event.defaultPrevented && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j';
+      if (!retainedJump) releaseReveal();
+      if (!kbd) setKbd(true);
+    }}
+    onPointerDownCapture={releaseReveal} onWheelCapture={releaseReveal}
+    onMouseDownCapture={() => { if (kbd) setKbd(false); }}>
     {bar && !archivedMode && <SessionBar bar={bar} busy={lifecycle.busy || !session} onClose={lifecycle.session}
       onRename={session ? lifecycle.rename : undefined}
       dispatch={<DispatchChip actions={actions} onDetails={() => setSending(true)} />} />}
+    {session && !archivedMode && !graph && <div className="tree-recent"><RecentTrail session={session} entries={view?.recent_items}
+      nextWaiting={oldestWaiting(session)} onReveal={id => select(id, false)} />
+      <button type="button" className="btn btn-ghost" title="Recent (⌘E)" onClick={() => setRecentOpen(true)}>Recent</button></div>}
+    {session && recentOpen && <RecentDialog session={session} entries={view?.recent_items}
+      seen={preferences?.seen?.find(mark => mark.session.project_id === route.project_id && mark.session.session_id === route.session_id)}
+      onReveal={id => select(id, false)} onClose={() => setRecentOpen(false)} />}
     {sending && <DispatchDialog store={actions.session} actions={actions} agent={bar?.agent ?? 'the agent'} onClose={() => setSending(false)} />}
     {filtersShown && <FilterBar chips={model?.chips ?? chipsOf([])} counts={counts}
       disabled={nav.pendingOperationId !== null && !nav.writing} dismissKey={route.session_id} onChip={setChip}>{selectedTag}</FilterBar>}
     {!filtersShown && !graph && <div className="tree-filters">{selectedTag}</div>}
+    {focusedId && !graph && <Banner icon="ph ph-tree-structure" actions={<button type="button" className="btn btn-ghost" aria-label="Leave Focus" disabled={viewBusy} onClick={() => focusBranch(null)}>×</button>}>
+      Focused: {names.get(focusedId)}</Banner>}
     {model && !graph && (!!query || !model.chips.has('all')) && <Banner icon={query ? 'ph ph-magnifying-glass' : 'ph ph-funnel'} actions={<><span aria-hidden="true">·</span><button type="button" className="btn btn-ghost" disabled={nav.writing || nav.pendingOperationId !== null} onClick={query ? onClearSearch : onClearFilters}>{query ? 'Clear search' : 'Clear filters'}</button></>}>
       Showing {model.searchCount} of {model.itemCount} items{query ? ` matching “${query}”` : ''}{model.hiddenCount > 0 ? ` (${model.hiddenCount} hidden)` : ''}{!model.chips.has('all') ? ' in the statuses you picked' : ''}</Banner>}
     {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>
@@ -880,7 +1006,13 @@ export function TreeView(props: TreeViewProps) {
     <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
     {/* The graph keeps its own scroller so its legend stays sticky (ui/graph/graph.css). */}
     {graph && !loading ? graph : <div className="tree-scroll-shell">
-      <div ref={scroller} className="tree-scroll" onScroll={() => { remembering(); updateEdge(); }}>{body}</div>
+      <nav className="tree-breadcrumb" aria-label="Map ancestors">{breadcrumb.map((id, index) => <span key={id}>
+        {index > 0 && <span aria-hidden="true"> › </span>}<button type="button" title={session?.items[id]?.question} onClick={() => select(id, false)}>{names.get(id)}</button>
+      </span>)}</nav>
+      <div ref={scroller} className="tree-scroll" onScroll={() => {
+        if (held.current?.scrollTop !== scroller.current?.scrollTop) revealedAnchor.current = null;
+        openingPlacement.current = null; settled.current = true; remembering(); updateEdge();
+      }}>{body}</div>
     </div>}
     {session && <AgentBin session={session} actions={actions} onRemove={onRemove} />}
     {lifecycle.dialog}

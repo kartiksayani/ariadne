@@ -6,10 +6,10 @@ import type { Server } from 'node:http';
 
 // Real-browser checks of the session tree's layout promises: a long preview folds to
 // four lines, hovering a row never rewraps its text, and clicking a row never scrolls.
-async function openTree(page: Page, origin: string) {
+async function openTree(page: Page, origin: string, query = '') {
   await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
   await page.setViewportSize({ width: 1000, height: 700 });
-  await page.goto(`${origin}/tests/e2e/tree-layout/fixture.html`);
+  await page.goto(`${origin}/tests/e2e/tree-layout/fixture.html${query}`);
   await page.locator('[data-shell-tab="projects"]').click();
   await page.locator('.pw-project-open').first().click();
   const session = page.locator('button[data-session-id]').first();
@@ -54,6 +54,71 @@ async function expectSolidMarker(marker: Locator) {
   expect(colour.alpha).toBe(255);
   await expect(marker).toHaveCSS('opacity', '1');
 }
+
+for (const theme of ['light', 'dark']) test(`Getting around keeps breadcrumbs and peeks clear of rows and chrome (${theme})`, async ({ page }) => {
+  const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+    logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+  try {
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    await openTree(page, `http://127.0.0.1:${address.port}`, '?nav');
+    await page.evaluate(value => document.documentElement.setAttribute('data-theme', value), theme);
+    const scroller = page.locator('.tree-scroll'), crumbs = page.getByRole('navigation', { name: 'Map ancestors' });
+    const before = await scroller.boundingBox();
+    const deep = page.locator('.tree-item[data-item-id="23"]');
+    await deep.evaluate(element => element.scrollIntoView({ block: 'start' }));
+    // Check the actual settled reference row, including sticky clearance: scrollIntoView
+    // may leave a fractional strip of its predecessor visible under the topic band.
+    await expect.poll(() => deep.evaluate(element => {
+      const box = element.closest('.tree-scroll')!, viewport = box.getBoundingClientRect();
+      const header = element.closest('.tree-topic-group')!.querySelector('.tree-topic')!.getBoundingClientRect();
+      const top = Math.max(viewport.top, header.bottom), bottom = Math.min(viewport.bottom, window.innerHeight);
+      return [...box.querySelectorAll<HTMLElement>('.tree-item')].find(row => {
+        const bounds = row.getBoundingClientRect();
+        return bounds.top >= top && bounds.bottom <= bottom;
+      })?.dataset.itemId;
+    })).toBe('23');
+    await expect(crumbs.getByRole('button')).toHaveText(['Rehearsal notes', 'Evidence check', 'Owner handoff']);
+    expect(await scroller.boundingBox()).toEqual(before);
+    const breadcrumbBox = (await crumbs.boundingBox())!, viewport = (await scroller.boundingBox())!;
+    expect(breadcrumbBox.y + breadcrumbBox.height).toBeLessThanOrEqual(viewport.y + 0.5);
+    await crumbs.getByRole('button', { name: 'Owner handoff' }).click();
+    await expectRevealedRow(page.locator('.tree-item[data-item-id="22"]'));
+
+    // Focus restricts Map rows while Waiting remains complete.
+    const root = page.locator('.tree-item[data-item-id="1"]');
+    const waitingCount = await page.locator('.waiting-card').count();
+    await root.getByRole('button', { name: 'Focus', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Leave Focus' })).toBeVisible();
+    await expect(page.locator('.tree-item[data-item-id="8"]')).toHaveCount(0);
+    expect(await page.locator('.waiting-card').count()).toBe(waitingCount);
+    await page.getByRole('button', { name: 'Leave Focus' }).click();
+    await expect(page.locator('.tree-item[data-item-id="8"]')).toHaveCount(1);
+
+    // Plain hover leaves the Map alone; Command-hover previews after the pause.
+    await root.hover(); await page.waitForTimeout(600);
+    await expect(page.getByRole('dialog', { name: /^Peek:/ })).toHaveCount(0);
+    await page.keyboard.down('Meta'); await root.hover();
+    const peek = page.getByRole('dialog', { name: /^Peek:/ });
+    await expect(peek).toBeVisible(); await page.keyboard.up('Meta');
+    const peekBox = (await peek.boundingBox())!, topBar = (await page.locator('.shell-header').boundingBox())!;
+    expect(peekBox.y).toBeGreaterThanOrEqual(topBar.y + topBar.height);
+    expect(peekBox.x).toBeGreaterThanOrEqual(0);
+    expect(peekBox.x + peekBox.width).toBeLessThanOrEqual(1000);
+    expect(peekBox.y + peekBox.height).toBeLessThanOrEqual(700);
+    const scrollBeforeEscape = await scroller.evaluate(element => element.scrollTop);
+    await page.keyboard.press('Escape');
+    await expect(peek).toHaveCount(0); await expect(root).toBeFocused();
+    expect(await scroller.evaluate(element => element.scrollTop)).toBe(scrollBeforeEscape);
+    await page.keyboard.press('Space'); await expect(peek).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Meta+e');
+    await expect(page.getByRole('dialog', { name: 'Recent items' })).toBeVisible();
+    await page.getByRole('button', { name: 'Changed only' }).click();
+    await expect(page.getByRole('button', { name: 'Changed only' })).toHaveAttribute('aria-pressed', 'true');
+  } finally { await server.close(); }
+});
 
 test('folds a long preview to four lines, never rewraps on hover and never scrolls on a click', async ({ page }) => {
   const errors: string[] = [];
