@@ -519,6 +519,7 @@
 }
 
 .tree-fix .stuck-note {
+  position: relative;
   margin: 2px 0;
 }
 
@@ -731,7 +732,6 @@
 
 .tree-outcome > span {
   min-width: 0;
-  white-space: pre-line;
   overflow-wrap: anywhere;
   text-wrap: pretty;
 }
@@ -752,6 +752,10 @@
 .tree-clamp {
   display: block;
   min-width: 0;
+
+  /* Markdown supplies <br> for each line break and a newline for copied text.
+     Collapse that newline so it does not create a second visual line. */
+  white-space: normal;
 }
 .tree-line > .tree-clamp { flex: 1; }
 
@@ -1108,6 +1112,13 @@
   flex: 1;
   flex-direction: column;
   min-height: 0;
+}
+
+/* The row already has an icon gutter. Let recovery text use the full body column. */
+.tree-fix .stuck-note > i {
+  position: absolute;
+  top: 0.25em;
+  left: calc(-1em - 8px);
 }
 
 /* An opaque surface in every interactive state, including the global button reset. */

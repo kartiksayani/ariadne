@@ -16,6 +16,23 @@ export function itemRowChrome(source: string): string {
 
 export function topicRowChrome(source: string): string {
   return source
+    // The app restores a selected row with detail open, then Escape/a opens its inline
+    // answer without scrolling. Replay that opening here rather than centering the final editor.
+    .replace('sel, detail: detail && !!sel, reveal,', 'sel, detail: !!props.answering || detail && !!sel, reveal,')
+    .replace('answering: props.answering || null,', 'answering: null,')
+    .replace('[400, 1200, 2500].forEach(t => setTimeout(() => this.scrollToSel(true), t));', `if (this.props.answering) {
+      document.fonts.ready.then(() => requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (!this.rootRef.current) return;
+        this.scrollToSel(true);
+        this.setState({ detail: false, answering: this.props.answering }, () => {
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (this.rootRef.current) this.rootRef.current.dataset.inlineAnswerReady = 'true';
+          }));
+        });
+      })));
+    } else {
+      [400, 1200, 2500].forEach(t => setTimeout(() => this.scrollToSel(true), t));
+    }`)
     .replace("nameColor: earlier ? neutral(82) : 'var(--color-text)',", "nameColor: earlier ? 'color-mix(in srgb, var(--a-acc-text) 82%, transparent)' : 'var(--a-acc-text)',")
     .replace('<div style="display:flex; align-items:center; gap:6px; min-width:0;">', '<div style="display:flex; flex-wrap:wrap; align-items:center; gap:6px; min-width:0;">')
     .replace('<span style="min-width:0; padding-left:4px; font-size:15.5px;', '<span style="flex:1 1 12em; min-width:0; padding-left:4px; font-size:15.5px;')

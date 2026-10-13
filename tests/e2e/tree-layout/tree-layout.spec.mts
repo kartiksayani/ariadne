@@ -208,6 +208,10 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
       await row.evaluate(element => element.scrollIntoView({ block: 'center' }));
       const body = row.locator('.tree-clamp');
       const line = await body.evaluate(element => parseFloat(getComputedStyle(element).lineHeight));
+      // Prove the fixture really contains six/seven body lines before testing the threshold.
+      await expect(body.locator('br')).toHaveCount(lines - 1);
+      expect((await body.textContent())!.split('\n')).toHaveLength(lines);
+      await expect(body).toHaveCSS('white-space', 'normal');
       if (lines === 6) {
         await expect(row.getByRole('button', { name: 'Show more' })).toHaveCount(0);
         expect((await body.boundingBox())!.height).toBeCloseTo(line * 6, 0);
@@ -230,11 +234,32 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
     await scroller.evaluate(element => { element.scrollTop = element.scrollHeight; });
     const marker = page.locator('.tree-selected-edge');
     await expect(marker).toContainText('↑ Selected: A long item title');
-    const surface = await marker.evaluate(element => getComputedStyle(element).backgroundColor);
-    expect(surface).toMatch(/^rgb\(/);
+    const colour = await marker.evaluate(element => {
+      const surface = getComputedStyle(element).backgroundColor;
+      const probe = document.createElement('span');
+      probe.style.backgroundColor = 'var(--a-card)';
+      probe.style.position = 'absolute';
+      element.append(probe);
+      const expected = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      // Let the browser resolve its own colour syntax, including oklch and color().
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 1;
+      const context = canvas.getContext('2d')!;
+      context.fillStyle = surface;
+      context.fillRect(0, 0, 1, 1);
+      return { surface, expected, alpha: context.getImageData(0, 0, 1, 1).data[3] };
+    });
+    const { surface } = colour;
+    expect(surface).toBe(colour.expected);
+    expect(colour.alpha).toBe(255);
+    await expect(marker).toHaveCSS('opacity', '1');
     await marker.hover(); await expect(marker).toHaveCSS('background-color', surface);
+    await expect(marker).toHaveCSS('opacity', '1');
     await marker.focus(); await expect(marker).toHaveCSS('background-color', surface);
-    await page.mouse.down(); await expect(marker).toHaveCSS('background-color', surface); await page.mouse.up();
+    await expect(marker).toHaveCSS('opacity', '1');
+    await page.mouse.down(); await expect(marker).toHaveCSS('background-color', surface);
+    await expect(marker).toHaveCSS('opacity', '1'); await page.mouse.up();
     await expect(marker).toHaveCount(0);
     await expect(root.locator('.tree-question')).toBeInViewport();
     await scroller.evaluate(element => { element.scrollTop = element.scrollHeight; });

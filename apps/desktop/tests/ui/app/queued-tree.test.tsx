@@ -20,9 +20,10 @@ describe('queued navigation in the current tree', () => {
     session.items = {}; session.topics = { [topic.id]: topic };
     session.inputs = {}; session.messages = []; session.answers = []; session.rounds = {};
     const expected: string[] = [], expanded: string[] = [];
-    for (let root = 1; root <= 20; ++root) {
+    // A nested tree exercises row identity and scroll preservation without a rendering benchmark.
+    for (let root = 1; root <= 3; ++root) {
       expanded.push(String(root));
-      for (let child = 0; child < 10; ++child) {
+      for (let child = 0; child < 4; ++child) {
         const id = child ? `${root}.${child}` : String(root);
         expected.push(id);
         session.items[id] = { ...template, id, parent: child ? String(root) : null, ordinal: child || root,
@@ -39,7 +40,7 @@ describe('queued navigation in the current tree', () => {
     const rows = () => [...tree.querySelectorAll<HTMLElement>('.tree-item')];
     const originalRows = rows();
     expect(originalRows.map(row => row.dataset.itemId)).toEqual(expected);
-    const focused = originalRows[104]!;
+    const focused = originalRows[6]!;
     focused.focus(); tree.scrollTop = 2_000;
     let release!: () => void, writing = false;
     const gate = new Promise<void>(resolve => { release = resolve; });

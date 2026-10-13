@@ -7,7 +7,7 @@ import { createDesktopService, type RendererService } from './data/service';
 import { DiscoveryController } from './data/discovery';
 import { useSession, type Immutable, type SessionState, type SessionStore } from './data/session-store';
 import type { RevealedItem } from './data/routes';
-import { plainFailure } from './data/plain';
+import { navigationFailure } from './data/plain';
 import type { ItemRoute, SessionPreferences, SessionRef } from './generated/core';
 import { NavigationStore, useNavigation } from './state/navigation/store';
 import { OwnerDraftStore, useOwnerDrafts } from './state/drafts/store';
@@ -309,18 +309,12 @@ function Workspace({ application }: { application: Application }) {
   };
   const reveal = async (target: ItemRoute, token: number, fromHistory = false, onReveal?: (result: RevealedItem) => void, requireItem = fromHistory): Promise<{ request: number; result: RevealedItem } | null> => {
     let result: RevealedItem | null = null;
+    let failure: unknown = null;
     // Reserve the destination at the click, before registered item resolution
     // yields. An older tab or link can no longer submit while this one loads.
-    const opened = navigation.navigate({ kind: 'session', session: { project_id: target.project_id, session_id: target.session_id } }, null,
+    void navigation.navigate({ kind: 'session', session: { project_id: target.project_id, session_id: target.session_id } }, null,
       () => shortcutSequence.current === token, async () => {
-        let resolved: RevealedItem | null;
-        try { resolved = await navigation.routes.revealItem(target); }
-        catch (error: unknown) {
-          if (shortcutSequence.current === token && navigation.getNavigationRequest() === request) {
-            reportRouteError(plainFailure(error, 'This registered item could not be opened.'));
-          }
-          return null;
-        }
+        const resolved = await navigation.routes.revealItem(target);
         if (requireItem && resolved?.kind !== 'item') return null;
         if (resolved && shortcutSequence.current === token && navigation.getNavigationRequest() === request) {
           result = resolved;
@@ -328,9 +322,13 @@ function Workspace({ application }: { application: Application }) {
           onReveal?.(resolved);
         }
         return resolved;
-      });
+      }, error => { failure = error; });
     const request = navigation.getNavigationRequest();
-    if (!await opened || !result || navigation.getNavigationRequest() !== request || shortcutSequence.current !== token) return null;
+    const opened = navigation.getNavigationCompletion(request);
+    const saved = await opened;
+    if (navigation.getNavigationRequest() !== request || shortcutSequence.current !== token) return null;
+    if (!saved) { if (failure) throw failure; return null; }
+    if (!result) return null;
     detailDismissedAt.current = null; setLocalReveal(result); setDetailOpen(true);
     // Continuations use this exact admitted request, including queued reveals.
     return { request, result };
@@ -342,11 +340,13 @@ function Workspace({ application }: { application: Application }) {
     invalidateOwnerRequest(); setLocalReveal(result);
     if (openDetail) { detailDismissedAt.current = null; setDetailOpen(true); }
   };
-  const revealItem = (target: ItemRoute) => {
+  const revealLinkedItem = (target: ItemRoute) => {
     setRouteError(null);
     invalidateOwnerRequest();
-    void reveal(target, shortcutSequence.current)
-      .catch((error: unknown) => reportRouteError(plainFailure(error, 'This registered item could not be opened.')));
+    return reveal(target, shortcutSequence.current);
+  };
+  const revealItem = (target: ItemRoute) => {
+    void revealLinkedItem(target).catch((error: unknown) => reportRouteError(navigationFailure(error)));
   };
   const navigateHistory = (direction: HistoryDirection) => {
     if (!route || state.writing || state.pendingOperationId !== null) return false;
@@ -356,7 +356,7 @@ function Workspace({ application }: { application: Application }) {
       try {
         return await reveal({ ...route, item_id: id }, token, true) !== null;
       } catch (error: unknown) {
-        if (shortcutSequence.current === token) reportRouteError(plainFailure(error, 'This registered item could not be opened.'));
+        if (shortcutSequence.current === token) reportRouteError(navigationFailure(error));
         return false;
       }
     });
@@ -379,7 +379,7 @@ function Workspace({ application }: { application: Application }) {
       if (!opened || opened.result.kind !== 'item' || shortcutSequence.current !== token || navigation.getNavigationRequest() !== opened.request) return;
       published = true;
       setOwnerFocus({ route: routeKey(target), itemId: target.item_id, intent, token, optionIndex, sendOption: quick === 'send', ownWords: quick === 'words', answerTarget });
-    }).catch((error: unknown) => reportRouteError(plainFailure(error, 'This registered item could not be opened.'))).finally(() => {
+    }).catch((error: unknown) => reportRouteError(navigationFailure(error))).finally(() => {
       if (quickRequests.current.get(identity) === token && (!published || shortcutSequence.current !== token)) quickRequests.current.delete(identity);
     });
   };
@@ -431,7 +431,7 @@ function Workspace({ application }: { application: Application }) {
       if (!operation) return;
       application.drafts.edit(operation, { text: 'Bring this up.' });
       await application.drafts.submit(operation);
-    } catch (error: unknown) { reportRouteError(plainFailure(error, 'This registered item could not be opened.')); }
+    } catch (error: unknown) { reportRouteError(navigationFailure(error)); }
     finally { bringing.current.delete(identity); }
   };
   const saveView = (change: Partial<SessionPreferences>) => {
@@ -632,9 +632,7 @@ function Workspace({ application }: { application: Application }) {
         hiddenItemIds={view?.hidden_item_ids}
         onLater={value => preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)}
         provenance={<CopiedProvenance store={store} itemId={selectedId}
-          projectPath={projectId => state.projects?.projects.items.find(project => project.project_id === projectId)?.canonical_root ?? null} revealItem={async target => {
-          revealItem(target);
-        }} />} /> : undefined}
+          projectPath={projectId => state.projects?.projects.items.find(project => project.project_id === projectId)?.canonical_root ?? null} revealItem={revealLinkedItem} />} /> : undefined}
       onCloseDetail={closeDetail}
       railContent={store && view && view.rail !== 'hidden' ? <MessageRail key={key} service={application.service} store={store} drafts={application.drafts}
         selectedItemId={selectedId} hoveredItemId={hoveredItem} onHighlight={(items, messages) => { setHighlightedItems(items); setHighlightedMessages(messages); }} onClose={toggleRail} closeDisabled={state.writing || state.pendingOperationId !== null} earlierAgent={earlier} /> : undefined}

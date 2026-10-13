@@ -143,6 +143,24 @@ describe('latest queued workspace navigation', () => {
     expect(ownerSelections(transport).some(selection => selection?.kind === 'projects')).toBe(false);
   });
 
+  it.each(['item', 'session'] as const)('settles an unavailable native %s link with a specific message and no owner write', async link => {
+    const { store, transport } = await setup(), invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (!('command' in args.request) && args.request.session?.session_id === secondId
+        && (name === 'reveal_item' || name === 'session_get')) {
+        return { api_version: 1, ok: false, error: { code: 'io_error', message: 'Folder missing', hint: '', retryable: false, field_errors: [] } };
+      }
+      return invoke(name, args);
+    });
+    await act(async () => { transport.emit('ariadne://route', { ...route, session_id: secondId, item_id: link === 'item' ? '77' : null }); });
+    await advance();
+    expect(screen.getByRole('alert').textContent).toContain('This session could not be opened. Check that its project folder is available, then try again.');
+    expect(screen.queryByText(/couldn’t read or save/)).toBeNull();
+    expect(store.getSnapshot()).toMatchObject({ writing: false, pendingOperationId: null, pendingNavigation: null });
+    expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
+    expect(ownerSelections(transport)).toEqual([]);
+  });
+
   it('quietly releases a superseded navigation rejection while the newest destination prepares', async () => {
     const { store, transport } = await setup(), rejected = gate(), capture = gate();
     transport.beforePatch = async request => {
@@ -303,24 +321,31 @@ describe('latest queued workspace navigation', () => {
     expect(notices.getSnapshot()).toEqual([]);
   });
 
-  it('settles superseded callers immediately while the retained latest request waits for its owner', async () => {
+  it('keeps confirmation armed after the bounded UI return and cancels superseded callers immediately', async () => {
     const { store, transport } = await setup(), owner = gate();
     transport.beforePatch = async () => { await owner.promise; };
     const saving = store.saveTheme('dark', 1);
     await advance();
-    const older = store.navigate(projects), latest = store.navigate(second);
+    const older = store.navigate(projects);
+    const olderCompletion = store.getNavigationCompletion(store.getNavigationRequest());
+    const latest = store.navigate(second);
+    const completion = store.getNavigationCompletion(store.getNavigationRequest());
     expect(await older).toBe(false);
-    let settled = false;
+    expect(await olderCompletion).toBe(false);
+    let settled = false, confirmed = false;
     void latest.then(() => { settled = true; });
+    void completion.then(() => { confirmed = true; });
     await advance(999);
     expect(settled).toBe(false);
     await advance(1);
     expect(await latest).toBe(false);
+    expect(confirmed).toBe(false);
     expect(store.getSnapshot()).toMatchObject({ pendingNavigation: second });
     expect(opening()).toBeDefined();
     transport.beforePatch = null;
     await act(async () => { owner.release(); expect(await saving).toBe(true); });
     await advance();
+    expect(await completion).toBe(true);
     shown(second, store, transport);
     expect(ownerSelections(transport)).toEqual([{ kind: 'session', session: route }, second]);
   });
@@ -359,9 +384,11 @@ describe('latest queued workspace navigation', () => {
     const saving = store.saveTheme('dark', 1);
     await advance();
     const waiting = store.navigate(second);
+    const completion = store.getNavigationCompletion(store.getNavigationRequest());
     await advance(1000);
     expect(await waiting).toBe(false);
     await act(async () => { store.stop(); owner.release(); expect(await saving).toBe(false); });
+    expect(await completion).toBe(false);
     await advance();
     expect(transport.attempts).toHaveLength(1);
     expect(store.getSnapshot().pendingNavigation).toBeNull();

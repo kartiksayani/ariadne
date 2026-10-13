@@ -65,6 +65,10 @@ const test = base.extend<Record<never, never>, { origin: string; designPage: Pag
     }, null, { timeout: 180_000 });
     // Ariadne.dc.html:976 scrolls the selection at 400/1200/2500 ms after mount.
     await page.evaluate(async () => { await document.fonts.ready; await new Promise(resolve => setTimeout(resolve, 2600)); });
+    const inline = page.locator('[id="1c"] [data-inline-answer-ready]');
+    await expect(inline).toHaveAttribute('data-inline-answer-ready', 'true');
+    await expect(inline.locator('[data-item-id="2.1.1"]')).toHaveAttribute('aria-selected', 'true');
+    await expect(inline.locator('[data-item-id="2.1.1"] textarea')).toHaveCount(1);
     expect(denied).toEqual([]);
     await use(page);
     await context.close();
@@ -126,8 +130,11 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
     }, spec.selected!);
     await expect(page.getByText('Showing an item outside your current filters.')).toBeVisible();
   }
+  let answerScroll: number | null = null;
   if (spec.answering) {
+    await settle(page);
     await row(spec.answering).focus();
+    answerScroll = await page.locator('.tree-scroll').evaluate(element => element.scrollTop);
     if (!spec.detail) await page.keyboard.press('Escape');
     await page.keyboard.press('a');
     await expect(page.locator(`[data-item-id="${spec.answering}"] .answer`)).toBeVisible();
@@ -147,6 +154,13 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
   // mouseover is React's mouseenter and leaves the rail's scroll position and the pointer alone.
   if (spec.hoverMsg) await railMessage(page, spec.hoverMsg).dispatchEvent('mouseover');
   await settle(page);
+  if (spec.answering) {
+    const selected = row(spec.answering);
+    await expect(selected).toHaveAttribute('aria-selected', 'true');
+    if (!spec.detail) await expect(page.locator('.shell-detail')).toHaveCount(0);
+    // Closing detail and opening the inline answer keep the owner's reading position.
+    expect(await page.locator('.tree-scroll').evaluate(element => element.scrollTop)).toBe(answerScroll);
+  }
   const sessionBar = page.locator('.tree-session-bar');
   if (await sessionBar.count()) {
     await expect(sessionBar.getByRole('button', { name: 'Session actions' })).toBeVisible();
@@ -264,21 +278,27 @@ for (const width of [1920, 1600, 1280]) for (const acceptedFailure of [false, tr
       const layout = await note.evaluate(element => {
         const status = element.querySelector<HTMLElement>(':scope > [role="status"]')!;
         const actions = element.querySelector<HTMLElement>(':scope > .stuck-actions')!;
-        const text = status.firstChild!, content = text.textContent!;
-        const words = [...content.matchAll(/\S+/g)].map(word => {
-          const range = document.createRange();
-          range.setStart(text, word.index); range.setEnd(text, word.index + word[0].length);
-          return { word: word[0], lines: range.getClientRects().length };
-        });
+        const words: { word: string; lines: number }[] = [];
+        const textNodes = document.createTreeWalker(status, NodeFilter.SHOW_TEXT);
+        for (let text = textNodes.nextNode(); text; text = textNodes.nextNode()) {
+          for (const word of text.textContent!.matchAll(/\S+/g)) {
+            const range = document.createRange();
+            range.setStart(text, word.index); range.setEnd(text, word.index + word[0].length);
+            words.push({ word: word[0], lines: range.getClientRects().length });
+          }
+        }
         const box = (node: Element) => {
           const { x, y, width, right, bottom } = node.getBoundingClientRect();
           return { x, y, width, right, bottom };
         };
-        return { note: box(element), status: box(status), actions: box(actions), words,
+        return { note: box(element), status: box(status), actions: box(actions), words, nestedText: status.childElementCount,
           buttons: [...actions.querySelectorAll('button')].map(box) };
       });
       // Enough room for ordinary words: recovery controls must never squeeze the reason to a sliver.
       expect(layout.status.width, `${selector} status width`).toBeGreaterThanOrEqual(190);
+      expect(layout.nestedText, 'the complete explanation is plain sentence text').toBe(0);
+      if (selector.startsWith('.tree-item')) expect(layout.status.x, 'reason uses the existing body column').toBe(layout.note.x);
+      expect(layout.words.map(word => word.word)).toEqual((await note.locator(':scope > [role="status"]').textContent())!.match(/\S+/g));
       for (const word of layout.words) expect(word.lines, `${selector}: ${word.word}`).toBe(1);
       // Controls can sit beside the reason when they fit, or wrap completely below it.
       const beside = layout.actions.x >= layout.status.right;

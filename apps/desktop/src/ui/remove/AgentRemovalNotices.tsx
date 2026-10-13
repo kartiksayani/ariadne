@@ -1,5 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react';
-import type { Immutable } from '../../data';
+import { navigationFailure, type Immutable } from '../../data';
 import type { Session } from '../../generated/domain/models';
 import type { SessionRef } from '../../generated/core';
 import type { SessionActionControllers } from '../../components/bindings/actions';
@@ -47,21 +47,32 @@ export function AgentRemovalNotices({ waiting, controllers, navigation, selected
             });
           } },
           { label: 'View', run: () => {
-            void navigation.navigate({ kind: 'session', session: route }).then(async saved => {
-              if (!saved) return;
+            let failure: unknown = null;
+            void navigation.navigate({ kind: 'session', session: route }, null, undefined, undefined, error => { failure = error; });
+            const request = navigation.getNavigationRequest();
+            const current = () => navigation.getNavigationRequest() === request;
+            void navigation.getNavigationCompletion(request).then(async saved => {
+              if (!current()) return;
+              if (!saved) {
+                if (failure) notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: navigationFailure(failure), dismissible: true });
+                return;
+              }
               const actions = controllers.forSession(navigation.opened.open(route));
               const ready = await waitForLifecycleReady(actions);
+              if (!current()) return;
               if (!ready.ok) { if (ready.error) notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: ready.error, dismissible: true }); return; }
               const topic = ready.session.topics[removal.topic_id], scope = removal.item_id && !topic?.removed_at ? removal.topic_id : null;
               onTree(route);
               const preferences = navigation.getSnapshot().preferences;
               const view = preferences?.sessions.find(value => sameSession(value.session, route));
-              if (!preferences || !view || !await navigation.saveSessionView({ ...structuredClone(view),
+              const opened = preferences && view && await navigation.saveSessionView({ ...structuredClone(view),
                 expanded_item_ids: [...view.expanded_item_ids], hidden_item_ids: view.hidden_item_ids ? [...view.hidden_item_ids] : undefined,
                 collapsed_topic_ids: view.collapsed_topic_ids ? [...view.collapsed_topic_ids] : undefined, filters: {
                 ...structuredClone(view.filters), archived: scope !== null && topic?.archived_at != null,
                 topic_id: null, statuses: [], owners: [], search: '', hide_later: false,
-              } }, preferences.revision)) {
+              } }, preferences.revision);
+              if (!current()) return;
+              if (!opened) {
                 notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: 'The bin could not be opened. Try View again.', dismissible: true }); return;
               }
               binView.reveal(route, scope);
