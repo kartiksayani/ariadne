@@ -108,5 +108,32 @@
       "name": "four-tilde lines",
       "body": "~~~~\n[x](https://evil.test/x)\n~~~~"
     }
+  ],
+  "reviewer_cases": [
+    {
+      "name": "underscores in safe path",
+      "path": "src/__init__.py",
+      "body": "Keep the initializer."
+    },
+    {
+      "name": "unusual path",
+      "path": "src/\r\n``````\r\n[x](https://evil.test/x)",
+      "body": "Keep the initializer."
+    },
+    {
+      "name": "empty body",
+      "path": "src/sync.rs",
+      "body": ""
+    },
+    {
+      "name": "inline code and whitespace",
+      "path": "src/sync.rs",
+      "body": "  `arr[i]` and `https://x` \\ <original> [saved]  "
+    },
+    {
+      "name": "trailing newlines",
+      "path": "src/sync.rs",
+      "body": "\n\ntrailing\r\n"
+    }
   ]
 }

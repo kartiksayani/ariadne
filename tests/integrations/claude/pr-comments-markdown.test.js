@@ -1,30 +1,43 @@
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
-import { fileReferences, MARKDOWN_LIMIT, parseMarkdown } from '../../../apps/desktop/src/ui/shared/markdown.ts';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { parseMarkdown } from '../../../apps/desktop/src/ui/shared/markdown.ts';
 import { Markdown } from '../../../apps/desktop/src/ui/shared/MarkdownText.tsx';
+import { detailModel } from '../../../apps/desktop/src/ui/detail/model.ts';
 
 const fixture = JSON.parse(readFileSync(new URL('../../../crates/ariadne-cli/tests/fixtures/pr-comments.json', import.meta.url), 'utf8'));
-const comment = fixture.threads[0].comments[0];
 const normalize = source => source.replace(/\r\n?/g, '\n');
+let saved;
 
-// Interpret the authored recipe with no Markdown parsing or escaping of data.
-function reviewerText(source) {
-  const longest = (source.match(/`+/g) ?? []).reduce((length, run) => Math.max(length, run.length), 0);
-  const fence = '`'.repeat(Math.max(3, longest + 1));
-  return `${fence}\n${source}\n${fence}`;
-}
+beforeAll(() => {
+  const directory = mkdtempSync(join(tmpdir(), 'ariadne-pr-comments-render-'));
+  const output = join(directory, 'stored.json');
+  try {
+    // Rust interprets the recipe templates against the real CLI/Core/Store.
+    // Render its saved messages; there is no JS copy of the recipe formatter.
+    execFileSync('cargo', ['test', '-p', 'ariadne-cli', '--locked', '--offline', '--test', 'pr_comments_recipe',
+      'recipe_exports_cli_stored_messages_for_markdown', '--', '--exact'], {
+      cwd: fileURLToPath(new URL('../../../', import.meta.url)),
+      env: { ...process.env, ARIADNE_PR_COMMENTS_RENDER_FIXTURE: output },
+      timeout: 120_000,
+      stdio: 'pipe',
+    });
+    saved = JSON.parse(readFileSync(output, 'utf8'));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 130_000);
 
-function reviewerNote(comment) {
-  const line = comment.line ?? comment.originalLine;
-  const position = line == null ? 'line no longer available' : `line ${line}`;
-  const location = /^[a-z0-9/._ -]+$/i.test(comment.path) ?
-    `Where: ${comment.path}, ${position}` : 'Where: the file shown in the quote below';
-  const quote = `${comment.path}, ${position}\n${comment.body}`;
-  const note = `${location}\n\n${comment.summary}\n${comment.suggestion}\n\nReviewer wrote:\n\n${reviewerText(quote)}`;
-  return comment.suggested_reply == null ? note :
-    `${note}\n\nSuggested reply:\n\n${reviewerText(comment.suggested_reply)}`;
+function stored(name) {
+  const value = saved.find(value => value.name === name);
+  const item = value.session.items[value.item_id];
+  const reply = value.session.messages.find(message => message.kind === 'reply' && message.item_id === item.id);
+  return { ...value, item, reply };
 }
 
 function links(value) {
@@ -36,84 +49,96 @@ function links(value) {
   return [];
 }
 
-function expectNoRenderedLinks(note) {
-  const parsed = parseMarkdown(note);
+function rendered(context) {
+  const parsed = parseMarkdown(context);
+  expect(parsed.rest).toBe('');
   expect(links(parsed)).toEqual([]);
   for (const compact of [false, true]) {
-    const markup = renderToStaticMarkup(createElement(Markdown, { text: note, compact }));
+    const markup = renderToStaticMarkup(createElement(Markdown, { text: context, compact }));
     expect(markup).not.toMatch(/<a(?:\s|>)|role="link"/);
   }
-  return parsed;
+  return parsed.blocks.filter(block => block.t === 'code');
 }
 
-describe('PR comments controlled reviewer fence', () => {
-  const cases = fixture.reviewer_bodies.map(({ name, body }) => [name, body]);
-  cases.push(['body past MARKDOWN_LIMIT', 'x'.repeat(MARKDOWN_LIMIT + 200) + '\r\n[x](https://evil.test/x)\n```']);
+describe('PR comments saved waiting conversation', () => {
+  const names = [...fixture.reviewer_bodies, ...fixture.reviewer_cases].map(value => value.name);
 
-  it.each(cases)('keeps reviewer data inert and unchanged: %s', (_name, body) => {
-    const note = reviewerNote({ ...comment, body });
-    const parsed = expectNoRenderedLinks(note);
-    expect(fileReferences(parsed.blocks)).toEqual([]);
-    const code = parsed.blocks.filter(block => block.t === 'code');
+  it.each(names)('renders CLI-stored reviewer data safely and unchanged: %s', name => {
+    const { comment, reply } = stored(name);
+    const code = rendered(reply.body);
     expect(code).toHaveLength(1);
     expect(code[0].lang).toBe('');
-    const quote = normalize(`${comment.path}, line ${comment.line}\n${body}`);
-    if (parsed.rest) {
-      // The parser caps its code block at MARKDOWN_LIMIT; the renderer keeps
-      // the remaining source as literal text. Together they preserve all data.
-      const fence = note.split('Reviewer wrote:\n\n')[1].split('\n')[0];
-      expect(code[0].text + parsed.rest).toBe(`${quote}\n${fence}`);
-      expect(parsed.rest).toContain('https://evil.test/x');
-      const markup = renderToStaticMarkup(createElement(Markdown, { text: note }));
-      expect(markup).toContain('class="md-rest"');
-    } else {
-      expect(code[0].text).toBe(quote);
-      expect(code[0].text.slice(quote.indexOf('\n') + 1)).toBe(normalize(body));
+    expect(code[0].text).toBe(normalize(`${comment.path}, line 24\n${comment.body}`));
+  });
+
+  it('keeps the short waiting ask beside the visible context before approval', () => {
+    const { session, item, reply, comment } = stored('exact suggested reply');
+    const model = detailModel({ session, itemId: item.id, now: Date.parse(session.updated_at), mode: null, later: false, saving: null });
+    expect(item.status).toBe('waiting_on_me');
+    expect(item.note).toBeNull();
+    expect(model.note).toBeNull();
+    expect(item.ask).not.toMatch(/[\r\n]/);
+    expect(item.ask.length).toBeLessThan(100);
+    expect(item.ask).not.toContain(comment.body);
+    expect(model.answer.options.map(option => option.label)).toEqual(['Fix', 'Reply', 'Skip']);
+    const context = model.chat.find(entry => entry.id === reply.id);
+    expect(context.message.body).toBe(reply.body);
+    expect(context.asks).toEqual([{ text: '', now: true, ordinal: 1 }]);
+    expect(model.chat.filter(entry => entry.asks.some(ask => ask.now))).toHaveLength(1);
+    expect(model.chat.indexOf(context)).toBeGreaterThan(model.chat.findIndex(entry => entry.id === item.created_message_id));
+    expect(context.message.body).toContain('Where:');
+    expect(context.message.body).toContain(comment.summary);
+    expect(context.message.body).toContain(comment.suggestion);
+    expect(context.message.body).toContain('Reviewer wrote:');
+    expect(context.message.body).toContain('Suggested reply:');
+    const code = rendered(context.message.body);
+    expect(code[1].text).toBe(normalize(comment.suggested_reply));
+  });
+
+  it('computes a fence longer than every run in the actual stored quote', () => {
+    for (const name of ['six-backtick line', 'unusual path', 'empty body', 'paragraph breaks', 'fence in a list item']) {
+      const { reply, comment } = stored(name);
+      const quote = `${comment.path}, line 24\n${comment.body}`;
+      const longest = (quote.match(/`+/g) ?? []).reduce((length, run) => Math.max(length, run.length), 0);
+      const fence = reply.body.split('Reviewer wrote:\n\n')[1].split('\n')[0];
+      expect(fence).toBe('`'.repeat(Math.max(3, longest + 1)));
     }
   });
 
-  it('uses longest backtick run plus one with a minimum of three', () => {
-    for (const [source, length] of [['', 3], ['a`b``c', 3], ['a```b', 4], ['``````\nbody\n``````', 7], ['a````````b', 9]]) {
-      const fenced = reviewerText(source);
-      const fence = '`'.repeat(length);
-      expect(fenced).toBe(`${fence}\n${source}\n${fence}`);
-    }
-    const path = 'src/``````````/sync.rs';
-    const note = reviewerNote({ ...comment, path, body: '```\nhttps://evil.test/x\n```' });
-    expect(note.split('Reviewer wrote:\n\n')[1].split('\n')[0]).toBe('`'.repeat(11));
-    expectNoRenderedLinks(note);
+  it('renders safe underscore paths as literal inline code and uses the fallback for other paths', () => {
+    const { reply } = stored('underscores in safe path');
+    expect(reply.body.startsWith('Where: `src/__init__.py`, line 24\n\n')).toBe(true);
+    const markup = renderToStaticMarkup(createElement(Markdown, { text: reply.body }));
+    expect(markup).toContain('<code class="md-code">src/__init__.py</code>');
+    expect(markup).not.toContain('<strong>init</strong>');
+    const unusual = stored('unusual path');
+    const prose = unusual.reply.body.split('Reviewer wrote:')[0];
+    expect(prose.startsWith('Where: the file shown in the quote below\n\n')).toBe(true);
+    expect(prose).not.toContain(unusual.comment.path);
+    expect(prose).not.toContain('https://');
   });
 
-  it('keeps unusual paths and raw reviewer text only inside the controlled fence', () => {
-    for (const path of [comment.path, 'src/\r\n``````\r\n[x](https://evil.test/x)', 'src/`arr[i]` <original>.rs']) {
-      const note = reviewerNote({ ...comment, path });
-      const prose = note.split('Reviewer wrote:')[0];
-      expect(prose.startsWith('Where: the file shown in the quote below\n\n')).toBe(true);
-      expect(prose).not.toContain(path);
-      expect(prose).not.toContain('https://');
-      expect(prose).not.toContain(comment.body);
-      const parsed = expectNoRenderedLinks(note);
-      expect(parsed.blocks.find(block => block.t === 'code').text).toBe(normalize(`${path}, line ${comment.line}\n${comment.body}`));
-    }
-    const note = reviewerNote({ ...comment, path: 'src/harbor_sync-2.rs' });
-    expect(note.startsWith('Where: src/harbor_sync-2.rs, line 24\n\n')).toBe(true);
-    expectNoRenderedLinks(note);
+  it.each(['ten KB body', 'oversize first body line'])('stores and safely renders a line-aligned prefix: %s', name => {
+    const { comment, reply, item } = stored(name);
+    expect(Buffer.byteLength(comment.body)).toBeGreaterThan(10_000);
+    expect(Buffer.byteLength(reply.body)).toBeLessThanOrEqual(4096);
+    expect(item.status).toBe('waiting_on_me');
+    const code = rendered(reply.body);
+    expect(code).toHaveLength(1);
+    const original = normalize(`${comment.path}, line 24\n${comment.body}`);
+    expect(original.startsWith(code[0].text)).toBe(true);
+    expect(code[0].text.endsWith('\n')).toBe(true);
+    expect(reply.body).toContain('\n```\n\nShortened; the full comment is on GitHub (Review comment link).');
+    // The sixty-backtick run beyond the retained prefix must not enlarge its fence.
+    expect(reply.body.split('Reviewer wrote:\n\n')[1].split('\n')[0]).toBe('```');
   });
 
-  it('preserves fetched whitespace, backslashes and inline code unchanged', () => {
-    for (const body of ['', '  `arr[i]` and `https://x` \\ <original> [saved]  ', '\n\ntrailing\r\n']) {
-      const note = reviewerNote({ ...comment, body });
-      expect(note).toContain(reviewerText(`${comment.path}, line ${comment.line}\n${body}`));
-      const parsed = expectNoRenderedLinks(note);
-      expect(parsed.blocks.find(block => block.t === 'code').text).toBe(normalize(`${comment.path}, line ${comment.line}\n${body}`));
-    }
-  });
-
-  it('shows the exact suggested reply in its own controlled fence', () => {
-    const reply = '  Approved text.\r\n``````\n[x](https://evil.test/x) \\ <original>  ';
-    const note = reviewerNote({ ...comment, suggested_reply: reply });
-    expect(note.split('Suggested reply:\n\n')[1]).toBe(reviewerText(reply));
-    const parsed = expectNoRenderedLinks(note);
-    expect(parsed.blocks.filter(block => block.t === 'code')[1].text).toBe(normalize(reply));
+  it.each(['oversize suggested reply', 'suggested reply with no room for wrappers'])('offers no partial suggested reply: %s', name => {
+    const { comment, reply, item } = stored(name);
+    expect(Buffer.byteLength(comment.suggested_reply)).toBeGreaterThanOrEqual(4096);
+    expect(Buffer.byteLength(reply.body)).toBeLessThanOrEqual(4096);
+    expect(reply.body).not.toContain('Suggested reply:');
+    expect(item.ask).toContain('Reply needs your own text.');
+    expect(rendered(reply.body)).toHaveLength(1);
   });
 });
