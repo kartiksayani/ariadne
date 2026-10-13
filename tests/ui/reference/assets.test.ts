@@ -43,6 +43,14 @@ describe('Paperwhite design source and offline assets', () => {
     expect([...lightBlock.matchAll(/--[\w-]+:/g)]).toHaveLength(light.length);
   });
 
+  it('adds coral attention in the app token layer without changing the ported roles', () => {
+    const appTokens = read('apps/desktop/src/styles/tokens.css').toString();
+    expect(tokens).not.toContain('--attention');
+    expect(appTokens).toContain('--attention: #ff966d;');
+    expect(appTokens).toContain('--attention: #a03d15;');
+    expect(read('apps/desktop/src/style.css').toString()).toContain('@import url("./styles/tokens.css");');
+  });
+
   it('pins all bundled bytes, JetBrains Mono faces and license notices', () => {
     const publicPath = 'apps/desktop/public/';
     const files = ['fonts', 'icons', 'licenses', 'styles'].flatMap(folder => readdirSync(resolve(repo, publicPath, folder)).map(file => `${publicPath}${folder}/${file}`));

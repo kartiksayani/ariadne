@@ -516,7 +516,7 @@ describe('owner seen preference batching', () => {
     expect(transport.mutations).toHaveLength(1);
     const marks = seenEntries(transport.mutations[0]);
     expect(marks).toHaveLength(2);
-    expect(marks[0].topics).toEqual([{ topic_id: topicId, at: '2026-10-13T10:00:00.500Z' }]);
+    expect(marks[0].topics).toEqual([{ topic_id: topicId, at: first.updated_at }]);
     expect(marks[1]).toMatchObject({ session: secondRoute, items: [{ item_id: '1', revision: first.items['1']!.revision }] });
     expect(transport.preferences.seen).toHaveLength(2);
   });
@@ -626,6 +626,24 @@ describe('owner seen preference batching', () => {
     expect(seenEntries(transport.mutations[0])[0].items).toEqual([{ item_id: '1', revision: 6 }]);
   });
 
+  it('accepts an explicitly observed revision while stale, but rejects uncaptured or future reads', async () => {
+    const { store, transport } = await setup(false);
+    const observed = store.opened.get(route)!.getSnapshot().snapshot!.session.items['1']!.revision;
+    const session = transport.sessions.get(route.session_id)!;
+    session.items['1']!.revision = observed + 1; ++session.revision;
+    let release!: () => void;
+    transport.holdSession = new Promise<void>(resolve => { release = resolve; });
+    transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+    expect(store.opened.get(route)!.getSnapshot().status).toBe('stale');
+    expect(store.markItemSeen(route, '1')).toBe(false);
+    expect(store.markItemSeen(route, '1', observed + 1)).toBe(false);
+    expect(store.markItemSeen(route, '1', observed)).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(seenEntries(transport.mutations[0])[0].items).toEqual([{ item_id: '1', revision: observed }]);
+    expect(store.getSnapshot().error).toBeNull();
+    transport.holdSession = null; release(); await store.opened.get(route)!.refresh();
+  });
+
   it('reads fresh revisions and survives two conflicts caused by saved draft keystrokes', async () => {
     const { store, transport } = await setup();
     const drafts = new OwnerDraftStore(store.service);
@@ -691,15 +709,54 @@ describe('owner seen preference batching', () => {
     expect(sessionSeen(store.getSnapshot().preferences, route)?.since).toBe(initialTime);
   });
 
-  it('ignores absent items and cancels unsaved debounce work on disposal', async () => {
+  it('cancels a queued upgrade baseline on disposal without submitting an owner observation', async () => {
+    const { store, transport } = await setup();
+    store.stop();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(transport.mutations).toHaveLength(0);
+  });
+
+  it('ignores absent items and finishes observed reads on disposal without blocking teardown', async () => {
     const { store, transport } = await setup(false);
     store.markItemSeen(route, 'missing');
     await vi.advanceTimersByTimeAsync(1000);
     expect(transport.mutations).toHaveLength(0);
     store.markItemSeen(route, '1');
     store.stop();
+    expect(store.getSnapshot().writing).toBe(false);
     await vi.advanceTimersByTimeAsync(1000);
     store.markTopicCaughtUp(route, 'missing');
-    expect(transport.mutations).toHaveLength(0);
+    expect(transport.mutations).toHaveLength(1);
+    expect(seenEntries(transport.mutations[0])[0].items).toEqual([{ item_id: '1', revision: transport.sessions.get(route.session_id)!.items['1']!.revision }]);
+  });
+
+  it('records a displayed revision when a newer revision arrives before the dwell callback', async () => {
+    const { store, transport } = await setup(false);
+    const session = transport.sessions.get(route.session_id)!;
+    session.items['1']!.revision = 3;
+    ++session.revision;
+    await store.opened.open(route).refresh();
+    session.items['1']!.revision = 4;
+    ++session.revision;
+    await store.opened.open(route).refresh();
+    store.markItemSeen(route, '1', 3);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(seenEntries(transport.mutations[0])[0].items).toEqual([{ item_id: '1', revision: 3 }]);
+  });
+
+  it('finishes pending catch-up on disposal, rebases a conflict and keeps errors silent', async () => {
+    const { store, transport } = await setup(false);
+    const session = transport.sessions.get(route.session_id)!, topicId = Object.keys(session.topics)[0];
+    store.reading.catchUp({ kind: 'mark_seen', session: route, at: initialTime,
+      items: [{ item_id: '1', revision: session.items['1']!.revision }], topics: [{ topic_id: topicId, at: session.updated_at }] });
+    transport.beforePatch = () => { transport.preferences.global.pinned = true; ++transport.preferences.revision; };
+    store.stop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transport.mutations).toHaveLength(2);
+    expect(sessionSeen(transport.preferences, route)?.topics).toEqual([{ topic_id: topicId, at: session.updated_at }]);
+    expect(transport.preferences.global.pinned).toBe(true);
+    expect(store.getSnapshot()).toMatchObject({ error: null, writing: false });
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(transport.mutations).toHaveLength(2);
   });
 });

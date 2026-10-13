@@ -2,6 +2,7 @@
 @import url("/icons/phosphor.css");
 @import url("/styles/design-tokens.css");
 @import url("/styles/paperwhite.css");
+@import url("./styles/tokens.css");
 
 html, body, #root {
   width: 100%;

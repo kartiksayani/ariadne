@@ -118,11 +118,18 @@ or expanding a row) rewrites that file and its backup.
      after `since` and newer than the item's seen revision.
    - "Waiting on me" stays the item's status. Viewing never clears it; only an
      answer does.
-   - A topic's seen time is when the owner last marked it caught up, not when
-     they last opened it. "Since you were here" and an updated brief are
-     measured from it.
-   - A question still waiting in a closed session shows "session closed" and
-     leaves the Waiting count. No data is written for it.
+   - A topic's seen time is its caught-up baseline, not when the owner last
+     opened the topic. The owner may mark it caught up explicitly; Alpha.14.4
+     also records that mark automatically when nothing unseen remains in the
+     topic. "Since you were here" and an updated brief are measured from it.
+   - Seen is shared across the Map, item detail and "Since you were here".
+     Opening an item marks its captured revision seen after about one second;
+     a future item preview uses the same dwell rule. Merely landing on a row
+     with N does not open it or mark it seen. Newer updates remain unseen.
+   - A question still waiting in a closed session appears only as history in
+     that session's own Map, labelled "Session closed" with no answer controls.
+     It appears nowhere in Waiting, including Sent question rows, and contributes
+     no actionable Waiting count. No item status is rewritten for it.
 7. **Agent warnings.** The CLI may add non-blocking warnings to its apply output.
    Warnings never change what is saved.
 
@@ -144,6 +151,20 @@ or expanding a row) rewrites that file and its backup.
 - [ADR-0094 Related items](ADR-0094-item-links.md)
 
 ## Implementation clarifications
+
+An item becomes seen after about a second of dwell in its open detail. A later
+preview can use the same observation hook. Record the revision actually displayed,
+so a concurrently arriving revision remains unseen. N only moves Map focus: its
+arrival neither opens an item nor marks it seen. Reading never answers a waiting
+question.
+
+A topic catches up implicitly when no unseen meaningful changes remain, including
+when its header is folded. A topic mark records the observation time only when
+the rendered session revision is still current, so a concurrently arriving unread
+batch remains eligible. Optional bulk catch-up
+updates shared display state immediately and allows five seconds of Undo before
+its monotonic write. Undo survives navigation and preserves subsequent individual
+reads; teardown finishes pending observations through the quiet background lane.
 
 Every change inside the apply batch that created an item is part of creation and
 adds no record, including the CLI's deferred connections and explicit edits. The

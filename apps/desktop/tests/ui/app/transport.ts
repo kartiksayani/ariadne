@@ -10,7 +10,7 @@ import { applySeen } from '../../../src/state/preferences/seen';
 export const secondId = '00000000-0000-4000-8000-000000000003';
 const page = <T,>(items: T[], revision: number): Page<T> => ({ items, next_cursor: null, snapshot_revision: revision });
 export const route = { project_id: demo.project_id, session_id: demo.id };
-const queriesWithSession = ['session_get', 'session_read', 'item_messages', 'item_rounds', 'reveal_item'];
+const queriesWithSession = ['session_get', 'session_read', 'item_messages', 'item_rounds', 'item_changes', 'reveal_item'];
 const mutationsWithoutSession = ['project_register', 'binding_connect', 'preferences_patch'];
 /**
  * Mirrors OwnerQueryRequest/OwnerMutationRequest::validate_wire in
@@ -180,6 +180,7 @@ export class AppTransport implements DesktopTransport {
     if (query.command === 'reveal_item') return { ...request.session, item_id: query.params.item_id };
     if (query.command === 'item_messages') return { item_id: query.params.item_id, messages: page(session.messages.filter(message => message.item_id === query.params.item_id), session.revision),
       timeline_context: { parent_item_id: null, created_message: null, source_round_id: null } };
+    if (query.command === 'item_changes') return { item_id: query.params.item_id, changes: page(session.items[query.params.item_id]?.changes ?? [], session.revision) };
     if (query.command === 'item_rounds') return { item_id: query.params.item_id, rounds: page([], session.revision) };
     if (query.command === 'session_read') {
       if (query.params.selection.view === 'messages') return { view: 'messages', page: page(session.messages, session.revision) };

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { ReadingLane } from '../preferences/reading';
 import type { BindingConnectParams, GlobalPreferences, ItemRoute, MutationReceipt, NavigationSelection, OwnerMutationRequest,
   PreferencesPatchEntry, PreferencesSnapshot, ProjectListResult, SessionListResult, SessionPreferences, SessionRef, Theme } from '../../generated/core';
 import type { RevealedItem } from '../../data/routes';
@@ -87,6 +88,7 @@ function rebaseEntries(entries: NavigationPatch[], base: PreferencesSnapshot, cu
 }
 
 export class NavigationStore {
+  readonly reading = new ReadingLane(entry => this.enqueueSeen(entry));
   readonly opened: OpenSessions;
   readonly routes: RegisteredRoutes;
   private state: NavigationState = Object.freeze({ preferences: null, projects: null, sessions: null,
@@ -286,19 +288,28 @@ export class NavigationStore {
       this.enqueueSeen({ kind: 'mark_seen', session, at: new Date().toISOString(), items: [], topics: [] });
     }
   }
-  /** Details and future peeks use the current fresh item capture, never a stale revision. */
-  markItemSeen(session: SessionRef, itemId: string): void {
-    if (this.stopped) return;
+  /** Details and future preview dwell record the revision actually displayed. */
+  markItemSeen(session: SessionRef, itemId: string, observedRevision?: number): boolean {
+    if (this.stopped) return false;
     const state = this.opened.get(session)?.getSnapshot(), item = state?.snapshot?.session.items[itemId];
-    if (!item || state?.status !== 'ready' || state.snapshot?.freshness !== 'fresh') return;
-    if ((sessionSeen(this.state.preferences, session)?.items.find(value => value.item_id === itemId)?.revision ?? 0) >= item.revision) return;
-    this.enqueueSeen({ kind: 'mark_seen', session, at: new Date().toISOString(), items: [{ item_id: itemId, revision: item.revision }], topics: [] });
+    // An explicit revision describes text already displayed, even while a new hint
+    // makes the store stale. An uncaptured read still requires a fresh snapshot.
+    if (!item || observedRevision === undefined && (state?.status !== 'ready' || state.snapshot?.freshness !== 'fresh')) return false;
+    const revision = observedRevision ?? item.revision;
+    if (revision > item.revision || revision < 1) return false;
+    if ((sessionSeen(this.state.preferences, session)?.items.find(value => value.item_id === itemId)?.revision ?? 0) >= revision) return true;
+    this.reading.mark({ kind: 'mark_seen', session, at: new Date().toISOString(), items: [{ item_id: itemId, revision }], topics: [] });
+    return true;
   }
-  /** Opening a topic does not catch it up; this is an explicit owner action. */
-  markTopicCaughtUp(session: SessionRef, topicId: string): void {
+  /** A topic catches up after all its unseen items have been read, or by an owner shortcut. */
+  markTopicCaughtUp(session: SessionRef, topicId: string, observedRevision?: number): void {
     if (this.stopped) return;
-    const at = new Date().toISOString();
-    this.enqueueSeen({ kind: 'mark_seen', session, at, items: [], topics: [{ topic_id: topicId, at }] });
+    const current = this.opened.get(session)?.getSnapshot();
+    if (current?.status !== 'ready' || current.snapshot?.freshness !== 'fresh' || !current.snapshot.session.topics[topicId]) return;
+    if (observedRevision !== undefined && observedRevision !== current.snapshot.session.revision) return;
+    const at = current.snapshot.session.updated_at;
+    if (Date.parse(sessionSeen(this.state.preferences, session)?.topics.find(value => value.topic_id === topicId)?.at ?? '') >= Date.parse(at)) return;
+    this.reading.mark({ kind: 'mark_seen', session, at: new Date().toISOString(), items: [], topics: [{ topic_id: topicId, at }] });
   }
   private enqueueSeen(entry: SeenPatch): void {
     if (this.stopped) return;
@@ -334,14 +345,14 @@ export class NavigationStore {
     });
     return flight;
   }
-  private async writeSeen(entries: SeenPatch[], generation: number): Promise<boolean> {
+  private async writeSeen(entries: SeenPatch[], generation: number, closing = false): Promise<boolean> {
     try {
       // Drafts and native preferences writers can advance independently of the
       // navigation capture. Read immediately before each background attempt.
       const preferences = await this.service.query({ session: null, request: { command: 'preferences_get', params: {} } });
-      if (this.stopped) return false;
+      if (this.stopped && !closing) return false;
       this.observeSeenCommit(preferences);
-      if (this.pending || this.ownerPreparing) {
+      if (!closing && (this.pending || this.ownerPreparing)) {
         entries.forEach(entry => queueSeen(this.seenQueue, entry));
         this.seenDue = true;
         return false;
@@ -350,10 +361,11 @@ export class NavigationStore {
       this.seenCapture = { preferences: structuredClone(preferences), entries: structuredClone(entries) };
       const receipt = await this.service.executeOwner({ session: null, command: { api_version: 1, command: 'preferences_patch', op_id: opId,
         params: { expected_preferences_revision: preferences.revision, entries } } });
-      if (this.stopped) return false;
+      if (this.stopped && !closing) return false;
       if (!('preferences_revision' in receipt) || receipt.operation_id !== opId || receipt.preferences_revision <= preferences.revision) {
         throw new ServiceFailure('invalid_response');
       }
+      if (this.stopped && closing) return true;
       if (receipt.preferences_revision === preferences.revision + 1) this.recordSeenCommit(receipt.preferences_revision);
       this.preferencesFloor = Math.max(this.preferencesFloor, receipt.preferences_revision);
       const previous = this.state.preferences;
@@ -375,7 +387,11 @@ export class NavigationStore {
       this.seenFailures = 0;
       return true;
     } catch (error: unknown) {
-      if (this.stopped) return false;
+      if (closing) {
+        if (error instanceof CoreFailure && error.error.code === 'revision_conflict' && generation < 2) return this.writeSeen(entries, generation + 1, true);
+        return false;
+      }
+      if (this.stopped && !closing) return false;
       if (error instanceof CoreFailure && !['commit_uncertain', 'delivery_uncertain'].includes(error.error.code)) this.seenCapture = null;
       entries.forEach(entry => queueSeen(this.seenQueue, entry));
       // Marking is upward-only, so even an uncertain completion can be retried
@@ -991,6 +1007,13 @@ export class NavigationStore {
   }
   stop(): void {
     if (this.stopped) return;
+    this.reading.stop();
+    const finalMarks = new Map<string, SeenPatch>();
+    // An upgrade baseline is automatic initialization, not an owner observation.
+    // It can be cancelled on disposal; explicit reads and catch-up must survive.
+    [...this.seenEntries, ...this.seenQueue.values()].forEach(entry => {
+      if (entry.items.length || entry.topics.length) queueSeen(finalMarks, entry);
+    });
     if (this.queuedNavigation) this.finishNavigation(this.queuedNavigation, false);
     this.stopped = true;
     this.textScaleTarget = null;
@@ -1009,6 +1032,8 @@ export class NavigationStore {
     this.subscriptions.forEach(unsubscribe => unsubscribe());
     this.opened.closeAll();
     this.listeners.clear();
+    // Finish pending read/catch-up observations on fresh preferences without delaying teardown.
+    if (finalMarks.size) void this.writeSeen([...finalMarks.values()], 0, true);
   }
 }
 
