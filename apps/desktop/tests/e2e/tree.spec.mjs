@@ -582,9 +582,12 @@ async function treeAcceptance(configuration) {
   const beforeReveal = (await preferences(tree)).view;
   const child = await browser.$('[aria-label="Child items"]').$('button[aria-label^="Native sentence 1.2\\a "]');
   await child.waitForDisplayed(); assert.equal(await child.getAttribute('aria-label'), initialSession.items['1.2'].question); await child.click();
-  await goToPeekItem(initialSession.items['1.2'], '1'); await showFullItemQuestion(initialSession.items['1.2']);
+  await goToPeekItem(initialSession.items['1.2'], '1');
   await wait(async () => (await browser.$('.tree-column').getText()).includes('Showing an item outside your current filters.'), 'Detail child reveal did not preserve the filter and expose an outside-filter row');
+  await wait(async () => (await focusedId()) === '1.2', 'Peek Go to did not focus the revealed row');
   assert.equal(await focusedId(), '1.2');
+  // Expanding the detail title deliberately moves focus to its own button.
+  await showFullItemQuestion(initialSession.items['1.2']);
   const revealed = (await preferences(tree)).view;
   assert.deepEqual(revealed.filters, beforeReveal.filters); assert.deepEqual(revealed.expanded_item_ids, beforeReveal.expanded_item_ids);
   await browser.$('button=Resume filtered view').click();

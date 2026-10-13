@@ -191,7 +191,7 @@ describe('session tree rows', () => {
     expect(ids()).toContain('8');
   });
 
-  it('focuses a top-level bullet on double click and exits Focus for an external reveal', async () => {
+  it('focuses a top-level bullet on double click and focuses the mounted target when an external reveal exits Focus', async () => {
     const view = await mount();
     fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
@@ -199,6 +199,7 @@ describe('session tree rows', () => {
     view.rerender({ selectedId: '8', reveal: target });
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
     expect(row('8')).not.toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(row('8')));
   });
 
   it('keeps newly entered Focus after an earlier external reveal', async () => {

@@ -1,17 +1,70 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { AppTransport, route, secondId } from '../app/transport';
 import { sessionButton } from '../app/open';
+import userEvent from '@testing-library/user-event';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 async function openFirst() {
   fireEvent.click(await sessionButton(route));
   await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
 }
 
 describe('peek desktop composition', { timeout: 10_000 }, () => {
+  it.each(['Tree', 'Graph'] as const)('Go to from a filtered detail child focuses the revealed %s row without scrolling via focus', async mode => {
+    const transport = new AppTransport(), source = transport.sessions.get(route.session_id)!;
+    source.items['1']!.question = 'Parent search match';
+    transport.preferences.sessions[0]!.filters.search = 'Parent search match';
+    transport.preferences.sessions[0]!.expanded_item_ids = [];
+    render(<DesktopApp service={createDesktopService(transport)} />); await openFirst();
+    if (mode === 'Graph') await userEvent.click(screen.getByRole('button', { name: 'Graph' }));
+    const rowSelector = mode === 'Tree' ? '[role="treeitem"]' : '.graph-node';
+    await userEvent.click(document.querySelector(`${rowSelector}[data-item-id="1"]`)!);
+    const detail = await screen.findByRole('article', { name: 'Detail of Parent search match' });
+    await waitFor(() => expect(transport.preferences.sessions[0]!.selected_item_id).toBe('1'));
+    const expansion = [...transport.preferences.sessions[0]!.expanded_item_ids];
+    const chip = within(within(detail).getByRole('region', { name: 'Child items' })).getByRole('button', { name: source.items['1.1']!.question });
+    await userEvent.click(chip);
+    await screen.findByRole('dialog', { name: `Peek: ${source.items['1.1']!.question}` });
+    await userEvent.keyboard('{Escape}');
+    expect(document.activeElement).toBe(chip);
+    await userEvent.click(chip);
+    const peek = await screen.findByRole('dialog', { name: `Peek: ${source.items['1.1']!.question}` });
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+    await userEvent.click(within(peek).getByRole('button', { name: 'Go to' }));
+    await screen.findByRole('article', { name: `Detail of ${source.items['1.1']!.question}` });
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector(`${rowSelector}[data-item-id="1.1"]`)));
+    expect(focus.mock.calls.some((args, index) => focus.mock.contexts[index] === document.activeElement && args[0]?.preventScroll)).toBe(true);
+    expect(chip.isConnected).toBe(false);
+    expect(transport.preferences.sessions[0]!.filters.search).toBe('Parent search match');
+    expect(transport.preferences.sessions[0]!.expanded_item_ids).toEqual(expansion);
+  });
+
+  it.each([
+    ['Tree', 'Markdown'], ['Graph', 'Markdown'], ['Tree', 'Waiting'], ['Graph', 'Waiting'],
+  ] as const)('Go to from %s %s peeks focuses the target and Escape returns to the source', async (mode, surface) => {
+    const transport = new AppTransport(), source = transport.sessions.get(route.session_id)!;
+    source.items['8']!.why = 'Review [the parent](item:1).';
+    source.items['2']!.parent = '1'; source.items['2']!.topic_id = source.items['1']!.topic_id;
+    render(<DesktopApp service={createDesktopService(transport)} />); await openFirst();
+    if (mode === 'Graph') await userEvent.click(screen.getByRole('button', { name: 'Graph' }));
+    const selector = mode === 'Tree' ? '[role="treeitem"]' : '.graph-node';
+    await userEvent.click(document.querySelector(`${selector}[data-item-id="8"]`)!);
+    const detail = await screen.findByRole('article', { name: `Detail of ${source.items['8']!.question}` });
+    await waitFor(() => expect(document.querySelector('[data-waiting-item="2"]')).not.toBeNull());
+    const container = surface === 'Markdown' ? detail : document.querySelector<HTMLElement>('[data-waiting-item="2"]')!;
+    const chip = within(container).getByRole('button', { name: `${source.items['1']!.question} · Done` });
+    await userEvent.click(chip); await screen.findByRole('dialog', { name: `Peek: ${source.items['1']!.question}` });
+    await userEvent.keyboard('{Escape}'); expect(document.activeElement).toBe(chip);
+    await userEvent.click(chip);
+    const peek = await screen.findByRole('dialog', { name: `Peek: ${source.items['1']!.question}` });
+    await userEvent.click(within(peek).getByRole('button', { name: 'Go to' }));
+    await screen.findByRole('article', { name: `Detail of ${source.items['1']!.question}` });
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector(`${selector}[data-item-id="1"]`)));
+  });
+
   it('previews a historical fork with its full title while its chip keeps the disambiguated name before Go to selects it', async () => {
     const transport = new AppTransport(), source = transport.sessions.get(route.session_id)!;
     const fork = source.items['1.1']!, elsewhere = source.items['8']!;
@@ -35,6 +88,7 @@ describe('peek desktop composition', { timeout: 10_000 }, () => {
     fireEvent.click(within(peek).getByRole('button', { name: 'Go to' }));
     await screen.findByRole('article', { name: `Detail of ${fork.question}` });
     await waitFor(() => expect(transport.preferences.sessions[0]!.selected_item_id).toBe(fork.id));
+    expect(document.activeElement).toBe(document.querySelector(`[role="treeitem"][data-item-id="${fork.id}"]`));
   });
 
   it.each(['Waiting', 'detail'] as const)('records a successful ordinary %s answer in Recent', async surface => {
