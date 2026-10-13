@@ -2,6 +2,24 @@
   padding: 28px 32px;
 }
 
+/* Pending navigation must not resize the current tree or move its scroll anchor. */
+.nav-opening {
+  position: absolute;
+  z-index: 20;
+  top: 12px;
+  right: 16px;
+  max-width: calc(100% - 32px);
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--color-divider);
+  border-radius: 6px;
+  background: var(--a-card);
+  color: var(--a-label);
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.5;
+  pointer-events: none;
+}
+
 .nav-banner {
   margin: 12px 0;
   padding: 14px 18px;

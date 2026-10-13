@@ -307,31 +307,33 @@ function Workspace({ application }: { application: Application }) {
     for (const [target, request] of quickRequests.current) if (request === token) quickRequests.current.delete(target);
     setOwnerFocus(current => current?.token === token ? null : current);
   };
-  const reveal = async (result: RevealedItem, ownerToken?: number, fromHistory = false): Promise<number | null> => {
-    if (ownerToken === undefined) invalidateOwnerRequest();
-    const token = ownerToken ?? shortcutSequence.current;
-    const intent = navigation.getNavigationIntent(), completion = navigation.getWritingCompletion();
-    const navigationRequest = navigation.getNavigationRequest();
-    // Leaving the tree can save its scroll anchor while this enabled link is
-    // being resolved. Retain only this current, unsubmitted navigation intent.
-    if (completion) {
-      const saved = await completion;
-      const current = navigation.getSnapshot();
-      // A write that definitely failed with revision_conflict was cleared and refreshed by the store,
-      // so this one explicit click proceeds against current state. Everything else stays refused.
-      if (!saved && !navigation.settledAsConflict(completion)) return null;
-      if (current.writing || current.pendingOperationId !== null || (saved && current.error)) return null;
-    }
-    if (intent === null || navigation.getNavigationIntent() !== intent || navigation.getNavigationRequest() !== navigationRequest
-      || shortcutSequence.current !== token) return null;
-    const target = result.kind === 'item' ? result.route : result.session;
-    historyReveal.current = fromHistory ? result : null;
-    const opened = navigation.navigate({ kind: 'session', session: { project_id: target.project_id, session_id: target.session_id } }, result, ownerToken === undefined ? undefined : () => shortcutSequence.current === ownerToken);
+  const reveal = async (target: ItemRoute, token: number, fromHistory = false, onReveal?: (result: RevealedItem) => void, requireItem = fromHistory): Promise<{ request: number; result: RevealedItem } | null> => {
+    let result: RevealedItem | null = null;
+    // Reserve the destination at the click, before registered item resolution
+    // yields. An older tab or link can no longer submit while this one loads.
+    const opened = navigation.navigate({ kind: 'session', session: { project_id: target.project_id, session_id: target.session_id } }, null,
+      () => shortcutSequence.current === token, async () => {
+        let resolved: RevealedItem | null;
+        try { resolved = await navigation.routes.revealItem(target); }
+        catch (error: unknown) {
+          if (shortcutSequence.current === token && navigation.getNavigationRequest() === request) {
+            reportRouteError(plainFailure(error, 'This registered item could not be opened.'));
+          }
+          return null;
+        }
+        if (requireItem && resolved?.kind !== 'item') return null;
+        if (resolved && shortcutSequence.current === token && navigation.getNavigationRequest() === request) {
+          result = resolved;
+          historyReveal.current = fromHistory ? resolved : null;
+          onReveal?.(resolved);
+        }
+        return resolved;
+      });
     const request = navigation.getNavigationRequest();
-    if (!await opened || navigation.getNavigationRequest() !== request || shortcutSequence.current !== token) return null;
+    if (!await opened || !result || navigation.getNavigationRequest() !== request || shortcutSequence.current !== token) return null;
     detailDismissedAt.current = null; setLocalReveal(result); setDetailOpen(true);
-    // Admission can follow an awaited write; continuations use this exact request.
-    return request;
+    // Continuations use this exact admitted request, including queued reveals.
+    return { request, result };
   };
   // Tree and graph already save their own selection through navigation.
   // The graph's ↑/↓ and "−" move the selection without opening detail (Ariadne.dc.html `select`).
@@ -342,18 +344,17 @@ function Workspace({ application }: { application: Application }) {
   };
   const revealItem = (target: ItemRoute) => {
     setRouteError(null);
-    void navigation.routes.revealItem(target).then(result => { if (result) reveal(result); })
+    invalidateOwnerRequest();
+    void reveal(target, shortcutSequence.current)
       .catch((error: unknown) => reportRouteError(plainFailure(error, 'This registered item could not be opened.')));
   };
   const navigateHistory = (direction: HistoryDirection) => {
     if (!route || state.writing || state.pendingOperationId !== null) return false;
     return itemHistory.navigate(direction, async id => {
-      const token = ++shortcutSequence.current, request = navigation.getNavigationRequest();
+      const token = ++shortcutSequence.current;
       setOwnerFocus(null); setRouteError(null);
       try {
-        const result = await navigation.routes.revealItem({ ...route, item_id: id });
-        if (result?.kind !== 'item' || shortcutSequence.current !== token || navigation.getNavigationRequest() !== request) return false;
-        return await reveal(result, token, true) !== null;
+        return await reveal({ ...route, item_id: id }, token, true) !== null;
       } catch (error: unknown) {
         if (shortcutSequence.current === token) reportRouteError(plainFailure(error, 'This registered item could not be opened.'));
         return false;
@@ -368,17 +369,14 @@ function Workspace({ application }: { application: Application }) {
     void agentNotRunning({ navigation, drafts: application.drafts, reveal: revealItem })(submission);
   };
   const focusOwner = (target: ItemRoute, intent: OwnerFocusRequest['intent'], optionIndex?: number, onReveal?: (result: RevealedItem) => void, quick?: 'send' | 'words', answerTarget?: OwnerFocusRequest['answerTarget']) => {
-    const token = ++shortcutSequence.current, navigationRequest = navigation.getNavigationRequest();
+    const token = ++shortcutSequence.current;
     const identity = JSON.stringify(target);
     let published = false;
     quickRequests.current.clear();
     if (quick) quickRequests.current.set(identity, token);
     setOwnerFocus(null);
-    void navigation.routes.revealItem(target).then(async result => {
-      if (!result || result.kind !== 'item' || shortcutSequence.current !== token || navigation.getNavigationRequest() !== navigationRequest) return;
-      onReveal?.(result);
-      const openedRequest = await reveal(result, token);
-      if (openedRequest === null || shortcutSequence.current !== token || navigation.getNavigationRequest() !== openedRequest) return;
+    void reveal(target, token, false, onReveal, true).then(opened => {
+      if (!opened || opened.result.kind !== 'item' || shortcutSequence.current !== token || navigation.getNavigationRequest() !== opened.request) return;
       published = true;
       setOwnerFocus({ route: routeKey(target), itemId: target.item_id, intent, token, optionIndex, sendOption: quick === 'send', ownWords: quick === 'words', answerTarget });
     }).catch((error: unknown) => reportRouteError(plainFailure(error, 'This registered item could not be opened.'))).finally(() => {
@@ -412,14 +410,12 @@ function Workspace({ application }: { application: Application }) {
     if (bringing.current.has(identity)) return;
     bringing.current.add(identity);
     setRouteError(null);
-    const token = ++shortcutSequence.current, navigationRequest = navigation.getNavigationRequest();
+    const token = ++shortcutSequence.current;
     setOwnerFocus(null);
     try {
-      const result = await navigation.routes.revealItem(target);
-      if (!result || result.kind !== 'item' || shortcutSequence.current !== token || navigation.getNavigationRequest() !== navigationRequest) return;
-      onReveal?.(result);
-      const openedRequest = await reveal(result, token);
-      if (openedRequest === null) return;
+      const opened = await reveal(target, token, false, onReveal, true);
+      if (!opened || opened.result.kind !== 'item') return;
+      const { result, request: openedRequest } = opened;
       await application.drafts.load();
       if (shortcutSequence.current !== token || navigation.getNavigationRequest() !== openedRequest) return;
       const current = result.store.getSnapshot(), session = current.snapshot?.session;
@@ -637,7 +633,7 @@ function Workspace({ application }: { application: Application }) {
         onLater={value => preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)}
         provenance={<CopiedProvenance store={store} itemId={selectedId}
           projectPath={projectId => state.projects?.projects.items.find(project => project.project_id === projectId)?.canonical_root ?? null} revealItem={async target => {
-          const result = await navigation.routes.revealItem(target); if (result) reveal(result);
+          revealItem(target);
         }} />} /> : undefined}
       onCloseDetail={closeDetail}
       railContent={store && view && view.rail !== 'hidden' ? <MessageRail key={key} service={application.service} store={store} drafts={application.drafts}

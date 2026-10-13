@@ -261,7 +261,7 @@ describe('owner seen preference batching', () => {
     const seenCommitted = new Promise<void>(resolve => { committed = resolve; });
     const receipt = new Promise<void>(resolve => { releaseReceipt = resolve; });
     const invoke = transport.invoke.bind(transport);
-    let interleaved = false;
+    let interleaved = false, navigating: Promise<boolean> | null = null;
     vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
       const request = args.request;
       if ('command' in request && request.command.command === 'preferences_patch') {
@@ -273,9 +273,9 @@ describe('owner seen preference batching', () => {
         }
         if (!interleaved) {
           interleaved = true;
-          // An admitted preference edit keeps its fields even if a newer route
-          // intent cannot enter the occupied owner writer.
-          expect(await store.navigate({ kind: 'all_sessions' })).toBe(false);
+          // The admitted view edit keeps its fields while the latest navigation
+          // waits for that owner writer, including its seen-conflict replay.
+          navigating = store.navigate({ kind: 'all_sessions' });
           transport.holdSeen = null; release();
           await seenCommitted;
         }
@@ -287,14 +287,17 @@ describe('owner seen preference batching', () => {
     const saving = store.saveSessionView({ ...transport.view(), selected_item_id: '2' }, 1);
     await vi.advanceTimersByTimeAsync(500);
     expect(await saving).toBe(true);
-    expect(transport.mutations).toHaveLength(3);
+    releaseReceipt();
+    expect(await navigating).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transport.mutations).toHaveLength(4);
     expect(transport.mutations[2].command.op_id).not.toBe(transport.mutations[1].command.op_id);
     const command = transport.mutations[2].command;
     expect(command.command === 'preferences_patch' && command.params.expected_preferences_revision).toBe(2);
     expect(transport.preferences.sessions[0].selected_item_id).toBe('2');
+    expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'all_sessions' });
     expect(sessionSeen(store.getSnapshot().preferences, route)?.items.map(item => item.item_id)).toEqual(['1']);
     const saved = store.getSnapshot().preferences;
-    releaseReceipt();
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getSnapshot().preferences).toBe(saved);
     expect(store.getSnapshot()).toMatchObject({ error: null, writing: false, pendingOperationId: null });
@@ -431,8 +434,10 @@ describe('owner seen preference batching', () => {
     const navigating = store.navigate({ kind: 'session', session: { ...route, session_id: secondId } });
     await vi.advanceTimersByTimeAsync(1000);
     expect(transport.mutations).toHaveLength(0);
+    expect(await navigating).toBe(false);
+    expect(store.getSnapshot().pendingNavigation).toEqual({ kind: 'session', session: { ...route, session_id: secondId } });
     transport.holdSession = null; release();
-    expect(await navigating).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(1000);
     expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: { ...route, session_id: secondId } });
     expect(transport.mutations.flatMap(seenEntries).map(entry => entry.session.session_id)).toEqual([route.session_id, secondId]);

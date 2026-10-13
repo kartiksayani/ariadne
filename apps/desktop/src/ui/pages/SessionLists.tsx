@@ -40,6 +40,7 @@ export interface SessionListsProps {
   readonly openTabs: ReadonlySet<string>;
   readonly now: number;
   readonly disabled: boolean;
+  readonly navigationDisabled?: boolean;
   /** Project page: "← Projects". */
   readonly onBack?: () => void;
   /** All sessions: the title and subtitle. */
@@ -91,7 +92,7 @@ function CardRun({ summary, service, onClick }: { readonly summary: Immutable<Se
 }
 
 export function SessionLists(props: SessionListsProps) {
-  const { navigation, actions, groups, sessions, snapshots, openTabs, now, disabled, onBack, overview, onOpenProject, onOpenSession, onRemove, children } = props;
+  const { navigation, actions, groups, sessions, snapshots, openTabs, now, disabled, navigationDisabled = disabled, onBack, overview, onOpenProject, onOpenSession, onRemove, children } = props;
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const lifecycleBusy = useRef(false);
   const waiting = useRef<{ cancel: () => void } | null>(null);
@@ -236,7 +237,7 @@ export function SessionLists(props: SessionListsProps) {
         <span className="pw-session-actions">
           <CopySessionId sessionId={summary.session_id} className="btn btn-ghost pw-card-button" />
           {archived
-            ? <><button type="button" className="btn btn-secondary pw-card-button" disabled={disabled} onClick={() => onOpenSession(route)}>
+            ? <><button type="button" className="btn btn-secondary pw-card-button" disabled={navigationDisabled} onClick={() => onOpenSession(route)}>
               <i className="ph ph-arrow-right" aria-hidden="true" />{open ? 'Go to tab' : 'Open in a tab'}</button>
               <button type="button" className="btn btn-secondary pw-card-button" disabled={off} title="Restore this session; it stays closed." onClick={() => { void lifecycle(summary, 'session_restore'); }}>
                 <i className="ph ph-arrow-counter-clockwise" aria-hidden="true" />Restore</button></>
@@ -244,7 +245,7 @@ export function SessionLists(props: SessionListsProps) {
             ? <button type="button" className="btn btn-secondary pw-card-button" disabled={off} onClick={() => { void lifecycle(summary, 'session_reopen'); }}>
               <i className="ph ph-arrow-counter-clockwise" aria-hidden="true" />Reopen</button>
             : <>
-              <button type="button" className={`btn ${open ? 'btn-secondary' : 'btn-primary'} pw-card-button`} disabled={disabled} data-session-id={summary.session_id}
+              <button type="button" className={`btn ${open ? 'btn-secondary' : 'btn-primary'} pw-card-button`} disabled={navigationDisabled} data-session-id={summary.session_id}
                 onClick={() => onOpenSession(route)}>
                 <i className={open ? 'ph ph-arrow-right' : 'ph ph-plus'} aria-hidden="true" />{open ? 'Go to tab' : 'Open in a tab'}</button>
               <button type="button" className="btn btn-ghost pw-card-button" disabled={off} title="Mark this session Closed in Ariadne. The agent process isn’t touched."

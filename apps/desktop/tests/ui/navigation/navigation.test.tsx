@@ -265,14 +265,12 @@ describe('canonical preference mutations', () => {
     expect(store.getSnapshot().pendingOperationId).toBe(outcome === 'uncertain' || outcome === 'stopped' ? operationId : null);
     expect(store.getSnapshot().preferences?.sessions[0].scroll).toEqual(outcome === 'confirmed' ? edit.scroll : prefs.sessions[0].scroll);
   });
-  it('settles a revision_conflict as current, unblocked and reported only for that rejection', async () => {
+  it('releases the writer after repeated conflicts and admits a later owner edit', async () => {
     const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs); await store.start();
     const held = deferred<MutationEnvelope>(); transport.enqueue('preferences_patch', held.promise);
     const edit = structuredClone(prefs.sessions[0]); edit.scroll = { item_id: '1', offset: 12 };
     const saved = store.saveSessionView(edit, prefs.revision);
     await waitFor(() => expect(store.getSnapshot().writing).toBe(true));
-    const completion = store.getWritingCompletion()!;
-    expect(store.settledAsConflict(completion)).toBe(false);
     // Both the first attempt and its single re-apply conflict, so the failure surfaces.
     read(transport, preferences(prefs.revision + 1));
     transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: { ...error, code: 'revision_conflict', current_revision: 3 } });
@@ -281,33 +279,27 @@ describe('canonical preference mutations', () => {
     expect(await saved).toBe(false);
     expect(store.getSnapshot()).toMatchObject({ writing: false, pendingOperationId: null });
     expect(store.getSnapshot().error).toMatchObject({ error: { code: 'revision_conflict' } });
-    expect(store.settledAsConflict(completion)).toBe(true);
     const next = deferred<MutationEnvelope>(); transport.enqueue('preferences_patch', next.promise);
     const again = store.saveSessionView(edit, prefs.revision + 2);
     await waitFor(() => expect(store.getSnapshot().writing).toBe(true));
-    expect(store.settledAsConflict(store.getWritingCompletion()!)).toBe(false);
-    expect(store.settledAsConflict(completion)).toBe(true);
     next.resolve(patchReceipt()); await again;
   });
-  it('stops reporting a conflict once a later write is rejected with a different failure', async () => {
+  it('reports a later rejection instead of a previous conflict', async () => {
     const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs); await store.start();
     const held = deferred<MutationEnvelope>(); transport.enqueue('preferences_patch', held.promise);
     const edit = structuredClone(prefs.sessions[0]); edit.scroll = { item_id: '1', offset: 12 };
     const saved = store.saveSessionView(edit, prefs.revision);
     await waitFor(() => expect(store.getSnapshot().writing).toBe(true));
-    const completion = store.getWritingCompletion()!;
     read(transport, preferences(prefs.revision + 1));
     transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: { ...error, code: 'revision_conflict', current_revision: 3 } });
     read(transport, preferences(prefs.revision + 2));
     held.resolve({ api_version: 1, ok: false, error: { ...error, code: 'revision_conflict', current_revision: 2 } });
     expect(await saved).toBe(false);
-    expect(store.settledAsConflict(completion)).toBe(true);
     transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: { ...error, code: 'invalid_transition' } });
     expect(await store.saveSessionView(edit, prefs.revision + 2)).toBe(false);
     expect(store.getSnapshot().error).toMatchObject({ error: { code: 'invalid_transition' } });
-    expect(store.settledAsConflict(completion)).toBe(false);
   });
-  it('cancels older unsubmitted intent on a current busy navigation attempt while ignoring stale callbacks', async () => {
+  it('retains a current busy navigation attempt while ignoring stale callbacks', async () => {
     const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs); await store.start();
     const held = deferred<MutationEnvelope>(); transport.enqueue('preferences_patch', held.promise);
     const saved = store.saveSessionView(prefs.sessions[0], prefs.revision);
@@ -315,13 +307,17 @@ describe('canonical preference mutations', () => {
     const intent = store.getNavigationIntent(), request = store.getNavigationRequest();
     expect(await store.navigate({ kind: 'all_sessions' }, null, () => false)).toBe(false);
     expect(store.getNavigationIntent()).toBe(intent);
-    expect(await store.navigate({ kind: 'all_sessions' })).toBe(false);
+    const navigating = store.navigate({ kind: 'all_sessions' });
     expect(store.getNavigationIntent()).toBe(intent! + 1);
-    expect(store.getNavigationRequest()).toBe(request);
+    expect(store.getNavigationRequest()).toBe(request + 1);
+    expect(store.getSnapshot().pendingNavigation).toEqual({ kind: 'all_sessions' });
+    transport.enqueue('preferences_patch', patchReceipt(3));
+    const next = preferences(3); next.global.selected_navigation = { kind: 'all_sessions' }; read(transport, next);
     held.resolve(patchReceipt()); expect(await saved).toBe(true);
+    expect(await navigating).toBe(true);
     store.stop(); expect(store.getNavigationIntent()).toBeNull();
     expect(await store.navigate({ kind: 'projects' })).toBe(false);
-    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(2);
   });
   it('closing a tab preserves all view settings and drafts and sends only preference entries', async () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'session', session: route };
@@ -377,20 +373,30 @@ describe('canonical preference mutations', () => {
     expect(await store.navigate({ kind: 'all_sessions' }, null, () => false)).toBe(false);
     expect(transport.calls).toHaveLength(reads); expect(store.getNavigationRequest()).toBe(1);
   });
-  it('unknown mutation completion retains the exact operation, prevents another command and reconciles with the same ID', async () => {
+  it('unknown mutation completion retains the exact operation and queues navigation until explicit reconciliation', async () => {
+    vi.useFakeTimers();
     const { transport, store } = setup(); read(transport); await store.start();
     transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: { ...error, code: 'commit_uncertain', message: 'Preference commit is uncertain.' } }, patchReceipt());
-    expect(await store.navigate({ kind: 'all_sessions' })).toBe(false);
+    const firstNavigation = store.navigate({ kind: 'all_sessions' });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await firstNavigation).toBe(false);
     expect(store.getSnapshot().pendingOperationId).toBe(operationId);
     const failure = store.getSnapshot().error;
     read(transport); await store.refresh();
     expect(store.getSnapshot().error).toBe(failure);
     expect(store.getSnapshot().pendingOperationId).toBe(operationId);
-    expect(await store.navigate({ kind: 'projects' })).toBe(false);
+    const navigating = store.navigate({ kind: 'projects' });
+    expect(store.getSnapshot().pendingNavigation).toEqual({ kind: 'projects' });
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
     const next = preferences(2); next.global.selected_navigation = { kind: 'all_sessions' }; read(transport, next);
+    transport.enqueue('preferences_patch', patchReceipt(3));
+    const latest = preferences(3); latest.global.selected_navigation = { kind: 'projects' }; read(transport, latest);
     expect(await store.retryMutation()).toBe(true);
-    const calls = transport.calls.filter(call => call.name === 'preferences_patch'); expect(calls).toHaveLength(2); expect(calls[0]).toEqual(calls[1]);
+    expect(await navigating).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    const calls = transport.calls.filter(call => call.name === 'preferences_patch'); expect(calls).toHaveLength(3); expect(calls[0]).toEqual(calls[1]);
     expect(store.getSnapshot().pendingOperationId).toBeNull();
+    expect(store.getSnapshot().preferences?.global.selected_navigation).toEqual({ kind: 'projects' });
   });
   it('a confirmed tab close stays visible when the follow-up read fails or returns an older revision', async () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'session', session: route };
@@ -431,7 +437,7 @@ describe('canonical preference mutations', () => {
     // The newly opened SessionStore also reads the ordinary presence catalogue.
     transport.enqueue('session_list', success('session_list', sessionResult()));
     transport.emit('ariadne://route', { ...route, item_id: '1.1' });
-    await waitFor(() => expect(store.opened.open(route).getSnapshot().status).toBe('ready'));
+    expect(transport.calls.filter(call => call.name === 'reveal_item' || call.name === 'session_get')).toHaveLength(0);
     expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(0);
     blocked.resolve(blockedRead === 'preferences' ? success('preferences_get', initial) : success('project_list', projectResult()));
     await startup;
@@ -442,30 +448,35 @@ describe('canonical preference mutations', () => {
     const patches = transport.calls.filter(call => call.name === 'preferences_patch');
     expect(patches).toHaveLength(1);
     expect((patches[0].request as OwnerMutationRequest).command.params).toMatchObject({ expected_preferences_revision: 1 });
+    expect(transport.calls.filter(call => call.name === 'reveal_item').map(call => call.request)).toEqual([
+      { session: route, request: { command: 'reveal_item', params: { item_id: '1.1' } } },
+    ]);
   });
   it('applies only the latest registered item route retained before startup completes', async () => {
     const { transport, store } = setup();
     const { initial, blocked, startup } = await deferredStartup(transport, store);
-    transport.enqueue('reveal_item', success('reveal_item', { ...route, item_id: '1.1' }), success('reveal_item', { ...route, item_id: '3' }));
-    transport.enqueue('session_get', loaded(), loaded(), loaded());
+    transport.enqueue('reveal_item', success('reveal_item', { ...route, item_id: '3' }));
+    transport.enqueue('session_get', loaded(), loaded());
     transport.emit('ariadne://route', { ...route, item_id: '1.1' });
-    await waitFor(() => expect(store.opened.open(route).getSnapshot().status).toBe('ready'));
     transport.emit('ariadne://route', { ...route, item_id: '3' });
-    await waitFor(() => expect(transport.calls.filter(call => call.name === 'session_get')).toHaveLength(2));
+    expect(transport.calls.filter(call => call.name === 'reveal_item' || call.name === 'session_get')).toHaveLength(0);
     transport.enqueue('preferences_patch', patchReceipt(2));
     const next = preferences(2); next.global.selected_navigation = { kind: 'session', session: route }; next.sessions[0].selected_item_id = '3';
     read(transport, next);
-    transport.enqueue('session_list', success('session_list', sessionResult()), success('session_list', sessionResult()));
+    transport.enqueue('session_list', success('session_list', sessionResult()));
     blocked.resolve(success('preferences_get', initial)); await startup;
     await waitFor(() => expect(store.getSnapshot().preferences?.sessions[0]?.selected_item_id).toBe('3'));
     expect(store.getSnapshot().reveal).toMatchObject({ kind: 'item', route: { ...route, item_id: '3' } });
+    expect(transport.calls.filter(call => call.name === 'reveal_item').map(call => call.request)).toEqual([
+      { session: route, request: { command: 'reveal_item', params: { item_id: '3' } } },
+    ]);
     const patches = transport.calls.filter(call => call.name === 'preferences_patch');
     expect(patches).toHaveLength(1);
     expect((patches[0].request as OwnerMutationRequest).command.params).toMatchObject({ entries: [
       { kind: 'set_global' }, { kind: 'set_session_view', preferences: { selected_item_id: '3' } },
     ] });
   });
-  it('retains a later item route whose validation crosses the pending startup route write', async () => {
+  it('reserves a later native item route and defers its validation until the startup write completes', async () => {
     const { transport, store } = setup();
     const { initial, blocked, startup } = await deferredStartup(transport, store);
     const later = deferred<QueryEnvelope>(), firstWrite = deferred<MutationEnvelope>();
@@ -474,18 +485,21 @@ describe('canonical preference mutations', () => {
     transport.enqueue('preferences_patch', firstWrite.promise, patchReceipt(3));
     const first = preferences(2); first.global.selected_navigation = { kind: 'session', session: route };
     const second = structuredClone(first); second.revision = 3; second.sessions[0].selected_item_id = '3';
-    read(transport, first); read(transport, second);
+    read(transport, first);
+    // The queued route captures the confirmed first write before its own patch.
+    transport.enqueue('preferences_get', success('preferences_get', first));
+    read(transport, second);
     transport.enqueue('session_list', success('session_list', sessionResult()), success('session_list', sessionResult()));
     transport.emit('ariadne://route', { ...route, item_id: '1.1' });
-    await waitFor(() => expect(store.opened.open(route).getSnapshot().status).toBe('ready'));
-    transport.emit('ariadne://route', { ...route, item_id: '3' });
-    await waitFor(() => expect(transport.calls.filter(call => call.name === 'reveal_item')).toHaveLength(2));
     blocked.resolve(success('preferences_get', initial)); await startup;
-    await waitFor(() => expect(store.getSnapshot().writing).toBe(true));
-    later.resolve(success('reveal_item', { ...route, item_id: '3' }));
-    await waitFor(() => expect(transport.calls.filter(call => call.name === 'session_get')).toHaveLength(3));
+    await waitFor(() => expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1));
+    transport.emit('ariadne://route', { ...route, item_id: '3' });
+    expect(transport.calls.filter(call => call.name === 'reveal_item')).toHaveLength(1);
+    expect(store.getSnapshot().writing).toBe(true);
     expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
     firstWrite.resolve(patchReceipt(2));
+    await waitFor(() => expect(transport.calls.filter(call => call.name === 'reveal_item')).toHaveLength(2));
+    later.resolve(success('reveal_item', { ...route, item_id: '3' }));
     await waitFor(() => expect(store.getSnapshot().preferences?.revision).toBe(3));
     expect(store.getSnapshot().preferences?.sessions[0].selected_item_id).toBe('3');
     expect(store.getSnapshot().reveal).toMatchObject({ kind: 'item', route: { ...route, item_id: '3' } });
@@ -769,12 +783,15 @@ describe('source-backed navigation views and explicit registration', () => {
   it('registers the exact root under canonical Registry scope', async () => {
     const { transport, store } = setup(); read(transport); await store.start();
     transport.enqueue('project_register', { api_version: 1, ok: true, data: { operation_id: operationId, project_id: projectId, registry_revision: 2 } }); read(transport);
+    transport.enqueue('preferences_patch', patchReceipt());
+    const registered = preferences(2); registered.global.selected_navigation = { kind: 'project', project_id: projectId }; read(transport, registered);
     const close = vi.fn(); render(<RegisterProject store={store} disabled={false} close={close} />);
     fireEvent.change(screen.getByLabelText('Project root'), { target: { value: '/registered/café project' } });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Register project' })); });
     expect(transport.calls.find(call => call.name === 'project_register')?.request).toEqual({ session: null, command: {
       api_version: 1, command: 'project_register', op_id: operationId, params: { canonical_root: '/registered/café project' },
-    } }); expect(close).toHaveBeenCalledOnce();
+    } }); await waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(store.getSnapshot().preferences?.global.selected_navigation).toEqual({ kind: 'project', project_id: projectId });
   });
   it('sends a home-relative root as typed and shows a missing folder in plain words', async () => {
     const { transport, store } = setup(); read(transport); await store.start();
@@ -1172,13 +1189,17 @@ describe('tree edits through canonical navigation preferences', () => {
     const native = structuredClone(prefs); native.revision = 2; read(transport, native); read(transport, native);
     const clickA = store.navigate({ kind: 'all_sessions' });
     await waitFor(() => expect(store.getSnapshot().writing).toBe(true));
-    // Click B arrives while A's write is pending and is dropped, but it supersedes A as the owner's intent.
-    expect(await store.navigate({ kind: 'project', project_id: projectId })).toBe(false);
+    // Click B supersedes A and waits until A's definite rejection releases its writer.
+    const clickB = store.navigate({ kind: 'project', project_id: projectId });
+    transport.enqueue('preferences_patch', patchReceipt(3));
+    const latest = structuredClone(native); latest.revision = 3; latest.global.selected_navigation = { kind: 'project', project_id: projectId };
+    read(transport, latest);
     held.resolve({ api_version: 1, ok: false, error: { ...error, code: 'revision_conflict', current_revision: 2 } });
     expect(await clickA).toBe(false);
-    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
-    expect(store.getSnapshot().error).toMatchObject({ error: { code: 'revision_conflict' } });
-    expect(store.getSnapshot().preferences?.global.selected_navigation).toEqual({ kind: 'projects' });
+    expect(await clickB).toBe(true);
+    expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(2);
+    expect(store.getSnapshot().error).toBeNull();
+    expect(store.getSnapshot().preferences?.global.selected_navigation).toEqual({ kind: 'project', project_id: projectId });
   });
   it('retries a conflicted session-view edit without overwriting a foreign change to another field', async () => {
     const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs); await store.start();
