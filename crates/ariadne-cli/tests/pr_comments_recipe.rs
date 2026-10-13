@@ -11,12 +11,13 @@ use std::{
 const RECIPE: &str = include_str!("../../../integrations/rules/pr-comments.md");
 const FIXTURE: &str = include_str!("fixtures/pr-comments.json");
 
-fn reviewer_text(text: &str) -> String {
+fn literal_text(text: &str) -> String {
     let escaped = text
         .replace('\\', "\\\\")
         .replace('<', "\\<")
         .replace('[', "\\[")
-        .replace(']', "\\]");
+        .replace(']', "\\]")
+        .replace('`', "\\`");
     let mut result = String::new();
     let mut remaining = escaped.as_str();
     while !remaining.is_empty() {
@@ -43,6 +44,77 @@ fn reviewer_text(text: &str) -> String {
             remaining = &remaining[ch.len_utf8()..];
         }
     }
+    result
+}
+
+// Preserve matched code before applying the recipe's literal escaping. This
+// fixture interpreter is not a production Markdown renderer.
+fn reviewer_inline(text: &str) -> String {
+    let mut runs = Vec::new();
+    let mut chars = text.char_indices().peekable();
+    while let Some((start, ch)) = chars.next() {
+        if ch == '\\' {
+            chars.next();
+        } else if ch == '`' {
+            let mut length = 1;
+            while chars.peek().is_some_and(|(_, ch)| *ch == '`') {
+                chars.next();
+                length += 1;
+            }
+            runs.push((start, length));
+        }
+    }
+    let mut result = String::new();
+    let (mut start, mut index) = (0, 0);
+    while index < runs.len() {
+        let (open, length) = runs[index];
+        if let Some(close) = (index + 1..runs.len()).find(|&at| runs[at].1 == length) {
+            let end = runs[close].0 + length;
+            result.push_str(&literal_text(&text[start..open]));
+            result.push_str(&text[open..end]);
+            start = end;
+            index = close;
+        }
+        index += 1;
+    }
+    result.push_str(&literal_text(&text[start..]));
+    result
+}
+
+fn reviewer_text(text: &str) -> String {
+    fn fence(line: &str) -> Option<(char, usize, &str)> {
+        let trimmed = line.trim_start_matches(' ');
+        if line.len() - trimmed.len() > 3 {
+            return None;
+        }
+        let ch = trimmed.chars().next()?;
+        if ch != '`' && ch != '~' {
+            return None;
+        }
+        let length = trimmed.chars().take_while(|c| *c == ch).count();
+        (length >= 3).then(|| (ch, length, &trimmed[length..]))
+    }
+    let (mut result, mut prose) = (String::new(), String::new());
+    let mut open = None;
+    for line in text.split_inclusive('\n') {
+        let marker = fence(line);
+        if let Some((ch, length)) = open {
+            result.push_str(line);
+            if marker.is_some_and(|(c, n, rest)| c == ch && n >= length && rest.trim().is_empty()) {
+                open = None;
+            }
+        } else if let Some((ch, length, _)) =
+            marker.filter(|(ch, _, rest)| *ch != '`' || !rest.contains('`'))
+        {
+            result.push_str(&reviewer_inline(&prose));
+            prose.clear();
+            result.push_str(line);
+            open = Some((ch, length));
+        } else {
+            prose.push_str(line);
+        }
+    }
+    result.push_str(&reviewer_inline(&prose));
     result
 }
 
@@ -221,21 +293,19 @@ impl Setup {
                     .or_else(|| comment["originalLine"].as_u64())
                     .map(|line| format!("line {line}"))
                     .unwrap_or_else(|| "line no longer available".into());
-                let quoted = comment["body"]
-                    .as_str()
-                    .unwrap()
+                let quoted = reviewer_text(comment["body"].as_str().unwrap())
                     .lines()
-                    .map(|line| format!("> {}", reviewer_text(line)))
+                    .map(|line| format!("> {line}"))
                     .collect::<Vec<_>>()
                     .join("\n");
                 let note = format!(
                     "Where: {}, {line}\n\nReviewer said:\n{quoted}\n\nSuggested action: {}",
-                    reviewer_text(comment["path"].as_str().unwrap()),
+                    literal_text(comment["path"].as_str().unwrap()),
                     comment["suggestion"].as_str().unwrap()
                 );
                 let mut request = template(
                     1,
-                    &json!({"topic": topic, "question": reviewer_text(comment["question"].as_str().unwrap()), "note": note, "comment_url": comment["url"]}),
+                    &json!({"topic": topic, "question": comment["question"], "note": note, "comment_url": comment["url"]}),
                 );
                 let current = self
                     .read_all("topics")
@@ -344,8 +414,7 @@ fn same_title_prs_have_separate_topics_and_empty_prs_reuse_their_topic() {
 #[test]
 fn recipe_escapes_reviewer_text_and_where_path_without_html_entities() {
     let setup = Setup::empty();
-    let mut fixture: Value = serde_json::from_str(FIXTURE).unwrap();
-    fixture["threads"][0]["comments"][0]["question"] = fixture["markdown_title"].clone();
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
     setup.import(&fixture);
     let items = setup.read_all("items");
     let note = items[0]["item"]["note"].as_str().unwrap();
@@ -354,13 +423,48 @@ fn recipe_escapes_reviewer_text_and_where_path_without_html_entities() {
     assert!(!note.contains("&lt;"));
     assert!(!note.contains("&amp;"));
     assert_eq!(
-        items[0]["item"]["question"],
-        r"Harbor \[sync\] \<notes> https\://docs.example.test/review"
-    );
-    assert_eq!(
         reviewer_text(r"\[saved] \<https://docs.example.test>"),
         r"\\\[saved\] \\\<https\://docs.example.test>"
     );
+}
+
+#[test]
+fn recipe_questions_are_plain_summaries_without_markdown_escapes() {
+    let setup = Setup::empty();
+    let mut fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    fixture["threads"][0]["comments"][0]["body"] = json!(
+        r"Fix vec[0] lookup, keep <original> errors and \saved values; see https://docs.example.test."
+    );
+    // The agent rewords the request rather than escaping the reviewer's text.
+    fixture["threads"][0]["comments"][0]["question"] = json!("Fix the first vector lookup");
+    setup.import(&fixture);
+    let items = setup.read_all("items");
+    assert_eq!(items[0]["item"]["question"], "Fix the first vector lookup");
+    for item in &items {
+        let question = item["item"]["question"].as_str().unwrap();
+        assert!(!question.contains(['\\', '<', '[', ']']));
+        assert!(!question.to_lowercase().contains("http"));
+    }
+    assert!(items[0]["item"]["note"]
+        .as_str()
+        .unwrap()
+        .contains(r"vec\[0\]"));
+}
+
+#[test]
+fn recipe_notes_preserve_reviewer_code_and_escape_only_surrounding_text() {
+    let setup = Setup::empty();
+    let mut fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    fixture["threads"][0]["comments"][0]["body"] = json!(
+        "Use `arr[i]` and `https://x`. Outside arr[i] https://x\n\n```suggestion\narr[i] = \"https://x\";\n```\nUnmatched `arr[i] https://x"
+    );
+    setup.import(&fixture);
+    let items = setup.read_all("items");
+    let note = items[0]["item"]["note"].as_str().unwrap();
+    assert!(note.contains(r"> Use `arr[i]` and `https://x`. Outside arr\[i\] https\://x"));
+    assert!(note.contains("> ```suggestion\n> arr[i] = \"https://x\";\n> ```"));
+    assert!(note.contains(r"> Unmatched \`arr\[i\] https\://x"));
+    assert_eq!(reviewer_text("`arr[i]\nhttps://x`"), "`arr[i]\nhttps://x`");
 }
 
 #[test]

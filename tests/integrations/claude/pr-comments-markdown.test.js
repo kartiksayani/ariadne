@@ -6,9 +6,40 @@ const fixture = JSON.parse(readFileSync(new URL('../../../crates/ariadne-cli/tes
 
 // Interpret the literal escaping prescribed by the authored recipe, then use
 // the desktop's real parser rather than a test-only Markdown implementation.
-function reviewerText(text) {
-  return text.replace(/\\/g, '\\\\').replace(/[<[\]]/g, '\\$&')
+function literalText(text) {
+  return text.replace(/\\/g, '\\\\').replace(/[<[\]`]/g, '\\$&')
     .replace(/https?:\/\//gi, scheme => scheme.replace(':', '\\:'));
+}
+
+function reviewerInline(source) {
+  const runs = [...source.matchAll(/\\.|`+/gs)].filter(match => match[0].startsWith('`'));
+  let result = '', start = 0;
+  for (let index = 0; index < runs.length; index++) {
+    const open = runs[index];
+    const closeIndex = runs.findIndex((run, at) => at > index && run[0].length === open[0].length);
+    if (closeIndex < 0) continue;
+    const end = runs[closeIndex].index + open[0].length;
+    result += literalText(source.slice(start, open.index)) + source.slice(open.index, end);
+    start = end;
+    index = closeIndex;
+  }
+  return result + literalText(source.slice(start));
+}
+
+function reviewerText(source) {
+  let result = '', prose = '', fence = null;
+  for (const line of source.match(/[^\n]*\n|[^\n]+$/g) ?? []) {
+    const marker = /^ {0,3}(`{3,}|~{3,})([^\n]*)\n?$/.exec(line);
+    if (fence) {
+      result += line;
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+    } else if (marker && (marker[1][0] !== '`' || !marker[2].includes('`'))) {
+      result += reviewerInline(prose) + line;
+      prose = '';
+      fence = marker[1];
+    } else prose += line;
+  }
+  return result + reviewerInline(prose);
 }
 
 function links(value) {
@@ -29,8 +60,8 @@ describe('PR comments recipe Markdown escaping', () => {
   it('defuses bare and Markdown reviewer URLs in the fixture note', () => {
     const comment = fixture.threads[0].comments[0];
     expect(links(parseMarkdown(comment.body)).length).toBeGreaterThan(0);
-    const quoted = comment.body.split('\n').map(line => `> ${reviewerText(line)}`).join('\n');
-    const note = `Where: ${reviewerText(comment.path)}, line ${comment.line}\n\nReviewer said:\n${quoted}\n\nSuggested action: ${comment.suggestion}`;
+    const quoted = reviewerText(comment.body).split('\n').map(line => `> ${line}`).join('\n');
+    const note = `Where: ${literalText(comment.path)}, line ${comment.line}\n\nReviewer said:\n${quoted}\n\nSuggested action: ${comment.suggestion}`;
     expect(links(parseMarkdown(note))).toEqual([]);
     expect(text(inline(reviewerText(comment.body), 0))).toBe(comment.body);
     expect(note).toContain('https\\://docs.example.test/guide');
@@ -53,5 +84,45 @@ describe('PR comments recipe Markdown escaping', () => {
     const parsed = inline(reviewerText(original), 0);
     expect(links(parsed)).toEqual([]);
     expect(text(parsed)).toBe(original);
+  });
+
+  it('preserves matched reviewer code verbatim while escaping the same text outside code', () => {
+    const original = '`arr[i]` and `https://x` outside: arr[i] https://x';
+    const escaped = reviewerText(original);
+    expect(escaped).toBe('`arr[i]` and `https://x` outside: arr\\[i\\] https\\://x');
+    const parsed = inline(escaped, 0);
+    expect(parsed.filter(node => node.t === 'code')).toEqual([
+      { t: 'code', text: 'arr[i]' }, { t: 'code', text: 'https://x' },
+    ]);
+    expect(text(parsed)).toBe('arr[i] and https://x outside: arr[i] https://x');
+    expect(links(parsed)).toEqual([]);
+    const multipleTicks = reviewerText('``arr[`i`] https://x``');
+    expect(multipleTicks).toBe('``arr[`i`] https://x``');
+    expect(inline(multipleTicks, 0)).toEqual([{ t: 'code', text: 'arr[`i`] https://x' }]);
+  });
+
+  it('preserves fenced suggestions verbatim across quoted lines without links', () => {
+    for (const fence of ['```suggestion', '~~~suggestion']) {
+      const code = String.raw`arr[i] = "https://x"; // \[saved] <value>`;
+      const original = `${fence}\n${code}\n${fence.slice(0, 3)}\nOutside arr[i] https://x`;
+      const escaped = reviewerText(original);
+      expect(escaped).toContain(`${fence}\n${code}\n${fence.slice(0, 3)}`);
+      expect(escaped).toContain('Outside arr\\[i\\] https\\://x');
+      const parsed = parseMarkdown(escaped.split('\n').map(line => `> ${line}`).join('\n'));
+      expect(parsed.blocks[0].children[0]).toEqual({ t: 'code', lang: 'suggestion', text: code });
+      expect(links(parsed)).toEqual([]);
+    }
+  });
+
+  it('escapes unmatched and escaped backticks as ordinary reviewer text', () => {
+    for (const original of ['`arr[i] https://x', '``arr[i]` https://x', '\\`arr[i] https://x']) {
+      const escaped = reviewerText(original);
+      expect(escaped).toContain('arr\\[i\\]');
+      expect(escaped).toContain('https\\://x');
+      const parsed = inline(escaped, 0);
+      expect(text(parsed)).toBe(original);
+      expect(links(parsed)).toEqual([]);
+      expect(parsed.filter(node => node.t === 'code')).toEqual([]);
+    }
   });
 });
