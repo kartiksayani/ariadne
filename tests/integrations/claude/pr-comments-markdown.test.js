@@ -20,6 +20,7 @@ beforeAll(() => {
   try {
     // Rust interprets the recipe templates against the real CLI/Core/Store.
     // Render its saved messages; there is no JS copy of the recipe formatter.
+    // check-commit.py prebuilds this binary before CI coverage; local runs build it here.
     execFileSync('cargo', ['test', '-p', 'ariadne-cli', '--locked', '--offline', '--test', 'pr_comments_recipe',
       'recipe_exports_cli_stored_messages_for_markdown', '--', '--exact'], {
       cwd: fileURLToPath(new URL('../../../', import.meta.url)),
@@ -81,6 +82,9 @@ describe('PR comments saved waiting conversation', () => {
     expect(item.ask.length).toBeLessThan(100);
     expect(item.ask).not.toContain(comment.body);
     expect(model.answer.options.map(option => option.label)).toEqual(['Fix', 'Reply', 'Skip']);
+    expect(model.answer.options.find(option => option.label === 'Reply').consequence).toBe(
+      "Post the suggested reply shown in this item's conversation, or your own one-line text instead.",
+    );
     const context = model.chat.find(entry => entry.id === reply.id);
     expect(context.message.body).toBe(reply.body);
     expect(context.asks).toEqual([{ text: '', now: true, ordinal: 1 }]);
@@ -139,6 +143,9 @@ describe('PR comments saved waiting conversation', () => {
     expect(Buffer.byteLength(reply.body)).toBeLessThanOrEqual(4096);
     expect(reply.body).not.toContain('Suggested reply:');
     expect(item.ask).toContain('Reply needs your own text.');
+    expect(item.options.find(option => option.label === 'Reply').consequence).toBe(
+      'Post only the exact text you approve in this conversation.',
+    );
     expect(rendered(reply.body)).toHaveLength(1);
   });
 });

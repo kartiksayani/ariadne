@@ -16,53 +16,55 @@ push, stages and commits, and plans time for it. Before UI implementation, share
 clickable HTML mock under `designs/mocks/`; the owner signs off and implementation
 follows it.
 
-**Main: `3e99578` (#149). Alpha.13 released (`v0.1.0-alpha.13`).**
-[Alpha.13 release](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.13).
-Releases since alpha.6, from main's squash subjects:
+**Main: `91bf3537` (#156). Alpha.14 released as `v0.1.0-alpha.14`** (tag at `1135693c`, #155).
+[Alpha.14 release](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.14).
 
-- **alpha.7** [#143](https://github.com/kartiksayani/ariadne/pull/143): one-chat detail, Waiting/Sent split, quick answers, hide items.
-- **alpha.8** [#144](https://github.com/kartiksayani/ariadne/pull/144): Ack — read-only items start Open with an Ack button.
-- **alpha.9** [#145](https://github.com/kartiksayani/ariadne/pull/145): item links — related items in details, graph and tree.
-- **alpha.10** [#146](https://github.com/kartiksayani/ariadne/pull/146): archive sessions — Archived group, Restore and Undo.
-- **alpha.11** [#147](https://github.com/kartiksayani/ariadne/pull/147): links open in the browser, answer box clears, hidden items grouped.
-- **alpha.12** [#148](https://github.com/kartiksayani/ariadne/pull/148): agents delete into a bin, Ack goes where the agent says, connect recovery, short install summary.
-- **alpha.13** [#149](https://github.com/kartiksayani/ariadne/pull/149): room for the conversation, tidier session page, truthful delivery, quieter menu bar.
+## Alpha.14 complete — a Map you can follow
 
-## Alpha.14 in progress — a Map you can follow
+- **14.0 data contracts:** [#150](https://github.com/kartiksayani/ariadne/pull/150), `395736a2`.
+- **14.1 agent rules and CLI warnings:** [#151](https://github.com/kartiksayani/ariadne/pull/151), `bc7fa712`.
+- **14.3 change tracking derived views:** [#152](https://github.com/kartiksayani/ariadne/pull/152), `63295ec5`.
+- **14.2a Map look:** [#153](https://github.com/kartiksayani/ariadne/pull/153), `2bd09408`.
+- **14.4 change tracking screens:** [#154](https://github.com/kartiksayani/ariadne/pull/154), `8a58f93c`.
+- **14.2b getting around:** [#155](https://github.com/kartiksayani/ariadne/pull/155), `1135693c`.
 
-At the owner's request (2026-10-13), a second research pass runs before mock M1.
-Mocks, UI work and the agent rules rewrite wait for its findings; 14.0 data work
-continues.
+## Alpha.15 in progress
 
-- **14.0:** data — link kinds, change records, topic brief, seen state and the
-  preference receipt window (ADR-0099); in progress on `feat/a14-contracts`.
-- **14.1:** agent rules rewrite and CLI warnings; after 14.0.
-- **14.2:** tree look and getting around; after mock M1 sign-off.
-- **14.3:** change tracking derived views; after 14.0.
-- **14.4:** change tracking screens; after 14.2, 14.3 and mock M2 sign-off.
+**15.3 PR comments** merged in [#156](https://github.com/kartiksayani/ariadne/pull/156),
+`91bf3537`. Owners choose Fix, Reply or Skip for each imported review comment.
 
-## Alpha.15 next — Conversation view
+The owner decided to remove the Messages pane because it is never used. A larger
+view of one item's conversation follows owner sign-off on mock M3. There will be
+no session-wide Conversation view and no reading of host transcripts. Chat with
+the agent stays in the terminal.
 
-- **15.0:** ADR-0100; after all alpha.14 work.
-- **15.1:** reading conversations; after 15.0.
-- **15.2:** Conversation screen; after 15.0 and mock M3 sign-off.
-- **15.3:** `/ariadne-pr-comments`; independent of the other modules.
+## Active work and next steps
 
-## Worktrees and next steps
+- `.worktrees/a15-no-rail` — `feat/a15-no-rail`: remove the Messages pane, in progress.
+- `.worktrees/a14-mock` — `design/a15-m3`: item conversation mock, waiting on owner sign-off.
+- `.worktrees/a14-polish` — `fix/a14-polish`: this follow-up PR, based on main `91bf3537`.
+  Earlier follow-ups cover cached row names and visible Ack all eligibility, Go to
+  focus expiry, and the layout suite split. Current uncommitted work covers Reply
+  wording, a CLI test prebuild before JS coverage, and these release records.
 
-- `.worktrees/a14-contracts` — `feat/a14-contracts`: 14.0 data contracts.
-- `.worktrees/a14-harness` — `chore/a14-harness`: this docs/hook upkeep, uncommitted.
-- `.worktrees/a14-mock` — `design/a14-m1`: clickable M1 mock.
+1. Finish removing the Messages pane and its affected checks.
+2. Review mock M3, then implement the larger item conversation view within the approved scope.
+3. Finish and review the follow-ups.
 
-1. Finish 14.0 and independent review at its exact head.
-2. Owner signs off M1.
-3. Start 14.1, 14.2 and 14.3 with disjoint ownership, at most 3 Codex jobs.
+## Process lessons
+
+- `quality` runs on push only. Before merging a PR whose base is behind main,
+  merge main into it and let CI run on that head. The tree-equality check presumes
+  the PR includes current main; verify the merged tree against that head.
+- Run `cargo test --workspace` before pushing integration-resource changes.
+  Installed-plugin fixtures live in several crates, so a CLI-only test run is
+  insufficient for that push.
 
 After merge, tag `v0.1.0-alpha.N` with `-m "Ariadne v0.1.0-alpha.N"`, wait for the
 release workflow and edit notes with the fixed
 [How to upgrade block](../planning/PERSONAL_RELEASE.md#release-notes).
-Refresh this page, tasks.json and the roadmap chart. Check current PR CI/reviews
-and each worktree's unpushed work before scheduling.
+Refresh this page, tasks.json and the roadmap chart using
+`python3 scripts/regenerate-roadmap.py`.
 
 ## Earlier delivery evidence
 

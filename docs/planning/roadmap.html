@@ -111,9 +111,12 @@
   "schema_version": 1,
   "status": {
     "updated_at": "2026-10-13T00:00:00Z",
-    "headline": "Alpha.13 released (v0.1.0-alpha.13, 3e99578, #149); alpha.14 — a Map you can follow — in progress; alpha.15 Conversation view next.",
+    "headline": "Alpha.14 released (v0.1.0-alpha.14, #150–#155); alpha.15 in progress, with PR comments merged in #156.",
     "notes": [
-      "14.0 data contracts (ADR-0099) are in progress on feat/a14-contracts; tree work needs owner sign-off on M1, change tracking screens on M2, and the Conversation screen on M3.",
+      "Next: remove the unused Messages pane, review mock M3 for a larger item conversation view, and finish the alpha.14 follow-ups on fix/a14-polish.",
+      "Owner decision: no session-wide Conversation view and no host transcript reading. Chat with the agent stays in the terminal.",
+      "Before merging a PR whose base is behind main, merge main into it and let push-triggered quality run on that head; the tree-equality check assumes this.",
+      "Run cargo test --workspace before pushing integration-resource changes; installed-plugin fixtures live in several crates.",
       "At most 3 Codex companion jobs (gpt-6.1-sol, high effort); Claude Code on Opus 5.5 maintains delivery and separate Opus 5.5 contexts review exact heads.",
       "Live Claude and Codex core loops were proved on 2026-10-06; remaining live acceptance rows are deferred by owner ruling.",
       "Codex follow-ups: investigate discovery of threads with no messages; send the setup instruction through codex queue instead of asking the owner to paste it.",
@@ -2617,11 +2620,15 @@
         "Contract generation check; meaningful Domain, Store, Core and preference tests."
       ],
       "estimate_days": 1,
-      "active": true,
       "progress": {
-        "state": "in_progress",
-        "prs": [],
-        "note": "In progress on feat/a14-contracts (ADR-0099)."
+        "state": "done",
+        "prs": [
+          150
+        ],
+        "note": "Merged in #150. Released in v0.1.0-alpha.14."
+      },
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/150"
       }
     },
     {
@@ -2647,7 +2654,17 @@
       "checks": [
         "Generated rules check; rule examples and CLI warning tests."
       ],
-      "estimate_days": 1
+      "estimate_days": 1,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/151"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          151
+        ],
+        "note": "Merged in #151. Released in v0.1.0-alpha.14."
+      }
     },
     {
       "id": "P10.2",
@@ -2668,7 +2685,19 @@
       "checks": [
         "Owner M1 sign-off before implementation; UI tests, design frames and local native journey."
       ],
-      "estimate_days": 1
+      "estimate_days": 1,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/155"
+      },
+      "implementation_pr_url": "https://github.com/kartiksayani/ariadne/pull/153",
+      "progress": {
+        "state": "done",
+        "prs": [
+          153,
+          155
+        ],
+        "note": "14.2a Map look merged in #153; 14.2b getting around merged in #155. Released in v0.1.0-alpha.14."
+      }
     },
     {
       "id": "P10.3",
@@ -2690,7 +2719,17 @@
       "checks": [
         "Real Core/Store tests of derived views."
       ],
-      "estimate_days": 1
+      "estimate_days": 1,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/152"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          152
+        ],
+        "note": "Merged in #152. Released in v0.1.0-alpha.14."
+      }
     },
     {
       "id": "P10.4",
@@ -2713,11 +2752,21 @@
       "checks": [
         "Owner M2 sign-off before implementation; UI tests, design frames and local native journey."
       ],
-      "estimate_days": 1
+      "estimate_days": 1,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/154"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          154
+        ],
+        "note": "Merged in #154. Released in v0.1.0-alpha.14."
+      }
     },
     {
       "id": "P11.0",
-      "title": "15.0 Conversation contracts — ADR-0100",
+      "title": "15.0 Item conversation contracts — ADR-0100",
       "phase": "M11",
       "depends_on": [
         "P10.0",
@@ -2734,7 +2783,7 @@
         "docs/delivery/HANDOFF.md"
       ],
       "acceptance": [
-        "Settle Conversation view contracts in ADR-0100 after alpha.14."
+        "Settle contracts for a larger view of one item’s existing conversation after mock M3 sign-off; no session-wide Conversation view or host transcript reading."
       ],
       "checks": [
         "Independent contract review against all alpha.14 consumers."
@@ -2743,7 +2792,7 @@
     },
     {
       "id": "P11.1",
-      "title": "15.1 Reading conversations",
+      "title": "15.1 Item conversation reads",
       "phase": "M11",
       "depends_on": [
         "P11.0"
@@ -2756,16 +2805,16 @@
         "docs/delivery/HANDOFF.md"
       ],
       "acceptance": [
-        "Read conversations under the settled ADR-0100 contracts."
+        "Read one item’s Ariadne conversation under the settled contracts; do not read host transcripts."
       ],
       "checks": [
-        "Real Core/Store conversation read tests."
+        "Real Core/Store item conversation read tests."
       ],
       "estimate_days": 1
     },
     {
       "id": "P11.2",
-      "title": "15.2 Conversation screen",
+      "title": "Item conversation view",
       "phase": "M11",
       "depends_on": [
         "P11.0"
@@ -2778,12 +2827,17 @@
         "docs/delivery/HANDOFF.md"
       ],
       "acceptance": [
-        "Implement the Conversation screen following owner-approved mock M3 and ADR-0100."
+        "Provide a bigger view for one item’s conversation after owner sign-off on mock M3; agent chat stays in the terminal."
       ],
       "checks": [
         "Owner M3 sign-off before implementation; UI tests, design frames and local native journey."
       ],
-      "estimate_days": 1
+      "estimate_days": 1,
+      "progress": {
+        "state": "blocked_owner",
+        "prs": [],
+        "note": "Waiting on owner sign-off for mock M3."
+      }
     },
     {
       "id": "P11.3",
@@ -2824,7 +2878,83 @@
         "npm run check; cargo test for ariadne-cli, ariadne-adapter-claude and ariadne-xtask.",
         "PR comment fixture recipe, repeat-import and injection tests without network; affected Claude Mod and installer tests; independent review."
       ],
-      "estimate_days": 1
+      "estimate_days": 1,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/156"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          156
+        ],
+        "note": "Merged in #156."
+      }
+    },
+    {
+      "id": "P11.4",
+      "title": "Remove the Messages pane",
+      "phase": "M11",
+      "depends_on": [],
+      "paths": [
+        "apps/desktop/src/ui/*",
+        "apps/desktop/src/state/*",
+        "apps/desktop/tests/ui/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Remove the Messages pane, which the owner never uses; retain item conversations and terminal chat with the agent."
+      ],
+      "checks": [
+        "npm run check; affected UI tests, design frames and local native journey."
+      ],
+      "estimate_days": 1,
+      "active": true,
+      "progress": {
+        "state": "in_progress",
+        "prs": [],
+        "note": "In progress on feat/a15-no-rail."
+      }
+    },
+    {
+      "id": "P11.5",
+      "title": "Alpha.14 follow-ups",
+      "phase": "M11",
+      "depends_on": [
+        "P10.2",
+        "P11.3"
+      ],
+      "paths": [
+        "apps/desktop/src/ui/tree/*",
+        "apps/desktop/tests/ui/tree/*",
+        "tests/e2e/owner-input/layout.spec.mts",
+        "integrations/rules/pr-comments.md",
+        "integrations/claude/plugin/skills/*",
+        "integrations/codex/skills/*",
+        "crates/ariadne-cli/tests/pr_comments_recipe.rs",
+        "tests/integrations/claude/pr-comments-markdown.test.js",
+        "scripts/check-commit.py",
+        "tests/test_commit_checks.py",
+        "docs/delivery/*",
+        "docs/planning/roadmap.html"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Finish the review follow-ups on fix/a14-polish: cached row names and visible Ack all eligibility, Go to focus expiry, independent layout journeys, clearer Reply approval wording, CLI fixture prebuild and release records."
+      ],
+      "checks": [
+        "npm run check; affected UI and Claude integration tests; pr_comments_recipe CLI tests; generated rules and roadmap checks; check-script tests; owner runs the Chromium layout tests."
+      ],
+      "estimate_days": 1,
+      "active": true,
+      "progress": {
+        "state": "in_progress",
+        "prs": [],
+        "note": "This PR, on fix/a14-polish; not merged."
+      }
     }
   ]
 }</script>

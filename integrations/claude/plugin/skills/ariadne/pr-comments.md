@@ -94,7 +94,7 @@ item. Keep `ask` one line. Put the context in `reply`, not `note` or `why`:
 waiting detail shows replies; progress notes are hidden while deciding.
 
 ```json
-{"operations":[{"op":"item.add","ref":"review_comment","topic":{"id":"$topic"},"question":"$question","short":"Review choice","type":"decision","ask":"$ask","options":[{"label":"Fix","consequence":"Make the suggested local change; post nothing to GitHub."},{"label":"Reply","consequence":"Post only the exact text you approve in this conversation."},{"label":"Skip","consequence":"Leave this comment alone; post nothing to GitHub."}],"links":[{"kind":"pr","label":"Review comment","target":"$comment_url"}]},{"op":"reply","item":{"ref":"review_comment"},"text":"$context"}]}
+{"operations":[{"op":"item.add","ref":"review_comment","topic":{"id":"$topic"},"question":"$question","short":"Review choice","type":"decision","ask":"$ask","options":[{"label":"Fix","consequence":"Make the suggested local change; post nothing to GitHub."},{"label":"Reply","consequence":"$reply_consequence"},{"label":"Skip","consequence":"Leave this comment alone; post nothing to GitHub."}],"links":[{"kind":"pr","label":"Review comment","target":"$comment_url"}]},{"op":"reply","item":{"ref":"review_comment"},"text":"$context"}]}
 ```
 
 `question`: your plain-words summary, without URLs, `<`, `[`, `]` or backslashes.
@@ -102,6 +102,11 @@ waiting detail shows replies; progress notes are hidden while deciding.
 If offering a reply, replace its last clause with "Reply approves its suggested
 text or your own." End the context with the same ask so the waiting marker
 anchors to the context. No answer means no action.
+
+`reply_consequence`: "Post only the exact text you approve in this conversation."
+If a complete suggested reply is included in the context, use: "Post the suggested
+reply shown in this item's conversation, or your own one-line text instead."
+If the suggestion is omitted because it cannot fit, use the default consequence.
 
 Context: "Where: `path`, line N" with the path in a one-backtick code span if it
 uses only letters, digits, `/ . _ -` or spaces; otherwise "Where: the file shown
