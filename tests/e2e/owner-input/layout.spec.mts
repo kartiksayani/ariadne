@@ -29,9 +29,10 @@ async function checkFilters(page: Page) {
   await expect(option).toHaveCount(0);
 }
 
-test('scrolls full variable tree rows with the session bar, setup and filters accessible', async ({ page }, testInfo) => {
-  // Visiting every session-bar control and menu item at both sizes takes about 6 minutes on loaded CI runners.
-  test.setTimeout(900_000);
+const usefulRows = 64;
+type Viewport = { width: number; height: number };
+
+async function withLayoutFixture(page: Page, viewport: Viewport, query: string, run: () => Promise<void>) {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
@@ -42,8 +43,110 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
     if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
     const origin = `http://127.0.0.1:${address.port}`;
     await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
-    await page.setViewportSize({ width: 1000, height: 668 });
-    await page.goto(`${origin}/tests/e2e/owner-input/fixture.html?largeTree`);
+    await page.setViewportSize(viewport);
+    await page.goto(`${origin}/tests/e2e/owner-input/fixture.html${query}`);
+    await run();
+    expect(errors).toEqual([]);
+  } finally { await server.close(); }
+}
+
+async function openLayoutSession(page: Page) {
+  await page.locator('button[data-session-id]').first().click();
+  await ready(page);
+}
+
+function geometry(page: Page) {
+  return page.evaluate(() => {
+    const rows = document.querySelector<HTMLElement>('.tree-scroll')!, center = document.querySelector<HTMLElement>('.shell-center-content')!;
+    return { rowsHeight: rows.clientHeight, rowsScrollHeight: rows.scrollHeight, rowsScrollTop: rows.scrollTop,
+      centerScrollTop: center.scrollTop, centerHeight: center.clientHeight, centerScrollHeight: center.scrollHeight,
+      // The toolbar's offset under the session bar. The body never scrolls sideways, so opening the detail
+      // column narrows the centre and the session bar may wrap; the toolbar must still sit right under it.
+      toolbarGap: document.querySelector('[role="group"][aria-label="Filter items"]')!.getBoundingClientRect().top - document.querySelector('.tree-session-bar')!.getBoundingClientRect().bottom,
+      headerTop: document.querySelector('.shell-header')!.getBoundingClientRect().top };
+  });
+}
+
+async function checkSessionBar(page: Page, viewport: Viewport) {
+  const tree = page.getByRole('tree');
+  const selected = tree.locator('[data-item-id="10.50"]');
+  await selected.click();
+  await expect(selected).toHaveAttribute('aria-selected', 'true');
+  expect((await geometry(page)).rowsScrollTop).toBeGreaterThan(0);
+  await ready(page);
+  const bar = page.locator('.tree-session-bar');
+  const actions = bar.getByRole('button', { name: 'Session actions', exact: true });
+  await reachable(actions);
+  // Every session action stays reachable through the menu with the tree scrolled.
+  for (const label of ['Close session', 'Rename', 'Copy ID']) {
+    await actions.click();
+    const menu = page.getByRole('menu', { name: 'Session actions' });
+    const menuBox = (await menu.boundingBox())!;
+    expect(menuBox.x).toBeGreaterThanOrEqual(0);
+    expect(menuBox.y).toBeGreaterThanOrEqual(0);
+    expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(viewport.width);
+    expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(viewport.height);
+    const action = page.getByRole('menuitem', { name: label, exact: true });
+    await reachable(action);
+    if (label === 'Copy ID') {
+      // This harness grants no clipboard permissions; check reachability without writing.
+      await page.keyboard.press('Escape');
+    } else {
+      await action.click();
+      if (label === 'Rename') {
+        const field = bar.getByLabel('Session name');
+        await expect(field).toBeInViewport();
+        await page.keyboard.press('Escape');
+        await expect(field).toHaveCount(0);
+      } else {
+        const review = page.getByRole('dialog');
+        await expect(review).toBeInViewport();
+        await review.getByRole('button', { name: 'Cancel', exact: true }).click();
+        await expect(review).toHaveCount(0);
+      }
+    }
+    await expect(actions).toBeFocused();
+  }
+  // Sending details and optional dispatch actions remain directly in the bar.
+  await reachable(bar.getByRole('button').and(bar.getByTitle('Sending and connection', { exact: true })));
+  const directControls = await bar.getByRole('button').all();
+  for (const action of directControls) {
+    if (await action.getAttribute('aria-label') === 'Session actions') continue;
+    await reachable(action);
+    if (await action.getAttribute('title') !== 'Sending and connection') continue;
+    await action.click();
+    const review = page.getByRole('dialog');
+    await expect(review).toBeInViewport();
+    await review.getByRole('button', { name: 'Done', exact: true }).click();
+    await expect(review).toHaveCount(0);
+    await expect(action).toBeFocused();
+  }
+  const current = await geometry(page);
+  expect(current.rowsHeight).toBeGreaterThan(usefulRows);
+  expect(current.centerScrollTop).toBe(0);
+  expect(current.centerScrollHeight).toBeLessThanOrEqual(current.centerHeight + 1);
+  await checkFilters(page);
+  const controls = await page.getByRole('group', { name: 'Filter items' }).evaluate(element => [...element.querySelectorAll('button')].map(control => {
+    const bounds = control.getBoundingClientRect();
+    return { label: control.textContent || control.closest('label')?.textContent,
+      reachable: document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.closest('button') === control };
+  }));
+  expect(controls.filter(control => !control.reachable)).toEqual([]);
+  const ordinary = tree.locator('[data-item-id="10.49"]');
+  await ordinary.evaluate(element => element.scrollIntoView({ block: 'start' }));
+  const completeRow = await ordinary.evaluate(element => {
+    const bounds = element.getBoundingClientRect(), viewport = element.closest('.tree-scroll')!.getBoundingClientRect();
+    return { height: bounds.height, top: bounds.top, bottom: bounds.bottom, viewportTop: viewport.top, viewportBottom: viewport.bottom };
+  });
+  expect(completeRow.height).toBeGreaterThan(40);
+  expect(completeRow.top).toBeGreaterThanOrEqual(completeRow.viewportTop);
+  expect(completeRow.bottom).toBeLessThanOrEqual(completeRow.viewportBottom);
+}
+
+test('keeps the connect card and scrolling instruction accessible', async ({ page }) => {
+  await withLayoutFixture(page, { width: 1000, height: 668 }, '', async () => {
+    await page.locator('[data-shell-tab="projects"]').click();
+    await page.locator('.pw-project-open').first().click();
     await page.getByRole('button', { name: 'Connect existing session', exact: true }).click();
     const dialog = page.getByRole('dialog');
     // Only the Codex notice renders the pasted instruction; the Claude Mod has nothing to paste.
@@ -76,31 +179,28 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
     expect(instruction.scrolls).toBe(true);
     expect(instruction.lineTop).toBeGreaterThanOrEqual(instruction.top);
     expect(instruction.lineBottom).toBeLessThanOrEqual(instruction.bottom);
-    await page.locator('button[data-session-id]').first().click();
-    const tree = page.getByRole('tree'), setup = page.getByRole('region', { name: 'Session setup' });
-    await ready(page);
-    await expect(tree.locator('.tree-item')).toHaveCount(2000);
+    await openLayoutSession(page);
     // The connect card belongs to the project page; the session view does not carry it.
-    await expect(setup).toHaveCount(0);
-    const geometry = () => page.evaluate(() => {
-      const rows = document.querySelector<HTMLElement>('.tree-scroll')!, center = document.querySelector<HTMLElement>('.shell-center-content')!;
-      return { rowsHeight: rows.clientHeight, rowsScrollHeight: rows.scrollHeight, rowsScrollTop: rows.scrollTop,
-        centerScrollTop: center.scrollTop, centerHeight: center.clientHeight, centerScrollHeight: center.scrollHeight,
-        // The toolbar's offset under the session bar. The body never scrolls sideways, so opening the detail
-        // column narrows the centre and the session bar may wrap; the toolbar must still sit right under it.
-        toolbarGap: document.querySelector('[role="group"][aria-label="Filter items"]')!.getBoundingClientRect().top - document.querySelector('.tree-session-bar')!.getBoundingClientRect().bottom,
-        headerTop: document.querySelector('.shell-header')!.getBoundingClientRect().top };
-    });
-    const before = await geometry();
+    await expect(card).toHaveCount(0);
+  });
+});
+
+test('scrolls and selects full variable rows in a 2000-item tree with accessible filters', async ({ page }, testInfo) => {
+  // Keep the CI allowance only for the required 2,000-row render, scroll and detail layout.
+  test.setTimeout(900_000);
+  await withLayoutFixture(page, { width: 1000, height: 668 }, '?largeTree', async () => {
+    await openLayoutSession(page);
+    const tree = page.getByRole('tree');
+    await expect(tree.locator('.tree-item')).toHaveCount(2000);
+    const before = await geometry(page);
     await testInfo.attach('initial-tree-geometry', { body: JSON.stringify(before), contentType: 'application/json' });
     // At least one full variable-height row (about 64px) stays visible.
-    const usefulRows = 64;
     expect(before.rowsHeight).toBeGreaterThan(usefulRows);
     const row = tree.locator('[data-item-id="10.50"]');
     // Clicking scrolls the row into view before selecting it.
     await row.click();
     await expect(row).toHaveAttribute('aria-selected', 'true');
-    const after = await geometry();
+    const after = await geometry(page);
     await testInfo.attach('tree-scroll-geometry', { body: JSON.stringify({ before, after }), contentType: 'application/json' });
     expect(after.rowsScrollTop).toBeGreaterThan(0);
     expect(after.rowsHeight).toBeGreaterThan(usefulRows);
@@ -110,77 +210,23 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
     expect(after.toolbarGap).toBe(before.toolbarGap);
     expect(after.headerTop).toBe(before.headerTop);
     await checkFilters(page);
-    for (const viewport of [{ width: 1000, height: 668 }, { width: 900, height: 650 }]) {
-      await page.setViewportSize(viewport);
-      await ready(page);
-      const bar = page.locator('.tree-session-bar');
-      const actions = bar.getByRole('button', { name: 'Session actions', exact: true });
-      await reachable(actions);
-      // Every session action stays reachable through the menu with the tree scrolled.
-      for (const label of ['Close session', 'Rename', 'Copy ID']) {
-        await actions.click();
-        const menu = page.getByRole('menu', { name: 'Session actions' });
-        const menuBox = (await menu.boundingBox())!;
-        expect(menuBox.x).toBeGreaterThanOrEqual(0);
-        expect(menuBox.y).toBeGreaterThanOrEqual(0);
-        expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(viewport.width);
-        expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(viewport.height);
-        const action = page.getByRole('menuitem', { name: label, exact: true });
-        await reachable(action);
-        if (label === 'Copy ID') {
-          // This harness grants no clipboard permissions; check reachability without writing.
-          await page.keyboard.press('Escape');
-        } else {
-          await action.click();
-          if (label === 'Rename') {
-            const field = bar.getByLabel('Session name');
-            await expect(field).toBeInViewport();
-            await page.keyboard.press('Escape');
-            await expect(field).toHaveCount(0);
-          } else {
-            const review = page.getByRole('dialog');
-            await expect(review).toBeInViewport();
-            await review.getByRole('button', { name: 'Cancel', exact: true }).click();
-            await expect(review).toHaveCount(0);
-          }
-        }
-        await expect(actions).toBeFocused();
-      }
-      // Sending details and optional dispatch actions remain directly in the bar.
-      await reachable(bar.getByRole('button').and(bar.getByTitle('Sending and connection', { exact: true })));
-      const directControls = await bar.getByRole('button').all();
-      for (const action of directControls) {
-        if (await action.getAttribute('aria-label') === 'Session actions') continue;
-        await reachable(action);
-        if (await action.getAttribute('title') !== 'Sending and connection') continue;
-        await action.click();
-        const review = page.getByRole('dialog');
-        await expect(review).toBeInViewport();
-        await review.getByRole('button', { name: 'Done', exact: true }).click();
-        await expect(review).toHaveCount(0);
-        await expect(action).toBeFocused();
-      }
-      const current = await geometry();
-      expect(current.rowsHeight).toBeGreaterThan(usefulRows);
-      expect(current.centerScrollTop).toBe(0);
-      expect(current.centerScrollHeight).toBeLessThanOrEqual(current.centerHeight + 1);
-      await checkFilters(page);
-      const controls = await page.getByRole('group', { name: 'Filter items' }).evaluate(element => [...element.querySelectorAll('button')].map(control => {
-        const bounds = control.getBoundingClientRect();
-        return { label: control.textContent || control.closest('label')?.textContent,
-          reachable: document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.closest('button') === control };
-      }));
-      expect(controls.filter(control => !control.reachable)).toEqual([]);
-      const ordinary = tree.locator('[data-item-id="10.49"]');
-      await ordinary.evaluate(element => element.scrollIntoView({ block: 'start' }));
-      const completeRow = await ordinary.evaluate(element => {
-        const bounds = element.getBoundingClientRect(), viewport = element.closest('.tree-scroll')!.getBoundingClientRect();
-        return { height: bounds.height, top: bounds.top, bottom: bounds.bottom, viewportTop: viewport.top, viewportBottom: viewport.bottom };
-      });
-      expect(completeRow.height).toBeGreaterThan(40);
-      expect(completeRow.top).toBeGreaterThanOrEqual(completeRow.viewportTop);
-      expect(completeRow.bottom).toBeLessThanOrEqual(completeRow.viewportBottom);
-    }
+  });
+});
+
+test('keeps session-bar actions accessible over a scrolled tree at 1000x668', async ({ page }) => {
+  const viewport = { width: 1000, height: 668 };
+  await withLayoutFixture(page, viewport, '?scrollTree', async () => {
+    await openLayoutSession(page);
+    await checkSessionBar(page, viewport);
+  });
+});
+
+test('keeps session-bar actions and graph scrolling accessible at 900x650', async ({ page }) => {
+  const viewport = { width: 900, height: 650 };
+  await withLayoutFixture(page, viewport, '?scrollTree', async () => {
+    await openLayoutSession(page);
+    await checkSessionBar(page, viewport);
+    const setup = page.getByRole('region', { name: 'Session setup' });
     // Graph renders in the tree column under the session bar and owns its
     // scrolling there. Catalogue routes retain the centre pane scroller,
     // including complete setup content below the catalogue.
@@ -195,8 +241,7 @@ test('scrolls full variable tree rows with the session bar, setup and filters ac
     await page.getByRole('navigation', { name: 'Projects and sessions' }).getByRole('button', { name: 'Projects', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
     await expect(setup).toHaveCount(0);
-    expect(errors).toEqual([]);
-  } finally { await server.close(); }
+  });
 });
 
 test('keeps one sent answer with its delivery controls in the ordinary App', async ({ page }, testInfo) => {
