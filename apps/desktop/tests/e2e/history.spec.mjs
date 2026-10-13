@@ -316,9 +316,19 @@ async function rail(history, saved, paged) {
     assert.equal(result.code, 0); return result.value.data.data;
   };
   await wait(async () => (await preferences()).sessions.find(view => view.session.session_id === history.sessionId)?.selected_item_id === '1', 'Registered parent selection did not finish its deliberate preference write');
-  const beforeUnpin = await preferences();
+  await wait(async () => (await preferences()).seen?.find(value => value.session.project_id === history.projectId
+    && value.session.session_id === history.sessionId)?.items.some(value => value.item_id === '1' && value.revision >= saved.items['1'].revision),
+  'Opened parent detail did not finish its seen preference write');
+  // Seen observations may update the envelope; Unpin must preserve navigation
+  // and every field of this session's saved view instead.
+  const navigationPreferences = snapshot => {
+    const view = snapshot.sessions.find(value => value.session.project_id === history.projectId && value.session.session_id === history.sessionId);
+    assert.ok(view, 'History session must have a saved view');
+    return { selected_navigation: snapshot.global.selected_navigation, view };
+  };
+  const beforeUnpin = navigationPreferences(await preferences());
   await unpinHistoryMessage(card, parentMessage);
-  assert.deepEqual(await preferences(), beforeUnpin, 'Unpin must not write saved navigation or selection');
+  assert.deepEqual(navigationPreferences(await preferences()), beforeUnpin, 'Unpin must not write saved navigation or selection');
   await closeHistoryRailReferences(parentMessage);
   await toggle.waitForEnabled(); await toggle.click();
   await wait(async () => (await browser.$$('.pw-rail-list [data-message-id]')).length === saved.messages.length, 'Reopened rail did not reload the complete canonical history');
@@ -476,7 +486,7 @@ export async function runHistoryAcceptance(configuration) {
   assert.equal(new Set((await admissions(history)).map(entry => entry.attemptId)).size, 7);
   await browser.saveScreenshot(join(evidence(), 'native-complete-history.png'));
   await writeFile(join(evidence(), 'history-acceptance.json'), JSON.stringify({ history, publication, ownerTexts, resultTexts, paged,
-    roundIds, reviewedTarget, proof, railProof, nativePinAndSelectionRefs: true, clearReferenceProof: 'Actual Unpin removes pin state without preferences writes; deliberate rail Close clears references',
+    roundIds, reviewedTarget, proof, railProof, nativePinAndSelectionRefs: true, clearReferenceProof: 'Actual Unpin removes pin state without navigation, selection or view preference writes; deliberate rail Close clears references',
     hoverProof: 'Focused actual-App component tests; embedded driver lacks hover transitions', finalSession, queued: await admissions(history), originalAdmissions }, null, 2));
 }
 

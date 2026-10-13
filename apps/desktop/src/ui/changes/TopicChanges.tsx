@@ -54,7 +54,7 @@ export function TopicChanges({ session, topicId, navigation, onOpenItem }: {
     try { localStorage.setItem(storageKey, next ? 'collapsed' : 'expanded'); } catch { /* Collapse still works for this view. */ }
   };
   const mark = (row: ChangeRow) => {
-    navigation.markItemSeen(route, row.item.id, row.item.revision);
+    if (!navigation.markItemSeen(route, row.item.id, row.item.revision)) return;
     setLeaving(previous => [...previous.filter(value => value.item.id !== row.item.id), row]);
     const timer = setTimeout(() => { timers.current.delete(timer); setLeaving(previous => previous.filter(value => value !== row)); }, 3000);
     timers.current.add(timer);
@@ -64,7 +64,7 @@ export function TopicChanges({ session, topicId, navigation, onOpenItem }: {
     const current = navigation.opened.get(route)?.getSnapshot();
     const coversCurrent = current?.status === 'ready' && current.snapshot?.freshness === 'fresh' && current.snapshot.session.revision === session.revision;
     navigation.reading.catchUp({ kind: 'mark_seen', session: route, at,
-      items: rows.map(row => ({ item_id: row.item.id, revision: row.item.revision })), topics: coversCurrent ? [{ topic_id: topicId, at }] : [] }, topicId);
+      items: rows.map(row => ({ item_id: row.item.id, revision: row.item.revision })), topics: coversCurrent ? [{ topic_id: topicId, at: session.updated_at }] : [] }, topicId);
   };
   const displayRows = [...rows, ...leaving.filter(row => !rows.some(value => value.item.id === row.item.id))].sort((left, right) => newest(right) - newest(left));
   return <div className="topic-changes">
@@ -86,9 +86,9 @@ export function TopicChanges({ session, topicId, navigation, onOpenItem }: {
       {canUndo && <button type="button" className="change-link" onClick={() => { navigation.reading.undo(undoToken!); }}>Undo</button>}
       {summary.longAbsence && rows.length > 0 ? <div className="since-away"><span>{count} {count === 1 ? 'change' : 'changes'} while you were away</span><span aria-hidden="true"> · </span><button type="button" className="change-link" onClick={catchUp}>Mark all seen</button></div>
         : displayRows.length ? <>
-          <button type="button" className="change-link" aria-expanded={sinceOpen} onClick={() => setSinceOpen(value => !value)}>Since you were here · {count} {count === 1 ? 'change' : 'changes'}</button>
+          <button type="button" className="change-link" aria-expanded={sinceOpen} onClick={() => setSinceOpen(value => !value)}>{rows.length ? `Since you were here · ${count} ${count === 1 ? 'change' : 'changes'}` : 'All caught up'}</button>
           {sinceOpen && <><ul className="since-cards">{displayRows.map(row => {
-            const marked = leaving.some(value => value.item.id === row.item.id);
+            const marked = leaving.some(value => value.item.id === row.item.id && value.item.revision >= row.item.revision);
             return <li className="since-card" key={row.item.id}>
               <ChangeName row={row} onOpenItem={onOpenItem} /><Compare row={row} session={session} />
               <button type="button" className="btn btn-secondary since-seen" disabled={marked} onClick={() => mark(row)}>{marked ? '✓ Seen' : 'Seen'}</button>

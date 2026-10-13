@@ -4,6 +4,7 @@ import { TopicChanges, unseenTopicRows } from '../../../src/ui/changes/TopicChan
 import { NavigationStore, useNavigation } from '../../../src/state/navigation/store';
 import { useReadingSeen } from '../../../src/state/preferences/reading';
 import { useImplicitCaughtUp } from '../../../src/ui/changes/useCaughtUp';
+import { isChangedSinceRead } from '../../../src/selectors/changes/seen';
 import { createDesktopService } from '../../../src/data/service';
 import { AppTransport, route } from '../app/transport';
 import { changesFixture, baseline, later } from './fixture';
@@ -45,6 +46,8 @@ describe('topic brief and shared catch-up', () => {
     const row = screen.getByRole('button', { name: 'Updated name A' }).closest('li')!;
     fireEvent.click(within(row).getByRole('button', { name: 'Seen' }));
     expect(screen.getByRole('button', { name: '✓ Seen' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'All caught up' })).toBeTruthy();
+    expect(screen.queryByText(/0 changes/)).toBeNull();
     expect(value.navigation.reading.getSnapshot().some(patch => patch.items.some(item => item.item_id === 'updated-0'))).toBe(true);
     await act(async () => { await vi.advanceTimersByTimeAsync(2999); });
     expect(screen.getByRole('button', { name: '✓ Seen' })).toBeTruthy();
@@ -60,6 +63,67 @@ describe('topic brief and shared catch-up', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(value.transport.preferences.seen![0].topics.some(topic => topic.topic_id === value.topic.id)).toBe(true);
     expect(value.session.items['updated-0']!.status).toBe('open');
+  });
+  it('accepts an explicit Seen card while a change hint makes the session stale', async () => {
+    const value = await setup();
+    fireEvent.click(screen.getByRole('button', { name: /Since you were here ·/ }));
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const invoke = value.transport.invoke.bind(value.transport);
+    vi.spyOn(value.transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'session_get') await gate;
+      return invoke(name, args);
+    });
+    value.session.items['updated-0']!.revision = 3;
+    value.session.items['updated-0']!.changes!.push(value.record({ revision: 3, at: '2026-10-10T01:30:00Z' }));
+    ++value.session.revision; value.session.updated_at = '2026-10-10T01:30:00Z';
+    act(() => value.transport.emit('ariadne://session_changed', { session_id: value.session.id, revision: value.session.revision }));
+    expect(value.navigation.opened.get(route)!.getSnapshot().status).toBe('stale');
+    fireEvent.click(screen.getByRole('button', { name: 'Seen' }));
+    expect(screen.getByRole('button', { name: '✓ Seen' })).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(value.transport.preferences.seen![0].items).toEqual([{ item_id: 'updated-0', revision: 2 }]);
+    await act(async () => { release(); await value.navigation.opened.get(route)!.refresh(); });
+    value.rerender(value.element());
+    // A newer displayed revision must not inherit the old card's three-second success.
+    expect(screen.queryByRole('button', { name: '✓ Seen' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Seen' }).hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('button', { name: /Since you were here · 1 change/ })).toBeTruthy();
+    expect(value.navigation.getSnapshot().error).toBeNull();
+  });
+  it('keeps an unaccepted Seen action available without showing success or removing its card', async () => {
+    const value = await setup();
+    fireEvent.click(screen.getByRole('button', { name: /Since you were here ·/ }));
+    const mark = vi.spyOn(value.navigation, 'markItemSeen').mockReturnValue(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Seen' }));
+    expect(mark).toHaveBeenCalledWith(route, 'updated-0', 2);
+    expect(screen.queryByRole('button', { name: '✓ Seen' })).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(screen.getByRole('button', { name: 'Seen' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Updated name A' })).toBeTruthy();
+  });
+  it.each(['implicit', 'bulk'] as const)('keeps an unobserved commit made before %s catch-up in Since with its changed marker', async kind => {
+    const value = await setup(2);
+    // The agent commits at 01:30, but the renderer still holds the 01:00 snapshot.
+    const item = value.session.items['updated-1']!;
+    item.revision = 3;
+    item.changes!.push(value.record({ revision: 3, at: '2026-10-10T01:30:00Z' }));
+    ++value.session.revision; value.session.updated_at = '2026-10-10T01:30:00Z';
+    fireEvent.click(screen.getByRole('button', { name: /Since you were here ·/ }));
+    if (kind === 'bulk') fireEvent.click(screen.getByRole('button', { name: 'Mark all caught up' }));
+    else act(() => {
+      value.navigation.markItemSeen(route, 'updated-0', 2);
+      value.navigation.markItemSeen(route, 'updated-1', 2);
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    const confirmed = value.transport.preferences.seen![0];
+    expect(confirmed.topics).toEqual([{ topic_id: value.topic.id, at: later }]);
+    await act(async () => { await value.navigation.opened.get(route)!.refresh(); });
+    value.rerender(value.element());
+    expect(unseenTopicRows(value.session, value.topic.id, confirmed).rows.map(row => row.item.id)).toEqual(['updated-1']);
+    expect(isChangedSinceRead(item, confirmed)).toBe(true);
+    expect(screen.getByRole('button', { name: /Since you were here · 1 change/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Updated name B' })).toBeTruthy();
   });
   it('shows the long-absence brief before the compact strip and provides Undo only after marking', async () => {
     const value = await setup(1, 0, 1, true);
@@ -81,7 +145,7 @@ describe('topic brief and shared catch-up', () => {
     ++value.session.revision; value.session.updated_at = '2026-10-13T12:00:01Z';
     await value.navigation.opened.open(route).refresh();
     value.rerender(value.element());
-    expect(screen.getByRole('button', { name: /Since you were here · 1 change/ })).toBeTruthy();
+    expect(screen.getByText('1 change while you were away')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
     expect(screen.getByText('2 changes while you were away')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Mark all seen' }));
@@ -117,7 +181,7 @@ describe('topic brief and shared catch-up', () => {
     });
     act(() => value.navigation.markItemSeen(route, 'updated-0'));
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    expect(value.transport.preferences.seen![0].topics).toEqual([{ topic_id: value.topic.id, at: '2026-10-10T02:00:00.000Z' }]);
+    expect(value.transport.preferences.seen![0].topics).toEqual([{ topic_id: value.topic.id, at: value.session.updated_at }]);
   });
   it('keeps a new unread batch when the store advances between the rendered catch-up capture and its effect', async () => {
     const value = await setup(); value.unmount();

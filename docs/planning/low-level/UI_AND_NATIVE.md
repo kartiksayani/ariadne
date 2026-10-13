@@ -167,12 +167,19 @@ Under the saved owner answer, derive effects from correlated activity message
 IDs and creation/change records. Show the owner's saved choice and typed words
 before `Because you chose X:` or `Read as: …` from the agent's existing free-text
 input-result explanation. Group named targets as updated, replaced, new or now
-blocked. Fill a card-wide five-name budget in Updated, Replaced, New, Now blocked
-order, allowing partially shown groups but no headings with zero shown names.
-Never hide exactly one name: show all six on a six-name card; a seven-name card
-shows five with two behind the reveal. Summarize the
-hidden names once in group order with counts/kinds in `and N more: …`; reveal
-shows all names.
+blocked. Show whole groups within a card-wide five-name budget in Updated,
+Replaced, New, Now blocked order. Once a whole group overflows, hide it and all
+later groups, including their headings. Summarize hidden whole groups once,
+outside the shown groups, with counts/kinds in display order in `and N more: …`;
+reveal restores their names and headings. Three updated plus three replaced
+therefore shows three names and `and 3 more: 3 replaced`; two updated plus ten
+replaced shows two names and `and 10 more: 10 replaced`.
+Only the first nonempty group may split when it alone exceeds five: show its
+first five names with a plain `and N more` inside that group; expansion reveals
+the remainder under the same heading, independently of the whole-group reveal.
+Never hide exactly one name in total: five plus one shows all six; three plus
+three still hides a whole group of three.
+Never render an empty heading.
 Small compare icons use the tooltip `Show before and after`, reflect expanded
 state, and toggle recorded before/current values everywhere comparisons appear.
 

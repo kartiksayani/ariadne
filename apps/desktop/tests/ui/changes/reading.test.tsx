@@ -37,6 +37,21 @@ describe('shared reading observations', () => {
     const result = renderHook(() => useReadingSeen(lane, null, value.seen.session));
     expect(result.result.current).toBeNull(); lane.stop();
   });
+  it('excludes pending catch-up from real reads and preserves a same-revision read after Undo', () => {
+    vi.useFakeTimers(); const save = vi.fn(), lane = new ReadingLane(save), value = changesFixture(2);
+    const prefs = { seen: [value.seen] } as PreferencesSnapshot;
+    const result = renderHook(() => ({ visible: useReadingSeen(lane, prefs, value.seen.session), observed: useReadingSeen(lane, prefs, value.seen.session, false) }));
+    let token = '';
+    act(() => { token = lane.catchUp({ kind: 'mark_seen', session: value.seen.session, at: value.session.updated_at,
+      items: [{ item_id: 'updated-0', revision: 2 }, { item_id: 'updated-1', revision: 2 }], topics: [] }); });
+    expect(result.result.current.visible!.items).toHaveLength(2);
+    expect(result.result.current.observed!.items).toHaveLength(0);
+    act(() => lane.mark({ kind: 'mark_seen', session: value.seen.session, at: value.session.updated_at, items: [{ item_id: 'updated-0', revision: 2 }], topics: [] }));
+    expect(result.result.current.observed!.items).toEqual([{ item_id: 'updated-0', revision: 2 }]);
+    act(() => lane.undo(token));
+    expect(result.result.current.visible!.items).toEqual([{ item_id: 'updated-0', revision: 2 }]);
+    act(() => vi.advanceTimersByTime(6000)); expect(save).toHaveBeenCalledTimes(1); lane.stop();
+  });
   it('prunes confirmed optimistic reads while preserving newer reads and pending Undo', () => {
     vi.useFakeTimers(); const lane = new ReadingLane(vi.fn()), value = changesFixture(2);
     const entry = { kind: 'mark_seen' as const, session: value.seen.session, at: value.seen.since,

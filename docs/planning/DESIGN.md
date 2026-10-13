@@ -85,12 +85,19 @@ Wording-only edits stay in history and create no attention marker.
 Under the owner's answer, show the saved option and any typed words, followed by
 `Because you chose X:` or the agent's `Read as: …` interpretation for typed
 answers. Group affected item names as updated, replaced, new or now blocked.
-Use a card-wide budget of five names, filling groups in Updated, Replaced, New,
-Now blocked order. A group may show some of its names; omit headings with none
-shown. Never hide exactly one name, so a six-name card shows all six and a
-seven-name card shows five with two behind the reveal. Summarize
-hidden names once, in the same group order, such as
-`and N more: 1 replaced, 2 new`; reveal shows them all. Each name opens its item.
+Use a card-wide budget of five names, showing whole groups in Updated, Replaced,
+New, Now blocked order. Once the next whole group exceeds the budget, hide it
+and every later group; omit their headings. Summarize these hidden groups once
+outside the shown groups, in display order, such as
+`and N more: 1 replaced, 2 new`; reveal restores each whole group and its heading.
+Thus three updated plus three replaced shows only the three updated names and
+`and 3 more: 3 replaced`. Only when the first nonempty group itself exceeds five
+may it split: show its first five names and an `and N more` reveal inside that
+group; expansion keeps all its names under the same heading. The in-group and
+whole-group reveals operate independently. Never hide exactly one name in total:
+five updated plus one replaced shows all six, while three
+updated plus three replaced still hides the whole replaced group.
+Each name opens its item.
 All comparisons use a small compare icon with `Show before and after` as its
 tooltip, highlighted while expanded.
 

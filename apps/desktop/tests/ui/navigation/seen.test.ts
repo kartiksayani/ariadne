@@ -516,7 +516,7 @@ describe('owner seen preference batching', () => {
     expect(transport.mutations).toHaveLength(1);
     const marks = seenEntries(transport.mutations[0]);
     expect(marks).toHaveLength(2);
-    expect(marks[0].topics).toEqual([{ topic_id: topicId, at: '2026-10-13T10:00:00.500Z' }]);
+    expect(marks[0].topics).toEqual([{ topic_id: topicId, at: first.updated_at }]);
     expect(marks[1]).toMatchObject({ session: secondRoute, items: [{ item_id: '1', revision: first.items['1']!.revision }] });
     expect(transport.preferences.seen).toHaveLength(2);
   });
@@ -624,6 +624,24 @@ describe('owner seen preference batching', () => {
     store.markItemSeen(route, '1');
     await vi.advanceTimersByTimeAsync(1000);
     expect(seenEntries(transport.mutations[0])[0].items).toEqual([{ item_id: '1', revision: 6 }]);
+  });
+
+  it('accepts an explicitly observed revision while stale, but rejects uncaptured or future reads', async () => {
+    const { store, transport } = await setup(false);
+    const observed = store.opened.get(route)!.getSnapshot().snapshot!.session.items['1']!.revision;
+    const session = transport.sessions.get(route.session_id)!;
+    session.items['1']!.revision = observed + 1; ++session.revision;
+    let release!: () => void;
+    transport.holdSession = new Promise<void>(resolve => { release = resolve; });
+    transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+    expect(store.opened.get(route)!.getSnapshot().status).toBe('stale');
+    expect(store.markItemSeen(route, '1')).toBe(false);
+    expect(store.markItemSeen(route, '1', observed + 1)).toBe(false);
+    expect(store.markItemSeen(route, '1', observed)).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(seenEntries(transport.mutations[0])[0].items).toEqual([{ item_id: '1', revision: observed }]);
+    expect(store.getSnapshot().error).toBeNull();
+    transport.holdSession = null; release(); await store.opened.get(route)!.refresh();
   });
 
   it('reads fresh revisions and survives two conflicts caused by saved draft keystrokes', async () => {

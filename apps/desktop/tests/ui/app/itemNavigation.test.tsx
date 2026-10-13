@@ -117,6 +117,27 @@ describe('composed item navigation', { timeout: 10_000 }, () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(mark).toHaveBeenCalledWith(route, '2', transport.sessions.get(route.session_id)!.items['2']!.revision);
   });
+  it('records detail dwell during pending catch-up so Undo preserves that real read', async () => {
+    const mark = vi.spyOn(NavigationStore.prototype, 'markItemSeen');
+    const value = changesFixture(2), transport = new AppTransport();
+    transport.sessions.set(value.session.id, value.session); transport.preferences.seen = [value.seen];
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime('2026-10-10T02:00:00Z');
+    await setup(transport); await openSession();
+    vi.useFakeTimers(); vi.setSystemTime('2026-10-10T02:00:00Z');
+    await click(screen.getByRole('button', { name: /Since you were here ·/ }));
+    await click(screen.getByRole('button', { name: 'Mark all caught up' }));
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy();
+    await pick('updated-0');
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(mark).toHaveBeenCalledWith(route, 'updated-0', 2);
+    await click(screen.getByRole('button', { name: 'Undo' }));
+    expect(within(treeRow('updated-0')).queryByRole('img', { name: 'Changed since you read it' })).toBeNull();
+    expect(within(treeRow('updated-1')).getByRole('img', { name: 'Changed since you read it' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Since you were here · 1 change/ })).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(transport.preferences.seen![0].items).toEqual([{ item_id: 'updated-0', revision: 2 }]);
+    expect(transport.preferences.seen![0].topics).toEqual([]);
+  });
   it.each([
     { archive: 'session', retained: false }, { archive: 'session', retained: true },
     { archive: 'topic', retained: false }, { archive: 'topic', retained: true },

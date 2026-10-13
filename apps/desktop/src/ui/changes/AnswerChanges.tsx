@@ -15,9 +15,9 @@ export function AnswerChanges({ session, inputId, onOpenItem }: { readonly sessi
   const blocked = useMemo(() => newlyBlocked(session, card), [session, card]);
   const groups = useMemo(() => answerGroups(session, card, blocked), [session, card, blocked]);
   const interpretations = useMemo(() => readAs(session, card), [session, card]);
-  const [expanded, setExpanded] = useState(false), [wording, setWording] = useState(false);
+  const [expanded, setExpanded] = useState(false), [withinGroupExpanded, setWithinGroupExpanded] = useState(false), [wording, setWording] = useState(false);
   if (!card.total && !card.groups.reworded.length) return null;
-  const limited = limitGroups(groups, expanded);
+  const limited = limitGroups(groups, expanded, withinGroupExpanded);
   const rewordings = card.groups.reworded.reduce((count, row) => count + row.records.length, 0);
   return <section className="answer-changes change-surface" aria-label="What your answer changed">
     <h3>What your answer changed</h3>
@@ -28,7 +28,9 @@ export function AnswerChanges({ session, inputId, onOpenItem }: { readonly sessi
     {limited.shown.map(group => <div className="change-group" key={group.label}><h4>{group.label}</h4>
       <ul>{group.rows.map(row => <li key={row.item.id}><ChangeName row={row} onOpenItem={onOpenItem} /><Compare row={row} session={session} />
         {blocked.has(row.item.id) && group.label !== 'Now blocked' && <span className="change-muted">Now blocked</span>}
-      </li>)}</ul></div>)}
+      </li>)}</ul>
+      {limited.withinGroup?.label === group.label && <button type="button" className="change-link" onClick={() => setWithinGroupExpanded(true)}>and {limited.withinGroup.rows.length} more</button>}
+    </div>)}
     {limited.summary && <button type="button" className="change-link" onClick={() => setExpanded(true)}>{limited.summary}</button>}
     {rewordings > 0 && <><button type="button" className="change-link change-muted" aria-expanded={wording} onClick={() => setWording(value => !value)}>
       {wording ? 'Hide rewordings' : `${rewordings} ${rewordings === 1 ? 'rewording' : 'rewordings'} not shown`}</button>

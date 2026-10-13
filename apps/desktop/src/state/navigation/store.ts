@@ -289,14 +289,17 @@ export class NavigationStore {
     }
   }
   /** Details and future preview dwell record the revision actually displayed. */
-  markItemSeen(session: SessionRef, itemId: string, observedRevision?: number): void {
-    if (this.stopped) return;
+  markItemSeen(session: SessionRef, itemId: string, observedRevision?: number): boolean {
+    if (this.stopped) return false;
     const state = this.opened.get(session)?.getSnapshot(), item = state?.snapshot?.session.items[itemId];
-    if (!item || state?.status !== 'ready' || state.snapshot?.freshness !== 'fresh') return;
+    // An explicit revision describes text already displayed, even while a new hint
+    // makes the store stale. An uncaptured read still requires a fresh snapshot.
+    if (!item || observedRevision === undefined && (state?.status !== 'ready' || state.snapshot?.freshness !== 'fresh')) return false;
     const revision = observedRevision ?? item.revision;
-    if (revision > item.revision || revision < 1) return;
-    if ((sessionSeen(this.state.preferences, session)?.items.find(value => value.item_id === itemId)?.revision ?? 0) >= revision) return;
+    if (revision > item.revision || revision < 1) return false;
+    if ((sessionSeen(this.state.preferences, session)?.items.find(value => value.item_id === itemId)?.revision ?? 0) >= revision) return true;
     this.reading.mark({ kind: 'mark_seen', session, at: new Date().toISOString(), items: [{ item_id: itemId, revision }], topics: [] });
+    return true;
   }
   /** A topic catches up after all its unseen items have been read, or by an owner shortcut. */
   markTopicCaughtUp(session: SessionRef, topicId: string, observedRevision?: number): void {
@@ -304,7 +307,7 @@ export class NavigationStore {
     const current = this.opened.get(session)?.getSnapshot();
     if (current?.status !== 'ready' || current.snapshot?.freshness !== 'fresh' || !current.snapshot.session.topics[topicId]) return;
     if (observedRevision !== undefined && observedRevision !== current.snapshot.session.revision) return;
-    const at = new Date().toISOString();
+    const at = current.snapshot.session.updated_at;
     if (Date.parse(sessionSeen(this.state.preferences, session)?.topics.find(value => value.topic_id === topicId)?.at ?? '') >= Date.parse(at)) return;
     this.reading.mark({ kind: 'mark_seen', session, at: new Date().toISOString(), items: [], topics: [{ topic_id: topicId, at }] });
   }

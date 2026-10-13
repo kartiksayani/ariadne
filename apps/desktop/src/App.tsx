@@ -255,9 +255,10 @@ function Workspace({ application }: { application: Application }) {
   const selectedId = candidateId && sessionState?.snapshot?.session.items[candidateId] && !itemRemoved(sessionState.snapshot.session, candidateId) ? candidateId : null;
   const seenRevision = selectedId ? sessionState?.snapshot?.session.items[selectedId]?.revision : null;
   const readingSeen = useReadingSeen(navigation.reading, state.preferences, route ?? { project_id: '', session_id: '' });
+  const observedSeen = useReadingSeen(navigation.reading, state.preferences, route ?? { project_id: '', session_id: '' }, false);
   const detailNeedsRead = useMemo(() => selectedId != null && seenRevision != null
-    && (readingSeen?.items.find(item => item.item_id === selectedId)?.revision ?? -1) < seenRevision,
-  [readingSeen, selectedId, seenRevision]);
+    && (observedSeen?.items.find(item => item.item_id === selectedId)?.revision ?? -1) < seenRevision,
+  [observedSeen, selectedId, seenRevision]);
   const observeDetail = useCallback(() => {
     if (route && selectedId) navigation.markItemSeen(route, selectedId, seenRevision ?? undefined);
   }, [navigation, route?.project_id, route?.session_id, selectedId, seenRevision]);

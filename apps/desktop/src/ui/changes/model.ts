@@ -5,21 +5,40 @@ import { changeRow } from '../../selectors/changes/card';
 import { activeItems } from '../../selectors/removed';
 
 export interface CardGroup { readonly label: string; readonly rows: readonly ChangeRow[] }
-export interface LimitedGroups { readonly shown: readonly CardGroup[]; readonly hidden: readonly CardGroup[]; readonly summary: string }
+export interface LimitedGroups {
+  readonly shown: readonly CardGroup[];
+  readonly hidden: readonly CardGroup[];
+  readonly withinGroup: CardGroup | null;
+  readonly summary: string;
+}
 
-/** One card-wide name budget; the sole remaining name is always shown. */
-export function limitGroups(groups: readonly CardGroup[], expanded = false): LimitedGroups {
-  const total = groups.reduce((sum, group) => sum + group.rows.length, 0);
-  let budget = expanded || total === 6 ? total : 5;
+/** Keep groups whole, except an oversized first group; never hide one name. */
+export function limitGroups(groups: readonly CardGroup[], expanded = false, withinGroupExpanded = false): LimitedGroups {
+  const nonempty = groups.filter(group => group.rows.length);
   const shown: CardGroup[] = [], hidden: CardGroup[] = [];
-  for (const group of groups) {
-    const count = Math.min(budget, group.rows.length);
-    if (count) shown.push({ label: group.label, rows: group.rows.slice(0, count) });
-    if (count < group.rows.length) hidden.push({ label: group.label, rows: group.rows.slice(count) });
-    budget -= count;
+  let count = 0, stopped = false, withinGroup: CardGroup | null = null;
+  for (const group of nonempty) {
+    if (!stopped && count + group.rows.length <= 5) {
+      shown.push(group);
+      count += group.rows.length;
+    } else if (!shown.length) {
+      shown.push({ label: group.label, rows: group.rows.slice(0, 5) });
+      withinGroup = { label: group.label, rows: group.rows.slice(5) };
+      stopped = true;
+    } else {
+      hidden.push(group);
+      stopped = true;
+    }
   }
   const remaining = hidden.reduce((sum, group) => sum + group.rows.length, 0);
-  return { shown, hidden, summary: remaining ? `and ${remaining} more: ${hidden.map(group => `${group.rows.length} ${group.label.toLowerCase()}`).join(', ')}` : '' };
+  if (remaining + (withinGroup?.rows.length ?? 0) === 1) return { shown: nonempty, hidden: [], withinGroup: null, summary: '' };
+  const displayed = withinGroupExpanded && withinGroup ? nonempty.slice(0, 1) : shown;
+  return {
+    shown: expanded ? [...displayed, ...hidden] : displayed,
+    hidden: expanded ? [] : hidden,
+    withinGroup: withinGroupExpanded ? null : withinGroup,
+    summary: !expanded && remaining ? `and ${remaining} more: ${hidden.map(group => `${group.rows.length} ${group.label.toLowerCase()}`).join(', ')}` : '',
+  };
 }
 
 const settled = (status: string | null | undefined) => status == null || ['done', 'decided', 'dropped'].includes(status);

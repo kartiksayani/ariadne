@@ -12,11 +12,16 @@ export class ReadingLane {
   private readonly pending = new Map<string, { entry: SeenPatch; timer: ReturnType<typeof setTimeout> }>();
   private readonly listeners = new Set<() => void>();
   private snapshot: readonly SeenPatch[] = EMPTY;
+  private markedSnapshot: readonly SeenPatch[] = EMPTY;
   constructor(private readonly save: (entry: SeenPatch) => void) {}
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   getSnapshot = () => this.snapshot;
+  /** Real reads and completed catch-up only; a pending Undo never suppresses dwell. */
+  getMarkedSnapshot = () => this.markedSnapshot;
   private publish() {
-    this.snapshot = [...this.marked.values(), ...[...this.pending.values()].map(value => value.entry)];
+    const marked = [...this.marked.values()];
+    if (marked.length !== this.markedSnapshot.length || marked.some((entry, index) => entry !== this.markedSnapshot[index])) this.markedSnapshot = marked;
+    this.snapshot = [...marked, ...[...this.pending.values()].map(value => value.entry)];
     this.listeners.forEach(listener => listener());
   }
   reconcile(preferences: Immutable<PreferencesSnapshot> | null) {
@@ -84,8 +89,8 @@ export class ReadingLane {
   }
 }
 
-export function useReadingSeen(lane: ReadingLane | undefined, preferences: Immutable<PreferencesSnapshot> | null, route: SessionRef): Immutable<SessionSeen> | null {
-  const patches = useSyncExternalStore(lane?.subscribe ?? (() => () => {}), lane?.getSnapshot ?? (() => EMPTY), lane?.getSnapshot ?? (() => EMPTY));
+export function useReadingSeen(lane: ReadingLane | undefined, preferences: Immutable<PreferencesSnapshot> | null, route: SessionRef, includePending = true): Immutable<SessionSeen> | null {
+  const patches = useSyncExternalStore(lane?.subscribe ?? (() => () => {}), (includePending ? lane?.getSnapshot : lane?.getMarkedSnapshot) ?? (() => EMPTY), (includePending ? lane?.getSnapshot : lane?.getMarkedSnapshot) ?? (() => EMPTY));
   const projectId = route.project_id, sessionId = route.session_id;
   useEffect(() => { lane?.reconcile(preferences); }, [lane, preferences]);
   return useMemo(() => {

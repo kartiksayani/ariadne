@@ -85,6 +85,10 @@ describe('draft and seen preference coordination', () => {
     // The reservation admits at most one existing seen flight per save. Repeat
     // the real race across edits and Send rather than inventing queued flights.
     for (const text of ['A', 'AB', 'ABC', 'Final reply', null]) {
+      // Each catch-up must cover a newly observed session. Re-reading the same
+      // snapshot deliberately no longer advances its topic timestamp.
+      ++session.revision; session.updated_at = new Date().toISOString();
+      await navigation.opened.get(route)!.refresh();
       const commit = deferred(), committed = deferred(), receipt = deferred();
       transport.beforePatch = async request => { if (isSeen(request)) await commit.promise; };
       transport.afterMutation = async (request, result) => {
