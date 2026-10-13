@@ -135,11 +135,11 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
     }, spec.selected!);
     await expect(page.getByText('Showing an item outside your current filters.')).toBeVisible();
   }
-  let answerScroll: number | null = null;
+  let answerTop: number | null = null;
   if (spec.answering) {
     await settle(page);
     await row(spec.answering).focus();
-    answerScroll = await page.locator('.tree-scroll').evaluate(element => element.scrollTop);
+    answerTop = await row(spec.answering).evaluate(element => element.getBoundingClientRect().top);
     if (!spec.detail) await page.keyboard.press('Escape');
     await page.keyboard.press('a');
     await expect(page.locator(`[data-item-id="${spec.answering}"] .answer`)).toBeVisible();
@@ -163,8 +163,9 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
     const selected = row(spec.answering);
     await expect(selected).toHaveAttribute('aria-selected', 'true');
     if (!spec.detail) await expect(page.locator('.shell-detail')).toHaveCount(0);
-    // Closing detail and opening the inline answer keep the owner's reading position.
-    expect(await page.locator('.tree-scroll').evaluate(element => element.scrollTop)).toBe(answerScroll);
+    // Closing detail and opening the inline answer keep the owner's reading position: the answered row
+    // stays where it was on screen. scrollTop may change, since rows above re-wrap when the Map widens.
+    expect(await selected.evaluate(element => element.getBoundingClientRect().top)).toBe(answerTop);
   }
   const sessionBar = page.locator('.tree-session-bar');
   if (await sessionBar.count()) {
