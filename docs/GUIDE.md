@@ -240,6 +240,26 @@ Once the thread is connected, give Codex the task as in
 [Working with a connected session](#working-with-a-connected-session); it
 organises topics and items itself.
 
+### Bring PR review comments into Ariadne
+
+In a connected Claude conversation, run `/ariadne-pr-comments 42`, or use the
+PR's `https://github.com/.../pull/...` URL for the current repository. In a
+connected Codex thread, invoke `$ariadne-pr-comments 42` with the installed skill.
+`ariadne setup --agent codex` prints the skill's path: if Codex cannot discover
+it, ask the agent to read that file and follow the recipe with your PR argument.
+
+The agent makes a topic named for the PR and an item for each open review
+comment. Each shows what was asked, the file and line, and a suggested action.
+Pick **Fix** to make a local change, **Reply** to post your exact one-line text
+(or the suggested reply you approve), or **Skip** to leave the comment alone.
+Results stay on those items. Re-running adds new comments to the same topic
+without repeating existing choices. Restore an archived topic before updating it.
+
+The agent uses its own `gh` login; Ariadne makes no GitHub calls and stores no
+GitHub token. Reviewer text is treated as data. Nothing is posted until you pick
+Reply for that comment, and the agent never resolves threads, approves or merges
+the PR on its own. Fix does not post a reply or push your change.
+
 ## A 60-second tour
 
 - **Waiting panel.** Every question waiting on you, across sessions. Click one to

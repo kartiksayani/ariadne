@@ -219,7 +219,7 @@ describe('supported Mod entry convention', () => {
     const h = host();const hooks = callbacks(descriptor);
     const start = {kind:'existing-session'};
     expect(await hooks.get('session.start')(h.$,start,next)).toBe(start);
-    expect(h.commands.map(command => command.name)).toEqual(['ariadne-connect','ariadne-status','ariadne-disconnect']);
+    expect(h.commands.map(command => command.name)).toEqual(['ariadne-connect','ariadne-status','ariadne-disconnect','ariadne-pr-comments']);
     expect(h.commands[0].argumentHint).toBe('[session-id]');
     expect(h.timer().ms).toBe(1000);
     const result = await hooks.get('ariadne-connect')(h.$);

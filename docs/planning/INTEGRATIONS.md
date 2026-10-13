@@ -69,6 +69,19 @@ It does not trigger a model call. For terminal work that should create original
 Ariadne findings, the full Ariadne rules are in the plugin's `ariadne` skill,
 which Claude loads on demand; the connect output does not repeat them.
 
+`/ariadne-pr-comments <PR>` starts the shared
+[`pr-comments.md`](../../integrations/rules/pr-comments.md) recipe in a connected
+conversation. The argument is a number or github.com PR URL for the current
+repository. The agent's own `gh` fetches unresolved review comments; Ariadne and
+the Mod make no network calls. One topic uses the PR title, one decision item
+uses each comment's canonical link for repeat-import identity, and only new
+comments are added on re-runs. The owner picks Fix, Reply or Skip on each item.
+Only Reply authorizes posting that exact approved text to that thread; thread
+resolution, PR approval and merging are never automatic. The generator also
+produces a standalone Codex `ariadne-pr-comments` skill installed under
+`~/.agents/skills/ariadne-pr-comments`; invoke it with `$ariadne-pr-comments <PR>`.
+Fixture recipe tests use the real CLI without GitHub or network access.
+
 The Mod obtains the input via the bridge CLI and private desktop control socket.
 If the app is closed, it does not dispatch new owner messages. Existing bound
 domain CLI calls still write to the project store while the app is closed. A

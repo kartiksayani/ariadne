@@ -401,7 +401,9 @@ Python runtime dependency. Use `$.process.run([absolute_helper,"bridge",...],
 into shell commands. Helper resolves state via explicit binding handles.
 
 1. On `session.start`, register `/ariadne-connect`, `/ariadne-status`,
-   `/ariadne-disconnect`; install a1s `$.clock.every` poll with reentrancy guard.
+   `/ariadne-disconnect`, `/ariadne-pr-comments <PR>`; install a1s
+   `$.clock.every` poll with reentrancy guard. The PR comments command submits
+   the authored `pr-comments.md` recipe to the agent; the Mod does not call GitHub.
 2. Connect gets `$.session.id()` and `$.session.cwd()`, registers/validates project
    and host binding through CLI, returns IDs/instruction snippet and generation.
    After validating the full saved receipt and explicit target, publish its exact
