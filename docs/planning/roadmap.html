@@ -2791,17 +2791,38 @@
       "phase": "M11",
       "depends_on": [],
       "paths": [
-        "integrations/claude/plugin/skills/ariadne-pr-comments/*",
-        "tests/integrations/claude/*"
+        "integrations/rules/pr-comments.md",
+        "integrations/rules/skill.md",
+        "integrations/claude/plugin/hooks/{register,pr-comments}.js",
+        "integrations/claude/plugin/skills/ariadne/*",
+        "integrations/codex/skills/{ariadne,ariadne-pr-comments}/*",
+        "tools/xtask/src/rules.rs",
+        "tools/xtask/tests/rules.rs",
+        "crates/ariadne-cli/src/setup/resources.rs",
+        "crates/ariadne-cli/tests/{setup,doctor,agent_skill_examples,pr_comments_recipe}.rs",
+        "crates/ariadne-cli/tests/fixtures/pr-comments.json",
+        "crates/ariadne-adapter-claude/src/probe.rs",
+        "crates/ariadne-adapter-claude/tests/conformance.rs",
+        "scripts/install/*",
+        "tests/functional/install/test_install.py",
+        "tests/integrations/claude/*",
+        "docs/GUIDE.md",
+        "docs/planning/INTEGRATIONS.md",
+        "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md"
       ],
       "spec": [
-        "docs/delivery/HANDOFF.md"
+        "integrations/rules/pr-comments.md",
+        "docs/planning/INTEGRATIONS.md"
       ],
       "acceptance": [
-        "Add /ariadne-pr-comments."
+        "Claude /ariadne-pr-comments and the matching installed Codex skill file one PR topic and one item per unresolved review comment through the existing CLI.",
+        "Re-runs use canonical PR/comment links to add only new comments; resolved threads are skipped.",
+        "Comment text is untrusted data. Only an owner Reply choice permits posting exact approved text to that thread; no automatic resolution, approval or merge.",
+        "GitHub access uses the agent’s gh login; Ariadne has no network/token handling."
       ],
       "checks": [
-        "Meaningful skill command tests and independent review."
+        "npm run check; cargo test for ariadne-cli, ariadne-adapter-claude and ariadne-xtask.",
+        "PR comment fixture recipe, repeat-import and injection tests without network; affected Claude Mod and installer tests; independent review."
       ],
       "estimate_days": 1
     }

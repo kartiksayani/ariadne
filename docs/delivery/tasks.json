@@ -1780,7 +1780,9 @@
       "estimate_days": 0.5,
       "progress": {
         "state": "done",
-        "prs": ["https://github.com/kartiksayani/ariadne/pull/114"],
+        "prs": [
+          "https://github.com/kartiksayani/ariadne/pull/114"
+        ],
         "note": "Core loop proved live on 2026-10-06 (busy queue FIFO, terminal-item message, multi-item replies, CLI status/topic/children, result-before-completion order, missing-evidence skip, Claude quit/relaunch). Deferred: completion-before-result order, result repair, resend, second session in the same project, second project isolation, Ariadne app quit/relaunch during a run, npm run test:live (script does not exist); reason: owner ruling 2026-10-06: no further paid host turns; core loops proven."
       },
       "completion": {
@@ -1813,7 +1815,9 @@
       "estimate_days": 0.5,
       "progress": {
         "state": "done",
-        "prs": ["https://github.com/kartiksayani/ariadne/pull/115"],
+        "prs": [
+          "https://github.com/kartiksayani/ariadne/pull/115"
+        ],
         "note": "Core loop proved live on 2026-10-06 through the Codex native queue (pause, two queued inputs, resume, FIFO delivery via codex queue, turn correlation, explicit results committed, item statuses updated; 5 Codex turns). Deferred: five inputs (two were run), closed-item message, disconnect/relaunch, duplicates, both join orders, missing-result/uncertain recovery, same-project/cross-project isolation, npm run test:live (script does not exist); reason: owner ruling 2026-10-06: no further paid host turns; core loops proven. Onboarding defects D1-D6 were fixed and merged in #116 (main 1e8d9e7); docs/GUIDE.md documents the fixed behaviour."
       },
       "completion": {
@@ -2678,17 +2682,38 @@
       "phase": "M11",
       "depends_on": [],
       "paths": [
-        "integrations/claude/plugin/skills/ariadne-pr-comments/*",
-        "tests/integrations/claude/*"
+        "integrations/rules/pr-comments.md",
+        "integrations/rules/skill.md",
+        "integrations/claude/plugin/hooks/{register,pr-comments}.js",
+        "integrations/claude/plugin/skills/ariadne/*",
+        "integrations/codex/skills/{ariadne,ariadne-pr-comments}/*",
+        "tools/xtask/src/rules.rs",
+        "tools/xtask/tests/rules.rs",
+        "crates/ariadne-cli/src/setup/resources.rs",
+        "crates/ariadne-cli/tests/{setup,doctor,agent_skill_examples,pr_comments_recipe}.rs",
+        "crates/ariadne-cli/tests/fixtures/pr-comments.json",
+        "crates/ariadne-adapter-claude/src/probe.rs",
+        "crates/ariadne-adapter-claude/tests/conformance.rs",
+        "scripts/install/*",
+        "tests/functional/install/test_install.py",
+        "tests/integrations/claude/*",
+        "docs/GUIDE.md",
+        "docs/planning/INTEGRATIONS.md",
+        "docs/planning/low-level/PROCESS_AND_PROTOCOLS.md"
       ],
       "spec": [
-        "docs/delivery/HANDOFF.md"
+        "integrations/rules/pr-comments.md",
+        "docs/planning/INTEGRATIONS.md"
       ],
       "acceptance": [
-        "Add /ariadne-pr-comments."
+        "Claude /ariadne-pr-comments and the matching installed Codex skill file one PR topic and one item per unresolved review comment through the existing CLI.",
+        "Re-runs use canonical PR/comment links to add only new comments; resolved threads are skipped.",
+        "Comment text is untrusted data. Only an owner Reply choice permits posting exact approved text to that thread; no automatic resolution, approval or merge.",
+        "GitHub access uses the agent’s gh login; Ariadne has no network/token handling."
       ],
       "checks": [
-        "Meaningful skill command tests and independent review."
+        "npm run check; cargo test for ariadne-cli, ariadne-adapter-claude and ariadne-xtask.",
+        "PR comment fixture recipe, repeat-import and injection tests without network; affected Claude Mod and installer tests; independent review."
       ],
       "estimate_days": 1
     }

@@ -25,7 +25,10 @@ package stays canonical and holds the helpers. Install swaps the copy after the
 `current` pointer flips and replaces an existing one only when its bytes match a
 receipt (or it is the old symlink layout), otherwise it refuses; uninstall
 removes the copy only when unedited. The optional existing PATH-directory links
-and the Codex skill link go through `current`. No shell startup or host configuration files are edited. After
+and the Codex skill links go through `current`. The installer owns
+`~/.agents/skills/ariadne` and `~/.agents/skills/ariadne-pr-comments` when those
+paths are free; foreign skills stay in place with an instruction to fix the link.
+No shell startup or host configuration files are edited. After
 publication the installed helper runs read-only `doctor --summary`. Install ends
 with a short plain summary: the installed version, session/project counts, up to
 two actionable problems, connection instructions and `ariadne doctor` for details

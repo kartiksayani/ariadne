@@ -1,6 +1,6 @@
 use std::{fs, os::unix::fs::symlink, path::Path};
 
-const ON_DEMAND: [&str; 7] = [
+const ON_DEMAND: [&str; 8] = [
     "inputs.md",
     "errors.md",
     "reconnect.md",
@@ -8,6 +8,7 @@ const ON_DEMAND: [&str; 7] = [
     "review.md",
     "checklist.md",
     "follow-up.md",
+    "pr-comments.md",
 ];
 const SKILL: &str = "Shared body.\n<!-- only:claude -->\nClaude only.\n<!-- /only -->\n<!-- only:codex -->\nCodex only.\n<!-- /only -->\nSee {{RULES}}.\n";
 const PATTERNS: &str = "Shared patterns.\n<!-- only:claude -->\nClaude example.\n<!-- /only -->\n<!-- only:codex -->\nCodex example.\n<!-- /only -->\n";
@@ -140,4 +141,35 @@ fn symlinked_rule_target_is_rejected_without_overwriting_unrelated_content() {
         fs::read_to_string(other).unwrap(),
         "Keep this owner's file."
     );
+}
+
+#[test]
+fn pr_comments_source_generates_a_codex_entry_and_detects_drift_and_symlinks() {
+    let root = tempfile::tempdir().unwrap();
+    let rules = root.path().join("integrations/rules");
+    sources(&rules, "Shared rules.\n");
+    ariadne_xtask::rules::generate(root.path(), false).unwrap();
+    let directory = root
+        .path()
+        .join("integrations/codex/skills/ariadne-pr-comments");
+    let target = directory.join("SKILL.md");
+    let entry = fs::read_to_string(&target).unwrap();
+    assert!(entry.starts_with("---\nname: ariadne-pr-comments\n"));
+    assert!(entry.contains("Codex example.") && !entry.contains("Claude example."));
+    assert!(entry.contains("rules/pr-comments.md"));
+    fs::write(&target, "edited").unwrap();
+    assert!(ariadne_xtask::rules::generate(root.path(), true)
+        .unwrap_err()
+        .contains("Stale"));
+    ariadne_xtask::rules::generate(root.path(), false).unwrap();
+    fs::remove_file(&target).unwrap();
+    let foreign = root.path().join("owner.md");
+    fs::write(&foreign, "Keep this file").unwrap();
+    symlink(&foreign, &target).unwrap();
+    assert!(ariadne_xtask::rules::generate(root.path(), false).is_err());
+    assert_eq!(fs::read_to_string(&foreign).unwrap(), "Keep this file");
+    fs::remove_file(&target).unwrap();
+    fs::remove_dir(&directory).unwrap();
+    symlink(root.path(), &directory).unwrap();
+    assert!(ariadne_xtask::rules::generate(root.path(), false).is_err());
 }

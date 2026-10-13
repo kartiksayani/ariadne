@@ -53,6 +53,7 @@ class InstallationTests(unittest.TestCase):
                       f" print(json.dumps({{'schema_version':1,'version':'{version}','files':{{"
                       "'rules/claude.md':'fixture claude rules','rules/codex.md':'fixture codex rules',"
                       "'codex-skills/ariadne/SKILL.md':'fixture codex skill',"
+                      "'codex-skills/ariadne-pr-comments/SKILL.md':'fixture PR comments skill',"
                       "'claude-mod/plugin/hooks/installed.js':sys.argv[3]}}))\n"
                       "else: sys.exit(2)\n")
             (self.artifacts / name).write_text(script)
@@ -108,11 +109,33 @@ class InstallationTests(unittest.TestCase):
         self.assertIn("add ~/.local/share/ariadne/current/bin to PATH", self.output.getvalue())
         self.assertEqual(len(self.output.getvalue().splitlines()), 1)
         self.assertEqual(set(installer.json_read(final / "install.json")["owned_links"]),
-                         {installer.SKILL_LINK})
+                         set(installer.SKILL_LINKS))
 
     @property
     def skill(self):
         return self.home / installer.SKILL_LINK
+
+    def test_pr_comments_skill_is_installed_upgraded_and_removed(self):
+        skill = self.home / installer.PR_COMMENTS_SKILL_LINK
+        final = self.install()
+        self.assertEqual(skill.resolve(), final / "integrations/codex-skills/ariadne-pr-comments")
+        self.assertEqual((skill / "SKILL.md").read_text(), "fixture PR comments skill")
+        self.assertIn(installer.PR_COMMENTS_SKILL_LINK, installer.json_read(final / "install.json")["owned_links"])
+        self.make_artifacts("0.2.0")
+        upgraded = self.install()
+        self.assertEqual(skill.resolve(), upgraded / "integrations/codex-skills/ariadne-pr-comments")
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertFalse(installer.exists(skill))
+
+    def test_foreign_pr_comments_skill_is_preserved_without_blocking_main_skill(self):
+        skill = self.home / installer.PR_COMMENTS_SKILL_LINK
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_bytes(b"owner skill")
+        final = self.install()
+        self.assertTrue(self.skill.is_symlink())
+        self.assertNotIn(installer.PR_COMMENTS_SKILL_LINK, installer.json_read(final / "install.json")["owned_links"])
+        self.assertEqual(installer.uninstall(self.home), [])
+        self.assertEqual((skill / "SKILL.md").read_bytes(), b"owner skill")
 
     def test_codex_skill_link_is_created_recorded_idempotent_and_removed_leaving_parent(self):
         final = self.install()
@@ -202,6 +225,7 @@ class InstallationTests(unittest.TestCase):
         outside = self.base / "outside-agents"
         (outside / "skills").mkdir(parents=True)
         self.skill.unlink()
+        (self.home / installer.PR_COMMENTS_SKILL_LINK).unlink()
         self.skill.parent.rmdir()
         self.skill.parent.parent.rmdir()
         (self.home / ".agents").symlink_to(outside)

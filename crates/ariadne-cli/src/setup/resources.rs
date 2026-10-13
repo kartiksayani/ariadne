@@ -74,6 +74,14 @@ pub fn bundle(helper: &Path) -> BTreeMap<String, Vec<u8>> {
             "codex-skills/ariadne/SKILL.md",
             resource!("codex/skills/ariadne/SKILL.md").as_slice(),
         ),
+        (
+            "claude-mod/plugin/hooks/pr-comments.js",
+            resource!("claude/plugin/hooks/pr-comments.js").as_slice(),
+        ),
+        (
+            "codex-skills/ariadne-pr-comments/SKILL.md",
+            resource!("codex/skills/ariadne-pr-comments/SKILL.md").as_slice(),
+        ),
     ]
     .into_iter()
     .chain(on_demand_files!(
@@ -83,7 +91,8 @@ pub fn bundle(helper: &Path) -> BTreeMap<String, Vec<u8>> {
         "report.md",
         "review.md",
         "checklist.md",
-        "follow-up.md"
+        "follow-up.md",
+        "pr-comments.md"
     )) {
         files.insert(name.to_owned(), bytes.to_vec());
     }
