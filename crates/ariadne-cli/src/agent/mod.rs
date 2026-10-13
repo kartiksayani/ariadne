@@ -8,6 +8,7 @@ use ariadne_core::{
     *,
 };
 use ariadne_domain::models::*;
+use ariadne_store::session::Store;
 
 use std::{
     collections::BTreeMap,
@@ -108,7 +109,7 @@ validates it exactly as before):
   an existing item to done/decided/dropped; expected_item_revisions for every
   existing item you touch.
 Example (a topic brief, a finding with one child task, one full owner question):
-  printf '%s' '{"operations":[{"op":"topic.add","name":"Choose cache release timing","short":"Release timing","brief":"The review found a race between cache writes. Choose whether the fallback should wait for the fix."},{"op":"item.add","ref":"fill_race","short":"Fill race","type":"finding","question":"Two writers race in fill()","status":"open","ack_to":"open","outcome":"Confirmed","why":"Reproduced locally","children":[{"short":"Serialize fills","type":"task","question":"Serialize concurrent cache fills"}]},{"op":"item.add","short":"Fallback merge","type":"decision","question":"Choose when to merge the fallback path","note":"The fallback is ready, but concurrent writes can race. What this means for you: releasing now needs closer monitoring. I recommend waiting for the fill fix (fairly sure) because concurrent writes can race; if that is wrong, we can merge now and monitor cache errors. If you do not answer, I will keep the fallback unmerged. Affects [fill race](item:3).","ask":"May I merge the fallback now, after the fill fix, or leave it unmerged?","options":[{"label":"Merge now","consequence":"Releases today with closer cache monitoring."},{"label":"After fix","consequence":"Delays release until concurrent fills are safe.","recommended":true},{"label":"Not now","consequence":"Keeps the fallback unmerged while other work continues."}],"affects":[{"ref":"fill_race"}]}]}' | ariadne apply --binding "$B" --generation "$G" --json-stdin --json
+  printf '%s' '{"operations":[{"op":"topic.add","name":"Choose cache release timing","short":"Release timing","brief":"The review found a race between cache writes. Choose whether the fallback should wait for the fix."},{"op":"item.add","ref":"fill_race","short":"Fill race","type":"finding","question":"Two writers race in fill()","status":"open","ack_to":"open","outcome":"Confirmed","why":"Reproduced locally","children":[{"short":"Serialize fills","type":"task","question":"Serialize concurrent cache fills"}]},{"op":"item.add","short":"Fallback merge","type":"decision","question":"Choose when to merge the fallback path","note":"The fallback is ready, but concurrent writes can race. What this means for you: releasing now needs closer monitoring. I recommend waiting for the fill fix (fairly sure) because concurrent writes can race; if that is wrong, we can merge now and monitor cache errors. If you do not answer, I will keep the fallback unmerged. Affects the fill race.","ask":"May I merge the fallback now, after the fill fix, or leave it unmerged?","options":[{"label":"Merge now","consequence":"Releases today with closer cache monitoring."},{"label":"After fix","consequence":"Delays release until concurrent fills are safe.","recommended":true},{"label":"Not now","consequence":"Keeps the fallback unmerged while other work continues."}],"affects":[{"ref":"fill_race"}]}]}' | ariadne apply --binding "$B" --generation "$G" --json-stdin --json
 Receipt (default, compact; data of the --json envelope):
   {"op_id":"...","session_revision":3,"topics":[{"id":"UUID","number":2,"short":"Release timing","revision":1,"created":true}],"items":[{"id":"3","short":"Fill race","revision":2,"created":true},{"id":"3.1","short":"Serialize fills","revision":1,"created":true},{"id":"4","short":"Fallback merge","revision":1,"created":true}],"warnings":[]}
   An item id is its number (1.2). revision is the value to send as the next
@@ -417,20 +418,14 @@ fn run_apply(
     // Match the receipt revision so a concurrent writer cannot change this advice.
     let warnings = before
         .and_then(|before| {
-            let catalogue = core.registry().catalogue().ok()?;
-            let after = catalogue
-                .projects
-                .iter()
-                .filter_map(|project| project.result.as_ref().ok())
-                .filter_map(|project| project.sessions.as_ref().ok())
-                .flatten()
-                .filter_map(|session| session.result.as_ref().ok())
-                .find(|session| {
-                    session.id == *context.session().session_id()
-                        && session.project_id == *context.session().project_id()
-                        && session.revision == receipt.revision
-                })?;
-            Some(warnings::collect(before, after, &request, &receipt))
+            let after = Store::open_registered(
+                &core.registry().project_dir(context.session().project_id()),
+                context.session().project_id().clone(),
+            )
+            .and_then(|store| store.read(context.session().session_id()))
+            .ok()?;
+            (after.revision == receipt.revision)
+                .then(|| warnings::collect(before, &after, &request, &receipt))
         })
         .unwrap_or_default();
     let mut shown = None;
@@ -853,6 +848,65 @@ fn invalid(message: &str) -> CoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apply_advice_uses_the_resolved_session_when_another_registered_store_breaks() {
+        let session: Session = serde_json::from_str(include_str!(
+            "../../../../fixtures/domain/history/seed.json"
+        ))
+        .unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let unrelated_root = tempfile::tempdir().unwrap();
+        let registry = ariadne_store::registry::Registry::open(home.path()).unwrap();
+        let uuid = |n| UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap();
+        registry
+            .register(root.path(), &uuid(99), || session.project_id.clone())
+            .unwrap();
+        registry
+            .register(unrelated_root.path(), &uuid(100), || uuid(101))
+            .unwrap();
+        let store = Store::open_registered(
+            &registry.project_dir(&session.project_id),
+            session.project_id.clone(),
+        )
+        .unwrap();
+        store.create(&session).unwrap();
+        let context = AgentResolver::resolve(&registry, uuid(3), uuid(4), None, None).unwrap();
+        // The route was resolved while all registrations were readable. Failure
+        // elsewhere after that must not suppress advice for the saved target.
+        std::fs::remove_file(registry.project_dir(&uuid(101)).join("project.json")).unwrap();
+        let core = NativeCoreService::new(
+            registry,
+            || UuidV4::new(uuid::Uuid::new_v4().to_string()).unwrap(),
+            || UtcMillis::new("2026-10-13T12:00:00.000Z").unwrap(),
+            |_| unreachable!("apply does not verify a host"),
+        );
+        let mut body = &br#"{"operations":[{"op":"item.add","topic":{"id":"00000000-0000-4000-8000-000000000005"},"type":"task","question":"Inspect retry evidence"}]}"#[..];
+        let Tool::Apply(call) = parse(
+            &[
+                "apply",
+                "--binding",
+                uuid(3).as_str(),
+                "--generation",
+                uuid(4).as_str(),
+                "--json-stdin",
+                "--json",
+            ],
+            &mut body,
+        )
+        .unwrap() else {
+            unreachable!()
+        };
+        let shown = run_apply(&core, context, call, Some(&session), &mut Vec::new()).unwrap();
+        assert!(shown["warnings"].as_array().unwrap().iter().any(|warning| {
+            warning
+                .as_str()
+                .unwrap()
+                .contains("Topic Release choice (1)")
+        }));
+        assert_eq!(store.read(&session.id).unwrap().items.0.len(), 3);
+    }
 
     #[test]
     fn read_notices_never_claim_counts_from_another_revision() {

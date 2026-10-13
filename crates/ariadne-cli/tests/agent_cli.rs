@@ -1589,12 +1589,7 @@ fn native_result_request_prints_a_full_raw_receipt_and_replays_without_a_second_
     ];
     let output = setup.call(&args, Some(&body));
     assert_eq!(output.status.code(), Some(0), "{output:?}");
-    let warning =
-        "Topic Delivery decisions (1) has at least 3 items and no brief. Add one with topic.edit.";
-    assert_eq!(
-        String::from_utf8(output.stderr.clone()).unwrap(),
-        format!("Warning: {warning}\n")
-    );
+    assert!(output.stderr.is_empty(), "{output:?}");
     let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(receipt["session_id"], session.id.as_str());
     assert_eq!(receipt["operation_id"], id(0x9000).as_str());
@@ -1633,7 +1628,7 @@ fn native_result_request_prints_a_full_raw_receipt_and_replays_without_a_second_
     let mut enveloped_args = args.to_vec();
     enveloped_args.push("--json");
     let mut enveloped = envelope(&setup.call(&enveloped_args, Some(&body)), 0);
-    assert_eq!(enveloped["data"]["warnings"], json!([warning]));
+    assert_eq!(enveloped["data"]["warnings"], json!([]));
     enveloped["data"]
         .as_object_mut()
         .unwrap()
@@ -2013,7 +2008,7 @@ fn the_help_example_has_a_topic_brief_deliberate_ack_and_a_full_owner_question()
         decision["ask"],
         "May I merge the fallback now, after the fill fix, or leave it unmerged?"
     );
-    assert_eq!(decision["note"], "The fallback is ready, but concurrent writes can race. What this means for you: releasing now needs closer monitoring. I recommend waiting for the fill fix (fairly sure) because concurrent writes can race; if that is wrong, we can merge now and monitor cache errors. If you do not answer, I will keep the fallback unmerged. Affects [fill race](item:3).");
+    assert_eq!(decision["note"], "The fallback is ready, but concurrent writes can race. What this means for you: releasing now needs closer monitoring. I recommend waiting for the fill fix (fairly sure) because concurrent writes can race; if that is wrong, we can merge now and monitor cache errors. If you do not answer, I will keep the fallback unmerged. Affects the fill race.");
     assert_eq!(
         decision["options"],
         json!([
@@ -3152,6 +3147,61 @@ fn lenient_completed_asks_get_a_real_question_round_and_owner_answer_route() {
             .iter()
             .any(|answer| answer.item_id == ask.id && answer.text == "Keep the draft for now."));
     }
+}
+
+#[test]
+fn unrelated_apply_does_not_repeat_existing_topic_or_waiting_warnings() {
+    let setup = Setup::new(&seed());
+    let first = envelope(
+        &setup.apply(&json!({"operations": (0..4).map(|n| json!({
+            "op":"item.add", "topic":{"id":id(5)}, "type":"question",
+            "question":format!("Choose retry approach {n}"), "ask":"Which approach?"
+        })).collect::<Vec<_>>() })),
+        0,
+    );
+    let warnings = first["data"]["warnings"].as_array().unwrap();
+    assert!(warnings
+        .iter()
+        .any(|warning| warning.as_str().unwrap().contains("no brief")));
+    assert!(warnings
+        .iter()
+        .any(|warning| warning.as_str().unwrap().contains("4 items are waiting")));
+
+    let reply = json!({"expected_item_revisions":{"2":1}, "operations":[{"op":"reply", "item":{"id":"2"}, "text":"Evidence is still available."}]});
+    for output in [
+        setup.agent(
+            &["apply"],
+            &["--json-stdin", "--dry-run", "--json"],
+            Some(&serde_json::to_vec(&reply).unwrap()),
+        ),
+        setup.apply(&reply),
+        setup.apply(&reply),
+    ] {
+        assert_eq!(envelope(&output, 0)["data"]["warnings"], json!([]));
+    }
+    let current = setup.store().read(&id(2)).unwrap();
+    let edited = envelope(
+        &setup.apply(&json!({"expected_item_revisions":{"2":current.items.0[&ItemRef::new("2").unwrap()].revision}, "operations":[{"op":"item.edit", "item":{"id":"2"}, "patch":{"question":"Original evidence remains available"}}]})),
+        0,
+    );
+    assert_eq!(edited["data"]["warnings"], json!([]));
+    let unchanged = envelope(
+        &setup.apply(&json!({"expected_item_revisions":{"3":current.items.0[&ItemRef::new("3").unwrap()].revision}, "operations":[{"op":"item.ask", "item":{"id":"3"}, "ask":"Keep this approach?"}]})),
+        0,
+    );
+    assert_eq!(unchanged["data"]["warnings"], json!([]));
+
+    let added = envelope(
+        &setup.apply(&json!({"operations":[{"op":"item.add", "topic":{"id":id(5)}, "type":"question", "question":"Choose another retry approach", "ask":"Which approach?"}]})),
+        0,
+    );
+    let warnings = added["data"]["warnings"].as_array().unwrap();
+    assert!(warnings
+        .iter()
+        .any(|warning| warning.as_str().unwrap().contains("5 items are waiting")));
+    assert!(warnings
+        .iter()
+        .any(|warning| warning.as_str().unwrap().contains("no brief")));
 }
 
 #[test]

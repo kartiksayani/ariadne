@@ -905,7 +905,11 @@ fn the_cli_help_example_creates_reading_items_open_for_ack_without_repairs() {
     ] {
         assert!(note.contains(part), "missing question guidance {part}");
     }
-    assert!(note.contains(&format!("[fill race](item:{})", item.id.as_str())));
+    assert!(note.contains("Affects the fill race."));
+    assert!(
+        !note.contains("(item:"),
+        "new item numbers come from the receipt"
+    );
 }
 
 #[test]
@@ -1276,10 +1280,8 @@ fn rules_explain_the_envelope_fields_and_every_error_code_they_name_exists() {
     assert!(ERRORS.contains("the CLI derives the same `op_id`"));
     assert!(ERRORS.contains("A retry of the identical request is safe"));
     assert!(ERRORS.contains("resending declared removed targets prunes them"));
-    assert!(RULES.contains("An unexpected `\"replayed\":true` files nothing new"));
-    assert!(
-        RULES.contains("a fresh explicit `op_id` to deliberately file the identical request again")
-    );
+    assert!(RULES.contains("Unexpected `\"replayed\":true` files nothing new"));
+    assert!(RULES.contains("a fresh explicit `op_id` to file the same request again"));
     assert!(RULES.contains("independent of generation"));
     for needle in [
         "New topics/items need stable `short`",

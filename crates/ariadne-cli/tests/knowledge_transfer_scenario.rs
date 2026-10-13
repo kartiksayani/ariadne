@@ -336,7 +336,7 @@ fn realistic_knowledge_transfer_session_succeeds_without_warnings() {
     assert!(initial.topics.0.values().all(|topic| topic
         .brief
         .as_ref()
-        .is_some_and(|brief| !brief.contains('\n') && brief.contains("(item:"))));
+        .is_some_and(|brief| !brief.contains('\n') && !brief.contains("(item:"))));
     assert!(
         initial.items.0.values().all(|item| item.parent.is_none()),
         "routine checklist steps stay inside one item"
@@ -389,8 +389,10 @@ fn realistic_knowledge_transfer_session_succeeds_without_warnings() {
             .options
             .iter()
             .all(|option| !option.consequence.trim().is_empty()));
+        assert!(!ask.contains("(item:"), "new item numbers need a receipt");
         for affected in question.affects.as_ref().unwrap() {
-            assert!(ask.contains(&format!("(item:{})", affected.as_str())));
+            let short = initial.items.0[affected].short.as_ref().unwrap();
+            assert!(ask.to_lowercase().contains(&short.to_lowercase()));
         }
     }
 

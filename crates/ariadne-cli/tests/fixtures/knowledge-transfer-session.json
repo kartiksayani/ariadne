@@ -12,7 +12,7 @@
             "ref": "behavior",
             "name": "Choose retry behavior",
             "short": "Sync behavior",
-            "brief": "Notes sync can retain queued notes while retrying for a bounded time. Choose the [retry ceiling](item:1) so outage pressure and the future pilot use the same limit."
+            "brief": "Notes sync can retain queued notes while retrying for a bounded time. Choose the retry ceiling so outage pressure and the future pilot use the same limit."
           },
           {
             "op": "item.add",
@@ -23,7 +23,7 @@
             "question": "How long should sync retry?",
             "short": "Retry ceiling",
             "type": "decision",
-            "ask": "Bottom line: how many attempts should notes sync make before pausing?\nWhat this means for you: choose how long a failed sync keeps trying.\nI recommend three attempts (fairly sure) because the scripted outage check keeps notes queued after the ceiling; if that’s wrong, a brief outage could require manual resume.\nIf you don’t answer, I’ll keep sync off. This affects [retry pressure](item:2) and [pilot backlog](item:4).\nDetails: the options trade automatic recovery time against pressure during an outage.",
+            "ask": "Bottom line: how many attempts should notes sync make before pausing?\nWhat this means for you: choose how long a failed sync keeps trying.\nI recommend three attempts (fairly sure) because the scripted outage check keeps notes queued after the ceiling; if that’s wrong, a brief outage could require manual resume.\nIf you don’t answer, I’ll keep sync off. This affects retry pressure and pilot backlog.\nDetails: the options trade automatic recovery time against pressure during an outage.",
             "options": [
               {
                 "id": "three",
@@ -58,7 +58,7 @@
             "type": "finding",
             "status": "open",
             "ack_to": "open",
-            "outcome": "Bottom line: five attempts keep failed sync traffic running longer.\nWhat this means for you: the [retry ceiling](item:1) controls how much outage pressure you accept.\nDetails: queued notes remain available after retries stop.",
+            "outcome": "Bottom line: five attempts keep failed sync traffic running longer.\nWhat this means for you: the retry ceiling controls how much outage pressure you accept.\nDetails: queued notes remain available after retries stop.",
             "why": "The scripted outage check retained queued notes but continued attempting sync until its ceiling.",
             "affects": [
               "backlog"
@@ -69,7 +69,7 @@
             "ref": "launch",
             "name": "Choose who gets sync",
             "short": "Sync launch",
-            "brief": "Notes sync stays off until you choose its first audience. A small pilot limits exposure while [pilot readiness](item:5) checks retry and pause behavior."
+            "brief": "Notes sync stays off until you choose its first audience. A small pilot limits exposure while pilot readiness checks retry and pause behavior."
           },
           {
             "op": "item.add",
@@ -80,7 +80,7 @@
             "question": "How widely should we enable sync?",
             "short": "Launch scope",
             "type": "decision",
-            "ask": "Bottom line: who should receive notes sync first?\nWhat this means for you: choose the size of the first rollout.\nI recommend a small pilot (not sure) because the scripted checks cover outages and recovery but not every usage pattern; if that’s wrong, pilot users may need to resume queued notes manually.\nIf you don’t answer, I’ll keep sync off. This affects [pilot backlog](item:4) and [pilot readiness](item:5).\nDetails: a pilot provides feedback with fewer people exposed, while a broad launch delivers sync sooner.",
+            "ask": "Bottom line: who should receive notes sync first?\nWhat this means for you: choose the size of the first rollout.\nI recommend a small pilot (not sure) because the scripted checks cover outages and recovery but not every usage pattern; if that’s wrong, pilot users may need to resume queued notes manually.\nIf you don’t answer, I’ll keep sync off. This affects pilot backlog and pilot readiness.\nDetails: a pilot provides feedback with fewer people exposed, while a broad launch delivers sync sooner.",
             "options": [
               {
                 "id": "pilot",
@@ -118,7 +118,7 @@
             "type": "finding",
             "status": "open",
             "ack_to": "open",
-            "outcome": "Bottom line: a long retry window leaves the pilot retrying during an outage.\nWhat this means for you: settle the [retry ceiling](item:1) before the [launch scope](item:3).\nDetails: pause recovery has not yet been checked.",
+            "outcome": "Bottom line: a long retry window leaves the pilot retrying during an outage.\nWhat this means for you: settle the retry ceiling before the launch scope.\nDetails: pause recovery has not yet been checked.",
             "why": "The scripted launch review starts with the five-attempt proposal and an untested pause path.",
             "affects": [
               "checks"
@@ -134,7 +134,7 @@
             "short": "Pilot readiness",
             "type": "task",
             "status": "in_progress",
-            "note": "Bottom line: readiness checks are underway.\nWhat this means for you: no rollout starts before your [launch scope](item:3) answer.\nDetails:\n- [ ] Confirm retries stop at the chosen ceiling without losing queued notes.\n- [ ] Confirm pause and resume sync queued notes once.",
+            "note": "Bottom line: readiness checks are underway.\nWhat this means for you: no rollout starts before your launch scope answer.\nDetails:\n- [ ] Confirm retries stop at the chosen ceiling without losing queued notes.\n- [ ] Confirm pause and resume sync queued notes once.",
             "depends_on": [
               "ceiling"
             ],
@@ -319,7 +319,7 @@
             "replacement": {
               "ref": "recovery"
             },
-            "outcome": "Replaced the untested pilot risk with [pilot pause result](item:6).",
+            "outcome": "Replaced the untested pilot risk with the pilot pause result.",
             "why": "Pause recovery now has evidence, so the old risk no longer describes readiness."
           },
           {

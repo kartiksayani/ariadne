@@ -15,7 +15,7 @@ this bypasses validation and can make the session unreadable.
 
 Apply may return non-blocking warnings; they do not change what is saved.
 
-An unexpected `"replayed":true` files nothing new; use a fresh explicit `op_id` to deliberately file the identical request again.
+Unexpected `"replayed":true` files nothing new; use a fresh explicit `op_id` to file the same request again.
 
 ## Request
 
@@ -59,14 +59,14 @@ Markdown text; plain topic names, `short`, option labels.
 Owner instructions win; apply these rules while connected or told "use Ariadne".
 
 1. **Keep only useful work.** File decisions, risks and results the owner needs.
-   Everything else stays in chat. Put routine lists the owner needs in one
+   Otherwise use chat. Put routine lists the owner needs in one
    checklist; split only for independent discussion/tracking. Chat points to
    filed work in 1–3 lines.
 2. **One point, one place.** Update the existing item instead of repeating it in
    reports/follow-ups. Answering a point once settles it everywhere. Merge
    duplicates with `item.replace`; children need independent usefulness.
-3. **Topics are owner actions.** Use plain names for what the owner needs to do,
-   without codes/ticket numbers. `topic.edit` keeps a 2–3 sentence `brief`: where
+3. **Topics are owner actions.** Name the owner action plainly, without
+   codes/ticket numbers. `topic.edit` keeps a 2–3 sentence `brief`: where
    things stand and what it means. Do not repeat Ariadne's decided/waiting/replaced
    lists or add a summary item.
 4. **Make questions easy to answer.** In this order: the decision in plain words;
@@ -79,10 +79,11 @@ Owner instructions win; apply these rules while connected or told "use Ariadne".
    ask scope up front before building if it is not already settled, and keep
    at most three questions `waiting_on_me` at once. Continue independent work;
    no-answer defaults respect permissions and never assume consent.
-6. **Layer the explanation.** Use a clear title (`question`), bottom line
-   as the first body line, "What this means for you", then details. Define every
+6. **Layer the explanation.** Use a clear `question` title, bottom line first,
+   "What this means for you", then details. Define every
    term on first use; keep paragraphs to three sentences or fewer.
 7. **Name connections.** Write `[retry cap](item:3.2)`, never bare item numbers.
+   Prose links need receipt item numbers; use batch refs in `affects`/`depends_on`/`related` for new items, then add prose links.
    Use `affects` for consequences, `depends_on` for prerequisites, `related`
    for other useful connections. Prose links alone declare nothing;
    leave unrelated items alone.
@@ -127,7 +128,7 @@ a notice; owner Restore: `errors.md`.
 
 ## Examples
 
-A brief replaces the summary item; related checks stay together.
+A brief replaces summary items; related checks stay together.
 
 ```json
 {"summary":"Reviewed retry safety","operations":[{"op":"topic.add","ref":"review","name":"Choose safe retry behavior","short":"Retry behavior"},{"op":"topic.edit","topic":{"ref":"review"},"brief":"The retry cap and error handling pass their checks. We can focus the remaining work on retry timing."},{"op":"item.add","question":"Retry checks pass","short":"Retry checks","type":"finding","status":"open","ack_to":"done","outcome":"The cap and error handling work. What this means for you: the remaining change can stay small.","why":"- Retry cap tested\n- Original error preserved"}]}

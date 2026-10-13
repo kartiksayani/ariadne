@@ -1,5 +1,5 @@
 //! Filing advice is derived locally; it is never part of a saved receipt.
-use ariadne_core::{ApplyRequest, EntityRef, Operation};
+use ariadne_core::{ApplyRequest, EntityRef, Operation, UuidRef};
 use ariadne_domain::{models::*, visibility::item_is_removed};
 use std::collections::BTreeSet;
 
@@ -33,6 +33,7 @@ pub(super) fn collect(
     let mut warnings = vec![];
     let mut mentioned = BTreeSet::new();
     let mut missing_reasons = BTreeSet::new();
+    let mut populated_topics = BTreeSet::new();
     let mut prose = vec![request.summary.as_str()];
     if let Some(result) = &request.input_result {
         prose.push(&result.explanation);
@@ -40,6 +41,9 @@ pub(super) fn collect(
     for operation in &request.operations {
         match operation {
             Operation::ItemAdd(add) => {
+                if let Some(topic) = resolve_topic(&add.topic, receipt) {
+                    populated_topics.insert(topic);
+                }
                 if let Some(item) = existing.iter().find(|item| {
                     similar(&add.question, &item.question)
                         || add.short.as_ref().is_some_and(|short| {
@@ -57,6 +61,10 @@ pub(super) fn collect(
                 prose.extend(add.ask.as_deref());
                 prose.extend(add.outcome.as_deref());
                 prose.extend(add.why.as_deref());
+                for option in add.options.iter().flatten() {
+                    prose.push(&option.label);
+                    prose.push(&option.consequence);
+                }
             }
             Operation::ItemEdit {
                 item,
@@ -97,14 +105,34 @@ pub(super) fn collect(
                     );
                 }
             }
-            Operation::ItemAsk { ask, .. } => prose.push(ask),
+            Operation::ItemAsk { ask, options, .. } => {
+                prose.push(ask);
+                for option in options {
+                    prose.push(&option.label);
+                    prose.push(&option.consequence);
+                }
+            }
             Operation::ItemReplace { outcome, why, .. } => {
                 prose.push(outcome);
                 prose.push(why);
             }
             Operation::Reply { text, .. } => prose.push(text),
-            Operation::TopicAdd { brief, .. } => prose.extend(brief.as_deref()),
-            Operation::TopicEdit { brief, .. } => {
+            Operation::TopicAdd {
+                r#ref, name, brief, ..
+            } => {
+                if let Some(topic) = resolve_topic(
+                    &UuidRef::Local(ariadne_core::LocalRef {
+                        r#ref: r#ref.clone(),
+                    }),
+                    receipt,
+                ) {
+                    populated_topics.insert(topic);
+                }
+                prose.push(name);
+                prose.extend(brief.as_deref());
+            }
+            Operation::TopicEdit { name, brief, .. } => {
+                prose.extend(name.as_deref());
                 prose.extend(brief.as_ref().and_then(|brief| brief.as_deref()));
             }
             _ => {}
@@ -135,18 +163,25 @@ pub(super) fn collect(
             .iter()
             .filter(|item| ariadne_core::queries::waiting_unanswered(after, item))
             .count();
-        if waiting > 3 {
+        let previously_waiting = before
+            .items
+            .0
+            .values()
+            .filter(|item| {
+                visible(before, item) && ariadne_core::queries::waiting_unanswered(before, item)
+            })
+            .count();
+        if waiting > 3 && waiting > previously_waiting {
             warnings.push(format!(
                 "{waiting} items are waiting on the owner. Finish or withdraw old questions."
             ));
         }
     }
-    for topic in after
-        .topics
-        .0
-        .values()
-        .filter(|topic| topic.removed_at.is_none() && topic.archived_at.is_none())
-    {
+    for topic in after.topics.0.values().filter(|topic| {
+        populated_topics.contains(&topic.id)
+            && topic.removed_at.is_none()
+            && topic.archived_at.is_none()
+    }) {
         if !has_text(topic.brief.as_deref())
             && live.iter().filter(|item| item.topic_id == topic.id).count() >= 3
         {
@@ -158,6 +193,21 @@ pub(super) fn collect(
         }
     }
     warnings
+}
+
+fn resolve_topic(target: &UuidRef, receipt: &SavedReceipt) -> Option<UuidV4> {
+    match target {
+        UuidRef::Existing(target) => Some(target.id.clone()),
+        UuidRef::Local(target) => match &receipt.data {
+            SavedReceiptData::Apply { allocated_refs, .. } => {
+                match allocated_refs.0.get(&target.r#ref) {
+                    Some(AllocatedRef::Topic { id }) => Some(id.clone()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        },
+    }
 }
 
 fn visible(session: &Session, item: &Item) -> bool {
@@ -244,29 +294,16 @@ fn similar(left: &str, right: &str) -> bool {
         })
 }
 
-/// Reference wording disambiguates item numbers from ordinary quantities.
-/// Versions, times, decimals and linked labels are deliberately left alone.
+/// Dotted references need only match a visible item. Root numbers need an
+/// explicit item/items prefix, including the rest of a directly introduced list.
 fn bare_numbers(text: &str) -> Vec<&str> {
-    let mut linked = vec![];
-    let mut offset = 0;
-    while let Some(open) = text[offset..].find('[') {
-        let start = offset + open;
-        let Some(close) = text[start..].find(']') else {
-            break;
-        };
-        let close = start + close;
-        if text[close..].starts_with("](item:") {
-            if let Some(end) = text[close..].find(')') {
-                linked.push(start..close + end + 1);
-            }
-        }
-        offset = close + 1;
-    }
+    let ignored = markdown_ranges(text);
     let bytes = text.as_bytes();
     let mut numbers = vec![];
     let mut index = 0;
+    let mut list_end = None;
     while index < bytes.len() {
-        if !bytes[index].is_ascii_digit() {
+        if !bytes[index].is_ascii_digit() || ignored[index] {
             index += 1;
             continue;
         }
@@ -278,22 +315,40 @@ fn bare_numbers(text: &str) -> Vec<&str> {
             index += 1;
         }
         let number = &text[start..index];
-        if linked.iter().any(|range| range.contains(&start)) {
+        let prefix = text[..start].trim_end();
+        let before = prefix
+            .rsplit(|c: char| !c.is_alphabetic())
+            .next()
+            .unwrap_or("")
+            .to_lowercase();
+        let explicit = matches!(before.as_str(), "item" | "items")
+            && text[..start]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace);
+        let continued = list_end.is_some_and(|end| {
+            matches!(
+                text[end..start].trim().to_lowercase().as_str(),
+                "," | "and" | "or" | ", and" | ", or"
+            )
+        });
+        list_end = None;
+        let line_prefix = text[..start].rsplit('\n').next().unwrap_or("");
+        if !number.contains('.')
+            && line_prefix.trim().is_empty()
+            && matches!(bytes.get(index), Some(b'.' | b')'))
+            && bytes.get(index + 1).is_some_and(u8::is_ascii_whitespace)
+        {
             continue;
         }
         let previous = text[..start].chars().next_back();
         let next = text[index..].chars().next();
-        if previous.is_some_and(|c| c.is_alphanumeric() || ".:/-+$".contains(c))
+        if prefix.ends_with('#')
+            || previous.is_some_and(|c| (c.is_alphanumeric() && !explicit) || ".:/-+$#".contains(c))
             || next.is_some_and(|c| c.is_alphanumeric() || ":/%".contains(c))
         {
             continue;
         }
-        let before = text[..start]
-            .split_whitespace()
-            .next_back()
-            .unwrap_or("")
-            .trim_matches(|c: char| !c.is_alphanumeric())
-            .to_lowercase();
         let after = text[index..]
             .split_whitespace()
             .next()
@@ -338,73 +393,192 @@ fn bare_numbers(text: &str) -> Vec<&str> {
         ) {
             continue;
         }
-        let numeric_context = text[..start]
-            .split_whitespace()
-            .rev()
-            .take(4)
-            .map(|word| {
-                word.trim_matches(|c: char| !c.is_alphanumeric())
-                    .to_lowercase()
-            })
-            .any(|word| {
-                matches!(
-                    word.as_str(),
-                    "version"
-                        | "sdk"
-                        | "score"
-                        | "measured"
-                        | "measurement"
-                        | "decimal"
-                        | "ratio"
-                        | "value"
-                        | "rate"
-                        | "price"
-                        | "cost"
-                        | "latency"
-                )
-            });
-        if numeric_context {
+        // Keep common numeric prose conservative without requiring a general
+        // reference verb: "Fixed 3.2 first" still identifies the visible item.
+        if !explicit
+            && !continued
+            && text[..start]
+                .split_whitespace()
+                .rev()
+                .take(4)
+                .map(|word| {
+                    word.trim_matches(|c: char| !c.is_alphanumeric())
+                        .to_lowercase()
+                })
+                .any(|word| {
+                    matches!(
+                        word.as_str(),
+                        "version"
+                            | "sdk"
+                            | "score"
+                            | "measured"
+                            | "measurement"
+                            | "decimal"
+                            | "ratio"
+                            | "value"
+                            | "rate"
+                            | "price"
+                            | "cost"
+                            | "latency"
+                    )
+                })
+        {
             continue;
         }
-        let context = text[..start]
-            .split_whitespace()
-            .rev()
-            .take(4)
-            .chain(text[index..].split_whitespace().take(3));
-        if context
-            .map(|word| {
-                word.trim_matches(|c: char| !c.is_alphanumeric())
-                    .to_lowercase()
-            })
-            .any(|word| {
-                matches!(
-                    word.as_str(),
-                    "item"
-                        | "items"
-                        | "see"
-                        | "update"
-                        | "updated"
-                        | "updates"
-                        | "change"
-                        | "changed"
-                        | "changes"
-                        | "affects"
-                        | "affected"
-                        | "dependency"
-                        | "dependencies"
-                        | "depends"
-                        | "replace"
-                        | "replaced"
-                        | "blocked"
-                        | "blocking"
-                        | "review"
-                )
-            })
-        {
+        if number.contains('.') || explicit || continued {
             numbers.push(number);
+            if explicit || continued {
+                list_end = Some(index);
+            }
         }
     }
     numbers
+}
+
+/// Ignore code and Markdown link text/destinations before looking for numbers.
+/// Bracketed labels are conservatively skipped even for reference-style links.
+fn markdown_ranges(text: &str) -> Vec<bool> {
+    let bytes = text.as_bytes();
+    let mut ignored = vec![false; bytes.len()];
+    let mut fence = None;
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        let mut trimmed = line.trim_start();
+        // Fenced code can sit inside one or more Markdown blockquotes.
+        let quote_limit = fence.map(|(_, _, depth)| depth).unwrap_or(usize::MAX);
+        let mut quote_depth = 0;
+        while let Some(quoted) = trimmed.strip_prefix('>') {
+            if quote_depth == quote_limit {
+                break;
+            }
+            trimmed = quoted.trim_start();
+            quote_depth += 1;
+        }
+        // A list item's opening fence follows its bullet or ordered marker;
+        // continuation and closing lines are already handled by trim_start.
+        let list_prefix = if matches!(trimmed.as_bytes().first(), Some(b'-' | b'+' | b'*')) {
+            1
+        } else {
+            let digits = trimmed.bytes().take_while(u8::is_ascii_digit).count();
+            if digits > 0 && matches!(trimmed.as_bytes().get(digits), Some(b'.' | b')')) {
+                digits + 1
+            } else {
+                0
+            }
+        };
+        if fence.is_none()
+            && list_prefix > 0
+            && trimmed
+                .as_bytes()
+                .get(list_prefix)
+                .is_some_and(u8::is_ascii_whitespace)
+        {
+            trimmed = trimmed[list_prefix..].trim_start();
+        }
+        let marker = trimmed.as_bytes().first().copied();
+        let run = trimmed
+            .bytes()
+            .take_while(|byte| Some(*byte) == marker)
+            .count();
+        let delimiter = marker.filter(|byte| matches!(byte, b'`' | b'~') && run >= 3);
+        if let Some((open, length, _)) = fence {
+            ignored[offset..offset + line.len()].fill(true);
+            if delimiter == Some(open) && run >= length && trimmed[run..].trim().is_empty() {
+                fence = None;
+            }
+        } else if let Some(marker) = delimiter {
+            ignored[offset..offset + line.len()].fill(true);
+            fence = Some((marker, run, quote_depth));
+        }
+        offset += line.len();
+    }
+    let mut index = 0;
+    while index < bytes.len() {
+        if ignored[index] {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        if bytes[index..].starts_with(b"https://") || bytes[index..].starts_with(b"http://") {
+            while index < bytes.len() && !bytes[index].is_ascii_whitespace() {
+                index += 1;
+            }
+            ignored[start..index].fill(true);
+        } else if bytes[index] == b'`' {
+            let run = bytes[index..]
+                .iter()
+                .take_while(|byte| **byte == b'`')
+                .count();
+            index += run;
+            let mut end = index;
+            while end < bytes.len() {
+                if bytes[end] == b'`' {
+                    let close = bytes[end..]
+                        .iter()
+                        .take_while(|byte| **byte == b'`')
+                        .count();
+                    end += close;
+                    if close == run {
+                        ignored[start..end].fill(true);
+                        index = end;
+                        break;
+                    }
+                } else {
+                    end += 1;
+                }
+            }
+        } else if bytes[index] == b'[' {
+            if let Some(label_end) = delimited_end(bytes, index, b'[', b']') {
+                index = label_end;
+                if bytes.get(index) == Some(&b'(') {
+                    index = delimited_end(bytes, index, b'(', b')').unwrap_or(bytes.len());
+                } else if bytes.get(index) == Some(&b'[') {
+                    index = delimited_end(bytes, index, b'[', b']').unwrap_or(bytes.len());
+                } else if bytes.get(index) == Some(&b':') {
+                    while index < bytes.len() && bytes[index] != b'\n' {
+                        index += 1;
+                    }
+                }
+                ignored[start..index].fill(true);
+            } else {
+                // An unfinished label may be an incomplete link; leave the
+                // rest alone rather than repeatedly scanning the same suffix.
+                ignored[start..].fill(true);
+                index = bytes.len();
+            }
+        } else if bytes[index] == b'<' {
+            if let Some(end) = bytes[index..].iter().position(|byte| *byte == b'>') {
+                index += end + 1;
+                ignored[start..index].fill(true);
+            } else {
+                index += 1;
+            }
+        } else {
+            index += 1;
+        }
+    }
+    ignored
+}
+
+fn delimited_end(bytes: &[u8], start: usize, open: u8, close: u8) -> Option<usize> {
+    let mut depth = 0;
+    let mut index = start;
+    while index < bytes.len() {
+        if bytes[index] == b'\\' {
+            index += 2;
+            continue;
+        }
+        if bytes[index] == open {
+            depth += 1;
+        } else if bytes[index] == close {
+            depth -= 1;
+            if depth == 0 {
+                return Some(index + 1);
+            }
+        }
+        index += 1;
+    }
+    None
 }
 
 #[cfg(test)]
@@ -452,6 +626,103 @@ mod tests {
     }
     fn contains(warnings: &[String], text: &str) -> bool {
         warnings.iter().any(|warning| warning.contains(text))
+    }
+    fn add_fixture_item(session: &mut Session, number: &str, status: ItemStatus) {
+        let mut item = session.items.0.values().next().unwrap().clone();
+        item.id = ItemRef::new(number).unwrap();
+        item.status = status;
+        session.items.0.insert(item.id.clone(), item);
+    }
+
+    #[test]
+    fn bare_reference_scan_distinguishes_existing_references_from_prose_and_markdown() {
+        let mut session = seed();
+        for number in ["3", "4", "1.2", "3.2", "1.2.3"] {
+            add_fixture_item(&mut session, number, ItemStatus::Open);
+        }
+        for text in [
+            "1. Update the docs",
+            "items\n1. Update the docs",
+            "items\n1) Update the docs",
+            "Review PR #3",
+            "Review PR # 3.2",
+            "Changed 3 files",
+            "Updated 2 tests",
+            "see [PR 3](https://example.test/review)",
+            "see [PR 3.2](https://example.test/review)",
+            "see [review](https://example.test/item 3.2)",
+            "see [review](https://example.test/(item 3.2))",
+            "see [item 3.2][reference]",
+            "[reference]: https://example.test/?id=3.2",
+            "[reference]: HTTPS://example.test/?id=3.2",
+            "[reference]: ftp://example.test/?id=3.2",
+            "see <https://example.test/item 3.2>",
+            "`item 3 and 3.2`",
+            "``item 3 and `3.2` ``",
+            "```rust\nitem 3 and 3.2\n```",
+            "~~~text\nitem 3 and 3.2\n~~~",
+            "> ~~~\n> Fixed 3.2 first\n> ~~~",
+            "> ```text\n> Fixed 3.2 first\n> ```",
+            "> > ~~~\n> > Fixed 3.2 first\n> > ~~~",
+            ">> ```text\n>> Fixed 3.2 first\n>> ```",
+            "- ~~~\n  Fixed 3.2 first\n  ~~~",
+            "+ ~~~text\n  Fixed 3.2 first\n  ~~~",
+            "* ```text\n  Fixed 3.2 first\n  ```",
+            "1. ~~~\n   Fixed 3.2 first\n   ~~~",
+            "2) ~~~text\n   Fixed 3.2 first\n   ~~~",
+            "~~~\n- ~~~\nFixed 3.2 first\n~~~",
+            "~~~\n1. ~~~\nFixed 3.2 first\n~~~",
+            "~~~\n> ~~~\nFixed 3.2 first\n~~~",
+            "> ~~~\n> > ~~~\n> Fixed 3.2 first\n> ~~~",
+            "version v1.2",
+            "version 1.2.3",
+            "Version 1.2.4 is released",
+            "xitem3 needs review",
+            "someitems4 needs review",
+            "item3 needs review",
+            "items3 and4 need review",
+        ] {
+            let warnings = advice(&session, json!({"summary":text,"operations":[]}));
+            assert!(
+                !contains(&warnings, "Bare item number"),
+                "{text}: {warnings:?}"
+            );
+        }
+        for (text, numbers) in [
+            ("Fixed 3.2 first", vec!["3.2"]),
+            ("see item 4", vec!["4"]),
+            ("items 3 and 4", vec!["3", "4"]),
+            ("items 3, 4 and 1", vec!["3", "4", "1"]),
+            ("修正 3.2 完成", vec!["3.2"]),
+            ("`ignore item 3` then fixed 3.2 first", vec!["3.2"]),
+            ("```\nitem 3\n```\nFixed 3.2 first", vec!["3.2"]),
+            (
+                "> > ~~~\n> > Fixed 3.2 first\n> > ~~~\nSee item 4",
+                vec!["4"],
+            ),
+            ("- ~~~\n  Fixed 3.2 first\n  ~~~\nSee item 4", vec!["4"]),
+            ("1. ~~~\n   Fixed 3.2 first\n   ~~~\nSee item 4", vec!["4"]),
+            ("See item 1.2.3", vec!["1.2.3"]),
+            ("items 3 changed 4 files", vec!["3"]),
+            ("3.2 and 4 files changed", vec!["3.2"]),
+            ("items 3 and\n4. Update docs", vec!["3"]),
+        ] {
+            let warnings = advice(&session, json!({"summary":text,"operations":[]}));
+            for number in &numbers {
+                assert!(
+                    contains(&warnings, &format!("Bare item number {number}.")),
+                    "{text}: {warnings:?}"
+                );
+            }
+            assert_eq!(
+                warnings
+                    .iter()
+                    .filter(|warning| warning.starts_with("Bare item number"))
+                    .count(),
+                numbers.len(),
+                "{text}: {warnings:?}"
+            );
+        }
     }
 
     #[test]
@@ -599,18 +870,14 @@ mod tests {
     }
 
     #[test]
-    fn every_required_prose_field_is_checked() {
+    fn every_required_prose_field_is_checked_independently() {
         let session = seed();
+        let topic = session.topics.0.keys().next().unwrap();
         let cases = [
-            json!({"operations":[{"op":"item.add","topic":{"id":session.topics.0.keys().next().unwrap()},"type":"task","question":"item 1"}]}),
-            json!({"operations":[{"op":"item.edit","item":{"id":"1"},"patch":{"question":"item 1","note":"item 1"}}]}),
-            json!({"operations":[{"op":"item.ask","item":{"id":"1"},"ask":"item 1"}]}),
-            json!({"operations":[{"op":"item.status","item":{"id":"1"},"status":"open","outcome":"item 1","why":"item 1"}]}),
-            json!({"operations":[{"op":"item.replace","item":{"id":"1"},"replacement":{"id":"2"},"outcome":"item 1","why":"item 1"}]}),
-            json!({"operations":[{"op":"reply","item":{"id":"1"},"text":"item 1"}]}),
-            json!({"operations":[{"op":"topic.add","name":"New","brief":"item 1"}]}),
-            json!({"operations":[{"op":"topic.edit","topic":{"id":session.topics.0.keys().next().unwrap()},"brief":"item 1"}]}),
+            json!({"summary":"item 1","operations":[]}),
             json!({"operations":[],"input_result":{"outcome":"answered","explanation":"item 1","handled_through_message_number":1}}),
+            json!({"operations":[{"op":"reply","item":{"id":"1"},"text":"item 1"}]}),
+            json!({"operations":[{"op":"item.ask","item":{"id":"1"},"ask":"item 1"}]}),
         ];
         for case in cases {
             assert!(
@@ -618,20 +885,73 @@ mod tests {
                 "{case}"
             );
         }
-        for field in ["note", "ask", "outcome", "why"] {
+        for field in ["question", "note", "ask", "outcome", "why"] {
             let mut case = add("Distinct task");
             case["operations"][0][field] = json!("See item 1");
             assert!(
                 contains(&advice(&session, case), "Bare item number 1."),
-                "{field}"
+                "item.add {field}"
             );
         }
         for field in ["question", "note"] {
             let case = json!({"operations":[{"op":"item.edit","item":{"id":"1"},"patch":{field:"See item 1"}}]});
             assert!(
                 contains(&advice(&session, case), "Bare item number 1."),
-                "{field}"
+                "item.edit {field}"
             );
+        }
+        for op in ["item.status", "item.replace"] {
+            for field in ["outcome", "why"] {
+                let mut operation = if op == "item.status" {
+                    json!({"op":op,"item":{"id":"1"},"status":"open"})
+                } else {
+                    json!({"op":op,"item":{"id":"1"},"replacement":{"id":"2"},"outcome":"Changed","why":"Approved"})
+                };
+                operation[field] = json!("See item 1");
+                assert!(
+                    contains(
+                        &advice(&session, json!({"operations":[operation]})),
+                        "Bare item number 1."
+                    ),
+                    "{op} {field}"
+                );
+            }
+        }
+        for op in ["topic.add", "topic.edit"] {
+            for field in ["name", "brief"] {
+                let mut operation = if op == "topic.add" {
+                    json!({"op":op,"name":"New topic"})
+                } else {
+                    json!({"op":op,"topic":{"id":topic}})
+                };
+                operation[field] = json!("See item 1");
+                assert!(
+                    contains(
+                        &advice(&session, json!({"operations":[operation]})),
+                        "Bare item number 1."
+                    ),
+                    "{op} {field}"
+                );
+            }
+        }
+        for op in ["item.add", "item.ask"] {
+            for field in ["label", "consequence"] {
+                let mut operation = if op == "item.add" {
+                    json!({"op":op,"topic":{"id":topic},"type":"decision","question":"Distinct choice","ask":"Choose an approach"})
+                } else {
+                    json!({"op":op,"item":{"id":"1"},"ask":"Choose an approach"})
+                };
+                let mut option = json!({"label":"Proceed","consequence":"Work continues"});
+                option[field] = json!("See item 1");
+                operation["options"] = json!([option]);
+                assert!(
+                    contains(
+                        &advice(&session, json!({"operations":[operation]})),
+                        "Bare item number 1."
+                    ),
+                    "{op} options.{field}"
+                );
+            }
         }
     }
 
@@ -766,6 +1086,114 @@ mod tests {
     }
 
     #[test]
+    fn waiting_advice_requires_an_increase_above_three_and_does_not_nag_on_replay() {
+        let request =
+            request(json!({"operations":[{"op":"item.ask","item":{"id":"1"},"ask":"Proceed?"}]}));
+        for (before_count, after_count, expected) in [
+            (2, 3, false),
+            (3, 4, true),
+            (4, 5, true),
+            (5, 5, false),
+            (5, 4, false),
+        ] {
+            let mut before = seed();
+            for number in 3..3 + before_count {
+                add_fixture_item(&mut before, &number.to_string(), ItemStatus::WaitingOnMe);
+            }
+            let mut after = seed();
+            for number in 3..3 + after_count {
+                add_fixture_item(&mut after, &number.to_string(), ItemStatus::WaitingOnMe);
+            }
+            let warnings = collect(&before, &after, &request, &receipt());
+            assert_eq!(
+                contains(&warnings, "items are waiting"),
+                expected,
+                "{before_count} -> {after_count}"
+            );
+            // Previewing the same candidate must produce exactly the same advice.
+            assert_eq!(collect(&before, &after, &request, &receipt()), warnings);
+            assert!(!contains(
+                &collect(&after, &after, &request, &receipt()),
+                "items are waiting"
+            ));
+        }
+    }
+
+    #[test]
+    fn unrelated_edits_replies_and_replays_do_not_nag_about_existing_topic_or_waiting_work() {
+        let mut session = seed();
+        for number in 3..8 {
+            add_fixture_item(&mut session, &number.to_string(), ItemStatus::WaitingOnMe);
+        }
+        let topic = session.topics.0.keys().next().unwrap();
+        for value in [
+            json!({"operations":[]}),
+            json!({"operations":[{"op":"item.edit","item":{"id":"1"},"patch":{"note":"Clarified the evidence"}}]}),
+            json!({"operations":[{"op":"reply","item":{"id":"1"},"text":"Recorded the update"}]}),
+            json!({"operations":[{"op":"topic.edit","topic":{"id":topic},"name":"Release context"}]}),
+        ] {
+            assert!(advice(&session, value.clone()).is_empty(), "{value}");
+        }
+    }
+
+    #[test]
+    fn topic_brief_advice_resolves_created_and_populated_topics_from_the_receipt() {
+        let before = seed();
+        let mut after = before.clone();
+        let topic_id = UuidV4::new("00000000-0000-4000-8000-000000000099").unwrap();
+        let mut topic = before.topics.0.values().next().unwrap().clone();
+        topic.id = topic_id.clone();
+        topic.name = "New work".into();
+        topic.order = PositiveSafeInteger::new(2).unwrap();
+        after.topics.0.insert(topic.id.clone(), topic);
+        for number in 3..6 {
+            add_fixture_item(&mut after, &number.to_string(), ItemStatus::Open);
+            after
+                .items
+                .0
+                .get_mut(&ItemRef::new(number.to_string()).unwrap())
+                .unwrap()
+                .topic_id = topic_id.clone();
+        }
+        let mut saved = receipt();
+        if let SavedReceiptData::Apply { allocated_refs, .. } = &mut saved.data {
+            allocated_refs.0.insert(
+                RequestRef::new("created_topic").unwrap(),
+                AllocatedRef::Topic {
+                    id: topic_id.clone(),
+                },
+            );
+        }
+        let requests = [
+            json!({"operations":[{"op":"topic.add","ref":"created_topic","name":"New work"}]}),
+            json!({"operations":[{"op":"item.add","topic":{"ref":"created_topic"},"type":"task","question":"Distinct task"}]}),
+            json!({"operations":[{"op":"item.add","topic":{"id":topic_id},"type":"task","question":"Distinct task"}]}),
+        ];
+        for value in requests {
+            let request = request(value.clone());
+            let warnings = collect(&before, &after, &request, &saved);
+            assert!(
+                contains(&warnings, "Topic New work (2)"),
+                "{value}: {warnings:?}"
+            );
+            assert_eq!(collect(&before, &after, &request, &saved), warnings);
+            // A replay still scopes topic advice to the original creation/addition.
+            assert!(contains(
+                &collect(&after, &after, &request, &saved),
+                "Topic New work (2)"
+            ));
+        }
+        after.topics.0.get_mut(&topic_id).unwrap().brief = Some("Settled background".into());
+        let request = request(
+            json!({"operations":[{"op":"topic.add","ref":"created_topic","name":"New work"}]}),
+        );
+        assert!(!contains(
+            &collect(&before, &after, &request, &saved),
+            "no brief"
+        ));
+    }
+
+    #[test]
     fn populated_topics_need_a_brief_after_the_request() {
         let before = seed();
         assert!(!contains(
@@ -776,7 +1204,7 @@ mod tests {
         let mut item = before.items.0.values().next().unwrap().clone();
         item.id = ItemRef::new("3").unwrap();
         after.items.0.insert(item.id.clone(), item);
-        let request = request(json!({"operations":[]}));
+        let request = request(add("Distinct third task"));
         assert!(contains(
             &collect(&before, &after, &request, &receipt()),
             "topic.edit"
