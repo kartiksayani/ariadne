@@ -114,8 +114,8 @@ Receipt (default, compact; data of the --json envelope):
   {"op_id":"...","session_revision":3,"topics":[{"id":"UUID","number":2,"short":"Release timing","revision":1,"created":true}],"items":[{"id":"3","short":"Fill race","revision":2,"created":true},{"id":"3.1","short":"Serialize fills","revision":1,"created":true},{"id":"4","short":"Fallback merge","revision":1,"created":true}],"warnings":[]}
   An item id is its number (1.2). revision is the value to send as the next
   expected_item_revisions entry. --full prints the complete saved receipt
-  (allocated_refs, messages, every revision). Repairs are explained in the compact
-  receipt's repairs array, or as stderr notes with --full, including retries.
+  (allocated_refs, messages, every revision). Repairs are explained in repairs
+  (including --full --json), or as stderr notes with human --full, including retries.
   Non-blocking warnings appear in warnings (including --full --json), or as stderr
   notes with human --full. They suggest clearer filing and never change what is saved.
   --dry-run runs every check against
@@ -379,7 +379,7 @@ fn run_apply(
     if call.dry_run {
         let (preview, repairs) = core.apply_preview_lenient(&context, &request)?;
         call.repairs.extend(repairs);
-        if call.full {
+        if call.full && !call.json {
             for repair in &call.repairs {
                 let _ = writeln!(errors, "Repair: {repair}");
             }
@@ -400,7 +400,7 @@ fn run_apply(
             if preview.replayed {
                 object.insert("replayed".into(), true.into());
             }
-            if !call.full && !call.repairs.is_empty() {
+            if (!call.full || call.json) && !call.repairs.is_empty() {
                 object.insert("repairs".into(), serde_json::json!(call.repairs));
             }
         }
@@ -409,7 +409,7 @@ fn run_apply(
     }
     let (receipt, replayed, repairs) = core.apply_lenient(&context, &request)?;
     call.repairs.extend(repairs);
-    if call.full {
+    if call.full && !call.json {
         for repair in &call.repairs {
             let _ = writeln!(errors, "Repair: {repair}");
         }
@@ -444,7 +444,7 @@ fn run_apply(
             object.insert("replayed".into(), true.into());
         }
     }
-    if !call.full && !call.repairs.is_empty() {
+    if (!call.full || call.json) && !call.repairs.is_empty() {
         if let Some(object) = shown.as_object_mut() {
             object.insert("repairs".into(), serde_json::json!(call.repairs));
         }

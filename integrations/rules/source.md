@@ -13,7 +13,7 @@ this bypasses validation and can make the session unreadable.
   heredoc); `--dry-run` validates without saving. Receipts list
   `op_id` and changed topic/item `id`, `short`, `revision`, `created`; topics have `number`.
 
-Apply may return non-blocking warnings; they do not change what is saved.
+`--json` puts warnings in JSON only; they never change saved work.
 
 Unexpected `"replayed":true` files nothing new; use a fresh explicit `op_id` to file the same request again.
 

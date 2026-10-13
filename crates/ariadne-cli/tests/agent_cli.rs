@@ -158,15 +158,18 @@ fn envelope(output: &Output, exit: i32) -> Value {
     value
 }
 fn repaired_full_envelope(output: &Output) -> Value {
-    let notes = String::from_utf8(output.stderr.clone()).unwrap();
-    assert_eq!(notes.lines().count(), 2, "{notes}");
-    for line in notes.lines() {
-        assert!(line.starts_with("Repair: operations[1]"), "{line}");
-        assert!(line.contains("created open with ack_to `done`"), "{line}");
+    let value = envelope(output, 0);
+    let repairs = value["data"]["repairs"].as_array().unwrap();
+    assert_eq!(repairs.len(), 2, "{repairs:?}");
+    for repair in repairs {
+        let repair = repair.as_str().unwrap();
+        assert!(repair.starts_with("operations[1]"), "{repair}");
+        assert!(
+            repair.contains("created open with ack_to `done`"),
+            "{repair}"
+        );
     }
-    let mut clean = output.clone();
-    clean.stderr.clear();
-    envelope(&clean, 0)
+    value
 }
 fn request(op: u64) -> Value {
     json!({"op_id":id(op),"source_input_id":null,"attempt_id":null,"expected_item_revisions":{},"expected_topic_revisions":{},"summary":"","operations":[],"input_result":null})
@@ -1662,6 +1665,47 @@ fn full_prints_the_complete_saved_receipt_and_a_stated_op_id_replays() {
         full
     );
     assert_eq!(setup.bytes(), saved, "a full replay also writes nothing");
+    let preview = repaired_full_envelope(&setup.apply_with(&["--dry-run", "--full"], &body));
+    assert_eq!(preview["data"]["dry_run"], true);
+    assert_eq!(preview["data"]["replayed"], true);
+    assert_eq!(preview["data"]["repairs"], full["data"]["repairs"]);
+    assert_eq!(setup.bytes(), saved, "a dry-run replay also writes nothing");
+}
+
+#[test]
+fn human_full_keeps_repair_notes_on_preview_apply_and_replay() {
+    let setup = Setup::new(&seed());
+    let body = lenient_with_op(603);
+    let before = setup.bytes();
+    for flags in [
+        &["--json-stdin", "--full", "--dry-run"][..],
+        &["--json-stdin", "--full"][..],
+        &["--json-stdin", "--full"][..],
+        &["--json-stdin", "--full", "--dry-run"][..],
+    ] {
+        let current = setup.bytes();
+        let output = setup.agent(&["apply"], flags, Some(&body));
+        assert_eq!(output.status.code(), Some(0), "{output:?}");
+        let notes = String::from_utf8(output.stderr).unwrap();
+        let repairs: Vec<_> = notes
+            .lines()
+            .filter_map(|line| line.strip_prefix("Repair: "))
+            .collect();
+        assert_eq!(repairs.len(), 2, "{notes}");
+        for repair in repairs {
+            assert!(repair.starts_with("operations[1]"), "{repair}");
+            assert!(
+                repair.contains("created open with ack_to `done`"),
+                "{repair}"
+            );
+        }
+        let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(receipt["data"]["kind"], "apply");
+        assert!(receipt.get("repairs").is_none());
+        if flags.contains(&"--dry-run") || current != before {
+            assert_eq!(setup.bytes(), current, "previews and replays write nothing");
+        }
+    }
 }
 
 #[test]
@@ -3202,6 +3246,42 @@ fn unrelated_apply_does_not_repeat_existing_topic_or_waiting_warnings() {
     assert!(warnings
         .iter()
         .any(|warning| warning.as_str().unwrap().contains("no brief")));
+}
+
+#[test]
+fn json_apply_warnings_keep_stderr_empty_for_compact_and_full_previews_and_replays() {
+    let bytes = serde_json::to_vec(&json!({
+        "summary":"See item 1 before continuing.",
+        "operations":[{
+            "op":"item.add", "topic":{"id":id(5)}, "type":"task",
+            "question":"Which release approach?"
+        }]
+    }))
+    .unwrap();
+    for full in [false, true] {
+        let setup = Setup::new(&seed());
+        let before = setup.bytes();
+        let mut flags = vec!["--json-stdin", "--json"];
+        if full {
+            flags.push("--full");
+        }
+        let mut dry_flags = flags.clone();
+        dry_flags.push("--dry-run");
+        let preview = envelope(&setup.agent(&["apply"], &dry_flags, Some(&bytes)), 0);
+        let warnings = preview["data"]["warnings"].as_array().unwrap();
+        assert_eq!(warnings.len(), 3, "{preview}");
+        assert_eq!(setup.bytes(), before);
+
+        let applied = envelope(&setup.agent(&["apply"], &flags, Some(&bytes)), 0);
+        assert_eq!(applied["data"]["warnings"], preview["data"]["warnings"]);
+        let saved = setup.bytes();
+        assert_ne!(saved, before);
+        for replay_flags in [&flags, &dry_flags] {
+            let replay = envelope(&setup.agent(&["apply"], replay_flags, Some(&bytes)), 0);
+            assert_eq!(replay["data"]["warnings"], applied["data"]["warnings"]);
+            assert_eq!(setup.bytes(), saved, "replays store no warning metadata");
+        }
+    }
 }
 
 #[test]

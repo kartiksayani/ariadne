@@ -1,10 +1,92 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { cliRequest, journeyResultRequest, journeySeedRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
 import { sendDetailReply } from '../../../apps/desktop/tests/e2e/owner-reply.mjs';
+
+async function fixture(t, response, { code = 0, diagnostic = '' } = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-scripted-cli-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const cli = join(root, 'cli.mjs'), journal = join(root, 'call.json');
+  await writeFile(cli, `#!${process.execPath}
+import { writeFileSync } from 'node:fs';
+let input = '';
+for await (const bytes of process.stdin) input += bytes;
+writeFileSync(${JSON.stringify(journal)}, JSON.stringify({ args: process.argv.slice(2), input, marker: process.env.ARIADNE_HELPER_MARKER }));
+console.log(${JSON.stringify(JSON.stringify(response))});
+process.stderr.write(${JSON.stringify(diagnostic)});
+process.exitCode = ${code};
+`);
+  await chmod(cli, 0o700);
+  return { cli, call: async () => JSON.parse(await readFile(journal, 'utf8')) };
+}
+
+test('scripted full apply requests JSON and retains warnings with its prior raw receipt', async t => {
+  const receipt = { session_id: 'session', warnings: ['Bare item number 1. Use an item link.'], repairs: ['Keep new items open for Ack.'] };
+  const response = { api_version: 1, ok: true, data: receipt };
+  const { cli, call } = await fixture(t, response);
+  const args = Object.freeze(['apply', '--binding', 'binding', '--generation', 'generation', '--json-stdin', '--full']);
+  const request = { op_id: 'operation', operations: [] };
+  const result = await cliRequest(cli, args, request, { ...process.env, ARIADNE_HELPER_MARKER: 'retained' });
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.value, receipt);
+  assert.deepEqual(result.response, response);
+  assert.deepEqual(JSON.parse(result.output), response);
+  assert.deepEqual(await call(), { args: [...args, '--json'], input: JSON.stringify(request), marker: 'retained' });
+});
+
+test('scripted unflagged read preserves the raw page and uses JSON with empty stdin', async t => {
+  const page = { items: [{ id: '1' }], next_cursor: null, notices: ['One removed item not shown'] };
+  const response = { api_version: 1, ok: true, data: page };
+  const { cli, call } = await fixture(t, response);
+  const args = ['read', '--binding', 'binding', '--generation', 'generation', '--view', 'items'];
+  const result = await cliRequest(cli, args);
+  assert.deepEqual(result.value, page);
+  assert.deepEqual(result.response, response);
+  assert.deepEqual((await call()).args, [...args, '--json']);
+  assert.equal((await call()).input, '');
+});
+
+test('explicit JSON apply keeps its envelope without adding a second flag or unwrapping twice', async t => {
+  const response = { api_version: 1, ok: true, data: { session_id: 'session', warnings: ['Retained advice'] } };
+  const { cli, call } = await fixture(t, response);
+  const args = ['apply', '--json-stdin', '--full', '--json'];
+  const result = await cliRequest(cli, args, { operations: [] });
+  assert.deepEqual(result.value, response);
+  assert.deepEqual(result.response, response);
+  assert.deepEqual((await call()).args, args);
+});
+
+for (const args of [['project', 'register', '--json-stdin'], ['binding', 'connect', '--json-stdin'], ['preferences', 'get', '--json-stdin'], ['demo', '--root', '/fixture/project', '--json']]) {
+  test(`scripted ${args.slice(0, 2).join(' ')} keeps its existing canonical envelope`, async t => {
+    const response = { api_version: 1, ok: true, data: { data: { project_id: 'project' } } };
+    const { cli, call } = await fixture(t, response);
+    const result = await cliRequest(cli, args, { session: null });
+    assert.deepEqual(result.value, response);
+    assert.deepEqual(result.response, response);
+    assert.deepEqual((await call()).args, args.includes('--json') ? args : [...args, '--json']);
+  });
+}
+
+for (const json of [false, true]) {
+  test(`scripted apply preserves a nonzero exit and error envelope with ${json ? 'explicit' : 'implicit'} JSON`, async t => {
+    const response = { api_version: 1, ok: false, error: { code: 'binding_mismatch', message: 'This binding is not the selected connected route' } };
+    const { cli } = await fixture(t, response, { code: 3 });
+    const result = await cliRequest(cli, ['apply', '--json-stdin', ...(json ? ['--json'] : [])], { operations: [] });
+    assert.equal(result.code, 3);
+    assert.deepEqual(result.value, response);
+    assert.deepEqual(result.response, response);
+  });
+}
+
+for (const code of [0, 4]) {
+  test(`scripted CLI rejects genuine stderr diagnostics even with a JSON response and exit ${code}`, async t => {
+    const { cli } = await fixture(t, { api_version: 1, ok: code === 0, data: {} }, { code, diagnostic: 'Unexpected fixture diagnostic\n' });
+    await assert.rejects(cliRequest(cli, ['apply', '--json-stdin'], { operations: [] }), /Scripted journey CLI diagnostic: Unexpected fixture diagnostic/);
+  });
+}
 
 test('native journey seed and result requests reach the real CLI/Core dispatch barrier', { timeout: 15000 }, async () => {
   const cli = process.env.ARIADNE_FIXTURE_TEST_CLI;

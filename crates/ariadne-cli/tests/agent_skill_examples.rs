@@ -1267,6 +1267,10 @@ fn rules_explain_every_input_kind_the_owner_can_send() {
 
 #[test]
 fn rules_explain_the_envelope_fields_and_every_error_code_they_name_exists() {
+    for line in RULES.lines().filter(|line| line.starts_with("- `ariadne ")) {
+        assert!(line.contains("--json`"), "agent command omits JSON: {line}");
+    }
+    assert!(RULES.contains("`--json` puts warnings in JSON only"));
     for needle in [
         "`attempt_id`",
         "`owner_message_number`",
@@ -1469,7 +1473,9 @@ fn cli_repairs_only_existing_ack_proposals_and_reports_preview_and_full_repairs(
     assert_eq!(seeded.session(), before);
     let full = seeded.apply(&["--full"], &serde_json::to_vec(&request).unwrap());
     assert_eq!(full.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&full.stderr).contains("Repair:"));
+    assert!(full.stderr.is_empty(), "{full:?}");
+    let full: Value = serde_json::from_slice(&full.stdout).unwrap();
+    assert_eq!(full["data"]["repairs"], preview["repairs"]);
     let saved = seeded.session();
     let item = &saved.items.0[&ItemRef::new("1").unwrap()];
     assert_eq!(item.status, ItemStatus::Open);
