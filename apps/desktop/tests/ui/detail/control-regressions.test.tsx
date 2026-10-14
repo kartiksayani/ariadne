@@ -25,6 +25,19 @@ async function setup() {
   return { transport, source, service, store, drafts, props };
 }
 
+/**
+ * jsdom does no layout, so this stands in for the two-line clamp of the pinned question and the view's title: while `clipped`
+ * is true their text is taller than the box that shows it.
+ */
+function clamp(clipped: boolean) {
+  const state = { clipped };
+  const clamped = (element: Element) => element.matches('.conversation-question-text, .conversation-title');
+  vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockImplementation(function (this: Element) { return clamped(this) ? 90 : 0; });
+  vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) { return clamped(this) ? (state.clipped ? 40 : 90) : 0; });
+  return state;
+}
+const resize = () => act(() => { window.dispatchEvent(new Event('resize')); });
+
 describe('conversation control regressions', () => {
   it.each(['Cancel', 'Escape'] as const)('closes Drop with %s, keeps its draft through restart and prefills the next explicit Drop', async action => {
     const { transport, service, drafts, props } = await setup();
@@ -203,6 +216,7 @@ describe('conversation control regressions', () => {
   });
 
   it('keeps the full pinned question one click away without changing the saved note or choice', async () => {
+    clamp(true);
     const { source, store, props } = await setup();
     const question = 'Should we keep all the details of this question available to the owner? '.repeat(8);
     source.items['2']!.ask = question; ++source.revision; await store.refresh();
@@ -233,6 +247,7 @@ describe('conversation control regressions', () => {
   });
 
   it('keeps question dialog keys from selecting or sending the pinned answer', async () => {
+    clamp(true);
     const { transport, source, store, drafts, props } = await setup();
     source.items['2']!.options = [
       { id: 'keep', label: 'Keep the window', consequence: 'Keep the timing.', recommended: true },
@@ -261,6 +276,7 @@ describe('conversation control regressions', () => {
   });
 
   it('reveals a long conversation title with one accessible button press', async () => {
+    clamp(true);
     const { source, store, props } = await setup();
     const fullTitle = 'A complete long title with all the detail needed to understand the item. '.repeat(8);
     source.items['4']!.question = fullTitle; ++source.revision; await store.refresh();
@@ -271,6 +287,67 @@ describe('conversation control regressions', () => {
     fireEvent.click(title);
     expect(screen.getByRole('button', { name: `Collapse title: ${fullTitle.trim()}` }).classList.contains('conversation-title-expanded')).toBe(true);
     expect(title.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('folds the title with the keyboard and keeps focus on it', async () => {
+    clamp(true);
+    const { source, store, props } = await setup();
+    const fullTitle = 'A complete long title with all the detail needed to understand the item. '.repeat(8);
+    source.items['4']!.question = fullTitle; ++source.revision; await store.refresh();
+    render(<ConversationView {...props} onClose={vi.fn()} />);
+    const title = screen.getByRole('button', { name: `Expand title: ${fullTitle.trim()}` });
+    title.focus();
+    fireEvent.keyDown(title, { key: 'Enter' });
+    expect(title.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.keyDown(title, { key: ' ' });
+    expect(title.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByRole('button', { name: `Expand title: ${fullTitle.trim()}` })).toBe(title);
+    expect(document.activeElement).toBe(title);
+  });
+
+  it('shows an expand control for the title and question only while their text is clipped, and re-measures on resize and on text edits', async () => {
+    const state = clamp(false);
+    const { source, store, props } = await setup();
+    source.items['2']!.ask = 'Which window?'; ++source.revision; await store.refresh();
+    render(<ConversationView {...props} itemId="2" onClose={vi.fn()} />);
+    const title = () => screen.queryByRole('button', { name: /^(Expand|Collapse) title/ });
+    expect(screen.queryByRole('button', { name: 'Expand question' }), 'a question that fits has no caret').toBeNull();
+    expect(title(), 'a title that fits has no button').toBeNull();
+    // The window narrows: the same text now needs more than two lines.
+    state.clipped = true; resize();
+    expect(screen.getByRole('button', { name: 'Expand question' })).toBeTruthy();
+    expect(title()).toBeTruthy();
+    // The window widens again.
+    state.clipped = false; resize();
+    expect(screen.queryByRole('button', { name: 'Expand question' })).toBeNull();
+    expect(title()).toBeNull();
+    // The agent rewrites the question and the title at a length that no longer fits.
+    state.clipped = true;
+    source.items['2']!.ask = 'Which window should we use? '.repeat(20); source.items['2']!.question = 'A longer title. '.repeat(20); ++source.revision;
+    await act(async () => { await store.refresh(); });
+    expect(screen.getByRole('button', { name: 'Expand question' })).toBeTruthy();
+    expect(title()).toBeTruthy();
+  });
+
+  it('keeps the full-question dialog open, with the new text and its focus, when the agent edits the question', async () => {
+    clamp(true);
+    const { source, store, props } = await setup();
+    source.items['2']!.ask = 'Which window should we use? '.repeat(8); ++source.revision; await store.refresh();
+    render(<ConversationView {...props} itemId="2" onClose={vi.fn()} />);
+    const toggle = screen.getByRole('button', { name: 'Expand question' });
+    fireEvent.click(toggle);
+    const dialog = screen.getByRole('dialog', { name: 'Current question' });
+    const close = within(dialog).getByRole('button', { name: 'Close question' });
+    close.focus();
+    expect(document.activeElement).toBe(close);
+    source.items['2']!.ask = 'Which window should we use after the agent changed its mind?'; ++source.revision;
+    await act(async () => { await store.refresh(); });
+    expect(screen.getByRole('dialog', { name: 'Current question' }), 'the dialog is not remounted').toBe(dialog);
+    expect(dialog.querySelector('.dialog-body')?.textContent?.trim()).toBe('Which window should we use after the agent changed its mind?');
+    expect(document.activeElement, 'focus stays on the dialog control').toBe(close);
+    expect(screen.getByRole('button', { name: 'Expand question' })).toBe(toggle);
+    fireEvent.click(close);
+    expect(screen.queryByRole('dialog', { name: 'Current question' })).toBeNull();
   });
 
   it('keeps the original pane owner caption after the reply while the larger view labels You before it', async () => {

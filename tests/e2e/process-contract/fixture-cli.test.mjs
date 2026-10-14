@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { cliRequest, journeyResultRequest, journeySeedRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { sendDetailReply } from '../../../apps/desktop/tests/e2e/owner-reply.mjs';
+import { ownerReplyTarget, sendDetailReply } from '../../../apps/desktop/tests/e2e/owner-reply.mjs';
 
 async function fixture(t, response, { code = 0, diagnostic = '' } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'ariadne-scripted-cli-'));
@@ -121,7 +121,10 @@ for (const scenario of ['delayed-readiness', 'wrong-text', 'disabled-send', 'fro
     const prior = { browser: globalThis.browser, home: process.env.ARIADNE_HOME, evidence: process.env.ARIADNE_E2E_EVIDENCE };
     const text = 'Exact fixture owner Reply\nSecond retained line.';
     const configuration = { sessionId: 'fixture-session', itemId: '1', sessionPath: join(root, 'session.json') };
-    const saved = { id: configuration.sessionId, revision: 7, items: { 1: { revision: 3 } }, inputs: {} };
+    const saved = { id: configuration.sessionId, revision: 7, inputs: {}, messages: [],
+      items: { 1: { revision: 3, question_revision: 2, status: 'waiting_on_me', ask: 'Which option?' } } };
+    // The explicit canonical target the real journeys freeze before typing; the helper refuses to race without one.
+    const expected = ownerReplyTarget(saved, configuration.itemId);
     const calls = []; let value = '', enabled = false, frozen = true, clicks = 0;
     try {
       process.env.ARIADNE_HOME = root; process.env.ARIADNE_E2E_EVIDENCE = root;
@@ -140,6 +143,8 @@ for (const scenario of ['delayed-readiness', 'wrong-text', 'disabled-send', 'fro
       } };
       globalThis.browser = {
         $: async selector => {
+          // The target wait reads the rendered detail's item and revision before the editor is touched.
+          if (selector === '.item-detail') return { getAttribute: async name => name === 'data-detail-item-id' ? configuration.itemId : String(saved.items[1].revision) };
           assert.equal(selector, '.item-detail [data-owner-input="1"]');
           return { waitForExist: async () => {}, $: async selector => {
             assert.equal(selector, '.detail-box, .answer-reply');
@@ -168,11 +173,11 @@ for (const scenario of ['delayed-readiness', 'wrong-text', 'disabled-send', 'fro
         },
       };
       if (scenario === 'delayed-readiness') {
-        await sendDetailReply(configuration, text); assert.equal(clicks, 1);
+        await sendDetailReply(configuration, text, expected); assert.equal(clicks, 1);
         assert.deepEqual(calls, ['editor displayed', 'editor enabled', 'type', 'send displayed', 'click']);
         await assert.rejects(readFile(join(root, 'reply-failure.json')), { code: 'ENOENT' });
       } else {
-        await assert.rejects(sendDetailReply(configuration, text), /Detail Reply text|Visible detail Reply/);
+        await assert.rejects(sendDetailReply(configuration, text, expected), /Detail Reply text|Visible detail Reply/);
         assert.equal(clicks, scenario === 'save-failure' ? 1 : 0);
         const proof = JSON.parse(await readFile(join(root, 'reply-failure.json'), 'utf8'));
         assert.equal(proof.stage, scenario === 'save-failure' ? 'persistence' : 'readiness');

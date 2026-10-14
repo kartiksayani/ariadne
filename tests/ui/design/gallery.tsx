@@ -14,6 +14,8 @@ declare global { interface Window {
   __designFixture?: DesignFixture;
   __designError?: string;
   __designToast?: { show: (text?: string) => void; clear: () => void };
+  /** The app's notice store, so a frame can push the notice a state needs (an actionable one stays until dismissed). */
+  __designNotices?: typeof notices;
 } }
 
 async function mount() {
@@ -25,6 +27,7 @@ async function mount() {
     ...(theme === 'light' || theme === 'dark' ? { theme } : {}),
   });
   window.__designFixture = fixture;
+  window.__designNotices = notices;
   if (fixture.spec.toast) {
     const id = 'design-session-toast';
     window.__designToast = {

@@ -214,8 +214,14 @@ and Reopen target the view's item. `PeekProvider.answerTarget` limits preview
 answers to that same item while the view is open.
 
 An unanswered current question uses a pinned `Your turn · <short name>` footer
-capped at 30% of the conversation pane (40% in narrow windows); compact labels retain consequences behind
-More. Only the question and options scroll; own words and Send stay fixed.
+that is as tall as its content, up to 30% of the conversation pane (40% in narrow windows, 50% below 700 px
+window height); compact labels retain consequences behind More. Only the options region scrolls: the
+heading, question (two lines, with an expand control that shows only while the text is clipped), status, paused,
+retry and error rows, own words and Send are fixed rows that are never clipped, scrolled or painted over.
+`useDockBudget` subtracts those rows from the cap and gives the options what is left (one whole option
+while the footer stays within half the pane, else none); recovery rows may take the chat below half the pane
+in small windows. While the view is open, notices keep to the band between its header and footer
+(`Body` measures it) and never cover a footer control.
 `conversationAnswerState` supplies the shared pane/view answer rule and footer
 shortcut eligibility. It pins only a live current question; closed-session
 questions keep their disabled answer control without Your turn. The live control

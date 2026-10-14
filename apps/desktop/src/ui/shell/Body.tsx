@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from 'react';
 import { bodyLayout, DETAIL_DEFAULT, DETAIL_MAX, DETAIL_MIN, WAITING_FOLDED, WAITING_WIDTH } from './model';
 import { WaitingFold } from './fold';
 import { ItemHistoryContext } from './itemHistory';
@@ -42,9 +42,48 @@ function useWidth(ref: RefObject<HTMLDivElement | null>): number | null {
   return width;
 }
 
+/**
+ * While the conversation view is open, notices keep to the band between its header and its footer, so a notice that never
+ * auto-dismisses (an actionable one) can never cover Back to Map, own words or Send. The band follows both as they resize.
+ */
+function useNoticeBand(view: RefObject<HTMLElement | null>, layer: RefObject<HTMLElement | null>, open: boolean) {
+  useLayoutEffect(() => {
+    const host = view.current, notices = layer.current;
+    if (!open || !host || !notices) return undefined;
+    let frame = 0;
+    const place = () => {
+      frame = 0;
+      const bounds = host.getBoundingClientRect();
+      const header = host.querySelector('.conversation-header')?.getBoundingClientRect(), dock = host.querySelector('.detail-dock')?.getBoundingClientRect();
+      notices.style.setProperty('--notice-top', `${Math.max(0, (header?.bottom ?? bounds.top) - bounds.top) + 8}px`);
+      notices.style.setProperty('--notice-bottom', `${Math.max(0, bounds.bottom - (dock?.top ?? bounds.bottom)) + 8}px`);
+    };
+    // Placing in a frame keeps the observers from reporting a resize loop.
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(place); };
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
+    const watched = new Set<Element>();
+    const watch = () => {
+      const next = new Set<Element>([host, ...host.querySelectorAll('.conversation-header, .detail-dock')]);
+      for (const element of watched) if (!next.has(element)) { resize?.unobserve(element); watched.delete(element); }
+      for (const element of next) if (!watched.has(element)) { resize?.observe(element); watched.add(element); }
+    };
+    // The footer appears, goes and changes while the view stays open.
+    const mutate = new MutationObserver(() => { watch(); schedule(); });
+    mutate.observe(host, { childList: true, subtree: true });
+    window.addEventListener('resize', schedule);
+    watch(); place();
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      resize?.disconnect(); mutate.disconnect(); window.removeEventListener('resize', schedule);
+      notices.style.removeProperty('--notice-top'); notices.style.removeProperty('--notice-bottom');
+    };
+  }, [view, layer, open]);
+}
+
 export function Body({ conversation, waiting, center, detail, detailPath, onCloseDetail, onRemove, hidden = false, hiddenNotice, onHide, detailWidth = null, onResizeDetail,
   waitingFolded = false, onFoldWaiting }: BodyProps) {
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement>(null), view = useRef<HTMLDivElement>(null), layer = useRef<HTMLDivElement>(null);
+  useNoticeBand(view, layer, !!conversation);
   const history = useContext(ItemHistoryContext);
   const width = useWidth(ref);
   const [peek, setPeek] = useState(false);
@@ -130,7 +169,7 @@ export function Body({ conversation, waiting, center, detail, detailPath, onClos
       <div className="shell-detail-scroll">{detail}</div>
     </aside>}
     </div>
-    {conversation && <div className="shell-conversation" style={{ left: layout.folded ? WAITING_FOLDED : WAITING_WIDTH }}>{conversation}</div>}
-    <div className="shell-notices" style={{ left: layout.folded ? WAITING_FOLDED : WAITING_WIDTH, right: !conversation && detail ? layout.detailWidth : 0 }}><Notices /></div>
+    {conversation && <div ref={view} className="shell-conversation" style={{ left: layout.folded ? WAITING_FOLDED : WAITING_WIDTH }}>{conversation}</div>}
+    <div ref={layer} className="shell-notices" data-conversation={conversation ? '' : undefined} style={{ left: layout.folded ? WAITING_FOLDED : WAITING_WIDTH, right: !conversation && detail ? layout.detailWidth : 0 }}><Notices /></div>
   </div>;
 }

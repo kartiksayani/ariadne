@@ -44,22 +44,29 @@ import './detail.css';
 import { ItemRefSession, usePeek } from '../peek/context';
 import { peekNames } from '../peek/names';
 import { navigationVisits } from '../navigation/visits';
+import { useClipped } from './useClipped';
+import { useDockBudget } from './useDockBudget';
 
 /** The pane is scrolled to (nearly) its end. */
 const nearEnd = (pane: HTMLElement) => pane.scrollHeight - pane.scrollTop - pane.clientHeight < 80;
 
 const resizeTargets = (pane: HTMLElement) => new Set<Element>([pane, ...pane.children, ...pane.querySelectorAll('.detail-turn-now .detail-bubble-agent')]);
 
-/** Keep the current ask readable above the options, with the pane's one-click full-text pattern. */
+/**
+ * Keep the current ask readable above the options, with the pane's one-click full-text pattern. The expand control shows only
+ * while the text is clipped (or its dialog is open), and the dialog follows the text if the agent edits the question.
+ */
 function ConversationQuestion({ text }: { readonly text: string }) {
   const [expanded, setExpanded] = useState(false);
+  const [node, setNode] = useState<HTMLDivElement | null>(null);
+  const clipped = useClipped(node, text);
   const id = useId();
   return <><div className="conversation-question">
-    <div id={id} className="conversation-question-text"><Markdown text={text} inline compact /></div>
-    <button type="button" className="btn btn-ghost btn-icon conversation-question-toggle" aria-label="Expand question"
+    <div id={id} ref={setNode} className="conversation-question-text"><Markdown text={text} inline compact /></div>
+    {(clipped || expanded) && <button type="button" className="btn btn-ghost btn-icon conversation-question-toggle" aria-label="Expand question"
       aria-expanded={expanded} aria-controls={expanded ? `${id}-full` : id} aria-haspopup="dialog" onClick={() => setExpanded(true)}>
       <i className="ph ph-caret-down" aria-hidden="true" />
-    </button>
+    </button>}
   </div>
     {expanded && createPortal(<div onKeyDown={event => event.stopPropagation()}><Dialog label="Current question" width={640} onCancel={() => setExpanded(false)}>
       <h2 className="dialog-title">Current question</h2>
@@ -317,6 +324,8 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     && round.question_revision === item.question_revision;
   const answerState = session ? conversationAnswerState(session, itemId, retained) : { showAnswer: false, live: false };
   const showAnswer = answerState.showAnswer;
+  const dock = useRef<HTMLDivElement>(null);
+  useDockBudget(dock, expanded && showAnswer);
   const savedAnswers = !showAnswer && session ? drafts.savedAnswers({ project_id: session.project_id, session_id: session.id }, itemId) : [];
   const ackTo = session && item ? ackTarget(session, item) : null;
   // An open item is replied to and an in-progress item gets notes: that box is always there, never behind a button. Other
@@ -697,7 +706,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     </section>}
     </div>
 
-    {docked && <div className={`detail-dock${expanded && showAnswer ? ' detail-dock-question' : ''}`}>
+    {docked && <div ref={dock} className={`detail-dock${expanded && showAnswer ? ' detail-dock-question' : ''}`}>
     {expanded && model.delivery && <div className="detail-delivery" role="status" style={{ color: model.delivery.color }}>
       <i className={model.delivery.icon} aria-hidden="true" /><span>{model.delivery.text}</span></div>}
     {!(expanded && showAnswer) && (ackTo || model.open || model.followUp) && <div className="detail-quick-actions">
@@ -743,7 +752,8 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
       {/* While the follow-up box is open, it is the detail's one data-owner-input. */}
       <AnswerSlot drafts={drafts} store={store} itemId={itemId} compactOptions={expanded} blocked={model.answer?.blocked} focusRequest={answerFocus}
         prompt={expanded && answerState.live ? <div className="conversation-pin"><h3>Your turn · {relatedLabels.get(itemId)}</h3>
-          <ConversationQuestion key={`${itemId}:${item.ask || item.question}`} text={item.ask || item.question} /></div> : undefined}
+          {/* Keyed by the item alone: an edit to the question text keeps an open full-question dialog (and its focus) mounted. */}
+          <ConversationQuestion key={itemId} text={item.ask || item.question} /></div> : undefined}
         marked={!owner}
         onFocusRequestConsumed={onFocusRequestConsumed} onEscape={() => focusRoot(itemId)} onAgentNotRunning={onAgentNotRunning} onSent={sentJustNow} />
     </section>}

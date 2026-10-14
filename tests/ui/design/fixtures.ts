@@ -93,6 +93,7 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
     item.options = Array.from({ length: spec.conversationOptions }, (_, index) => ({ id: `window-${index + 1}`, rec: index === 0,
       label: ['Keep the current window', 'Use a shorter window', 'Use a longer window', 'Choose per attempt'][index],
       consequence: ['Keep the timing already reviewed.', 'Recover sooner after a short failure.', 'Allow more time for the agent to recover.', 'Adjust the timing to each delivery attempt.'][index] }));
+    if (spec.shortQuestion) { item.q = 'Keep the retry window?'; item.ask = 'Which retry window should we use?'; }
   }
   if (spec.answerOptions !== undefined) {
     const item = items.find(item => item.id === spec.selected)!;
@@ -158,7 +159,7 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
     ?? (autoTab && autoTab !== 's2' ? autoTab : 's2');
   const openTabs = ({ sessions: ['s2', 's1', 'c1'], projects: ['s2', 's1', 'c1'], projectpage: ['s2', 's1'], first: [], session: ['s2', 's1'], project: ['s2', 's1'],
     notrunning: ['s2', 's1'], archive: ['s2', 's1'], continue: ['s2', 's1'] } as Record<string, string[]>)[spec.scenario] ?? ['s2'];
-  return { topics, items, msgs, sessions, projects, sessionOf, tab, openTabs, submissions, reconnecting: spec.scenario === 'reconnecting',
+  return { topics, items, msgs, sessions, projects, sessionOf, tab, openTabs, submissions, reconnecting: spec.scenario === 'reconnecting' || !!spec.reconnecting,
     now: new Date(frameNow(spec)).toISOString() };
 }
 

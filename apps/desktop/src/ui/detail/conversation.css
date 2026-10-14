@@ -39,9 +39,17 @@
   color: inherit;
   font: inherit;
   text-align: left;
-  cursor: pointer;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.conversation-title-button {
+  cursor: pointer;
+}
+
+.conversation-title-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .conversation-title-expanded {
@@ -67,35 +75,37 @@
   padding-inline: max(24px, calc((100% - 780px) / 2));
 }
 
-.item-conversation .detail-dock-question {
-  height: 30%;
-  min-height: 0;
-  overflow: hidden;
+/*
+ * The pinned question footer is as tall as its content. Everything in it is a fixed row (status, heading, question, retry
+ * and error rows, own words, Send), and none of those shrinks, clips or scrolls. Only the options region is held to a
+ * height, --dock-options, which useDockBudget derives from the footer's cap (--dock-cap, a share of the view) minus those
+ * rows. The footer's own max-height is only a last resort; rows past it scroll rather than paint over one another.
+ */
+.item-conversation {
+  --dock-cap: 30%;
 }
 
-.item-conversation .detail-dock-question > .detail-answer,
-.item-conversation .detail-dock-question .detail-answer-slot,
-.item-conversation .detail-dock-question .answer {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.item-conversation .detail-dock-question > .detail-answer {
-  overflow: hidden;
+.item-conversation .detail-dock.detail-dock-question {
+  max-height: 80%;
 }
 
 .item-conversation .detail-dock-question .answer {
   gap: 4px;
 }
 
-.item-conversation .detail-dock-question .answer-choices {
-  flex: 1;
-  min-height: 0;
+.item-conversation .detail-dock-question .answer > .answer-choices {
+  flex: none;
+  max-height: var(--dock-options, none);
   overflow: auto;
   contain: paint;
   padding: 2px;
+}
+
+/* No room for even one option beside the rows that must stay readable: the region folds away rather than show a cut-off sliver. */
+.item-conversation .detail-dock[data-squeezed] .answer-choices {
+  max-height: 0;
+  padding-block: 0;
+  visibility: hidden;
 }
 
 .item-conversation .answer-choices[data-more-below] {
@@ -167,21 +177,19 @@
 }
 
 .item-conversation .detail-dock {
-  max-height: 30%;
+  max-height: var(--dock-cap);
   padding-block: 6px;
 }
 
 @media (width <= 1000px) {
-  .item-conversation .detail-dock-question {
-    height: 40%;
-    max-height: 40%;
+  .item-conversation {
+    --dock-cap: 40%;
   }
 }
 
 @media (height < 700px) {
-  .item-conversation .detail-dock-question {
-    height: 50%;
-    max-height: 50%;
+  .item-conversation {
+    --dock-cap: 50%;
   }
 
   .item-conversation .answer-fixed-controls > .answer-hint {
