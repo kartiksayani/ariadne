@@ -11,6 +11,7 @@ import { ackTitle } from '../shared/ack';
 import { useWorkspaceKeys } from '../keys';
 import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
+import { GraphFilter } from '../tree/FilterBar';
 import { hiddenGroupKey, hiddenGroupsFor } from '../tree/hidden';
 import { applyChange, mergeChange, relatedEdgePath, sessionGraph, statusVisual, STUB_HEIGHT, STUB_WIDTH, type GraphNode, type GraphStub, type RelatedEdge, type TopicGraph, type ViewChange } from './model';
 import './graph.css';
@@ -359,14 +360,19 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
         <span className="graph-legend-key" aria-label="Waiting on me" title="Waiting on me"><span className="graph-legend-waiting" /><span className="graph-legend-label">Waiting on me</span></span>
         <span className="graph-legend-key" aria-label="Closed" title="Closed"><span className="graph-legend-closed" /><span className="graph-legend-label">Closed</span></span>
         <span className="graph-legend-note" title="One graph per topic">One graph per topic</span>
-        <button type="button" className="btn btn-secondary graph-reveal" disabled={!selectedId || !graph?.nodes.has(selectedId)} onClick={revealSelected}>
-          <i className="ph ph-crosshair-simple" aria-hidden="true" />Reveal selected</button>
+        <div className="graph-legend-actions">
+          <button type="button" className="btn btn-secondary graph-reveal" disabled={!selectedId || !graph?.nodes.has(selectedId)} onClick={revealSelected}>
+            <i className="ph ph-crosshair-simple" aria-hidden="true" />Reveal selected</button>
+          <GraphFilter />
+        </div>
       </div>
       <div className="graph-cards">
         {graph?.topics.map(topic => <TopicCard key={topic.topic.id} graph={topic} sessionLabel={continuedFrom?.(topic.topic) ?? sessionLabel} marker={`${marker}-${topic.topic.id}`}
           focusId={focusId} onOpen={open} onCollapse={collapse} onToggleStub={toggleStub} />)}
         {!!graph?.crossTopicRelated.length && <CrossTopicLinks edges={graph.crossTopicRelated} />}
       </div></>}
+      {/* With no topic to draw there is no legend, but a filter that emptied the graph must stay reachable. */}
+      {!graph?.topics.length && <GraphFilter wrap />}
     </div>
   </div>;
 }

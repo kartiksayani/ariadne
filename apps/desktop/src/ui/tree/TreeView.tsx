@@ -32,7 +32,7 @@ import { StuckNote } from '../answer/StuckNote';
 import { editQueued, inEditor } from '../answer/held';
 import { InlineRecovery } from '../../components/recovery/RecoveryPanel';
 import { Banner, SessionBar } from './SessionBar';
-import { FilterBar } from './FilterBar';
+import { FilterBar, GraphFilterSlot } from './FilterBar';
 import { useLifecycle } from './Lifecycle';
 import { ItemRefs } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
@@ -1040,6 +1040,9 @@ export function TreeView(props: TreeViewProps) {
   const inline: ReadonlySet<string> = new Set(graph && !loading ? [] : rows.flatMap(row => row.delivery?.stuck ? [row.delivery.stuck.input.id] : []));
   const filtersShown = !archivedMode;
   const counts = model?.counts ?? { all: 0, waiting: 0, open: 0, progress: 0, closed: 0 };
+  const graphShown = !!graph && !loading;
+  const filterBar = <FilterBar chips={model?.chips ?? chipsOf([])} counts={counts}
+    disabled={nav.pendingOperationId !== null && !nav.writing} dismissKey={route.session_id} onChip={setChip} />;
   const queryText = query.trim();
   let body: ReactNode;
   if (loading) {
@@ -1094,13 +1097,12 @@ export function TreeView(props: TreeViewProps) {
     {bar && !archivedMode && <SessionBar bar={bar} busy={lifecycle.busy || !session} onClose={lifecycle.session}
       onRename={session ? lifecycle.rename : undefined}
       dispatch={<DispatchChip actions={actions} onDetails={() => setSending(true)} />} />}
-    {/* The filter control ends this row (and stands alone in it over the graph), so it needs no row of its own. */}
-    {filtersShown && <div className="tree-recent">
+    {/* The filter control ends this row, so it needs no row of its own. Over a loaded graph it sits in the graph's legend row instead. */}
+    {filtersShown && !graphShown && <div className="tree-recent">
       {session && !graph && <><RecentTrail session={session} entries={view?.recent_items}
         nextWaiting={oldestWaiting(session)} onReveal={id => select(id, false)} />
       <button type="button" className="btn btn-ghost" title="Recent (⌘E)" onClick={() => setRecentOpen(true)}>Recent</button></>}
-      <FilterBar chips={model?.chips ?? chipsOf([])} counts={counts}
-        disabled={nav.pendingOperationId !== null && !nav.writing} dismissKey={route.session_id} onChip={setChip} />
+      {filterBar}
     </div>}
     {session && recentOpen && <RecentDialog session={session} entries={view?.recent_items}
       seen={seen}
@@ -1114,7 +1116,7 @@ export function TreeView(props: TreeViewProps) {
       {lifecycle.pending}. Check whether your last change was saved before making another.</Banner>}
     <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
     {/* The graph keeps its own scroller so its legend stays sticky (ui/graph/graph.css). */}
-    {graph && !loading ? graph : <div className="tree-scroll-shell">
+    {graphShown ? <GraphFilterSlot.Provider value={filtersShown ? filterBar : null}>{graph}</GraphFilterSlot.Provider> : <div className="tree-scroll-shell">
       {/* One fixed-height row outside the scroller: the ancestors of the first row in view, and the selection tag beside them. */}
       <div className="tree-path">
         <nav className="tree-breadcrumb" aria-label="Map ancestors">{breadcrumb.map((id, index) => <span key={id}>

@@ -9,6 +9,7 @@ import { OpenSessions, immutable } from '../../../src/data/session-store';
 import { RegisteredRoutes, type RevealedItem } from '../../../src/data/routes';
 import { createDesktopService, type DesktopTransport } from '../../../src/data/service';
 import { GraphView } from '../../../src/ui/graph/GraphView';
+import { GraphFilterSlot } from '../../../src/ui/tree/FilterBar';
 import { graphSession, preferences } from './fixture';
 import { Notices, notices } from '../../../src/ui/pages/notices';
 
@@ -470,5 +471,22 @@ describe('session graph view', () => {
     const empty = await setup(session); render(<empty.Composition />);
     expect(screen.queryByText('One graph per topic')).toBeNull();
     await act(async () => {});
+  });
+
+  it('seats the Tree column\'s filter control beside Reveal selected, and keeps it reachable when no topic is drawn', async () => {
+    const slot = <button type="button">Filter</button>;
+    const value = await setup(), view = render(<GraphFilterSlot.Provider value={slot}><value.Composition /></GraphFilterSlot.Provider>);
+    const legend = document.querySelector('.graph-legend')!;
+    expect(legend.querySelector('.graph-legend-actions')!.textContent).toBe('Reveal selectedFilter');
+    expect(document.querySelectorAll('.graph-legend')).toHaveLength(1);
+    view.unmount();
+    const session = graphSession(); session.items = {};
+    const empty = await setup(session); render(<GraphFilterSlot.Provider value={slot}><empty.Composition /></GraphFilterSlot.Provider>);
+    expect(document.querySelector('.graph-legend-bare')!.textContent).toBe('Filter');
+    await act(async () => {});
+    cleanup();
+    // Nothing provided (archived sessions): no stray row.
+    render(<empty.Composition />);
+    expect(document.querySelector('.graph-legend')).toBeNull();
   });
 });

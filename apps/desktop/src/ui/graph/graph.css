@@ -108,9 +108,27 @@
   box-shadow: inset 0 0 0 1px var(--color-divider);
 }
 
+/* Reveal selected and the filter control end the legend row together. */
+.graph-legend-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* The funnel is no taller than Reveal selected, so seating it here keeps the legend row's height. */
+.graph-legend .tree-filter-button {
+  width: 22px;
+  height: 22px;
+}
+
+.graph-legend-bare {
+  justify-content: flex-end;
+}
+
 .graph-reveal {
   flex-shrink: 0;
-  margin-left: auto;
   padding: 3px 10px;
   font-size: calc(12.5px * var(--text-scale));
   white-space: nowrap;

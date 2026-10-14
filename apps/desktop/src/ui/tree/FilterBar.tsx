@@ -1,7 +1,18 @@
 // The status menu reads and toggles the saved status set. It sits at the end of the Recent row,
 // so the Map keeps the room a row of its own would take.
+import { createContext, useContext, type ReactNode } from 'react';
 import { ActionMenu } from '../shared/ActionMenu';
 import { CHIPS, type Chip } from './model';
+
+/** The Tree column hands its filter control to the graph, which seats it in the legend row. */
+export const GraphFilterSlot = createContext<ReactNode>(null);
+
+/** The filter control the Tree column provided, for the graph's legend row; `wrap` makes the row it needs when nothing else does. */
+export function GraphFilter({ wrap = false }: { wrap?: boolean }) {
+  const filter = useContext(GraphFilterSlot);
+  if (!filter) return null;
+  return wrap ? <div className="graph-legend graph-legend-bare">{filter}</div> : <>{filter}</>;
+}
 
 export function FilterBar({ chips, counts, disabled, dismissKey, onChip }: {
   chips: ReadonlySet<Chip>; counts: Readonly<Record<Chip, number>>; disabled: boolean;

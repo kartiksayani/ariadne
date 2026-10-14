@@ -405,6 +405,51 @@ for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as 
   });
 }
 
+for (const frame of ['graph-hidden', 'graph-hidden-small'] as const) for (const theme of ['dark', 'light'] as const) {
+  test(`Over the Graph the filter control shares the legend row with Reveal selected: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec(frame), theme });
+    const filters = page.getByRole('group', { name: 'Filter items' }), trigger = filters.getByRole('button', { name: /^Filter/ });
+    await expect(trigger).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`graph-filter-${frame}-${theme}.png`), animations: 'disabled' });
+    const rows = await page.evaluate(() => {
+      const rect = (element: Element | null) => element!.getBoundingClientRect();
+      const filter = document.querySelector('.tree-filters')!, reveal = document.querySelector('.graph-reveal'), legend = document.querySelector('.graph-legend')!;
+      // Every row in the legend column that holds the filter button: the button's siblings in its row.
+      const row = filter.closest('.graph-legend');
+      const parts = [...legend.querySelectorAll(':scope > *, .graph-legend-actions > *')].filter(part => !part.classList.contains('graph-legend-actions'))
+        .map(part => ({ name: part.className || part.tagName, rect: part.getBoundingClientRect() })).filter(part => part.rect.width > 0);
+      return { standalone: !!document.querySelector('.tree-recent'), inLegend: !!row, filter: rect(filter), reveal: rect(reveal), legend: rect(legend),
+        parts, scrollWidth: legend.scrollWidth, clientWidth: legend.clientWidth, column: rect(document.querySelector('.tree-column')) };
+    });
+    expect(rows.standalone, 'no row over the Graph holds only the filter button').toBe(false);
+    expect(rows.inLegend, 'the filter control sits in the legend row').toBe(true);
+    expect(Math.abs((rows.filter.top + rows.filter.height / 2) - (rows.reveal.top + rows.reveal.height / 2)), 'the funnel and Reveal selected share one row').toBeLessThan(4);
+    expect(rows.filter.left, 'the funnel follows Reveal selected').toBeGreaterThanOrEqual(rows.reveal.right - 0.5);
+    expect(rows.legend.height, 'the legend stays one row').toBeLessThanOrEqual(44);
+    expect(rows.filter.height, 'the funnel does not make the legend row taller than Reveal selected').toBeLessThanOrEqual(rows.reveal.height + 0.5);
+    expect(rows.filter.right).toBeLessThanOrEqual(rows.column.right + 0.5);
+    expect(rows.scrollWidth, 'the legend does not clip').toBeLessThanOrEqual(rows.clientWidth);
+    const ordered = [...rows.parts].sort((a, b) => a.rect.left - b.rect.left);
+    for (let at = 1; at < ordered.length; at++) expect(ordered[at - 1]!.rect.right, `${ordered[at - 1]!.name} does not overlap ${ordered[at]!.name}`).toBeLessThanOrEqual(ordered[at]!.rect.left + 0.5);
+    for (const part of ordered) {
+      expect(part.rect.top).toBeGreaterThanOrEqual(rows.legend.top - 0.5);
+      expect(part.rect.bottom).toBeLessThanOrEqual(rows.legend.bottom + 0.5);
+    }
+    // The menu opens inside the window and still filters.
+    await trigger.click();
+    const option = page.getByRole('menuitemcheckbox', { name: /^Open \d+$/ });
+    await expect(option).toBeVisible();
+    const menu = await page.getByRole('menu', { name: /^Filter/ }).boundingBox(), size = page.viewportSize()!;
+    expect(menu!.x).toBeGreaterThanOrEqual(0); expect(menu!.x + menu!.width).toBeLessThanOrEqual(size.width);
+    expect(menu!.y).toBeGreaterThanOrEqual(0); expect(menu!.y + menu!.height).toBeLessThanOrEqual(size.height);
+    await option.click();
+    await page.keyboard.press('Escape');
+    await expect(filters.getByRole('button', { name: 'Filter: Open' })).toHaveAttribute('data-active', 'true');
+    await expect(trigger).toBeFocused();
+    await page.screenshot({ path: testInfo.outputPath(`graph-filter-active-${frame}-${theme}.png`), animations: 'disabled' });
+  });
+}
+
 for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) {
   test(`The filter control ends the Recent row and gives the Map the rest: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
     await openApp(page, origin, { ...frameSpec(frame), theme });
