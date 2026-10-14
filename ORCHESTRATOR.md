@@ -96,16 +96,16 @@ assertion fails again, remove that assertion rather than changing product code.
   test per row. The reviewer checks the table for missing rows as well as the diff.
   A third fix round in one area stops for a re-brief from the table. Recorded
   2026-10-14: the recovery companion needed three rounds, because each fix moved the
-  failure to a neighbouring path.
+  failure to a neighbouring path. Owner decision 2026-10-14.
 - **Pin before moving:** Before extracting, moving or sharing UI or state code, add
   tests that pin the current behaviour of every control it touches: open, close,
   Cancel, Esc, keys, disabled states and saved drafts. They pass before and after
   the move. Recorded 2026-10-14: extracting the item conversation silently stopped
-  Cancel from closing the Drop box.
+  Cancel from closing the Drop box. Owner decision 2026-10-14.
 - **Previous-release reads:** A change to any saved format keeps a test that the
   previous release's reader accepts the new output. Otherwise the PR states the
   one-way step and the owner approves it. Recorded 2026-10-14: dropping a preference
-  field would have stopped alpha.14 reading ui.json; review caught it only by reading.
+  field would have stopped alpha.14 reading ui.json; review caught it only by reading. Owner decision 2026-10-14.
 - **CI parity:** Tests find build outputs through `CARGO_TARGET_DIR`, which CI sets,
   or `CARGO_BIN_EXE_*`, never a hard-coded `target/debug`. Recorded once,
   2026-10-14. A check-script guard waits for a second occurrence, per the process
@@ -115,7 +115,7 @@ assertion fails again, remove that assertion rather than changing product code.
   race under "Known flakes" in [HANDOFF](docs/delivery/HANDOFF.md). A second
   occurrence of the same flake is fixed, in the test or in the race, before the next
   merge. Native journeys never race agent-side changes: they wait for the canonical
-  state the next step depends on.
+  state the next step depends on. Owner decision 2026-10-14.
 - **Validation and completion:** Application changes retain full required
   application CI; documentation-only changes retain appropriate lightweight
   checks. Use native acceptance for user-visible integration and deterministic

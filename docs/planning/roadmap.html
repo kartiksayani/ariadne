@@ -2783,7 +2783,8 @@
         "docs/delivery/HANDOFF.md"
       ],
       "acceptance": [
-        "Settle contracts for a larger view of one item’s existing conversation after mock M3 sign-off; no session-wide Conversation view or host transcript reading."
+        "Settle contracts for a larger view of one item’s existing conversation after mock M3 sign-off; no session-wide Conversation view or host transcript reading.",
+        "Superseded by the owner decision of 2026-10-13: no session-wide Conversation view and no transcript reading; one item’s conversation opens in a bigger view instead (P11.2). No ADR-0100 is written."
       ],
       "checks": [
         "Independent contract review against all alpha.14 consumers."
@@ -2805,7 +2806,8 @@
         "docs/delivery/HANDOFF.md"
       ],
       "acceptance": [
-        "Read one item’s Ariadne conversation under the settled contracts; do not read host transcripts."
+        "Read one item’s Ariadne conversation under the settled contracts; do not read host transcripts.",
+        "Superseded by the owner decision of 2026-10-13: no host transcript reader; one item’s conversation opens in a bigger view instead (P11.2)."
       ],
       "checks": [
         "Real Core/Store item conversation read tests."
@@ -2816,9 +2818,7 @@
       "id": "P11.2",
       "title": "15.2 Item conversation view",
       "phase": "M11",
-      "depends_on": [
-        "P11.0"
-      ],
+      "depends_on": [],
       "paths": [
         "apps/desktop/src/ui/*",
         "apps/desktop/tests/ui/*"
@@ -3017,7 +3017,7 @@
       ],
       "acceptance": [
         "Close three rare cases found in the #159 review: a rollback that could remove the only copy of the recovery file on network filesystems, transient read errors that set a good recovery file aside, and a needless sync on reads.",
-        "The brief is a full failure table that crosses every error source with every outcome, per the ORCHESTRATOR delivery feedback rules."
+        "The brief is a full failure table that crosses every error source with every operation and gives the outcome for each pair, per the ORCHESTRATOR delivery feedback rules."
       ],
       "checks": [
         "npm run check; a test per row of the failure table; independent review."

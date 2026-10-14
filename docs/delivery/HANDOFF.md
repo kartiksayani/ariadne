@@ -80,10 +80,12 @@ One entry per flake: the test and its first failure, the evidence, and the suspe
 - **Native delivery journey, "Detail Reply text and enabled Send were not ready for one click"** (`apps/desktop/tests/e2e/owner-reply.mjs:109`).
   - First failed: #159 CI, 2026-10-14. The rerun passed.
   - The fake agent changed the item (revision 3 → 4) while the test typed, so the stale-question guard disabled Send. The app behaved as designed.
-  - Fix on recurrence: wait for the agent's change before typing.
+  - The cause is known, and it breaks the rule that native journeys never race agent-side changes, so it is not a flake to wait on. The journey must wait for the agent's change before typing. The fix rides with #160, which already edits that file.
 - **`crates/ariadne-core/tests/native_connection.rs` `expired_fresh_work_cannot_persist_after_waiting_for_registry_lock`.**
+  - A local hang under heavy load, not a required check, so it is outside the Flakes rule.
   - First failed: a local run on 2026-10-14, where it hung for 45 minutes under heavy load.
   - It then passed 8 of 8 runs on its own.
+  - Suspected cause: thread timing under CPU starvation in its lock-and-channel handshake.
 
 ## Earlier delivery evidence
 
