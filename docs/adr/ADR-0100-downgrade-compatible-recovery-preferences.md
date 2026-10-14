@@ -31,12 +31,22 @@ main preferences, keep its changes and the companion's marker. Never report a
 completed recovery before its marker is durable.
 
 The companion is optional convenience data. If it cannot be read, validated or
-reconciled with the main revision, move it aside to
+reconciled with the main revision because its contents are invalid, move it aside to
 `ui-recovery.corrupt-<time>.json`, log a plain line, and continue without markers.
 Never delete its evidence or let it block navigation or saved drafts. If moving
 it fails, keep it untouched and ignore it for that operation. Old notices may
 reappear. Keep at most 10,000 completion IDs in insertion order, evicting the
 oldest first for a new ID; an existing ID keeps its position.
+
+Store failures do not make a valid companion corrupt: leave its bytes and replay
+receipts untouched. Preference reads still succeed. If companion durability
+cannot be confirmed, return the authoritative main snapshot without markers. If
+durability is confirmed but publishing a pending revision to the main file fails,
+return the validated in-memory projection, including the durable markers and the
+main file's saved navigation and drafts. Retry publication on a later operation.
+Every patch, including an ordinary draft patch, still propagates store failures
+or `CommitUncertain`; retry with the same operation ID. A successful read does
+not imply that a pending main-file publication or a new patch has been saved.
 
 Keep the existing 1 MiB response allowance for the legacy preference fields.
 The bounded recovery ledger and revision metadata have a separate 400 KiB

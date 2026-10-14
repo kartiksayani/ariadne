@@ -88,7 +88,7 @@ impl<'a> PreferencesService<'a> {
     pub fn get(&self, context: &OwnerContext) -> Result<PreferencesSnapshot, CoreError> {
         owner(context)?;
         self.registry
-            .with_ui_file(|mut file| Ok(load(&mut file)?.0.snapshot))
+            .with_ui_file(|mut file| Ok(load_read(&mut file)?.0.snapshot))
             .map_err(failure)
     }
 
@@ -306,6 +306,19 @@ fn load(file: &mut UiFile<'_>) -> Result<(Record, RecoveryRecord), Failure> {
     load_with(file, project_recovery)
 }
 
+fn load_read(file: &mut UiFile<'_>) -> Result<(Record, RecoveryRecord), Failure> {
+    load_with(file, |file, record, recovery| {
+        project_recovery_with(
+            file,
+            record,
+            recovery,
+            ProjectionMode::Read,
+            |file, operation_id| file.confirm_recovery(operation_id),
+            |file, bytes, operation_id| file.publish_current(bytes, operation_id),
+        )
+    })
+}
+
 fn load_with(
     file: &mut UiFile<'_>,
     project: impl FnOnce(
@@ -353,18 +366,27 @@ fn project_recovery(
         file,
         record,
         recovery,
+        ProjectionMode::Patch,
         |file, operation_id| file.confirm_recovery(operation_id),
         |file, bytes, operation_id| file.publish_current(bytes, operation_id),
     )
+}
+
+#[derive(Clone, Copy)]
+enum ProjectionMode {
+    Read,
+    Patch,
 }
 
 fn project_recovery_with(
     file: &mut UiFile<'_>,
     mut record: Record,
     recovery: RecoveryRecord,
+    mode: ProjectionMode,
     confirm: impl FnOnce(&UiFile<'_>, &UuidV4) -> Result<(), StoreError>,
     publish: impl FnOnce(&mut UiFile<'_>, &[u8], &UuidV4) -> Result<(), StoreError>,
 ) -> Result<(Record, RecoveryRecord), Failure> {
+    let original = record.clone();
     record.snapshot.resolved_unsent_input_ids = recovery.resolved_input_ids.clone();
     // Old binaries may publish an ordinary patch at the marker's intended
     // revision. Its fields and history win; the durable marker still applies.
@@ -385,14 +407,27 @@ fn project_recovery_with(
             record.operations.push(pending.clone());
             trim(&mut record.operations);
             validate(&record).map_err(|_| corrupt(&file.recovery_path()))?;
-            confirm(file, &pending.operation_id)?;
-            publish(file, &encode(&record)?, &pending.operation_id).map_err(|_| {
-                Failure::Store(StoreError::CommitUncertain {
+            if let Err(error) = confirm(file, &pending.operation_id) {
+                return match mode {
+                    ProjectionMode::Read => Ok((original, empty_recovery())),
+                    ProjectionMode::Patch => Err(error.into()),
+                };
+            }
+            if publish(file, &encode(&record)?, &pending.operation_id).is_err()
+                && matches!(mode, ProjectionMode::Patch)
+            {
+                return Err(Failure::Store(StoreError::CommitUncertain {
                     operation_id: Some(pending.operation_id.clone()),
-                })
-            })?;
+                }));
+            }
         } else {
-            confirm(file, &pending.operation_id)?;
+            validate(&record).map_err(|_| corrupt(&file.path()))?;
+            if let Err(error) = confirm(file, &pending.operation_id) {
+                return match mode {
+                    ProjectionMode::Read => Ok((original, empty_recovery())),
+                    ProjectionMode::Patch => Err(error.into()),
+                };
+            }
         }
     }
     validate(&record).map_err(|_| corrupt(&file.path()))?;
@@ -872,6 +907,7 @@ mod recovery_retry_tests {
                         file,
                         record,
                         recovery,
+                        ProjectionMode::Patch,
                         |file, operation| file.confirm_recovery(operation),
                         |file, _, _| {
                             Err(StoreError::Io {
@@ -903,6 +939,7 @@ mod recovery_retry_tests {
                         file,
                         record,
                         recovery,
+                        ProjectionMode::Patch,
                         |_, operation| {
                             Err(StoreError::CommitUncertain {
                                 operation_id: Some(operation.clone()),
@@ -917,6 +954,69 @@ mod recovery_retry_tests {
                 operation_id: Some(ref operation),
             })) if operation == &id(102))
             );
+            pending.assert_preserved();
+        }
+        pending.assert_retry_completes();
+    }
+
+    #[test]
+    fn preferences_read_returns_main_without_markers_when_confirmation_fails() {
+        let pending = PendingMarker::new();
+        for _ in 0..3 {
+            let result = pending.registry.with_ui_file(|mut file| {
+                load_with(&mut file, |file, record, recovery| {
+                    project_recovery_with(
+                        file,
+                        record,
+                        recovery,
+                        ProjectionMode::Read,
+                        |_, operation| {
+                            Err(StoreError::CommitUncertain {
+                                operation_id: Some(operation.clone()),
+                            })
+                        },
+                        |_, _, _| panic!("unconfirmed marker must not publish main preferences"),
+                    )
+                })
+            });
+            let (record, recovery) = result.map_err(failure).unwrap();
+            assert_eq!(record.snapshot.revision.value(), 3);
+            assert!(record.snapshot.resolved_unsent_input_ids.is_empty());
+            assert!(recovery.operations.is_empty());
+            pending.assert_preserved();
+        }
+        pending.assert_retry_completes();
+    }
+
+    #[test]
+    fn preferences_read_returns_durable_projection_when_main_publication_fails() {
+        let pending = PendingMarker::new();
+        for _ in 0..3 {
+            let result = pending.registry.with_ui_file(|mut file| {
+                load_with(&mut file, |file, record, recovery| {
+                    project_recovery_with(
+                        file,
+                        record,
+                        recovery,
+                        ProjectionMode::Read,
+                        |file, operation| file.confirm_recovery(operation),
+                        |file, _, _| {
+                            Err(StoreError::Io {
+                                action: "write",
+                                path: file.path(),
+                                kind: std::io::ErrorKind::StorageFull,
+                            })
+                        },
+                    )
+                })
+            });
+            let (record, recovery) = result.map_err(failure).unwrap();
+            assert_eq!(record.snapshot.revision.value(), 4);
+            assert_eq!(
+                record.snapshot.resolved_unsent_input_ids,
+                vec![id(90), id(91), id(92)]
+            );
+            assert_eq!(recovery.operations.last().unwrap().operation_id, id(102));
             pending.assert_preserved();
         }
         pending.assert_retry_completes();

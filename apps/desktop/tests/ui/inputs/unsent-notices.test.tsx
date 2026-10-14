@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { createDesktopService } from '../../../src/data/service';
+import { CoreFailure, createDesktopService } from '../../../src/data/service';
 import { OpenSessions } from '../../../src/data/session-store';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
@@ -294,6 +294,53 @@ it('keeps a transient I/O dismissal failure retryable', async () => {
   failure.mockRestore();
   fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
   await waitFor(() => expect(value.transport.preferences.resolved_unsent_input_ids).toContain(value.input.id));
+});
+
+it('classifies its own I/O save failure when a concurrent refresh reports permission denied', async () => {
+  const value = await setup('agent_removed');
+  const invoke = value.transport.invoke.bind(value.transport);
+  vi.spyOn(value.transport, 'invoke').mockImplementation(async (name, args) => {
+    if (name === 'preferences_get' || name === 'preferences_patch') {
+      return { api_version: 1, ok: false, error: { code: name === 'preferences_get' ? 'permission_denied' : 'io_error',
+        message: 'Independent failure', hint: '', retryable: false, field_errors: [] } };
+    }
+    return invoke(name, args);
+  });
+  const resolve = value.navigation.resolveUnsentInput.bind(value.navigation);
+  vi.spyOn(value.navigation, 'resolveUnsentInput').mockImplementation(async inputId => {
+    try { return await resolve(inputId); }
+    catch (failure: unknown) {
+      // Complete the unrelated read before the notice consumes its own command failure.
+      await value.navigation.refresh();
+      expect(value.navigation.getSnapshot().error).toMatchObject({ error: { code: 'permission_denied' } });
+      throw failure;
+    }
+  });
+  fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }));
+  await screen.findByText(/Couldn’t save the dismissal/);
+  expect(screen.queryByText('Hidden until Ariadne restarts.')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy();
+});
+
+it('keeps an early refusal retryable despite an old unrelated permission failure', async () => {
+  const value = await setup('agent_removed');
+  value.transport.failNext = 'preferences_patch';
+  await act(async () => {
+    expect(await value.navigation.saveTheme('dark', value.navigation.getSnapshot().preferences!.revision)).toBe(false);
+  });
+  expect(value.navigation.getSnapshot().pendingOperationId).not.toBeNull();
+  const invoke = value.transport.invoke.bind(value.transport);
+  vi.spyOn(value.transport, 'invoke').mockImplementation(async (name, args) => name === 'preferences_get'
+    ? { api_version: 1, ok: false, error: { code: 'permission_denied', message: 'Unrelated read failed', hint: '', retryable: false, field_errors: [] } }
+    : invoke(name, args));
+  await act(() => value.navigation.refresh());
+  expect(value.navigation.getSnapshot().error).toBeInstanceOf(CoreFailure);
+  const mutations = value.transport.mutations.length;
+  fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }));
+  await screen.findByText(/Couldn’t save the dismissal/);
+  expect(value.transport.mutations).toHaveLength(mutations);
+  expect(screen.queryByText('Hidden until Ariadne restarts.')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy();
 });
 
 it('keeps restored words and offers run-only dismissal when their recovery marker cannot be saved', async () => {

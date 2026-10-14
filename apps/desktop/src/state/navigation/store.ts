@@ -16,6 +16,7 @@ type Failure = CoreFailure | ServiceFailure;
 // `retry` exists only for owner preference patches. It rebuilds the same owner
 // action against the refreshed snapshot with a new operation id, after a definite revision_conflict.
 type PendingMutation = { request: OwnerMutationRequest; confirmed: (receipt: MutationReceipt) => void;
+  failed?: (failure: Failure) => void;
   retry?: () => PendingMutation | null | Promise<PendingMutation | null>;
   retrySeen?: (preferences: PreferencesSnapshot) => Promise<PendingMutation | null>;
   prepare?: () => Promise<PendingMutation>;
@@ -492,8 +493,8 @@ export class NavigationStore {
     return structuredClone(this.state.preferences) as PreferencesSnapshot;
   }
   private patch(preferences: PreferencesSnapshot, entries: NavigationPatch[], confirmed: () => void = () => {}, replay?: ReplayEntries,
-    seenWaited = false, current?: () => boolean): Promise<boolean> {
-    const mutation = this.patchMutation(preferences, entries, confirmed, true, replay, current);
+    seenWaited = false, current?: () => boolean, failed?: (failure: Failure) => void): Promise<boolean> {
+    const mutation = this.patchMutation(preferences, entries, confirmed, true, replay, current, failed);
     const flight = this.seenFlight;
     if (flight) mutation.prepare = async () => {
       if (!seenWaited) await this.waitForSeen(flight);
@@ -501,7 +502,7 @@ export class NavigationStore {
       const fresh = await this.capturePreferences();
       const rebased = replay ? replay(fresh) : rebaseEntries(entries, preferences, fresh);
       if (!rebased) throw new ServiceFailure('invalid_response');
-      return this.patchMutation(fresh, rebased, confirmed, true, replay, current);
+      return this.patchMutation(fresh, rebased, confirmed, true, replay, current, failed);
     };
     // Reserve the owner writer synchronously even during the bounded wait.
     return this.execute(mutation);
@@ -521,7 +522,7 @@ export class NavigationStore {
         hidden_item_ids: entry.preferences.hidden_item_ids.filter(id => !!state.snapshot!.session.items[id]) } };
     });
   }
-  private patchMutation(preferences: PreferencesSnapshot, entries: NavigationPatch[], confirmed: () => void, retryable: boolean, replay?: ReplayEntries, current?: () => boolean): PendingMutation {
+  private patchMutation(preferences: PreferencesSnapshot, entries: NavigationPatch[], confirmed: () => void, retryable: boolean, replay?: ReplayEntries, current?: () => boolean, failed?: (failure: Failure) => void): PendingMutation {
     // Keep the owner's original fields for rebasing; cleanup must never replay a
     // stale whole set over a concurrent hide. Only the outgoing write is pruned.
     const written = this.pruneHidden(entries);
@@ -543,10 +544,10 @@ export class NavigationStore {
       if (!captured || captured.revision <= preferences.revision) return null;
       const fresh = structuredClone(captured) as PreferencesSnapshot;
       const rebased = replay ? replay(fresh) : rebaseEntries(entries, preferences, fresh);
-      return rebased && this.patchMutation(fresh, rebased, confirmed, seenOnly && retryable, replay, current);
+      return rebased && this.patchMutation(fresh, rebased, confirmed, seenOnly && retryable, replay, current, failed);
     };
     const retry = retryable ? () => reapply(null, false) : undefined;
-    return { request, retry, retrySeen: fresh => reapply(fresh, true), current, confirmed: receipt => {
+    return { request, retry, retrySeen: fresh => reapply(fresh, true), current, failed, confirmed: receipt => {
       if (!('preferences_revision' in receipt) || receipt.preferences_revision < preferences.revision) {
         throw new ServiceFailure('invalid_response');
       }
@@ -650,14 +651,22 @@ export class NavigationStore {
       return await this.patch(preferences, [{ kind: 'set_global', preferences: { ...preferences.global, ...change } }]);
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
-  /** Permanently resolves one unsent notice after dismissal or a confirmed put-back. */
+  /** Resolves one unsent notice; admission refusal returns false, its own save failure throws. */
   async resolveUnsentInput(inputId: string): Promise<boolean> {
     try {
       if (this.stopped || this.pending || !this.state.preferences) return false;
       const preferences = this.preferences();
       if (preferences.resolved_unsent_input_ids?.includes(inputId)) return true;
-      return await this.patch(preferences, [{ kind: 'resolve_unsent_input', input_id: inputId }]);
-    } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
+      let failure: Failure | undefined;
+      const saved = await this.patch(preferences, [{ kind: 'resolve_unsent_input', input_id: inputId }], undefined, undefined,
+        false, undefined, ownFailure => { failure = ownFailure; });
+      if (failure) throw failure;
+      return saved;
+    } catch (error: unknown) {
+      const failure = fail(error);
+      this.publish({ error: failure });
+      throw failure;
+    }
   }
   async saveSessionView(view: SessionPreferences, expectedPreferencesRevision: number): Promise<boolean> {
     try {
@@ -988,6 +997,7 @@ export class NavigationStore {
         if (pending.current && !pending.current()) return this.discardNavigation();
         this.pending = null;
         this.mutationFailure = failure;
+        pending.failed?.(failure);
         this.publish({ writing: false, pendingOperationId: null, error: failure });
         return false;
       }
@@ -1039,6 +1049,7 @@ export class NavigationStore {
         return this.discardNavigation();
       }
       this.mutationFailure = failure;
+      pending.failed?.(failure);
       // An unknown completion retains the exact command and operation ID.
       // Definitive typed rejection permits a new, explicitly chosen action.
       if (failure instanceof CoreFailure && !['commit_uncertain', 'delivery_uncertain'].includes(failure.error.code)) this.pending = null;

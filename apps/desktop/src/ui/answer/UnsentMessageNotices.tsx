@@ -110,8 +110,7 @@ export function UnsentMessageNotices({ waiting, drafts, opened, selectedStore, n
           finished.current.add(inputId);
           notices.dismiss(id);
           if (moved && active.current) notices.push({ icon: 'ph ph-check', text: 'Put back. Open “Reply to topic” on its topic to send it.' });
-        } catch {
-          const failure = navigation.getSnapshot().error;
+        } catch (failure: unknown) {
           if (failure instanceof CoreFailure && failure.error.code === 'permission_denied') {
             recoveryUnavailable.current.add(inputId);
             if (moved) hints.current.set(inputId, 'Your message is in the reply box, but recovery can’t be saved. Dismiss hides this notice until Ariadne restarts.');

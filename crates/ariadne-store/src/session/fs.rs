@@ -420,8 +420,22 @@ impl Directory {
         target: &str,
         rename: impl FnOnce(&CString, &CString) -> libc::c_int,
     ) -> Result<(), StoreError> {
+        self.rename_entry_no_replace_with_unlink(source, target, rename, |source| {
+            // SAFETY: the checked source name is anchored to this live directory.
+            unsafe { libc::unlinkat(self.file.as_raw_fd(), source.as_ptr(), 0) }
+        })
+    }
+
+    fn rename_entry_no_replace_with_unlink(
+        &self,
+        source: &str,
+        target: &str,
+        rename: impl FnOnce(&CString, &CString) -> libc::c_int,
+        unlink: impl FnOnce(&CString) -> libc::c_int,
+    ) -> Result<(), StoreError> {
         let path = self.path.join(source);
-        component(target, &self.path.join(target))?;
+        let target_path = self.path.join(target);
+        component(target, &target_path)?;
         let source_type = self.entry_type(source)?;
         if source_type == Some(libc::S_IFDIR) {
             return Err(StoreError::UnsafePath { path });
@@ -433,13 +447,16 @@ impl Directory {
             return Ok(());
         }
         let error = io::Error::last_os_error();
-        if !matches!(error.raw_os_error(), Some(libc::ENOTSUP | libc::EINVAL)) {
+        if !matches!(
+            error.raw_os_error(),
+            Some(libc::ENOTSUP | libc::EINVAL | libc::ENOSYS)
+        ) {
             return Err(StoreError::io("rename", &path, error));
         }
         if !matches!(source_type, Some(libc::S_IFREG | libc::S_IFLNK)) {
             return Err(StoreError::UnsafePath { path });
         }
-        // Some filesystems lack exclusive rename. Linking the entry with flags=0
+        // Some filesystems or kernels lack exclusive rename. Linking with flags=0
         // preserves symlinks themselves and refuses an existing destination.
         // SAFETY: both names remain anchored to this live directory descriptor.
         os_result(
@@ -455,8 +472,15 @@ impl Directory {
             "link",
             &path,
         )?;
-        // SAFETY: only the source entry is removed after preserving its link.
-        if unsafe { libc::unlinkat(self.file.as_raw_fd(), source.as_ptr(), 0) } == -1 {
+        if unlink(&source) == -1 {
+            // Roll back only the link just created under the resource lock, so
+            // retries do not accumulate another preserved name on every read.
+            // SAFETY: the destination was exclusively linked immediately above.
+            os_result(
+                unsafe { libc::unlinkat(self.file.as_raw_fd(), target.as_ptr(), 0) },
+                "unlink",
+                &target_path,
+            )?;
             return Err(StoreError::CommitUncertain { operation_id: None });
         }
         Ok(())
@@ -693,7 +717,7 @@ mod tests {
 
     #[test]
     fn unsupported_exclusive_rename_falls_back_for_regular_files_and_symlinks() {
-        for code in [libc::ENOTSUP, libc::EINVAL] {
+        for code in [libc::ENOTSUP, libc::EINVAL, libc::ENOSYS] {
             for link in [false, true] {
                 let root = tempfile::tempdir().unwrap();
                 let directory = Directory::root(root.path()).unwrap();
@@ -727,7 +751,7 @@ mod tests {
 
     #[test]
     fn unsupported_exclusive_rename_never_replaces_evidence_or_moves_directories() {
-        for code in [libc::ENOTSUP, libc::EINVAL] {
+        for code in [libc::ENOTSUP, libc::EINVAL, libc::ENOSYS] {
             for link in [false, true] {
                 let root = tempfile::tempdir().unwrap();
                 let directory = Directory::root(root.path()).unwrap();
@@ -759,6 +783,56 @@ mod tests {
                 ));
                 assert!(root.path().join("directory").is_dir());
                 assert!(!root.path().join("moved-directory").exists());
+            }
+        }
+    }
+
+    #[test]
+    fn failed_source_unlink_rolls_back_preserved_link_on_every_retry() {
+        for code in [libc::ENOTSUP, libc::EINVAL, libc::ENOSYS] {
+            for link in [false, true] {
+                let root = tempfile::tempdir().unwrap();
+                let directory = Directory::root(root.path()).unwrap();
+                let source = root.path().join("source");
+                let outside = root.path().join("outside");
+                std::fs::write(&outside, b"untouched link target").unwrap();
+                if link {
+                    symlink(&outside, &source).unwrap();
+                } else {
+                    std::fs::write(&source, b"source evidence").unwrap();
+                }
+                let original = std::fs::symlink_metadata(&source).unwrap();
+                for attempt in 0..3 {
+                    let target = format!("preserved-{attempt}");
+                    let result = directory.with_lock("ui.lock", true, || {
+                        directory.rename_entry_no_replace_with_unlink(
+                            "source",
+                            &target,
+                            unsupported_rename(code),
+                            |_| {
+                                // SAFETY: errno is this thread's writable OS error slot.
+                                unsafe { *errno() = libc::EACCES };
+                                -1
+                            },
+                        )
+                    });
+                    assert!(matches!(result, Err(StoreError::CommitUncertain { .. })));
+                    let retained = std::fs::symlink_metadata(&source).unwrap();
+                    assert_eq!(retained.ino(), original.ino());
+                    assert_eq!(retained.nlink(), original.nlink());
+                    assert!(std::fs::symlink_metadata(root.path().join(&target)).is_err());
+                    assert_eq!(std::fs::read(&outside).unwrap(), b"untouched link target");
+                    if link {
+                        assert_eq!(std::fs::read_link(&source).unwrap(), outside);
+                    } else {
+                        assert_eq!(std::fs::read(&source).unwrap(), b"source evidence");
+                    }
+                }
+                assert!(!std::fs::read_dir(root.path()).unwrap().any(|entry| entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("preserved-")));
             }
         }
     }

@@ -824,22 +824,54 @@ fn companion_ahead_of_restored_or_deleted_main_never_blocks_drafts() {
 #[test]
 fn companion_projection_failure_preserves_marker_until_publication_retry() {
     let s = Setup::new();
-    s.service().patch(&owner(), &patch(100, 1, vec![])).unwrap();
-    let original = fs::read(s.live()).unwrap();
+    let mut global = s.saved().global;
+    global.selected_navigation = NavigationSelection::Session { session: route() };
     s.service()
-        .patch(&owner(), &patch(101, 2, vec![resolve(90)]))
+        .patch(
+            &owner(),
+            &patch(
+                100,
+                1,
+                vec![
+                    PreferencesPatchEntry::SetGlobal {
+                        preferences: global.clone(),
+                    },
+                    PreferencesPatchEntry::UpsertDraft {
+                        draft: restored_draft(),
+                    },
+                ],
+            ),
+        )
         .unwrap();
+    let original = fs::read(s.live()).unwrap();
+    let marker_command = patch(101, 2, vec![resolve(90)]);
+    let marker_receipt = s.service().patch(&owner(), &marker_command).unwrap();
     let companion = fs::read(recovery_path(&s)).unwrap();
     fs::write(s.live(), &original).unwrap();
     fs::remove_file(s.backup()).unwrap();
     let outside = s.home.path().join("untouched");
     fs::write(&outside, b"outside owner evidence").unwrap();
     std::os::unix::fs::symlink(&outside, s.backup()).unwrap();
+    let mut updated_draft = restored_draft();
+    updated_draft.text = "Updated draft".into();
+    let draft_command = patch(
+        102,
+        3,
+        vec![PreferencesPatchEntry::UpsertDraft {
+            draft: updated_draft.clone(),
+        }],
+    );
     for _ in 0..3 {
-        assert_eq!(
-            s.service().get(&owner()).unwrap_err().code,
-            CoreErrorCode::CommitUncertain
-        );
+        let saved = s.saved();
+        assert_eq!(saved.revision, revision(3));
+        assert_eq!(saved.resolved_unsent_input_ids, vec![id(90)]);
+        assert_eq!(saved.global, global);
+        assert_eq!(saved.drafts, vec![restored_draft()]);
+        for command in [&marker_command, &draft_command] {
+            let error = s.service().patch(&owner(), command).unwrap_err();
+            assert_eq!(error.code, CoreErrorCode::CommitUncertain);
+            assert!(error.message.contains(id(101).as_str()));
+        }
         assert_eq!(fs::read(recovery_path(&s)).unwrap(), companion);
         assert!(quarantined_paths(&s).is_empty());
     }
@@ -849,19 +881,17 @@ fn companion_projection_failure_preserves_marker_until_publication_retry() {
     let saved = s.saved();
     assert_eq!(saved.revision, revision(3));
     assert_eq!(saved.resolved_unsent_input_ids, vec![id(90)]);
-    s.service()
-        .patch(
-            &owner(),
-            &patch(
-                102,
-                3,
-                vec![PreferencesPatchEntry::UpsertDraft {
-                    draft: restored_draft(),
-                }],
-            ),
-        )
-        .unwrap();
-    assert_eq!(s.saved().drafts, vec![restored_draft()]);
+    assert_eq!(
+        s.service().patch(&owner(), &marker_command).unwrap(),
+        marker_receipt
+    );
+    let draft_receipt = s.service().patch(&owner(), &draft_command).unwrap();
+    assert_eq!(s.saved().drafts, vec![updated_draft]);
+    assert_eq!(s.saved().global, global);
+    assert_eq!(
+        s.service().patch(&owner(), &draft_command).unwrap(),
+        draft_receipt
+    );
 }
 
 #[test]
@@ -1168,6 +1198,12 @@ fn durable_marker_replays_after_failed_main_publication_without_false_success() 
     );
     assert_eq!(fs::read(s.live()).unwrap(), before);
     let companion = fs::read(recovery_path(&s)).unwrap();
+    let saved = s.saved();
+    assert_eq!(saved.revision, revision(3));
+    assert_eq!(saved.resolved_unsent_input_ids, vec![id(90)]);
+    assert_eq!(fs::read(s.live()).unwrap(), before);
+    assert_eq!(fs::read(recovery_path(&s)).unwrap(), companion);
+    assert!(quarantined_paths(&s).is_empty());
     // Restore the publication destination before reloading: a still-valid
     // pending receipt rolls forward and replays without a second marker write.
     // A reload while projection remains broken is covered separately above.
