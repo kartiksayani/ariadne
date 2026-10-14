@@ -555,6 +555,9 @@ for (const theme of ['dark', 'light'] as const) for (const viewport of conversat
     const pin = dock.locator('.conversation-pin');
     await expect(pin.getByRole('heading', { name: /^Your turn ·/ })).toBeInViewport();
     await expect(pin.locator('p').first()).toBeInViewport();
+    await expect(conversation.locator('.conversation-header .status-badge')).toHaveText('Waiting on me');
+    await expect(page.locator('[data-waiting-item="4.1"]')).toBeVisible();
+    if (viewport.width === 1280) for (let index = 0; index < 3; index++) await expect(turns.nth(index), 'at least three messages share the initial chat viewport').toBeInViewport();
     await expect(dock.getByRole('textbox', { name: 'Reply in your own words', exact: true })).toBeAttached();
     await expect(dock.locator('[data-answer-option]')).not.toHaveCount(0);
     await settle(page);
@@ -564,8 +567,9 @@ for (const theme of ['dark', 'light'] as const) for (const viewport of conversat
       return { body: body.height / pane.height, dock: dock.height / pane.height,
         bodyBottom: body.bottom, dockTop: dock.top, dockBottom: dock.bottom, paneBottom: pane.bottom };
     });
-    expect(geometry.body, 'the transcript keeps most of the conversation pane').toBeGreaterThanOrEqual(0.55);
-    expect(geometry.dock, 'the answer footer uses at most 40% of the pane').toBeLessThanOrEqual(0.40);
+    // Allow subpixel layout rounding around the CSS 30% cap.
+    expect(geometry.body, 'the transcript keeps most of the conversation pane').toBeGreaterThanOrEqual(0.699);
+    expect(geometry.dock, 'the answer footer uses at most 30% of the pane').toBeLessThanOrEqual(0.301);
     expect(geometry.bodyBottom).toBeLessThanOrEqual(geometry.dockTop + 1);
     expect(geometry.dockBottom).toBeCloseTo(geometry.paneBottom, 0);
     const overlayBox = (await conversation.boundingBox())!, waitingBox = (await page.locator('.shell-waiting').boundingBox())!;
@@ -574,6 +578,9 @@ for (const theme of ['dark', 'light'] as const) for (const viewport of conversat
     expect(overlayBox.y).toBeGreaterThanOrEqual(tabs.y + tabs.height - 1);
     expect(overlayBox.x + overlayBox.width).toBeLessThanOrEqual(viewport.width + 1);
     expect(overlayBox.y + overlayBox.height).toBeLessThanOrEqual(footer.y + 1);
+    expect(await page.locator('.shell-footer .shell-key').allTextContents()).toEqual([
+      'escBack to Map', '↑↓messages', '1–9select', '⌥1–9send choice + note', '⌥0focus own words', '⌘↵send', 'Spacepeek',
+    ]);
     await page.screenshot({ path: testInfo.outputPath(`${id}.png`), animations: 'disabled' });
     expect(await body.evaluate(element => element.scrollHeight > element.clientHeight), 'the long transcript scrolls').toBe(true);
     const footerBefore = await dock.boundingBox(), pinBefore = await pin.boundingBox();

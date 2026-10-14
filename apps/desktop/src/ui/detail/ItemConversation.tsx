@@ -29,6 +29,7 @@ import { copyText } from '../shared/clipboard';
 import { notices } from '../pages/notices';
 import { isViewConflict } from '../shared/conflictNotice';
 import { displayStatus } from '../../selectors/waiting/replied';
+import { waitingOnOwner } from '../../selectors/waiting/rows';
 import { closedSessionQuestion, sessionAnswerBlocked } from '../../selectors/sessionClosed';
 import { SessionClosedChip } from '../shared/SessionClosedChip';
 import { CopyMessage } from './CopyMessage';
@@ -279,7 +280,8 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   const currentQuestionOpen = item?.status === 'waiting_on_me' && !!round && round.closed_at === null
     && round.question_revision === item.question_revision;
   const archived = session?.archived_at != null || (item && session?.topics[item.topic_id]?.archived_at != null);
-  const showAnswer = !archived && (!!session && !!item && closedSessionQuestion(session, item) || currentQuestionOpen && !!(model?.answer || retained?.uncertain || retained?.error));
+  const showAnswer = expanded ? !!session && !!item && waitingOnOwner(session, item)
+    : !archived && (!!session && !!item && closedSessionQuestion(session, item) || currentQuestionOpen && !!(model?.answer || retained?.uncertain || retained?.error));
   const savedAnswers = !showAnswer && session ? drafts.savedAnswers({ project_id: session.project_id, session_id: session.id }, itemId) : [];
   const ackTo = session && item ? ackTarget(session, item) : null;
   // An open item is replied to and an in-progress item gets notes: that box is always there, never behind a button. Other
@@ -698,7 +700,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     {showAnswer && <section className="detail-section detail-answer" aria-label="Your answer">
       {model.answer && <PausedNote actions={actions} />}
       {/* While the follow-up box is open, it is the detail's one data-owner-input. */}
-      <AnswerSlot drafts={drafts} store={store} itemId={itemId} blocked={model.answer?.blocked} focusRequest={answerFocus}
+      <AnswerSlot drafts={drafts} store={store} itemId={itemId} compactOptions={expanded} blocked={model.answer?.blocked} focusRequest={answerFocus}
         marked={!owner}
         onFocusRequestConsumed={onFocusRequestConsumed} onEscape={() => focusRoot(itemId)} onAgentNotRunning={onAgentNotRunning} onSent={sentJustNow} />
     </section>}

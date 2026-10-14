@@ -3,6 +3,7 @@ import { useSession } from '../../data/session-store';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { StatusBadge } from '../shared/StatusBadge';
 import { statusKey } from '../shared/status';
+import { badgeLabel } from '../tree/model';
 import { ItemConversation, type ItemDetailProps } from './ItemConversation';
 import './conversation.css';
 
@@ -17,7 +18,8 @@ export function ConversationView({ onClose, ...props }: ItemDetailProps & { read
   }}>
     <header className="conversation-header">
       <div><h1>{item?.question ?? 'Conversation'}</h1>
-        {item && session && <div className="conversation-meta"><span>{item.type}</span><StatusBadge status={statusKey[displayStatus(session, item)]} /></div>}
+        {item && session && <div className="conversation-meta"><span className="conversation-type">{item.type}</span><StatusBadge status={statusKey[displayStatus(session, item)]}
+          label={badgeLabel(item, props.later, displayStatus(session, item))} /></div>}
       </div>
       <button type="button" className="btn btn-secondary" onClick={onClose}><i className="ph ph-arrow-left" aria-hidden="true" />Back to Map</button>
     </header>

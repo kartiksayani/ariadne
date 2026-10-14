@@ -24,6 +24,7 @@ export interface AnswerSlotProps {
   readonly drafts: OwnerDraftStore;
   readonly store: SessionStore;
   readonly itemId: string;
+  readonly compactOptions?: boolean;
   /** Why the detail model blocks answering (closed session, reconnecting), if it does. */
   readonly blocked?: string | null;
   readonly focusRequest?: OwnerFocusRequest;
@@ -38,7 +39,7 @@ export interface AnswerSlotProps {
   readonly marked?: boolean;
 }
 
-export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFocusRequestConsumed, onEscape, onAgentNotRunning, onSent, marked = true }: AnswerSlotProps) {
+export function AnswerSlot({ drafts, store, itemId, compactOptions = false, blocked, focusRequest, onFocusRequestConsumed, onEscape, onAgentNotRunning, onSent, marked = true }: AnswerSlotProps) {
   const mark = marked ? itemId : undefined;
   const root = useRef<HTMLDivElement>(null), handled = useRef<number | null>(null);
   const [shortcutStatus, setShortcutStatus] = useState<string | null>(null);
@@ -106,7 +107,7 @@ export function AnswerSlot({ drafts, store, itemId, blocked, focusRequest, onFoc
   const review = { label: 'Review this question', onAction: () => { setShortcutStatus(null); submit.review(); } };
   return <div ref={root} className="detail-answer-slot" data-owner-input={mark}>
     {shortcutStatus && <p role="alert">{shortcutStatus}</p>}
-    <AnswerControl variant="chat" options={options} selected={selected} draft={draft.text} label="Answer"
+    <AnswerControl variant="chat" compactOptions={compactOptions} options={options} selected={selected} draft={draft.text} label="Answer"
       locked={submit.locked || submit.changed || ended} frozen={!live}
       warn={submit.changed && !entry.uncertain ? changedText : undefined} warnAction={submit.changed && !entry.uncertain ? review : undefined}
       blocked={ended ? sessionAnswerBlocked(session!) : entry.uncertain || submit.changed ? undefined : submit.blocked ?? blocked ?? undefined}

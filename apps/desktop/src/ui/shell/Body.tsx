@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from 'react';
-import { bodyLayout, DETAIL_DEFAULT, DETAIL_MAX, DETAIL_MIN } from './model';
+import { bodyLayout, DETAIL_DEFAULT, DETAIL_MAX, DETAIL_MIN, WAITING_FOLDED, WAITING_WIDTH } from './model';
 import { WaitingFold } from './fold';
 import { ItemHistoryContext } from './itemHistory';
 import { HideIcon } from '../shared/HideIcon';
@@ -29,7 +29,7 @@ export interface BodyProps {
 
 const STEP = 16, SETTLE_MS = 500;
 
-/** The body's width, following window resizes; null where it cannot be measured. */
+/** The body's visible width, following window resizes; null where it cannot be measured. */
 function useWidth(ref: RefObject<HTMLDivElement | null>): number | null {
   const [width, setWidth] = useState<number | null>(null);
   useEffect(() => {
@@ -95,7 +95,9 @@ export function Body({ conversation, waiting, center, detail, detailPath, onClos
     if (settle.current) clearTimeout(settle.current);
     settle.current = setTimeout(() => commit(value), SETTLE_MS);
   };
-  return <div ref={ref} className="shell-body" style={{ gridTemplateColumns: layout.columns }}>
+  // The retained grid can exceed a narrow viewport; Conversation follows the viewport instead.
+  return <div ref={ref} className="shell-body-viewport">
+    <div className="shell-body" style={{ gridTemplateColumns: layout.columns }}>
     <div className={`shell-waiting${layout.folded ? ' shell-waiting-folded' : ''}`}>
       <WaitingFold.Provider value={fold}>{waiting}</WaitingFold.Provider></div>
     <main className="shell-center" inert={!!conversation || undefined} aria-hidden={!!conversation || undefined}><div className="shell-center-content">{center}</div><Notices /></main>
@@ -127,6 +129,7 @@ export function Body({ conversation, waiting, center, detail, detailPath, onClos
       </div>
       <div className="shell-detail-scroll">{detail}</div>
     </aside>}
-    {conversation && <div className="shell-conversation">{conversation}</div>}
+    </div>
+    {conversation && <div className="shell-conversation" style={{ left: layout.folded ? WAITING_FOLDED : WAITING_WIDTH }}>{conversation}</div>}
   </div>;
 }

@@ -208,20 +208,21 @@ target and the ordinary revision/operation/receipt guards. No new persisted mode
 session-wide conversation, host transcript read or owner-input command is added.
 
 An unanswered current question uses a pinned `Your turn · <short name>` footer
-capped at 40% of the view height; its answer control replaces the ordinary composer
+capped at 30% of the conversation pane; compact labels retain consequences behind
+More, and its answer control replaces the ordinary composer
 until answered. Closing or switching keeps shared drafts and uncertain operations.
 The view participates in existing captured-revision seen dwell through the shared
 reading lane.
 
-Capture the divider's first new message ID per item opening/switch and retain it
-through that viewing session, including seen dwell. The divider may derive a
-timestamp boundary from `SessionSeen.since` for baseline-covered messages when
-no explicit item seen revision exists. A current
-recorded item revision has no new section; an explicit later revision that cannot
-map to messages has no divider. Messages lack item revisions and `append_message`
-creates no `ItemChangeRecord`, so the full last-seen message boundary is not
-recoverable. Reuse existing seen preferences without adding fields or guessing a
-boundary from unrelated change records.
+Capture the divider's first unread agent message ID per item opening/switch and
+retain it through seen dwell. Apply receipt identities and `item_revisions` map
+messages to the final revision at which their atomic batch became visible. For
+recorded item-seen R, mapped revisions greater than R are new. Require complete,
+consistent evidence for involved agent messages, validated against creation and
+change provenance; omit the divider when evidence is trimmed or conflicts.
+Owner messages are seen and never anchor it. Nothing/everything new has no divider.
+Without explicit item-seen R, use the existing `SessionSeen.since` timestamp
+baseline. Reuse preferences without adding fields or guessing missing provenance.
 
 ### Claude installed-helper acceptance join
 

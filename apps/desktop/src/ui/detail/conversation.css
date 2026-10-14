@@ -32,6 +32,9 @@
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.conversation-type {
   text-transform: capitalize;
 }
 
@@ -45,7 +48,8 @@
 }
 
 .item-conversation .detail-dock {
-  padding-block: 12px;
+  max-height: 30%;
+  padding-block: 8px;
 }
 
 .item-conversation .detail-bubble {
@@ -53,8 +57,55 @@
 }
 
 .conversation-pin h3 {
-  margin: 0 0 8px;
+  margin: 0 0 4px;
   font-size: calc(14px * var(--text-scale));
+}
+
+.item-conversation .answer-options-compact .answer-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.item-conversation .answer-options-compact .answer-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.item-conversation .answer-options-compact .answer-option {
+  padding: 5px 8px;
+  gap: 0;
+}
+
+.item-conversation .answer-options-compact .answer-option-head {
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+
+.item-conversation .answer-options-compact .answer-label {
+  overflow-wrap: anywhere;
+}
+
+.item-conversation .answer-options-compact .answer-recommended {
+  display: inline-flex;
+  margin: 0;
+  font-size: calc(11px * var(--text-scale));
+}
+
+.item-conversation .answer-options-compact .answer-description {
+  display: none;
+}
+
+.item-conversation .answer-options-compact .answer-description-open {
+  display: block;
+  margin-top: 4px;
+}
+
+.item-conversation .answer-options-compact .answer-more {
+  margin: 5px 0 0;
 }
 
 .conversation-unseen {

@@ -52,6 +52,23 @@ describe('compact chat choices', () => {
     { ...options[0]!, consequence: 'Keep the current plan and check each example before sending it. '.repeat(12) },
     { id: 'no', label: 'Change the design after comparing the alternatives', consequence: 'Review the alternatives and explain the tradeoffs in the conversation. '.repeat(12), recommended: false },
   ];
+  it('keeps conversation option labels and Recommended inline while More reveals consequences without sending', () => {
+    const values = props({ options: choices, variant: 'chat', compactOptions: true }), view = render(<AnswerControl {...values} />);
+    const option = view.container.querySelector('[data-answer-option="0"]')!;
+    expect(option.querySelector('.answer-option-head .answer-recommended')?.textContent).toBe('Recommended');
+    const more = screen.getByRole('button', { name: `More about ${choices[0]!.label}` });
+    const consequence = document.getElementById(more.getAttribute('aria-controls')!)!;
+    expect(consequence.hidden).toBe(true);
+    fireEvent.click(more);
+    expect(consequence.hidden).toBe(false);
+    expect(consequence.textContent).toBe(choices[0]!.consequence);
+    expect(values.onSelect).not.toHaveBeenCalled(); expect(values.onDraft).not.toHaveBeenCalled();
+    expect(values.onSendOption).not.toHaveBeenCalled(); expect(values.onSendText).not.toHaveBeenCalled();
+    view.rerender(<AnswerControl {...values} compactOptions={false} />);
+    expect(option.querySelector('.answer-option-head .answer-recommended')).toBeNull();
+    expect(view.container.querySelector('.answer-options-compact')).toBeNull();
+    expect(option.querySelector('.answer-consequence .answer-recommended')).toBeTruthy();
+  });
   it.each(['', '  \n'])('shows every choice for an empty note %j and keeps sending separate from selection', async draft => {
     const user = userEvent.setup(), values = props({ options: choices, variant: 'chat', draft });
     const view = render(<AnswerControl {...values} />);

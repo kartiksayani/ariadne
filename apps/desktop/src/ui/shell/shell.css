@@ -296,6 +296,15 @@
 }
 
 /* — body — */
+.shell-body-viewport {
+  position: relative;
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .shell-body {
   display: grid;
   grid-template-rows: minmax(0, 1fr);
@@ -349,12 +358,15 @@
 }
 
 .shell-conversation {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
   z-index: 3;
-  grid-column: 2 / -1;
-  grid-row: 1;
   display: flex;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   background: var(--a-bg);
 }
 

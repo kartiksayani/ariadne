@@ -54,6 +54,7 @@ import { ItemHistoryContext, useItemHistory, type HistoryDirection } from './ui/
 import { connectionOf } from './ui/shared/connection';
 import { acknowledge, ackBlocked, ackFailure, ackTarget } from './ui/shared/ack';
 import { displayStatus } from './selectors/waiting/replied';
+import { waitingOnOwner } from './selectors/waiting/rows';
 import { earlierAgent } from './ui/shared/excerpt';
 import { FileRefs, LinkOpener } from './ui/shared/MarkdownText';
 import { fileOpener, linkOpener, listenForLinkFailures } from './ui/shared/openers';
@@ -714,6 +715,9 @@ function Workspace({ application }: { application: Application }) {
         onLater={value => preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)}
         provenance={<CopiedProvenance store={store} itemId={selectedId}
           projectPath={projectId => state.projects?.projects.items.find(project => project.project_id === projectId)?.canonical_root ?? null} revealItem={revealLinkedItem} />} /> : undefined}
+      conversationFooter={conversation && sessionState?.snapshot?.session.items[conversation.itemId] ? {
+        question: waitingOnOwner(sessionState.snapshot.session, sessionState.snapshot.session.items[conversation.itemId]!),
+      } : undefined}
       conversation={conversation?.route === key && store && route ? <ConversationView key={`${key}:${conversation.itemId}`} drafts={application.drafts}
         store={store} itemId={conversation.itemId} later={preferences?.later.some(value => sameSession(value, route) && value.item_id === conversation.itemId) ?? false}
         onClose={closeConversation} onBring={() => { void queueBring({ ...route, item_id: conversation.itemId }); }} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })}

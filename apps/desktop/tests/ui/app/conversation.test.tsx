@@ -177,6 +177,26 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     expect(selected(transport)).toBe('4');
   });
 
+  it('keeps the header, Waiting card and pin aligned before and after an owner reply', async () => {
+    const transport = await setup(); await expand(); await switchQuestion();
+    const header = () => conversation().querySelector('.conversation-header .status-badge')!;
+    expect(header().textContent).toBe('Waiting on me');
+    expect(card('2')).toBeTruthy(); expect(conversation().querySelector('.conversation-pin')).toBeTruthy();
+    expect(document.querySelector('.shell-footer')?.textContent).toContain('⌥0focus own words');
+    expect(document.querySelector('.shell-footer')?.textContent).not.toContain('hide / unhide');
+    const words = within(conversation()).getByLabelText('Reply in your own words');
+    fireEvent.change(words, { target: { value: 'This is my answer.' } });
+    key(words, 'Enter', { metaKey: true });
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    await waitFor(() => {
+      expect(header().textContent).toBe('Waiting on agent');
+      expect(card('2')).toBeNull(); expect(conversation().querySelector('.conversation-pin')).toBeNull();
+    });
+    expect(row('2').querySelector('.status-badge')?.textContent).toBe('Waiting on agent');
+    expect(document.querySelector('.shell-footer')?.textContent).not.toContain('⌥0');
+    expect(within(conversation()).getByLabelText('Reply message')).toBeTruthy();
+  });
+
   it('Command Enter sends the ordinary overlay composer to its own item', async () => {
     const transport = await setup(); await expand(); await switchQuestion();
     const session = transport.sessions.get(route.session_id)!;

@@ -44,6 +44,8 @@ export interface AnswerOption {
 export interface AnswerControlProps {
   readonly options: readonly AnswerOption[];
   readonly variant: 'compact' | 'full' | 'chat';
+  /** The bigger conversation keeps option consequences behind More. */
+  readonly compactOptions?: boolean;
   readonly selected: number;
   readonly draft: string;
   readonly warn?: string;
@@ -68,7 +70,7 @@ export function defaultSelection(options: readonly Pick<AnswerOption, 'id' | 're
   return index >= 0 ? index : options.findIndex(option => option.recommended);
 }
 
-export function AnswerControl({ options, variant, selected, draft, warn, warnAction, blocked, locked = false, frozen = false, noText = false, label,
+export function AnswerControl({ options, variant, compactOptions = false, selected, draft, warn, warnAction, blocked, locked = false, frozen = false, noText = false, label,
   onSelect, onDraft, onSendOption, onSendText, onEscape }: AnswerControlProps) {
   const root = useRef<HTMLDivElement>(null), text = useRef<HTMLTextAreaElement>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -134,10 +136,11 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
           <span className="answer-option-head">
             <span className="answer-key">{index + 1}</span>
             <span className="answer-label">{option.label}</span>
+            {compactOptions && option.recommended && <span className="answer-recommended"><i className="ph-fill ph-star" aria-hidden="true" />Recommended</span>}
             {on && <span className="answer-picked"><i className="ph ph-check" aria-hidden="true" /></span>}
           </span>
-          <span className="answer-consequence">{option.recommended && <span className="answer-recommended"><i className="ph-fill ph-star" aria-hidden="true" />Recommended</span>}{chat
-            ? <span id={id} className={`answer-description${open ? ' answer-description-open' : ''}`}>{option.consequence}</span> : option.consequence}</span>
+          <span className="answer-consequence">{!compactOptions && option.recommended && <span className="answer-recommended"><i className="ph-fill ph-star" aria-hidden="true" />Recommended</span>}{chat
+            ? <span id={id} hidden={compactOptions && !open || undefined} className={`answer-description${open ? ' answer-description-open' : ''}`}>{option.consequence}</span> : option.consequence}</span>
         </button>;
         return chat ? <div className="answer-card" key={option.id}>
           {button}
@@ -160,7 +163,7 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
       </button>
       {!chat && <span className="answer-hint">{hint}</span>}
     </div>;
-  return <div ref={root} className={`answer answer-${variant}${chat ? ' answer-full' : ''}${collapsed ? ' answer-collapsed' : ''}`} role="group" aria-label={label} onKeyDown={keys}>
+  return <div ref={root} className={`answer answer-${variant}${chat ? ' answer-full' : ''}${compactOptions ? ' answer-options-compact' : ''}${collapsed ? ' answer-collapsed' : ''}`} role="group" aria-label={label} onKeyDown={keys}>
     {warn && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{warn}</span>
       {warnAction && <button type="button" className="btn btn-secondary answer-warn-action" onClick={event => { event.stopPropagation(); warnAction.onAction(); }}>{warnAction.label}</button>}</div>}
     {chat ? <>

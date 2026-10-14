@@ -2,10 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { designFixture, prototypeData } from '../design/fixtures';
 import { frameIds } from '../design/frames';
 import { handoffMembers } from '../design/source.mts';
+import { currentQuestionReplied, displayStatus } from '../../../apps/desktop/src/selectors/waiting/replied';
+import { waitingOnOwner } from '../../../apps/desktop/src/selectors/waiting/rows';
 
 const data = prototypeData(handoffMembers()['Ariadne.dc.html']);
 
 describe('neutral design samples', () => {
+  it('keeps historical thread answers out of the current waiting episode', () => {
+    const fixture = designFixture('1u', data), session = fixture.transport.sessions.get(fixture.route!.session_id)!;
+    const item = session.items['4.1']!, round = session.rounds[item.current_round_id!]!;
+    expect(round.question_revision).toBe(item.question_revision);
+    expect(session.answers.filter(answer => answer.item_id === item.id).every(answer => answer.question_revision < item.question_revision)).toBe(true);
+    expect(currentQuestionReplied(session, item)).toBe(false);
+    expect(waitingOnOwner(session, item)).toBe(true);
+    expect(displayStatus(session, item)).toBe('waiting_on_me');
+  });
   it('keeps project names, roots and session references consistent', () => {
     expect(data.PROJECTS.map(project => [project.id, project.name, project.path])).toEqual([
       ['notes', 'notes-sdk', '~/Documents/Code/notes-sdk'],

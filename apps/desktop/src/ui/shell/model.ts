@@ -193,11 +193,26 @@ export function footerSummary(counts: FooterCounts | null): string {
   return `${counts.items} items · ${counts.waiting} waiting on you · ${counts.inProgress} in progress · ${counts.open} open${counts.archivedTopics ? ` · ${counts.archivedTopics} archived topics` : ''}`;
 }
 
-export const footerKeys: readonly { readonly k: string; readonly t: string }[] = [
-  { k: '↑↓', t: 'move' }, { k: '←→', t: 'fold' }, { k: 'a', t: 'ack / answer' }, { k: '1–9', t: 'select' }, { k: '⌥1–9', t: 'send choice + note' }, { k: '⌥0', t: 'focus own words' }, { k: '⌘↵', t: 'reply only' }, { k: '↵', t: 'send / details' },
-  { k: 'b r d z o', t: 'item actions' }, { k: 'x', t: 'hide / unhide' }, { k: '/', t: 'search' }, { k: 'g', t: 'graph' }, { k: 'w', t: 'waiting' }, { k: 'esc', t: 'close' },
-  { k: 'Space', t: 'peek' }, { k: '⌘E', t: 'recent' },
+export interface FooterKey { readonly k: string; readonly t: string }
+export interface ConversationFooterState { readonly question: boolean }
+
+const footerKeyDefinitions: readonly (FooterKey & { readonly conversationText?: string; readonly questionOnly?: boolean })[] = [
+  { k: '↑↓', t: 'move', conversationText: 'messages' }, { k: '←→', t: 'fold' }, { k: 'a', t: 'ack / answer' }, { k: '1–9', t: 'select', conversationText: 'select' },
+  { k: '⌥1–9', t: 'send choice + note', conversationText: 'send choice + note', questionOnly: true }, { k: '⌥0', t: 'focus own words', conversationText: 'focus own words', questionOnly: true },
+  { k: '⌘↵', t: 'reply only', conversationText: 'send' }, { k: '↵', t: 'send / details' },
+  { k: 'b r d z o', t: 'item actions' }, { k: 'x', t: 'hide / unhide' }, { k: '/', t: 'search' }, { k: 'g', t: 'graph' }, { k: 'w', t: 'waiting' }, { k: 'esc', t: 'close', conversationText: 'Back to Map' },
+  { k: 'Space', t: 'peek', conversationText: 'peek' }, { k: '⌘E', t: 'recent' },
 ];
+
+export const footerKeys: readonly FooterKey[] = footerKeyDefinitions.map(({ k, t }) => ({ k, t }));
+
+/** The same shortcut catalogue, limited to the keys that work in Conversation. */
+export function footerKeysFor(conversation?: ConversationFooterState): readonly FooterKey[] {
+  if (!conversation) return footerKeys;
+  return footerKeyDefinitions.flatMap(key => key.conversationText === undefined || (key.questionOnly && !conversation.question)
+    ? [] : [{ k: key.k, t: key.conversationText }])
+    .sort((left, right) => Number(right.k === 'esc') - Number(left.k === 'esc'));
+}
 
 /** Body column widths in CSS pixels. The detail bounds match the saved `detail_width` bounds. */
 export const WAITING_WIDTH = 300, WAITING_FOLDED = 44, CENTRE_MIN = 560;

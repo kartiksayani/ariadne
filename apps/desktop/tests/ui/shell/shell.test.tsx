@@ -38,6 +38,87 @@ function measureBody(initialWidth: number): (width: number) => void {
 }
 
 describe('Paperwhite shell', () => {
+  it('bounds Conversation to the viewport while the covered Map and detail retain their grid and mounted state', () => {
+    measureBody(900);
+    const value = props({ body: { waiting: <WaitingFrame count="2" />, center: <input aria-label="Map draft" defaultValue="Preserved" />,
+      detail: <p>Dock content</p>, onFoldWaiting: vi.fn() } });
+    const { rerender } = render(<Shell {...value} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (2)' }));
+    const grid = document.querySelector<HTMLElement>('.shell-body')!, center = screen.getByRole('main');
+    const draft = screen.getByRole<HTMLInputElement>('textbox', { name: 'Map draft' });
+    const detail = screen.getByRole('complementary', { name: 'Item detail' });
+    const columns = grid.style.gridTemplateColumns;
+    // The retained Map's minimum columns extend to 1000px in this 900px viewport.
+    expect(columns).toBe('300px minmax(380px,1fr) 320px');
+    fireEvent.change(draft, { target: { value: 'Still here' } });
+    rerender(<Shell {...value} body={{ ...value.body, conversation: <p>Conversation content</p> }} />);
+    const overlay = screen.getByText('Conversation content').parentElement!;
+    expect(overlay.className).toBe('shell-conversation');
+    expect(overlay.parentElement?.className).toBe('shell-body-viewport');
+    expect(overlay.previousElementSibling).toBe(grid);
+    expect(overlay.style.left).toBe('300px');
+    expect(grid.style.gridTemplateColumns).toBe(columns);
+    expect(grid.querySelector('.shell-center')).toBe(center);
+    expect(grid.querySelector('.shell-detail')).toBe(detail);
+    expect(center.getAttribute('inert')).toBe('');
+    expect(detail.getAttribute('aria-hidden')).toBe('true');
+    expect(draft.value).toBe('Still here');
+    // CSS owns the actual geometry; browser design assertions complement this jsdom ownership check.
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/shell/shell.css'), 'utf8');
+    const rules = (selector: string) => css.split(`${selector} {`)[1]!.split('}')[0];
+    expect(rules('.shell-body-viewport')).toContain('position: relative;');
+    expect(rules('.shell-body-viewport')).toContain('minmax(0, 1fr) / minmax(0, 1fr)');
+    expect(rules('.shell-body-viewport')).toContain('overflow: hidden;');
+    expect(rules('.shell-conversation')).toContain('position: absolute;');
+    expect(rules('.shell-conversation')).toContain('right: 0;');
+    expect(rules('.shell-conversation')).not.toContain('grid-column');
+    rerender(<Shell {...value} />);
+    expect(screen.getByRole('main')).toBe(center);
+    expect(screen.getByRole('complementary', { name: 'Item detail' })).toBe(detail);
+    expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Map draft' })).toBe(draft);
+    expect(draft.value).toBe('Still here');
+    expect(grid.style.gridTemplateColumns).toBe(columns);
+    expect(center.hasAttribute('inert')).toBe(false);
+  });
+
+  it('moves the Conversation edge with the actual Waiting fold and peek as the viewport resizes', () => {
+    const resizeWindow = measureBody(900), fold = vi.fn();
+    const value = props({ body: { waiting: <WaitingFrame count="2" />, center: <p>Map</p>, detail: <p>Dock</p>,
+      conversation: <p>Conversation content</p>, onFoldWaiting: fold } });
+    const { rerender } = render(<Shell {...value} />);
+    const overlay = document.querySelector<HTMLElement>('.shell-conversation')!;
+    expect(overlay.style.left).toBe('44px');
+    fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (2)' }));
+    expect(overlay.style.left).toBe('300px');
+    expect(fold).not.toHaveBeenCalled();
+    resizeWindow(1400);
+    expect(overlay.style.left).toBe('300px');
+    rerender(<Shell {...value} body={{ ...value.body, waitingFolded: true }} />);
+    expect(overlay.style.left).toBe('44px');
+    resizeWindow(900);
+    expect(overlay.style.left).toBe('44px');
+  });
+
+  it('shows only Conversation shortcuts and hides pinned question keys when no question is pinned', () => {
+    const value = props({ body: { waiting: null, center: <p>Map</p>, conversation: <p>Conversation</p> },
+      conversationFooter: { question: true } });
+    const { rerender } = render(<Shell {...value} />);
+    const footer = document.querySelector('.shell-footer')!;
+    const keys = () => [...footer.querySelectorAll('.pw-keycap')].map(key => key.textContent);
+    expect(keys()).toEqual(['esc', '↑↓', '1–9', '⌥1–9', '⌥0', '⌘↵', 'Space']);
+    expect(footer.textContent).toContain('escBack to Map');
+    expect(footer.textContent).toContain('↑↓messages');
+    expect(footer.textContent).toContain('⌘↵send');
+    rerender(<Shell {...value} conversationFooter={{ question: false }} />);
+    expect(keys()).toEqual(['esc', '↑↓', '1–9', '⌘↵', 'Space']);
+    rerender(<Shell {...value} conversationFooter={undefined} />);
+    expect(keys()).toEqual(['esc', '↑↓', '1–9', '⌘↵', 'Space']);
+    rerender(<Shell {...value} body={{ ...value.body, conversation: undefined }} />);
+    expect(keys()).toContain('g');
+    expect(keys()).toContain('←→');
+    expect(footer.textContent).toContain('⌘↵reply only');
+  });
+
   it('bounds the overlay in a named centre container while its content owns scrolling', () => {
     // jsdom does not lay out CSS; these ownership rules complement the design geometry assertions.
     const shell = readFileSync(resolve(__dirname, '../../../src/ui/shell/shell.css'), 'utf8');
