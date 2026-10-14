@@ -24,8 +24,10 @@ function runRecipeFixture(output, run = execFileSync) {
       stdio: 'pipe',
     });
   } catch (error) {
-    throw new Error('PR comments fixture failed. Prebuild it from the repository root, then rerun:\n'
-      + 'cargo test -p ariadne-cli --locked --offline --test pr_comments_recipe --no-run', { cause: error });
+    const prebuild = ['ETIMEDOUT', 'ENOENT'].includes(error?.code)
+      ? ' Prebuild it from the repository root, then rerun:\n'
+        + 'cargo test -p ariadne-cli --locked --offline --test pr_comments_recipe --no-run' : '';
+    throw new Error(`PR comments fixture failed.${prebuild}`, { cause: error });
   }
 }
 
@@ -48,6 +50,16 @@ it.each(['ETIMEDOUT', 'ENOENT'])('reports the exact fixture prebuild command on 
   expect(() => runRecipeFixture('stored.json', () => { throw cause; })).toThrow(expect.objectContaining({
     message: expect.stringContaining('cargo test -p ariadne-cli --locked --offline --test pr_comments_recipe --no-run'),
     cause,
+  }));
+});
+
+it.each([
+  ['another process error', Object.assign(new Error('Fixture process failed'), { code: 'EACCES' })],
+  ['a failed fixture assertion', Object.assign(new Error('Fixture assertion failed'), { status: 101 })],
+  ['an ordinary error', new Error('Fixture failed')],
+])('retains the %s cause without suggesting a prebuild', (_name, cause) => {
+  expect(() => runRecipeFixture('stored.json', () => { throw cause; })).toThrow(expect.objectContaining({
+    message: 'PR comments fixture failed.', cause,
   }));
 });
 

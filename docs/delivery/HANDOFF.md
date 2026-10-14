@@ -1,4 +1,4 @@
-# Ariadne handoff — 2026-10-13
+# Ariadne handoff — 2026-10-14
 
 Claude Code on **Opus 5.5** maintains delivery. At most **3 Codex companion jobs**
 (**gpt-6.1-sol, high effort**) implement bounded work in isolated worktrees with
@@ -16,41 +16,37 @@ push, stages and commits, and plans time for it. Before UI implementation, share
 clickable HTML mock under `designs/mocks/`; the owner signs off and implementation
 follows it.
 
-**Main: `91bf3537` (#156). Alpha.14 released as `v0.1.0-alpha.14`** (tag at `1135693c`, #155).
-[Alpha.14 release](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.14).
+**Main: `10b6013a` (#159). Alpha.15 released as
+[`v0.1.0-alpha.15`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.15)**
+(tag at `10b6013a`). Alpha.14 is `v0.1.0-alpha.14` (tag at `1135693c`, #155): a Map you
+can follow, from #150 (`395736a2`), #151 (`bc7fa712`), #152 (`63295ec5`), #153
+(`2bd09408`), #154 (`8a58f93c`) and #155 (`1135693c`).
 
-## Alpha.14 complete — a Map you can follow
+## Alpha.15 released
 
-- **14.0 data contracts:** [#150](https://github.com/kartiksayani/ariadne/pull/150), `395736a2`.
-- **14.1 agent rules and CLI warnings:** [#151](https://github.com/kartiksayani/ariadne/pull/151), `bc7fa712`.
-- **14.3 change tracking derived views:** [#152](https://github.com/kartiksayani/ariadne/pull/152), `63295ec5`.
-- **14.2a Map look:** [#153](https://github.com/kartiksayani/ariadne/pull/153), `2bd09408`.
-- **14.4 change tracking screens:** [#154](https://github.com/kartiksayani/ariadne/pull/154), `8a58f93c`.
-- **14.2b getting around:** [#155](https://github.com/kartiksayani/ariadne/pull/155), `1135693c`.
+- [#156](https://github.com/kartiksayani/ariadne/pull/156), `91bf3537`: `/ariadne-pr-comments`. Owners choose Fix, Reply or Skip for each imported review comment.
+- [#157](https://github.com/kartiksayani/ariadne/pull/157), `6101ba93`: alpha.14 follow-ups (Ack all and Go to edge cases, faster large Maps, steadier CI, release records).
+- [#158](https://github.com/kartiksayani/ariadne/pull/158), `914b4374`: the Messages pane is removed and the Map holds the reading row through resizes. Unsent-message notices live in a separate recovery file, so alpha.14 can still read preferences.
+- [#159](https://github.com/kartiksayani/ariadne/pull/159), `10b6013a`: the recovery file survives disk errors, reads never fail because of it, and notices can always be dismissed.
 
-## Alpha.15 in progress
+## Alpha.16 in progress
 
-**15.3 PR comments** merged in [#156](https://github.com/kartiksayani/ariadne/pull/156),
-`91bf3537`. Owners choose Fix, Reply or Skip for each imported review comment.
+[#160](https://github.com/kartiksayani/ariadne/pull/160), "Item conversation view"
+(`feat/a15-conversation`), is in review fix round 3. The owner signed off mock M3.
+It is a larger view of one item's conversation. There is no session-wide Conversation
+view and no reading of host transcripts. Chat with the agent stays in the terminal.
 
-The owner decided to remove the Messages pane because it is never used. A larger
-view of one item's conversation follows owner sign-off on mock M3. There will be
-no session-wide Conversation view and no reading of host transcripts. Chat with
-the agent stays in the terminal.
+## Next steps
 
-## Active work and next steps
-
-- `.worktrees/a15-no-rail` — `feat/a15-no-rail`: remove the Messages pane, in progress.
-- `.worktrees/a14-mock` — `design/a15-m3`: item conversation mock, waiting on owner sign-off.
-- `.worktrees/a14-polish` — `fix/a14-polish`: this follow-up PR, based on main `91bf3537`.
-  Earlier follow-ups cover cached row names and visible Ack all eligibility, Go to
-  focus expiry, and the layout suite split. Reply wording, a CLI test prebuild
-  before JS coverage, and these release records are committed in
-  [PR #157](https://github.com/kartiksayani/ariadne/pull/157).
-
-1. Finish removing the Messages pane and its affected checks.
-2. Review mock M3, then implement the larger item conversation view within the approved scope.
-3. Finish and review the follow-ups.
+1. Finish review of #160 and merge it.
+2. Recovery edge cases from a failure table. Three rare cases from the #159 review:
+   a rollback that could remove the only copy of the recovery file on network
+   filesystems, transient read errors that set a good recovery file aside, and a
+   needless sync on reads. Brief it as a full failure table (ORCHESTRATOR, "Delivery
+   feedback rules"). Task P11.7.
+3. Previous-release read test: an automatic check that the previous release accepts
+   the files the new build writes. Task P11.8.
+4. Watch the Known flakes list below; a second occurrence gets fixed before the next merge.
 
 ## Process lessons
 
@@ -60,12 +56,36 @@ the agent stays in the terminal.
 - Run `cargo test --workspace` before pushing integration-resource changes.
   Installed-plugin fixtures live in several crates, so a CLI-only test run is
   insufficient for that push.
+- Fix rounds, moved UI code, saved formats, CI parity and flakes follow the
+  ORCHESTRATOR rules under "Delivery feedback rules" ([ORCHESTRATOR](../../ORCHESTRATOR.md)).
 
 After merge, tag `v0.1.0-alpha.N` with `-m "Ariadne v0.1.0-alpha.N"`, wait for the
 release workflow and edit notes with the fixed
 [How to upgrade block](../planning/PERSONAL_RELEASE.md#release-notes).
 Refresh this page, tasks.json and the roadmap chart using
 `python3 scripts/regenerate-roadmap.py`.
+
+## Known flakes
+
+One entry per flake: the test and its first failure, the evidence, and the suspected cause. A second occurrence gets fixed before the next merge (ORCHESTRATOR, Flakes).
+
+- **`tests/e2e/tree-layout/tree-layout.spec.mts:585`, dark theme only.**
+  - First failed: #158 CI, 2026-10-14. The rerun passed.
+  - The check that the child sits under the sticky header failed after the test set `scrollTop` by hand.
+  - Suspected cause: a ⌘J reveal was still settling.
+- **`apps/desktop/tests/e2e/tree.spec.mjs:604`.**
+  - First failed: #157 CI, 2026-10-13. The rerun passed.
+  - A click right after a keyboard Enter selection was never saved.
+  - Suspected cause: a click landing while a selection save is in flight.
+- **Native delivery journey, "Detail Reply text and enabled Send were not ready for one click"** (`apps/desktop/tests/e2e/owner-reply.mjs:109`).
+  - First failed: #159 CI, 2026-10-14. The rerun passed.
+  - The fake agent changed the item (revision 3 → 4) while the test typed, so the stale-question guard disabled Send. The app behaved as designed.
+  - The cause is known, and it breaks the rule that native journeys never race agent-side changes, so it is not a flake to wait on. The journey must wait for the agent's change before typing. The fix rides with #160, which already edits that file.
+- **`crates/ariadne-core/tests/native_connection.rs` `expired_fresh_work_cannot_persist_after_waiting_for_registry_lock`.**
+  - A local hang under heavy load, not a required check, so it is outside the Flakes rule.
+  - First failed: a local run on 2026-10-14, where it hung for 45 minutes under heavy load.
+  - It then passed 8 of 8 runs on its own.
+  - Suspected cause: thread timing under CPU starvation in its lock-and-channel handshake.
 
 ## Earlier delivery evidence
 
@@ -210,7 +230,7 @@ Follow-ups the run surfaced:
   `ariadne bridge announce` and written on connect and reconnect; Codex bindings have none (no
   agent-side process on that path). `SessionSummary.topic_count` counts all topics. UI does not read either yet.
 
-## Next steps
+## Next steps at alpha.7 (historical)
 
 1. Review the committed alpha.7 fixes in [PR #143](https://github.com/kartiksayani/ariadne/pull/143), awaiting merge, and the focused check results.
 2. Complete the remaining alpha.7 acceptance before publishing a release; this task does not run native/e2e checks.

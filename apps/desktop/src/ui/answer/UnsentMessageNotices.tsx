@@ -1,5 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import type { Immutable, OpenSessions, SessionStore } from '../../data/session-store';
+import { CoreFailure } from '../../data/service';
 import type { Session } from '../../generated/domain/models';
 import type { WaitingStore } from '../../selectors/waiting/store';
 import { notSent } from '../../selectors/waiting/stuck';
@@ -24,6 +25,8 @@ export function UnsentMessageNotices({ waiting, drafts, opened, selectedStore, n
   const draftState = useOwnerDrafts(drafts);
   const navigationState = useNavigation(navigation);
   const finished = useRef(new Set<string>());
+  const hidden = useRef(new Set<string>());
+  const recoveryUnavailable = useRef(new Set<string>());
   const flights = useRef(new Set<string>());
   const restored = useRef(new Set<string>());
   const hints = useRef(new Map<string, string>());
@@ -45,7 +48,7 @@ export function UnsentMessageNotices({ waiting, drafts, opened, selectedStore, n
         || !editable(unsent.input.kind) || inItemConversation(session, message)) continue;
       const id = `unsent:${session.id}:${unsent.input.id}`;
       const inputId = unsent.input.id;
-      if (finished.current.has(inputId) || resolved.has(inputId)) continue;
+      if (finished.current.has(inputId) || hidden.current.has(inputId) || resolved.has(inputId)) continue;
       if (unsent.again || sendingAgain(draftState, session, unsent.input)) {
         notices.dismiss(id); continue;
       }
@@ -53,10 +56,15 @@ export function UnsentMessageNotices({ waiting, drafts, opened, selectedStore, n
       const name = unsent.input.target.item_id ? unsent.input.payload.target_snapshot.item_question ?? unsent.input.payload.target_snapshot.topic_name
         : session.topics[unsent.input.target.topic_id]?.name ?? unsent.input.payload.target_snapshot.topic_name;
       published.current.add(id);
+      const latestSession = () => {
+        const openedSession = opened.get({ project_id: session.project_id, session_id: session.id })?.getSnapshot().snapshot?.session;
+        const seen = observed.current.get(session.id) ?? session;
+        return openedSession && openedSession.revision >= seen.revision ? openedSession : seen;
+      };
       const show = (hint?: string) => {
         if (hint) hints.current.set(inputId, hint);
-        if (!active.current || finished.current.has(inputId)) return;
-        const blocked = putBackBlocked(observed.current.get(session.id) ?? session, unsent.input);
+        if (!active.current || finished.current.has(inputId) || hidden.current.has(inputId)) return;
+        const blocked = putBackBlocked(latestSession(), unsent.input);
         const storedHint = hints.current.get(inputId);
         const detail = [blocked, storedHint !== blocked ? storedHint : null].filter(Boolean).join(' ');
         const firstLine = unsent.input.payload.text.split(/\r?\n/u)[0].trim();
@@ -68,12 +76,11 @@ export function UnsentMessageNotices({ waiting, drafts, opened, selectedStore, n
         actions: [{ label: 'Put back in reply box', disabled: !!blocked || flights.current.has(inputId), run: () => {
           if (flights.current.has(inputId)) return;
           if (restored.current.has(inputId)) { void resolve(true); return; }
-          const store = opened.get({ project_id: session.project_id, session_id: session.id });
-          const current = store?.getSnapshot().snapshot?.session ?? observed.current.get(session.id)!;
+          const current = latestSession();
           const input = current.inputs[unsent.input.id];
           if (!input || input.state !== 'cancelled') return;
           const reason = putBackBlocked(current, input);
-          if (reason) { show(reason); return; }
+          if (reason) { show(); return; }
           flights.current.add(inputId); show();
           void putBackCancelled(drafts, current, input).then(outcome => {
             flights.current.delete(inputId);
@@ -88,8 +95,14 @@ export function UnsentMessageNotices({ waiting, drafts, opened, selectedStore, n
         } }],
       });
       };
+      const hideForRun = () => {
+        hidden.current.add(inputId);
+        notices.dismiss(id);
+        if (active.current) notices.push({ icon: 'ph ph-check', text: 'Hidden until Ariadne restarts.' });
+      };
       const resolve = async (moved: boolean) => {
         if (flights.current.has(inputId)) return;
+        if (!moved && recoveryUnavailable.current.has(inputId)) { hideForRun(); return; }
         flights.current.add(inputId);
         show(moved ? 'Your message is in the reply box. Saving recovery…' : 'Saving dismissal…');
         try {
@@ -97,8 +110,12 @@ export function UnsentMessageNotices({ waiting, drafts, opened, selectedStore, n
           finished.current.add(inputId);
           notices.dismiss(id);
           if (moved && active.current) notices.push({ icon: 'ph ph-check', text: 'Put back. Open “Reply to topic” on its topic to send it.' });
-        } catch {
-          hints.current.set(inputId, moved ? 'Your message is in the reply box, but recovery couldn’t be saved. Try “Put back in reply box” again to save it.'
+        } catch (failure: unknown) {
+          if (failure instanceof CoreFailure && failure.error.code === 'permission_denied') {
+            recoveryUnavailable.current.add(inputId);
+            if (moved) hints.current.set(inputId, 'Your message is in the reply box, but recovery can’t be saved. Dismiss hides this notice until Ariadne restarts.');
+            else hideForRun();
+          } else hints.current.set(inputId, moved ? 'Your message is in the reply box, but recovery couldn’t be saved. Try “Put back in reply box” again to save it.'
             : 'Couldn’t save the dismissal. Your message is still kept; dismiss it again to retry.');
         } finally {
           flights.current.delete(inputId);
