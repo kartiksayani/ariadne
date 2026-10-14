@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { Session } from '../../../src/generated/domain/models';
@@ -34,9 +35,10 @@ async function setup(session: Session = graphSession(), view = preferences()) {
   const store = sessions.open(route); await store.refresh();
   const routes = new RegisteredRoutes(service, sessions), saved: SessionPreferences[] = [], reveals: [string, boolean][] = [];
   let write: (next: SessionPreferences) => Promise<boolean> = async () => true;
-  function Composition({ reveal = null, tight = false, search, hidden }: { reveal?: RevealedItem | null; tight?: boolean; search?: string; hidden?: string[] }) {
+  function Composition({ reveal = null, tight = false, search, hidden, selection, onCommit }: { reveal?: RevealedItem | null; tight?: boolean; search?: string; hidden?: string[]; selection?: string; onCommit?: () => void }) {
     const [current, setCurrent] = useState(view);
-    return <GraphView store={store} routes={routes} view={immutable(hidden ? { ...current, hidden_item_ids: hidden } : current)} later={new Set()} search={search} reveal={reveal} tight={tight} sessionLabel="codex · yesterday"
+    useLayoutEffect(() => { onCommit?.(); });
+    return <GraphView store={store} routes={routes} view={immutable({ ...current, ...(hidden ? { hidden_item_ids: hidden } : {}), ...(selection ? { selected_item_id: selection } : {}) })} later={new Set()} search={search} reveal={reveal} tight={tight} sessionLabel="codex · yesterday"
       continuedFrom={topic => topic.name === 'Continued context' ? 'Continued from claude-code · yesterday' : null}
       saveView={async next => { saved.push(structuredClone(next)); const ok = await write(next); if (ok) setCurrent(next); return ok; }}
       onReveal={(result, openDetail) => { if (result.kind === 'item') reveals.push([result.route.item_id, openDetail]); }} />;
@@ -198,12 +200,13 @@ describe('session graph view', () => {
     await waitFor(() => expect(value.reveals).toEqual([['1.1.1', true]]));
     expect(value.saved.at(-1)?.hidden_item_ids).toEqual(['1']);
     fireEvent.click(stub()!);
-    expect(ids()).toEqual(['2', '3', '8']);
+    expect(selected()).toBe('1.1.1');
+    expect(node('1.1.1').className).toContain('is-hidden');
     // Opening and folding is local: nothing was saved for it.
     expect(value.saved.every(view => view.hidden_item_ids?.length === 1 && view.hidden_item_ids[0] === '1')).toBe(true);
   });
 
-  it('opens the stub of a revealed or newly selected hidden item so it shows', async () => {
+  it('opens the stub of a revealed hidden item and keeps its selected route drawn', async () => {
     const value = await setup(undefined, preferences({ hidden_item_ids: ['1'] }));
     const { rerender } = render(<value.Composition />);
     expect(ids()).toEqual(['2', '3', '8']);
@@ -214,37 +217,227 @@ describe('session graph view', () => {
     expect(stub()!.getAttribute('aria-expanded')).toBe('true');
     // "Reveal selected" finds it.
     expect((screen.getByRole('button', { name: /Reveal selected/ }) as HTMLButtonElement).disabled).toBe(false);
-    // Folding the stub also ends the reveal's hold on it, so it stays folded.
+    // The current selection keeps its hidden route drawn even after the reveal is dismissed.
     fireEvent.click(stub()!);
-    expect(ids()).toEqual(['2', '3', '8']);
+    expect(selected()).toBe('1.2');
+    expect(stub()!.getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('keeps the stub a focusable button: Enter and Space belong to it, arrows skip hidden items', async () => {
+  it('can fold a revealed hidden route after selection has moved elsewhere', async () => {
+    const value = await setup(undefined, preferences({ hidden_item_ids: ['1'], selected_item_id: '2' }));
+    const reveal = await value.routes.revealItem({ ...value.route, item_id: '1.1.1' });
+    render(<value.Composition reveal={reveal} />);
+    vi.spyOn(value.routes, 'revealItem').mockResolvedValueOnce(null);
+    let confirmWrite = () => {};
+    value.writeWith(() => new Promise(resolve => { confirmWrite = () => resolve(true); }));
+    fireEvent.keyDown(node('1.1.1'), { key: 'End' });
+    await waitFor(() => expect(value.saved.at(-1)?.selected_item_id).toBe('8'));
+    expect(node('1.1.1')).toBeTruthy();
+    fireEvent.click(stub()!);
+    expect(node('1.1.1')).toBeNull();
+    expect(selected()).toBe('8');
+    await act(async () => { confirmWrite(); });
+    expect(selected()).toBe('8');
+  });
+
+  it('draws and centers a saved hidden selection on startup and on a session-keyed remount', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('graph-scroll') ? new DOMRect(0, 0, 400, 300) : new DOMRect(600, 500, 190, 66);
+    });
+    const value = await setup(undefined, preferences({ hidden_item_ids: ['1', '1.1'], selected_item_id: '1.1.1', expanded_item_ids: [] }));
+    const commits: { selected: string | undefined; focused: Element | null; scroll: number }[] = [];
+    const observe = () => commits.push({ selected: selected(), focused: document.activeElement, scroll: document.querySelector('.graph-scroll')!.scrollTop });
+    const { rerender } = render(<value.Composition key="session-one" onCommit={observe} />);
+    const check = () => {
+      expect(selected()).toBe('1.1.1');
+      expect(document.activeElement).toBe(node('1.1.1'));
+      expect(document.querySelector('.graph-scroll')!.scrollTop).toBe(383);
+      expect(node('1.1.1').className).toContain('is-hidden');
+    };
+    check();
+    expect(commits[0]).toEqual({ selected: '1.1.1', focused: node('1.1.1'), scroll: 383 });
+    commits.length = 0;
+    rerender(<value.Composition key="session-two" onCommit={observe} />);
+    check();
+    expect(commits[0]).toEqual({ selected: '1.1.1', focused: node('1.1.1'), scroll: 383 });
+    expect(value.saved).toEqual([]);
+  });
+
+  it('opens and centers a hidden Tree selection on the first Graph commit after the reveal is dismissed', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('graph-scroll') ? new DOMRect(0, 0, 400, 300) : new DOMRect(600, 500, 190, 66);
+    });
+    const value = await setup(undefined, preferences({ hidden_item_ids: ['1'], expanded_item_ids: [] }));
+    const reveal = await value.routes.revealItem({ ...value.route, item_id: '1.1.1' });
+    expect(reveal?.kind).toBe('item');
+    const commits: (string | undefined)[] = [];
+    render(<value.Composition reveal={null} selection="1.1.1" onCommit={() => { commits.push(selected()); }} />);
+    expect(commits[0]).toBe('1.1.1');
+    expect(document.querySelector('.graph-scroll')!.scrollTop).toBe(383);
+    expect(selected()).toBe('1.1.1');
+    expect(document.activeElement).toBe(node('1.1.1'));
+    expect(node('1.1.1').className).toContain('is-hidden');
+  });
+
+  it('opens a truly newly selected hidden route without a reveal or a local stub expansion', async () => {
+    const value = await setup(undefined, preferences({ selected_item_id: '2', hidden_item_ids: ['1', '1.1'], expanded_item_ids: [] }));
+    const { rerender } = render(<value.Composition />);
+    expect(node('1.1.1')).toBeNull();
+    const commits: (string | undefined)[] = [];
+    rerender(<value.Composition selection="1.1.1" onCommit={() => { commits.push(selected()); }} />);
+    expect(commits[0]).toBe('1.1.1');
+    expect(node('1.1.1').className).toContain('is-hidden');
+    expect(document.querySelectorAll('.graph-stub[aria-expanded="true"]')).toHaveLength(2);
+    expect(value.saved).toEqual([]);
+    expect(value.reveals).toEqual([]);
+  });
+
+  it('keeps an item drawn and dimmed when it becomes hidden while selected', async () => {
+    const value = await setup(undefined, preferences({ selected_item_id: '2' }));
+    const { rerender } = render(<value.Composition />);
+    node('2').focus();
+    rerender(<value.Composition hidden={['2']} />);
+    expect(selected()).toBe('2');
+    expect(node('2').className).toContain('is-hidden');
+    expect(document.activeElement).toBe(node('2'));
+    expect(stub()!.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(stub()!);
+    expect(selected()).toBe('2');
+  });
+
+  it('moves arrows through stubs in layout order with one roving tab stop, and Enter/Space toggle them', async () => {
+    const user = userEvent.setup();
     const value = await setup(undefined, preferences({ hidden_item_ids: ['1.2'], selected_item_id: '1.1.1' }));
     render(<value.Composition />);
     const small = stub(/^1 item hidden$/) as HTMLButtonElement;
     expect(small.tagName).toBe('BUTTON');
-    expect(small.tabIndex).toBe(0);
-    small.focus(); expect(document.activeElement).toBe(small);
-    fireEvent.keyDown(small, { key: 'Enter' });
-    await act(async () => {});
-    expect(value.reveals).toEqual([]);
-    // ↓ from the last drawn child skips the hidden 1.2 and lands on the next visible item.
+    expect(small.tabIndex).toBe(-1);
     fireEvent.keyDown(node('1.1.1'), { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(small);
+    expect(small.tabIndex).toBe(0);
+    expect(document.querySelectorAll('.graph-node[tabindex="0"], .graph-stub[tabindex="0"]')).toHaveLength(1);
+    expect(value.reveals).toEqual([]);
+    await user.keyboard('{Enter}');
+    expect(small.getAttribute('aria-expanded')).toBe('true');
+    expect(node('1.2')).toBeTruthy();
+    await user.keyboard(' ');
+    expect(small.getAttribute('aria-expanded')).toBe('false');
+    expect(node('1.2')).toBeNull();
+    fireEvent.keyDown(small, { key: 'ArrowRight' });
+    expect(small.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.keyDown(small, { key: 'ArrowLeft' });
+    expect(small.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.keyDown(small, { key: 'ArrowDown' });
     await waitFor(() => expect(value.reveals).toEqual([['2', false]]));
+    expect(document.activeElement).toBe(node('2'));
+    fireEvent.keyDown(node('2'), { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(small);
+    fireEvent.keyDown(small, { key: 'ArrowUp' });
+    await waitFor(() => expect(value.reveals.at(-1)).toEqual(['1.1.1', false]));
+    expect(document.activeElement).toBe(node('1.1.1'));
   });
 
-  it('moves focus to the stub when the focused item is hidden', async () => {
-    const value = await setup(undefined, preferences({ selected_item_id: '2' }));
+  describe('keyboard moves bring the target, with its focus ring, into view across as well as down', () => {
+    /** A 400x300 scroller; each card and stub sits at its own x in the graph, shifted by the scroller's scrollLeft. */
+    function lay(at: Record<string, number>, scrollerWidth = 400) {
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        const scroller = this.closest<HTMLElement>('.graph-scroll');
+        if (this.classList.contains('graph-scroll')) return new DOMRect(0, 0, scrollerWidth, 300);
+        const key = this.dataset.itemId ?? this.dataset.stub ?? '', own = this.classList.contains('graph-stub') ? 'stub' : key;
+        const left = (at[own] ?? 100) - (scroller?.scrollLeft ?? 0), width = this.classList.contains('graph-stub') ? 90 : 190;
+        return new DOMRect(left, 100, width, this.classList.contains('graph-stub') ? 20 : 66);
+      });
+    }
+    const scrolled = () => document.querySelector<HTMLElement>('.graph-scroll')!.scrollLeft;
+
+    it('scrolls to a stub beyond the right edge, then to a card beyond the left edge, leaving 8px for the ring', async () => {
+      lay({ '1.1.1': 20, stub: 560, 2: 100 });
+      const value = await setup(undefined, preferences({ hidden_item_ids: ['1.2'], selected_item_id: '1.1.1' }));
+      render(<value.Composition />);
+      fireEvent.keyDown(node('1.1.1'), { key: 'ArrowDown' });
+      const small = stub(/^1 item hidden$/) as HTMLButtonElement;
+      expect(document.activeElement).toBe(small);
+      // The stub's right edge ends 8px inside the scroller's 400px.
+      expect(small.getBoundingClientRect().right).toBe(400 - 8);
+      fireEvent.keyDown(small, { key: 'ArrowDown' });
+      await waitFor(() => expect(document.activeElement).toBe(node('2')));
+      // The card began 158px left of the scroller; it now begins 8px inside it.
+      expect(node('2').getBoundingClientRect().left).toBe(8);
+    });
+    it('scrolls to a stub beyond the left edge so its ring is whole', async () => {
+      lay({ '1.1.1': 20, stub: -300 });
+      const value = await setup(undefined, preferences({ hidden_item_ids: ['1.2'], selected_item_id: '1.1.1' }));
+      render(<value.Composition />);
+      fireEvent.keyDown(node('1.1.1'), { key: 'ArrowDown' });
+      expect(document.activeElement).toBe(stub(/^1 item hidden$/));
+      expect(stub(/^1 item hidden$/)!.getBoundingClientRect().left).toBe(8);
+    });
+    it('does not scroll when the target and its ring are already in view', async () => {
+      lay({ '1.1.1': 20, stub: 120 });
+      const value = await setup(undefined, preferences({ hidden_item_ids: ['1.2'], selected_item_id: '1.1.1' }));
+      render(<value.Composition />);
+      // Opening centres the selected card; the stub then sits inside the scroller with room to spare, so the key moves nothing.
+      const before = scrolled(), small = stub(/^1 item hidden$/)!, at = small.getBoundingClientRect().left;
+      expect(at).toBeGreaterThanOrEqual(8); expect(small.getBoundingClientRect().right).toBeLessThanOrEqual(392);
+      fireEvent.keyDown(node('1.1.1'), { key: 'ArrowDown' });
+      expect(document.activeElement).toBe(small);
+      expect(scrolled()).toBe(before);
+    });
+    it('keeps the left edge of a target wider than the scroller in view', async () => {
+      lay({ '1.1.1': 20, stub: 120, 2: 500 }, 150);
+      const value = await setup(undefined, preferences({ hidden_item_ids: ['1.2'], selected_item_id: '1.1.1' }));
+      render(<value.Composition />);
+      fireEvent.keyDown(node('1.1.1'), { key: 'ArrowDown' });
+      fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+      await waitFor(() => expect(document.activeElement).toBe(node('2')));
+      expect(node('2').getBoundingClientRect().left).toBe(8);
+    });
+  });
+
+  it('starts arrow traversal at a focused unselected node, using the same order as stubs', async () => {
+    const value = await setup(undefined, preferences({ selected_item_id: '2', hidden_item_ids: ['1.2'] }));
+    render(<value.Composition />);
+    act(() => node('1.1.1').focus());
+    fireEvent.keyDown(node('1.1.1'), { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(stub(/^1 item hidden$/));
+    expect(selected()).toBe('2');
+    expect(value.reveals).toEqual([]);
+  });
+
+  it('updates the roving tab stop when an external selection replaces a focused stub', async () => {
+    const value = await setup(undefined, preferences({ selected_item_id: '1.1.1', hidden_item_ids: ['1.2'] }));
     const { rerender } = render(<value.Composition />);
-    node('2').focus();
-    fireEvent.click(node('2'));
-    await waitFor(() => expect(value.reveals).toEqual([['2', true]]));
-    rerender(<value.Composition hidden={['2']} />);
-    expect(node('2')).toBeNull();
+    fireEvent.keyDown(node('1.1.1'), { key: 'ArrowDown' });
     const small = stub(/^1 item hidden$/)!;
-    expect(small.getAttribute('aria-expanded')).toBe('false');
-    expect(document.activeElement).toBe(small);
+    expect(small.tabIndex).toBe(0);
+    rerender(<value.Composition selection="2" />);
+    expect(node('2').tabIndex).toBe(0);
+    expect(small.tabIndex).toBe(-1);
+    expect(document.querySelectorAll('.graph-node[tabindex="0"], .graph-stub[tabindex="0"]')).toHaveLength(1);
+  });
+
+  it('makes a stub the roving tab stop when a topic has only hidden nodes', async () => {
+    const value = await setup(undefined, preferences({ hidden_item_ids: ['1', '2', '3', '8'] }));
+    render(<value.Composition />);
+    const stops = document.querySelectorAll('.graph-node[tabindex="0"], .graph-stub[tabindex="0"]');
+    expect(stops).toHaveLength(1);
+    expect(stops[0]).toBe(stub(/^3 items hidden, waiting on you$/));
+    fireEvent.keyDown(document.querySelector('.graph-scroll')!, { key: 'Home' });
+    expect(document.activeElement).toBe(stops[0]);
+    fireEvent.keyDown(stops[0]!, { key: 'End' });
+    expect(document.activeElement).toBe(stub(/^1 item hidden$/));
+  });
+
+  it('moves focus to the innermost containing stub when a focused unselected item becomes hidden', async () => {
+    const value = await setup(undefined, preferences({ selected_item_id: '2', hidden_item_ids: ['1'] }));
+    const { rerender } = render(<value.Composition />);
+    fireEvent.click(stub(/^1 item hidden, waiting on you$/)!);
+    act(() => node('1.1.1').focus());
+    rerender(<value.Composition hidden={['1', '1.1']} />);
+    expect(node('1.1.1')).toBeNull();
+    const inner = document.querySelector<HTMLElement>('[data-stub="hidden:00000000-0000-4000-8000-000000000010:1"]')!;
+    expect(document.activeElement).toBe(inner);
+    expect(inner.tabIndex).toBe(0);
   });
 
   it('highlights collapsed children consistently in graph badges and tree notes', () => {
@@ -269,7 +462,7 @@ describe('session graph view', () => {
     }
   });
 
-  it('counts only what expanding draws in a collapsed node, and expanding it draws the stub too', async () => {
+  it('counts the visible subtree in a collapsed node, and expanding it draws the stub too', async () => {
     const value = await setup(undefined, preferences({ hidden_item_ids: ['1.1'], expanded_item_ids: [] }));
     render(<value.Composition />);
     // 1.1 is hidden, so the pill counts 1.2 alone.
@@ -280,6 +473,28 @@ describe('session graph view', () => {
     expect(ids()).toEqual(['1', '1.2', '2', '3', '8']);
     expect(stub(/^1 item hidden, waiting on you$/)).toBeTruthy();
     expect(value.saved.at(-1)).toMatchObject({ hidden_item_ids: ['1.1'], expanded_item_ids: ['1'], selected_item_id: '1' });
+  });
+
+  it('shows +N for every visible descendant across deeper tiers while stubs count hidden siblings', async () => {
+    const session = graphSession();
+    session.items['1.2.1'] = { ...session.items['1.2']!, id: '1.2.1', parent: '1.2', ordinal: 1 };
+    session.items['1.2.1.1'] = { ...session.items['1.2']!, id: '1.2.1.1', parent: '1.2.1', ordinal: 1 };
+    session.items['1.2.1.2'] = { ...session.items['1.2']!, id: '1.2.1.2', parent: '1.2.1', ordinal: 2 };
+    const value = await setup(session, preferences({ expanded_item_ids: [], hidden_item_ids: ['1.1', '1.2.1.2'] }));
+    render(<value.Composition />);
+    expect(node('1').querySelector('.graph-node-below')!.textContent).toBe('+3');
+    fireEvent.click(node('1'));
+    await waitFor(() => expect(value.reveals).toEqual([['1', true]]));
+    expect(ids()).toEqual(['1', '1.2', '2', '3', '8']);
+    expect(stub(/^1 item hidden, waiting on you$/)).toBeTruthy();
+    expect(node('1.2').querySelector('.graph-node-below')!.textContent).toBe('+2');
+    fireEvent.click(node('1.2'));
+    await waitFor(() => expect(value.reveals.at(-1)).toEqual(['1.2', true]));
+    expect(node('1.2.1').querySelector('.graph-node-below')!.textContent).toBe('+1');
+    fireEvent.click(node('1.2.1'));
+    await waitFor(() => expect(value.reveals.at(-1)).toEqual(['1.2.1', true]));
+    expect(screen.getAllByRole('treeitem', { name: /^1 item hidden/ })).toHaveLength(2);
+    expect(node('1.2.1.2')).toBeNull();
   });
 
   it('names a branch whose children are all hidden, and expanding it draws their stub', async () => {

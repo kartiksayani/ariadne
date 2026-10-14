@@ -150,7 +150,7 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
       ? <button type="button" className="tree-chevron" tabIndex={-1} aria-label="Expand or collapse"
         onClick={event => { event.stopPropagation(); onToggle(item.id); }}><i className={row.expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} /></button>
       : <span className="tree-chevron-space" />}
-    <span className="tree-icon" onDoubleClick={event => { if (!item.parent && onFocusBranch) { event.stopPropagation(); onFocusBranch(branchFocused ? null : item.id); } }}><StatusBadge status={status} variant="icon" /></span>
+    <span className="tree-icon" onDoubleClick={event => { if (!disabled && !item.parent && onFocusBranch) { event.stopPropagation(); onFocusBranch(branchFocused ? null : item.id); } }}><StatusBadge status={status} variant="icon" /></span>
     <div className="tree-body">
       <div className="tree-heading"><div className="tree-question" style={{ color: muted ? neutral(64) : 'var(--color-text)' }}>
         {row.segments.map((segment, index) => <span key={index} className={segment.hit ? 'tree-hit' : undefined}>{segment.text}</span>)}

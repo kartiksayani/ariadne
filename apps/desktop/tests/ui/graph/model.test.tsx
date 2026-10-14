@@ -125,7 +125,7 @@ describe('graph model', () => {
     const open = new Set([hiddenGroupKey(topicA, null)]);
     const graph = build({ view: preferences({ hidden_item_ids: ['1'] }), selectedId: '1.1.1', expandedHiddenGroups: open });
     // Visible siblings first, then the stub's items, as in the Tree.
-    expect(graph.order).toEqual(['2', '3', '1', '1.1', '1.1.1', '1.2', '8']);
+    expect(graph.order).toEqual(['2', '3', hiddenGroupKey(topicA, null), '1', '1.1', '1.1.1', '1.2', '8']);
     for (const id of ['1', '1.1', '1.1.1', '1.2']) expect(graph.nodes.get(id)!.hidden).toBe(true);
     expect(graph.nodes.get('1.1.1')!.selected).toBe(true);
     expect(graph.nodes.get('2')!.hidden).toBe(false);
@@ -159,9 +159,9 @@ describe('graph model', () => {
       expect(edgeIds(graph).filter(id => /(^|:)2($|:)/.test(id))).toEqual([]);
       expect(graph.stubs.get(rootGroup)).toMatchObject({ count: 1, parent: null, topicId: topicA, expanded: false });
     });
-    it('does not draw the children of a hidden item either', () => {
-      const graph = build({ view: preferences({ hidden_item_ids: ['1'] }), selectedId: '1.1.1' });
-      expect(graph.order).toEqual(['2', '3', '8']);
+    it('does not draw the children of an unselected hidden item either', () => {
+      const graph = build({ view: preferences({ hidden_item_ids: ['1'] }), selectedId: null });
+      expect(graph.order).toEqual(['2', '3', rootGroup, '8']);
       const parts = edgeIds(graph).flatMap(id => id.split(':'));
       for (const id of ['1', '1.1', '1.1.1', '1.2']) expect(parts).not.toContain(id);
       expect(edgeIds(graph)).toContain(`topic:${rootGroup}`);
@@ -179,23 +179,25 @@ describe('graph model', () => {
       // 1.1.1 waits on the owner, so the stub for 1.1 says so, like the Tree's row.
       const waiting = build({ view: preferences({ hidden_item_ids: ['1.1'] }) });
       expect(waiting.stubs.get(kidsOfOne)).toMatchObject({ count: 1, waiting: true });
-      expect(waiting.order).toEqual(['1', '1.2', '2', '3', '8']);
+      expect(waiting.order).toEqual(['1', '1.2', kidsOfOne, '2', '3', '8']);
     });
     it('shows the hidden items, faded, after the stub while the owner has it open', () => {
       const graph = build({ view: preferences({ hidden_item_ids: ['1.1'] }), expandedHiddenGroups: new Set([kidsOfOne]) });
-      expect(graph.order).toEqual(['1', '1.2', '1.1', '1.1.1', '2', '3', '8']);
+      expect(graph.order).toEqual(['1', '1.2', kidsOfOne, '1.1', '1.1.1', '2', '3', '8']);
       expect(graph.stubs.get(kidsOfOne)).toMatchObject({ expanded: true });
       expect(graph.children.get('1')).toEqual(['1.2', '1.1']);
       expect(graph.nodes.get('1.1')!.hidden).toBe(true);
     });
-    it('opens the groups on the way to a revealed hidden item, and only for the reveal', () => {
+    it('opens the selected hidden route on the first model pass, including saved folded ancestors', () => {
       const view = preferences({ hidden_item_ids: ['1'], expanded_item_ids: [] });
       const revealed = build({ view, selectedId: '1.1.1', revealedItemId: '1.1.1', temporaryExpandedItemIds: ['1', '1.1'] });
       expect(revealed.order).toContain('1.1.1');
       expect(revealed.stubs.get(rootGroup)!.expanded).toBe(true);
       const selectedOnly = build({ view, selectedId: '1.1.1' });
-      expect(selectedOnly.order).not.toContain('1.1.1');
-      expect(selectedOnly.stubs.get(rootGroup)!.expanded).toBe(false);
+      expect(selectedOnly.order).toContain('1.1.1');
+      expect(selectedOnly.stubs.get(rootGroup)!.expanded).toBe(true);
+      expect(selectedOnly.nodes.get('1.1.1')).toMatchObject({ selected: true, hidden: true });
+      expect(view.expanded_item_ids).toEqual([]);
     });
     it('keeps a topic whose top items are all hidden, with only its stub', () => {
       const graph = build({ view: preferences({ hidden_item_ids: ['8'] }) });
@@ -207,7 +209,7 @@ describe('graph model', () => {
       expect(topic.height).toBeLessThan(120);
       expect(graph.order).not.toContain('8');
     });
-    it('counts below what expanding can draw, and names hidden-only branches', () => {
+    it('counts the visible subtree and names hidden-only branches', () => {
       const folded = preferences({ expanded_item_ids: [], hidden_item_ids: ['1.1'] });
       const closed = build({ view: folded });
       expect(closed.nodes.get('1')).toMatchObject({ collapsed: true, below: 1, hiddenBelow: 1 });
@@ -221,12 +223,30 @@ describe('graph model', () => {
       expect(onlyOpen.nodes.get('1')).toMatchObject({ collapsed: false, canCollapse: true });
       expect(onlyOpen.stubs.get(kidsOfOne)!.count).toBe(2);
     });
+    it('counts all visible tiers but counts each hidden branch once, separately from sibling stub counts', () => {
+      const session = graphSession();
+      session.items['1.2.1'] = { ...session.items['1.2']!, id: '1.2.1', parent: '1.2', ordinal: 1 };
+      session.items['1.2.1.1'] = { ...session.items['1.2']!, id: '1.2.1.1', parent: '1.2.1', ordinal: 1 };
+      session.items['1.2.1.2'] = { ...session.items['1.2']!, id: '1.2.1.2', parent: '1.2.1', ordinal: 2 };
+      session.items['1.2.1.2.1'] = { ...session.items['1.2']!, id: '1.2.1.2.1', parent: '1.2.1.2', ordinal: 1 };
+      const view = preferences({ expanded_item_ids: [], hidden_item_ids: ['1.1', '1.2.1.2'] });
+      const closed = build({ session, view });
+      expect(closed.nodes.get('1')).toMatchObject({ below: 3, hiddenBelow: 2, collapsed: true });
+      const nextTier = build({ session, view: { ...view, expanded_item_ids: ['1'] } });
+      expect(nextTier.children.get('1')).toEqual(['1.2']);
+      expect(nextTier.stubs.get(kidsOfOne)!.count).toBe(1);
+      expect(nextTier.nodes.get('1.2')).toMatchObject({ below: 2, hiddenBelow: 1, collapsed: true });
+      const open = build({ session, view: { ...view, expanded_item_ids: ['1', '1.2', '1.2.1'] } });
+      expect(open.stubs.get(kidsOfOne)!.count).toBe(1);
+      expect(open.stubs.get(hiddenGroupKey(topicA, '1.2.1'))!.count).toBe(1);
+      expect(open.nodes.has('1.2.1.2.1')).toBe(false);
+    });
     it('treats search and status filters as the Tree does: hidden matches fold into the stub', () => {
       const search = build({ view: preferences({ hidden_item_ids: ['1.2'], filters: { ...preferences().filters, search: 'receipt' } }) });
-      expect(search.order).toEqual(['1', '1.1']);
+      expect(search.order).toEqual(['1', '1.1', kidsOfOne]);
       expect(search.stubs.get(kidsOfOne)).toMatchObject({ count: 1 });
       const status = build({ view: preferences({ hidden_item_ids: ['1.2'], filters: { ...preferences().filters, statuses: ['in_progress'] } }) });
-      expect(status.order).toEqual(['1']);
+      expect(status.order).toEqual(['1', kidsOfOne]);
       expect(status.nodes.get('1')).toMatchObject({ dimmed: true });
       expect(status.stubs.get(kidsOfOne)).toMatchObject({ count: 1 });
       // Nothing hidden matches: no stub.

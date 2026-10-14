@@ -12,7 +12,7 @@ import { useWorkspaceKeys } from '../keys';
 import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
 import { GraphFilter } from '../tree/FilterBar';
-import { hiddenGroupKey, hiddenGroupsFor } from '../tree/hidden';
+import { hiddenGroupKey } from '../tree/hidden';
 import { applyChange, mergeChange, relatedEdgePath, sessionGraph, statusVisual, STUB_HEIGHT, STUB_WIDTH, type GraphNode, type GraphStub, type RelatedEdge, type TopicGraph, type ViewChange } from './model';
 import './graph.css';
 import { useFilterFolds } from '../shared/filterFolds';
@@ -39,6 +39,8 @@ export interface GraphViewProps {
   readonly onReveal: (result: RevealedItem, openDetail: boolean) => void;
 }
 
+/** Room kept beside a keyboard-reached target: its focus ring (2px outline + 2px offset) plus a little air. */
+const RING_ROOM = 8;
 /** Scrolls `element` into the scroller: centred (Reveal selected, links) or just into view (Ariadne.dc.html:990). */
 function scrollToNode(scroller: HTMLElement, element: Element, center: boolean) {
   const a = scroller.getBoundingClientRect(), b = element.getBoundingClientRect();
@@ -50,6 +52,10 @@ function scrollToNode(scroller: HTMLElement, element: Element, center: boolean) 
   const top = 48;
   if (b.top < a.top + top) scroller.scrollTop -= a.top + top - b.top;
   else if (b.bottom > a.bottom - 8) scroller.scrollTop += Math.min(b.bottom - a.bottom + 8, b.top - a.top - top);
+  // The same nearest-edge move across: a card or stub reached by key lands whole, with room for its 2px focus ring and
+  // 2px offset (the ring is clipped by this scroller). Nothing moves while the target and its ring are already in view.
+  if (b.left < a.left + RING_ROOM) scroller.scrollLeft -= a.left + RING_ROOM - b.left;
+  else if (b.right > a.right - RING_ROOM) scroller.scrollLeft += Math.min(b.right - a.right + RING_ROOM, b.left - a.left - RING_ROOM);
 }
 
 interface NodeProps {
@@ -82,10 +88,10 @@ const Node = memo(function Node({ node, focusable, onOpen, onCollapse }: NodePro
 });
 
 /** The Map's "N items hidden" row, as a small stub: Enter or a click shows the hidden items, and again folds them. */
-const Stub = memo(function Stub({ stub, onToggle }: { readonly stub: GraphStub; readonly onToggle: (stub: GraphStub) => void }) {
+const Stub = memo(function Stub({ stub, focusable, onToggle }: { readonly stub: GraphStub; readonly focusable: boolean; readonly onToggle: (stub: GraphStub) => void }) {
   const label = `${stub.count} ${stub.count === 1 ? 'item' : 'items'} hidden${stub.waiting ? ', waiting on you' : ''}`;
   return <button type="button" role="treeitem" className="graph-stub" aria-expanded={stub.expanded} aria-label={label}
-    title={`${label} · ${stub.expanded ? 'fold them again' : 'show them'}`} data-stub={stub.key}
+    title={`${label} · ${stub.expanded ? 'fold them again' : 'show them'}`} data-stub={stub.key} tabIndex={focusable ? 0 : -1}
     style={{ left: stub.x, top: stub.y, width: STUB_WIDTH, height: STUB_HEIGHT }} onClick={() => onToggle(stub)}>
     <i className={stub.expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} aria-hidden="true" />
     <span className="graph-stub-text">{stub.count} hidden</span>
@@ -115,7 +121,7 @@ function TopicCard({ graph, sessionLabel, marker, focusId, onOpen, onCollapse, o
         </g>)}
       </svg>
       {graph.nodes.map(node => <Node key={node.item.id} node={node} focusable={node.item.id === focusId} onOpen={onOpen} onCollapse={onCollapse} />)}
-      {graph.stubs.map(stub => <Stub key={stub.key} stub={stub} onToggle={onToggleStub} />)}
+      {graph.stubs.map(stub => <Stub key={stub.key} stub={stub} focusable={stub.key === focusId} onToggle={onToggleStub} />)}
     </div>
   </section>;
 }
@@ -165,6 +171,7 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   const [dismissedReveal, setDismissedReveal] = useState<RevealedItem | null>(null);
   // Hidden groups the owner has open, like the Tree's expandedHiddenGroups: local to this view and never saved.
   const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(() => new Set());
+  const [focusedEntry, setFocusedEntry] = useState<{ id: string; selectedId: string | null } | null>(null);
   // Optimistic view edits: `pending` waits for the current write, `inflight` is being written.
   const [pending, setPending] = useState<ViewChange | null>(null);
   const [inflight, setInflight] = useState<ViewChange | null>(null);
@@ -193,29 +200,9 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId });
   latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId };
 
-  // A selection that moves onto a hidden item, or a reveal of one (a link, a Waiting card, search, detail), opens the
-  // hidden groups on its route so it shows; the owner folds them again from their stubs. Hiding the item the graph is
-  // showing (the x key, the detail pane) is the opposite: it folds away like any other hidden item.
-  const hiddenSelection = useRef<{ sessionId?: string; selectedId: string | null }>({ selectedId: null });
-  const knownHidden = useRef<ReadonlySet<string>>(new Set(view.hidden_item_ids ?? []));
-  const revealedId = itemReveal?.route.item_id ?? null;
-  useLayoutEffect(() => {
-    const explicit = new Set(view.hidden_item_ids ?? []), added = new Set([...explicit].filter(id => !knownHidden.current.has(id)));
-    knownHidden.current = explicit;
-    if (!session) return;
-    const previous = hiddenSelection.current;
-    hiddenSelection.current = { sessionId: session.id, selectedId };
-    const moved = previous.sessionId !== session.id || previous.selectedId !== selectedId;
-    const hiding = !!revealedId && added.size > 0 && hiddenGroupsFor(session, added, revealedId).length > 0;
-    if (hiding) setDismissedReveal(currentReveal);
-    setOpenGroups(groups => {
-      const next = new Set(groups);
-      for (const id of [moved ? selectedId : null, hiding ? null : revealedId]) if (id) hiddenGroupsFor(session, explicit, id).forEach(key => next.add(key));
-      return next.size === groups.size ? groups : next;
-    });
-  }, [session, selectedId, revealedId, view.hidden_item_ids]);
   const toggleStub = useCallback((stub: GraphStub) => {
-    setDismissedReveal(currentReveal);
+    // Dismissing a selected reveal would also discard the graph's current selection.
+    if (currentReveal?.kind !== 'item' || currentReveal.route.item_id !== latest.current.selectedId) setDismissedReveal(currentReveal);
     setOpenGroups(groups => { const next = new Set(groups); if (stub.expanded) next.delete(stub.key); else next.add(stub.key); return next; });
   }, [currentReveal]);
   // When the focused node is hidden away, focus goes to its stub, as the Tree's does.
@@ -227,7 +214,7 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
     let key: string | null = null;
     for (let item = session.items[id]; item; item = item.parent ? session.items[item.parent] : undefined) {
       const group = hiddenGroupKey(item.topic_id, item.parent);
-      if (explicit.has(item.id) && graph.stubs.has(group)) key = group;
+      if (explicit.has(item.id) && graph.stubs.has(group)) { key = group; break; }
     }
     const stub = key ? scroller.current?.querySelector<HTMLElement>(`[data-stub="${CSS.escape(key)}"]`) : null;
     if (stub) { focusedRow.current = null; stub.focus({ preventScroll: true }); }
@@ -260,6 +247,7 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   const change = useCallback((next: ViewChange) => setPending(previous => mergeChange(previous, next)), []);
   /** Select an item: show it now, save it, and tell the App (which opens detail when asked). */
   const select = useCallback((id: string, options: { openDetail: boolean; expand?: boolean; center?: boolean }) => {
+    setFocusedEntry({ id, selectedId: id });
     if (options.expand && latest.current.graph?.filtering) filterFolds.setFold('items', id, false);
     change({ selected: id, expansion: options.expand ? [{ kind: 'expand', id }] : [] });
     setScrollTarget({ id, center: !!options.center });
@@ -289,6 +277,8 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   const keys = useWorkspaceKeys<HTMLDivElement>({
     'move-down': () => move(1), 'move-up': () => move(-1), first: () => move(-Infinity), last: () => move(Infinity),
     unfold: () => {
+      const stub = focusedRow.current ? latest.current.graph?.stubs.get(focusedRow.current) : undefined;
+      if (stub) { if (!stub.expanded) toggleStub(stub); return true; }
       const { graph: current, selectedId: id } = latest.current, node = id ? current?.nodes.get(id) : undefined;
       if (!current || !node || (!node.below && !node.hiddenBelow)) return !!node;
       if (node.collapsed) {
@@ -300,6 +290,12 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
       return true;
     },
     fold: () => {
+      const stub = focusedRow.current ? latest.current.graph?.stubs.get(focusedRow.current) : undefined;
+      if (stub) {
+        if (stub.expanded) toggleStub(stub);
+        else if (stub.parent) select(stub.parent, { openDetail: false });
+        return true;
+      }
       const { graph: current, selectedId: id } = latest.current, node = id ? current?.nodes.get(id) : undefined;
       if (!current || !node) return false;
       if (node.canCollapse) { collapse(node); return true; }
@@ -316,9 +312,13 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   function move(step: number): boolean {
     const order = latest.current.graph?.order ?? [];
     if (!order.length) return false;
-    const index = order.indexOf(latest.current.selectedId ?? '');
+    const current = focusedRow.current && order.includes(focusedRow.current) ? focusedRow.current : latest.current.selectedId;
+    const index = order.indexOf(current ?? '');
     const next = step === -Infinity ? 0 : step === Infinity ? order.length - 1 : Math.max(0, Math.min(order.length - 1, index + step));
-    if (order[next] !== latest.current.selectedId) select(order[next], { openDetail: false });
+    const id = order[next];
+    if (latest.current.graph?.stubs.has(id)) {
+      setFocusedEntry({ id, selectedId: latest.current.selectedId }); setScrollTarget({ id, center: false, focus: true });
+    } else if (id !== current) select(id, { openDetail: false });
     return true;
   }
 
@@ -337,21 +337,26 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   }, [graph, store]);
   useLayoutEffect(() => {
     if (!scrollTarget) return;
-    const element = scroller.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(scrollTarget.id)}"]`);
+    const element = scroller.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(scrollTarget.id)}"], [data-stub="${CSS.escape(scrollTarget.id)}"]`);
     if (!scroller.current || !element) return;
     setScrollTarget(null);
     scrollToNode(scroller.current, element, scrollTarget.center);
     if (scrollTarget.focus || scroller.current.contains(document.activeElement)) element.focus({ preventScroll: true });
   }, [scrollTarget, graph]);
 
-  const focusId = selectedId && graph?.nodes.has(selectedId) ? selectedId : graph?.order[0] ?? null;
+  const focusId = focusedEntry && focusedEntry.selectedId === selectedId && graph?.order.includes(focusedEntry.id) ? focusedEntry.id
+    : selectedId && graph?.nodes.has(selectedId) ? selectedId : graph?.order[0] ?? null;
   // Like the prototype, the graph and its legend show only when a topic has nodes (Ariadne.dc.html:2177).
   return <div className="graph-view">
     <div ref={scroller} className="graph-scroll" tabIndex={-1}
-      onFocus={event => { focusedRow.current = event.target instanceof Element ? event.target.closest('[data-row]')?.getAttribute('data-row') ?? null : null; }}
+      onFocus={event => {
+        const element = event.target instanceof Element ? event.target.closest('[data-row], [data-stub]') : null;
+        focusedRow.current = element?.getAttribute('data-row') ?? element?.getAttribute('data-stub') ?? null;
+        if (focusedRow.current) setFocusedEntry({ id: focusedRow.current, selectedId: latest.current.selectedId });
+      }}
       onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
       // A focused button keeps its own Enter and Space (Ariadne.dc.html:1471).
-      if (!(event.target instanceof HTMLButtonElement)) keys(event);
+      if (!(event.target instanceof HTMLButtonElement) || (event.target.hasAttribute('data-stub') && event.key !== 'Enter' && event.key !== ' ')) keys(event);
     }}>
       {!!graph?.topics.length && <><div className="graph-legend">
         <span className="graph-legend-key" aria-label="Thread to the selected item" title="Thread to the selected item"><span className="graph-legend-thread" /><span className="graph-legend-label">Thread</span></span>

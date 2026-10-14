@@ -108,6 +108,15 @@ describe('session tree rows', () => {
     }
   });
 
+  it('keeps a sticky Focus exit before the cold session has loaded', async () => {
+    const view = await mount({ load: false, configure: transport => { viewOf(transport).focused_item_id = '1'; } });
+    expect(view.store.getSnapshot().snapshot).toBeNull();
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name: 'Unfocus 1' }));
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+    await act(async () => { await view.store.refresh(); });
+    expect(viewOf(view.transport).focused_item_id).toBeUndefined();
+  });
+
   it('preserves Focus through pending root removal and Undo', async () => {
     const transport = new AppTransport(); viewOf(transport).focused_item_id = '1';
     const session = transport.sessions.get(route.session_id)!;
@@ -242,13 +251,118 @@ describe('session tree rows', () => {
     expect(within(row('1')).getByRole('button', { name: /^Focus on / }).textContent).toBe('Focus');
   });
 
-  it('leaves Focus by double click on the focused item’s icon, and holds Unfocus while the view is busy', async () => {
+  it('leaves Focus by double click on the focused item’s icon', async () => {
     const view = await mount();
     fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
     fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
     expect(ids()).toContain('8');
+  });
+
+  it.each(['row', 'icon', 'sticky'] as const)('holds %s Unfocus while the view is busy', async control => {
+    const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
+    vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'preferences_patch') await gate;
+      return invoke(name, args);
+    });
+    let saving!: Promise<boolean>;
+    act(() => { saving = view.navigation.saveSessionView(structuredClone(viewOf(view.transport)), view.transport.preferences.revision); });
+    await waitFor(() => expect(view.navigation.getSnapshot().writing).toBe(true));
+    expect(view.navigation.isWritingRecent()).toBe(false);
+    const leave = control === 'sticky' ? within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name: /^Unfocus / })
+      : within(row('1')).getByRole('button', { name: /^Unfocus / });
+    expect((leave as HTMLButtonElement).disabled).toBe(true);
+    if (control === 'icon') fireEvent.doubleClick(row('1').querySelector('.tree-icon')!); else fireEvent.click(leave);
+    await act(async () => { release(); await saving; });
+    expect(viewOf(view.transport).focused_item_id).toBe('1');
+    expect(within(row('1')).getByRole('button', { name: /^Unfocus / })).toBeTruthy();
+  });
+
+  it.each(['row', 'icon', 'sticky'] as const)('allows %s Unfocus through a busy automatic Recent save', async control => {
+    const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
+    vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'preferences_patch') await gate;
+      return invoke(name, args);
+    });
+    let saving!: Promise<boolean>;
+    act(() => { saving = view.navigation.saveRecentItems(route, [{ item_id: '1', action: 'peeked', visited_at: '2026-10-13T12:00:00.000Z' }], view.transport.preferences.revision); });
+    await waitFor(() => expect(view.navigation.isWritingRecent()).toBe(true));
+    expect(view.navigation.getSnapshot().writing).toBe(true);
+    const leave = control === 'sticky' ? within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name: /^Unfocus / })
+      : within(row('1')).getByRole('button', { name: /^Unfocus / });
+    expect((leave as HTMLButtonElement).disabled).toBe(false);
+    if (control === 'icon') fireEvent.doubleClick(row('1').querySelector('.tree-icon')!); else fireEvent.click(leave);
+    expect(within(row('1')).queryByRole('button', { name: /^Unfocus / })).toBeNull();
+    await act(async () => { release(); await saving; });
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+  });
+
+  it.each(['row Hide', 'detail Hide'] as const)('ends Focus on %s and does not restore it on Unhide', async source => {
+    const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
+    if (source === 'row Hide') fireEvent.click(within(row('1')).getByRole('button', { name: 'Hide (x)' }));
+    else await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: ['1'] }, view.transport.preferences.revision); });
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+    expect(viewOf(view.transport).hidden_item_ids).toContain('1');
+    await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: [] }, view.transport.preferences.revision); });
+    expect(viewOf(view.transport).focused_item_id).toBeUndefined();
+    expect(row('1')).toBeTruthy(); expect(row('8')).toBeTruthy();
+  });
+
+  it.each(['search', 'filter', 'folded topic', 'pending removal'] as const)('keeps a sticky Focus exit when %s unmounts the row', async exclusion => {
+    const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
+    viewOf(transport).focused_item_id = '1';
+    const removal = new RemovalQueue({ service: createDesktopService(transport), notices, read: async () => session });
+    const view = await mount({ transport, removal });
+    if (exclusion === 'search') view.rerender({ query: 'no matching item anywhere' });
+    else if (exclusion === 'filter') fireEvent.click(chip('In progress'));
+    else if (exclusion === 'folded topic') fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Expand or collapse topic' }));
+    else {
+      const target = { kind: 'item' as const, item: { ...route, item_id: '1' } };
+      act(() => { removal.schedule(target, removeSubject(session, target)!); });
+    }
+    expect(row('1')).toBeNull();
+    const leave = within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name: /^Unfocus / });
+    await waitFor(() => expect((leave as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(leave);
+    await waitFor(() => expect(viewOf(transport).focused_item_id).toBeUndefined());
+  });
+
+  it.each(['above', 'below'] as const)('keeps a sticky Focus exit when its button is %s the viewport', async edge => {
+    let buttonTop = 100;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.tree-scroll')) return new DOMRect(0, 0, 300, 400);
+      if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 60);
+      if (this.matches('.tree-item .tree-focus-action')) return new DOMRect(0, buttonTop, 60, 20);
+      return new DOMRect(0, 100, 300, 100);
+    });
+    const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
+    const band = within(screen.getByRole('navigation', { name: 'Map ancestors' }));
+    expect(band.queryByRole('button', { name: /^Unfocus / })).toBeNull();
+    buttonTop = edge === 'above' ? 40 : 450;
+    fireEvent.scroll(document.querySelector('.tree-scroll')!);
+    fireEvent.click(band.getByRole('button', { name: /^Unfocus / }));
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+  });
+
+  it.each(['removed', 'no longer top-level', 'reparented beneath a hidden ancestor'] as const)('ends invalid Focus when the item is %s', async invalid => {
+    const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
+    if (invalid === 'reparented beneath a hidden ancestor') await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: ['2'] }, view.transport.preferences.revision); });
+    expect(viewOf(view.transport).focused_item_id).toBe('1');
+    const session = view.transport.sessions.get(route.session_id)!;
+    if (invalid === 'removed') session.items['1']!.removed_at = session.updated_at;
+    else session.items['1']!.parent = '2';
+    session.revision++;
+    await act(async () => { await view.store.refresh(true); });
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+    if (invalid === 'reparented beneath a hidden ancestor') {
+      await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: [] }, view.transport.preferences.revision); });
+      expect(viewOf(view.transport).focused_item_id).toBeUndefined();
+    }
   });
 
   it('focuses a top-level bullet on double click and focuses the mounted target when an external reveal exits Focus', async () => {

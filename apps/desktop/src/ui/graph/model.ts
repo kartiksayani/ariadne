@@ -61,7 +61,7 @@ export interface GraphNode {
   readonly short: string;
   readonly x: number;
   readonly y: number;
-  /** Items below this node that expanding it can draw: hidden items and what is under them are not counted. */
+  /** Whole visible subtree below this node, across every tier; hidden branches are excluded. Expanding opens only the next tier. */
   readonly below: number;
   /** Hidden items below this node (each hidden branch counted once): the stub's items. */
   readonly hiddenBelow: number;
@@ -95,7 +95,7 @@ export interface TopicGraph {
 }
 export interface SessionGraph {
   readonly topics: readonly TopicGraph[];
-  /** Node ids in layout order (topic by topic, depth first): the ↑/↓ order. Hidden items count only while their stub is open. */
+  /** Node ids and stub keys in layout order (topic by topic, depth first): the ↑/↓ order. */
   readonly order: readonly string[];
   /** Visible node by id. */
   readonly nodes: ReadonlyMap<string, GraphNode>;
@@ -160,8 +160,12 @@ export function sessionGraph(input: GraphInput): SessionGraph {
   // The Tree's rule (ui/tree/model.ts): a hidden item folds into one stub among its siblings; an outside
   // reveal opens the groups on its route, and the owner opens the rest, locally.
   const openGroups = new Set(input.expandedHiddenGroups ?? []);
+  const selectedGroups = selectedId ? hiddenGroupsFor(session, explicit, selectedId) : [];
+  selectedGroups.forEach(key => openGroups.add(key));
   if (input.revealedItemId) hiddenGroupsFor(session, explicit, input.revealedItemId).forEach(key => openGroups.add(key));
-  const rows = sentenceRows(session, view, later, input.temporaryExpandedItemIds ?? [], input.revealedItemId ?? null, input.filterCollapsedItemIds).rows;
+  // A selected hidden route must exist on the first render, including its folded ancestors and filter context.
+  const rows = sentenceRows(session, view, later, input.temporaryExpandedItemIds ?? [],
+    selectedGroups.length ? selectedId : input.revealedItemId ?? null, input.filterCollapsedItemIds).rows;
   const labels = itemLabels(rows.map(row => row.item), session.topics);
   const indexes = indexSession(session);
   const rowsByParent = new Map<string, SentenceRow[]>(), rootsByTopic = new Map<string, SentenceRow[]>();
@@ -215,6 +219,7 @@ export function sessionGraph(input: GraphInput): SessionGraph {
     const place = (entry: Entry, depth: number): number => {
       deepest = Math.max(deepest, depth);
       if (entry.kind === 'stub') {
+        order.push(entry.stub.key);
         const stub: GraphStub = { ...entry.stub, x: columnX(depth), y };
         topicStubs.push(stub); stubs.set(stub.key, stub);
         const top = y + STUB_HEIGHT / 2 - NODE_HEIGHT / 2;

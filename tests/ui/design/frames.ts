@@ -161,5 +161,16 @@ export function frameSpec(id: string): FrameSpec {
 export const detailMask = { reason: 'chat-style detail pane, owner request 2026-10-08; covered by tests/e2e/owner-input/layout.spec.mts + UI tests', selector: '.shell-detail-scroll' } as const;
 export const detailMasked = (spec: FrameSpec): boolean => !!spec.detail;
 
+/**
+ * Graph frames are compared with the Graph's own rows moved, not with a looser threshold. The handoff puts a
+ * standalone filter row above the legend; the app moved the filter button into the legend row (owner request,
+ * A16), so the legend and the Graph below it sit higher by the height of that row. The legend is measured against
+ * the legend, the Graph body against the selected card (the handoff scrolls the selection to the centre of a
+ * shorter viewport, so the body moves by less than the legend). The strips the move leaves without a counterpart
+ * (the handoff's filter row, the part of the Graph newly in view at the foot) are masked. Everything else is
+ * compared pixel for pixel at the same place.
+ */
+export const graphShift = { reason: 'filter row above the Graph legend removed, filter button moved into the legend row (A16 owner report)', maxShift: 60 } as const;
+
 /** Graph frames: the handoff's view="graph" or the session scenario (Ariadne.dc.html:961). */
 export const graphFrame = (spec: FrameSpec): boolean => spec.view === 'graph' || spec.scenario === 'session';

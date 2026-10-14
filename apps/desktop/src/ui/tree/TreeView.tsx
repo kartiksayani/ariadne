@@ -22,7 +22,7 @@ import type { PendingSubmission } from '../answer/useSubmit';
 import { notices as noticeStore } from '../pages/notices';
 import { chipsOf, closed, collapsedNote, mapChanges, nextMarkedItem, oldestWaiting, parentKey, sessionBar, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
 import { HiddenRow } from './HiddenRow';
-import { hiddenGroupKey, hiddenGroupsFor } from './hidden';
+import { hiddenGroupKey, hiddenGroupsFor, hiddenSource } from './hidden';
 import { HideIcon } from '../shared/HideIcon';
 import { ackTarget, ackTitle, useAck } from '../shared/ack';
 import { Guides, ItemRow, type RowAction } from './ItemRow';
@@ -136,6 +136,7 @@ export function TreeView(props: TreeViewProps) {
   // The composed graph reads saved statuses; both views must share the same fold scope during writes.
   const filterFolds = useFilterFolds(navigation.routes, route, (graph ? savedView : view)?.filters, query);
   const viewBusy = nav.writing || nav.pendingOperationId !== null;
+  const focusDisabled = viewBusy && !navigation.isWritingRecent();
   const archivedMode = view?.filters.archived ?? false;
   const savedLater = preferences?.later;
   const later = useMemo(() => new Set(savedLater?.filter(item => item.project_id === route.project_id && item.session_id === route.session_id)
@@ -223,8 +224,8 @@ export function TreeView(props: TreeViewProps) {
   [session, view, query, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, nextRevealId, presence, health, summaries, minute]);
   const summary = summaries.find(value => value.project_id === route.project_id && value.session_id === route.session_id) ?? null;
   const bar = sessionBar(session, summary, presence);
-  const focusedItem = view?.focused_item_id ? session?.items[view.focused_item_id] : null;
-  const focusedId = focusedItem && !focusedItem.parent && session && !itemRemoved(session, focusedItem.id) ? focusedItem.id : null;
+  const focusedItem = view?.focused_item_id ? raw?.items[view.focused_item_id] : null;
+  const focusedId = view?.focused_item_id && (!raw || (focusedItem && !focusedItem.parent && !itemRemoved(raw, focusedItem.id))) ? view.focused_item_id : null;
   const focusedBranch = useMemo(() => session && focusedId ? branchItems(session, focusedId) : null, [session, focusedId]);
   const rows = useMemo(() => session ? focusedRows(model?.rows ?? [], session, focusedId) : model?.rows ?? [], [model, session, focusedId]);
   const names = useMemo(() => session ? peekNames(session) : new Map<string, string>(), [session]);
@@ -361,7 +362,7 @@ export function TreeView(props: TreeViewProps) {
     return true;
   };
   const focusBranch = (id: string | null) => {
-    if (viewBusy && !navigation.isWritingRecent()) return;
+    if (focusDisabled) return;
     if (id && (!session?.items[id] || session.items[id]!.parent)) return;
     settled.current = true; openingPlacement.current = null; setAnchor(null);
     void saveView(next => {
@@ -385,8 +386,10 @@ export function TreeView(props: TreeViewProps) {
     const id = view?.focused_item_id;
     if (state.status !== 'ready' || !raw || !id) return;
     const item = raw.items[id];
-    if (!item || item.parent || itemRemoved(raw, id)) void saveView(next => { delete next.focused_item_id; });
-  }, [view?.focused_item_id, state.status, raw]);
+    if (!item || item.parent || itemRemoved(raw, id) || hiddenSource(raw, new Set(view?.hidden_item_ids ?? []), id)) {
+      void saveView(next => { delete next.focused_item_id; });
+    }
+  }, [view?.focused_item_id, view?.hidden_item_ids, state.status, raw]);
   const toggleItem = (id: string) => {
     const row = latest.current.rows.find(value => value.key === id);
     if (!row || row.kind !== 'item' || !row.hasKids) return;
@@ -709,8 +712,8 @@ export function TreeView(props: TreeViewProps) {
   const held = useRef<{ readonly key: string; readonly offset: number; readonly top: number; readonly scrollTop: number } | null>(null);
   const panelTarget = useRef<{ readonly key: string; readonly top: number; readonly scrollTop: number } | null>(null);
   const [breadcrumb, setBreadcrumb] = useState<readonly string[]>([]);
-  /** The focused item's own Unfocus button has scrolled under the sticky band: the breadcrumb row then carries a copy. */
-  const [focusAbove, setFocusAbove] = useState(false);
+  /** Keep an exit in the band whenever the focused row's own Unfocus is unavailable. */
+  const [focusExitMissing, setFocusExitMissing] = useState(false);
   const placed = useRef<Anchor | null>(null);
   placed.current = anchor;
   const remembering = () => {
@@ -760,8 +763,10 @@ export function TreeView(props: TreeViewProps) {
     setBreadcrumb(previous => previous.length === next.length && previous.every((id, index) => id === next[index]) ? previous : next);
     const focusRoot = latest.current.focusedId ? elements.current.get(latest.current.focusedId) : undefined;
     const leave = focusRoot?.querySelector('.tree-focus-action');
-    const above = !!leave && leave.getBoundingClientRect().top < top;
-    setFocusAbove(previous => previous === above ? previous : above);
+    const rect = leave?.getBoundingClientRect();
+    const bottom = Math.min(box.getBoundingClientRect().bottom, window.innerHeight);
+    const missing = !rect || rect.width <= 0 || rect.height <= 0 || rect.top < top || rect.bottom > bottom;
+    setFocusExitMissing(previous => previous === missing ? previous : missing);
   };
   const layoutState = useRef({ selectedId, reveal, detailOpen });
   const releaseReveal = () => {
@@ -1019,7 +1024,7 @@ export function TreeView(props: TreeViewProps) {
         {props.topicContent(row.topic.id)}</div>}
       {items.map(row => row.kind === 'hidden'
         ? <HiddenRow key={row.key} row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleHiddenGroup} />
-        : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={viewBusy && !navigation.isWritingRecent()} closedReason={session ? sessionAnswerBlocked(session) : undefined}
+        : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={focusDisabled} closedReason={session ? sessionAnswerBlocked(session) : undefined}
         changeMarker={changes?.markers.get(row.key)} nextUnseen={nextTarget?.id === row.key} nextUnseenPulse={nextPulse && nextTarget?.id === row.key}
         note={row.collapsed ? collapsedNote(row.collapsed) : null}
         actions={itemActions(row)} answer={answering === row.key ? answerControl : null} fix={fixOf(row)}
@@ -1071,9 +1076,8 @@ export function TreeView(props: TreeViewProps) {
     body = <div className="tree-no-match"><div className="tree-no-match-title">No archived topics in this session.</div></div>;
   } else body = tree;
 
-  // The focused item's own button says Unfocus; once it is scrolled under the sticky band, this copy at the end of the
-  // breadcrumb row does, so leaving Focus never needs a scroll back up.
-  const unfocusCopy = focusedId && <button type="button" className="tree-focus-action" aria-label={`Unfocus ${names.get(focusedId)}`} disabled={viewBusy}
+  // The sticky copy also covers filtered, folded or otherwise unmounted rows.
+  const unfocusCopy = focusedId && <button type="button" className="tree-focus-action" aria-label={`Unfocus ${names.get(focusedId) ?? (focusedItem ? shortLabel(focusedItem) : focusedId)}`} disabled={focusDisabled}
     onClick={() => focusBranch(null)}>Unfocus</button>;
   const selectedTag = !graph && <div className="tree-selected-slot" role="group" aria-label="Selected item navigation">
     {selectedEdge && selectedId && session?.items[selectedId] && <button type="button" className="tree-selected-edge" data-edge={selectedEdge}
@@ -1121,7 +1125,7 @@ export function TreeView(props: TreeViewProps) {
       <div className="tree-path">
         <nav className="tree-breadcrumb" aria-label="Map ancestors">{breadcrumb.map((id, index) => <span key={id}>
           {index > 0 && <span aria-hidden="true"> › </span>}<button type="button" title={session?.items[id]?.question} onClick={() => select(id, false)}>{names.get(id)}</button>
-        </span>)}{focusAbove && unfocusCopy}</nav>
+        </span>)}{focusExitMissing && unfocusCopy}</nav>
         {selectedTag}
       </div>
       <div ref={scroller} className="tree-scroll" onScroll={() => {

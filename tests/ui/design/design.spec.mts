@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, extname, resolve, sep } from 'node:path';
-import { answerFrameIds, designNow, detailMask, detailMasked, dockFrameIds, frameNow, frameSpec, graphFrame, toastFrameIds, variantIds, type FrameSpec } from './frames';
+import { answerFrameIds, designNow, detailMask, detailMasked, dockFrameIds, frameNow, frameSpec, graphFrame, graphShift, toastFrameIds, variantIds, type FrameSpec } from './frames';
 import { startDesignServer } from './server.mts';
 import { handoffMembers, prefix, repo, sourceRoot } from './source.mts';
 import thresholds from './thresholds.json' with { type: 'json' };
@@ -683,9 +683,88 @@ for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as 
   });
 }
 
+for (const frame of ['graph-hidden', 'graph-hidden-small'] as const) for (const theme of ['dark', 'light'] as const) {
+  test(`The hidden-items stub shows a whole focus ring under keyboard focus: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec(frame), theme });
+    const stub = page.locator('.graph-stub').first();
+    // The Graph's own keyboard moves (up and down in layout order) reach the stub and scroll it into view themselves.
+    await page.locator('.graph-node[aria-selected="true"]').focus();
+    const reached = () => stub.evaluate(element => element === document.activeElement);
+    for (const key of ['ArrowDown', 'ArrowUp'] as const) for (let step = 0; step < 40 && !(await reached()); step++) { await page.keyboard.press(key); await page.waitForTimeout(40); }
+    await expect(stub).toBeFocused();
+    expect(await stub.evaluate(element => element.matches(':focus-visible')), 'keyboard focus shows the ring').toBe(true);
+    await settle(page);
+    const ring = await stub.evaluate(element => {
+      const style = getComputedStyle(element), rect = element.getBoundingClientRect();
+      const width = parseFloat(style.outlineWidth) || 0, offset = parseFloat(style.outlineOffset) || 0;
+      const grow = style.outlineStyle === 'none' ? 0 : width + Math.max(offset, 0);
+      const drawn = { left: rect.left - grow, top: rect.top - grow, right: rect.right + grow, bottom: rect.bottom + grow };
+      // Every ancestor that clips must still contain the ring.
+      const clips: { name: string; left: number; top: number; right: number; bottom: number }[] = [];
+      for (let node = element.parentElement; node; node = node.parentElement) {
+        const overflow = getComputedStyle(node);
+        if (overflow.overflowX === 'visible' && overflow.overflowY === 'visible') continue;
+        const box = node.getBoundingClientRect();
+        clips.push({ name: node.className || node.tagName, left: box.left, top: box.top, right: box.right, bottom: box.bottom });
+      }
+      return { style: style.outlineStyle, width, shadow: style.boxShadow, drawn, clips, view: { width: innerWidth, height: innerHeight } };
+    });
+    await page.screenshot({ path: testInfo.outputPath(`fix1-graph-stub-focus-${frame}-${theme}.png`), animations: 'disabled' });
+    const box = (await stub.boundingBox())!;
+    await page.screenshot({ path: testInfo.outputPath(`fix1-graph-stub-focus-zoom-${frame}-${theme}.png`), animations: 'disabled',
+      clip: { x: Math.max(0, box.x - 40), y: Math.max(0, box.y - 30), width: Math.min(box.width + 80, page.viewportSize()!.width), height: box.height + 60 } });
+    expect(ring.style === 'none' ? ring.shadow : ring.style, 'a focus indicator is drawn').not.toBe('none');
+    for (const clip of ring.clips) {
+      expect(ring.drawn.left, `${clip.name} does not cut the ring on the left`).toBeGreaterThanOrEqual(clip.left - 0.5);
+      expect(ring.drawn.right, `${clip.name} does not cut the ring on the right`).toBeLessThanOrEqual(clip.right + 0.5);
+      expect(ring.drawn.top, `${clip.name} does not cut the ring at the top`).toBeGreaterThanOrEqual(clip.top - 0.5);
+      expect(ring.drawn.bottom, `${clip.name} does not cut the ring at the bottom`).toBeLessThanOrEqual(clip.bottom + 0.5);
+    }
+  });
+}
+
+/** Focus leaves from the sticky Unfocus copy when the focused row is not on screen: filtered out by search, or its topic folded. */
+for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) for (const state of ['search', 'folded'] as const) {
+  test(`The sticky Unfocus is whole and clear of the path row when the focused row is ${state === 'search' ? 'filtered out by search' : 'under a folded topic'}: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec(frame), theme });
+    const roots = page.locator('.tree-item-root:has(.tree-chevron)'), first = roots.first();
+    const topic = page.locator('.tree-topic-group').first().locator('.tree-topic');
+    // Something that matches another topic's item only, so the search leaves rows on screen but not the focused one.
+    const other = ((await roots.last().locator('.tree-question').textContent()) ?? '').trim().slice(0, 14);
+    await first.getByRole('button', { name: /^Focus on / }).click();
+    await expect(first.getByRole('button', { name: /^Unfocus / })).toBeVisible();
+    if (state === 'search') await page.locator('[data-shell-search]').fill(other);
+    else await topic.locator('.tree-chevron').dispatchEvent('click');
+    await settle(page);
+    const copy = page.getByRole('navigation', { name: 'Map ancestors' }).getByRole('button', { name: /^Unfocus / });
+    await expect(copy, 'the exit stays in the path row').toBeVisible();
+    await expect(copy).toHaveText('Unfocus');
+    const facts = await page.evaluate(() => {
+      const box = (element: Element) => element.getBoundingClientRect();
+      const copy = document.querySelector('.tree-path .tree-focus-action')!, path = document.querySelector('.tree-path')!, bar = document.querySelector('.tree-breadcrumb')!;
+      const others = [...document.querySelectorAll('.tree-breadcrumb button:not(.tree-focus-action), .tree-selected-edge')].map(element => ({ name: element.textContent, rect: box(element) }));
+      const centre = document.elementFromPoint(box(copy).left + box(copy).width / 2, box(copy).top + box(copy).height / 2);
+      return { copy: box(copy), path: box(path), bar: box(bar), others, covers: !!centre?.closest('.tree-focus-action'), width: innerWidth, height: innerHeight,
+        clipped: copy.scrollWidth > copy.clientWidth };
+    });
+    expect(facts.copy.left).toBeGreaterThanOrEqual(facts.bar.left - 0.5); expect(facts.copy.right).toBeLessThanOrEqual(facts.bar.right + 0.5);
+    expect(facts.copy.top).toBeGreaterThanOrEqual(facts.path.top - 0.5); expect(facts.copy.bottom).toBeLessThanOrEqual(facts.path.bottom + 0.5);
+    expect(facts.copy.right).toBeLessThanOrEqual(facts.width); expect(facts.copy.bottom).toBeLessThanOrEqual(facts.height);
+    expect(facts.clipped, 'the word is not cut off').toBe(false);
+    expect(facts.covers, 'nothing paints over it').toBe(true);
+    for (const other of facts.others) {
+      const apart = other.rect.right <= facts.copy.left + 0.5 || other.rect.left >= facts.copy.right - 0.5 || other.rect.bottom <= facts.copy.top || other.rect.top >= facts.copy.bottom;
+      expect(apart, `${other.name} does not overlap Unfocus`).toBe(true);
+    }
+    await page.screenshot({ path: testInfo.outputPath(`fix1-unfocus-${state}-${frame}-${theme}.png`), animations: 'disabled' });
+    await copy.click();
+    await expect(copy).toHaveCount(0);
+  });
+}
+
 /** Pixel diff in the browser canvas: mismatch ratio and a diff image (mismatches red over the dimmed app). */
-async function compare(page: Page, design: Buffer, app: Buffer, regions: readonly Region[] = [], mask: Region | null = null) {
-  return page.evaluate(async ({ design, app, tolerance, regions, mask }) => {
+async function compare(page: Page, design: Buffer, app: Buffer, regions: readonly Region[] = [], masks: readonly Region[] = [], shifts: readonly Shift[] = []) {
+  return page.evaluate(async ({ design, app, tolerance, regions, masks, shifts }) => {
     const load = (base64: string) => new Promise<HTMLImageElement>((done, fail) => {
       const image = new Image(); image.onload = () => done(image); image.onerror = fail; image.src = `data:image/png;base64,${base64}`;
     });
@@ -702,11 +781,14 @@ async function compare(page: Page, design: Buffer, app: Buffer, regions: readonl
     for (let index = 0; index < a.length; index += 4) {
       const x = (index / 4) % width, y = Math.floor(index / 4 / width);
       // A masked region is left out of the ratio (the frame's full area still divides it) and shown tinted blue in the diff.
-      if (mask && x >= mask.x && x < mask.x + mask.width && y >= mask.y && y < mask.y + mask.height) {
+      if (masks.some(mask => x >= mask.x && x < mask.x + mask.width && y >= mask.y && y < mask.y + mask.height)) {
         out.data.set([b[index] * 0.3, b[index + 1] * 0.3 + 24, b[index + 2] * 0.3 + 64, 255], index);
         continue;
       }
-      const differs = [0, 1, 2, 3].some(channel => Math.abs(a[index + channel] - b[index + channel]) > tolerance);
+      // A shifted band is compared with the design's pixel `dy` rows lower: the app's row sits higher by an intended change.
+      const shift = shifts.find(band => x >= band.x && x < band.x + band.width && y >= band.y && y < band.y + band.height);
+      const other = shift && y + shift.dy < height ? index + shift.dy * width * 4 : index;
+      const differs = [0, 1, 2, 3].some(channel => Math.abs(a[other + channel] - b[index + channel]) > tolerance);
       if (differs) {
         mismatched++;
         regions.forEach((region, at) => { if (x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height) inRegion[at]++; });
@@ -716,9 +798,46 @@ async function compare(page: Page, design: Buffer, app: Buffer, regions: readonl
     context.putImageData(out, 0, 0);
     return { ratio: mismatched / (width * height), regions: regions.map((region, at) => inRegion[at] / Math.max(1, region.width * region.height)), width, height,
       png: canvas.toDataURL('image/png').split(',')[1] };
-  }, { design: design.toString('base64'), app: app.toString('base64'), tolerance, regions, mask });
+  }, { design: design.toString('base64'), app: app.toString('base64'), tolerance, regions, masks, shifts });
 }
 interface Region { readonly name: string; readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+/** App rows [y, y + height) of the columns [x, x + width) are compared with the design's rows `dy` lower. */
+interface Shift extends Region { readonly dy: number }
+
+/**
+ * Graph frames (frames.ts graphShift): where the legend and the Graph body sit in the design against the app.
+ * Returns the shifted bands and the strips with no counterpart, in app pixels. Nothing outside the centre column moves.
+ */
+async function graphBands(page: Page, designPage: Page, card: string, columns: readonly Region[]) {
+  const center = columns.find(column => column.name === 'center')!;
+  const app = await page.evaluate(() => {
+    const legend = document.querySelector('.graph-legend')!, thread = legend.querySelector('[aria-label="Thread to the selected item"]')!;
+    const node = document.querySelector('.graph-node[aria-selected="true"]') ?? document.querySelector('.graph-node');
+    return { legendTop: legend.getBoundingClientRect().top, legendBottom: legend.getBoundingClientRect().bottom, thread: thread.getBoundingClientRect().top,
+      row: node?.getAttribute('data-row') ?? null, node: node?.getBoundingClientRect().top ?? null };
+  });
+  expect(app.row, 'the Graph has a card to align on').not.toBeNull();
+  const design = await designPage.evaluate(({ card, row }) => {
+    const root = document.querySelector(`[id="${card}"] .dv-card`)!;
+    // The card sits at a fractional page offset and the capture clips at the rounded one: measure from that origin.
+    const origin = Math.round(root.getBoundingClientRect().y + window.scrollY) - window.scrollY;
+    return { thread: root.querySelector('[aria-label="Thread to the selected item"]')!.getBoundingClientRect().top - origin,
+      node: root.querySelector(`[data-row="${row}"]`)!.getBoundingClientRect().top - origin };
+  }, { card, row: app.row });
+  const legend = Math.round(design.thread - app.thread), body = Math.round(design.node - app.node!);
+  const limit = graphShift.maxShift;
+  expect(legend, 'the legend moves up, by a row at most').toBeGreaterThanOrEqual(0); expect(legend).toBeLessThanOrEqual(limit);
+  expect(body, 'the Graph body moves up by no more than the legend').toBeGreaterThanOrEqual(0); expect(body).toBeLessThanOrEqual(legend);
+  const top = Math.round(app.legendTop), under = Math.round(app.legendBottom), foot = center.y + center.height;
+  const strip = (name: string, y: number, height: number): Region => ({ name, x: center.x, y, width: center.width, height });
+  const band = (name: string, y: number, height: number, dy: number): Shift => ({ ...strip(name, y, height), dy });
+  return {
+    // The Graph below the legend: app rows from where the design's Graph starts under its legend, up to the last row that has a design row.
+    shifts: [band('legend', top, under - top, legend), band('graph', under + legend - body, foot - under - legend, body)],
+    masks: [strip('graph newly in view under the legend', under, legend - body), strip('graph newly in view above the footer', foot - body, body)].filter(mask => mask.height > 0),
+    legend, body,
+  };
+}
 
 test.describe.configure({ mode: 'parallel' });
 /** Stable identity works even though reference rows no longer print their item numbers. */
@@ -1594,7 +1713,9 @@ async function capture(page: Page, designPage: Page, spec: FrameSpec, id: string
     const mask = detailMasked(spec) ? await page.locator(detailMask.selector).evaluate(element => {
       const rect = element.getBoundingClientRect(); return { name: 'detail body', x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
     }) : null;
-    const result = await compare(canvas, design, app, columns, mask);
+    // Graph frames compare the legend and the Graph with the intended move applied (frames.ts graphShift); the rest as is.
+    const graph = graphFrame(spec) ? await graphBands(page, designPage, card, columns) : null;
+    const result = await compare(canvas, design, app, columns, [...(mask ? [mask] : []), ...(graph?.masks ?? [])], graph?.shifts ?? []);
     await canvas.close();
     writeFileSync(resolve(output, `${id}-design.png`), design);
     writeFileSync(resolve(output, `${id}-app.png`), app);
@@ -1602,6 +1723,7 @@ async function capture(page: Page, designPage: Page, spec: FrameSpec, id: string
     const threshold = (thresholds as Record<string, number>)[id] ?? 0;
     writeFileSync(resolve(output, 'frames', `${id}.json`), `${JSON.stringify({ ratio: Number(result.ratio.toFixed(4)), threshold, tolerance,
       masked: mask ? { region: mask, reason: detailMask.reason } : null,
+      shifted: graph ? { reason: graphShift.reason, legend: graph.legend, graph: graph.body, bands: graph.shifts, masks: graph.masks } : null,
       columns: Object.fromEntries(columns.map((column, at) => [column.name, Number(result.regions[at].toFixed(4))])),
       size: { width: result.width, height: result.height }, viewport: { width: spec.width, height: spec.height }, shell }, null, 2)}\n`);
     expect(denied).toEqual([]);
