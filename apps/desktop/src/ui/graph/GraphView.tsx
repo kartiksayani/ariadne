@@ -11,7 +11,8 @@ import { ackTitle } from '../shared/ack';
 import { useWorkspaceKeys } from '../keys';
 import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
-import { applyChange, mergeChange, relatedEdgePath, sessionGraph, statusVisual, type GraphNode, type RelatedEdge, type TopicGraph, type ViewChange } from './model';
+import { hiddenGroupKey, hiddenGroupsFor } from '../tree/hidden';
+import { applyChange, mergeChange, relatedEdgePath, sessionGraph, statusVisual, STUB_HEIGHT, STUB_WIDTH, type GraphNode, type GraphStub, type RelatedEdge, type TopicGraph, type ViewChange } from './model';
 import './graph.css';
 import { useFilterFolds } from '../shared/filterFolds';
 import { notices } from '../pages/notices';
@@ -60,7 +61,9 @@ const Node = memo(function Node({ node, focusable, onOpen, onCollapse }: NodePro
   const visual = statusVisual[node.status];
   const className = ['graph-node', node.status === 'waiting' && 'is-waiting', node.onThread && 'is-thread', node.selected && 'is-selected',
     node.closed && 'is-closed', node.dimmed && 'is-dimmed', node.hidden && 'is-hidden'].filter(Boolean).join(' ');
-  const belowTitle = `${node.below} items below, collapsed · click to open the next tier`;
+  // Only what expanding can draw is counted; a branch of hidden items has its own stub and is named when nothing else is below.
+  const belowTitle = node.below > 0 ? `${node.below} items below, collapsed · click to open the next tier`
+    : `${node.hiddenBelow} ${node.hiddenBelow === 1 ? 'item' : 'items'} hidden below, collapsed · click to open the next tier`;
   return <div className={className} role="treeitem" aria-selected={node.selected} aria-expanded={node.below ? !node.collapsed : undefined}
     aria-label={`${node.short}: ${node.item.question}${node.hidden ? ' (hidden)' : ''}`} title={node.item.question} tabIndex={focusable ? 0 : -1}
     data-item-id={node.item.id} data-row={node.item.id} style={{ left: node.x, top: node.y }}
@@ -69,7 +72,7 @@ const Node = memo(function Node({ node, focusable, onOpen, onCollapse }: NodePro
       <i className={`graph-node-icon ${visual.icon}`} role="img" aria-label={visual.label} title={visual.label} style={{ color: `var(--st-${node.status})` }} />
       <span className="graph-node-title">{node.short}</span>
       {node.ack && <span className="graph-node-ack" title={`${ackTitle(node.ack, node.item.status)} · open details`}>{ackTitle(node.ack, node.item.status)}</span>}
-      {node.collapsed && <span className="graph-node-below" title={belowTitle}>+{node.below}</span>}
+      {node.collapsed && <span className="graph-node-below" title={belowTitle}>{node.below > 0 ? `+${node.below}` : `${node.hiddenBelow} hidden`}</span>}
       {node.canCollapse && <button type="button" className="graph-node-collapse" title="Collapse branches" aria-label="Collapse branches" tabIndex={-1}
         onClick={(event: MouseEvent) => { event.stopPropagation(); onCollapse(node); }}><i className="ph ph-minus" aria-hidden="true" /></button>}
     </div>
@@ -77,9 +80,21 @@ const Node = memo(function Node({ node, focusable, onOpen, onCollapse }: NodePro
   </div>;
 });
 
-function TopicCard({ graph, sessionLabel, marker, focusId, onOpen, onCollapse }: {
+/** The Map's "N items hidden" row, as a small stub: Enter or a click shows the hidden items, and again folds them. */
+const Stub = memo(function Stub({ stub, onToggle }: { readonly stub: GraphStub; readonly onToggle: (stub: GraphStub) => void }) {
+  const label = `${stub.count} ${stub.count === 1 ? 'item' : 'items'} hidden${stub.waiting ? ', waiting on you' : ''}`;
+  return <button type="button" role="treeitem" className="graph-stub" aria-expanded={stub.expanded} aria-label={label}
+    title={`${label} · ${stub.expanded ? 'fold them again' : 'show them'}`} data-stub={stub.key}
+    style={{ left: stub.x, top: stub.y, width: STUB_WIDTH, height: STUB_HEIGHT }} onClick={() => onToggle(stub)}>
+    <i className={stub.expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} aria-hidden="true" />
+    <span className="graph-stub-text">{stub.count} hidden</span>
+    {stub.waiting && <i className="ph-fill ph-question graph-stub-waiting" aria-hidden="true" />}
+  </button>;
+});
+
+function TopicCard({ graph, sessionLabel, marker, focusId, onOpen, onCollapse, onToggleStub }: {
   readonly graph: TopicGraph; readonly sessionLabel: string | null; readonly marker: string; readonly focusId: string | null;
-  readonly onOpen: NodeProps['onOpen']; readonly onCollapse: NodeProps['onCollapse'];
+  readonly onOpen: NodeProps['onOpen']; readonly onCollapse: NodeProps['onCollapse']; readonly onToggleStub: (stub: GraphStub) => void;
 }) {
   return <section className="graph-card" aria-label={graph.topic.name}>
     <div className="graph-card-head">
@@ -99,6 +114,7 @@ function TopicCard({ graph, sessionLabel, marker, focusId, onOpen, onCollapse }:
         </g>)}
       </svg>
       {graph.nodes.map(node => <Node key={node.item.id} node={node} focusable={node.item.id === focusId} onOpen={onOpen} onCollapse={onCollapse} />)}
+      {graph.stubs.map(stub => <Stub key={stub.key} stub={stub} onToggle={onToggleStub} />)}
     </div>
   </section>;
 }
@@ -146,6 +162,8 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   const scroller = useRef<HTMLDivElement>(null);
   const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
   const [dismissedReveal, setDismissedReveal] = useState<RevealedItem | null>(null);
+  // Hidden groups the owner has open, like the Tree's expandedHiddenGroups: local to this view and never saved.
+  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(() => new Set());
   // Optimistic view edits: `pending` waits for the current write, `inflight` is being written.
   const [pending, setPending] = useState<ViewChange | null>(null);
   const [inflight, setInflight] = useState<ViewChange | null>(null);
@@ -169,10 +187,50 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   const selectedId = pending?.selected ?? inflight?.selected ?? itemReveal?.route.item_id ?? view.selected_item_id;
   const graph = useMemo(() => session ? sessionGraph({ session, view: shown, later, selectedId, tight,
     temporaryExpandedItemIds: itemReveal?.temporaryExpandedItemIds ?? [], revealedItemId: itemReveal?.route.item_id ?? null,
-    filterCollapsedItemIds: filterFolds.items }) : null,
-  [session, shown, later, selectedId, tight, itemReveal, filterFolds.items]);
+    filterCollapsedItemIds: filterFolds.items, expandedHiddenGroups: openGroups }) : null,
+  [session, shown, later, selectedId, tight, itemReveal, filterFolds.items, openGroups]);
   const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId });
   latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId };
+
+  // A selection that moves onto a hidden item, or a reveal of one (a link, a Waiting card, search, detail), opens the
+  // hidden groups on its route so it shows; the owner folds them again from their stubs. Hiding the item the graph is
+  // showing (the x key, the detail pane) is the opposite: it folds away like any other hidden item.
+  const hiddenSelection = useRef<{ sessionId?: string; selectedId: string | null }>({ selectedId: null });
+  const knownHidden = useRef<ReadonlySet<string>>(new Set(view.hidden_item_ids ?? []));
+  const revealedId = itemReveal?.route.item_id ?? null;
+  useLayoutEffect(() => {
+    const explicit = new Set(view.hidden_item_ids ?? []), added = new Set([...explicit].filter(id => !knownHidden.current.has(id)));
+    knownHidden.current = explicit;
+    if (!session) return;
+    const previous = hiddenSelection.current;
+    hiddenSelection.current = { sessionId: session.id, selectedId };
+    const moved = previous.sessionId !== session.id || previous.selectedId !== selectedId;
+    const hiding = !!revealedId && added.size > 0 && hiddenGroupsFor(session, added, revealedId).length > 0;
+    if (hiding) setDismissedReveal(currentReveal);
+    setOpenGroups(groups => {
+      const next = new Set(groups);
+      for (const id of [moved ? selectedId : null, hiding ? null : revealedId]) if (id) hiddenGroupsFor(session, explicit, id).forEach(key => next.add(key));
+      return next.size === groups.size ? groups : next;
+    });
+  }, [session, selectedId, revealedId, view.hidden_item_ids]);
+  const toggleStub = useCallback((stub: GraphStub) => {
+    setDismissedReveal(currentReveal);
+    setOpenGroups(groups => { const next = new Set(groups); if (stub.expanded) next.delete(stub.key); else next.add(stub.key); return next; });
+  }, [currentReveal]);
+  // When the focused node is hidden away, focus goes to its stub, as the Tree's does.
+  const focusedRow = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const id = focusedRow.current, active = document.activeElement;
+    if (!id || !graph || !session || graph.nodes.has(id) || (active && active !== document.body)) return;
+    const explicit = new Set(view.hidden_item_ids ?? []);
+    let key: string | null = null;
+    for (let item = session.items[id]; item; item = item.parent ? session.items[item.parent] : undefined) {
+      const group = hiddenGroupKey(item.topic_id, item.parent);
+      if (explicit.has(item.id) && graph.stubs.has(group)) key = group;
+    }
+    const stub = key ? scroller.current?.querySelector<HTMLElement>(`[data-stub="${CSS.escape(key)}"]`) : null;
+    if (stub) { focusedRow.current = null; stub.focus({ preventScroll: true }); }
+  }, [graph, session, view.hidden_item_ids]);
 
   // The item this graph selected last; its reveal comes back through `reveal` and must not scroll again.
   const own = useRef<string | null>(null);
@@ -184,7 +242,7 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
     if (reveal.route.item_id === own.current) own.current = null;
     else setScrollTarget({ id: reveal.route.item_id, center: true, focus: true });
   }, [reveal]);
-  useLayoutEffect(() => { ++request.current; setLocalReveal(null); setPending(null); setInflight(null); setError(null); }, [store]);
+  useLayoutEffect(() => { ++request.current; setLocalReveal(null); setPending(null); setInflight(null); setError(null); setOpenGroups(new Set()); }, [store]);
 
   // Writes one change at a time through navigation's preference writer; later edits merge into `pending`.
   useEffect(() => {
@@ -231,7 +289,7 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
     'move-down': () => move(1), 'move-up': () => move(-1), first: () => move(-Infinity), last: () => move(Infinity),
     unfold: () => {
       const { graph: current, selectedId: id } = latest.current, node = id ? current?.nodes.get(id) : undefined;
-      if (!current || !node || !node.below) return !!node;
+      if (!current || !node || (!node.below && !node.hiddenBelow)) return !!node;
       if (node.collapsed) {
         if (current.filtering) filterFolds.setFold('items', node.item.id, false);
         change({ expansion: [{ kind: 'expand', id: node.item.id }] }); return true;
@@ -288,7 +346,9 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   const focusId = selectedId && graph?.nodes.has(selectedId) ? selectedId : graph?.order[0] ?? null;
   // Like the prototype, the graph and its legend show only when a topic has nodes (Ariadne.dc.html:2177).
   return <div className="graph-view">
-    <div ref={scroller} className="graph-scroll" tabIndex={-1} onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+    <div ref={scroller} className="graph-scroll" tabIndex={-1}
+      onFocus={event => { focusedRow.current = event.target instanceof Element ? event.target.closest('[data-row]')?.getAttribute('data-row') ?? null : null; }}
+      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
       // A focused button keeps its own Enter and Space (Ariadne.dc.html:1471).
       if (!(event.target instanceof HTMLButtonElement)) keys(event);
     }}>
@@ -304,7 +364,7 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
       </div>
       <div className="graph-cards">
         {graph?.topics.map(topic => <TopicCard key={topic.topic.id} graph={topic} sessionLabel={continuedFrom?.(topic.topic) ?? sessionLabel} marker={`${marker}-${topic.topic.id}`}
-          focusId={focusId} onOpen={open} onCollapse={collapse} />)}
+          focusId={focusId} onOpen={open} onCollapse={collapse} onToggleStub={toggleStub} />)}
         {!!graph?.crossTopicRelated.length && <CrossTopicLinks edges={graph.crossTopicRelated} />}
       </div></>}
     </div>

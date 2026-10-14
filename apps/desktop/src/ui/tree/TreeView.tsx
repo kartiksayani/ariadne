@@ -25,7 +25,7 @@ import { HiddenRow } from './HiddenRow';
 import { hiddenGroupKey, hiddenGroupsFor } from './hidden';
 import { HideIcon } from '../shared/HideIcon';
 import { ackTarget, ackTitle, useAck } from '../shared/ack';
-import { ItemRow, type RowAction } from './ItemRow';
+import { Guides, ItemRow, type RowAction } from './ItemRow';
 import { TopicRow, type TopicAction } from './TopicRow';
 import { TopicReply } from '../answer/TopicReply';
 import { StuckNote } from '../answer/StuckNote';
@@ -236,8 +236,8 @@ export function TreeView(props: TreeViewProps) {
     }
     return groups;
   }, [rows]);
-  const latest = useRef({ view, preferences, rows, session, selectedId, answering });
-  latest.current = { view, preferences, rows, session, selectedId, answering };
+  const latest = useRef({ view, preferences, rows, session, selectedId, answering, focusedId });
+  latest.current = { view, preferences, rows, session, selectedId, answering, focusedId };
 
   const hiddenSelection = useRef<{ sessionId?: string; selectedId: string | null }>({ selectedId: null });
   useEffect(() => {
@@ -709,6 +709,8 @@ export function TreeView(props: TreeViewProps) {
   const held = useRef<{ readonly key: string; readonly offset: number; readonly top: number; readonly scrollTop: number } | null>(null);
   const panelTarget = useRef<{ readonly key: string; readonly top: number; readonly scrollTop: number } | null>(null);
   const [breadcrumb, setBreadcrumb] = useState<readonly string[]>([]);
+  /** The focused item's own Unfocus button has scrolled under the sticky band: the breadcrumb row then carries a copy. */
+  const [focusAbove, setFocusAbove] = useState(false);
   const placed = useRef<Anchor | null>(null);
   placed.current = anchor;
   const remembering = () => {
@@ -756,6 +758,10 @@ export function TreeView(props: TreeViewProps) {
       return !ancestor || ancestor.getBoundingClientRect().top < top;
     }) : [];
     setBreadcrumb(previous => previous.length === next.length && previous.every((id, index) => id === next[index]) ? previous : next);
+    const focusRoot = latest.current.focusedId ? elements.current.get(latest.current.focusedId) : undefined;
+    const leave = focusRoot?.querySelector('.tree-focus-action');
+    const above = !!leave && leave.getBoundingClientRect().top < top;
+    setFocusAbove(previous => previous === above ? previous : above);
   };
   const layoutState = useRef({ selectedId, reveal, detailOpen });
   const releaseReveal = () => {
@@ -1007,7 +1013,10 @@ export function TreeView(props: TreeViewProps) {
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
         reply={replying === row.topic.id && !archivedMode ? <TopicReply drafts={drafts} store={store} actions={actions} topicId={row.topic.id}
           agent={bar?.agent ?? 'the agent'} onClose={() => { setReplying(null); focusRow(row.key); }} /> : null} fix={fixOf(row)} />
-      {row.expanded && props.topicContent?.(row.topic.id)}
+      {/* The topic's rail runs on through its cards, so the thread is one line from the band to the first item. */}
+      {row.expanded && props.topicContent && <div className="tree-topic-cards" data-topic-cards={row.topic.id}>
+        <Guides guides={row.guides.filter(guide => guide.kind === 'line').map(guide => ({ ...guide, fromBullet: false }))} />
+        {props.topicContent(row.topic.id)}</div>}
       {items.map(row => row.kind === 'hidden'
         ? <HiddenRow key={row.key} row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleHiddenGroup} />
         : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={viewBusy && !navigation.isWritingRecent()} closedReason={session ? sessionAnswerBlocked(session) : undefined}
@@ -1015,7 +1024,7 @@ export function TreeView(props: TreeViewProps) {
         note={row.collapsed ? collapsedNote(row.collapsed) : null}
         actions={itemActions(row)} answer={answering === row.key ? answerControl : null} fix={fixOf(row)}
         unfolded={isUnfolded(row.key)} onUnfold={unfold}
-        onFocusBranch={focusBranch} names={names}
+        onFocusBranch={focusBranch} branchFocused={focusedId === row.key} names={names}
         onPeekHover={(id, event) => { const handlers = peek?.chipProps({ ...route, item_id: id });
           if (event.type === 'mouseenter') handlers?.onMouseEnter(event); else handlers?.onMouseMove(event);
         }}
@@ -1059,6 +1068,10 @@ export function TreeView(props: TreeViewProps) {
     body = <div className="tree-no-match"><div className="tree-no-match-title">No archived topics in this session.</div></div>;
   } else body = tree;
 
+  // The focused item's own button says Unfocus; once it is scrolled under the sticky band, this copy at the end of the
+  // breadcrumb row does, so leaving Focus never needs a scroll back up.
+  const unfocusCopy = focusedId && <button type="button" className="tree-focus-action" aria-label={`Unfocus ${names.get(focusedId)}`} disabled={viewBusy}
+    onClick={() => focusBranch(null)}>Unfocus</button>;
   const selectedTag = !graph && <div className="tree-selected-slot" role="group" aria-label="Selected item navigation">
     {selectedEdge && selectedId && session?.items[selectedId] && <button type="button" className="tree-selected-edge" data-edge={selectedEdge}
       aria-label={`${selectedEdge === 'above' ? '↑' : '↓'} Selected: ${session.items[selectedId]!.question}`}
@@ -1081,18 +1094,18 @@ export function TreeView(props: TreeViewProps) {
     {bar && !archivedMode && <SessionBar bar={bar} busy={lifecycle.busy || !session} onClose={lifecycle.session}
       onRename={session ? lifecycle.rename : undefined}
       dispatch={<DispatchChip actions={actions} onDetails={() => setSending(true)} />} />}
-    {session && !archivedMode && !graph && <div className="tree-recent"><RecentTrail session={session} entries={view?.recent_items}
-      nextWaiting={oldestWaiting(session)} onReveal={id => select(id, false)} />
-      <button type="button" className="btn btn-ghost" title="Recent (⌘E)" onClick={() => setRecentOpen(true)}>Recent</button></div>}
+    {/* The filter control ends this row (and stands alone in it over the graph), so it needs no row of its own. */}
+    {filtersShown && <div className="tree-recent">
+      {session && !graph && <><RecentTrail session={session} entries={view?.recent_items}
+        nextWaiting={oldestWaiting(session)} onReveal={id => select(id, false)} />
+      <button type="button" className="btn btn-ghost" title="Recent (⌘E)" onClick={() => setRecentOpen(true)}>Recent</button></>}
+      <FilterBar chips={model?.chips ?? chipsOf([])} counts={counts}
+        disabled={nav.pendingOperationId !== null && !nav.writing} dismissKey={route.session_id} onChip={setChip} />
+    </div>}
     {session && recentOpen && <RecentDialog session={session} entries={view?.recent_items}
       seen={seen}
       onReveal={id => select(id, false)} onClose={() => setRecentOpen(false)} />}
     {sending && <DispatchDialog store={actions.session} actions={actions} agent={bar?.agent ?? 'the agent'} onClose={() => setSending(false)} />}
-    {filtersShown && <FilterBar chips={model?.chips ?? chipsOf([])} counts={counts}
-      disabled={nav.pendingOperationId !== null && !nav.writing} dismissKey={route.session_id} onChip={setChip}>{selectedTag}</FilterBar>}
-    {!filtersShown && !graph && <div className="tree-filters">{selectedTag}</div>}
-    {focusedId && !graph && <Banner icon="ph ph-tree-structure" actions={<button type="button" className="btn btn-ghost" aria-label="Leave Focus" disabled={viewBusy} onClick={() => focusBranch(null)}>×</button>}>
-      Focused: {names.get(focusedId)}</Banner>}
     {model && !graph && (!!query || !model.chips.has('all')) && <Banner icon={query ? 'ph ph-magnifying-glass' : 'ph ph-funnel'} actions={<><span aria-hidden="true">·</span><button type="button" className="btn btn-ghost" disabled={nav.writing || nav.pendingOperationId !== null} onClick={query ? onClearSearch : onClearFilters}>{query ? 'Clear search' : 'Clear filters'}</button></>}>
       Showing {model.searchCount} of {model.itemCount} items{query ? ` matching “${query}”` : ''}{model.hiddenCount > 0 ? ` (${model.hiddenCount} hidden)` : ''}{!model.chips.has('all') ? ' in the statuses you picked' : ''}</Banner>}
     {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>
@@ -1102,9 +1115,13 @@ export function TreeView(props: TreeViewProps) {
     <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
     {/* The graph keeps its own scroller so its legend stays sticky (ui/graph/graph.css). */}
     {graph && !loading ? graph : <div className="tree-scroll-shell">
-      <nav className="tree-breadcrumb" aria-label="Map ancestors">{breadcrumb.map((id, index) => <span key={id}>
-        {index > 0 && <span aria-hidden="true"> › </span>}<button type="button" title={session?.items[id]?.question} onClick={() => select(id, false)}>{names.get(id)}</button>
-      </span>)}</nav>
+      {/* One fixed-height row outside the scroller: the ancestors of the first row in view, and the selection tag beside them. */}
+      <div className="tree-path">
+        <nav className="tree-breadcrumb" aria-label="Map ancestors">{breadcrumb.map((id, index) => <span key={id}>
+          {index > 0 && <span aria-hidden="true"> › </span>}<button type="button" title={session?.items[id]?.question} onClick={() => select(id, false)}>{names.get(id)}</button>
+        </span>)}{focusAbove && unfocusCopy}</nav>
+        {selectedTag}
+      </div>
       <div ref={scroller} className="tree-scroll" onScroll={() => {
         // At the held scrollTop this can be our own correction's delayed event;
         // remembering restores any intervening reflow before capturing again.

@@ -229,10 +229,14 @@ describe('Map change markers and next unseen navigation', () => {
   it('renders topic content only under expanded topic headers', async () => {
     const view = await mount(undefined, { topicContent: id => <div data-topic-content={id}>Topic changes</div> });
     const header = document.querySelector<HTMLElement>('.tree-topic')!;
-    expect(header.nextElementSibling?.getAttribute('data-topic-content')).toBe(header.dataset.row);
+    // The cards sit in a wrapper that carries the topic's rail on through them (see the Map layout tests).
+    const cards = header.nextElementSibling!;
+    expect(cards.classList.contains('tree-topic-cards')).toBe(true);
+    expect(cards.querySelector('[data-topic-content]')?.getAttribute('data-topic-content')).toBe(header.dataset.row);
     fireEvent.click(within(header).getByRole('button', { name: 'Expand or collapse topic' }));
     await waitFor(() => expect(header.getAttribute('aria-expanded')).toBe('false'));
-    expect(header.nextElementSibling?.hasAttribute('data-topic-content')).not.toBe(true);
+    expect(header.nextElementSibling?.classList.contains('tree-topic-cards')).not.toBe(true);
+    expect(header.closest('.tree-topic-group')!.querySelector('[data-topic-content]')).toBeNull();
     expect(view.transport.mutations).toHaveLength(1);
   });
 });

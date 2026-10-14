@@ -186,12 +186,12 @@
   text-overflow: ellipsis;
 }
 
+/* The filter control ends the Recent row. */
 .tree-filters {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 6px;
-  padding: 10px 16px 8px;
+  margin-left: auto;
 }
 
 .tree-filter-button {
@@ -318,7 +318,11 @@
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color-accent) 80%, transparent);
 }
 
+/* An opaque chip: the rails (the elbow from the parent, the line down to the children) end at its edge
+   instead of passing through the caret, the way a leaf row's ring dot cuts them. */
 .tree-chevron {
+  --tree-chevron-base: var(--a-bg);
+
   position: relative;
   z-index: 1;
   flex: none;
@@ -330,17 +334,23 @@
   border: 0;
   border-radius: 4px;
   cursor: pointer;
-  color: color-mix(in srgb, var(--color-text) 55%, transparent);
-  background: transparent;
+  color: color-mix(in srgb, var(--color-text) 80%, transparent);
+  background: color-mix(in srgb, var(--color-text) 9%, var(--tree-chevron-base));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-text) 16%, transparent);
+}
+
+.tree-topic .tree-chevron {
+  --tree-chevron-base: var(--a-side);
 }
 
 .tree-chevron:hover {
   color: var(--color-text);
-  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+  background: color-mix(in srgb, var(--color-text) 18%, var(--tree-chevron-base));
 }
 
 .tree-chevron i {
-  font-size: calc(12px * var(--text-scale));
+  font-size: calc(14px * var(--text-scale));
+  -webkit-text-stroke: .5px currentcolor;
 }
 
 .tree-chevron-space {
@@ -503,6 +513,13 @@
   min-width: 0;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* The topic's cards sit right of the rail (their left margin clears it); the wrapper's own height, margins
+   included, is what lets the rail run unbroken from the band down to the first item. */
+.tree-topic-cards {
+  position: relative;
+  display: flow-root;
 }
 
 /* Reply and recovery controls scroll with the section, below its sticky band. */
@@ -1142,13 +1159,27 @@
   left: calc(-1em - 8px);
 }
 
-/* Reserve the same top-bar height with or without the tag; it never covers or shifts rows. */
-.tree-selected-slot {
-  flex: 1;
+/* The path row keeps the same height with or without the tag; it never covers or shifts rows.
+   The tag sits at the row's right end; the ancestors beside it shorten their names first. */
+.tree-path {
+  display: flex;
+  flex: none;
+  align-items: center;
   min-width: 0;
+}
+
+.tree-selected-slot {
+  flex: none;
+  min-width: 0;
+  max-width: 60%;
   height: 28px;
+  margin-right: 16px;
   display: flex;
   align-items: center;
+}
+
+.tree-selected-slot:empty {
+  margin-right: 0;
 }
 
 /* Content width, with an opaque surface in every state, including the global button reset. */
@@ -1189,7 +1220,7 @@
 /* The fixed slot is outside the scroller: changing its names neither overlaps rows nor moves them. */
 .tree-breadcrumb {
   display: flex;
-  flex: none;
+  flex: 1 1 0;
   align-items: center;
   gap: 4px;
   height: 28px;
@@ -1233,6 +1264,15 @@
 .tree-breadcrumb button {
   padding: 0;
   line-height: inherit;
+}
+
+/* The sticky copy of the focused item's button, at the end of the ancestors: the same look as on its row. */
+.tree-breadcrumb .tree-focus-action {
+  flex: none;
+  align-self: center;
+  height: 22px;
+  margin-left: 4px;
+  padding: 0 6px;
 }
 
 .tree-selected-edge > span:first-child {

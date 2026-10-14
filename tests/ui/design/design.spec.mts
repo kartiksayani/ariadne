@@ -11,7 +11,7 @@ import { answerFrameIds, designNow, detailMask, detailMasked, dockFrameIds, fram
 import { startDesignServer } from './server.mts';
 import { handoffMembers, prefix, repo, sourceRoot } from './source.mts';
 import thresholds from './thresholds.json' with { type: 'json' };
-import { changeNames, interpretation, ownerWords } from './changes-fixture';
+import { changeNames, interpretation, longDecided, ownerWords } from './changes-fixture';
 
 // Pixels whose channels differ by more than this count as mismatched.
 const tolerance = 16;
@@ -172,8 +172,8 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
   if (graphFrame(spec)) {
     await expect(page.locator('.tree-selected-edge')).toHaveCount(0);
   } else if (await page.locator('.tree-scroll').count()) {
-    await expect(page.locator('.tree-filters > .tree-selected-slot')).toHaveCount(1);
-    await expect(page.locator('.tree-scroll-shell .tree-selected-slot, .tree-scroll-shell .tree-selected-edge')).toHaveCount(0);
+    await expect(page.locator('.tree-path > .tree-selected-slot')).toHaveCount(1);
+    await expect(page.locator('.tree-scroll .tree-selected-slot, .tree-scroll .tree-selected-edge')).toHaveCount(0);
   }
   await expect(page.locator('.pw-rail')).toHaveCount(0);
   await expect(page.locator('.session-activity')).toHaveCount(0);
@@ -312,11 +312,329 @@ for (const theme of ['dark', 'light'] as const) {
     expect(briefBox!.y + briefBox!.height).toBeLessThan(sinceBox!.y);
     await changesFit(brief); await changesFit(since);
     await since.getByRole('button', { name: 'Mark all seen', exact: true }).click();
-    await expect(since).toContainText('All caught up');
-    await since.getByRole('button', { name: 'Undo', exact: true }).click();
+    // Caught up leaves no box: a check in the brief's header line, with Undo beside it while it is offered.
+    await expect(since).toHaveCount(0);
+    await expect(brief.getByRole('img', { name: 'All caught up' })).toBeVisible();
+    await changesFit(brief);
+    await testInfo.attach(`changes-caught-up-undo-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+    await brief.getByRole('button', { name: 'Undo', exact: true }).click();
     await expect(since).toContainText('8 changes while you were away');
     await expect(brief.locator('.brief-list').nth(1).locator('.change-name')).toHaveText(['Recovery question']);
     await testInfo.attach(`changes-away-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+}
+
+/** Layout tests of the Map's topic cards, chevrons, filter row and rails (A16 owner reports). */
+const mapSizes = [{ brief: 'map-brief-long', map: 'map-thread' }, { brief: 'map-brief-long-small', map: 'map-thread-small' }] as const;
+
+for (const { brief: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) {
+  test(`Topic brief names flow across the width instead of one per line: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec(frame), theme });
+    const brief = page.getByRole('region', { name: 'Topic brief', exact: true });
+    await page.locator('.tree-scroll').evaluate(element => { element.scrollTop = 0; });
+    await brief.scrollIntoViewIfNeeded();
+    const decided = brief.locator('.brief-list').nth(0);
+    // Every name is there, in order.
+    await expect(decided.locator('.change-name')).toHaveText(['Recovery policy', ...longDecided]);
+    const layout = await decided.evaluate(list => {
+      const names = list.querySelector('ul')!, box = names.getBoundingClientRect(), items = [...names.children].map(item => item.getBoundingClientRect());
+      return { count: items.length, lines: new Set(items.map(rect => Math.round(rect.top))).size, width: box.width,
+        reach: Math.max(...items.map(rect => rect.right)) - box.left, label: 0,
+        dot: getComputedStyle(names.firstElementChild!, '::after').content, lastDot: getComputedStyle(names.lastElementChild!, '::after').content };
+    });
+    expect(layout.lines, 'names share lines').toBeLessThanOrEqual(Math.ceil(layout.count * 0.6));
+    expect(layout.lines).toBeGreaterThan(1);
+    expect(layout.reach, 'the names use the width').toBeGreaterThan(layout.width * 0.7);
+    expect(layout.dot).toBe('"·"');
+    expect(layout.lastDot).toBe('none');
+    // The group labels stay a column on the left, and "Your turn" / "Replaced" do not wrap.
+    const labels = await brief.locator('.brief-list > strong').evaluateAll(elements => elements.map(element => {
+      const range = document.createRange(); range.selectNodeContents(element);
+      return { x: element.getBoundingClientRect().x, lines: new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size };
+    }));
+    expect(new Set(labels.map(label => label.x)).size).toBe(1);
+    for (const label of labels) expect(label.lines, 'a group label stays on one line').toBe(1);
+    // "old replaced by new" is one unit: the "replaced by" and the new name share a line.
+    const pair = await brief.locator('.brief-list').nth(2).locator('li').first().evaluate(item => {
+      const replacement = item.querySelector('.brief-replacement')!, button = replacement.querySelector('button')!;
+      const middle = (rect: DOMRect) => rect.top + rect.height / 2;
+      return { lead: middle(replacement.firstElementChild!.getBoundingClientRect()), name: middle(button.getBoundingClientRect()), rects: replacement.getClientRects().length };
+    });
+    expect(Math.abs(pair.lead - pair.name)).toBeLessThan(4);
+    expect(pair.rects).toBe(1);
+    await changesFit(brief);
+    await testInfo.attach(`brief-wrap-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+}
+
+for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) {
+  test(`Fold chevron is an opaque chip the rails end at: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec(frame), theme });
+    await page.locator('.tree-scroll').evaluate(element => { element.querySelector('.tree-item:has(.tree-chevron)')?.scrollIntoView({ block: 'center' }); });
+    await settle(page);
+    const chevrons = page.locator('.tree-chevron');
+    expect(await chevrons.count()).toBeGreaterThan(1);
+    const facts = await chevrons.evaluateAll(buttons => buttons.map(button => {
+      const style = getComputedStyle(button), caret = getComputedStyle(button.querySelector('i')!), box = button.getBoundingClientRect();
+      const paint = (color: string, base: string) => {
+        const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+        const context = canvas.getContext('2d')!;
+        context.fillStyle = base; context.fillRect(0, 0, 1, 1); context.fillStyle = color; context.fillRect(0, 0, 1, 1);
+        return [...context.getImageData(0, 0, 1, 1).data];
+      };
+      const light = (rgb: number[]) => { const [r, g, b] = rgb.map(value => { const unit = value / 255; return unit <= 0.03928 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+      const chip = paint(style.backgroundColor, 'rgb(0, 0, 0)'), over = paint(style.backgroundColor, 'rgb(255, 255, 255)');
+      const ink = paint(style.color, style.backgroundColor);
+      const [high, low] = [light(chip), light(ink)].sort((a, b) => b - a);
+      const centre = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return { opaque: chip.every((value, at) => value === over[at]), contrast: (high + 0.05) / (low + 0.05), caret: parseFloat(caret.fontSize),
+        width: box.width, height: box.height, covers: !!centre?.closest('.tree-chevron'), hidden: box.bottom < 0 || box.top > innerHeight };
+    }));
+    for (const fact of facts.filter(value => !value.hidden)) {
+      expect(fact.opaque, 'the chip hides the rail behind it').toBe(true);
+      expect(fact.contrast, 'the caret reads against its chip').toBeGreaterThanOrEqual(4.5);
+      expect(fact.caret).toBeGreaterThanOrEqual(14);
+      expect(fact.width).toBe(16);
+      expect(fact.covers, 'the chip paints over the rail').toBe(true);
+    }
+    // Hover keeps a visible state.
+    const first = chevrons.nth(1), resting = await first.evaluate(element => getComputedStyle(element).backgroundColor);
+    await first.hover();
+    expect(await first.evaluate(element => getComputedStyle(element).backgroundColor)).not.toBe(resting);
+    await testInfo.attach(`chevron-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+}
+
+for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) {
+  test(`The filter control ends the Recent row and gives the Map the rest: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec(frame), theme });
+    const filters = page.getByRole('group', { name: 'Filter items' }), trigger = filters.getByRole('button', { name: /^Filter/ });
+    await expect(trigger).toBeVisible();
+    const geometry = await page.evaluate(() => {
+      const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
+      const recent = box('.tree-recent'), recentButton = box('.tree-recent > button'), filter = box('.tree-filters'), trail = box('.recent-trail');
+      return { recent, recentButton, filter, trail, bar: box('.tree-session-bar'), scroller: box('.tree-scroll'), path: box('.tree-path'),
+        inRow: !!document.querySelector('.tree-recent > .tree-filters'), column: box('.tree-column') };
+    });
+    expect(geometry.inRow, 'the filter control sits in the Recent row').toBe(true);
+    expect(geometry.filter.left).toBeGreaterThanOrEqual(geometry.recentButton.right - 0.5);
+    expect(geometry.filter.right).toBeLessThanOrEqual(geometry.column.right + 0.5);
+    expect(Math.abs((geometry.filter.top + geometry.filter.height / 2) - (geometry.recentButton.top + geometry.recentButton.height / 2))).toBeLessThan(6);
+    expect(geometry.trail.right, 'the trail does not run under Recent').toBeLessThanOrEqual(geometry.recentButton.left + 0.5);
+    // Between the session bar and the rows: the Recent row (32) and the path row (28), no row of its own for the filter.
+    expect(geometry.scroller.top - geometry.bar.bottom).toBeLessThanOrEqual(66);
+    expect(geometry.path.top - geometry.recent.bottom, 'no stray row between Recent and the path').toBeLessThanOrEqual(1);
+    // The menu opens inside the window, and an active filter says which statuses it keeps.
+    await trigger.click();
+    const option = page.getByRole('menuitemcheckbox', { name: /^Open \d+$/ });
+    await expect(option).toBeVisible();
+    const menu = (await option.boundingBox())!, size = page.viewportSize()!;
+    expect(menu.x).toBeGreaterThanOrEqual(0); expect(menu.x + menu.width).toBeLessThanOrEqual(size.width);
+    await option.click();
+    await page.keyboard.press('Escape');
+    await expect(filters.getByRole('button', { name: 'Filter: Open' })).toHaveAttribute('data-active', 'true');
+    await expect(page.getByText(/^Showing \d+ of \d+ items.* in the statuses you picked/)).toBeVisible();
+    await testInfo.attach(`filter-row-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+    // The shortcut for search still focuses the search field.
+    await page.locator('.tree-scroll').focus();
+    await page.keyboard.press('/');
+    await expect(page.locator('[data-shell-search]')).toBeFocused();
+  });
+}
+
+for (const { map: frame } of mapSizes) test(`The selection tag and the ancestors share the path row without overlap: ${frame}`, async ({ page, origin }) => {
+  await openApp(page, origin, frameSpec(frame));
+  await page.locator('.tree-scroll').evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await settle(page);
+  const tag = page.locator('.tree-path .tree-selected-edge');
+  await expect(tag).toBeVisible();
+  const boxes = await page.evaluate(() => {
+    const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
+    const crumbs = [...document.querySelectorAll('.tree-breadcrumb button')].map(button => button.getBoundingClientRect());
+    return { path: box('.tree-path'), crumbs: box('.tree-breadcrumb'), tag: box('.tree-selected-edge'), buttons: crumbs, scroller: box('.tree-scroll') };
+  });
+  expect(boxes.crumbs.right).toBeLessThanOrEqual(boxes.tag.left + 0.5);
+  expect(boxes.tag.right).toBeLessThanOrEqual(boxes.path.right + 0.5);
+  expect(boxes.path.height).toBeLessThanOrEqual(28.5);
+  expect(boxes.path.bottom).toBeLessThanOrEqual(boxes.scroller.top + 0.5);
+  for (const button of boxes.buttons) expect(button.right).toBeLessThanOrEqual(boxes.crumbs.right + 0.5);
+});
+
+/** The selected path and the plain guide must each run as one line from the topic band through its cards to the items. */
+async function railRuns(page: Page) {
+  await page.locator('.tree-scroll').evaluate(element => { element.scrollTop = 0; });
+  await settle(page);
+  return page.locator('.tree-topic-group').first().evaluate(group => {
+    const origin = group.getBoundingClientRect(), topic = group.querySelector('.tree-topic')!.getBoundingClientRect();
+    const lines = [...group.querySelectorAll<HTMLElement>('.tree-guide')].map(line => ({ rect: line.getBoundingClientRect(), on: line.style.width === '1.5px' }))
+      .filter(line => Math.abs(line.rect.left - origin.left - 20) < 1.5 && line.rect.height > 0);
+    const runs = (on: boolean) => {
+      const merged: number[][] = [];
+      for (const [top, bottom] of lines.filter(line => line.on === on).map(line => [line.rect.top, line.rect.bottom]).sort((a, b) => a[0] - b[0])) {
+        const last = merged.at(-1);
+        if (last && top <= last[1] + 1.5) last[1] = Math.max(last[1], bottom); else merged.push([top, bottom]);
+      }
+      return merged;
+    };
+    const cards = group.querySelector('.topic-changes')?.getBoundingClientRect(), first = group.querySelector('[data-item-id]')?.getBoundingClientRect();
+    return { off: runs(false), on: runs(true), topic: { top: topic.top, bottom: topic.bottom }, first: first ? { top: first.top, bottom: first.bottom } : null,
+      cardsLeft: cards ? cards.left - origin.left : null, cardsHeight: cards?.height ?? 0 };
+  });
+}
+for (const { name, frame, theme, act } of [
+  { name: 'brief open, no since cards', frame: 'map-thread', theme: 'dark', act: async () => {} },
+  { name: 'brief open, no since cards', frame: 'map-thread', theme: 'light', act: async () => {} },
+  { name: 'brief open, no since cards at 900', frame: 'map-thread-small', theme: 'dark', act: async () => {} },
+  { name: 'brief collapsed', frame: 'map-thread', theme: 'dark', act: async (page: Page) => { await page.getByRole('button', { name: 'Topic brief', exact: true }).first().click(); } },
+  { name: 'long brief with since cards', frame: 'map-brief-long', theme: 'dark', act: async (page: Page) => { await page.getByRole('button', { name: /^Since you were here ·/ }).click(); } },
+  { name: 'long brief with since cards', frame: 'map-brief-long', theme: 'light', act: async (page: Page) => { await page.getByRole('button', { name: /^Since you were here ·/ }).click(); } },
+  { name: 'long brief collapsed at 900', frame: 'map-brief-long-small', theme: 'dark', act: async (page: Page) => { await page.getByRole('button', { name: 'Topic brief', exact: true }).click(); } },
+] as const) test(`The thread is one unbroken line through the topic cards: ${name} (${frame}, ${theme})`, async ({ page, origin }, testInfo) => {
+  await openApp(page, origin, { ...frameSpec(frame), theme });
+  await act(page);
+  const runs = await railRuns(page);
+  expect(runs.off, 'the plain guide is one line from the band to the last item').toHaveLength(1);
+  expect(runs.on, 'the accent thread is one line from the band to the selected path').toHaveLength(1);
+  for (const run of [runs.off[0]!, runs.on[0]!]) {
+    expect(run[0], 'it starts inside the band').toBeLessThanOrEqual(runs.topic.bottom);
+    expect(run[1], 'it reaches the first item').toBeGreaterThanOrEqual(runs.first!.top);
+  }
+  expect(runs.cardsHeight).toBeGreaterThan(0);
+  expect(runs.cardsLeft!, 'the cards sit clear of the rail').toBeGreaterThanOrEqual(24);
+  await testInfo.attach(`thread-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+});
+
+for (const { map: frame } of mapSizes) test(`A folded topic draws no rail below its band: ${frame}`, async ({ page, origin }) => {
+  await openApp(page, origin, frameSpec(frame));
+  const group = page.locator('.tree-topic-group').first();
+  await group.locator('.tree-topic .tree-chevron').dispatchEvent('click');
+  await expect(group.locator('.tree-topic')).toHaveAttribute('aria-expanded', 'false');
+  await expect(group.locator('.tree-topic-cards')).toHaveCount(0);
+  const below = await group.evaluate(element => {
+    const band = element.querySelector('.tree-topic')!.getBoundingClientRect();
+    return [...element.querySelectorAll('.tree-guide')].filter(line => line.getBoundingClientRect().height > 0 && line.getBoundingClientRect().bottom > band.bottom + 2).length;
+  });
+  expect(below).toBe(0);
+});
+
+for (const frame of ['map-thread', 'map-thread-small'] as const) for (const theme of ['dark', 'light'] as const) {
+  test(`Nothing to catch up on is a check in the brief header, not a box: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec(frame), theme });
+    await page.locator('.tree-scroll').evaluate(element => { element.scrollTop = 0; });
+    await expect(page.getByRole('region', { name: 'Since you were here', exact: true })).toHaveCount(0);
+    const brief = page.getByRole('region', { name: 'Topic brief', exact: true }).first();
+    const icon = brief.getByRole('img', { name: 'All caught up' });
+    await expect(icon).toBeVisible();
+    await expect(icon).toHaveAttribute('title', 'All caught up');
+    const line = await brief.evaluate(element => {
+      const toggle = element.querySelector('button')!.getBoundingClientRect(), mark = element.querySelector('[aria-label="All caught up"]')!.getBoundingClientRect();
+      return { sameLine: Math.abs((toggle.top + toggle.height / 2) - (mark.top + mark.height / 2)) < 8, after: mark.left >= toggle.right - 0.5 };
+    });
+    expect(line).toEqual({ sameLine: true, after: true });
+    await testInfo.attach(`caught-up-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+}
+
+for (const size of [{ width: 1280, height: 800 }, { width: 900, height: 650 }] as const) for (const theme of ['dark', 'light'] as const) {
+  test(`Caught up keeps Undo beside the check, and changes keep their box: ${size.width}x${size.height} (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec('changes-away'), ...size, theme });
+    const brief = page.getByRole('region', { name: 'Topic brief', exact: true });
+    const since = page.getByRole('region', { name: 'Since you were here', exact: true });
+    // While there are changes the box is today's, unchanged.
+    await expect(since).toContainText('8 changes while you were away');
+    await expect(brief.getByRole('img', { name: 'All caught up' })).toHaveCount(0);
+    await testInfo.attach(`has-changes-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+    await since.getByRole('button', { name: 'Mark all seen', exact: true }).click();
+    await expect(since).toHaveCount(0);
+    const check = brief.getByRole('img', { name: 'All caught up' }), undo = brief.getByRole('button', { name: 'Undo', exact: true });
+    await expect(check).toBeVisible(); await expect(undo).toBeVisible();
+    const line = await brief.evaluate(element => {
+      const toggle = element.querySelector('button')!.getBoundingClientRect(), mark = element.querySelector('[aria-label="All caught up"]')!.getBoundingClientRect();
+      const undo = [...element.querySelectorAll('button')].find(button => button.textContent === 'Undo')!.getBoundingClientRect();
+      const middle = (rect: DOMRect) => rect.top + rect.height / 2;
+      return { oneLine: Math.abs(middle(toggle) - middle(mark)) < 8 && Math.abs(middle(toggle) - middle(undo)) < 8, ordered: toggle.right <= mark.left + 0.5 && mark.right <= undo.left + 0.5 };
+    });
+    expect(line).toEqual({ oneLine: true, ordered: true });
+    await changesFit(brief);
+    await testInfo.attach(`caught-up-undo-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+    await undo.click();
+    await expect(since).toContainText('8 changes while you were away');
+  });
+}
+
+/** Graph cards and stubs never overlap one another. */
+async function noOverlap(page: Page) {
+  const overlaps = await page.locator('.graph-canvas').evaluateAll(canvases => canvases.flatMap(canvas => {
+    const boxes = [...canvas.querySelectorAll('.graph-node, .graph-stub')].map(element => ({ name: element.getAttribute('data-item-id') ?? element.getAttribute('data-stub'), rect: element.getBoundingClientRect() }));
+    return boxes.flatMap((a, i) => boxes.slice(i + 1).filter(b => Math.min(a.rect.right, b.rect.right) - Math.max(a.rect.left, b.rect.left) > 1
+      && Math.min(a.rect.bottom, b.rect.bottom) - Math.max(a.rect.top, b.rect.top) > 1).map(b => `${a.name} x ${b.name}`));
+  }));
+  expect(overlaps).toEqual([]);
+}
+
+for (const frame of ['graph-hidden', 'graph-hidden-small'] as const) for (const theme of ['dark', 'light'] as const) {
+  test(`The Graph folds hidden items into one small stub that opens and folds: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec(frame), theme });
+    const stubs = page.locator('.graph-stub');
+    expect(await stubs.count()).toBeGreaterThan(0);
+    await expect(page.locator('.graph-node.is-hidden'), 'hidden items are not drawn as cards').toHaveCount(0);
+    const size = await stubs.first().evaluate(stub => {
+      const rect = stub.getBoundingClientRect(), card = document.querySelector('.graph-node')!.getBoundingClientRect();
+      return { stubWidth: rect.width, stubHeight: rect.height, cardWidth: card.width, cardHeight: card.height };
+    });
+    expect(size.stubHeight, 'much smaller than a card').toBeLessThan(size.cardHeight / 2);
+    expect(size.stubWidth).toBeLessThan(size.cardWidth * 0.75);
+    await noOverlap(page);
+    const folded = await page.locator('.graph-node').count();
+    await stubs.first().scrollIntoViewIfNeeded();
+    await expect(stubs.first()).toHaveAttribute('aria-expanded', 'false');
+    await stubs.first().click();
+    await expect(stubs.first()).toHaveAttribute('aria-expanded', 'true');
+    expect(await page.locator('.graph-node').count()).toBeGreaterThan(folded);
+    expect(await page.locator('.graph-node.is-hidden').count()).toBeGreaterThan(0);
+    await noOverlap(page);
+    await testInfo.attach(`graph-stub-open-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+    // The stub is a button: Enter folds again.
+    await stubs.first().focus(); await page.keyboard.press('Enter');
+    await expect(stubs.first()).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('.graph-node.is-hidden')).toHaveCount(0);
+    expect(await page.locator('.graph-node').count()).toBe(folded);
+    await testInfo.attach(`graph-stub-folded-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+}
+
+for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) {
+  test(`Focus is left from the focused item's own button, and from its sticky copy once that scrolls away: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec(frame), theme });
+    const root = page.locator('.tree-item-root:has(.tree-chevron)').first();
+    const place = () => root.evaluate(element => {
+      const button = element.querySelector('.tree-focus-action')!.getBoundingClientRect(), row = element.getBoundingClientRect();
+      return { x: Math.round(button.left - row.left), y: Math.round(button.top - row.top), width: Math.round(button.width), height: Math.round(button.height) };
+    });
+    const before = await place();
+    await root.getByRole('button', { name: /^Focus on / }).click();
+    const unfocus = root.getByRole('button', { name: /^Unfocus / });
+    await expect(unfocus).toHaveText('Unfocus');
+    await expect(page.getByText(/^Focused:/), 'there is no banner').toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Leave Focus' })).toHaveCount(0);
+    const after = await place();
+    // Same spot, same height and look; only the word is longer.
+    expect({ x: after.x, y: after.y, height: after.height }).toEqual({ x: before.x, y: before.y, height: before.height });
+    await expect(unfocus).toHaveClass(/tree-focus-action/);
+    await expect(page.locator('.tree-item-root')).toHaveCount(1);
+    // Scrolled so its own button is under the sticky band, the copy beside the ancestors takes over.
+    await page.locator('.tree-scroll').evaluate(element => { element.scrollTop = element.scrollHeight; });
+    const copy = page.getByRole('navigation', { name: 'Map ancestors' }).getByRole('button', { name: /^Unfocus / });
+    await expect(copy).toBeVisible();
+    const box = (await copy.boundingBox())!, crumbs = (await page.getByRole('navigation', { name: 'Map ancestors' }).boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(crumbs.x); expect(box.x + box.width).toBeLessThanOrEqual(crumbs.x + crumbs.width + 0.5);
+    expect(box.y).toBeGreaterThanOrEqual(crumbs.y - 0.5); expect(box.y + box.height).toBeLessThanOrEqual(crumbs.y + crumbs.height + 0.5);
+    await testInfo.attach(`focus-scrolled-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+    await copy.click();
+    await expect(page.locator('.tree-item-root')).not.toHaveCount(1);
+    await expect(copy).toHaveCount(0);
+    await page.locator('.tree-scroll').evaluate(element => { element.scrollTop = 0; });
+    await expect(root.getByRole('button', { name: /^Focus on / })).toHaveText('Focus');
   });
 }
 
@@ -488,10 +806,13 @@ for (const theme of ['light', 'dark'] as const) test(`Getting around preserves t
   expect(await scroller.evaluate(element => element.scrollTop)).toBe(before);
   const waiting = await page.locator('[data-waiting-item]').count();
   await root.getByRole('button', { name: /^Focus on / }).click();
-  await expect(page.getByText(/^Focused:/)).toBeVisible();
+  // The focused item's own button now says Unfocus; there is no banner to leave from.
+  await expect(root.getByRole('button', { name: /^Unfocus / })).toBeVisible();
+  await expect(page.getByText(/^Focused:/)).toHaveCount(0);
   expect(await page.locator('[data-waiting-item]').count()).toBe(waiting);
   await expect(page.locator(`.tree-item-root:not([data-item-id="${sourceId}"])`)).toHaveCount(0);
-  await page.getByRole('button', { name: 'Leave Focus' }).click();
+  await root.getByRole('button', { name: /^Unfocus / }).click();
+  await expect(root.getByRole('button', { name: /^Focus on / })).toBeVisible();
   await page.keyboard.press('Meta+e');
   const recent = page.getByRole('dialog', { name: 'Recent items' });
   await expect(recent).toBeVisible();

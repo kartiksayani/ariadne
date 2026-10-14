@@ -34,6 +34,8 @@ export interface FrameSpec {
   readonly reconnecting?: boolean;
   readonly expandedAnswer?: number;
   readonly hiddenItems?: readonly string[];
+  /** Items hidden by the saved view only, with their text untouched (hiddenItems also rewrites their question). */
+  readonly foldedItems?: readonly string[];
   /** Compact dock states are app-only, independent of immutable handoff comparisons. */
   readonly dockState?: 'question' | 'open' | 'pending';
   /** Compare a stopped turn after delivery with a rejection before delivery. */
@@ -43,7 +45,7 @@ export interface FrameSpec {
   /** Opens Waiting even when the window squeezes the centre column. */
   readonly peekWaiting?: boolean;
   /** App-only M2 changes states, independent of the original handoff baselines. */
-  readonly changes?: 'typed' | 'choice' | 'away';
+  readonly changes?: 'typed' | 'choice' | 'away' | 'long';
 }
 
 const wide = { width: 1600, height: 960 } as const, narrow = { width: 1280, height: 800 } as const;
@@ -105,6 +107,14 @@ const specs: readonly FrameSpec[] = [
   { ...base, width: 1280, height: 900, id: 'changes-typed', selected: '3.1', detail: true, changes: 'typed' },
   { ...base, width: 1280, height: 900, id: 'changes-choice', selected: '3.1', detail: true, changes: 'choice' },
   { ...base, width: 1000, height: 800, id: 'changes-away', changes: 'away' },
+  // Map layout frames: the brief with many decided names, and the plain Map with the selected thread passing the topic cards.
+  { ...base, ...narrow, id: 'map-brief-long', selected: '3.1', changes: 'long' },
+  { ...base, width: 900, height: 650, id: 'map-brief-long-small', selected: '3.1', changes: 'long' },
+  { ...base, ...narrow, id: 'map-thread', selected: '1.3.1.2' },
+  { ...base, width: 900, height: 650, id: 'map-thread-small', selected: '1.3.1.2' },
+  // The Graph with hidden siblings folded into a stub (the Tree's "N items hidden" rule).
+  { ...base, ...narrow, id: 'graph-hidden', view: 'graph', selected: '1.3.1.2', foldedItems: ['1.1', '1.4', '2.2'] },
+  { ...base, width: 900, height: 650, id: 'graph-hidden-small', view: 'graph', selected: '1.3.1.2', foldedItems: ['1.1', '1.4', '2.2'] },
 ];
 
 /** Harness states drawn from another board frame's card (FrameSpec.design). */

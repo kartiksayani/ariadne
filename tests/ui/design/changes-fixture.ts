@@ -7,8 +7,14 @@ export const ownerWords = 'Keep retries quiet while offline.\nTell me when my sa
 export const interpretation = 'Read as: Keep saved changes safe and explain recovery without repeated alerts.';
 export const changeNames = ['Recovery policy', 'Retry schedule', 'Saved receipt', 'Offline wording', 'Old retry policy', 'Wake-up check', 'Clock change check', 'Recovery note'];
 
+/** Nineteen decided names for the long brief frame; some are long enough to need a line of their own on a narrow Map. */
+export const longDecided = ['Backoff curve', 'Jitter range', 'Offline banner', 'Queue limit', 'Receipt format', 'Retry cap', 'Sync window',
+  'Wake-up policy', 'Clock skew rule', 'Resume order', 'Idle timeout', 'Conflict wording', 'Quiet hours',
+  'Large payload handling during a flaky connection', 'Telemetry opt-in', 'Disk-full behaviour', 'Cancel semantics for half-sent changes',
+  'Battery saver mode', 'Error vocabulary'];
+
 /** Fixed, app-only M2 data: five existing changes, three new items, and one waiting question. */
-export function addChangesFixture(session: Session, mode: 'typed' | 'choice' | 'away'): SessionSeen {
+export function addChangesFixture(session: Session, mode: 'typed' | 'choice' | 'away' | 'long'): SessionSeen {
   const template = session.items['3.1']!;
   const topic = session.topics[template.topic_id]!;
   const binding = session.bindings[session.active_binding_id!]!;
@@ -38,6 +44,17 @@ export function addChangesFixture(session: Session, mode: 'typed' | 'choice' | '
       ],
     }];
   }));
+  if (mode === 'long') {
+    // A topic that has settled a lot: the brief's Decided list holds many short and a few long names.
+    for (const [index, name] of longDecided.entries()) {
+      const itemId = `3.${index + 10}`;
+      session.items[itemId] = { ...structuredClone(template), id: itemId, ordinal: index + 10, parent: null, next_child: 1,
+        question: name, short: name, status: 'decided', revision: 1, note: 'Settled earlier.', ask: null, options: [],
+        outcome: 'Settled.', why: 'Keep interruptions recoverable.', replaced_by: null, created_at: old, updated_at: old,
+        created_message_id: id(7), updated_message_ids: [], waiting_since: null, recipient_binding_id: null,
+        current_round_id: null, source_round_id: null, status_history: [], changes: [] };
+    }
+  }
   session.messages = [
     { id: id(7), number: 1, author: 'agent', kind: 'activity', body: 'Choose how recovery should behave.', created_at: old,
       item_id: '3.1', topic_id: topic.id, items_touched: ['3.1'], binding_id: binding.id, input_id: null, attempt_id: null, host_turn_id: null, round_id: roundId, origin: null },

@@ -33,9 +33,9 @@ async function setup(session: Session = graphSession(), view = preferences()) {
   const store = sessions.open(route); await store.refresh();
   const routes = new RegisteredRoutes(service, sessions), saved: SessionPreferences[] = [], reveals: [string, boolean][] = [];
   let write: (next: SessionPreferences) => Promise<boolean> = async () => true;
-  function Composition({ reveal = null, tight = false, search }: { reveal?: RevealedItem | null; tight?: boolean; search?: string }) {
+  function Composition({ reveal = null, tight = false, search, hidden }: { reveal?: RevealedItem | null; tight?: boolean; search?: string; hidden?: string[] }) {
     const [current, setCurrent] = useState(view);
-    return <GraphView store={store} routes={routes} view={immutable(current)} later={new Set()} search={search} reveal={reveal} tight={tight} sessionLabel="codex · yesterday"
+    return <GraphView store={store} routes={routes} view={immutable(hidden ? { ...current, hidden_item_ids: hidden } : current)} later={new Set()} search={search} reveal={reveal} tight={tight} sessionLabel="codex · yesterday"
       continuedFrom={topic => topic.name === 'Continued context' ? 'Continued from claude-code · yesterday' : null}
       saveView={async next => { saved.push(structuredClone(next)); const ok = await write(next); if (ok) setCurrent(next); return ok; }}
       onReveal={(result, openDetail) => { if (result.kind === 'item') reveals.push([result.route.item_id, openDetail]); }} />;
@@ -174,19 +174,76 @@ describe('session graph view', () => {
     } finally { vi.unstubAllGlobals(); }
   });
 
-  it('fades hidden branches while keeping click and outside selection paths into detail', async () => {
+  const stub = (name: RegExp = /^\d+ items? hidden/) => screen.queryByRole('treeitem', { name });
+
+  it('does not draw hidden items; one small stub stands for them and opens and folds them locally', async () => {
     const value = await setup(undefined, preferences({ hidden_item_ids: ['1'] }));
-    const { rerender } = render(<value.Composition />);
+    render(<value.Composition />);
+    expect(ids()).toEqual(['2', '3', '8']);
+    expect(node('1')).toBeNull();
+    const small = stub(/^1 item hidden, waiting on you$/)!;
+    expect(small.textContent).toContain('1 hidden');
+    expect(small.getAttribute('aria-expanded')).toBe('false');
+    // Far smaller than a card.
+    expect(parseInt(small.style.height)).toBeLessThan(parseInt(node('2').style.height || '66') / 2);
+    fireEvent.click(small);
+    expect(ids()).toEqual(['1', '1.1', '1.1.1', '1.2', '2', '3', '8']);
     for (const id of ['1', '1.1', '1.1.1', '1.2']) expect(node(id).className).toContain('is-hidden');
     expect(node('2').className).not.toContain('is-hidden');
     expect(node('1.1.1').getAttribute('aria-label')).toContain('(hidden)');
+    expect(stub()!.getAttribute('aria-expanded')).toBe('true');
+    // Choosing a hidden item selects it and opens detail without un-hiding it.
     fireEvent.click(node('1.1.1'));
     await waitFor(() => expect(value.reveals).toEqual([['1.1.1', true]]));
     expect(value.saved.at(-1)?.hidden_item_ids).toEqual(['1']);
+    fireEvent.click(stub()!);
+    expect(ids()).toEqual(['2', '3', '8']);
+    // Opening and folding is local: nothing was saved for it.
+    expect(value.saved.every(view => view.hidden_item_ids?.length === 1 && view.hidden_item_ids[0] === '1')).toBe(true);
+  });
+
+  it('opens the stub of a revealed or newly selected hidden item so it shows', async () => {
+    const value = await setup(undefined, preferences({ hidden_item_ids: ['1'] }));
+    const { rerender } = render(<value.Composition />);
+    expect(ids()).toEqual(['2', '3', '8']);
     const reveal = await value.routes.revealItem({ ...value.route, item_id: '1.2' });
     rerender(<value.Composition reveal={reveal} />);
     expect(selected()).toBe('1.2');
     expect(node('1.2').className).toContain('is-hidden');
+    expect(stub()!.getAttribute('aria-expanded')).toBe('true');
+    // "Reveal selected" finds it.
+    expect((screen.getByRole('button', { name: /Reveal selected/ }) as HTMLButtonElement).disabled).toBe(false);
+    // Folding the stub also ends the reveal's hold on it, so it stays folded.
+    fireEvent.click(stub()!);
+    expect(ids()).toEqual(['2', '3', '8']);
+  });
+
+  it('keeps the stub a focusable button: Enter and Space belong to it, arrows skip hidden items', async () => {
+    const value = await setup(undefined, preferences({ hidden_item_ids: ['1.2'], selected_item_id: '1.1.1' }));
+    render(<value.Composition />);
+    const small = stub(/^1 item hidden$/) as HTMLButtonElement;
+    expect(small.tagName).toBe('BUTTON');
+    expect(small.tabIndex).toBe(0);
+    small.focus(); expect(document.activeElement).toBe(small);
+    fireEvent.keyDown(small, { key: 'Enter' });
+    await act(async () => {});
+    expect(value.reveals).toEqual([]);
+    // ↓ from the last drawn child skips the hidden 1.2 and lands on the next visible item.
+    fireEvent.keyDown(node('1.1.1'), { key: 'ArrowDown' });
+    await waitFor(() => expect(value.reveals).toEqual([['2', false]]));
+  });
+
+  it('moves focus to the stub when the focused item is hidden', async () => {
+    const value = await setup(undefined, preferences({ selected_item_id: '2' }));
+    const { rerender } = render(<value.Composition />);
+    node('2').focus();
+    fireEvent.click(node('2'));
+    await waitFor(() => expect(value.reveals).toEqual([['2', true]]));
+    rerender(<value.Composition hidden={['2']} />);
+    expect(node('2')).toBeNull();
+    const small = stub(/^1 item hidden$/)!;
+    expect(small.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(small);
   });
 
   it('highlights collapsed children consistently in graph badges and tree notes', () => {
@@ -211,20 +268,34 @@ describe('session graph view', () => {
     }
   });
 
-  it('opens hidden collapsed branches without clearing their hidden preference', async () => {
-    const value = await setup(undefined, preferences({ hidden_item_ids: ['1'], expanded_item_ids: [] }));
+  it('counts only what expanding draws in a collapsed node, and expanding it draws the stub too', async () => {
+    const value = await setup(undefined, preferences({ hidden_item_ids: ['1.1'], expanded_item_ids: [] }));
     render(<value.Composition />);
-    expect(node('1').classList.contains('is-hidden')).toBe(true);
-    fireEvent.click(within(node('1')).getByText('+3'));
+    // 1.1 is hidden, so the pill counts 1.2 alone.
+    expect(node('1').querySelector('.graph-node-below')!.textContent).toBe('+1');
+    expect(stub()).toBeNull();
+    fireEvent.click(within(node('1')).getByText('+1'));
     await waitFor(() => expect(value.reveals).toEqual([['1', true]]));
-    expect(node('1.1').classList.contains('is-hidden')).toBe(true);
-    expect(value.saved.at(-1)).toMatchObject({ hidden_item_ids: ['1'], expanded_item_ids: ['1'], selected_item_id: '1' });
+    expect(ids()).toEqual(['1', '1.2', '2', '3', '8']);
+    expect(stub(/^1 item hidden, waiting on you$/)).toBeTruthy();
+    expect(value.saved.at(-1)).toMatchObject({ hidden_item_ids: ['1.1'], expanded_item_ids: ['1'], selected_item_id: '1' });
+  });
+
+  it('names a branch whose children are all hidden, and expanding it draws their stub', async () => {
+    const value = await setup(undefined, preferences({ hidden_item_ids: ['1.1', '1.2'], expanded_item_ids: [] }));
+    render(<value.Composition />);
+    expect(node('1').querySelector('.graph-node-below')!.textContent).toBe('2 hidden');
+    fireEvent.click(node('1'));
+    await waitFor(() => expect(value.saved.at(-1)?.expanded_item_ids).toEqual(['1']));
+    expect(stub(/^2 items hidden, waiting on you$/)).toBeTruthy();
+    expect(ids()).toEqual(['1', '2', '3', '8']);
   });
 
   it('keeps hidden filter context at least as faded as other context nodes', async () => {
     const value = await setup(undefined, preferences({ hidden_item_ids: ['1'],
       filters: { ...preferences().filters, search: 'morning or evening' } }));
-    render(<value.Composition />);
+    const reveal = await value.routes.revealItem({ ...value.route, item_id: '1.1.1' });
+    render(<value.Composition reveal={reveal} />);
     const style = document.createElement('style');
     style.textContent = readFileSync(resolve(__dirname, '../../../src/ui/graph/graph.css'), 'utf8');
     document.head.append(style);

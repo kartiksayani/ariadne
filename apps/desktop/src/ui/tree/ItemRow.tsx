@@ -120,13 +120,16 @@ export interface ItemRowProps {
   readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
   readonly onSelect: (id: string) => void;
   readonly onToggle: (id: string) => void;
-  readonly onFocusBranch?: (id: string) => void;
+  /** Enters Focus on a top-level item; null leaves it. */
+  readonly onFocusBranch?: (id: string | null) => void;
+  /** This top-level item is the one Focus is on: its button reads Unfocus. */
+  readonly branchFocused?: boolean;
   readonly names?: ReadonlyMap<string, string>;
   readonly onPeekHover?: (id: string, event: MouseEvent<HTMLDivElement>) => void;
   readonly onPeekLeave?: () => void;
 }
 
-export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, note, actions, answer, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, onFocusBranch, names, onPeekHover, onPeekLeave }: ItemRowProps) {
+export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, note, actions, answer, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, onFocusBranch, branchFocused = false, names, onPeekHover, onPeekLeave }: ItemRowProps) {
   const item = row.item, status = visual(row.status);
   const details = preview(row);
   const muted = closed(item.status) || row.context || row.later || row.hidden;
@@ -147,7 +150,7 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
       ? <button type="button" className="tree-chevron" tabIndex={-1} aria-label="Expand or collapse"
         onClick={event => { event.stopPropagation(); onToggle(item.id); }}><i className={row.expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} /></button>
       : <span className="tree-chevron-space" />}
-    <span className="tree-icon" onDoubleClick={event => { if (!item.parent && onFocusBranch) { event.stopPropagation(); onFocusBranch(item.id); } }}><StatusBadge status={status} variant="icon" /></span>
+    <span className="tree-icon" onDoubleClick={event => { if (!item.parent && onFocusBranch) { event.stopPropagation(); onFocusBranch(branchFocused ? null : item.id); } }}><StatusBadge status={status} variant="icon" /></span>
     <div className="tree-body">
       <div className="tree-heading"><div className="tree-question" style={{ color: muted ? neutral(64) : 'var(--color-text)' }}>
         {row.segments.map((segment, index) => <span key={index} className={segment.hit ? 'tree-hit' : undefined}>{segment.text}</span>)}
@@ -158,8 +161,9 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
         {row.sessionClosed && <SessionClosedChip reason={closedReason} />}
         <StatusBadge status={status} label={row.badge} variant="text" /></span></div>
       <PreviewBlock value={details} open={unfolded} onToggle={() => onUnfold(item.id)} />
-      {!item.parent && onFocusBranch && <button type="button" className="tree-focus-action" tabIndex={-1} aria-label={`Focus on ${names?.get(item.id) ?? shortLabel(item)}`} disabled={disabled}
-        onClick={event => { event.stopPropagation(); onFocusBranch(item.id); }}>Focus</button>}
+      {!item.parent && onFocusBranch && <button type="button" className="tree-focus-action" tabIndex={-1} disabled={disabled}
+        aria-label={`${branchFocused ? 'Unfocus' : 'Focus on'} ${names?.get(item.id) ?? shortLabel(item)}`}
+        onClick={event => { event.stopPropagation(); onFocusBranch(branchFocused ? null : item.id); }}>{branchFocused ? 'Unfocus' : 'Focus'}</button>}
       {row.ack && <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}>{ackTitle(row.ack, item.status)}</div>}
       {delivery(row, fix)}
       {note && <button type="button" className="tree-collapsed" tabIndex={-1}

@@ -180,10 +180,16 @@ describe('session tree rows', () => {
     const name = peekNames(view.store.getSnapshot().snapshot!.session).get('1')!;
     expect(name).toBe('Shared name');
     fireEvent.click(within(row('1')).getByRole('button', { name: `Focus on ${name}` }));
-    expect(screen.getByText(/^Focused:/).textContent).toContain(name);
+    // One place to leave: the focused item's own button, which has taken over from Focus. No banner.
+    expect(screen.queryByText(/^Focused:/)).toBeNull();
+    expect(within(row('1')).getByRole('button', { name: `Unfocus ${name}` }).textContent).toBe('Unfocus');
+    expect(within(row('1')).queryByRole('button', { name: /^Focus on / })).toBeNull();
     const box = document.querySelector<HTMLElement>('.tree-scroll')!; box.scrollTop = 100; fireEvent.scroll(box);
     expect(screen.getByRole('button', { name: /^↑ Selected:/ }).textContent).toContain(name);
-    expect(within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name }).textContent).toBe(name);
+    const crumbs = within(screen.getByRole('navigation', { name: 'Map ancestors' }));
+    expect(crumbs.getByRole('button', { name }).textContent).toBe(name);
+    // Scrolled under the sticky band, the focused item's sticky copy carries Unfocus too.
+    expect(crumbs.getByRole('button', { name: `Unfocus ${name}` }).textContent).toBe('Unfocus');
   });
 
   it('keeps Focus discoverable without a tab stop on every top-level row', async () => {
@@ -217,15 +223,30 @@ describe('session tree rows', () => {
     expect(view.transport.preferences.seen![0]!.items).toEqual([]);
     await act(async () => { release(); await gate; });
   });
-  it('enters Focus by visible action, remembers it on remount, and leaves through the notice', async () => {
+  it('enters Focus by visible action, remembers it on remount, and leaves by the same button, now reading Unfocus', async () => {
     const view = await mount();
     fireEvent.click(within(row('1')).getByRole('button', { name: /^Focus on /  }));
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
     expect(ids()).toEqual(['1', '1.1']);
-    expect(screen.getByText(/^Focused:/).textContent).toContain(shortLabel(view.transport.sessions.get(route.session_id)!.items['1']!));
+    const label = shortLabel(view.transport.sessions.get(route.session_id)!.items['1']!);
+    expect(screen.queryByText(/^Focused:/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Leave Focus' })).toBeNull();
     cleanup(); await mount({ transport: view.transport });
     expect(ids()).toEqual(['1', '1.1']);
-    fireEvent.click(screen.getByRole('button', { name: 'Leave Focus' }));
+    const leave = within(row('1')).getByRole('button', { name: `Unfocus ${label}` });
+    expect(leave.textContent).toBe('Unfocus');
+    expect(leave.tabIndex).toBe(-1);
+    fireEvent.click(leave);
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+    expect(ids()).toContain('8');
+    expect(within(row('1')).getByRole('button', { name: /^Focus on / }).textContent).toBe('Focus');
+  });
+
+  it('leaves Focus by double click on the focused item’s icon, and holds Unfocus while the view is busy', async () => {
+    const view = await mount();
+    fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
+    fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
     expect(ids()).toContain('8');
   });
@@ -2492,11 +2513,13 @@ describe('scrolling the tree', () => {
     fireEvent.scroll(scroller());
     const marker = () => screen.getByRole('button', { name: edge === 'above' ? /^↑ Selected:/ : /^↓ Selected:/ });
     expect(marker().getAttribute('data-edge')).toBe(edge);
-    const slot = document.querySelector('.tree-filters > .tree-selected-slot')!;
+    const slot = document.querySelector('.tree-path > .tree-selected-slot')!;
     expect(slot.getAttribute('aria-label')).toBe('Selected item navigation');
     expect(slot.closest('[aria-label="Filter items"]')).toBeNull();
     expect(slot.contains(marker())).toBe(true);
-    expect(document.querySelector('.tree-scroll-shell')!.contains(marker())).toBe(false);
+    // The tag shares the fixed path row with the ancestors; it is never inside the scroller.
+    expect(document.querySelector('.tree-scroll')!.contains(marker())).toBe(false);
+    expect(slot.previousElementSibling).toBe(screen.getByRole('navigation', { name: 'Map ancestors' }));
     expect(marker().querySelector('.tree-selected-label')?.textContent).not.toBe('');
     fireEvent.click(marker());
     expect(document.activeElement).toBe(row(edge === 'above' ? '1' : '8'));
@@ -2542,7 +2565,7 @@ describe('scrolling the tree', () => {
     // Session/filter bars end at 150; the scroller starts below them, with a 220 px topic band.
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       if (this.matches('.tree-session-bar')) return new DOMRect(0, 0, 300, 104);
-      if (this.matches('.tree-filters')) return new DOMRect(0, 104, 300, 46);
+      if (this.matches('.tree-recent')) return new DOMRect(0, 104, 300, 46);
       if (this.matches('.tree-topic')) return new DOMRect(0, 150, 300, 220);
       const rect = rectangle.call(this);
       if (this.matches('.tree-scroll, [role="treeitem"][data-item-id]')) return new DOMRect(rect.x, rect.y + 150, rect.width, rect.height);
@@ -2570,7 +2593,7 @@ describe('scrolling the tree', () => {
     }, props: { selectedId: '8' } });
     fireEvent.scroll(scroller());
     const tag = screen.getByRole('button', { name: /^↓ Selected:/ });
-    expect(tag.closest('.tree-filters > .tree-selected-slot')).not.toBeNull();
+    expect(tag.closest('.tree-path > .tree-selected-slot')).not.toBeNull();
     expect(screen.queryByRole('button', { name: /^Filter/ })).toBeNull();
   });
 

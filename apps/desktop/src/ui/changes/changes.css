@@ -79,20 +79,65 @@
 .topic-since { margin-top: 8px; }
 .brief-attribution { margin-left: 6px; }
 
+/* Nothing to catch up on: a muted check in the brief's header line, never a box of its own. */
+.brief-caught-up {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 6px;
+  white-space: nowrap;
+  vertical-align: baseline;
+  color: var(--a-label);
+}
+
+.brief-caught-up .change-link { margin-right: 0; }
+
 .brief-list {
   display: flex;
   gap: 10px;
   margin-top: 6px;
 }
 
+/* The label never wraps ("Replaced", "Your turn"); the names beside it flow across the card's width. */
 .brief-list > strong {
-  flex: 0 0 70px;
+  flex: 0 0 9.5ch;
   font-weight: 500;
+  white-space: nowrap;
 }
 
+/* Names flow as wrapping inline items separated by a thin middle dot, so a long list uses the width
+   instead of one short name per line. Every name stays; a "replaced by" pair is one item and never splits. */
 .brief-list ul {
+  display: flex;
   flex: 1;
+  flex-wrap: wrap;
+  align-items: baseline;
   min-width: 0;
+}
+
+/* A name and its trailing dot are two flex items, so the dot stays on the name's last line when it wraps. */
+.brief-list li {
+  display: flex;
+  align-items: baseline;
+  align-items: last baseline;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* "old replaced by new" reads as one unit: it flows as text inside its item and only wraps if it is wider than the card. */
+.brief-list li[data-pair] {
+  display: block;
+}
+
+.brief-replacement {
+  display: inline-block;
+  max-width: 100%;
+}
+
+.brief-list li:not(:last-child)::after {
+  content: '·';
+  margin: 0 .55em;
+  color: var(--a-label);
 }
 
 .since-card {

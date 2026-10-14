@@ -67,25 +67,30 @@ export function TopicChanges({ session, topicId, navigation, onOpenItem }: {
       items: rows.map(row => ({ item_id: row.item.id, revision: row.item.revision })), topics: coversCurrent ? [{ topic_id: topicId, at: session.updated_at }] : [] }, topicId);
   };
   const displayRows = [...rows, ...leaving.filter(row => !rows.some(value => value.item.id === row.item.id))].sort((left, right) => newest(right) - newest(left));
+  const away = summary.longAbsence && rows.length > 0;
+  // With nothing to read there is no box: a small check in the brief's header line says so, and carries Undo while it is offered.
+  const caughtUp = !away && displayRows.length === 0;
   return <div className="topic-changes">
     <section className="topic-brief change-surface" aria-label="Topic brief">
       <button type="button" className="change-link" aria-expanded={!collapsed} onClick={toggleBrief}>Topic brief <i className={collapsed ? 'ph ph-caret-right' : 'ph ph-caret-down'} aria-hidden="true" /></button>
-      {topic.brief && <span className="change-muted brief-attribution">By the agent · as of <time dateTime={topic.brief_updated_at ?? topic.created_at}>{time(topic.brief_updated_at ?? topic.created_at)}</time></span>}
+      {caughtUp && <span className="brief-caught-up"><i className="ph ph-check-circle" role="img" aria-label="All caught up" title="All caught up" />
+        {canUndo && <button type="button" className="change-link" onClick={() => { navigation.reading.undo(undoToken!); }}>Undo</button>}</span>}
+      {topic.brief &&<span className="change-muted brief-attribution">By the agent · as of <time dateTime={topic.brief_updated_at ?? topic.created_at}>{time(topic.brief_updated_at ?? topic.created_at)}</time></span>}
       {!collapsed && <>
         {topic.brief && <p className="brief-text">{topic.brief}</p>}
         {[{ label: 'Decided', rows: lists.decided }, { label: 'Your turn', rows: lists.yourTurn }, { label: 'Replaced', rows: lists.replaced }].map(group => <div className="brief-list" key={group.label}>
-          <strong>{group.label}</strong><ul>{group.rows.length ? group.rows.map(row => <li key={row.item.id}>
-            {group.label === 'Replaced' ? <><del><ChangeName row={row} onOpenItem={onOpenItem} /></del><span className="change-muted"> replaced by </span>
-              {row.replacement ? <button type="button" className="change-name" onClick={() => onOpenItem(row.replacement!.id)}>{shortLabel(row.replacement)}</button> : <span className="change-muted">an unavailable item</span>}</>
+          <strong>{group.label}</strong><ul>{group.rows.length ? group.rows.map(row => <li key={row.item.id} data-pair={group.label === 'Replaced' || undefined}>
+            {group.label === 'Replaced' ? <><del><ChangeName row={row} onOpenItem={onOpenItem} /></del>{' '}<span className="brief-replacement"><span className="change-muted">replaced by </span>
+              {row.replacement ? <button type="button" className="change-name" onClick={() => onOpenItem(row.replacement!.id)}>{shortLabel(row.replacement)}</button> : <span className="change-muted">an unavailable item</span>}</span></>
               : <ChangeName row={row} onOpenItem={onOpenItem} />}
           </li>) : <li className="change-muted">{group.label === 'Your turn' ? 'No questions waiting on you' : 'None yet'}</li>}</ul>
         </div>)}
       </>}
     </section>
-    <section className="topic-since change-surface" aria-label="Since you were here">
+    {!caughtUp && <section className="topic-since change-surface" aria-label="Since you were here">
       {canUndo && <button type="button" className="change-link" onClick={() => { navigation.reading.undo(undoToken!); }}>Undo</button>}
-      {summary.longAbsence && rows.length > 0 ? <div className="since-away"><span>{count} {count === 1 ? 'change' : 'changes'} while you were away</span><span aria-hidden="true"> · </span><button type="button" className="change-link" onClick={catchUp}>Mark all seen</button></div>
-        : displayRows.length ? <>
+      {away ? <div className="since-away"><span>{count} {count === 1 ? 'change' : 'changes'} while you were away</span><span aria-hidden="true"> · </span><button type="button" className="change-link" onClick={catchUp}>Mark all seen</button></div>
+        : <>
           <button type="button" className="change-link" aria-expanded={sinceOpen} onClick={() => setSinceOpen(value => !value)}>{rows.length ? `Since you were here · ${count} ${count === 1 ? 'change' : 'changes'}` : 'All caught up'}</button>
           {sinceOpen && <><ul className="since-cards">{displayRows.map(row => {
             const marked = leaving.some(value => value.item.id === row.item.id && value.item.revision >= row.item.revision);
@@ -97,7 +102,7 @@ export function TopicChanges({ session, topicId, navigation, onOpenItem }: {
               {!row.records.length && <p className="change-muted">New</p>}
             </li>;
           })}</ul>{rows.length > 0 && <button type="button" className="change-link" onClick={catchUp}>Mark all caught up</button>}</>}
-        </> : <span className="change-muted">All caught up</span>}
-    </section>
+        </>}
+    </section>}
   </div>;
 }
