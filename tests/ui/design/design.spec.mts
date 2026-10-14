@@ -577,9 +577,10 @@ for (const theme of ['dark', 'light'] as const) for (const viewport of conversat
     };
     const firstOption = dock.locator('[data-answer-option]').first();
     const choiceSend = dock.getByRole('button', { name: /^Send / }).filter({ hasNotText: 'Send as a reply only' });
-    const controls = [heading, question, firstOption, choiceSend, ownWords, replySend];
+    const controls = [heading, question, firstOption, choiceSend, ownWords];
     const assertControls = async (option = firstOption) => {
-      const visible = [heading, question, option, choiceSend, ownWords, replySend];
+      const visible = [heading, question, option, choiceSend, ownWords];
+      if (await replySend.count()) visible.push(replySend);
       for (const control of visible) await fullyVisible(control);
       const boxes = await Promise.all(visible.map(control => control.boundingBox()));
       for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
@@ -590,17 +591,42 @@ for (const theme of ['dark', 'light'] as const) for (const viewport of conversat
       }
     };
     await expect(dock.locator('[data-answer-option]')).toHaveCount(4);
+    await expect(replySend, 'the reply-only action appears once there are words to send').toHaveCount(0);
+    const optionsRegion = dock.locator('.answer-choices');
+    expect(await optionsRegion.evaluate(element => element.scrollTop), 'the first option starts at rest without an initial scroll').toBe(0);
+    const optionsRoom = await optionsRegion.evaluate(element => {
+      const style = getComputedStyle(element);
+      return element.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+    });
+    expect(optionsRoom, 'the options viewport fits a complete first choice, including its padding').toBeGreaterThanOrEqual((await firstOption.boundingBox())!.height);
     await assertControls();
     await firstOption.click();
     await assertControls();
     const questionGeometry = await question.locator('.conversation-question-text').evaluate(element => ({ height: element.getBoundingClientRect().height, line: parseFloat(getComputedStyle(element).lineHeight), scroll: element.scrollHeight, client: element.clientHeight }));
     expect(questionGeometry.scroll, 'the fixture actually needs the full-question action').toBeGreaterThan(questionGeometry.client);
     expect(questionGeometry.height, 'the current question initially takes at most two lines').toBeLessThanOrEqual(questionGeometry.line * 2 + 1);
-    const optionsRegion = dock.locator('.answer-choices');
     const scrollers = await dock.evaluate(element => [...element.querySelectorAll<HTMLElement>('*')].filter(child => child.tagName !== 'TEXTAREA' && /auto|scroll/.test(getComputedStyle(child).overflowY)).map(child => child.className));
     expect(scrollers, 'only options own a footer scroller').toEqual(['answer-choices']);
     const optionsStyle = await optionsRegion.evaluate(element => ({ overflow: getComputedStyle(element).overflowY, sticky: [...element.querySelectorAll('*')].some(child => ['sticky', 'fixed'].includes(getComputedStyle(child).position)) }));
     expect(optionsStyle.overflow).toBe('auto'); expect(optionsStyle.sticky).toBe(false);
+    const assertWordsRoom = async () => {
+      const words = (await ownWords.boundingBox())!, row = (await dock.locator('.answer-conversation-row').boundingBox())!;
+      expect(words.width, 'own words always get at least half the composer row').toBeGreaterThanOrEqual(row.width / 2);
+    };
+    await assertWordsRoom();
+    const optionsOverflow = await optionsRegion.evaluate(element => element.scrollHeight > element.clientHeight + 1);
+    if (optionsOverflow) {
+      await expect(optionsRegion).toHaveAttribute('data-more-below', 'true');
+      await expect(optionsRegion).not.toHaveCSS('box-shadow', 'none');
+      await optionsRegion.evaluate(element => { element.scrollTop = element.scrollHeight; });
+      await expect(optionsRegion).not.toHaveAttribute('data-more-below');
+      await expect(optionsRegion).toHaveCSS('box-shadow', 'none');
+      await optionsRegion.evaluate(element => { element.scrollTop = 0; });
+      await expect(optionsRegion).toHaveAttribute('data-more-below', 'true');
+      await assertControls();
+    } else {
+      await expect(optionsRegion).not.toHaveAttribute('data-more-below');
+    }
     if (viewport.height < 700) await expect(dock.locator('.answer-fixed-controls > .answer-hint')).toBeHidden();
     else await expect(dock.locator('.answer-fixed-controls > .answer-hint')).toBeVisible();
     const wordsBox = (await ownWords.boundingBox())!, sendBox = (await choiceSend.boundingBox())!;
@@ -640,6 +666,14 @@ for (const theme of ['dark', 'light'] as const) for (const viewport of conversat
       'escBack to Map', '↑↓messages', 'aack / answer', 'rreply', '1–9select', '⌥1–9send choice + note', '⌥0focus own words', '⌘↵send', 'b d oitem actions', 'Spacepeek',
     ]);
     await page.screenshot({ path: testInfo.outputPath(`${id}.png`), animations: 'disabled' });
+    await ownWords.fill('My note about the retry window');
+    await expect(replySend).toBeVisible();
+    await assertWordsRoom();
+    await assertControls();
+    const typedWords = (await ownWords.boundingBox())!;
+    if (viewport.width === 900) {
+      for (const send of [choiceSend, replySend]) expect((await send.boundingBox())!.y, 'both Send buttons move below the typing box at narrow widths').toBeGreaterThanOrEqual(typedWords.y + typedWords.height);
+    }
     expect(await body.evaluate(element => element.scrollHeight > element.clientHeight), 'the long transcript scrolls').toBe(true);
     const footerBefore = await dock.boundingBox(), pinBefore = await pin.boundingBox();
     await body.evaluate(element => { element.scrollTop = element.scrollHeight; });
@@ -648,7 +682,7 @@ for (const theme of ['dark', 'light'] as const) for (const viewport of conversat
     expect(await pin.boundingBox(), 'the waiting question stays with its answer controls').toEqual(pinBefore);
     // Only the options move: heading, question and both Send actions remain fixed.
     const chatScroll = await body.evaluate(element => element.scrollTop);
-    const fixed = controls.filter(control => control !== firstOption);
+    const fixed = [...controls.filter(control => control !== firstOption), replySend];
     const fixedBefore = await Promise.all(fixed.map(control => control.boundingBox()));
     for (const option of await dock.locator('[data-answer-option]').all()) {
       await option.scrollIntoViewIfNeeded(); await assertControls(option);

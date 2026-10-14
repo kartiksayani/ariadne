@@ -1,7 +1,7 @@
 // The answer control (handoff "Answer Control.dc.html"): numbered options, the
 // Send row and, in the full variant, a reply box. Waiting cards (compact), the
 // tree's inline answer and the detail panel (full) all render this one control.
-import { useId, useRef, useState, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useWorkspaceKeys } from '../keys';
 import { useGrow } from './useGrow';
 import './answer.css';
@@ -74,7 +74,8 @@ export function defaultSelection(options: readonly Pick<AnswerOption, 'id' | 're
 
 export function AnswerControl({ options, variant, compactOptions = false, prompt, selected, draft, warn, warnAction, blocked, locked = false, frozen = false, noText = false, label,
   onSelect, onDraft, onSendOption, onSendText, onEscape }: AnswerControlProps) {
-  const root = useRef<HTMLDivElement>(null), text = useRef<HTMLTextAreaElement>(null);
+  const root = useRef<HTMLDivElement>(null), text = useRef<HTMLTextAreaElement>(null), choices = useRef<HTMLDivElement>(null);
+  const [moreBelow, setMoreBelow] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const descriptionId = useId(), [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const chat = variant === 'chat', full = variant !== 'compact', picked = options[selected];
@@ -88,6 +89,19 @@ export function AnswerControl({ options, variant, compactOptions = false, prompt
   const gate = (hard: boolean, soft: boolean) => ({ disabled: hard || undefined, 'aria-disabled': soft && !hard ? true : undefined });
   const hasText = full && !noText;
   const withNote = hasText && !!draft.trim();
+  // The cue follows actual overflow, including wrapping, More and composer growth.
+  useLayoutEffect(() => {
+    const region = choices.current;
+    if (!chat || !compactOptions || !region) { setMoreBelow(false); return undefined; }
+    const update = () => setMoreBelow(region.clientHeight > 0 && region.scrollHeight - region.clientHeight - region.scrollTop > 1);
+    update();
+    region.addEventListener('scroll', update);
+    window.addEventListener('resize', update);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    observer?.observe(region);
+    if (region.firstElementChild) observer?.observe(region.firstElementChild);
+    return () => { region.removeEventListener('scroll', update); window.removeEventListener('resize', update); observer?.disconnect(); };
+  }, [chat, compactOptions, options, draft, expanded]);
   const sendOption = (index: number) => { if (options[index] && !blocked && !off) onSendOption(index, hasText ? draft : undefined); };
   const sendText = () => { if (draft.trim() && !blocked && !off) onSendText(draft); };
   const optionIndex = (target: EventTarget) => target instanceof HTMLElement && root.current?.contains(target)
@@ -166,12 +180,12 @@ export function AnswerControl({ options, variant, compactOptions = false, prompt
       {!chat && <span className="answer-hint">{hint}</span>}
     </div>;
   const chatComposer = !noText && <div className="answer-reply answer-composer">
-    <div className={`answer-composer-row${compactOptions ? ' answer-conversation-row' : ''}`}>
+    <div className={`answer-composer-row${compactOptions ? ` answer-conversation-row${!draft.trim() ? ' answer-conversation-row-empty' : ''}` : ''}`}>
       <textarea ref={text} className="input answer-text" aria-label="Reply in your own words" placeholder="Add a note to your choice, or reply on its own…" rows={1}
         value={draft} disabled={locked} onFocus={() => setCollapsed(false)} onClick={event => event.stopPropagation()} onChange={event => { setCollapsed(false); onDraft(event.target.value); }} />
       {compactOptions && sendButton}
-      <button type="button" className="btn btn-secondary answer-reply-send" {...gate(!draft.trim() || locked, frozen || !!blocked)}
-        onClick={event => { event.stopPropagation(); sendText(); }}>Send as a reply only</button>
+      {(!compactOptions || draft.trim()) && <button type="button" className="btn btn-secondary answer-reply-send" {...gate(!draft.trim() || locked, frozen || !!blocked)}
+        onClick={event => { event.stopPropagation(); sendText(); }}>Send as a reply only</button>}
     </div>
   </div>;
   const chatControls = <>{(!compactOptions || noText) && sendButton}{chatComposer}<span className="answer-hint">{chatHint}</span></>;
@@ -180,7 +194,7 @@ export function AnswerControl({ options, variant, compactOptions = false, prompt
       {warnAction && <button type="button" className="btn btn-secondary answer-warn-action" onClick={event => { event.stopPropagation(); warnAction.onAction(); }}>{warnAction.label}</button>}</div>}
     {chat ? <>
       {compactOptions && prompt}
-      {(options.length > 0 || !compactOptions && prompt) && <div className="answer-choices">{!compactOptions && prompt}{optionCards}</div>}
+      {(options.length > 0 || !compactOptions && prompt) && <div ref={choices} className="answer-choices" data-more-below={compactOptions && moreBelow || undefined}>{!compactOptions && prompt}{optionCards}</div>}
       {compactOptions ? <div className="answer-fixed-controls">{chatControls}</div> : chatControls}
     </> : <>{optionCards}{sendButton}</>}
     {full && !chat && !noText && <div className="answer-reply">
