@@ -3,13 +3,12 @@
 // -app.png and -diff.png, a per-frame result that teardown.ts gathers into
 // report.json, and fails a frame whose mismatch ratio exceeds thresholds.json.
 import { test as base, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
-import { createServer } from 'vite';
-import react from '@vitejs/plugin-react';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, extname, resolve, sep } from 'node:path';
 import { answerFrameIds, designNow, detailMask, detailMasked, dockFrameIds, frameNow, frameSpec, graphFrame, toastFrameIds, variantIds, type FrameSpec } from './frames';
+import { startDesignServer } from './server.mts';
 import { handoffMembers, prefix, repo, sourceRoot } from './source.mts';
 import thresholds from './thresholds.json' with { type: 'json' };
 import { changeNames, interpretation, ownerWords } from './changes-fixture';
@@ -43,15 +42,10 @@ const test = base.extend<Record<never, never>, { origin: string; designPage: Pag
       const sri = members['support.js'].match(new RegExp(`var ${name}_SRI = "([^"]+)"`))?.[1];
       expect(`sha384-${createHash('sha384').update(bytes).digest('base64')}`, url).toBe(sri);
     }
-    const server = await createServer({ configFile: false, root: repo, publicDir: resolve(repo, 'apps/desktop/public'), plugins: [react()], logLevel: 'error',
-      server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
-    try {
-      await server.listen();
-      const address = server.httpServer?.address();
-      if (!address || typeof address === 'string') throw new Error('Missing design server address');
-      await use(`http://127.0.0.1:${address.port}`);
-    } finally { await server.close(); }
-  }, { scope: 'worker' }],
+    // Warmed before the first test, so no test pays the cold transform inside its render wait.
+    const { server, origin } = await startDesignServer();
+    try { await use(origin); } finally { await server.close(); }
+  }, { scope: 'worker', timeout: 240_000 }],
   designPage: [async ({ browser, origin }, use) => {
     const context = await browser.newContext({ viewport: { width: 1700, height: 1000 }, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC',
       colorScheme: 'dark', reducedMotion: 'reduce' });

@@ -208,15 +208,23 @@ async function delivery(configuration) {
       await pending.waitForExist(); await pending.scrollIntoView({ block: 'center' });
       await wait(async () => await pending.isDisplayed() && folded(await pending.getText()).includes(folded(text))
         && (await pending.getText()).includes('Not sent yet'), 'The conversation reply and its queued delivery were not visible');
-      const delivery = await browser.$('section[aria-label="Item conversation"] .detail-delivery[role="status"]');
-      await wait(async () => await delivery.isDisplayed() && (await delivery.getText()).startsWith('Queued for '),
-        'The bigger conversation view did not show the saved reply delivery');
+      // The stage's wording depends on whether the agent is running, so capture what the dock shows
+      // and require the detail pane to show the same line for the item (both render model.delivery).
+      const delivery = await browser.$('section[aria-label="Item conversation"] .detail-dock .detail-delivery[role="status"]');
+      let dockDelivery = '';
+      await wait(async () => (dockDelivery = await delivery.isDisplayed() ? (await delivery.getText()).trim() : '') !== '',
+        'The bigger conversation view did not show a delivery line for the saved reply');
       await browser.saveScreenshot(join(evidence, 'native-item-conversation.png'));
       const back = await browser.$('section[aria-label="Item conversation"]').$('button=Back to Map');
       await back.waitForDisplayed(); await back.waitForEnabled(); await back.click();
       await wait(async () => !(await browser.$('section[aria-label="Item conversation"]').isExisting()), 'Back to Map did not close the bigger conversation view');
       assert.equal(await browser.$('.item-detail').getAttribute('data-detail-item-id'), configuration.itemId,
         'Back to Map keeps the conversation item selected');
+      const detailDelivery = await browser.$('.item-detail:not(.item-conversation) .detail-delivery[role="status"]');
+      let detailText = '';
+      // The message is built after the wait, so it carries the text the pane last showed.
+      try { await wait(async () => (detailText = await detailDelivery.isDisplayed() ? (await detailDelivery.getText()).trim() : '') === dockDelivery, 'unused'); }
+      catch { assert.fail(`The detail pane did not show the conversation view's delivery line "${dockDelivery}"; it showed "${detailText}"`); }
       await showHistory([text]);
     }
   }
