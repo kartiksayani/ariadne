@@ -12,7 +12,7 @@ import { useWorkspaceKeys } from '../keys';
 import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
 import { GraphFilter } from '../tree/FilterBar';
-import { hiddenGroupKey } from '../tree/hidden';
+import { hiddenGroupsFor } from '../tree/hidden';
 import { applyChange, mergeChange, relatedEdgePath, sessionGraph, statusVisual, STUB_HEIGHT, STUB_WIDTH, type GraphNode, type GraphStub, type RelatedEdge, type TopicGraph, type ViewChange } from './model';
 import './graph.css';
 import { useFilterFolds } from '../shared/filterFolds';
@@ -167,10 +167,9 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   const session = useMemo(() => raw && visibleSession(raw, state.route, hidden), [raw, state.route, hidden]);
   const marker = useId().replace(/:/g, '');
   const scroller = useRef<HTMLDivElement>(null);
-  const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
+  const [localReveal, setLocalReveal] = useState<{ result: RevealedItem; external: RevealedItem | null } | null>(null);
+  const [localSelection, setLocalSelection] = useState<{ id: string; external: RevealedItem | null } | null>(null);
   const [dismissedReveal, setDismissedReveal] = useState<RevealedItem | null>(null);
-  // Hidden groups the owner has open, like the Tree's expandedHiddenGroups: local to this view and never saved.
-  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(() => new Set());
   const [focusedEntry, setFocusedEntry] = useState<{ id: string; selectedId: string | null } | null>(null);
   // Optimistic view edits: `pending` waits for the current write, `inflight` is being written.
   const [pending, setPending] = useState<ViewChange | null>(null);
@@ -184,7 +183,7 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   }, [errorNoticeId, error]);
   const [scrollTarget, setScrollTarget] = useState<{ id: string; center: boolean; focus?: boolean } | null>(null);
   const mounted = useRef(true), request = useRef(0);
-  const offered = localReveal ?? reveal;
+  const offered = localReveal?.external === reveal ? localReveal.result : reveal;
   const currentReveal = offered === dismissedReveal ? null : offered;
   const itemReveal = currentReveal?.store === store && currentReveal.kind === 'item' ? currentReveal : null;
   const shown = useMemo(() => {
@@ -192,45 +191,66 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
     return search === undefined || search === changed.filters.search ? changed : { ...changed, filters: { ...changed.filters, search } };
   }, [view, inflight, pending, search]);
   const filterFolds = useFilterFolds(routes, shown.session, shown.filters);
-  const selectedId = pending?.selected ?? inflight?.selected ?? itemReveal?.route.item_id ?? view.selected_item_id;
+  // An outside reveal wins immediately over an older selection whose preference write is still pending.
+  const optimisticSelection = localSelection?.external === reveal && (pending?.selected || inflight?.selected) ? localSelection.id : null;
+  const selectedId = optimisticSelection ?? itemReveal?.route.item_id ?? view.selected_item_id;
+  // Initialize during render so the first commit already contains the route. Later snapshots retain the owner's folds.
+  const [hiddenGroups, setHiddenGroups] = useState<{
+    store: SessionStore; selectedId: string | null; reveal: RevealedItem | null; open: ReadonlySet<string>;
+  } | null>(null);
+  let groupState = hiddenGroups;
+  if (session && (!groupState || groupState.store !== store || groupState.selectedId !== selectedId || groupState.reveal !== itemReveal)) {
+    const explicit = new Set(shown.hidden_item_ids ?? []);
+    const selectionChanged = !groupState || groupState.store !== store || groupState.selectedId !== selectedId;
+    const open = new Set(groupState?.store === store ? groupState.open : []);
+    if (selectionChanged && selectedId) hiddenGroupsFor(session, explicit, selectedId).forEach(key => open.add(key));
+    if (itemReveal && (selectionChanged || groupState?.reveal !== itemReveal)) hiddenGroupsFor(session, explicit, itemReveal.route.item_id).forEach(key => open.add(key));
+    groupState = { store, selectedId, reveal: itemReveal, open };
+    setHiddenGroups(groupState);
+  }
+  const openGroups = groupState?.open;
   const graph = useMemo(() => session ? sessionGraph({ session, view: shown, later, selectedId, tight,
     temporaryExpandedItemIds: itemReveal?.temporaryExpandedItemIds ?? [], revealedItemId: itemReveal?.route.item_id ?? null,
     filterCollapsedItemIds: filterFolds.items, expandedHiddenGroups: openGroups }) : null,
   [session, shown, later, selectedId, tight, itemReveal, filterFolds.items, openGroups]);
-  const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId });
-  latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId };
+  const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: reveal });
+  latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: reveal };
 
   const toggleStub = useCallback((stub: GraphStub) => {
-    // Dismissing a selected reveal would also discard the graph's current selection.
     if (currentReveal?.kind !== 'item' || currentReveal.route.item_id !== latest.current.selectedId) setDismissedReveal(currentReveal);
-    setOpenGroups(groups => { const next = new Set(groups); if (stub.expanded) next.delete(stub.key); else next.add(stub.key); return next; });
+    setHiddenGroups(groups => {
+      if (!groups) return groups;
+      const open = new Set(groups.open); if (stub.expanded) open.delete(stub.key); else open.add(stub.key);
+      return { ...groups, open };
+    });
   }, [currentReveal]);
-  // When the focused node is hidden away, focus goes to its stub, as the Tree's does.
+  // Keep keyboard focus at the same layout position when any focused entry disappears.
   const focusedRow = useRef<string | null>(null);
+  const previousOrder = useRef<readonly string[]>([]);
   useLayoutEffect(() => {
+    const before = previousOrder.current;
+    const order = graph?.order ?? [];
+    previousOrder.current = order;
     const id = focusedRow.current, active = document.activeElement;
-    if (!id || !graph || !session || graph.nodes.has(id) || (active && active !== document.body)) return;
-    const explicit = new Set(view.hidden_item_ids ?? []);
-    let key: string | null = null;
-    for (let item = session.items[id]; item; item = item.parent ? session.items[item.parent] : undefined) {
-      const group = hiddenGroupKey(item.topic_id, item.parent);
-      if (explicit.has(item.id) && graph.stubs.has(group)) { key = group; break; }
-    }
-    const stub = key ? scroller.current?.querySelector<HTMLElement>(`[data-stub="${CSS.escape(key)}"]`) : null;
-    if (stub) { focusedRow.current = null; stub.focus({ preventScroll: true }); }
-  }, [graph, session, view.hidden_item_ids]);
+    if (!id || order.includes(id) || (active && active !== document.body)) return;
+    const index = before.indexOf(id), next = order[Math.min(Math.max(index, 0), order.length - 1)];
+    const target = next ? scroller.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(next)}"], [data-stub="${CSS.escape(next)}"]`) : null;
+    (target ?? scroller.current)?.focus({ preventScroll: true });
+  }, [graph]);
 
-  // The item this graph selected last; its reveal comes back through `reveal` and must not scroll again.
-  const own = useRef<string | null>(null);
+  // A selection's reveal comes back through `reveal` and must not scroll again.
+  const ownReveal = useRef<RevealedItem | null>(null);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
   // A reveal from outside the graph (a link, a waiting card) centres its item.
   useLayoutEffect(() => {
     setLocalReveal(null);
+    setLocalSelection(null);
+    const echo = reveal !== null && reveal === ownReveal.current;
+    ownReveal.current = null;
     if (reveal?.store !== store || reveal.kind !== 'item') return;
-    if (reveal.route.item_id === own.current) own.current = null;
-    else setScrollTarget({ id: reveal.route.item_id, center: true, focus: true });
+    if (!echo) setScrollTarget({ id: reveal.route.item_id, center: true, focus: true });
   }, [reveal]);
-  useLayoutEffect(() => { ++request.current; setLocalReveal(null); setPending(null); setInflight(null); setError(null); setOpenGroups(new Set()); }, [store]);
+  useLayoutEffect(() => { ++request.current; setLocalReveal(null); setPending(null); setInflight(null); setError(null); }, [store]);
 
   // Writes one change at a time through navigation's preference writer; later edits merge into `pending`.
   useEffect(() => {
@@ -246,28 +266,29 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
 
   const change = useCallback((next: ViewChange) => setPending(previous => mergeChange(previous, next)), []);
   /** Select an item: show it now, save it, and tell the App (which opens detail when asked). */
-  const select = useCallback((id: string, options: { openDetail: boolean; expand?: boolean; center?: boolean }) => {
+  const select = useCallback((id: string, options: { openDetail: boolean; expand?: boolean }) => {
+    setLocalSelection({ id, external: latest.current.external });
     setFocusedEntry({ id, selectedId: id });
     if (options.expand && latest.current.graph?.filtering) filterFolds.setFold('items', id, false);
     change({ selected: id, expansion: options.expand ? [{ kind: 'expand', id }] : [] });
-    setScrollTarget({ id, center: !!options.center });
-    own.current = id;
-    const call = ++request.current;
+    setScrollTarget({ id, center: false });
+    const call = ++request.current, external = latest.current.external;
     void latest.current.routes.revealItem({ ...latest.current.view.session, item_id: id }).then(result => {
-      if (!mounted.current || call !== request.current || !result) return;
-      setLocalReveal(result); latest.current.onReveal(result, options.openDetail);
-    }).catch((failure: unknown) => { if (mounted.current && call === request.current) setError(plainFailure(failure, 'This item could not be opened.')); });
+      if (!mounted.current || call !== request.current || external !== latest.current.external || !result) return;
+      ownReveal.current = result;
+      setLocalReveal({ result, external }); latest.current.onReveal(result, options.openDetail);
+    }).catch((failure: unknown) => { if (mounted.current && call === request.current && external === latest.current.external) setError(plainFailure(failure, 'This item could not be opened.')); });
   }, [change, filterFolds.setFold]);
   // Clicking a node selects it and opens detail; a collapsed node also opens its next tier (Ariadne.dc.html:1564).
   const open = useCallback((node: GraphNode) => {
-    select(node.item.id, { openDetail: true, expand: node.collapsed, center: true });
+    select(node.item.id, { openDetail: true, expand: node.collapsed });
   }, [select]);
   // "−" collapses the branches; a selection inside moves to this node (Ariadne.dc.html:1569).
   const collapse = useCallback((node: GraphNode) => {
     const selected = latest.current.selectedId;
     let inside = false;
     for (let id = selected ? session?.items[selected]?.parent : null; id; id = session?.items[id]?.parent) if (id === node.item.id) inside = true;
-    if (inside) select(node.item.id, { openDetail: false, center: false });
+    if (inside) select(node.item.id, { openDetail: false });
     if (latest.current.graph?.filtering) filterFolds.setFold('items', node.item.id, true);
     change({ expansion: [{ kind: 'collapse', id: node.item.id }] });
     if (itemReveal?.temporaryExpandedItemIds.includes(node.item.id)) setDismissedReveal(currentReveal);
@@ -323,10 +344,12 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   }
 
   const revealSelected = () => {
-    const id = latest.current.selectedId, element = id ? scroller.current?.querySelector(`[data-row="${CSS.escape(id)}"]`) : null;
-    if (scroller.current && element) scrollToNode(scroller.current, element, true);
+    const id = latest.current.selectedId;
+    if (!id || !session) return;
+    setHiddenGroups(groups => groups ? { ...groups, open: new Set([...groups.open, ...hiddenGroupsFor(session, new Set(shown.hidden_item_ids ?? []), id)]) } : groups);
+    setScrollTarget({ id, center: true, focus: true });
   };
-  // Opening the graph centres the selection (Ariadne.dc.html:978); later moves keep it in view.
+  // Centre once per store on opening; later plain selection changes leave the Map where the owner put it.
   const opened = useRef<SessionStore | null>(null);
   useLayoutEffect(() => {
     if (!graph || opened.current === store) return;
@@ -366,7 +389,7 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
         <span className="graph-legend-key" aria-label="Closed" title="Closed"><span className="graph-legend-closed" /><span className="graph-legend-label">Closed</span></span>
         <span className="graph-legend-note" title="One graph per topic">One graph per topic</span>
         <div className="graph-legend-actions">
-          <button type="button" className="btn btn-secondary graph-reveal" disabled={!selectedId || !graph?.nodes.has(selectedId)} onClick={revealSelected}>
+          <button type="button" className="btn btn-secondary graph-reveal" disabled={!selectedId || !session?.items[selectedId] || !graph?.topics.length} onClick={revealSelected}>
             <i className="ph ph-crosshair-simple" aria-hidden="true" />Reveal selected</button>
           <GraphFilter />
         </div>

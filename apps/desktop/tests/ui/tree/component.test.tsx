@@ -25,12 +25,28 @@ import { NavigationGraph } from '../../../src/ui/graph/NavigationGraph';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 import { shortLabel } from '../../../src/ui/shared/short';
 import { peekNames } from '../../../src/ui/peek/names';
-import { RemovalContext, RemovalQueue } from '../../../src/ui/remove/queue';
+import { RemovalContext, RemovalQueue, UNDO_MS } from '../../../src/ui/remove/queue';
 import { removeSubject } from '../../../src/ui/remove/model';
 import { ackAllFor } from '../../../src/ui/navigation/ackAllController';
 
 const stores: NavigationStore[] = [];
-afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); notices.clear(); vi.restoreAllMocks(); vi.useRealTimers(); });
+const removals = new Set<RemovalQueue>();
+function disposeTrees() {
+  cleanup();
+  // Confirmed removals outlive TreeView. Cancel fixture-owned work before
+  // clearing its notices, so a later test cannot receive its timer's outcome.
+  removals.forEach(queue => queue.pending().forEach(operation => queue.undo(operation)));
+  removals.clear();
+  stores.splice(0).forEach(store => store.stop());
+  notices.clear();
+}
+afterEach(() => {
+  disposeTrees();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  if (vi.isFakeTimers()) vi.clearAllTimers();
+  vi.useRealTimers();
+});
 const now = () => Date.parse('2026-10-07T12:00:00Z');
 
 interface Recorded {
@@ -41,6 +57,7 @@ interface Recorded {
 async function mount({ transport = new AppTransport(), configure, props = {}, load = true, removal = null }: {
   transport?: AppTransport; configure?: (transport: AppTransport) => void; props?: Partial<TreeViewProps>; load?: boolean; removal?: RemovalQueue | null;
 } = {}) {
+  if (removal) removals.add(removal);
   configure?.(transport);
   transport.preferences.sessions = transport.preferences.sessions.map(view => ({ ...view, tab_open: true }));
   const service = createDesktopService(transport), navigation = new NavigationStore(service); stores.push(navigation);
@@ -260,7 +277,7 @@ describe('session tree rows', () => {
     expect(ids()).toContain('8');
   });
 
-  it.each(['row', 'icon', 'sticky'] as const)('holds %s Unfocus while the view is busy', async control => {
+  it.each(['row Unfocus button', 'disabled item icon', 'sticky Unfocus button'] as const)('ignores the %s while the view is busy', async control => {
     const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
@@ -272,10 +289,11 @@ describe('session tree rows', () => {
     act(() => { saving = view.navigation.saveSessionView(structuredClone(viewOf(view.transport)), view.transport.preferences.revision); });
     await waitFor(() => expect(view.navigation.getSnapshot().writing).toBe(true));
     expect(view.navigation.isWritingRecent()).toBe(false);
-    const leave = control === 'sticky' ? within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name: /^Unfocus / })
+    const leave = control === 'sticky Unfocus button' ? within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name: /^Unfocus / })
       : within(row('1')).getByRole('button', { name: /^Unfocus / });
     expect((leave as HTMLButtonElement).disabled).toBe(true);
-    if (control === 'icon') fireEvent.doubleClick(row('1').querySelector('.tree-icon')!); else fireEvent.click(leave);
+    if (control === 'disabled item icon') fireEvent.doubleClick(row('1').querySelector('.tree-icon')!); else fireEvent.click(leave);
+    expect(within(row('1')).getByRole('button', { name: /^Unfocus / })).toBeTruthy();
     await act(async () => { release(); await saving; });
     expect(viewOf(view.transport).focused_item_id).toBe('1');
     expect(within(row('1')).getByRole('button', { name: /^Unfocus / })).toBeTruthy();
@@ -314,10 +332,19 @@ describe('session tree rows', () => {
   });
 
   it.each(['search', 'filter', 'folded topic', 'pending removal'] as const)('keeps a sticky Focus exit when %s unmounts the row', async exclusion => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.tree-scroll')) return new DOMRect(0, 0, 300, 400);
+      if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 60);
+      if (this.matches('.tree-item .tree-focus-action')) return new DOMRect(0, 100, 60, 20);
+      return new DOMRect(0, 100, 300, 100);
+    });
     const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
     viewOf(transport).focused_item_id = '1';
     const removal = new RemovalQueue({ service: createDesktopService(transport), notices, read: async () => session });
     const view = await mount({ transport, removal });
+    const band = within(screen.getByRole('navigation', { name: 'Map ancestors' }));
+    expect(within(row('1')).getByRole('button', { name: /^Unfocus / })).toBeTruthy();
+    expect(band.queryByRole('button', { name: /^Unfocus / })).toBeNull();
     if (exclusion === 'search') view.rerender({ query: 'no matching item anywhere' });
     else if (exclusion === 'filter') fireEvent.click(chip('In progress'));
     else if (exclusion === 'folded topic') fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Expand or collapse topic' }));
@@ -326,10 +353,25 @@ describe('session tree rows', () => {
       act(() => { removal.schedule(target, removeSubject(session, target)!); });
     }
     expect(row('1')).toBeNull();
-    const leave = within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name: /^Unfocus / });
+    const leave = band.getByRole('button', { name: /^Unfocus / });
     await waitFor(() => expect((leave as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(leave);
     await waitFor(() => expect(viewOf(transport).focused_item_id).toBeUndefined());
+  });
+
+  it('ends Focus when hidden ids change for the focused top-level item', async () => {
+    const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
+    const session = view.store.getSnapshot().snapshot!.session;
+    expect(session.items['1']!.parent).toBeNull();
+    expect(viewOf(view.transport).hidden_item_ids ?? []).not.toContain('1');
+    expect(within(row('1')).getByRole('button', { name: /^Unfocus / })).toBeTruthy();
+    await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: ['1'] }, view.transport.preferences.revision); });
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+    expect(viewOf(view.transport).hidden_item_ids).toContain('1');
+    expect(view.store.getSnapshot().snapshot!.session).toBe(session);
+    await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: [] }, view.transport.preferences.revision); });
+    expect(viewOf(view.transport).focused_item_id).toBeUndefined();
+    expect(row('1')).toBeTruthy();
   });
 
   it.each(['above', 'below'] as const)('keeps a sticky Focus exit when its button is %s the viewport', async edge => {
@@ -609,6 +651,28 @@ describe('session tree rows', () => {
     expect(screen.getByRole('alert').textContent).toBe(words);
     expect(screen.getByRole('alert').textContent).not.toContain('loading');
   });
+  it('does not leak a pending removal into a later stale selection', async () => {
+    vi.useFakeTimers();
+    const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
+    const removal = new RemovalQueue({ service: createDesktopService(transport), notices, read: async () => session });
+    await mount({ transport, removal });
+    const target = { kind: 'item' as const, item: { ...route, item_id: '1' } };
+    act(() => { removal.schedule(target, removeSubject(session, target)!); });
+    expect(removal.pending()).toHaveLength(1);
+    // Exercise the same teardown as afterEach, then put its five-second
+    // deadline inside the next fixture's successful stale-selection flow.
+    disposeTrees();
+    const value = await mount(), { release } = await staleTree(value);
+    fireEvent.click(row('3'));
+    await act(async () => { release(); await value.store.refresh(); });
+    expect(value.calls.selected).toHaveLength(1);
+    expect(viewOf(value.transport).selected_item_id).toBe('3');
+    await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS); });
+    expect(notices.getSnapshot()).toEqual([]);
+    expect(transport.mutations.some(request => request.command.command === 'item_remove')).toBe(false);
+    expect(removal.pending()).toEqual([]);
+  });
+
   it.each(['click', 'Enter'] as const)('waits for a stale session before selecting with %s', async method => {
     const value = await mount(), { release } = await staleTree(value);
     expect(row('3').getAttribute('aria-disabled')).toBeNull();

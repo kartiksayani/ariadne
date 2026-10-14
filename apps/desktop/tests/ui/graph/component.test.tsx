@@ -43,7 +43,7 @@ async function setup(session: Session = graphSession(), view = preferences()) {
       saveView={async next => { saved.push(structuredClone(next)); const ok = await write(next); if (ok) setCurrent(next); return ok; }}
       onReveal={(result, openDetail) => { if (result.kind === 'item') reveals.push([result.route.item_id, openDetail]); }} />;
   }
-  return { Composition, store, routes, saved, reveals, route,
+  return { Composition, store, routes, saved, reveals, route, session,
     failReveal: () => { failReveal = true; }, writeWith: (next: typeof write) => { write = next; } };
 }
 const node = (id: string) => document.querySelector<HTMLElement>(`.graph-node[data-item-id="${id}"]`)!;
@@ -200,13 +200,13 @@ describe('session graph view', () => {
     await waitFor(() => expect(value.reveals).toEqual([['1.1.1', true]]));
     expect(value.saved.at(-1)?.hidden_item_ids).toEqual(['1']);
     fireEvent.click(stub()!);
-    expect(selected()).toBe('1.1.1');
-    expect(node('1.1.1').className).toContain('is-hidden');
+    expect(node('1.1.1')).toBeNull();
+    expect(stub()!.getAttribute('aria-expanded')).toBe('false');
     // Opening and folding is local: nothing was saved for it.
     expect(value.saved.every(view => view.hidden_item_ids?.length === 1 && view.hidden_item_ids[0] === '1')).toBe(true);
   });
 
-  it('opens the stub of a revealed hidden item and keeps its selected route drawn', async () => {
+  it('opens a revealed hidden route once and lets the owner fold it', async () => {
     const value = await setup(undefined, preferences({ hidden_item_ids: ['1'] }));
     const { rerender } = render(<value.Composition />);
     expect(ids()).toEqual(['2', '3', '8']);
@@ -217,10 +217,9 @@ describe('session graph view', () => {
     expect(stub()!.getAttribute('aria-expanded')).toBe('true');
     // "Reveal selected" finds it.
     expect((screen.getByRole('button', { name: /Reveal selected/ }) as HTMLButtonElement).disabled).toBe(false);
-    // The current selection keeps its hidden route drawn even after the reveal is dismissed.
     fireEvent.click(stub()!);
-    expect(selected()).toBe('1.2');
-    expect(stub()!.getAttribute('aria-expanded')).toBe('true');
+    expect(node('1.2')).toBeNull();
+    expect(stub()!.getAttribute('aria-expanded')).toBe('false');
   });
 
   it('can fold a revealed hidden route after selection has moved elsewhere', async () => {
@@ -280,29 +279,245 @@ describe('session graph view', () => {
   });
 
   it('opens a truly newly selected hidden route without a reveal or a local stub expansion', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('graph-scroll') ? new DOMRect(0, 0, 400, 300) : new DOMRect(600, 500, 190, 66);
+    });
     const value = await setup(undefined, preferences({ selected_item_id: '2', hidden_item_ids: ['1', '1.1'], expanded_item_ids: [] }));
     const { rerender } = render(<value.Composition />);
     expect(node('1.1.1')).toBeNull();
-    const commits: (string | undefined)[] = [];
-    rerender(<value.Composition selection="1.1.1" onCommit={() => { commits.push(selected()); }} />);
-    expect(commits[0]).toBe('1.1.1');
+    const box = document.querySelector<HTMLElement>('.graph-scroll')!;
+    box.scrollTop = 0;
+    const left = box.scrollLeft, commits: { selected: string | undefined; top: number; left: number }[] = [];
+    rerender(<value.Composition selection="1.1.1" onCommit={() => { commits.push({ selected: selected(), top: box.scrollTop, left: box.scrollLeft }); }} />);
+    expect(commits[0]).toEqual({ selected: '1.1.1', top: 0, left });
     expect(node('1.1.1').className).toContain('is-hidden');
     expect(document.querySelectorAll('.graph-stub[aria-expanded="true"]')).toHaveLength(2);
     expect(value.saved).toEqual([]);
     expect(value.reveals).toEqual([]);
   });
 
-  it('keeps an item drawn and dimmed when it becomes hidden while selected', async () => {
+  it.each(['visible', 'hidden'] as const)('keeps both scroll positions when a plain selection changes to an off-screen %s item', async visibility => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains('graph-scroll')) return new DOMRect(0, 0, 400, 300);
+      const box = this.closest<HTMLElement>('.graph-scroll'), target = this.dataset.itemId === '1.1.1';
+      return new DOMRect((target ? 1000 : 100) - (box?.scrollLeft ?? 0), (target ? 900 : 100) - (box?.scrollTop ?? 0), 190, 66);
+    });
+    const value = await setup(undefined, preferences({ selected_item_id: '2',
+      ...(visibility === 'hidden' ? { hidden_item_ids: ['1', '1.1'], expanded_item_ids: [] } : {}) }));
+    const { rerender } = render(<value.Composition />);
+    const box = document.querySelector<HTMLElement>('.graph-scroll')!;
+    box.scrollTop = 47; box.scrollLeft = 83;
+    const focused = document.activeElement, commits: { selected: string | undefined; top: number; left: number }[] = [];
+    const observe = () => { commits.push({ selected: selected(), top: box.scrollTop, left: box.scrollLeft }); };
+    rerender(<value.Composition selection="1.1.1" onCommit={observe} />);
+    expect(commits[0]).toEqual({ selected: '1.1.1', top: 47, left: 83 });
+    expect(node('1.1.1').getBoundingClientRect().top).toBeGreaterThan(box.getBoundingClientRect().bottom);
+    expect(node('1.1.1').getBoundingClientRect().left).toBeGreaterThan(box.getBoundingClientRect().right);
+    expect(node('1.1.1').classList.contains('is-hidden')).toBe(visibility === 'hidden');
+    rerender(<value.Composition selection="1.1.1" tight onCommit={observe} />);
+    await act(async () => { await value.store.refresh(true); });
+    expect(commits.every(commit => commit.top === 47 && commit.left === 83)).toBe(true);
+    expect(document.activeElement).toBe(focused);
+    expect(value.saved).toEqual([]); expect(value.reveals).toEqual([]);
+    const reveal = screen.getByRole('button', { name: /Reveal selected/ }) as HTMLButtonElement;
+    expect(reveal.disabled).toBe(false);
+    fireEvent.click(reveal);
+    const bounds = node('1.1.1').getBoundingClientRect();
+    expect(bounds.top + bounds.height / 2).toBe(150);
+    expect(bounds.left + bounds.width / 2).toBe(200);
+  });
+
+  it.each(['visible', 'off-screen'] as const)('uses nearest-edge scrolling for an owner click on the %s node', async position => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains('graph-scroll')) return new DOMRect(0, 0, 400, 300);
+      const box = this.closest<HTMLElement>('.graph-scroll'), target = this.dataset.itemId === '3';
+      return new DOMRect((target ? position === 'visible' ? 100 : 600 : 105) - (box?.scrollLeft ?? 0),
+        (target ? position === 'visible' ? 100 : 500 : 117) - (box?.scrollTop ?? 0), 190, 66);
+    });
+    const value = await setup(undefined, preferences({ selected_item_id: '2' }));
+    const echo = await value.routes.revealItem({ ...value.route, item_id: '3' });
+    vi.spyOn(value.routes, 'revealItem').mockResolvedValueOnce(echo);
+    const { rerender } = render(<value.Composition />);
+    const box = document.querySelector<HTMLElement>('.graph-scroll')!;
+    fireEvent.click(node('3'));
+    await waitFor(() => expect(value.reveals).toEqual([['3', true]]));
+    const expected = position === 'visible' ? { top: 0, left: 0 } : { top: 274, left: 398 };
+    expect({ top: box.scrollTop, left: box.scrollLeft }).toEqual(expected);
+    rerender(<value.Composition reveal={echo} />);
+    expect({ top: box.scrollTop, left: box.scrollLeft }).toEqual(expected);
+  });
+
+  it('folds an item hidden during the same selection and can reveal it dimmed again', async () => {
     const value = await setup(undefined, preferences({ selected_item_id: '2' }));
     const { rerender } = render(<value.Composition />);
     node('2').focus();
     rerender(<value.Composition hidden={['2']} />);
+    expect(node('2')).toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(stub()!.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(screen.getByRole('button', { name: /Reveal selected/ }));
     expect(selected()).toBe('2');
     expect(node('2').className).toContain('is-hidden');
-    expect(document.activeElement).toBe(node('2'));
-    expect(stub()!.getAttribute('aria-expanded')).toBe('true');
-    fireEvent.click(stub()!);
-    expect(selected()).toBe('2');
+  });
+
+  it('opens an outside hidden selection on its first commit after an internal reveal', async () => {
+    const value = await setup(undefined, preferences({ selected_item_id: '2', hidden_item_ids: ['1', '1.1'] }));
+    const { rerender } = render(<value.Composition />);
+    fireEvent.click(node('3'));
+    await waitFor(() => expect(value.reveals).toEqual([['3', true]]));
+    const reveal = await value.routes.revealItem({ ...value.route, item_id: '1.1.1' });
+    const commits: (string | undefined)[] = [];
+    rerender(<value.Composition reveal={reveal} onCommit={() => { commits.push(selected()); }} />);
+    expect(commits[0]).toBe('1.1.1');
+    expect(selected()).toBe('1.1.1');
+  });
+
+  it('discards an internal reveal that finishes after an outside reveal replaces it', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('graph-scroll') ? new DOMRect(0, 0, 400, 300) : new DOMRect(600, 500, 190, 66);
+    });
+    const value = await setup(undefined, preferences({ selected_item_id: '2', hidden_item_ids: ['1'] }));
+    const outside = await value.routes.revealItem({ ...value.route, item_id: '1.1.1' });
+    const stale = await value.routes.revealItem({ ...value.route, item_id: '3' });
+    let finish!: (result: RevealedItem | null) => void;
+    vi.spyOn(value.routes, 'revealItem').mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const { rerender } = render(<value.Composition />);
+    fireEvent.click(node('3'));
+    await waitFor(() => expect(value.saved.at(-1)?.selected_item_id).toBe('3'));
+    rerender(<value.Composition reveal={outside} />);
+    await act(async () => { finish(stale); });
+    expect(selected()).toBe('1.1.1');
+    expect(value.reveals).toEqual([]);
+    const box = document.querySelector<HTMLElement>('.graph-scroll')!;
+    box.scrollTop = 0;
+    rerender(<value.Composition reveal={stale} />);
+    expect(selected()).toBe('3');
+    expect(box.scrollTop).toBe(383);
+    expect(document.activeElement).toBe(node('3'));
+  });
+
+  it('opens an outside hidden selection on its first commit while an older selection write is pending', async () => {
+    const value = await setup(undefined, preferences({ selected_item_id: '2', hidden_item_ids: ['1'] }));
+    const outside = await value.routes.revealItem({ ...value.route, item_id: '1.1.1' });
+    let finish!: () => void;
+    value.writeWith(() => new Promise(resolve => { finish = () => resolve(true); }));
+    const { rerender } = render(<value.Composition />);
+    fireEvent.click(node('3'));
+    await waitFor(() => expect(value.reveals).toEqual([['3', true]]));
+    expect(value.saved.at(-1)?.selected_item_id).toBe('3');
+    const commits: (string | undefined)[] = [];
+    rerender(<value.Composition reveal={outside} onCommit={() => { commits.push(selected()); }} />);
+    expect(commits[0]).toBe('1.1.1');
+    await act(async () => { finish(); });
+    expect(selected()).toBe('1.1.1');
+  });
+
+  it.each(['outer click', 'inner click', 'outer ArrowLeft', 'inner ArrowLeft'])('respects the owner’s %s fold across rerenders and live updates', async action => {
+    const value = await setup(undefined, preferences({ selected_item_id: '1.1.1', hidden_item_ids: ['1', '1.1'] }));
+    const { rerender } = render(<value.Composition />);
+    const key = `hidden:${value.session.items['1']!.topic_id}:${action.startsWith('inner') ? '1' : ''}`;
+    const group = () => document.querySelector<HTMLElement>(`[data-stub="${key}"]`)!;
+    expect(group().getAttribute('aria-expanded')).toBe('true');
+    expect(group().title).toContain('fold them again');
+    if (action.endsWith('ArrowLeft')) {
+      act(() => group().focus()); fireEvent.keyDown(group(), { key: 'ArrowLeft' });
+    } else fireEvent.click(group());
+    const check = () => {
+      expect(node('1.1.1')).toBeNull();
+      expect(group().getAttribute('aria-expanded')).toBe('false');
+      expect(group().title).toContain('show them');
+    };
+    check(); rerender(<value.Composition tight />); check();
+    value.session.items['2']!.question = 'Live update elsewhere'; value.session.revision++;
+    await act(async () => { await value.store.refresh(true); }); check();
+  });
+
+  it('enables Reveal selected for a folded hidden route and reopens and centers it', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('graph-scroll') ? new DOMRect(0, 0, 400, 300) : new DOMRect(600, 500, 190, 66);
+    });
+    const value = await setup(undefined, preferences({ selected_item_id: '1.1.1', hidden_item_ids: ['1', '1.1'], expanded_item_ids: [] }));
+    render(<value.Composition />);
+    fireEvent.click(document.querySelector('.graph-stub')!);
+    expect(node('1.1.1')).toBeNull();
+    const reveal = screen.getByRole('button', { name: /Reveal selected/ }) as HTMLButtonElement;
+    expect(reveal.disabled).toBe(false);
+    const box = document.querySelector<HTMLElement>('.graph-scroll')!; box.scrollTop = 0;
+    fireEvent.click(reveal);
+    expect(selected()).toBe('1.1.1'); expect(box.scrollTop).toBe(383);
+    expect(document.activeElement).toBe(node('1.1.1'));
+  });
+
+  it('clears old route folds and opens the new route on each selection change', async () => {
+    const value = await setup(undefined, preferences({ selected_item_id: '1.1.1', hidden_item_ids: ['1', '1.1', '8'] }));
+    const { rerender } = render(<value.Composition />);
+    const root = () => document.querySelector<HTMLElement>(`[data-stub="hidden:${value.session.items['1']!.topic_id}:"]`)!;
+    fireEvent.click(root()); expect(node('1.1.1')).toBeNull();
+    rerender(<value.Composition selection="8" />);
+    expect(selected()).toBe('8'); expect(root().getAttribute('aria-expanded')).toBe('false');
+    rerender(<value.Composition selection="1.1.1" />);
+    expect(selected()).toBe('1.1.1');
+    expect(root().getAttribute('aria-expanded')).toBe('true');
+    expect(document.querySelector(`[data-stub="hidden:${value.session.items['1']!.topic_id}:1"]`)!.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('reopens an owner-folded route for a new outside reveal of the same selection', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('graph-scroll') ? new DOMRect(0, 0, 400, 300) : new DOMRect(600, 500, 190, 66);
+    });
+    const value = await setup(undefined, preferences({ selected_item_id: '1.1.1', hidden_item_ids: ['1', '1.1'] }));
+    const first = await value.routes.revealItem({ ...value.route, item_id: '1.1.1' });
+    const { rerender } = render(<value.Composition reveal={first} />);
+    fireEvent.click(document.querySelector('.graph-stub')!); expect(node('1.1.1')).toBeNull();
+    rerender(<value.Composition reveal={first} tight />); expect(node('1.1.1')).toBeNull();
+    rerender(<value.Composition reveal={null} />); expect(node('1.1.1')).toBeNull();
+    const next = await value.routes.revealItem({ ...value.route, item_id: '1.1.1' });
+    expect(next).not.toBe(first);
+    const box = document.querySelector<HTMLElement>('.graph-scroll')!; box.scrollTop = 0;
+    rerender(<value.Composition reveal={next} />); expect(selected()).toBe('1.1.1'); expect(box.scrollTop).toBe(383);
+  });
+
+  it('keeps owner stub folds local through reveal, live refresh and remount', async () => {
+    const value = await setup(undefined, preferences({ selected_item_id: '1.1.1', hidden_item_ids: ['1'] }));
+    const { rerender } = render(<value.Composition key="first" />);
+    fireEvent.click(stub()!); expect(node('1.1.1')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Reveal selected/ })); expect(selected()).toBe('1.1.1');
+    fireEvent.click(stub()!); expect(node('1.1.1')).toBeNull();
+    value.session.revision++;
+    await act(async () => { await value.store.refresh(true); });
+    expect(node('1.1.1')).toBeNull(); expect(value.saved).toEqual([]);
+    rerender(<value.Composition key="second" />);
+    expect(selected()).toBe('1.1.1'); expect(value.saved).toEqual([]);
+  });
+
+  it.each(['stub', 'node', 'hidden node', 'last node'])('keeps focus on the nearest surviving entry when a focused %s disappears', async kind => {
+    const session = graphSession();
+    const value = await setup(session, preferences({ selected_item_id: '2', hidden_item_ids: kind === 'stub' ? ['1.2'] : kind === 'hidden node' ? ['1.1'] : [] }));
+    const { rerender } = render(<value.Composition />);
+    const target = kind === 'stub' ? stub()! : node(kind === 'last node' ? '8' : '1.2');
+    act(() => target.focus());
+    if (kind === 'hidden node') rerender(<value.Composition hidden={['1.1', '1.2']} />);
+    else {
+      const id = kind === 'last node' ? '8' : '1.2';
+      session.items[id]!.removed_at = session.updated_at; session.revision++;
+      await act(async () => { await value.store.refresh(true); });
+    }
+    const expected = kind === 'last node' ? node('3') : kind === 'hidden node' ? stub()! : node('2');
+    expect(document.activeElement).toBe(expected);
+    expect(document.activeElement).not.toBe(document.body);
+    expect(expected.tabIndex).toBe(0);
+    fireEvent.keyDown(expected, { key: kind === 'last node' ? 'ArrowUp' : 'ArrowDown' });
+    expect(document.activeElement).not.toBe(expected);
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('keeps focus on the scroller when the final graph entry disappears', async () => {
+    const session = graphSession(); Object.keys(session.items).forEach(id => { if (id !== '8') delete session.items[id]; });
+    const value = await setup(session, preferences({ selected_item_id: '8' }));
+    render(<value.Composition />); act(() => node('8').focus());
+    session.items['8']!.removed_at = session.updated_at; session.revision++;
+    await act(async () => { await value.store.refresh(true); });
+    expect(document.activeElement).toBe(document.querySelector('.graph-scroll'));
   });
 
   it('moves arrows through stubs in layout order with one roving tab stop, and Enter/Space toggle them', async () => {

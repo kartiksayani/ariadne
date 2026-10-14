@@ -114,7 +114,7 @@ export interface GraphInput {
   readonly temporaryExpandedItemIds?: readonly string[];
   readonly revealedItemId?: string | null;
   readonly filterCollapsedItemIds?: ReadonlySet<string>;
-  /** Hidden groups the owner opened (keys of `hiddenGroupKey`); local to the view, never saved. */
+  /** Local hidden-group state; when omitted, initialize the selected/revealed route. An empty set folds every group. */
   readonly expandedHiddenGroups?: ReadonlySet<string>;
   readonly selectedId: string | null;
   readonly tight: boolean;
@@ -159,13 +159,15 @@ export function sessionGraph(input: GraphInput): SessionGraph {
   const hidden = hiddenItems(session, explicit);
   // The Tree's rule (ui/tree/model.ts): a hidden item folds into one stub among its siblings; an outside
   // reveal opens the groups on its route, and the owner opens the rest, locally.
-  const openGroups = new Set(input.expandedHiddenGroups ?? []);
   const selectedGroups = selectedId ? hiddenGroupsFor(session, explicit, selectedId) : [];
-  selectedGroups.forEach(key => openGroups.add(key));
-  if (input.revealedItemId) hiddenGroupsFor(session, explicit, input.revealedItemId).forEach(key => openGroups.add(key));
-  // A selected hidden route must exist on the first render, including its folded ancestors and filter context.
-  const rows = sentenceRows(session, view, later, input.temporaryExpandedItemIds ?? [],
-    selectedGroups.length ? selectedId : input.revealedItemId ?? null, input.filterCollapsedItemIds).rows;
+  const openGroups = new Set(input.expandedHiddenGroups ?? [...selectedGroups,
+    ...(input.revealedItemId ? hiddenGroupsFor(session, explicit, input.revealedItemId) : [])]);
+  // Open selected hidden ancestors without granting selection a reveal's filter exemption.
+  const temporary = new Set(input.temporaryExpandedItemIds ?? []);
+  if (selectedGroups.length) {
+    for (let id = selectedId ? session.items[selectedId]?.parent : null; id; id = session.items[id]?.parent) temporary.add(id);
+  }
+  const rows = sentenceRows(session, view, later, [...temporary], input.revealedItemId ?? null, input.filterCollapsedItemIds).rows;
   const labels = itemLabels(rows.map(row => row.item), session.topics);
   const indexes = indexSession(session);
   const rowsByParent = new Map<string, SentenceRow[]>(), rootsByTopic = new Map<string, SentenceRow[]>();

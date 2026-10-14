@@ -199,6 +199,18 @@ describe('graph model', () => {
       expect(selectedOnly.nodes.get('1.1.1')).toMatchObject({ selected: true, hidden: true });
       expect(view.expanded_item_ids).toEqual([]);
     });
+    it.each(['search', 'status'] as const)('keeps selected hidden items subject to %s filters, just like visible selections', filter => {
+      const filters = { ...preferences().filters, ...(filter === 'search' ? { search: 'Record retry limits' } : { statuses: ['open' as const] }) };
+      for (const hidden_item_ids of [[], ['1', '1.1']]) {
+        const graph = build({ view: preferences({ hidden_item_ids, filters }), selectedId: '1.1.1' });
+        expect(graph.nodes.has('1.1.1')).toBe(false);
+      }
+    });
+    it.each(['search', 'status'] as const)('forces a live revealed hidden item through %s filters', filter => {
+      const filters = { ...preferences().filters, ...(filter === 'search' ? { search: 'Record retry limits' } : { statuses: ['open' as const] }) };
+      const graph = build({ view: preferences({ hidden_item_ids: ['1', '1.1'], filters }), selectedId: '1.1.1', revealedItemId: '1.1.1' });
+      expect(graph.nodes.get('1.1.1')).toMatchObject({ selected: true, hidden: true });
+    });
     it('keeps a topic whose top items are all hidden, with only its stub', () => {
       const graph = build({ view: preferences({ hidden_item_ids: ['8'] }) });
       const topic = graph.topics.find(value => value.topic.id === topicB)!;

@@ -819,14 +819,16 @@ async function graphBands(page: Page, designPage: Page, card: string, columns: r
   expect(app.row, 'the Graph has a card to align on').not.toBeNull();
   const design = await designPage.evaluate(({ card, row }) => {
     const root = document.querySelector(`[id="${card}"] .dv-card`)!;
+    const filterRow = root.querySelector('[aria-label="Filter"]')!.parentElement!;
     // The card sits at a fractional page offset and the capture clips at the rounded one: measure from that origin.
     const origin = Math.round(root.getBoundingClientRect().y + window.scrollY) - window.scrollY;
     return { thread: root.querySelector('[aria-label="Thread to the selected item"]')!.getBoundingClientRect().top - origin,
-      node: root.querySelector(`[data-row="${row}"]`)!.getBoundingClientRect().top - origin };
+      node: root.querySelector(`[data-row="${row}"]`)!.getBoundingClientRect().top - origin,
+      filterRowHeight: filterRow.getBoundingClientRect().height };
   }, { card, row: app.row });
   const legend = Math.round(design.thread - app.thread), body = Math.round(design.node - app.node!);
-  const limit = graphShift.maxShift;
-  expect(legend, 'the legend moves up, by a row at most').toBeGreaterThanOrEqual(0); expect(legend).toBeLessThanOrEqual(limit);
+  expect(design.filterRowHeight, 'the handoff filter row has measurable height').toBeGreaterThan(0);
+  expect(Math.abs(design.thread - app.thread - design.filterRowHeight), 'the legend moves up by the handoff filter row height').toBeLessThanOrEqual(1);
   expect(body, 'the Graph body moves up by no more than the legend').toBeGreaterThanOrEqual(0); expect(body).toBeLessThanOrEqual(legend);
   const top = Math.round(app.legendTop), under = Math.round(app.legendBottom), foot = center.y + center.height;
   const strip = (name: string, y: number, height: number): Region => ({ name, x: center.x, y, width: center.width, height });
