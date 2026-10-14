@@ -561,7 +561,8 @@ for (const theme of ['dark', 'light'] as const) for (const viewport of conversat
     const replySend = dock.getByRole('button', { name: 'Send as a reply only', exact: true });
     const fullyVisible = async (control: Locator) => {
       await expect(control).toBeVisible();
-      await expect(control).toBeInViewport({ ratio: 1 });
+      // Sub-pixel scroll positions can leave a fraction of a pixel outside; the clip check below allows 1 px too.
+      await expect(control).toBeInViewport({ ratio: 0.98 });
       // A box can be inside the footer while being clipped by a nested scroller.
       const clipped = await control.evaluate(element => {
         const rect = element.getBoundingClientRect(), failures: string[] = [];
