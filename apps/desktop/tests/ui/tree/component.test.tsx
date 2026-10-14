@@ -31,17 +31,18 @@ import { ackAllFor } from '../../../src/ui/navigation/ackAllController';
 
 const stores: NavigationStore[] = [];
 const removals = new Set<RemovalQueue>();
-function disposeTrees() {
+async function disposeTrees() {
   cleanup();
-  // Confirmed removals outlive TreeView. Cancel fixture-owned work before
-  // clearing its notices, so a later test cannot receive its timer's outcome.
+  // Confirmed removals outlive TreeView. Cancel pending fixture work and wait
+  // for commands already sending before clearing their notices and timers.
   removals.forEach(queue => queue.pending().forEach(operation => queue.undo(operation)));
+  await Promise.all([...removals].map(queue => queue.flush()));
   removals.clear();
   stores.splice(0).forEach(store => store.stop());
   notices.clear();
 }
-afterEach(() => {
-  disposeTrees();
+afterEach(async () => {
+  await disposeTrees();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   if (vi.isFakeTimers()) vi.clearAllTimers();
@@ -661,7 +662,7 @@ describe('session tree rows', () => {
     expect(removal.pending()).toHaveLength(1);
     // Exercise the same teardown as afterEach, then put its five-second
     // deadline inside the next fixture's successful stale-selection flow.
-    disposeTrees();
+    await disposeTrees();
     const value = await mount(), { release } = await staleTree(value);
     fireEvent.click(row('3'));
     await act(async () => { release(); await value.store.refresh(); });
@@ -671,6 +672,41 @@ describe('session tree rows', () => {
     expect(notices.getSnapshot()).toEqual([]);
     expect(transport.mutations.some(request => request.command.command === 'item_remove')).toBe(false);
     expect(removal.pending()).toEqual([]);
+  });
+
+  it('waits for a sending removal before teardown clears its notices and timers', async () => {
+    vi.useFakeTimers();
+    const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
+    const removal = new RemovalQueue({ service: createDesktopService(transport), notices, read: async () => session });
+    await mount({ transport, removal });
+    let release!: () => void, entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'item_remove') { entered = true; await gate; }
+      return invoke(name, args);
+    });
+    const target = { kind: 'item' as const, item: { ...route, item_id: '1' } };
+    act(() => { removal.schedule(target, removeSubject(session, target)!); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS); });
+    const sending = removal.flush();
+    let disposed = false;
+    const disposal = disposeTrees().then(() => { disposed = true; });
+    try {
+      await act(async () => {});
+      expect(entered).toBe(true);
+      expect(removal.pending()).toEqual([]);
+      expect(disposed).toBe(false);
+      expect(notices.getSnapshot()[0]?.text).toContain('Telling demo.local');
+      await act(async () => { release(); await sending; await disposal; });
+      expect(disposed).toBe(true);
+      expect(transport.mutations.filter(request => request.command.command === 'item_remove')).toHaveLength(1);
+      expect(notices.getSnapshot()).toEqual([]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      // A failed assertion must still release the command before afterEach.
+      await act(async () => { release(); await sending; await disposal; });
+      notices.clear();
+    }
   });
 
   it.each(['click', 'Enter'] as const)('waits for a stale session before selecting with %s', async method => {

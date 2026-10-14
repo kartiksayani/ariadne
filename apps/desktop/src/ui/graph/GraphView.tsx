@@ -241,15 +241,6 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   // A selection's reveal comes back through `reveal` and must not scroll again.
   const ownReveal = useRef<RevealedItem | null>(null);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
-  // A reveal from outside the graph (a link, a waiting card) centres its item.
-  useLayoutEffect(() => {
-    setLocalReveal(null);
-    setLocalSelection(null);
-    const echo = reveal !== null && reveal === ownReveal.current;
-    ownReveal.current = null;
-    if (reveal?.store !== store || reveal.kind !== 'item') return;
-    if (!echo) setScrollTarget({ id: reveal.route.item_id, center: true, focus: true });
-  }, [reveal]);
   useLayoutEffect(() => { ++request.current; setLocalReveal(null); setPending(null); setInflight(null); setError(null); }, [store]);
 
   // Writes one change at a time through navigation's preference writer; later edits merge into `pending`.
@@ -266,16 +257,18 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
 
   const change = useCallback((next: ViewChange) => setPending(previous => mergeChange(previous, next)), []);
   /** Select an item: show it now, save it, and tell the App (which opens detail when asked). */
-  const select = useCallback((id: string, options: { openDetail: boolean; expand?: boolean }) => {
+  const select = useCallback((id: string, options: { openDetail: boolean; expand?: boolean; center?: boolean }) => {
     setLocalSelection({ id, external: latest.current.external });
     setFocusedEntry({ id, selectedId: id });
     if (options.expand && latest.current.graph?.filtering) filterFolds.setFold('items', id, false);
     change({ selected: id, expansion: options.expand ? [{ kind: 'expand', id }] : [] });
-    setScrollTarget({ id, center: false });
+    if (!options.center) setScrollTarget({ id, center: false });
     const call = ++request.current, external = latest.current.external;
     void latest.current.routes.revealItem({ ...latest.current.view.session, item_id: id }).then(result => {
       if (!mounted.current || call !== request.current || external !== latest.current.external || !result) return;
       ownReveal.current = result;
+      // An undrawn target and its temporary route must arrive in the same commit.
+      if (options.center) setScrollTarget({ id, center: true, focus: true });
       setLocalReveal({ result, external }); latest.current.onReveal(result, options.openDetail);
     }).catch((failure: unknown) => { if (mounted.current && call === request.current && external === latest.current.external) setError(plainFailure(failure, 'This item could not be opened.')); });
   }, [change, filterFolds.setFold]);
@@ -346,29 +339,40 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   const revealSelected = () => {
     const id = latest.current.selectedId;
     if (!id || !session) return;
-    setHiddenGroups(groups => groups ? { ...groups, open: new Set([...groups.open, ...hiddenGroupsFor(session, new Set(shown.hidden_item_ids ?? []), id)]) } : groups);
-    setScrollTarget({ id, center: true, focus: true });
+    if (!latest.current.graph?.nodes.has(id)) select(id, { openDetail: false, center: true });
+    else setScrollTarget({ id, center: true, focus: true });
   };
-  // Centre once per store on opening; later plain selection changes leave the Map where the owner put it.
+  // Consume every cause against this commit's DOM, even when its target is absent.
+  // A later filter, snapshot or layout change must never revive a scroll request.
   const opened = useRef<SessionStore | null>(null);
+  const previousReveal = useRef<RevealedItem | null | undefined>(undefined);
   useLayoutEffect(() => {
-    if (!graph || opened.current === store) return;
-    opened.current = store;
-    const id = latest.current.selectedId, element = id ? scroller.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(id)}"]`) : null;
-    if (scroller.current && element) { scrollToNode(scroller.current, element, true); element.focus({ preventScroll: true }); }
-    else scroller.current?.focus({ preventScroll: true });
-  }, [graph, store]);
-  useLayoutEffect(() => {
-    if (!scrollTarget) return;
-    const element = scroller.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(scrollTarget.id)}"], [data-stub="${CSS.escape(scrollTarget.id)}"]`);
-    if (!scroller.current || !element) return;
-    setScrollTarget(null);
-    scrollToNode(scroller.current, element, scrollTarget.center);
-    if (scrollTarget.focus || scroller.current.contains(document.activeElement)) element.focus({ preventScroll: true });
-  }, [scrollTarget, graph]);
+    let target = scrollTarget;
+    if (scrollTarget) setScrollTarget(null);
+    if (previousReveal.current !== reveal) {
+      previousReveal.current = reveal;
+      setLocalReveal(null); setLocalSelection(null);
+      const echo = reveal !== null && reveal === ownReveal.current;
+      ownReveal.current = null;
+      if (!echo && reveal?.store === store && reveal.kind === 'item') target = { id: reveal.route.item_id, center: true, focus: true };
+    }
+    const initial = !!graph && opened.current !== store;
+    if (initial) {
+      opened.current = store;
+      if (!target && selectedId) target = { id: selectedId, center: true, focus: true };
+    }
+    const box = scroller.current;
+    const element = target ? box?.querySelector<HTMLElement>(`[data-row="${CSS.escape(target.id)}"], [data-stub="${CSS.escape(target.id)}"]`) : null;
+    if (box && element && target) {
+      scrollToNode(box, element, target.center);
+      if (target.focus || box.contains(document.activeElement)) element.focus({ preventScroll: true });
+    } else if (initial) box?.focus({ preventScroll: true });
+  });
 
   const focusId = focusedEntry && focusedEntry.selectedId === selectedId && graph?.order.includes(focusedEntry.id) ? focusedEntry.id
     : selectedId && graph?.nodes.has(selectedId) ? selectedId : graph?.order[0] ?? null;
+  const revealControl = <button type="button" className="btn btn-secondary graph-reveal" disabled={!selectedId || !session?.items[selectedId]} onClick={revealSelected}>
+    <i className="ph ph-crosshair-simple" aria-hidden="true" />Reveal selected</button>;
   // Like the prototype, the graph and its legend show only when a topic has nodes (Ariadne.dc.html:2177).
   return <div className="graph-view">
     <div ref={scroller} className="graph-scroll" tabIndex={-1}
@@ -376,6 +380,9 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
         const element = event.target instanceof Element ? event.target.closest('[data-row], [data-stub]') : null;
         focusedRow.current = element?.getAttribute('data-row') ?? element?.getAttribute('data-stub') ?? null;
         if (focusedRow.current) setFocusedEntry({ id: focusedRow.current, selectedId: latest.current.selectedId });
+      }}
+      onBlur={event => {
+        if (!(event.relatedTarget instanceof globalThis.Node) || !event.currentTarget.contains(event.relatedTarget)) focusedRow.current = null;
       }}
       onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
       // A focused button keeps its own Enter and Space (Ariadne.dc.html:1471).
@@ -389,8 +396,7 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
         <span className="graph-legend-key" aria-label="Closed" title="Closed"><span className="graph-legend-closed" /><span className="graph-legend-label">Closed</span></span>
         <span className="graph-legend-note" title="One graph per topic">One graph per topic</span>
         <div className="graph-legend-actions">
-          <button type="button" className="btn btn-secondary graph-reveal" disabled={!selectedId || !session?.items[selectedId] || !graph?.topics.length} onClick={revealSelected}>
-            <i className="ph ph-crosshair-simple" aria-hidden="true" />Reveal selected</button>
+          {revealControl}
           <GraphFilter />
         </div>
       </div>
@@ -399,8 +405,10 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
           focusId={focusId} onOpen={open} onCollapse={collapse} onToggleStub={toggleStub} />)}
         {!!graph?.crossTopicRelated.length && <CrossTopicLinks edges={graph.crossTopicRelated} />}
       </div></>}
-      {/* With no topic to draw there is no legend, but a filter that emptied the graph must stay reachable. */}
-      {!graph?.topics.length && <GraphFilter wrap />}
+      {/* Filters and the selected item's exit remain reachable when no topic is drawn. */}
+      {!graph?.topics.length && (selectedId && session?.items[selectedId]
+        ? <div className="graph-legend graph-legend-bare"><div className="graph-legend-actions">{revealControl}<GraphFilter /></div></div>
+        : <GraphFilter wrap />)}
     </div>
   </div>;
 }

@@ -170,7 +170,7 @@ export const detailMasked = (spec: FrameSpec): boolean => !!spec.detail;
  * (the handoff's filter row, the part of the Graph newly in view at the foot) are masked. Everything else is
  * compared pixel for pixel at the same place.
  */
-export const graphShift = { reason: 'filter row above the Graph legend removed, filter button moved into the legend row (A16 owner report)', maxShift: 60 } as const;
+export const graphShift = { reason: 'filter row above the Graph legend removed, filter button moved into the legend row (A16 owner report)' } as const;
 
 /** Graph frames: the handoff's view="graph" or the session scenario (Ariadne.dc.html:961). */
 export const graphFrame = (spec: FrameSpec): boolean => spec.view === 'graph' || spec.scenario === 'session';

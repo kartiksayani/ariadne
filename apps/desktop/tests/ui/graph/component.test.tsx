@@ -35,10 +35,10 @@ async function setup(session: Session = graphSession(), view = preferences()) {
   const store = sessions.open(route); await store.refresh();
   const routes = new RegisteredRoutes(service, sessions), saved: SessionPreferences[] = [], reveals: [string, boolean][] = [];
   let write: (next: SessionPreferences) => Promise<boolean> = async () => true;
-  function Composition({ reveal = null, tight = false, search, hidden, selection, onCommit }: { reveal?: RevealedItem | null; tight?: boolean; search?: string; hidden?: string[]; selection?: string; onCommit?: () => void }) {
+  function Composition({ reveal = null, tight = false, search, hidden, selection, filters, expanded, onCommit }: { reveal?: RevealedItem | null; tight?: boolean; search?: string; hidden?: string[]; selection?: string; filters?: Partial<SessionPreferences['filters']>; expanded?: string[]; onCommit?: () => void }) {
     const [current, setCurrent] = useState(view);
     useLayoutEffect(() => { onCommit?.(); });
-    return <GraphView store={store} routes={routes} view={immutable({ ...current, ...(hidden ? { hidden_item_ids: hidden } : {}), ...(selection ? { selected_item_id: selection } : {}) })} later={new Set()} search={search} reveal={reveal} tight={tight} sessionLabel="codex · yesterday"
+    return <GraphView store={store} routes={routes} view={immutable({ ...current, ...(hidden ? { hidden_item_ids: hidden } : {}), ...(selection ? { selected_item_id: selection } : {}), ...(filters ? { filters: { ...current.filters, ...filters } } : {}), ...(expanded ? { expanded_item_ids: expanded } : {}) })} later={new Set()} search={search} reveal={reveal} tight={tight} sessionLabel="codex · yesterday"
       continuedFrom={topic => topic.name === 'Continued context' ? 'Continued from claude-code · yesterday' : null}
       saveView={async next => { saved.push(structuredClone(next)); const ok = await write(next); if (ok) setCurrent(next); return ok; }}
       onReveal={(result, openDetail) => { if (result.kind === 'item') reveals.push([result.route.item_id, openDetail]); }} />;
@@ -51,6 +51,102 @@ const ids = () => [...document.querySelectorAll<HTMLElement>('.graph-node')].map
 const selected = () => document.querySelector<HTMLElement>('.graph-node[aria-selected="true"]')?.dataset.itemId;
 
 describe('session graph view', () => {
+  const scrollStarts = ['visible selection', 'hidden selection', 'search-excluded selection', 'status-excluded selection', 'collapsed-parent selection', 'unsuccessful Reveal selected'] as const;
+  const passiveEvents = ['search edit', 'status change', 'stub fold', 'stub unfold', 'parent fold', 'parent unfold', 'live addition', 'live removal', 'plain selection', 'tight change'] as const;
+  it.each(scrollStarts.flatMap(start => passiveEvents.map(event => ({ start, event }))))('keeps Graph scroll and focus unchanged after $event from $start', async ({ start, event }) => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.graph-scroll')) return new DOMRect(0, 0, 400, 300);
+      const box = this.closest<HTMLElement>('.graph-scroll');
+      return new DOMRect(900 - (box?.scrollLeft ?? 0), 800 - (box?.scrollTop ?? 0), 190, 66);
+    });
+    const session = graphSession();
+    session.items['9'] = { ...session.items['8']!, id: '9', ordinal: 9, question: 'Unrelatedneedle branch' };
+    session.items['9.1'] = { ...session.items['8']!, id: '9.1', parent: '9', ordinal: 1, question: 'Unrelatedneedle hidden child' };
+    const target = '1.1.1', searchExcluded = start === 'search-excluded selection' || start === 'unsuccessful Reveal selected';
+    const value = await setup(session, preferences({ selected_item_id: target,
+      hidden_item_ids: ['9.1', ...(start === 'hidden selection' ? ['1.1'] : [])] }));
+    let props = { search: searchExcluded ? 'unrelatedneedle' : '', filters: { statuses: start === 'status-excluded selection' ? ['open'] : [] } as Partial<SessionPreferences['filters']>,
+      expanded: [...(start === 'collapsed-parent selection' ? [] : ['1', '1.1']), ...(event === 'parent unfold' ? [] : ['9'])], selection: target, tight: false };
+    const composition = () => <><input aria-label="Outside editor" /><value.Composition {...props} /></>;
+    const { rerender } = render(composition());
+    expect(node(target) !== null).toBe(start === 'visible selection' || start === 'hidden selection');
+    const unrelatedStub = () => [...document.querySelectorAll<HTMLElement>('.graph-stub')].find(element => element.dataset.stub?.endsWith(':9'))!;
+    if (event === 'stub fold') fireEvent.click(unrelatedStub());
+    if (start === 'unsuccessful Reveal selected') {
+      value.failReveal();
+      fireEvent.click(screen.getByRole('button', { name: 'Reveal selected' }));
+    }
+    await act(async () => {});
+    const box = document.querySelector<HTMLElement>('.graph-scroll')!, editor = screen.getByRole('textbox', { name: 'Outside editor' });
+    box.scrollTop = 47; box.scrollLeft = 83;
+    act(() => editor.focus());
+    const before = { top: box.scrollTop, left: box.scrollLeft, focused: document.activeElement };
+    if (event === 'search edit') props = { ...props, search: searchExcluded ? '' : 'unrelatedneedle' };
+    else if (event === 'status change') props = { ...props, filters: { statuses: start === 'status-excluded selection' ? [] : ['open'] } };
+    else if (event === 'stub fold' || event === 'stub unfold') fireEvent.click(unrelatedStub());
+    else if (event === 'parent fold' || event === 'parent unfold') props = { ...props, expanded: event === 'parent fold' ? props.expanded.filter(id => id !== '9') : [...props.expanded, '9'] };
+    else if (event === 'live addition' || event === 'live removal') {
+      if (event === 'live addition') session.items['10'] = { ...session.items['8']!, id: '10', ordinal: 10 };
+      else delete session.items['8'];
+      session.revision++;
+      await act(async () => { await value.store.refresh(true); });
+    } else if (event === 'plain selection') props = { ...props, selection: '8' };
+    else props = { ...props, tight: true };
+    rerender(composition());
+    await act(async () => {});
+    expect({ top: box.scrollTop, left: box.scrollLeft, focused: document.activeElement }).toEqual(before);
+  });
+
+  it.each(['button', 'page body'] as const)('leaves focus outside the Graph on the %s when a previously focused entry disappears', async destination => {
+    const value = await setup();
+    render(<><button type="button">Elsewhere</button><value.Composition /></>);
+    act(() => node('1.2').focus());
+    const outside = screen.getByRole('button', { name: 'Elsewhere' });
+    act(() => { outside.focus(); if (destination === 'page body') outside.blur(); });
+    const focused = document.activeElement;
+    value.session.items['1.2']!.removed_at = value.session.updated_at; value.session.revision++;
+    await act(async () => { await value.store.refresh(true); });
+    expect(document.activeElement).toBe(focused);
+  });
+
+  it.each(['outside reveal', 'Reveal selected', 'owner key', 'owner click'] as const)('drops an undrawn %s scroll target before a later commit can draw it', async cause => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.graph-scroll')) return new DOMRect(0, 0, 400, 300);
+      const box = this.closest<HTMLElement>('.graph-scroll');
+      return new DOMRect(900 - (box?.scrollLeft ?? 0), 800 - (box?.scrollTop ?? 0), 190, 66);
+    });
+    const value = await setup(undefined, preferences({ selected_item_id: '1.1.1', expanded_item_ids: [] }));
+    const reveal = await value.routes.revealItem({ ...value.route, item_id: '1.1.1' });
+    // An outside route may precede its live snapshot. Neither that arrival nor
+    // a later expansion may revive this commit's unsuccessful scroll request.
+    const undrawn = reveal?.kind === 'item' ? { ...reveal, route: { ...reveal.route, item_id: 'late' }, temporaryExpandedItemIds: [] } : null;
+    const { rerender } = render(<><input aria-label="Outside editor" /><value.Composition /></>);
+    if (cause === 'outside reveal') rerender(<><input aria-label="Outside editor" /><value.Composition reveal={undrawn} /></>);
+    else if (cause === 'Reveal selected') {
+      value.failReveal(); fireEvent.click(screen.getByRole('button', { name: 'Reveal selected' }));
+    } else {
+      vi.spyOn(value.routes, 'revealItem').mockResolvedValueOnce(null);
+      act(() => {
+        node('1').focus();
+        if (cause === 'owner key') fireEvent.keyDown(node('1'), { key: 'ArrowDown' });
+        else fireEvent.click(node('2'));
+        // The optimistic target is excluded in the very commit it requested.
+        rerender(<><input aria-label="Outside editor" /><value.Composition search="rootmissingneedle" /></>);
+      });
+      expect(node('2')).toBeNull();
+    }
+    await act(async () => {});
+    const box = document.querySelector<HTMLElement>('.graph-scroll')!, editor = screen.getByRole('textbox', { name: 'Outside editor' });
+    box.scrollTop = 47; box.scrollLeft = 83; act(() => editor.focus());
+    if (cause === 'outside reveal') {
+      value.session.items['late'] = { ...value.session.items['8']!, id: 'late', ordinal: 9 }; value.session.revision++;
+      await act(async () => { await value.store.refresh(true); });
+      expect(node('late')).not.toBeNull();
+    } else rerender(<><input aria-label="Outside editor" /><value.Composition expanded={['1', '1.1']} /></>);
+    await act(async () => {});
+    expect({ top: box.scrollTop, left: box.scrollLeft, focused: document.activeElement }).toEqual({ top: 47, left: 83, focused: editor });
+  });
+
   it('filters with the live header search and clears scoped folds when that search changes', async () => {
     const value = await setup(undefined, preferences({ expanded_item_ids: [], selected_item_id: '1' }));
     const { rerender } = render(<value.Composition search="morning or evening" />);
@@ -355,7 +451,7 @@ describe('session graph view', () => {
     expect(node('2')).toBeNull();
     expect(document.activeElement).not.toBe(document.body);
     expect(stub()!.getAttribute('aria-expanded')).toBe('false');
-    fireEvent.click(screen.getByRole('button', { name: /Reveal selected/ }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Reveal selected/ })); });
     expect(selected()).toBe('2');
     expect(node('2').className).toContain('is-hidden');
   });
@@ -443,7 +539,7 @@ describe('session graph view', () => {
     const reveal = screen.getByRole('button', { name: /Reveal selected/ }) as HTMLButtonElement;
     expect(reveal.disabled).toBe(false);
     const box = document.querySelector<HTMLElement>('.graph-scroll')!; box.scrollTop = 0;
-    fireEvent.click(reveal);
+    await act(async () => { fireEvent.click(reveal); });
     expect(selected()).toBe('1.1.1'); expect(box.scrollTop).toBe(383);
     expect(document.activeElement).toBe(node('1.1.1'));
   });
@@ -474,14 +570,17 @@ describe('session graph view', () => {
     const next = await value.routes.revealItem({ ...value.route, item_id: '1.1.1' });
     expect(next).not.toBe(first);
     const box = document.querySelector<HTMLElement>('.graph-scroll')!; box.scrollTop = 0;
-    rerender(<value.Composition reveal={next} />); expect(selected()).toBe('1.1.1'); expect(box.scrollTop).toBe(383);
+    const commits: { top: number; focused: Element | null }[] = [];
+    rerender(<value.Composition reveal={next} onCommit={() => { commits.push({ top: box.scrollTop, focused: document.activeElement }); }} />);
+    expect(commits[0]).toEqual({ top: 383, focused: node('1.1.1') });
+    expect(selected()).toBe('1.1.1'); expect(box.scrollTop).toBe(383);
   });
 
   it('keeps owner stub folds local through reveal, live refresh and remount', async () => {
     const value = await setup(undefined, preferences({ selected_item_id: '1.1.1', hidden_item_ids: ['1'] }));
     const { rerender } = render(<value.Composition key="first" />);
     fireEvent.click(stub()!); expect(node('1.1.1')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /Reveal selected/ })); expect(selected()).toBe('1.1.1');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Reveal selected/ })); }); expect(selected()).toBe('1.1.1');
     fireEvent.click(stub()!); expect(node('1.1.1')).toBeNull();
     value.session.revision++;
     await act(async () => { await value.store.refresh(true); });
