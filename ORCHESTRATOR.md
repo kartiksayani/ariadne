@@ -116,6 +116,19 @@ assertion fails again, remove that assertion rather than changing product code.
   occurrence of the same flake is fixed, in the test or in the race, before the next
   merge. Native journeys never race agent-side changes: they wait for the canonical
   state the next step depends on. Owner decision 2026-10-14.
+- **UI side effects get one invariant.** Scroll, focus and anything else that moves
+  the view state get one invariant over every trigger: which owner actions may cause
+  it, and that a request never outlives its commit. Test it as a table (starting
+  states × non-owner events) before fixing. Recorded 2026-10-15: three review rounds
+  on #162 each found a scroll or fold regression introduced by the previous fix.
+  Owner decision 2026-10-15 (generalize harness learnings).
+- **Visual and layout work goes to a browser-capable worker** that runs the design
+  suite and reads the screenshots. The implementer's sandbox cannot launch a browser,
+  so it writes layout blind. Recorded 2026-10-15: #160 took 5 rounds. Owner decision
+  2026-10-15 (generalize harness learnings).
+- **Native end-to-end steps assert parity with the app's own state,** never guessed
+  text. Recorded 2026-10-15: #160's native steps failed 3 times on guessed text.
+  Owner decision 2026-10-15 (generalize harness learnings).
 - **Validation and completion:** Application changes retain full required
   application CI; documentation-only changes retain appropriate lightweight
   checks. Use native acceptance for user-visible integration and deterministic
