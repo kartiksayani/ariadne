@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { createDesktopService } from '../../../src/data/service';
+import { createDesktopService, ServiceFailure } from '../../../src/data/service';
 import type { DesktopTransport } from '../../../src/data/service';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { AppTransport } from '../app/transport';
@@ -72,11 +72,29 @@ it('confirms recovery at capacity by evicting the oldest ID and preserves that o
   expect(reopened.getSnapshot().preferences?.resolved_unsent_input_ids).toEqual(expected);
 });
 
+it('throws the recovery retry’s own failure after rebasing a revision conflict', async () => {
+  const transport = new AppTransport(), store = navigation(transport);
+  await store.start();
+  const invoke = transport.invoke.bind(transport);
+  let attempts = 0;
+  vi.spyOn(transport, 'invoke').mockImplementation((async (name, args) => {
+    if (name === 'preferences_patch') {
+      const code = ++attempts === 1 ? 'revision_conflict' : 'permission_denied';
+      if (attempts === 1) ++transport.preferences.revision;
+      return { api_version: 1, ok: false, error: { code, message: 'Marker save failed.', hint: 'Retry.', retryable: false, field_errors: [] } };
+    }
+    return invoke(name, args);
+  }) as DesktopTransport['invoke']);
+  await expect(store.resolveUnsentInput(first)).rejects.toMatchObject({ error: { code: 'permission_denied' } });
+  expect(attempts).toBe(2);
+  expect(store.getSnapshot().preferences?.resolved_unsent_input_ids).toBeUndefined();
+});
+
 it('keeps unconfirmed recovery completion pending and retries the same operation', async () => {
   const transport = new AppTransport(), store = navigation(transport);
   await store.start();
   transport.failNext = 'preferences_patch';
-  expect(await store.resolveUnsentInput(first)).toBe(false);
+  await expect(store.resolveUnsentInput(first)).rejects.toBeInstanceOf(ServiceFailure);
   expect(store.getSnapshot().preferences?.resolved_unsent_input_ids).toBeUndefined();
   expect(await store.resolveUnsentInput(second)).toBe(false);
   const request = transport.mutations.at(-1);
