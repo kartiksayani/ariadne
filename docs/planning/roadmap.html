@@ -110,10 +110,11 @@
   <script id="roadmap-data" type="application/json">{
   "schema_version": 1,
   "status": {
-    "updated_at": "2026-10-14T00:00:00Z",
-    "headline": "Alpha.15 released (v0.1.0-alpha.15, #156–#159); alpha.16 in progress, with the item conversation view in review as #160.",
+    "updated_at": "2026-10-15T00:00:00Z",
+    "headline": "Alpha.17 released (v0.1.0-alpha.17, #162): Map fixes on top of alpha.16 (#160, the item conversation view) and alpha.15 (#156–#159).",
     "notes": [
-      "Next: finish review of #160, then the recovery edge cases from a failure table and the previous-release read test.",
+      "Next: the UI is being redesigned. Mockups are made in Claude Design, the owner approves them, and only then does it get built. The Map and window layout are chosen; the remaining rounds are answering plus conversation, what changed plus peek, and dialogs, notices and pages.",
+      "Queued behind the redesign: the #162 follow-ups (P11.10–P11.14), the recovery edge cases from a failure table and the previous-release read test.",
       "Owner decision: no session-wide Conversation view and no host transcript reading. Chat with the agent stays in the terminal.",
       "Before merging a PR whose base is behind main, merge main into it and let push-triggered quality run on that head; the tree-equality check assumes this.",
       "Run cargo test --workspace before pushing integration-resource changes; installed-plugin fixtures live in several crates.",
@@ -2833,13 +2834,15 @@
         "Owner M3 sign-off before implementation; UI tests, design frames and local native journey."
       ],
       "estimate_days": 1,
-      "active": true,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/160"
+      },
       "progress": {
-        "state": "in_progress",
+        "state": "done",
         "prs": [
           160
         ],
-        "note": "Owner signed off mock M3. PR #160 on feat/a15-conversation, in review fix round 3."
+        "note": "Merged in #160 after the owner signed off mock M3. Released in v0.1.0-alpha.16."
       }
     },
     {
@@ -3045,6 +3048,161 @@
       ],
       "checks": [
         "The check runs in CI against the previous release and fails when it cannot read a file the new build wrote; independent review."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.9",
+      "title": "Map fixes: brief, chevron, filter, thread, Graph hidden items, Unfocus, caught-up check",
+      "phase": "M11",
+      "depends_on": [
+        "P11.2"
+      ],
+      "paths": [
+        "apps/desktop/src/ui/*",
+        "apps/desktop/tests/ui/*",
+        "tests/ui/design/*",
+        "docs/delivery/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "The topic brief wraps as one line of names, the collapse chevron is visible, and the filter sits in the Recent row and in the Graph legend.",
+        "The thread rail runs unbroken through topic cards.",
+        "The Graph folds hidden items into an \"N hidden\" stub with the Tree's hidden semantics, and draws a selected hidden item.",
+        "Unfocus sits on the focused item, with a sticky exit whenever that button is not visible; the \"Focused:\" banner is gone.",
+        "A caught-up check in the brief header replaces the \"All caught up\" box.",
+        "The Graph scrolls only on first open per store, outside reveals, Reveal selected and the owner's own click or key, tested over 60 rows (6 starting states × 10 non-owner events)."
+      ],
+      "checks": [
+        "npm run check; UI tests, design frames and the local native journey; independent review rounds at the exact head."
+      ],
+      "estimate_days": 1,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/162"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          162
+        ],
+        "note": "Merged in #162. Released in v0.1.0-alpha.17."
+      }
+    },
+    {
+      "id": "P11.10",
+      "title": "Graph selection reply race",
+      "phase": "M11",
+      "depends_on": [
+        "P11.9"
+      ],
+      "paths": [
+        "apps/desktop/src/ui/graph/GraphView.tsx",
+        "apps/desktop/src/App.tsx",
+        "apps/desktop/tests/ui/graph/*",
+        "apps/desktop/tests/ui/App.test.tsx"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "A Graph click's revealItem reply is no longer dropped when a reveal is dismissed while the click is in flight. Today the external guard in GraphView.tsx compares App's treeReveal, which changes on a dismissal.",
+        "The guard uses a counter that changes only on a non-own, non-null outside reveal."
+      ],
+      "checks": [
+        "npm run check; a test that dismisses a reveal while a Graph click is in flight and still sees the reply applied; affected Graph and App tests."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.11",
+      "title": "Stale \"outside your filters\" banner after a Graph fold or stub toggle",
+      "phase": "M11",
+      "depends_on": [
+        "P11.9"
+      ],
+      "paths": [
+        "apps/desktop/src/ui/graph/GraphView.tsx",
+        "apps/desktop/src/App.tsx",
+        "apps/desktop/tests/ui/graph/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "The \"outside your filters\" banner is dismissed when the owner folds or unfolds in the Graph or toggles an \"N hidden\" stub, as the Tree does through onDismissReveal."
+      ],
+      "checks": [
+        "npm run check; Graph tests for the fold and stub toggle with the banner showing."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.12",
+      "title": "Reveal selected detail parity between Graph and Tree",
+      "phase": "M11",
+      "depends_on": [
+        "P11.9"
+      ],
+      "paths": [
+        "apps/desktop/src/ui/graph/GraphView.tsx",
+        "apps/desktop/src/ui/tree/TreeView.tsx",
+        "apps/desktop/tests/ui/graph/*",
+        "apps/desktop/tests/ui/tree/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Reveal selected leaves the detail view closed in the Graph and opens it in the Tree. The owner decides which behaviour both views share, then both are aligned and tested."
+      ],
+      "checks": [
+        "Owner decision recorded; tests in both views assert the same detail state after Reveal selected."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.13",
+      "title": "Missing composed Graph tests",
+      "phase": "M11",
+      "depends_on": [
+        "P11.9"
+      ],
+      "paths": [
+        "apps/desktop/tests/ui/App.test.tsx",
+        "apps/desktop/tests/ui/graph/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "A composed test through App shows that a plain Graph click keeps scroll position and focus.",
+        "The selection is asserted after Resume."
+      ],
+      "checks": [
+        "npm run check; the new tests fail when the scroll or focus guard is removed."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.14",
+      "title": "Flake watch: register.test.js after a refused owner command",
+      "phase": "M11",
+      "depends_on": [],
+      "paths": [
+        "tests/integrations/claude/register.test.js",
+        "docs/delivery/HANDOFF.md"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md",
+        "ORCHESTRATOR.md"
+      ],
+      "acceptance": [
+        "The test \"admits claims again after an owner command is refused\" failed once in a local coverage run (first occurrence). A second occurrence is fixed, in the test or in the race, before the next merge."
+      ],
+      "checks": [
+        "Watch only until a second failure; then follow the Flakes rule in ORCHESTRATOR."
       ],
       "estimate_days": 1
     }

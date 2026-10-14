@@ -1,4 +1,4 @@
-# Ariadne handoff — 2026-10-14
+# Ariadne handoff — 2026-10-15
 
 Claude Code on **Opus 5.5** maintains delivery. At most **3 Codex companion jobs**
 (**gpt-6.1-sol, high effort**) implement bounded work in isolated worktrees with
@@ -16,11 +16,39 @@ push, stages and commits, and plans time for it. Before UI implementation, share
 clickable HTML mock under `designs/mocks/`; the owner signs off and implementation
 follows it.
 
-**Main: `10b6013a` (#159). Alpha.15 released as
-[`v0.1.0-alpha.15`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.15)**
-(tag at `10b6013a`). Alpha.14 is `v0.1.0-alpha.14` (tag at `1135693c`, #155): a Map you
-can follow, from #150 (`395736a2`), #151 (`bc7fa712`), #152 (`63295ec5`), #153
-(`2bd09408`), #154 (`8a58f93c`) and #155 (`1135693c`).
+**Main: `925c9645` (#162). Alpha.17 released as
+[`v0.1.0-alpha.17`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.17)**
+(tag at `925c9645`). Alpha.16 is `v0.1.0-alpha.16` (tag at `44158cbf`, #160), alpha.15 is
+`v0.1.0-alpha.15` (tag at `10b6013a`, #159) and alpha.14 is `v0.1.0-alpha.14` (tag at
+`1135693c`, #155): a Map you can follow, from #150 (`395736a2`), #151 (`bc7fa712`), #152
+(`63295ec5`), #153 (`2bd09408`), #154 (`8a58f93c`) and #155 (`1135693c`).
+
+## Alpha.17 released
+
+[#162](https://github.com/kartiksayani/ariadne/pull/162), `925c9645`: Map fixes from the
+owner's alpha.16 feedback. Task P11.9. What changed for the owner:
+
+- The topic brief wraps as one line of names instead of one per line.
+- The collapse chevron is a visible chip with a larger caret.
+- The filter button sits in the Recent row, and in the Graph legend row beside "Reveal selected". When a filter leaves no topics to draw, the Graph keeps a bare row so the filter can still be cleared.
+- The thread rail runs unbroken through topic cards.
+- The Graph folds hidden items into an "N hidden" stub, with the Tree's hidden semantics: stubs on the selected item's route open once per selection change, the owner can fold them, folds survive re-renders and live updates, and a selected hidden item is drawn. Stubs join the keyboard roving tab stop.
+- Unfocus sits on the focused item's own button and the "Focused:" banner is gone. A sticky Unfocus shows whenever that button is not mounted or not visible (filtered out, topic folded, scrolled under the band). Hiding the focused item ends Focus.
+- With nothing to catch up on, a check in the brief header replaces the "All caught up" box.
+- The Graph scrolls only on owner actions. One invariant, tested as a 60-row table (6 starting states × 10 non-owner events): the Graph scrolls on first open per store, outside reveals, Reveal selected, and the owner's own click or key. A scroll request is used in its own commit or dropped, so a stale one never fires later on a filter edit, unfold or live update. A plain selection change keeps the scroll position.
+- Reveal selected brings an undrawn selection in through the registered temporary route, as the Tree does. When a focused node or stub disappears, focus moves to the nearest survivor, never the page body.
+
+Three review rounds each found a scroll or fold regression introduced by the previous
+fix. That is the origin of the "UI side effects get one invariant" rule in
+ORCHESTRATOR. The follow-ups it left are tasks P11.10–P11.14 (see Next steps).
+
+## Alpha.16 released
+
+[#160](https://github.com/kartiksayani/ariadne/pull/160), `44158cbf`, "Item conversation
+view" (task P11.2). The owner signed off mock M3. It is a larger view of one item's
+conversation, with Waiting beside it. There is no session-wide Conversation view and no
+reading of host transcripts. Chat with the agent stays in the terminal. #161 (`d937eb1c`)
+added the harness rules and the alpha.15 records.
 
 ## Alpha.15 released
 
@@ -29,16 +57,26 @@ can follow, from #150 (`395736a2`), #151 (`bc7fa712`), #152 (`63295ec5`), #153
 - [#158](https://github.com/kartiksayani/ariadne/pull/158), `914b4374`: the Messages pane is removed and the Map holds the reading row through resizes. Unsent-message notices live in a separate recovery file, so alpha.14 can still read preferences.
 - [#159](https://github.com/kartiksayani/ariadne/pull/159), `10b6013a`: the recovery file survives disk errors, reads never fail because of it, and notices can always be dismissed.
 
-## Alpha.16 in progress
+## Next
 
-[#160](https://github.com/kartiksayani/ariadne/pull/160), "Item conversation view"
-(`feat/a15-conversation`), is in review fix round 3. The owner signed off mock M3.
-It is a larger view of one item's conversation. There is no session-wide Conversation
-view and no reading of host transcripts. Chat with the agent stays in the terminal.
+**The UI is being redesigned.** Mockups are made in Claude Design, the owner approves
+them, and only then does a redesign get built. The Map and window layout are chosen.
+The remaining rounds are:
+
+1. Answering plus conversation.
+2. What changed plus peek.
+3. Dialogs, notices and pages.
 
 ## Next steps
 
-1. Finish review of #160 and merge it.
+These wait until the redesign rounds above are done, unless the owner asks for one earlier.
+
+1. Follow-ups from #162, each a small task:
+   - P11.10 Graph selection reply race: a Graph click's `revealItem` reply is dropped when a reveal is dismissed mid-flight, because the `external` guard in `GraphView.tsx` compares App's `treeReveal`. Fix with a counter that changes only on a non-own, non-null outside reveal.
+   - P11.11 Stale "outside your filters" banner: it stays after a Graph fold or stub toggle; the Tree dismisses it through `onDismissReveal`.
+   - P11.12 Reveal selected detail parity: the Graph keeps detail closed and the Tree opens it. The owner decides, then both align.
+   - P11.13 Missing composed tests: a plain Graph click keeps scroll and focus through App, and the selection is asserted after Resume.
+   - P11.14 Flake watch for `tests/integrations/claude/register.test.js` (see Known flakes).
 2. Recovery edge cases from a failure table. Three rare cases from the #159 review:
    a rollback that could remove the only copy of the recovery file on network
    filesystems, transient read errors that set a good recovery file aside, and a
@@ -69,16 +107,16 @@ Refresh this page, tasks.json and the roadmap chart using
 
 One entry per flake: the test and its first failure, the evidence, and the suspected cause. A second occurrence gets fixed before the next merge (ORCHESTRATOR, Flakes).
 
-- **`apps/desktop/tests/ui/tree/component.test.tsx`, “waits for a stale session before selecting with click”.** Fixed in #162.
-  - First failed: local PR #162 coverage gate, 2026-10-15. Selection completed and was saved, but the final notice assertion expected zero notices and saw one (then line 647); an unchanged full coverage rerun passed. Second occurrence: the owner's full coverage run on the same working tree, also 2026-10-15 (about 60 s for the file with `--maxWorkers=3`).
+- **`apps/desktop/tests/ui/tree/component.test.tsx`, “waits for a stale session before selecting with click”.** Fixed in #162 (released in alpha.17).
+  - First failed: local #162 coverage gate, 2026-10-15. Selection completed and was saved, but the final notice assertion expected zero notices and saw one (then line 647); an unchanged full coverage rerun passed. Second occurrence: the owner's full coverage run on the same working tree, also 2026-10-15 (about 60 s for the file with `--maxWorkers=3`).
   - Cause: the new “keeps a sticky Focus exit when pending removal unmounts the row” test left a `RemovalQueue` operation in its five-second Undo window. Component cleanup and `notices.clear()` did not cancel its timer. The timer later called `RemovalQueue.fire` → `note`, then `execute` → `note`, pushing `remove:<operation-id>` into a later test. Captured text: `Removed “Keep the full reply…” and 1 item below it. demo.local was told and won’t bring them up again.` This is a fixture leak introduced by this PR; production removals correctly survive view unmounts. Geometry mocks, Focus effects and TopicChanges were not the source.
   - Comparison: four whole-file coverage runs on an exact `origin/main` export (`44158cbf`), plus a run with 200 stale-selection cases, passed under three-process load. The main-source controlled selection case also retained zero notices after the five-second deadline. Ordinary loaded runs did not reproduce the failure; controlling the leaked timer reproduced the saved-selection-plus-one-notice state deterministically.
   - Fix: register fixture removal queues during mount, undo every pending operation and await already-sending commands in shared teardown before clearing notices; restore mocks/globals and clear fake timers before returning to real timers. “does not leak a pending removal into a later stale selection” exercises that teardown with fake timers installed before mounting. Removing just the pending-operation cleanup makes it fail with the captured removal notice, while selection `3` is already saved. “waits for a sending removal before teardown clears its notices and timers” gates an in-flight command and fails if teardown omits the wait. No product change, added delay, retry or relaxed assertion.
   - Validation: ten post-fix whole-file coverage runs passed (199 tests each; 1,990 total; zero failures), three concurrent Vitest processes, each using `--coverage --maxWorkers=3` with separate report directories; 48–58 s per run. The regression was also checked with the cleanup removed and failed deterministically. `npm run check` passed. The exact full coverage command with `--maxWorkers=3` completed in 158.22 s: 120 files / 2,538 tests passed; only `tests/ui/reference/assets.test.ts`, “serves each local resource through Vite unchanged”, failed with “Server is not running.” (the permitted localhost-socket sandbox exception). An earlier attempt overlapping all three file processes with the full suite exhausted unrelated test timeouts; those runs were stopped and do not count toward the ten-run proof.
 
 - **`tests/integrations/claude/register.test.js`, "admits claims again after an owner command is refused".** First occurrence; not fixed yet.
-  - First failed: local PR #162 full coverage run, 2026-10-15. Line 780 waited for 2 matching calls and saw 1.
-  - Evidence: the file passed 3 times in a row on its own. PR #162 does not touch the Claude integration.
+  - First failed: local #162 full coverage run, 2026-10-15. Line 780 waited for 2 matching calls and saw 1. Task P11.14.
+  - Evidence: the file passed 3 times in a row on its own. #162 does not touch the Claude integration.
   - Suspected cause: timing under coverage load, where the `vi.waitFor` default timeout is too short after `h.timer().callback()`. Not confirmed.
 
 - **Design harness first load: `tests/ui/design/design.spec.mts` `openApp`'s 60 s `waitForFunction` for the app to render.** Fixed in #160.
@@ -95,10 +133,10 @@ One entry per flake: the test and its first failure, the evidence, and the suspe
   - First failed: #157 CI, 2026-10-13. The rerun passed.
   - A click right after a keyboard Enter selection was never saved.
   - Suspected cause: a click landing while a selection save is in flight.
-- **Native delivery journey, "Detail Reply text and enabled Send were not ready for one click"** (`apps/desktop/tests/e2e/owner-reply.mjs:109`).
+- **Native delivery journey, "Detail Reply text and enabled Send were not ready for one click"** (`apps/desktop/tests/e2e/owner-reply.mjs`).
   - First failed: #159 CI, 2026-10-14. The rerun passed.
   - The fake agent changed the item (revision 3 → 4) while the test typed, so the stale-question guard disabled Send. The app behaved as designed.
-  - The cause is known, and it breaks the rule that native journeys never race agent-side changes, so it is not a flake to wait on. The journey must wait for the agent's change before typing. The fix rides with #160, which already edits that file.
+  - The cause is known, and it broke the rule that native journeys never race agent-side changes, so it was not a flake to wait on. Fixed in #160: the journey freezes the completed publication (`ownerReplyTarget`) and waits for the app to show that target before typing.
 - **`crates/ariadne-core/tests/native_connection.rs` `expired_fresh_work_cannot_persist_after_waiting_for_registry_lock`.**
   - A local hang under heavy load, not a required check, so it is outside the Flakes rule.
   - First failed: a local run on 2026-10-14, where it hung for 45 minutes under heavy load.
