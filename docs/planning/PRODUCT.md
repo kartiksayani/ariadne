@@ -34,10 +34,14 @@ Owner clarifications determine delivery, structured results and complete history
 
 Projects and All sessions; closable session tabs; persistent Waiting/Sent panel;
 Tree/Graph/Archive views; topic and status filters; sentence-based rows; question,
-outcome and why; complete item conversation and rounds/forks; optional-width
-message rail toggle; theme; keyboard navigation; search; tray count/quick list;
+outcome and why; complete item conversation and rounds/forks in item detail;
+theme; keyboard navigation; search; tray count/quick list;
 native item notifications; pin-window; terminal open/focus; setup/uninstall/demo.
 Every mockup frame is mapped in [DESIGN_TRACEABILITY](DESIGN_TRACEABILITY.md).
+
+The agent's general chat stays in the terminal. Topic messages that touch no item
+and lifecycle activity remain stored without a separate conversation view.
+Persistent unsent-message notices and recovery actions remain reachable.
 
 Owner controls Bring it up / Reply / Add note / Follow up / Back to Open / Drop
 queue explicit intents. Only the agent changes item status. Later/Unpark is a

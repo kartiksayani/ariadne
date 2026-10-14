@@ -236,7 +236,7 @@ const archivedAt = (words: string | undefined, fallback: string) => {
 };
 
 /** Builds the frame's application state; throws "fixture not written" for frames without one. */
-export function designFixture(frame: string, data: PrototypeData, presentation: Partial<Pick<FrameSpec, 'theme' | 'rail'>> = {}): DesignFixture {
+export function designFixture(frame: string, data: PrototypeData, presentation: Partial<Pick<FrameSpec, 'theme'>> = {}): DesignFixture {
   const spec = { ...frameSpec(frame), ...presentation }, world = scenarioWorld(spec, data);
   const projectIds = new Map(world.projects.map((project, index) => [project.id, uuid('a', index + 1)]));
   const refs = new Map(world.sessions.map((session, index) => [session.id, { project_id: projectIds.get(session.project)!, session_id: uuid('b', index + 1) }]));
@@ -394,7 +394,7 @@ export function designFixture(frame: string, data: PrototypeData, presentation: 
     return { session: refs.get(id)!, tab_open: true, tab_order: order, selected_item_id: current ? spec.selected ?? null : null, expanded_item_ids: expanded(session),
       // The reveal scenario filters to Waiting (Ariadne.dc.html:938); the harness then reveals the selection through a route.
       filters: { search: '', statuses: current && spec.scenario === 'reveal' ? ['waiting_on_me'] : [], owners: [], topic_id: null, archived: current && spec.scenario === 'archive', hide_later: false },
-      rail: current && spec.rail ? 'activity' : 'hidden', scroll: null,
+      scroll: null,
       ...(current && spec.hiddenItems ? { hidden_item_ids: [...spec.hiddenItems] } : {}) };
   });
   // 1y continues t5 from yesterday's codex session here; 1ad answers 5.3 in that session, whose agent isn't running (Ariadne.dc.html:955-957).

@@ -11,7 +11,6 @@ export interface FrameSpec {
   readonly theme: 'dark' | 'light';
   readonly scenario: Scenario;
   readonly state: 'ready' | 'empty' | 'loading' | 'clear';
-  readonly rail: boolean;
   readonly selected?: string;
   readonly detail?: boolean;
   /** App-only saved detail width, exercised through the resize separator. */
@@ -19,7 +18,6 @@ export interface FrameSpec {
   readonly answering?: string;
   readonly view?: 'graph';
   readonly openMode?: 'reply' | 'followup';
-  readonly hoverMsg?: number;
   /** A harness state of another board frame: the frame whose card is drawn, then put in this state. */
   readonly design?: string;
   /** The tree row the pointer rests on (Item Row.dc.html: hover band, row actions and the id). */
@@ -43,40 +41,40 @@ export interface FrameSpec {
 }
 
 const wide = { width: 1600, height: 960 } as const, narrow = { width: 1280, height: 800 } as const;
-const base = { ...wide, theme: 'dark', scenario: 'default', state: 'ready', rail: false } as const;
+const base = { ...wide, theme: 'dark', scenario: 'default', state: 'ready' } as const;
 // TOPICS t1-t3 (Ariadne.dc.html:530-532), folded by the review scenarios (Ariadne.dc.html:940).
 const reviewFolds = ["Reviewer's comments on the SDK cache PR (#226)", 'Cache entries the SDK can’t read', 'Agent instructions in the repo'] as const;
 const specs: readonly FrameSpec[] = [
-  { ...base, id: '1a', rail: true, hoverMsg: 4 },
-  { ...base, id: '1b', selected: '1.3.1.2', detail: true, rail: true },
+  { ...base, id: '1a' },
+  { ...base, id: '1b', selected: '1.3.1.2', detail: true },
   { ...base, id: '1c', selected: '2.1.1', answering: '2.1.1' },
   { ...base, id: '1d', view: 'graph', selected: '1.3.1.2' },
   { ...base, id: '1e', theme: 'light', selected: '3.1', detail: true },
-  { ...base, id: '1f', theme: 'light', view: 'graph', selected: '1.2.2.1', rail: true },
-  { ...base, ...narrow, id: '1g', state: 'empty', rail: true },
-  { ...base, ...narrow, id: '1h', state: 'loading', rail: true },
+  { ...base, id: '1f', theme: 'light', view: 'graph', selected: '1.2.2.1' },
+  { ...base, ...narrow, id: '1g', state: 'empty' },
+  { ...base, ...narrow, id: '1h', state: 'loading' },
   { ...base, ...narrow, id: '1i', theme: 'light', state: 'clear' },
-  { ...base, id: '1l', scenario: 'sent', selected: '2.1.1', detail: true, rail: true },
+  { ...base, id: '1l', scenario: 'sent', selected: '2.1.1', detail: true },
   { ...base, id: '1m', scenario: 'failed', selected: '3.1', detail: true },
   { ...base, id: '1n', scenario: 'reveal', selected: '1.3.1.2', detail: true },
   { ...base, ...narrow, id: '1o', scenario: 'reconnecting', selected: '3.1', detail: true },
   { ...base, ...narrow, id: '1p', scenario: 'first' },
-  { ...base, id: '1q', selected: '1.4', detail: true, rail: true },
+  { ...base, id: '1q', selected: '1.4', detail: true },
   { ...base, ...narrow, id: '1r', theme: 'light', selected: '1.4', detail: true, openMode: 'reply' },
-  { ...base, id: '1t', scenario: 'review', selected: '4.4', detail: true, rail: true, collapseTopics: reviewFolds },
-  { ...base, id: '1u', scenario: 'thread', selected: '4.1', detail: true, rail: true, collapseTopics: reviewFolds },
+  { ...base, id: '1t', scenario: 'review', selected: '4.4', detail: true, collapseTopics: reviewFolds },
+  { ...base, id: '1u', scenario: 'thread', selected: '4.1', detail: true, collapseTopics: reviewFolds },
   { ...base, ...narrow, id: '1v', selected: '1.3.1', detail: true, openMode: 'followup' },
-  { ...base, id: '1w', scenario: 'project', selected: '5.3', detail: true, rail: true },
+  { ...base, id: '1w', scenario: 'project', selected: '5.3', detail: true },
   { ...base, id: '1x', scenario: 'archive' },
-  { ...base, id: '1y', scenario: 'continue', rail: true },
+  { ...base, id: '1y', scenario: 'continue' },
   { ...base, id: '1z', scenario: 'sessions' },
   { ...base, id: '1aa', scenario: 'session' },
   { ...base, id: '1ab', scenario: 'projects' },
   { ...base, id: '1ac', scenario: 'projectpage' },
   { ...base, id: '1ad', scenario: 'notrunning', selected: '5.3', detail: true },
   // 1b with the pointer on a row: a plain row gets the hover band; the selected row keeps its own band.
-  { ...base, id: '1b-hover', design: '1b', selected: '1.3.1.2', detail: true, rail: true, hoverItem: '1.3.1' },
-  { ...base, id: '1b-hover-selected', design: '1b', selected: '1.3.1.2', detail: true, rail: true, hoverItem: '1.3.1.2' },
+  { ...base, id: '1b-hover', design: '1b', selected: '1.3.1.2', detail: true, hoverItem: '1.3.1' },
+  { ...base, id: '1b-hover-selected', design: '1b', selected: '1.3.1.2', detail: true, hoverItem: '1.3.1.2' },
   { ...base, width: 1400, height: 830, id: 'answer-two-long', selected: '3.1', detail: true, answerOptions: 2 },
   { ...base, width: 1400, height: 830, id: 'answer-two-expanded', selected: '3.1', detail: true, answerOptions: 2, expandedAnswer: 0 },
   { ...base, width: 1400, height: 830, id: 'answer-nine', selected: '3.1', detail: true, answerOptions: 9 },

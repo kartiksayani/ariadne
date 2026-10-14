@@ -180,7 +180,7 @@ async function result(history, ordinal, body, extra = []) {
 }
 async function renderedBodies(selector) {
   return browser.execute(selector => [...document.querySelectorAll(selector)].map(card => ({
-    id: card.dataset.messageId, body: card.querySelector('.detail-bubble-agent .md, .excerpt-body, .pw-excerpt-text')?.textContent,
+    id: card.dataset.messageId, body: card.querySelector('.detail-bubble-agent .md')?.textContent,
   })), selector);
 }
 // Ask, owner and correlated reply are separate chronological messages. A full
@@ -255,51 +255,36 @@ async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
   return { rounds, conversationMessageIds: visible.map(value => value.id), firstRoundMessageIds: firstRound };
 }
 
-async function railState() {
+async function conversationState() {
   return browser.execute(() => {
-    const rail = document.querySelector('.pw-rail-list'), editor = document.querySelector('[data-owner-input] textarea');
-    return { top: rail.scrollTop, height: rail.scrollHeight, viewport: rail.clientHeight,
+    const pane = document.querySelector('.item-detail .detail-body'), editor = document.querySelector('[data-owner-input] textarea');
+    return { top: pane.scrollTop, height: pane.scrollHeight, viewport: pane.clientHeight,
       focused: document.activeElement === editor, draft: editor?.value };
   });
 }
-export async function unpinHistoryMessage(card, message) {
-  // The rail excerpt is its own pin toggle: a second click unpins it.
-  await card.scrollIntoView(); await card.click();
-  await wait(async () => !(await card.getAttribute('class')).includes('pw-excerpt-active')
-    && await card.getAttribute('aria-pressed') === 'false',
-  `Native unpin did not remove the actual message pin #${message.number}`);
-}
-export async function closeHistoryRailReferences(message) {
-  // Unpin does not clear a separate hover source. This embedded driver cannot
-  // produce hover transitions; deliberate Close proves the rail cleanup instead.
-  const close = await browser.$('button[aria-label="Hide messages"]');
-  await close.waitForEnabled(); await close.click();
-  await wait(async () => browser.execute(id => {
-    const item = document.querySelector('[role="treeitem"][data-item-id="1"]');
-    const message = document.querySelector(`.detail-chat-list [data-message-id="${id}"]`);
-    return !document.querySelector('.pw-rail')
-      && item && !item.hasAttribute('data-highlight')
-      && message && !message.classList.contains('excerpt-highlighted');
-  }, message.id), 'Native rail Close did not clear transient tree and detail references');
-}
-async function rail(history, saved, paged) {
-  const toggle = await browser.$('button[title="Messages (m)"]');
-  if (!(await browser.$('.pw-rail-list').isExisting())) {
-    await failureEvidence('rail-messages-toggle', () => toggle.waitForEnabled()); await toggle.scrollIntoView(); await toggle.click();
+async function proveConversationMessages(saved, itemId) {
+  const item = saved.items[itemId], parent = item.parent ? saved.items[item.parent] : null;
+  const roundMessageIds = new Set(Object.values(saved.rounds).filter(round => round.item_id === itemId)
+    .flatMap(round => [round.opened_message_id, ...round.agent_message_ids, ...round.owner_message_ids]));
+  const expected = saved.messages.filter(message => message.item_id === itemId || message.items_touched.includes(itemId)
+    || message.id === item.created_message_id || message.id === parent?.created_message_id
+    || item.updated_message_ids.includes(message.id) || roundMessageIds.has(message.id));
+  await wait(async () => {
+    const visible = await renderedBodies('.detail-chat-list > li[data-message-id]');
+    return expected.every(message => visible.some(value => value.id === message.id));
+  }, 'Item conversation did not load every canonical message page');
+  const visible = await renderedBodies('.detail-chat-list > li[data-message-id]');
+  assert.equal(new Set(visible.map(value => value.id)).size, visible.length, 'Complete item message pages must not duplicate conversation entries');
+  for (const message of expected) {
+    // Owner choices and replies have their own readable rendering, proved round by round above.
+    if (message.author !== 'owner') assert.equal(folded(visible.find(value => value.id === message.id).body), folded(message.body),
+      `Item conversation lost the complete canonical body #${message.number}`);
   }
-  await wait(async () => (await browser.$$('.pw-rail-list [data-message-id]')).length === saved.messages.length, 'Rail did not load every actual canonical message page');
-  const visible = await renderedBodies('.pw-rail-list [data-message-id]');
-  assert.equal(new Set(visible.map(value => value.id)).size, saved.messages.length);
-  for (const message of saved.messages) assert.equal(visible.find(value => value.id === message.id).body, message.body);
-  const parentMessage = saved.messages.find(message => message.body === paged[0].text);
-  let card = await browser.$(`.pw-rail-list [data-message-id="${parentMessage.id}"]`);
-  await card.scrollIntoView();
-  await card.click();
-  await wait(async () => browser.execute(id => {
-    const tree = document.querySelector('[role="treeitem"][data-item-id="1"]');
-    const detail = document.querySelector(`.detail-chat-list [data-message-id="${id}"]`);
-    return tree?.getAttribute('data-highlight') === 'strong' && detail?.classList.contains('excerpt-highlighted');
-  }, parentMessage.id), 'Native rail pin did not cross-highlight its real tree item and detail message');
+  return expected.map(message => message.id);
+}
+async function conversation(history, saved, paged) {
+  const messageIds = await proveConversationMessages(saved, '1');
+  const parentMessage = saved.messages.find(message => message.body === paged[0].text); assert.ok(parentMessage);
   const childMessage = saved.messages.find(message => message.item_id === '1.1' && message.kind === 'reply'); assert.ok(childMessage);
   const parent = await row('1');
   if (await parent.getAttribute('aria-expanded') !== 'true') {
@@ -309,113 +294,77 @@ async function rail(history, saved, paged) {
   await (await browser.$('[data-shell-search]')).waitForEnabled();
   const child = await row('1.1'); await child.waitForDisplayed(); await child.scrollIntoView(); await child.click();
   await waitForHistoryItem(saved.items['1.1']);
-  await wait(async () => browser.execute(id => document.querySelector(`.pw-rail-list [data-message-id="${id}"]`)?.classList.contains('pw-excerpt-highlight'), childMessage.id), 'Native tree selection did not highlight its canonical rail backlink');
-  assert.ok((await card.getAttribute('class')).includes('pw-excerpt-active'));
+  const childMessageIds = await proveConversationMessages(saved, '1.1');
+  const childReply = await browser.$(`.detail-chat-list [data-message-id="${childMessage.id}"] .detail-bubble-agent .md`);
+  assert.equal(folded(await childReply.getText()), folded(childMessage.body), 'Registered child navigation must reveal its own complete reply');
+  const sibling = await row('1.2'); await sibling.waitForDisplayed(); await sibling.scrollIntoView(); await sibling.click();
+  await waitForHistoryItem(saved.items['1.2']);
+  const siblingMessageIds = await proveConversationMessages(saved, '1.2');
+  assert.equal(await browser.$('.session-activity').isExisting(), false, 'Session history has no disclosure');
+  const conversationMessageIds = new Set([...messageIds, ...childMessageIds, ...siblingMessageIds]);
+  const storedHistoryMessages = saved.messages.filter(message => !conversationMessageIds.has(message.id));
+  const persisted = await snapshot(history);
+  assert.deepEqual(persisted.messages, saved.messages, 'Reading item conversations must preserve every complete stored message');
   await selectParent(saved.items['1']);
-  const conversation = await browser.$('.item-detail [aria-label="Conversation"]'); await conversation.waitForDisplayed(); await conversation.scrollIntoView();
-  await wait(async () => browser.execute(id => document.querySelector(`.detail-chat-list [data-message-id="${id}"]`)?.classList.contains('excerpt-highlighted'), parentMessage.id), 'Pinned canonical detail reference was lost after registered child navigation');
-  const preferences = async () => {
-    const result = await cliRequest(history.cli, ['preferences', 'get', '--json-stdin'], { session: null, request: { command: 'preferences_get', params: {} } });
-    assert.equal(result.code, 0); return result.value.data.data;
-  };
-  await wait(async () => (await preferences()).sessions.find(view => view.session.session_id === history.sessionId)?.selected_item_id === '1', 'Registered parent selection did not finish its deliberate preference write');
-  await wait(async () => (await preferences()).seen?.find(value => value.session.project_id === history.projectId
-    && value.session.session_id === history.sessionId)?.items.some(value => value.item_id === '1' && value.revision >= saved.items['1'].revision),
-  'Opened parent detail did not finish its seen preference write');
-  // Move focus out of the tree before the baseline: Unpin's click would otherwise
-  // finish the previous parent selection's blur-triggered scroll save.
-  const expectedScroll = await browser.execute(() => {
-    const tree = document.querySelector('.tree-scroll'), top = tree.getBoundingClientRect().top;
-    let readingTop = top;
-    for (const header of tree.querySelectorAll('.tree-topic')) {
-      const rect = header.getBoundingClientRect();
-      if (rect.top <= top && rect.bottom > top) readingTop = Math.max(readingTop, rect.bottom);
-    }
-    const first = [...tree.querySelectorAll('.tree-rows [data-item-id]')].find(element => element.getBoundingClientRect().bottom > readingTop);
-    const header = first?.closest('.tree-topic-group')?.querySelector('.tree-topic');
-    return first ? { item_id: first.dataset.itemId, offset: first.getBoundingClientRect().top - top - (header?.getBoundingClientRect().height ?? 0) } : null;
-  });
-  assert.ok(expectedScroll, 'History tree must have a visible reading anchor');
-  await browser.execute(element => element.focus({ preventScroll: true }), card);
-  await wait(async () => {
-    const view = (await preferences()).sessions.find(value => value.session.project_id === history.projectId && value.session.session_id === history.sessionId);
-    return view?.scroll?.item_id === expectedScroll.item_id && view.scroll.offset === expectedScroll.offset
-      && await browser.$('[data-shell-search]').isEnabled();
-  }, 'Parent tree reading anchor did not finish its previous scroll preference write');
-  // Only read observations, their envelope revision and their replay receipt window
-  // may advance independently. Every other persisted preference must stay identical.
-  const nonSeenPreferences = async () => {
-    const record = await readJson(join(process.env.ARIADNE_HOME, 'ui.json'));
-    delete record.operations;
-    delete record.snapshot.seen;
-    delete record.snapshot.revision;
-    return record;
-  };
-  const beforeUnpin = await nonSeenPreferences();
-  await unpinHistoryMessage(card, parentMessage);
-  // Sample through the deferred preference-write window so a late save cannot
-  // slip past one immediate observation. Every sample must match the baseline.
-  const unpinObservedAt = Date.now();
-  let unpinObservationDuration;
-  do {
-    assert.deepEqual(await nonSeenPreferences(), beforeUnpin, 'Unpin must not write saved navigation or selection');
-    unpinObservationDuration = Date.now() - unpinObservedAt;
-    if (unpinObservationDuration < 1000) await new Promise(resolve => setTimeout(resolve, 100));
-  } while (unpinObservationDuration < 1000);
-  await closeHistoryRailReferences(parentMessage);
-  await toggle.waitForEnabled(); await toggle.click();
-  await wait(async () => (await browser.$$('.pw-rail-list [data-message-id]')).length === saved.messages.length, 'Reopened rail did not reload the complete canonical history');
-  // WebdriverIO's scrollIntoView injects a wheel gesture sized for the window, which may not move
-  // this nested rail on a CI runner. Scroll the DOM element directly; the rail's reaction is ours.
+  await proveConversationMessages(saved, '1');
+  // Scroll the actual detail body: the docked editor is outside this reading region.
   const domScroll = (element, block) => browser.execute((node, position) => node.scrollIntoView({ behavior: 'instant', block: position }), element, block);
-  const latest = await browser.$(`.pw-rail-list [data-message-id="${saved.messages.at(-1).id}"]`); await domScroll(latest, 'end');
-  // Wait for the rail to settle, then scroll up; a late refresh that re-pins the rail is retried.
+  await browser.execute(() => {
+    const pane = document.querySelector('.item-detail .detail-body');
+    pane.scrollTop = pane.scrollHeight; pane.dispatchEvent(new window.Event('scroll', { bubbles: true }));
+  });
   let previous = null, beforeUp = null, lastState = null;
-  await failureEvidence('rail-older-navigation', async () => {
+  await failureEvidence('conversation-older-navigation', async () => {
     try {
       await wait(async () => {
-        const state = lastState = await railState();
+        const state = lastState = await conversationState();
         const stable = previous && previous.top === state.top && previous.height === state.height;
         previous = state;
         if (!stable) { beforeUp = null; return false; }
         if (!beforeUp) beforeUp = state;
-        const target = await browser.$(`.pw-rail-list [data-message-id="${parentMessage.id}"]`);
+        const target = await browser.$(`.detail-chat-list [data-message-id="${parentMessage.id}"]`);
         await domScroll(target, 'start');
-        const after = lastState = await railState();
+        const after = lastState = await conversationState();
         if (after.top < beforeUp.top - 100) return true;
         beforeUp = null; previous = null; return false;
-      }, 'Older-message navigation did not actually scroll the nested rail upward');
+      }, 'Older-message navigation did not actually scroll the item conversation upward');
     } catch (error) {
-      error.message += ` railState=${JSON.stringify(lastState)}`; throw error;
+      error.message += ` conversationState=${JSON.stringify(lastState)}`; throw error;
     }
   });
-  // The open item's Reply box is always docked; the Reply button (its key hint "r" is part of the text) focuses it.
   const reply = await browser.$('[aria-label="Item actions"]').$('button*=Reply'); await reply.waitForEnabled(); await reply.scrollIntoView(); await reply.click();
   const editor = await browser.$(`${ownerInput('1')} textarea`); await failureEvidence('owner-input-editor-first', () => editor.waitForEnabled());
   const draft = `Unsent native history draft ${process.env.ARIADNE_E2E_NONCE}\nKeep focus and every word.`;
   await editor.scrollIntoView(); await editor.setValue(draft);
-  const paused = await railState(); assert.equal(paused.focused, true); assert.equal(paused.draft, draft);
+  const paused = await conversationState(); assert.equal(paused.focused, true); assert.equal(paused.draft, draft);
+  assert.ok(paused.height - paused.viewport - paused.top > 80, 'Live history proof must start while reading an older message');
   const before = await snapshot(history), revisions = { '1': before.items['1'].revision };
   const additions = [0, 1].map(index => ({ op: 'reply', ref: `history_live_${index}`, item: { id: '1' }, round_id: null,
-    text: `New complete native rail reply ${index}\nRetain the live body without stealing owner focus.` }));
+    text: `New complete native conversation reply ${index}\nRetain the live body without stealing owner focus.` }));
   await apply(history, additions, revisions);
   const live = await snapshot(history), count = live.messages.length - before.messages.length;
   assert.ok(count >= additions.length, 'Count includes real Activity messages, not only explicit replies');
-  const jump = await browser.$(`button=${count} new message${count === 1 ? '' : 's'} · Jump to latest`); await jump.waitForDisplayed({ timeout: 20000 });
-  const held = await railState(); assert.equal(held.focused, true); assert.equal(held.draft, draft); assert.ok(Math.abs(held.top - paused.top) <= 1);
+  await proveConversationMessages(live, '1');
+  const held = await conversationState(); assert.equal(held.focused, true); assert.equal(held.draft, draft); assert.ok(Math.abs(held.top - paused.top) <= 1);
   assert.equal(inputs(live).length, 7, 'Live history publication cannot manufacture an owner submission');
-  await jump.click();
-  await wait(async () => { const state = await railState(); return state.height - state.viewport - state.top <= 2; }, 'Deliberate Jump to latest did not resume the actual nested rail');
-  await editor.scrollIntoView(); await editor.click();
-  const following = await railState(); assert.equal(following.focused, true); assert.equal(following.draft, draft);
+  // A deliberate scroll to the transcript end resumes following arrivals without moving editor focus.
+  await browser.execute(() => {
+    const pane = document.querySelector('.item-detail .detail-body');
+    pane.scrollTop = pane.scrollHeight; pane.dispatchEvent(new window.Event('scroll', { bubbles: true }));
+  });
+  await wait(async () => { const state = await conversationState(); return state.height - state.viewport - state.top <= 2; },
+    'Deliberate scrolling to latest did not reach the item conversation end');
+  const following = await conversationState(); assert.equal(following.focused, true); assert.equal(following.draft, draft);
   await apply(history, [{ op: 'reply', ref: 'history_followed', item: { id: '1' }, round_id: null,
-    text: 'Following native rail reply\nThe genuine subsequent message remains visible.' }], { '1': live.items['1'].revision });
+    text: 'Following native conversation reply\nThe genuine subsequent message remains visible.' }], { '1': live.items['1'].revision });
   const final = await snapshot(history);
-  await wait(async () => (await browser.$$('.pw-rail-list [data-message-id]')).length === final.messages.length, 'Following rail did not load the next genuine message');
-  const followed = await railState(); assert.ok(followed.height - followed.viewport - followed.top <= 2);
-  assert.equal(followed.focused, true); assert.equal(followed.draft, draft);
-  assert.equal(await browser.$('button*=Jump to latest').isExisting(), false);
-  return { beforeUp, paused, held, following, followed, count, draft, final };
+  assert.deepEqual(final.messages.slice(0, saved.messages.length), saved.messages,
+    'Live conversation arrivals must preserve every earlier complete stored message');
+  await proveConversationMessages(final, '1');
+  await wait(async () => { const state = await conversationState(); return state.height - state.viewport - state.top <= 2; },
+    'Item conversation did not keep following the next genuine message');
+  const followed = await conversationState(); assert.equal(followed.focused, true); assert.equal(followed.draft, draft);
+  return { messageIds, childMessageIds, siblingMessageIds, storedHistoryMessageIds: storedHistoryMessages.map(message => message.id), beforeUp, paused, held, following, followed, count, draft, final };
 }
 
 export async function runHistoryAcceptance(configuration) {
@@ -505,9 +454,9 @@ export async function runHistoryAcceptance(configuration) {
     return await former.isExisting() && folded(await former.getText()).includes(folded(formerOutcome));
   }, 'Genuine reopening lost its former outcome in native detail');
   publication.push(await apply(history, [{ op: 'reply', ref: 'history_child_reply', item: { id: '1.1' }, round_id: null,
-    text: 'Native child rail backlink\nIts registered link remains distinct from the selected parent.' }], { '1.1': saved.items['1.1'].revision }));
+    text: 'Native child conversation reply\nIts registered link remains distinct from the selected parent.' }], { '1.1': saved.items['1.1'].revision }));
   saved = await snapshot(history);
-  const railProof = await rail(history, saved, paged), finalSession = railProof.final;
+  const conversationProof = await conversation(history, saved, paged), finalSession = conversationProof.final;
   const unchanged = await snapshot(configuration);
   assert.equal(unchanged.active_binding_id, original.active_binding_id);
   assert.equal(unchanged.bindings[configuration.bindingId].generation, configuration.generation);
@@ -519,8 +468,7 @@ export async function runHistoryAcceptance(configuration) {
   assert.equal(new Set((await admissions(history)).map(entry => entry.attemptId)).size, 7);
   await browser.saveScreenshot(join(evidence(), 'native-complete-history.png'));
   await writeFile(join(evidence(), 'history-acceptance.json'), JSON.stringify({ history, publication, ownerTexts, resultTexts, paged,
-    roundIds, reviewedTarget, proof, railProof, nativePinAndSelectionRefs: true, clearReferenceProof: 'Actual Unpin removes pin state without changing any persisted preference except seen observations, revision and replay receipts; deliberate rail Close clears references',
-    hoverProof: 'Focused actual-App component tests; embedded driver lacks hover transitions', finalSession, queued: await admissions(history), originalAdmissions }, null, 2));
+    roundIds, reviewedTarget, proof, conversationProof, finalSession, queued: await admissions(history), originalAdmissions }, null, 2));
 }
 
 export async function restoreHistoryAcceptance(configuration) {
@@ -530,10 +478,11 @@ export async function restoreHistoryAcceptance(configuration) {
   assert.deepEqual(await snapshot(history), finalSession); assert.deepEqual(await admissions(history), prior.queued);
   await open(history);
   await proveRounds(history, finalSession, prior.ownerTexts, prior.resultTexts, prior.paged);
+  await proveConversationMessages(finalSession, '1');
   // The Reply box is docked on the open item; it shows the draft the relaunch retained.
   const reply = await browser.$('[aria-label="Item actions"]').$('button*=Reply'); await reply.waitForEnabled(); await reply.scrollIntoView(); await reply.click();
   const editor = await browser.$(`${ownerInput('1')} textarea`); await failureEvidence('restored-owner-draft', () => editor.waitForDisplayed());
-  assert.equal(await editor.getValue(), prior.railProof.draft, 'Actual process relaunch must retain the unsent owner draft without creating a new input');
+  assert.equal(await editor.getValue(), prior.conversationProof.draft, 'Actual process relaunch must retain the unsent owner draft without creating a new input');
   assert.ok(folded(await browser.$('.item-detail [aria-label="Former outcome"]').getText()).includes(folded(formerOutcome)));
   assert.deepEqual(await snapshot(history), finalSession); assert.deepEqual(await admissions(history), prior.queued);
   assert.deepEqual(await admissions(configuration), prior.originalAdmissions);

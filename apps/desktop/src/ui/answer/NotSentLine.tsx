@@ -4,7 +4,7 @@
 // which loads its text into the item's (or the topic's) editor by the same safe
 // rule as Edit (an existing draft is never overwritten; selectors/waiting/stuck
 // `notSent`, held.ts `putBackCancelled`). Shown by every place that shows the
-// line: the item's timeline and the message rail. The button goes once the same
+// line: the item's conversation. Topic replies use a persistent notice. The button goes once the same
 // words were sent again.
 import { useState } from 'react';
 import { ReviewResult } from './StuckNote';

@@ -9,7 +9,7 @@ import { route } from './transport';
 
 afterEach(() => { cleanup(); notices.clear(); vi.restoreAllMocks(); });
 
-it('keeps the sole topic archive notice actionable through queued navigation and reconciliation with Messages open', async () => {
+it('keeps the sole topic archive notice actionable through queued navigation and reconciliation with item detail open', async () => {
   const transport = new HistoryTransport(), session = transport.source;
   const item = session.items['8']!, topic = session.topics[item.topic_id]!;
   item.status = 'done';
@@ -23,9 +23,8 @@ it('keeps the sole topic archive notice actionable through queued navigation and
     expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
     expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Messages (m)' }));
-  await screen.findByRole('complementary', { name: 'Messages' });
-  await waitFor(() => expect(transport.preferences.sessions.find(view => view.session.session_id === session.id)?.rail).toBe('activity'));
+  fireEvent.click(document.querySelector(`[role="treeitem"][data-item-id="${item.id}"]`)!);
+  await screen.findByRole('article', { name: `Detail of ${item.question}` });
 
   const region = screen.getByRole('region', { name: 'Notifications' });
   fireEvent.click(await screen.findByRole('button', { name: 'Archive topic' }));
@@ -54,7 +53,7 @@ it('keeps the sole topic archive notice actionable through queued navigation and
     expect(within(region).getByRole('button', { name: 'Undo' })).toBe(undo);
     expect(undo.closest('[data-notice-id]')).toBe(card);
     expect(card.isConnected).toBe(true); expect(undo.disabled).toBe(false);
-    expect(screen.getByRole('complementary', { name: 'Messages' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Messages (m)' })).toBeNull();
   };
   try {
     fireEvent.click(screen.getByRole('button', { name: 'Switch to light' }));

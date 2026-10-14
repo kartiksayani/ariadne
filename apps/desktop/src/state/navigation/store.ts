@@ -28,7 +28,7 @@ type QueuedNavigation = { selection: NavigationSelection; reveal: RevealedItem |
   request: number; started: number; running: boolean; confirmed: boolean; fresh: boolean;
   resolve: (saved: boolean) => void; completion: Promise<boolean>; confirm: (saved: boolean) => void;
   timer: ReturnType<typeof setTimeout> };
-type NavigationPatch = Extract<PreferencesPatchEntry, { kind: 'set_global' | 'set_session_view' | 'set_later' }>;
+type NavigationPatch = Extract<PreferencesPatchEntry, { kind: 'set_global' | 'set_session_view' | 'set_later' | 'resolve_unsent_input' }>;
 type ReplayEntries = (preferences: PreferencesSnapshot) => NavigationPatch[] | null;
 /** Draft bookkeeping shares seen admission and provenance with navigation. */
 export interface PreferencesWriteCoordination {
@@ -563,9 +563,11 @@ export class NavigationStore {
             const index = saved.sessions.findIndex(view => sameRoute(view.session, entry.preferences.session));
             if (index < 0) saved.sessions.push(structuredClone(entry.preferences));
             else saved.sessions[index] = structuredClone(entry.preferences);
-          } else {
+          } else if (entry.kind === 'set_later') {
             saved.later = saved.later.filter(item => !sameRoute(item, entry.item) || item.item_id !== entry.item.item_id);
             if (entry.later) saved.later.push(structuredClone(entry.item));
+          } else {
+            saved.resolved_unsent_input_ids = [...new Set([...(saved.resolved_unsent_input_ids ?? []), entry.input_id])].slice(-10_000);
           }
         }
         this.seenAdvance = null;
@@ -648,6 +650,15 @@ export class NavigationStore {
       return await this.patch(preferences, [{ kind: 'set_global', preferences: { ...preferences.global, ...change } }]);
     } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
   }
+  /** Permanently resolves one unsent notice after dismissal or a confirmed put-back. */
+  async resolveUnsentInput(inputId: string): Promise<boolean> {
+    try {
+      if (this.stopped || this.pending || !this.state.preferences) return false;
+      const preferences = this.preferences();
+      if (preferences.resolved_unsent_input_ids?.includes(inputId)) return true;
+      return await this.patch(preferences, [{ kind: 'resolve_unsent_input', input_id: inputId }]);
+    } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
+  }
   async saveSessionView(view: SessionPreferences, expectedPreferencesRevision: number): Promise<boolean> {
     try {
       const preferences = await this.editingPreferences(expectedPreferencesRevision);
@@ -678,7 +689,7 @@ export class NavigationStore {
         view = { session, tab_open: false, selected_item_id: null,
           tab_order: Math.max(-1, ...preferences.sessions.map(saved => saved.tab_order)) + 1,
           expanded_item_ids: [...initialExpansion(snapshot)],
-          filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null };
+          filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, scroll: null };
       }
       const entries: ReplayEntries = fresh => {
         const saved = fresh.sessions.find(value => sameRoute(value.session, session));
@@ -729,7 +740,7 @@ export class NavigationStore {
       session: { project_id: item.project_id, session_id: item.session_id }, tab_open: false, selected_item_id: null,
       tab_order: Math.max(-1, ...preferences.sessions.map(saved => saved.tab_order)) + 1,
       expanded_item_ids: [...initialExpansion(session)],
-      filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null,
+      filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, scroll: null,
     };
     const ids = new Set((view.hidden_item_ids ?? []).filter(id => !!session.items[id]));
     if (hidden) ids.add(item.item_id);
@@ -831,7 +842,7 @@ export class NavigationStore {
         const existing = preferences.sessions.find(view => sameRoute(view.session, selection.session));
         const view: SessionPreferences = existing ?? { session: selection.session, tab_open: true, selected_item_id: null,
           tab_order: Math.max(-1, ...preferences.sessions.map(session => session.tab_order)) + 1, expanded_item_ids: [...initialExpansion(snapshot.session)],
-          filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'waiting', scroll: null };
+          filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, scroll: null };
         entries.push({ kind: 'set_session_view', preferences: { ...view, tab_open: true,
           selected_item_id: reveal?.kind === 'item' ? reveal.route.item_id : view.selected_item_id } });
         if (equal(preferences.global.selected_navigation, selection) && existing?.tab_open && !reveal) {
@@ -957,13 +968,13 @@ export class NavigationStore {
       this.pending = null;
       if (this.state.writing || this.state.pendingOperationId !== null) this.publish({ writing: false, pendingOperationId: null });
       this.flushNavigation();
-      // View/Later receipts already publish the exact saved preferences. Their
+      // View/Later/recovery receipts already publish the exact saved preferences. Their
       // completion must not wait for unrelated catalogue reads, which can remain
       // busy under periodic reconciliation. Navigation/global and domain edits
       // retain their immediate refresh; view edits reconcile on the normal timer.
       const command = pending.request.command;
       const viewOnly = command.command === 'preferences_patch' && command.params.entries.every(entry =>
-        entry.kind === 'set_session_view' || entry.kind === 'set_later');
+        entry.kind === 'set_session_view' || entry.kind === 'set_later' || entry.kind === 'resolve_unsent_input');
       if (!viewOnly) await this.refresh();
       if ('project_id' in receipt && pending.followupIntent === this.navigationIntent) {
         void this.navigate({ kind: 'project', project_id: receipt.project_id });

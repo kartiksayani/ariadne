@@ -295,7 +295,7 @@ it('Waiting visits persist a never-opened session without opening its tab or cha
     .toMatchObject({ item_id: '1', action: 'peeked' }));
   const saved = transport.preferences.sessions.find(view => view.session.session_id === otherRoute.session_id)!;
   expect(saved.tab_open).toBe(false); expect(saved.tab_order).toBe(1); expect(saved.selected_item_id).toBeNull();
-  expect(saved.expanded_item_ids).toEqual([]); expect(saved.rail).toBe('waiting');
+  expect(saved.expanded_item_ids).toEqual([]);
   expect(transport.preferences.global.selected_navigation).toEqual(selection);
   const reopened = new NavigationStore(service);
   await reopened.refresh();

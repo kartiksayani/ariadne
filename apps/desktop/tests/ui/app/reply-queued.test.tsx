@@ -16,7 +16,7 @@ async function replySession() {
   other.rounds[other.items['2']!.current_round_id!]!.options_snapshot = [];
   transport.sessions.set(secondId, other);
   transport.preferences.global.selected_navigation = { kind: 'session', session: route };
-  Object.assign(transport.preferences.sessions[0], { tab_open: true, rail: 'waiting' });
+  Object.assign(transport.preferences.sessions[0], { tab_open: true });
   render(<DesktopApp service={createDesktopService(transport)} />);
   await screen.findByRole('region', { name: 'Session tree' });
   await waitFor(() => expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false'));

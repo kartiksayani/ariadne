@@ -34,12 +34,12 @@ async function mount(configure?: (transport: AppTransport) => void, extra: Parti
   const service = createDesktopService(transport), navigation = new NavigationStore(service); stores.push(navigation);
   await navigation.start();
   const store = navigation.opened.open(route); await store.refresh();
-  const selected = vi.fn(), hover = vi.fn();
+  const selected = vi.fn();
   const props: TreeViewProps = { navigation, store, actions: new SessionActionControllers(service).forSession(store), drafts: new OwnerDraftStore(service),
-    query: '', reveal: null, selectedId: null, detailOpen: false, railOpen: false, highlightedItems: new Set(), highlightedMessages: new Set(), summaries: [],
-    onHoverItem: hover, onSelected: selected, onDismissReveal: () => {}, onResume: () => {}, onAct: () => {}, onClearFilters: () => {}, onShowArchive: () => {}, onRemove: () => {}, ...extra };
+    query: '', reveal: null, selectedId: null, detailOpen: false, summaries: [],
+    onSelected: selected, onDismissReveal: () => {}, onResume: () => {}, onAct: () => {}, onClearFilters: () => {}, onShowArchive: () => {}, onRemove: () => {}, ...extra };
   const rendered = render(<TreeView {...props} />);
-  return { transport, navigation, store, selected, hover, rerender: (extra: Partial<TreeViewProps>) => rendered.rerender(<TreeView {...props} {...extra} />) };
+  return { transport, navigation, store, selected, rerender: (extra: Partial<TreeViewProps>) => rendered.rerender(<TreeView {...props} {...extra} />) };
 }
 
 describe('Map change markers and next unseen navigation', () => {
@@ -75,7 +75,7 @@ describe('Map change markers and next unseen navigation', () => {
     expect(within(row('2')).getByRole('img', { name: 'Changed since you read it' })).toBeTruthy();
   });
 
-  it('walks Map preorder and wraps without opening, hovering, selecting or marking seen', async () => {
+  it('walks Map preorder and wraps without opening, selecting or marking seen', async () => {
     const view = await mount();
     next();
     expect(target()).toBe(row('1.1')); expect(document.activeElement).toBe(row('1.1'));
@@ -86,7 +86,7 @@ describe('Map change markers and next unseen navigation', () => {
     expect(within(row('1.1')).getByRole('img', { name: 'New to you' })).toBeTruthy();
     next(); expect(target()).toBe(row('2')); expect(row('1.1').hasAttribute('data-next-unseen')).toBe(false);
     next(); expect(target()).toBe(row('1.1'));
-    expect(view.selected).not.toHaveBeenCalled(); expect(view.hover).not.toHaveBeenCalled();
+    expect(view.selected).not.toHaveBeenCalled();
     expect(view.transport.preferences.seen![0]!.items).toEqual([]);
     expect(view.transport.mutations).toEqual([]);
     expect(view.transport.queries.filter(query => query.request.command === 'reveal_item')).toEqual([]);
@@ -132,7 +132,7 @@ describe('Map change markers and next unseen navigation', () => {
     await waitFor(() => expect(view.transport.preferences.sessions[0]!.focused_item_id).toBeUndefined());
     delete before.focused_item_id;
     expect(view.transport.preferences.sessions[0]).toEqual(before);
-    expect(view.selected).not.toHaveBeenCalled(); expect(view.hover).not.toHaveBeenCalled();
+    expect(view.selected).not.toHaveBeenCalled();
     expect(view.transport.preferences.seen![0]!.items).toEqual([]);
     expect(view.transport.queries.filter(query => query.request.command === 'reveal_item')).toEqual([]);
   });

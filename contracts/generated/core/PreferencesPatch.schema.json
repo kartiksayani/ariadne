@@ -511,6 +511,23 @@
         {
           "type": "object",
           "properties": {
+            "input_id": {
+              "$ref": "#/$defs/UuidV4"
+            },
+            "kind": {
+              "type": "string",
+              "const": "resolve_unsent_input"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "input_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
             "at": {
               "$ref": "#/$defs/UtcMillis"
             },
@@ -545,15 +562,6 @@
             "topics"
           ]
         }
-      ]
-    },
-    "RailView": {
-      "type": "string",
-      "enum": [
-        "waiting",
-        "sent",
-        "activity",
-        "hidden"
       ]
     },
     "RecentAction": {
@@ -645,9 +653,6 @@
             "$ref": "#/$defs/ItemRef"
           }
         },
-        "rail": {
-          "$ref": "#/$defs/RailView"
-        },
         "recent_items": {
           "type": "array",
           "items": {
@@ -693,7 +698,6 @@
         "tab_order",
         "expanded_item_ids",
         "filters",
-        "rail",
         "scroll"
       ]
     },

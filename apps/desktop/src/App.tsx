@@ -26,7 +26,7 @@ import { PeekProvider } from './ui/peek/Peek';
 import { ItemRefSession } from './ui/peek/context';
 import { navigationVisits } from './ui/navigation/visits';
 import { attachAckAll, stopAckAll } from './ui/navigation/ackAllController';
-import { MessageRail } from './ui/rail/MessageRail';
+import { UnsentMessageNotices } from './ui/answer/UnsentMessageNotices';
 import { SessionActionControllers } from './components/bindings/actions';
 import { RecoveryPanel, recoveryTargets } from './components/recovery/RecoveryPanel';
 import { CopiedProvenance } from './components/history-actions/CopiedProvenance';
@@ -106,7 +106,6 @@ function workspaceKeys(app: {
   readonly toggleLater: (target: ItemRoute, itemId: string) => boolean;
   readonly archiveTopic: (topicId: string) => boolean;
   readonly toggleGraph: () => void;
-  readonly toggleRail: () => void;
   readonly closeDetail: () => void;
   readonly clearFilters?: () => void;
   readonly askRemove: (target: TreeRemoveTarget) => boolean;
@@ -145,7 +144,6 @@ function workspaceKeys(app: {
     later: onItem(({ item, target }) => app.toggleLater(target, item.id)),
     archive: onItem(({ item }) => app.archiveTopic(item.topic_id)),
     graph: () => { if (!app.store) return false; app.toggleGraph(); return true; },
-    messages: () => { if (!app.store) return false; app.toggleRail(); return true; },
     // The Waiting column's own fold button owns the fold (saved layout, narrow-window peek); the key presses it.
     waiting: () => {
       const control = document.querySelector<HTMLButtonElement>('[data-shortcut-waiting-fold]');
@@ -171,10 +169,9 @@ function SessionArchive({ application, view, onRemove }: { application: Applicat
 }
 interface CenterProps {
   readonly application: Application; readonly view: OpenedSessionView; readonly graph: boolean; readonly query: string;
-  readonly reveal: RevealedItem | null; readonly selectedId: string | null; readonly detailOpen: boolean; readonly railOpen: boolean;
+  readonly reveal: RevealedItem | null; readonly selectedId: string | null; readonly detailOpen: boolean;
   readonly historyReveal: RevealedItem | null;
-  readonly highlightedItems: ReadonlySet<string>; readonly highlightedMessages: ReadonlySet<string>;
-  readonly onHoverItem: (itemId: string | null) => void; readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
+  readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
   readonly onDismissReveal: () => void; readonly onResume: () => void; readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
   readonly onOpenItem: (itemId: string) => void;
   readonly onClearFilters: () => void; readonly onClearSearch: () => void; readonly onShowArchive: () => void;
@@ -197,7 +194,7 @@ function SessionCenter({ application, view, graph, reveal, onRemoveTarget, ...pr
       onOpenItem={props.onOpenItem} /> : undefined}
     notices={notice || recovering ? <div className="tree-notices">{notice}{recovering && <RecoveryPanel actions={actions} />}</div> : null}
     graph={graph && !view.preferences?.filters.archived ? <NavigationGraph navigation={application.navigation} store={view.store} query={props.query}
-      tight={props.detailOpen || props.railOpen} onReveal={props.onSelected} onHoverItem={props.onHoverItem} /> : null} />;
+      tight={props.detailOpen} onReveal={props.onSelected} /> : null} />;
 }
 function Workspace({ application }: { application: Application }) {
   const navigation = application.navigation, state = useNavigation(navigation);
@@ -230,10 +227,6 @@ function Workspace({ application }: { application: Application }) {
   const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
   // "Resume filtered view", a filter change or a fold drops the tree's temporary reveal.
   const [dismissedReveal, setDismissedReveal] = useState<RevealedItem | null>(null);
-  const [highlightedItems, setHighlightedItems] = useState<ReadonlySet<string>>(new Set());
-  const [hoveredItem, setHoveredItem] = useState<string | null>(null);
-  const hoverItem = useCallback((itemId: string | null) => setHoveredItem(itemId), []);
-  const [highlightedMessages, setHighlightedMessages] = useState<ReadonlySet<string>>(new Set());
   const [searchEdit, setSearchEdit] = useState<{ route: string; text: string; attempted: boolean } | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
   const routeFailureCapture = useRef(sessionState?.snapshot);
@@ -308,7 +301,6 @@ function Workspace({ application }: { application: Application }) {
     if (detailDismissedAt.current !== navigation.getNavigationRequest()) setDetailOpen(true);
     setLocalReveal(null);
   }, [key, navigation]);
-  useEffect(() => { setHighlightedItems(new Set()); setHighlightedMessages(new Set()); setHoveredItem(null); }, [key, view?.rail]);
   useEffect(() => {
     if (detailDismissedAt.current !== navigation.getNavigationRequest()) setDetailOpen(true);
   }, [view?.selected_item_id, state.reveal, navigation]);
@@ -464,11 +456,6 @@ function Workspace({ application }: { application: Application }) {
     if (view && preferences) void navigation.saveSessionView({ ...structuredClone(view), ...change } as SessionPreferences, preferences.revision);
   };
   const closeDetail = () => { invalidateOwnerRequest(); detailDismissedAt.current = navigation.getNavigationRequest(); setDetailOpen(false); };
-  const toggleRail = () => {
-    const current = navigation.getSnapshot();
-    if (current.writing || current.pendingOperationId !== null) return;
-    saveView({ rail: view?.rail === 'hidden' ? 'activity' : 'hidden' });
-  };
   const later = route && selectedId ? preferences?.later.some(item => routeKey(item) === key && item.item_id === selectedId) ?? false : false;
   const shown = useAppliedTheme(theme);
   const [textSizeTarget, setTextSizeTarget] = useState<TextSize | null>(null);
@@ -627,7 +614,7 @@ function Workspace({ application }: { application: Application }) {
     askRemove,
     oldestWaiting: () => application.waiting.getSnapshot().waiting[0]?.route,
     toggleLater, toggleHidden,
-    toggleGraph: () => setGraphModes(previous => ({ ...previous, [key]: !graph })), toggleRail,
+    toggleGraph: () => setGraphModes(previous => ({ ...previous, [key]: !graph })),
     clearFilters: detailOpen && !!selectedId || !view || !filtering(view.filters) && !query ? undefined : clearFilters,
   }), { scope: 'workspace' });
   // Keys pressed while focus is on <body> (after launch or a click on a non-focusable area) still reach the keymap.
@@ -637,17 +624,18 @@ function Workspace({ application }: { application: Application }) {
     onPeekSeen={(target, observedRevision) => navigation.markItemSeen(target, target.item_id, observedRevision)}
     onVisit={(target, action) => { if (action !== 'opened') navigationVisits.record(target, target.item_id, action === 'peek' ? 'peeked' : 'answered'); }}>
     <ItemRefSession.Provider value={route ?? null}><ItemHistoryContext.Provider value={historyControls}><RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys}>
+    <UnsentMessageNotices waiting={application.waiting} drafts={application.drafts} opened={navigation.opened} navigation={navigation}
+      selectedStore={store ?? null} />
     <DraftConflictNotices drafts={application.drafts} opened={navigation.opened} selectedSession={route ?? null} />
     <AgentRemovalNotices waiting={application.waiting} controllers={application.actions} navigation={navigation}
       selectedSession={sessionState?.snapshot?.session ?? null} onTree={showBinTree} />
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
       onRemoveTarget={removeTarget}
       session={store ? sessionFacts(sessionState, projectName) : undefined}
-      chrome={{ query, views, railOn: !!store && !!view && view.rail !== 'hidden', theme: shown,
+      chrome={{ query, views, theme: shown,
         textSize: shownTextSize, onTextSizeChange: changeTextSize,
         // A new search is a filter change: it drops the temporary reveal (the selection stays as its own row).
         onQueryChange: view ? text => { setSearchEdit({ route: key, text, attempted: false }); setDismissedReveal(currentReveal); } : undefined,
-        onToggleRail: view ? toggleRail : undefined,
         onToggleTheme: () => { if (preferences) void navigation.saveTheme(themeToggle(shown).next, preferences.revision); } }}
       hidden={selectedHidden} hiddenNotice={hiddenNotice} onHide={route && selectedId ? () => { toggleHidden({ ...route, item_id: selectedId }); } : undefined}
       onRemove={() => { if (route && selectedId) askRemove({ kind: 'item', item: { ...route, item_id: selectedId } }); }}
@@ -658,7 +646,7 @@ function Workspace({ application }: { application: Application }) {
       detail={store && selectedId && detailOpen && route ? <ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}
         onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined}
         onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onBring={() => { void queueBring({ ...route, item_id: selectedId }); }}
-        highlightedMessageIds={highlightedMessages} later={later} onAgentNotRunning={onAgentNotRunning} earlierAgent={earlier}
+        later={later} onAgentNotRunning={onAgentNotRunning} earlierAgent={earlier}
         hiddenItemIds={view?.hidden_item_ids} seen={readingSeen}
         answerJump={answerJump?.route === key && answerJump.itemId === selectedId ? answerJump : undefined}
         onAnswerJumpConsumed={consumeAnswerJump}
@@ -667,12 +655,10 @@ function Workspace({ application }: { application: Application }) {
         provenance={<CopiedProvenance store={store} itemId={selectedId}
           projectPath={projectId => state.projects?.projects.items.find(project => project.project_id === projectId)?.canonical_root ?? null} revealItem={revealLinkedItem} />} /> : undefined}
       onCloseDetail={closeDetail}
-      railContent={store && view && view.rail !== 'hidden' ? <MessageRail key={key} service={application.service} store={store} drafts={application.drafts}
-        selectedItemId={selectedId} hoveredItemId={hoveredItem} onHighlight={(items, messages) => { setHighlightedItems(items); setHighlightedMessages(messages); }} onClose={toggleRail} closeDisabled={state.writing || state.pendingOperationId !== null} earlierAgent={earlier} /> : undefined}
       renderSession={opened => <SessionCenter application={application} view={opened} graph={graph} query={query} reveal={treeReveal}
         historyReveal={historyReveal.current === treeReveal ? historyReveal.current : null}
-        selectedId={treeSelectedId} detailOpen={detailOpen && !!selectedId} railOpen={!!view && view.rail !== 'hidden'}
-        highlightedItems={highlightedItems} highlightedMessages={highlightedMessages} onHoverItem={hoverItem} onSelected={selected}
+        selectedId={treeSelectedId} detailOpen={detailOpen && !!selectedId}
+        onSelected={selected}
         onOpenItem={itemId => { if (route) revealItem({ ...route, item_id: itemId }); }}
         onDismissReveal={() => setDismissedReveal(currentReveal)} onResume={() => { setDismissedReveal(currentReveal); closeDetail(); }}
         onAct={(intent, target, onReveal) => {

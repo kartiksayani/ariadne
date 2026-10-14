@@ -739,10 +739,6 @@
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 
-.detail-turn.excerpt-highlighted .detail-bubble {
-  box-shadow: 0 0 0 2px var(--color-accent);
-}
-
 .detail-related {
   display: flex;
   flex-direction: column;

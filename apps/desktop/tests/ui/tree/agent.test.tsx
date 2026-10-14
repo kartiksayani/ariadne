@@ -11,7 +11,7 @@ const id = (suffix: string) => `00000000-0000-4000-8000-0000000000${suffix}`;
 function view(session: Session, statuses: ItemStatus[] = []): SessionPreferences {
   return { session: { project_id: session.project_id, session_id: session.id }, tab_open: true, selected_item_id: null,
     tab_order: 0, expanded_item_ids: [], filters: { search: '', statuses, owners: [], topic_id: null, archived: false, hide_later: false },
-    rail: 'waiting', scroll: null };
+    scroll: null };
 }
 /** Item 2 waits on the owner; the owner's reply to it is queued. */
 function replied(): Session {

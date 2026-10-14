@@ -25,6 +25,12 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     print(json.dumps({name.removeprefix(sys.argv[2]): archive.read(name).decode('utf-8') for name in archive.namelist() if not name.endswith('/')}))
 `, archive, prefix], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })) as Record<string, string>;
   members['Ariadne.dc.html'] = gettingAroundChrome(footerChrome(graphChrome(changesChrome(topicRowChrome(sessionChrome(members['Ariadne.dc.html']!))))));
+  // Alpha.15 keeps the same board scenarios and compares their surviving columns with Messages closed.
+  // The owner removed the Messages pane and its shortcut; ignore former rail/hover props in the archive.
+  members['Ariadne.dc.html'] = members['Ariadne.dc.html']!
+    .replace(/^[ \t]*<button[^\n]*title="Messages \(m\)"[^\n]*<\/button>\n/m, '')
+    .replace('rail: props.rail === undefined ? true : !!props.rail,', 'rail: false,')
+    .replace('hoverMsg: props.hoverMsg ? Number(props.hoverMsg) : null, msgSel: null,', 'hoverMsg: null, msgSel: null,');
   members['Item Row.dc.html'] = gettingAroundItemChrome(itemRowChrome(members['Item Row.dc.html']!));
   return members;
 }

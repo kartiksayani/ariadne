@@ -167,7 +167,7 @@ are omitted, while nullable domain/service fields emit explicit null.
 | `topic_remove` | session ref, topic_id, expected_revision (topic), op_id | hard-deletes the topic's continuation family in every session that holds a copy, in any registered project; one `removed` notice to the latest copy; saved `removal` receipt |
 | `session_remove` | session:null, project_id, session_id, expected_revision, op_id | deletes the session file after a backup, pending inputs included; `Removed` receipt |
 | `project_remove` | session:null, project_id, op_id | unregisters the project and deletes only its Ariadne store after a backup; `Removed` receipt |
-| `preferences_patch` | expected_preferences_revision, patch | UI-only Later, drafts, theme, rail, tabs, geometry, seen state |
+| `preferences_patch` | expected_preferences_revision, patch | UI-only Later, drafts, theme, tabs, geometry, seen state |
 | `preferences_get` | none | local owner-only versioned UI preferences, including unsent drafts |
 | `reveal_item` | registered project/session/item IDs | focus route; no mutation |
 
@@ -394,7 +394,7 @@ Preference records belong to the local owner backend. `PreferencesSnapshot`
 contains schema/revision, global theme (system/light/dark), required
 `selected_navigation:NavigationSelection`, optional window geometry/monitor,
 pin and notification watermark; per-session required `tab_open`, selection, tab
-order, expansion, filters, rail and scroll; qualified Later routes; and unsent
+order, expansion, filters and scroll; qualified Later routes; and unsent
 `OwnerDraft` records. The optional submission_attempted marker defaults to false
 and false is omitted from serialization to preserve legacy preference-command
 replay digests. True is saved with the exact request-bearing draft before submit;
@@ -413,19 +413,27 @@ is explicit. The existing request/entity/page bounds apply. See
 `project{project_id}` or `session{session:SessionRef}`. SetGlobal/SetSessionView
 remain the only navigation preference patches. Closing a tab sets `tab_open`
 false and retains its view data and drafts. These required fields precede any
-production preferences writer; no compatibility defaults or migration apply.
+production preferences writer. Alpha.15 removes the session `rail` preference.
+Snapshot reads accept and ignore that retired key in older `ui.json` files;
+ordinary reads preserve the file bytes and the disk writer saves `rail: "hidden"`
+on every session view so strict older binaries can still load the record. API
+snapshots and session-view patches omit the field. Other unknown fields and
+duplicate keys still reject, and current session-view patches
+accept only the published fields.
 `ViewFilters.owners` is required and uses the canonical `ItemOwner` union. Empty
 means all owners; selected exact owner values combine with OR, and with search,
 status, topic, Archive and Later filters through AND. Other-owner names preserve
 their exact bytes and follow the existing nonblank/NUL-free owner constraint.
 
-The native preferences backend stores one strict private `ui.json` record with
-the canonical snapshot and retained owner operation/digest/exact preference
+The native preferences backend stores a strict private `ui.json` record with
+the legacy-compatible snapshot and retained owner operation/digest/exact preference
 receipts. Absence returns revision1 defaults (System, Projects, empty views/Later/
 drafts) without writing data; the first patch expects1 and saves revision2. Exact
 operation replay precedes revision guards and performs no write; changed same-op
-parameters conflict. Each new valid patch saves effects plus receipt atomically
-and increments once. The complete canonical response envelope must fit1MiB;
+parameters conflict. Each new ordinary valid patch saves effects plus receipt
+atomically and increments once. The canonical response envelope excluding the
+bounded recovery-ID and revision metadata must fit1MiB (revision is accounted
+at its initial value, 1);
 receipt history accepts any consecutive run ending at the snapshot revision.
 Writes retain the newest 256 receipts, trimming larger existing histories on the
 next write. Replay inside that window returns the saved result; an older operation
@@ -433,6 +441,49 @@ is treated as new, so its stale expected revision refuses it. Unrelated patches
 preserve stale/unavailable view routes and exact inert drafts. Malformed/future
 records remain untouched; explicit owner reset/backup recovery remains native
 Settings acceptance. See [ADR-0041](../../adr/ADR-0041-native-core-and-owner-preferences.md).
+
+Owner preferences expose optional `resolved_unsent_input_ids`, default empty:
+up to 10,000 unique UUID v4 input identities in completion order. When a new
+identity exceeds the bound, evict the oldest first; resolving an existing identity
+does not reorder it. The additive `resolve_unsent_input {input_id}` entry adds an identity to this ledger for
+both Dismiss and confirmed Put back. A recovery patch contains only recovery
+entries, listing each input once; mixing with view, draft or other preference
+entries rejects. Put back confirms the restored draft in an ordinary patch
+before sending its separate marker patch. These markers never mutate agent
+session data. Ordinary preference data retains its 1MiB canonical envelope
+budget, measured with revision 1; bounded recovery IDs and subsequent revision
+metadata growth share a separate 400KiB response allowance.
+The complete local-owner preferences envelope therefore cannot exceed
+1MiB + 400KiB. This preferences-only allowance preserves readable tabs, Later,
+seen state and drafts when an older binary saves a valid record near its 1MiB
+limit; marker metadata cannot consume or expand the ordinary data budget.
+Core's preferences writer and query-result validation enforce the same limits.
+Other query and MCP response budgets remain unchanged.
+
+Markers are stored only in the strict private fixed companion `ui-recovery.json`,
+with schema version 1, `resolved_input_ids`, and a bounded 256-operation owner
+receipt ledger. The companion and `ui.json` share `ui.lock`, the trusted
+directory, no-follow validation and synced atomic publication primitives; no
+caller selects either path. Commit the validated companion first, then project
+only its operation receipt and revision into `ui.json`. A failed second
+publication returns `commit_uncertain`. On the next locked read or retry,
+confirm companion durability and roll forward that projection only when the
+main revision is exactly one below its latest marker receipt. If an older
+binary has already advanced main to that revision or later, preserve all its
+fields and receipts; the companion remains authoritative for the markers.
+A companion that cannot be read, parsed, validated or reconciled with main is
+optional recovery data: move it aside under the same lock to
+`ui-recovery.corrupt-<time>.json`, log a plain line without message text, and
+continue with no markers. This includes main being more than one revision behind
+after an owner restore or deletion. Preserve the companion rather than deleting
+it; if it cannot be moved, log that failure and still allow navigation and draft
+patches without using or overwriting it. Old recovery notices may reappear.
+Main `ui.json` validation and corruption errors retain their existing behaviour.
+Replay checks operation IDs and digests against both retained histories, even
+after ordinary writes prune a marker's main receipt. A retained receipt still
+replays the original completed operation after quarantine or eviction; replay
+does not recreate discarded markers. No markers are serialized
+inline in `ui.json`, so older binary saves preserve the companion unchanged.
 
 Owner preferences expose optional `seen`, default empty. Each entry is
 `{session,since,items:[{item_id,revision}],topics:[{topic_id,at}]}`. The new patch

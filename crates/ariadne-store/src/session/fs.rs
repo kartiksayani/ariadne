@@ -380,6 +380,46 @@ impl Directory {
         }
     }
 
+    /// Move one entry under its resource lock without following final links or
+    /// replacing evidence at the destination. Unreadable regular files and
+    /// symlinks can be preserved; directories are outside this operation.
+    pub(crate) fn rename_entry_no_replace(
+        &self,
+        source: &str,
+        target: &str,
+    ) -> Result<(), StoreError> {
+        let path = self.path.join(source);
+        component(target, &self.path.join(target))?;
+        if self.entry_type(source)? == Some(libc::S_IFDIR) {
+            return Err(StoreError::UnsafePath { path });
+        }
+        let source = c_name(source.as_bytes(), &path)?;
+        let target = c_name(target.as_bytes(), &self.path)?;
+        // SAFETY: both checked single-component names are relative to this live
+        // directory. Exclusive rename moves the entry itself, never a link target.
+        #[cfg(target_os = "macos")]
+        let result = unsafe {
+            libc::renameatx_np(
+                self.file.as_raw_fd(),
+                source.as_ptr(),
+                self.file.as_raw_fd(),
+                target.as_ptr(),
+                libc::RENAME_EXCL,
+            )
+        };
+        #[cfg(not(target_os = "macos"))]
+        let result = unsafe {
+            libc::renameat2(
+                self.file.as_raw_fd(),
+                source.as_ptr(),
+                self.file.as_raw_fd(),
+                target.as_ptr(),
+                libc::RENAME_NOREPLACE,
+            )
+        };
+        os_result(result, "rename", &path)
+    }
+
     pub fn temp(&self, stem: &str, bytes: &[u8]) -> Result<Temporary<'_>, StoreError> {
         component(stem, &self.path.join(stem))?;
         loop {
@@ -600,6 +640,54 @@ unsafe fn errno() -> *mut libc::c_int {
 mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
+
+    #[test]
+    fn exclusive_entry_rename_preserves_collisions_and_moves_links_without_following() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = Directory::root(root.path()).unwrap();
+        std::fs::write(root.path().join("source"), b"source evidence").unwrap();
+        std::fs::write(root.path().join("target"), b"existing evidence").unwrap();
+        assert!(directory
+            .rename_entry_no_replace("source", "target")
+            .is_err());
+        assert_eq!(
+            std::fs::read(root.path().join("source")).unwrap(),
+            b"source evidence"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("target")).unwrap(),
+            b"existing evidence"
+        );
+        directory
+            .rename_entry_no_replace("source", "preserved")
+            .unwrap();
+        assert_eq!(
+            std::fs::read(root.path().join("preserved")).unwrap(),
+            b"source evidence"
+        );
+        symlink(root.path().join("target"), root.path().join("link")).unwrap();
+        directory
+            .rename_entry_no_replace("link", "preserved-link")
+            .unwrap();
+        assert!(
+            std::fs::symlink_metadata(root.path().join("preserved-link"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("target")).unwrap(),
+            b"existing evidence"
+        );
+        std::fs::create_dir(root.path().join("directory")).unwrap();
+        assert!(directory
+            .rename_entry_no_replace("directory", "moved-directory")
+            .is_err());
+        assert!(root.path().join("directory").is_dir());
+        assert!(directory
+            .rename_entry_no_replace("../source", "invalid")
+            .is_err());
+    }
 
     #[test]
     fn only_create_enoent_retries_once_and_preserves_the_second_error() {

@@ -152,6 +152,35 @@ describe('a message taken back to edit', () => {
     expect(withdrawn(immutable(session), message)).toBe(false);
     expect(notSent(immutable(session), message)?.line).toBe('Taken back to edit. Cancelled before it reached the agent');
   });
+  it('resolves an edited topic reply after a later reply to that topic, even when the words changed', () => {
+    const { session, input, message } = setup();
+    input.kind = 'topic_reply'; input.target.item_id = null;
+    const later = structuredClone(input); later.id = id('99'); later.seq = input.seq + 100;
+    later.state = 'queued'; later.cancel_cause = undefined; later.payload.text = 'The edited reply';
+    session.inputs[later.id] = later;
+    expect(withdrawn(immutable(session), message)).toBe(true);
+    expect(notSent(immutable(session), message)).toBeNull();
+    for (const state of ['cancelled', 'skipped'] as const) {
+      later.state = state;
+      expect(withdrawn(immutable(session), message)).toBe(false);
+    }
+    later.state = 'queued'; later.kind = 'continue';
+    expect(withdrawn(immutable(session), message)).toBe(false);
+    later.kind = 'topic_reply'; later.target.topic_id = 'another-topic';
+    expect(withdrawn(immutable(session), message)).toBe(false);
+    later.target.topic_id = input.target.topic_id; later.target.item_id = '2';
+    expect(withdrawn(immutable(session), message)).toBe(false);
+    later.target.item_id = null; later.seq = input.seq - 1;
+    expect(withdrawn(immutable(session), message)).toBe(false);
+  });
+  it('keeps item take-back recovery when a later item reply uses edited words', () => {
+    const { session, input, message } = setup();
+    const later = structuredClone(input); later.id = id('99'); later.seq = input.seq + 100;
+    later.state = 'queued'; later.cancel_cause = undefined; later.payload.text = 'Changed item reply';
+    session.inputs[later.id] = later;
+    expect(withdrawn(immutable(session), message)).toBe(false);
+    expect(notSent(immutable(session), message)?.again).toBe(false);
+  });
   it('never counts as an answer, shown or hidden: the item still waits on the owner', () => {
     const { session, message } = setup();
     expect(counted(immutable(session), message)).toBe(false);

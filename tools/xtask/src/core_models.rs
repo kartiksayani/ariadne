@@ -90,7 +90,6 @@ pub fn artifacts() -> Result<BTreeMap<PathBuf, String>, String> {
         RecentItem,
         RecentAction,
         ViewFilters,
-        RailView,
         ScrollAnchor,
         OwnerDraft,
         PreferencesPatch,

@@ -111,7 +111,7 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
   await route(page.context(), origin, denied);
   await page.setViewportSize({ width: spec.width, height: spec.height });
   await page.clock.setFixedTime(frameNow(spec));
-  const params = new URLSearchParams({ frame: spec.id, theme: spec.theme, rail: spec.rail ? '1' : '0' });
+  const params = new URLSearchParams({ frame: spec.id, theme: spec.theme });
   await page.goto(`${origin}/tests/ui/design/gallery.html?${params}`);
   await page.waitForFunction(() => (window as { __designError?: string }).__designError
     || /\d+ items/.test(document.querySelector('.shell-summary')?.textContent ?? ''), null, { timeout: 60_000 });
@@ -155,9 +155,6 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
     if (spec.selected && !spec.detail) await page.keyboard.press('Escape');
     await page.keyboard.press('g');
   }
-  // hover-msg (1a): the rail message is hovered, so the items it touched are highlighted. A dispatched
-  // mouseover is React's mouseenter and leaves the rail's scroll position and the pointer alone.
-  if (spec.hoverMsg) await railMessage(page, spec.hoverMsg).dispatchEvent('mouseover');
   await settle(page);
   if (spec.answering) {
     const selected = row(spec.answering);
@@ -184,11 +181,12 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
     await expect(page.locator('.tree-filters > .tree-selected-slot')).toHaveCount(1);
     await expect(page.locator('.tree-scroll-shell .tree-selected-slot, .tree-scroll-shell .tree-selected-edge')).toHaveCount(0);
   }
+  await expect(page.locator('.pw-rail')).toHaveCount(0);
+  await expect(page.locator('.session-activity')).toHaveCount(0);
+  await expect(page.getByRole('list', { name: 'Session activity', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Messages (m)', exact: true })).toHaveCount(0);
   expect(denied).toEqual([]);
 }
-
-const railMessage = (page: Page, number: number) => page.locator('.pw-rail-list [data-message-id]').filter({
-  has: page.locator('.pw-excerpt-number', { hasText: new RegExp(`^#${number}$`) }) });
 
 /** Check actual wrapped boxes; text assertions alone cannot detect clipped change cards. */
 async function changesFit(surface: Locator) {
@@ -328,34 +326,6 @@ for (const theme of ['dark', 'light'] as const) {
   });
 }
 
-/**
- * Puts the app's rail where the design's rail sits. The prototype scrolls its rail to the bottom 60 ms after
- * mount (Ariadne.dc.html:988), before its fonts settle; in some frames the reflow leaves it above the bottom,
- * showing "Follow latest" (Ariadne.dc.html:2196). The app's rail is scrolled to the same message and offset.
- */
-async function matchRail(page: Page, designPage: Page, id: string) {
-  const aside = designPage.locator(`[id="${id}"] .dv-card aside[aria-label="Messages"]`);
-  if (!await aside.count()) return;
-  const position = await aside.evaluate(element => {
-    const list = element.children[1] as HTMLElement;
-    if (list.scrollHeight - list.scrollTop - list.clientHeight < 24) return null;
-    const top = list.getBoundingClientRect().top;
-    for (const card of list.children) {
-      const rect = card.getBoundingClientRect(), number = /^\s*#(\d+)/.exec(card.textContent ?? '')?.[1];
-      if (number && rect.bottom > top) return { number: Number(number), offset: rect.top - top };
-    }
-    return null;
-  });
-  if (!position) return;
-  const card = railMessage(page, position.number);
-  await card.evaluate((element, offset) => {
-    const list = element.closest<HTMLElement>('.pw-rail-list')!;
-    list.scrollTop += element.getBoundingClientRect().top - list.getBoundingClientRect().top - offset;
-  }, position.offset);
-  await expect(page.locator('.pw-rail-follow')).toHaveText('Follow latest');
-  await settle(page);
-}
-
 /** Pixel diff in the browser canvas: mismatch ratio and a diff image (mismatches red over the dimmed app). */
 async function compare(page: Page, design: Buffer, app: Buffer, regions: readonly Region[] = [], mask: Region | null = null) {
   return page.evaluate(async ({ design, app, tolerance, regions, mask }) => {
@@ -405,7 +375,7 @@ for (const id of [...designFrames, ...variantIds]) {
     const denied: string[] = [];
     await route(page.context(), origin, denied);
     await openApp(page, origin, spec);
-    if (spec.rail) await matchRail(page, designPage, card);
+    await expect(designPage.locator(`[id="${card}"] aside[aria-label="Messages"]`)).toHaveCount(0);
     // The pointer rests on a row in both: the prototype's hoverItem and the app's :hover. Moved off again after the capture.
     if (spec.hoverItem) {
       await designRow(designPage, card, spec.hoverItem).hover();
@@ -470,7 +440,7 @@ for (const width of [1920, 1600, 1280]) for (const acceptedFailure of [false, tr
 for (const theme of ['light', 'dark'] as const) test(`Map names and top-line status keep their layout on hover in ${theme}`, async ({ page, origin }) => {
   const denied: string[] = [];
   await route(page.context(), origin, denied);
-  await openApp(page, origin, { ...frameSpec('1a'), theme, rail: false, hoverMsg: undefined });
+  await openApp(page, origin, { ...frameSpec('1a'), theme });
   const root = page.locator('.tree-item.tree-item-root').first(), child = page.locator('.tree-item.tree-item-child').first();
   await expect(page.locator('.tree-id')).toHaveCount(0);
   await expect(root.locator('.tree-top-colour')).toHaveCount(1);
@@ -496,7 +466,7 @@ for (const theme of ['light', 'dark'] as const) test(`Map names and top-line sta
 for (const theme of ['light', 'dark'] as const) test(`Getting around preserves the Map while peeking and focusing in ${theme}`, async ({ page, origin }) => {
   const denied: string[] = [];
   await route(page.context(), origin, denied);
-  await openApp(page, origin, { ...frameSpec('1a'), theme, rail: false, hoverMsg: undefined });
+  await openApp(page, origin, { ...frameSpec('1a'), theme });
   const root = page.locator('.tree-item.tree-item-root').first(), scroller = page.locator('.tree-scroll');
   const sourceId = await root.getAttribute('data-item-id');
   await root.click();
@@ -829,12 +799,12 @@ async function capture(page: Page, designPage: Page, spec: FrameSpec, id: string
     const shell = await page.evaluate(() => {
       const height = (selector: string) => document.querySelector(selector)?.getBoundingClientRect().height ?? null;
       const columns = [...document.querySelector('.shell-body')!.children].map(child => ({
-        name: ['waiting', 'center', 'detail'].find(name => child.classList.contains(`shell-${name}`)) ?? 'rail',
+        name: ['waiting', 'center', 'detail'].find(name => child.classList.contains(`shell-${name}`)) ?? 'unknown',
         x: child.getBoundingClientRect().x, width: child.getBoundingClientRect().width }));
       return { header: height('.shell-header'), tabs: height('.shell-tabs'), footer: height('.shell-footer'), columns };
     });
     expect(shell.header).toBe(48); expect(shell.tabs).toBe(38); expect(shell.footer).toBe(30);
-    const fixed: Record<string, number> = { waiting: 300, detail: 400, rail: 240 };
+    const fixed: Record<string, number> = { waiting: 300, detail: 400 };
     for (const column of shell.columns) {
       if (column.name === 'center') expect(column.width, 'centre column').toBeGreaterThanOrEqual(560);
       else expect(column.width, `${column.name} column`).toBe(fixed[column.name]);
@@ -849,7 +819,7 @@ async function capture(page: Page, designPage: Page, spec: FrameSpec, id: string
     // Each body column's own ratio, so a view can be followed apart from the columns around it.
     const columns = await page.evaluate(() => [...document.querySelector('.shell-body')!.children].map(child => {
       const rect = child.getBoundingClientRect();
-      return { name: ['waiting', 'center', 'detail'].find(name => child.classList.contains(`shell-${name}`)) ?? 'rail',
+      return { name: ['waiting', 'center', 'detail'].find(name => child.classList.contains(`shell-${name}`)) ?? 'unknown',
         x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
     }));
     const canvas = await page.context().newPage();

@@ -216,7 +216,6 @@
                 "archived": false,
                 "hide_later": false
               },
-              "rail": "waiting",
               "scroll": {
                 "item_id": null,
                 "offset": 0.0

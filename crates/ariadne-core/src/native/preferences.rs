@@ -2,27 +2,79 @@
 use super::errors;
 use crate::*;
 use ariadne_domain::models::*;
-use ariadne_store::{registry::Registry, session::StoreError};
+use ariadne_store::{registry::Registry, session::StoreError, ui::UiFile};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256 as Hasher};
 use std::collections::{BTreeMap, BTreeSet};
 
+// Older ui.json snapshots retain this retired view field. Keep patch DTOs strict,
+// accept only this legacy snapshot key. The disk adapter writes hidden for
+// strict older binaries; API snapshots remain rail-less.
+pub(crate) fn session_preferences_without_legacy_rail<'de, D>(
+    deserializer: D,
+) -> Result<Vec<SessionPreferences>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LegacySessionPreferences {
+        #[serde(default, rename = "rail")]
+        _rail: Option<serde::de::IgnoredAny>,
+        #[serde(flatten)]
+        preferences: SessionPreferences,
+    }
+    Vec::<LegacySessionPreferences>::deserialize(deserializer).map(|sessions| {
+        sessions
+            .into_iter()
+            .map(|session| session.preferences)
+            .collect()
+    })
+}
+
 const RECEIPT_WINDOW: usize = 256;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record {
     // This canonical field is the sole authoritative file schema version.
+    #[serde(serialize_with = "serialize_disk_snapshot")]
     snapshot: PreferencesSnapshot,
     operations: Vec<Operation>,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Operation {
     actor_scope: ReceiptActorScope,
     operation_id: UuidV4,
     command_digest: Sha256,
     result: PreferencesPatchedReceipt,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecoveryRecord {
+    schema_version: SchemaVersion,
+    resolved_input_ids: Vec<UuidV4>,
+    operations: Vec<Operation>,
+}
+
+fn serialize_disk_snapshot<S: serde::Serializer>(
+    snapshot: &PreferencesSnapshot,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut value = serde_json::to_value(snapshot).map_err(serde::ser::Error::custom)?;
+    value
+        .as_object_mut()
+        .expect("typed snapshot")
+        .remove("resolved_unsent_input_ids");
+    for session in value["sessions"].as_array_mut().expect("typed sessions") {
+        session
+            .as_object_mut()
+            .expect("typed session")
+            .insert("rail".into(), serde_json::json!("hidden"));
+    }
+    value.serialize(serializer)
 }
 
 pub struct PreferencesService<'a> {
@@ -36,7 +88,7 @@ impl<'a> PreferencesService<'a> {
     pub fn get(&self, context: &OwnerContext) -> Result<PreferencesSnapshot, CoreError> {
         owner(context)?;
         self.registry
-            .with_ui_file(|file| Ok(decode(file.bytes(), &file.path())?.snapshot))
+            .with_ui_file(|mut file| Ok(load(&mut file)?.0.snapshot))
             .map_err(failure)
     }
 
@@ -61,15 +113,12 @@ impl<'a> PreferencesService<'a> {
         ).expect("typed normalized preferences"))))
         .expect("SHA256");
         self.registry
-            .with_ui_file(|file| {
-                let mut record = decode(file.bytes(), &file.path())?;
-                if let Some(saved) = record
-                    .operations
-                    .iter()
-                    .find(|entry| &entry.operation_id == op_id)
-                {
-                    return if saved.command_digest == digest {
-                        Ok(saved.result.clone())
+            .with_ui_file(|mut file| {
+                let (mut record, mut recovery) = load(&mut file)?;
+                let saved: Vec<_> = record.operations.iter().chain(&recovery.operations).filter(|entry| &entry.operation_id == op_id).collect();
+                if !saved.is_empty() {
+                    return if saved.iter().all(|entry| entry.command_digest == digest) {
+                        Ok(saved[0].result.clone())
                     } else {
                         Err(Failure::Core(errors::local(
                             CoreErrorCode::OperationReused,
@@ -111,25 +160,26 @@ impl<'a> PreferencesService<'a> {
                     operation_id: op_id.clone(),
                     preferences_revision: record.snapshot.revision,
                 };
-                record.operations.push(Operation {
+                let operation = Operation {
                     actor_scope: ReceiptActorScope::Owner {},
                     operation_id: op_id.clone(),
                     command_digest: digest,
                     result: result.clone(),
-                });
-                if record.operations.len() > RECEIPT_WINDOW {
-                    record
-                        .operations
-                        .drain(..record.operations.len() - RECEIPT_WINDOW);
-                }
+                };
+                record.operations.push(operation.clone());
+                trim(&mut record.operations);
                 validate(&record).map_err(Failure::Core)?;
-                let bytes = serde_json::to_vec_pretty(&record).map_err(|_| {
-                    Failure::Core(errors::local(
-                        CoreErrorCode::InvalidArgument,
-                        "Preferences cannot be serialized",
-                    ))
-                })?;
-                file.publish(&bytes, op_id)?;
+                let bytes = encode(&record)?;
+                if params.entries.iter().any(|entry| matches!(entry, PreferencesPatchEntry::ResolveUnsentInput { .. })) {
+                    recovery.resolved_input_ids = record.snapshot.resolved_unsent_input_ids.clone();
+                    recovery.operations.push(operation);
+                    trim(&mut recovery.operations);
+                    validate_recovery(&recovery).map_err(Failure::Core)?;
+                    file.publish_recovery(&encode(&recovery)?, op_id)?;
+                    file.publish_current(&bytes, op_id).map_err(|_| Failure::Store(StoreError::CommitUncertain { operation_id: Some(op_id.clone()) }))?;
+                } else {
+                    file.publish_current(&bytes, op_id)?;
+                }
                 Ok(result)
             })
             .map_err(failure)
@@ -182,11 +232,142 @@ fn defaults() -> PreferencesSnapshot {
         later: vec![],
         drafts: vec![],
         seen: vec![],
+        resolved_unsent_input_ids: vec![],
     }
 }
 fn one() -> SchemaVersion {
     SchemaVersion::new(1).expect("literal")
 }
+
+fn trim(operations: &mut Vec<Operation>) {
+    if operations.len() > RECEIPT_WINDOW {
+        operations.drain(..operations.len() - RECEIPT_WINDOW);
+    }
+}
+
+fn encode(value: &impl Serialize) -> Result<Vec<u8>, Failure> {
+    serde_json::to_vec_pretty(value).map_err(|_| {
+        Failure::Core(errors::local(
+            CoreErrorCode::InvalidArgument,
+            "Preferences cannot be serialized",
+        ))
+    })
+}
+
+fn validate_recovery(record: &RecoveryRecord) -> Result<(), CoreError> {
+    validate_resolved(&record.resolved_input_ids)?;
+    if record.schema_version != one()
+        || record.operations.is_empty()
+        || record.operations.len() > RECEIPT_WINDOW
+    {
+        return Err(errors::local(
+            CoreErrorCode::InvalidArgument,
+            "Invalid recovery ledger",
+        ));
+    }
+    let mut ids = BTreeSet::new();
+    let mut revision = 1;
+    for saved in &record.operations {
+        if !matches!(saved.actor_scope, ReceiptActorScope::Owner {})
+            || !ids.insert(&saved.operation_id)
+            || saved.result.operation_id != saved.operation_id
+            || saved.result.preferences_revision.value() <= revision
+        {
+            return Err(errors::local(
+                CoreErrorCode::InvalidArgument,
+                "Invalid recovery receipt history",
+            ));
+        }
+        revision = saved.result.preferences_revision.value();
+    }
+    Ok(())
+}
+
+fn validate_resolved(ids: &[UuidV4]) -> Result<(), CoreError> {
+    if ids.len() > RESOLVED_UNSENT_INPUT_CAPACITY {
+        return Err(errors::local(
+            CoreErrorCode::CapacityExceeded,
+            "Resolved unsent inputs exceed the 10000 entry bound",
+        ));
+    }
+    let mut unique = BTreeSet::new();
+    if !ids.iter().all(|id| unique.insert(id)) {
+        return Err(errors::local(
+            CoreErrorCode::InvalidArgument,
+            "Duplicate resolved unsent input",
+        ));
+    }
+    Ok(())
+}
+
+/// The companion is authoritative for markers. Its last receipt is also the
+/// recoverable revision projection if publication stopped between the two files.
+fn load(file: &mut UiFile<'_>) -> Result<(Record, RecoveryRecord), Failure> {
+    let original = decode(file.bytes(), &file.path())?;
+    let Some(bytes) = file.recovery_bytes() else {
+        return Ok((original, empty_recovery()));
+    };
+    let recovery =
+        serde_json::from_slice::<RecoveryRecord>(bytes).map_err(|_| corrupt(&file.recovery_path()));
+    let attempt = recovery.and_then(|recovery| {
+        validate_recovery(&recovery).map_err(Failure::Core)?;
+        project_recovery(file, original.clone(), recovery)
+    });
+    match attempt {
+        Ok(records) => Ok(records),
+        Err(_) => {
+            file.discard_recovery();
+            Ok((original, empty_recovery()))
+        }
+    }
+}
+
+fn empty_recovery() -> RecoveryRecord {
+    RecoveryRecord {
+        schema_version: one(),
+        resolved_input_ids: vec![],
+        operations: vec![],
+    }
+}
+
+fn project_recovery(
+    file: &mut UiFile<'_>,
+    mut record: Record,
+    recovery: RecoveryRecord,
+) -> Result<(Record, RecoveryRecord), Failure> {
+    record.snapshot.resolved_unsent_input_ids = recovery.resolved_input_ids.clone();
+    // Old binaries may publish an ordinary patch at the marker's intended
+    // revision. Its fields and history win; the durable marker still applies.
+    if let Some(pending) = recovery.operations.last() {
+        file.confirm_recovery(&pending.operation_id)?;
+        let wanted = pending.result.preferences_revision;
+        if record.snapshot.revision.value() < wanted.value() - 1 {
+            return Err(corrupt(&file.recovery_path()));
+        }
+        if record.snapshot.revision.value() == wanted.value() - 1 {
+            if record
+                .operations
+                .iter()
+                .any(|saved| saved.operation_id == pending.operation_id)
+            {
+                return Err(corrupt(&file.recovery_path()));
+            }
+            record.snapshot.revision = wanted;
+            record.operations.push(pending.clone());
+            trim(&mut record.operations);
+            validate(&record).map_err(|_| corrupt(&file.recovery_path()))?;
+            file.publish_current(&encode(&record)?, &pending.operation_id)
+                .map_err(|_| {
+                    Failure::Store(StoreError::CommitUncertain {
+                        operation_id: Some(pending.operation_id.clone()),
+                    })
+                })?;
+        }
+    }
+    validate(&record).map_err(|_| corrupt(&file.path()))?;
+    Ok((record, recovery))
+}
+
 fn decode(bytes: Option<&[u8]>, path: &std::path::Path) -> Result<Record, Failure> {
     let Some(bytes) = bytes else {
         return Ok(Record {
@@ -208,6 +389,11 @@ fn decode(bytes: Option<&[u8]>, path: &std::path::Path) -> Result<Record, Failur
         )));
     }
     let record: Record = serde_json::from_slice(bytes).map_err(|_| corrupt(path))?;
+    // Recovery markers belong exclusively to the durable companion, never an
+    // inline extension that an older binary would reject or discard.
+    if !record.snapshot.resolved_unsent_input_ids.is_empty() {
+        return Err(corrupt(path));
+    }
     validate(&record).map_err(|_| corrupt(path))?;
     if record.operations.is_empty() {
         return Err(corrupt(path));
@@ -219,6 +405,7 @@ fn corrupt(path: &std::path::Path) -> Failure {
 }
 fn validate(record: &Record) -> Result<(), CoreError> {
     let snapshot = &record.snapshot;
+    validate_resolved(&snapshot.resolved_unsent_input_ids)?;
     let mut operations = BTreeSet::new();
     let first_revision = snapshot
         .revision
@@ -301,24 +488,42 @@ fn validate(record: &Record) -> Result<(), CoreError> {
     entry_valid(PreferencesPatchEntry::SetGlobal {
         preferences: snapshot.global.clone(),
     })?;
-    let framed = ApplicationEnvelope::Success(SuccessEnvelope {
-        api_version: one(),
-        ok: SuccessFlag,
-        data: QueryResult::PreferencesGet(snapshot.clone()),
-    });
-    if serde_json::to_vec(&framed)
-        .map_err(|_| {
-            errors::local(
-                CoreErrorCode::InvalidArgument,
-                "Invalid preferences response",
-            )
-        })?
-        .len()
-        > 1024 * 1024
+    validate_preferences_response(snapshot)
+}
+
+pub(crate) fn validate_preferences_response(
+    snapshot: &PreferencesSnapshot,
+) -> Result<(), CoreError> {
+    validate_resolved(&snapshot.resolved_unsent_input_ids)?;
+    let framed = |snapshot| {
+        ApplicationEnvelope::Success(SuccessEnvelope {
+            api_version: one(),
+            ok: SuccessFlag,
+            data: QueryResult::PreferencesGet(snapshot),
+        })
+    };
+    let size = |snapshot| {
+        serde_json::to_vec(&framed(snapshot))
+            .map(|bytes| bytes.len())
+            .map_err(|_| {
+                errors::local(
+                    CoreErrorCode::InvalidArgument,
+                    "Invalid preferences response",
+                )
+            })
+    };
+    let mut ordinary = snapshot.clone();
+    ordinary.resolved_unsent_input_ids.clear();
+    // Receipt projection must not crowd out an old-valid snapshot when the
+    // revision gains a digit. Account for revision metadata in the same fixed
+    // recovery allowance, leaving the ordinary data budget unchanged.
+    ordinary.revision = PositiveSafeInteger::new(1).expect("literal");
+    if size(ordinary)? > PREFERENCES_RESPONSE_BYTES
+        || size(snapshot.clone())? > PREFERENCES_RESPONSE_BYTES + RECOVERY_RESPONSE_BYTES
     {
         return Err(errors::local(
             CoreErrorCode::CapacityExceeded,
-            "Preferences response exceeds the 1MiB canonical response budget; reduce this patch",
+            "Preferences response exceeds its 1MiB data budget or 400KiB recovery allowance; reduce this patch",
         ));
     }
     Ok(())
@@ -471,6 +676,16 @@ fn apply(
         }
         PreferencesPatchEntry::DeleteDraft { operation_id } => {
             snapshot.drafts.retain(|draft| &draft.op_id != operation_id)
+        }
+        PreferencesPatchEntry::ResolveUnsentInput { input_id } => {
+            if !snapshot.resolved_unsent_input_ids.contains(input_id) {
+                // Preserve insertion order. Only a new marker evicts the oldest;
+                // an existing ID is idempotent and never refreshes its position.
+                if snapshot.resolved_unsent_input_ids.len() == RESOLVED_UNSENT_INPUT_CAPACITY {
+                    snapshot.resolved_unsent_input_ids.remove(0);
+                }
+                snapshot.resolved_unsent_input_ids.push(input_id.clone());
+            }
         }
         PreferencesPatchEntry::MarkSeen {
             session,

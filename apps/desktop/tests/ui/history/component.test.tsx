@@ -1,12 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { useState } from 'react';
 import { DetailPath, ItemDetail } from '../../../src/ui/detail/ItemDetail';
-import { MessageRail } from '../../../src/ui/rail/MessageRail';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { withdrawn } from '../../../src/selectors/waiting/stuck';
 import { immutable } from '../../../src/data';
-import { extraMessage, setup } from './fixtures';
+import { setup } from './fixtures';
 import { notices } from '../../../src/ui/pages/notices';
 
 const copy = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
@@ -16,11 +14,7 @@ async function ready(change?: (session: ReturnType<typeof setup>['transport']['s
   const value = setup(); opened.push(value); change?.(value.transport.session); await value.store.refresh(); return value;
 }
 afterEach(() => { cleanup(); opened.splice(0).forEach(value => value.sessions.closeAll()); notices.clear(); vi.restoreAllMocks(); copy.mockClear(); });
-type FixtureSession = ReturnType<typeof setup>['transport']['session'];
-/** The rail keeps cancellations; only an edited message sent again leaves the history. */
-const shown = (session: FixtureSession) => session.messages.filter(message => !withdrawn(immutable(session), immutable(message))).length;
-
-describe('cancelled owner text in the chat and Messages', () => {
+describe('cancelled owner text in the item conversation', () => {
   it.each([
     { cause: 'owner' as const, attempted: false }, { cause: 'owner' as const, attempted: true },
     { cause: undefined, attempted: false }, { cause: undefined, attempted: true },
@@ -28,7 +22,7 @@ describe('cancelled owner text in the chat and Messages', () => {
     { cause: 'topic_archived' as const, attempted: false }, { cause: 'topic_archived' as const, attempted: true },
     { cause: 'session_closed' as const, attempted: false }, { cause: 'session_closed' as const, attempted: true },
   ])('keeps and labels the complete text for cause $cause, after an attempt: $attempted', async ({ cause, attempted }) => {
-    const body = '  Cancelled owner words\nKeep every line and trailing spaces  ', highlight = vi.fn();
+    const body = '  Cancelled owner words\nKeep every line and trailing spaces  ';
     const value = await ready(session => {
       const input = session.inputs['00000000-0000-4000-8000-000000000076']!;
       input.kind = 'reply'; input.state = 'cancelled'; input.cancel_cause = cause;
@@ -40,8 +34,7 @@ describe('cancelled owner text in the chat and Messages', () => {
     const line = cause === 'owner_edit' ? `Taken back to edit. ${warning}`
       : !attempted && cause === 'topic_archived' ? 'Not sent: cancelled when you archived this topic'
       : !attempted && cause === 'session_closed' ? 'Not sent: cancelled when you closed this session' : warning;
-    render(<><ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="4" later={false} onOpenItem={vi.fn()} />
-      <MessageRail {...value} onHighlight={highlight} /></>);
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="4" later={false} onOpenItem={vi.fn()} />);
     const chat = await screen.findByRole('region', { name: 'Conversation' });
     const turn = chat.querySelector<HTMLElement>(`[data-message-id="${input.message_id}"]`)!;
     expect(turn).not.toBeNull(); expect(turn.classList.contains('detail-turn-cancelled')).toBe(true);
@@ -50,18 +43,6 @@ describe('cancelled owner text in the chat and Messages', () => {
     expect(turn.closest('[hidden], [aria-hidden="true"]')).toBeNull();
     fireEvent.click(within(turn).getByRole('button', { name: 'Copy message' }));
     expect(copy).toHaveBeenLastCalledWith(body);
-    const log = screen.getByRole('log');
-    const card = await waitFor(() => { const found = log.querySelector<HTMLElement>(`[data-message-id="${input.message_id}"]`); expect(found).not.toBeNull(); return found!; });
-    expect(card.querySelector('.pw-excerpt-text')!.textContent).toBe(body);
-    expect(card.parentElement!.classList.contains('pw-excerpt-cancelled')).toBe(true);
-    expect(card.parentElement!.textContent).toContain(line);
-    expect(card.closest('[hidden], [aria-hidden="true"]')).toBeNull();
-    if (cause === 'owner' || cause === undefined) {
-      fireEvent.click(within(card.parentElement!).getByRole('button', { name: 'Copy message' }));
-      expect(copy).toHaveBeenLastCalledWith(body);
-    }
-    fireEvent.click(card);
-    expect(highlight).toHaveBeenLastCalledWith(new Set([input.target.item_id]), new Set([input.message_id]));
   });
 });
 
@@ -69,16 +50,13 @@ describe('item detail panel', () => {
   const panel = (value: Awaited<ReturnType<typeof ready>>, itemId = '1', open = vi.fn()) =>
     <ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId={itemId} later={false} onOpenItem={open} />;
 
-  it('names the agent in an earlier session’s message numbers, in the detail and the rail', async () => {
+  it('names the agent in an earlier session’s message numbers', async () => {
     const value = await ready(), session = value.transport.session, item = session.items['1']!;
     const created = session.messages.find(message => message.id === item.created_message_id)!;
-    render(<><ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={vi.fn()} earlierAgent="codex" />
-      <MessageRail {...value} onHighlight={() => {}} earlierAgent="codex" /></>);
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={vi.fn()} earlierAgent="codex" />);
     await screen.findByRole('heading', { name: item.question });
     expect(screen.getByText(`Decision · next action: you · raised in codex #${created.number}`)).toBeTruthy();
     expect(within(screen.getByRole('region', { name: 'Conversation' })).getAllByText(`codex #${created.number}`).length).toBeGreaterThan(0);
-    const log = await screen.findByRole('log');
-    await waitFor(() => expect(log.querySelector(`[data-message-id="${created.id}"] .pw-excerpt-number`)?.textContent).toBe(`codex #${created.number}`));
   });
 
   it('reads every section from the session snapshot in the handoff order', async () => {
@@ -209,17 +187,15 @@ describe('item detail panel', () => {
     expect(chat.textContent).toContain('The full history is retained.');
   });
 
-  it('keeps rail highlights and parent provenance on the single transcript', async () => {
+  it('keeps parent provenance on the single transcript', async () => {
     const value = await ready(), session = value.transport.session, item = session.items['1.1']!, open = vi.fn();
-    const highlights = new Set([item.created_message_id]);
-    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId={item.id} later={false} onOpenItem={open} highlightedMessageIds={highlights} />);
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId={item.id} later={false} onOpenItem={open} />);
     const chat = await screen.findByRole('region', { name: 'Conversation' });
     expect(within(chat).getByText('Parent raised here')).toBeTruthy();
     expect(within(chat).getByText('Agent raised this')).toBeTruthy();
     const parent = session.items[item.parent!]!;
     expect(chat.querySelector(`[data-message-id="${parent.created_message_id}"]`)!.textContent).toContain(parent.question);
     const raised = chat.querySelector(`[data-message-id="${item.created_message_id}"]`)!;
-    expect(raised.classList.contains('excerpt-highlighted')).toBe(true);
     expect(chat.querySelectorAll('li[data-message-id]')).toHaveLength(2);
     expect(within(raised as HTMLElement).getByRole('button', { name: 'Copy message' })).toBeTruthy();
   });
@@ -277,170 +253,34 @@ describe('item detail panel', () => {
   });
 });
 
-describe('complete message rail', () => {
-  it('accepts ordinary inline parent callbacks without republishing unchanged selection, then updates the latest callback and cleans up once', async () => {
-    const value = await ready();
-    let renders = 0, calls = 0;
-    const cleanupCalls: ReadonlySet<string>[] = [];
-    function Parent() {
-      const [selection, setSelection] = useState({ items: new Set<string>(), messages: new Set<string>() });
-      const [generation, setGeneration] = useState(1);
-      ++renders;
-      return <><button type="button" onClick={() => setGeneration(current => current + 1)}>New parent callback</button>
-        <output aria-label="Parent highlights">{generation}:{[...selection.items].join(',')}:{[...selection.messages].join(',')}</output>
-        <MessageRail {...value} onHighlight={(items, messages) => {
-          ++calls;
-          if (generation === 2) cleanupCalls.push(messages);
-          setSelection({ items: new Set(items), messages: new Set(messages) });
-        }} /></>;
-    }
-    const rendered = render(<Parent />);
-    const log = screen.getByRole('log');
-    await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(value.transport.session)));
-    expect(renders).toBeLessThan(10);
-    const before = calls;
-    fireEvent.click(screen.getByRole('button', { name: 'New parent callback' }));
-    expect(calls).toBe(before);
-    const message = value.transport.session.messages.find(message => message.item_id === '1')!;
-    const card = log.querySelector(`[data-message-id="${message.id}"]`)!;
-    fireEvent.mouseEnter(card);
-    expect(screen.getByLabelText('Parent highlights').textContent).toBe(`2:1:${message.id}`);
-    expect(calls).toBe(before + 1);
-    expect(cleanupCalls.at(-1)).toEqual(new Set([message.id]));
-    fireEvent.click(card);
-    fireEvent.mouseLeave(card);
-    expect(card.classList.contains('pw-excerpt-active')).toBe(true);
-    expect(card.getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByLabelText('Parent highlights').textContent).toBe(`2:1:${message.id}`);
-    const beforeUnmount = calls;
-    rendered.unmount();
-    expect(calls).toBe(beforeUnmount + 1);
-    expect(cleanupCalls.at(-1)).toEqual(new Set());
-  });
-  it('cross-highlights the items a message touched on hover and pin, and the messages of the selected or hovered item', async () => {
-    const value = await ready(), highlight = vi.fn();
-    const rendered = render(<MessageRail {...value} selectedItemId="2" onHighlight={highlight} />);
-    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(value.transport.session)));
-    const message = value.transport.session.messages.find(message => message.item_id === '1')!;
-    const card = log.querySelector(`[data-message-id="${message.id}"]`)!;
-    fireEvent.mouseEnter(card);
-    expect(highlight).toHaveBeenLastCalledWith(new Set(['1']), new Set([message.id]));
-    fireEvent.click(card); fireEvent.mouseLeave(card);
-    expect(card.classList.contains('pw-excerpt-active')).toBe(true);
-    expect(highlight).toHaveBeenLastCalledWith(new Set(['1']), new Set([message.id]));
-    const selected = value.transport.session.messages.find(message => message.item_id === '2')!;
-    expect(log.querySelector(`[data-message-id="${selected.id}"]`)!.classList.contains('pw-excerpt-highlight')).toBe(true);
-    // A hovered item takes over from the selected one (Ariadne.dc.html:2082).
-    rendered.rerender(<MessageRail {...value} selectedItemId="2" hoveredItemId="1" onHighlight={highlight} />);
-    expect(log.querySelector(`[data-message-id="${selected.id}"]`)!.classList.contains('pw-excerpt-highlight')).toBe(false);
-    fireEvent.click(card);
-    expect(card.getAttribute('aria-pressed')).toBe('false');
-    expect(highlight).toHaveBeenLastCalledWith(new Set(), new Set());
-    rendered.unmount(); expect(highlight).toHaveBeenLastCalledWith(new Set(), new Set());
-  });
-  it('shows the handoff header, follow state and excerpt meta', async () => {
-    const value = await ready(), close = vi.fn();
-    render(<MessageRail {...value} onHighlight={vi.fn()} onClose={close} />);
-    const rail = screen.getByRole('complementary', { name: 'Messages' });
-    await waitFor(() => expect(rail.querySelectorAll('[data-message-id]')).toHaveLength(shown(value.transport.session)));
-    expect(within(rail).getByText(String(shown(value.transport.session)), { selector: '.pw-rail-count' })).toBeTruthy();
-    expect(within(rail).getByRole('button', { name: 'Following latest' })).toBeTruthy();
-    const first = value.transport.session.messages[0]!;
-    const card = rail.querySelector(`[data-message-id="${first.id}"]`)!;
-    expect(card.querySelector('.pw-excerpt-number')!.textContent).toBe(`#${first.number}`);
-    expect(card.querySelector('.pw-excerpt-who')!.textContent).toBe(first.author === 'owner' ? 'You' : first.author === 'agent' ? 'Agent' : 'System');
-    fireEvent.click(within(rail).getByRole('button', { name: 'Hide messages' }));
-    expect(close).toHaveBeenCalledOnce();
-  });
-  it('keeps a queued message visible when the owner deletes it, and changes its label immediately', async () => {
-    const value = await ready(), session = value.transport.session;
-    render(<MessageRail {...value} onHighlight={vi.fn()} />);
-    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(session)));
-    const queued = Object.values(session.inputs).find(input => input?.state === 'queued' && input.attempts.length === 0 && input.kind !== 'continue')!;
-    const message = session.messages.find(message => message.id === queued.message_id)!;
-    expect(log.querySelector(`[data-message-id="${queued.message_id}"]`)).not.toBeNull();
-    queued.state = 'cancelled'; queued.cancel_cause = 'owner'; session.revision++;
+describe('item reply cancellation updates', () => {
+  it.each([
+    { cause: 'owner' as const, line: 'Cancelled before it reached the agent' },
+    { cause: 'topic_archived' as const, line: 'Not sent: cancelled when you archived this topic' },
+    { cause: 'session_closed' as const, line: 'Not sent: cancelled when you closed this session' },
+  ])('keeps the exact queued reply when $cause cancels it and updates its label', async ({ cause, line }) => {
+    const body = '  **Queued owner words**\nKeep every line and trailing spaces  ';
+    const value = await ready(session => {
+      const input = session.inputs['00000000-0000-4000-8000-000000000076']!;
+      input.kind = 'reply'; input.state = 'queued'; input.attempts = []; delete input.cancel_cause;
+      input.payload.text = body;
+      session.messages.find(message => message.id === input.message_id)!.body = body;
+    });
+    const session = value.transport.session, input = session.inputs['00000000-0000-4000-8000-000000000076']!;
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="4" later={false} onOpenItem={vi.fn()} />);
+    const chat = await screen.findByRole('region', { name: 'Conversation' });
+    expect(chat.querySelector(`[data-pending="${input.id}"]`)!.textContent).toContain('Not sent yet');
+    input.state = 'cancelled'; input.cancel_cause = cause; session.revision++;
     await act(() => value.store.refresh());
-    await waitFor(() => expect(log.querySelector(`[data-message-id="${queued.message_id}"]`)!.parentElement!.textContent).toContain('Cancelled before it reached the agent'));
-    expect(log.querySelector(`[data-message-id="${queued.message_id}"]`)!.textContent).toContain(message.body);
-    expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(session));
-  });
-  it('keeps a message that archive or close cancelled, marked as not sent', async () => {
-    const value = await ready(), session = value.transport.session;
-    render(<MessageRail {...value} onHighlight={vi.fn()} />);
-    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(session)));
-    const queued = Object.values(session.inputs).find(input => input?.state === 'queued' && input.attempts.length === 0 && input.kind !== 'continue')!;
-    queued.state = 'cancelled'; queued.cancel_cause = 'topic_archived'; session.revision++;
-    await act(() => value.store.refresh());
-    const card = await waitFor(() => { const found = log.querySelector(`[data-message-id="${queued.message_id}"]`); expect(found).not.toBeNull(); return found!; });
-    // The Not sent line sits beside the message button, in the same group.
-    expect(card.parentElement!.textContent).toContain('Not sent: cancelled when you archived this topic');
-  });
-  it('offers Put back on a topic reply that archive cancelled, in the rail too', async () => {
-    const value = await ready(), session = value.transport.session, drafts = new OwnerDraftStore(value.service);
-    render(<MessageRail {...value} drafts={drafts} onHighlight={vi.fn()} />);
-    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(session)));
-    const queued = Object.values(session.inputs).find(input => input?.state === 'queued' && input.attempts.length === 0 && input.kind !== 'continue')!;
-    const topicId = queued.target.topic_id;
-    queued.kind = 'topic_reply'; queued.target = { topic_id: topicId, item_id: null };
-    queued.state = 'cancelled'; queued.cancel_cause = 'topic_archived'; session.revision++;
-    await act(() => value.store.refresh());
-    const card = await waitFor(() => { const found = log.querySelector(`[data-message-id="${queued.message_id}"]`); expect(found).not.toBeNull(); return found!; });
-    // The button shows wherever the Not sent line shows.
-    expect(card.parentElement!.textContent).toContain('Not sent: cancelled when you archived this topic');
-    expect(within(card.parentElement!).getByRole('button', { name: 'Put back in reply box' })).toBeTruthy();
-  });
-  it('an update landing before the scroll event is delivered does not yank a reader scrolled up', async () => {
-    const value = await ready();
-    render(<MessageRail {...value} onHighlight={vi.fn()} />);
-    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(value.transport.session)));
-    Object.defineProperties(log, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, value: 200 } });
-    log.scrollTop = 800; fireEvent.scroll(log);
-    log.scrollTop = 250; // programmatic scroll whose scroll event has not been dispatched yet
-    value.transport.session.messages.push(extraMessage(value.transport.session, 16));
-    value.transport.session.revision = 22;
-    await act(() => value.store.refresh());
-    await screen.findByRole('button', { name: '1 new message · Jump to latest' });
-    expect(log.scrollTop).toBe(250);
-  });
-  it('upward scrolling pauses follow; new messages count without changing focus/scroll until an explicit jump', async () => {
-    const value = await ready();
-    render(<><input aria-label="Unsent draft" defaultValue="exact draft  " /><MessageRail {...value} onHighlight={vi.fn()} /></>);
-    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(value.transport.session)));
-    Object.defineProperties(log, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, value: 200 } });
-    log.scrollTop = 800; fireEvent.scroll(log); log.scrollTop = 250; fireEvent.scroll(log);
-    const input = screen.getByLabelText('Unsent draft'); input.focus();
-    value.transport.session.messages.push(extraMessage(value.transport.session, 16), extraMessage(value.transport.session, 17));
-    value.transport.session.revision = 22;
-    await act(() => value.store.refresh());
-    await screen.findByRole('button', { name: '2 new messages · Jump to latest' });
-    expect(log.scrollTop).toBe(250); expect(document.activeElement).toBe(input); expect((input as HTMLInputElement).value).toBe('exact draft  ');
-    fireEvent.click(screen.getByRole('button', { name: '2 new messages · Jump to latest' }));
-    expect(log.scrollTop).toBe(1000); expect(screen.queryByRole('button', { name: /Jump to latest/ })).toBeNull();
-    expect(document.activeElement).toBe(input);
-    value.transport.session.messages.push(extraMessage(value.transport.session, 18)); value.transport.session.revision = 23;
-    await act(() => value.store.refresh());
-    await screen.findByText('New exact message 18');
-    expect(screen.queryByRole('button', { name: /Jump to latest/ })).toBeNull();
-  });
-  it('a scrollTop that shrank only because the viewport grew keeps following after a jump', async () => {
-    const value = await ready();
-    render(<MessageRail {...value} onHighlight={vi.fn()} />);
-    const log = screen.getByRole('log'); await waitFor(() => expect(log.querySelectorAll('[data-message-id]')).toHaveLength(shown(value.transport.session)));
-    Object.defineProperties(log, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, writable: true, value: 200 } });
-    log.scrollTop = 800; fireEvent.scroll(log); log.scrollTop = 250; fireEvent.scroll(log);
-    value.transport.session.messages.push(extraMessage(value.transport.session, 16));
-    value.transport.session.revision = 22;
-    await act(() => value.store.refresh());
-    fireEvent.click(await screen.findByRole('button', { name: '1 new message · Jump to latest' }));
-    expect(log.scrollTop).toBe(1000);
-    // The Jump button unmounted; the viewport grew, so the browser clamped scrollTop but it is still at the bottom.
-    Object.defineProperty(log, 'clientHeight', { configurable: true, value: 240 });
-    log.scrollTop = 760;
-    value.transport.session.messages.push(extraMessage(value.transport.session, 17)); value.transport.session.revision = 23;
-    await act(() => value.store.refresh());
-    await screen.findByText('New exact message 17');
-    expect(screen.queryByRole('button', { name: /Jump to latest/ })).toBeNull();
-    expect(log.scrollTop).toBe(1000);
+    const turn = await waitFor(() => {
+      const found = chat.querySelector<HTMLElement>(`li[data-message-id="${input.message_id}"]`);
+      expect(found?.textContent).toContain(line); return found!;
+    });
+    expect(turn.classList.contains('detail-turn-cancelled')).toBe(true);
+    expect(turn.textContent).toContain('Queued owner words');
+    expect(turn.textContent).toContain('Keep every line and trailing spaces');
+    expect(chat.querySelector(`[data-pending="${input.id}"]`)).toBeNull();
+    fireEvent.click(within(turn).getByRole('button', { name: 'Copy message' }));
+    expect(copy).toHaveBeenLastCalledWith(body);
   });
 });

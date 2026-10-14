@@ -30,8 +30,8 @@ Contents:
 - **A tree of topics and items.** Each question is an item with its options, the
   agent's replies and its status, so you see what was asked, decided and dropped.
 - **A graph view** of the same items, to see how far one question branched.
-- **Full history per item**, in rounds, plus a message rail to see which messages
-  touched which item.
+- **Full history per item**, in rounds, with the complete conversation in item
+  detail.
 - **No guessing after a failed delivery.** If Ariadne cannot confirm a message
   arrived, it stops and asks you what to do. It never resends on its own.
 - **Local only.** Your data is plain files on your Mac. No account, no cloud, no
@@ -270,8 +270,8 @@ the PR on its own. Fix does not post a reply or push your change.
 - **Item detail.** Shows the question, its options and the full replies. Type
   your answer in your own words or pick an option, then send. Ariadne saves your
   answer at once. The agent replies on the item and the history is kept.
-- **Message rail.** The side column with the conversation history. Toggle it from
-  the top bar.
+- **Terminal chat.** The agent's general conversation stays in its terminal;
+  each item's replies and history stay in item detail.
 - **Search box** in the top bar filters items. The sun/moon button cycles the
   theme (system, light, dark).
 - **Menu-bar icon.** Shows how many questions wait on you and lists the oldest.
@@ -309,7 +309,8 @@ holds those files.
 Ariadne never resends something on its own. If a message cannot be confirmed, it
 stops and asks you. Look for **Delivery needs attention** and click **Review
 recovery**. Pick from **Recovery choice**, type a reason, then click **Save
-recovery decision**.
+recovery decision**. Persistent unsent-message notices and recovery actions
+remain available in the main window.
 
 | State you see | What it means | What you can choose |
 |---|---|---|

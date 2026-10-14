@@ -3815,6 +3815,13 @@
             "$ref": "#/$defs/ItemRoute"
           }
         },
+        "resolved_unsent_input_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UuidV4"
+          },
+          "maxItems": 10000
+        },
         "revision": {
           "$ref": "#/$defs/PositiveSafeInteger"
         },
@@ -4236,15 +4243,6 @@
         "item_status_history",
         "item_updated_messages",
         "item_changes"
-      ]
-    },
-    "RailView": {
-      "type": "string",
-      "enum": [
-        "waiting",
-        "sent",
-        "activity",
-        "hidden"
       ]
     },
     "ReceiptActorScope": {
@@ -5626,9 +5624,6 @@
             "$ref": "#/$defs/ItemRef"
           }
         },
-        "rail": {
-          "$ref": "#/$defs/RailView"
-        },
         "recent_items": {
           "type": "array",
           "items": {
@@ -5674,7 +5669,6 @@
         "tab_order",
         "expanded_item_ids",
         "filters",
-        "rail",
         "scroll"
       ]
     },

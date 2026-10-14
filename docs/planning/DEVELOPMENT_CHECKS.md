@@ -19,13 +19,20 @@ selector. Changes confined to Rust sources or Cargo manifests in crates/desktop
 Rust, root Cargo/toolchain files, Markdown documentation and the static task/chart
 metadata skip that capture. Frontend, design, asset, browser-test, Node dependency/
 configuration and other paths retain it; missing bases and manual full runs capture.
-The current history/rail components, their local CSS and the existing desktop
+The current item-detail history components, their local CSS and the existing desktop
 history test directory also skip capture: the reference gallery imports only its
 reference components/styles and does not load these modules. Remove this narrow
 exception when the gallery starts importing them. Other product modules retain
 capture; this is not a general frontend exemption.
 Application tests, frontend build/lint/types, weighted Rust+web coverage, Clippy,
 native WebView smoke and selected packaged release checks run independently.
+
+Alpha.15 removes the Messages pane from current frame specifications and the
+reference adapter. Parity checks and screenshot thresholds still apply to the
+remaining layout. History acceptance uses the item-detail Conversation; topic
+replies and lifecycle messages without an item conversation remain stored and
+unshown. Historical `.delivery/` evidence and earlier removal/parity records stay
+intact.
 
 CI runs three parallel matrix jobs (`quality / static`, `quality / coverage`,
 `quality / native`), each `scripts/check-commit.py --ci ... --stage <name>`

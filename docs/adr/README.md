@@ -125,3 +125,6 @@ accepted, completed attempt still saves its answer and handles the input.
 [ADR-0099](ADR-0099-knowledge-transfer-records.md) adds typed item connections,
 bounded change records, topic briefs and owner seen state, and keeps a window of
 the newest preference receipts.
+
+[ADR-0100](ADR-0100-downgrade-compatible-recovery-preferences.md) keeps alpha.14
+preference files readable while persisting unsent-message recovery completion.

@@ -84,7 +84,6 @@ export interface ItemDetailProps {
   readonly onOpenItem: (itemId: string) => void;
   readonly focusRequest?: OwnerFocusRequest;
   readonly onFocusRequestConsumed?: (token: number) => void;
-  readonly highlightedMessageIds?: ReadonlySet<string>;
   /** A send while the agent isn't running opens the "Agent isn't running" dialog (1ad). */
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
   /** Set for an earlier session's item: its message numbers read "codex #19" (shared/excerpt earlierAgent). */
@@ -214,7 +213,7 @@ function ItemLink({ link }: { readonly link: LinkView }) {
   return <div className="detail-link detail-link-plain">{body}</div>;
 }
 
-export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, highlightedMessageIds, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds, seen, answerJump, onAnswerJumpConsumed, onOpenAnswer }: ItemDetailProps) {
+export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds, seen, answerJump, onAnswerJumpConsumed, onOpenAnswer }: ItemDetailProps) {
   const current = useSession(store), session = current.snapshot?.session;
   const item = session?.items[itemId];
   const submit = useDetailSubmit(drafts, store, itemId);
@@ -561,7 +560,7 @@ export function ItemDetail({ drafts, store, itemId, later, onLater, onBring, onO
         {model.chat.map(entry => <li key={entry.id} data-message-id={entry.id} data-pending={entry.pending?.input.id}
           data-round={entry.asks[0]?.ordinal}
           data-owner-said={entry.you && !Object.values(session.inputs).some(input => input?.message_id === entry.id && input.state === 'cancelled') ? 'true' : undefined}
-          className={`detail-turn${entry.unsent ? ' detail-turn-cancelled' : ''}${entry.asks.some(ask => ask.now) ? ' detail-turn-now' : ''}${entry.pending ? ' detail-turn-pending' : ''}${highlightedMessageIds?.has(entry.id) ? ' excerpt-highlighted' : ''}`}>
+          className={`detail-turn${entry.unsent ? ' detail-turn-cancelled' : ''}${entry.asks.some(ask => ask.now) ? ' detail-turn-now' : ''}${entry.pending ? ' detail-turn-pending' : ''}`}>
           {entry.marker && <div className="detail-chat-marker">{entry.marker}</div>}
           <div className={`detail-msg${entry.you ? ' detail-msg-you' : ''}`}>
             <div className={`detail-bubble ${entry.you ? 'detail-bubble-you' : 'detail-bubble-agent'}`}>

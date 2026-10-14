@@ -11,14 +11,26 @@ pub struct PreferencesSnapshot {
     pub schema_version: SchemaVersion,
     pub revision: PositiveSafeInteger,
     pub global: GlobalPreferences,
+    #[serde(deserialize_with = "crate::native::session_preferences_without_legacy_rail")]
     pub sessions: Vec<SessionPreferences>,
     pub later: Vec<ItemRoute>,
     pub drafts: Vec<OwnerDraft>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[ts(as = "Option<Vec<SessionSeen>>", optional)]
     pub seen: Vec<SessionSeen>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = 10_000))]
+    #[ts(as = "Option<Vec<UuidV4>>", optional)]
+    pub resolved_unsent_input_ids: Vec<UuidV4>,
 }
 
+/// New IDs evict the oldest marker at capacity; existing IDs keep their order.
+pub const RESOLVED_UNSENT_INPUT_CAPACITY: usize = 10_000;
+/// Ordinary preferences retain their original envelope budget. Recovery IDs
+/// and revision metadata have a separate bounded allowance so older writers
+/// cannot crowd them out.
+pub const PREFERENCES_RESPONSE_BYTES: usize = 1024 * 1024;
+pub const RECOVERY_RESPONSE_BYTES: usize = 400 * 1024;
 pub const SEEN_ITEMS_CAPACITY: usize = 10_000;
 pub const SEEN_TOPICS_CAPACITY: usize = 1_024;
 
@@ -158,7 +170,6 @@ pub struct SessionPreferences {
     #[ts(as = "Option<Vec<ItemRef>>", optional)]
     pub hidden_item_ids: Vec<ItemRef>,
     pub filters: ViewFilters,
-    pub rail: RailView,
     pub scroll: Option<ScrollAnchor>,
     // Topic bands the owner folded in this session's tree.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -191,14 +202,6 @@ pub struct ViewFilters {
     pub topic_id: Option<UuidV4>,
     pub archived: bool,
     pub hide_later: bool,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum RailView {
-    Waiting,
-    Sent,
-    Activity,
-    Hidden,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
@@ -247,6 +250,9 @@ pub enum PreferencesPatchEntry {
     },
     DeleteDraft {
         operation_id: UuidV4,
+    },
+    ResolveUnsentInput {
+        input_id: UuidV4,
     },
     MarkSeen {
         session: SessionRef,

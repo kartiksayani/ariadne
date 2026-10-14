@@ -125,8 +125,9 @@ own final drop. This preserves drain order and introduces no early release or
 new dispatch authority.
 
 Ordinary App assembly reuses NavigationWorkspace and ReferenceWorkspace with
-optional Waiting and rail content, the existing detail slot, and explicit
-query/view/rail/theme callbacks. Default reference-gallery output remains stable.
+optional Waiting content, the existing item-detail conversation slot, and explicit
+query/view/theme callbacks. Reference-gallery comparisons retain parity for the
+remaining layout after the Alpha.15 Messages-pane removal.
 NavigationStore keeps canonical theme changes on its existing serialized
 preferences writer; graph display mode stays local because it is not a canonical
 session preference. Application-lifetime routing and recovery controllers share
@@ -173,16 +174,19 @@ saved concurrent operation wins over stale-preview rejection, and an unsaved
 preview. Source read/hash failures before that transaction remain uncertain.
 No new DTO or alternate mutation path is introduced.
 
-History/rail composition owns transient cross-highlights for the current session.
-`NavigationSentenceTree` and `SentenceTree` accept optional
-`highlightedItemIds: ReadonlySet<string>` and `onHoverItem(itemId: string | null)`
-props. Rail hover/pin uses its existing item/message refs to highlight both tree
-rows and detail messages; tree hover feeds the existing rail `hoveredItemId`.
-Selection retains its existing reveal route. Highlights never write preferences,
-change selection, move focus or scroll. Clear transient refs on session changes
-and view disposal; memoized rows must update when their highlight changes.
-The App owns this wiring, reusing existing TreeRow touched styling and rail
-callbacks. No CoreService, persisted DTO or second session reader is introduced.
+Alpha.15 removes the Messages pane and its transient cross-highlights by owner decision.
+Item conversations retain saved messages and cancellation recovery through
+`NotSentLine` and `putBackCancelled`; existing drafts are never overwritten.
+Topic replies and lifecycle history with no item conversation remain stored and
+unshown, without a replacement history surface. `selectors/history.ts::inItemConversation`
+identifies which messages already have reachable conversations.
+`UnsentMessageNotices` supplies persistent, dismissible recovery
+for cancelled editable owner messages without a conversation. Notices survive
+selection changes, use current loaded session state on recovery, and disappear
+only after confirmed recovery completion, resend or saved owner dismissal. Current session
+preferences omit rail state; persisted snapshots accept and ignore the retired
+field while keeping strict unknown-field validation elsewhere. Recovery notices
+show current restore/reopen prerequisites before stored action feedback.
 
 ### Claude installed-helper acceptance join
 

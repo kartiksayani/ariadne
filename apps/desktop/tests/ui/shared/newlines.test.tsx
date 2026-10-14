@@ -2,11 +2,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
-import { RailExcerpt } from '../../../src/ui/shared/MessageExcerpt';
 import { Markdown } from '../../../src/ui/shared/MarkdownText';
 
 // The agent's line breaks reach the screen: stored text is kept as written, Markdown turns bullets into
-// lists. Tree excerpts compact those blocks until expanded; message rail previews retain their breaks.
+// lists. Tree excerpts compact those blocks until expanded.
 afterEach(cleanup);
 const css = (path: string) => readFileSync(resolve(__dirname, '../../../src', path), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 const declarations = (file: string, selector: string) => [...css(file).matchAll(/([^{}]+)\{([^}]*)\}/g)]
@@ -14,13 +13,6 @@ const declarations = (file: string, selector: string) => [...css(file).matchAll(
 
 describe('line breaks in agent text', () => {
   const bullets = 'Done:\n- one\n- two\n- three';
-
-  it('are kept in the text of a message preview and laid out as written', () => {
-    const { container } = render(<RailExcerpt id="m1" view={{ number: '#1', author: 'agent', who: 'Agent', icon: 'ph ph-robot', when: '15:04', body: bullets }}
-      active={false} highlight={false} onHover={() => {}} onPin={() => {}} />);
-    expect(container.querySelector('.pw-excerpt-text')?.textContent).toBe(bullets);
-    expect(declarations('ui/shared/shared.css', '.pw-excerpt-text')).toMatch(/white-space:\s*pre-line/);
-  });
 
   it('compact excerpt blocks until expanded while titles keep their authored breaks', () => {
     expect(declarations('ui/tree/tree.css', '.tree-question')).toMatch(/white-space:\s*pre-line/);

@@ -307,8 +307,8 @@ describe('tree remove triggers', () => {
     const store = navigation.opened.open(route); await store.refresh();
     const actions = new SessionActionControllers(service).forSession(store), targets: RemoveTarget[] = [];
     const tree = <TreeView navigation={navigation} store={store} actions={actions} drafts={new OwnerDraftStore(service)} query="" reveal={null} selectedId={null}
-      detailOpen={false} railOpen={false} highlightedItems={new Set()} highlightedMessages={new Set()} summaries={[]}
-      onHoverItem={() => {}} onSelected={() => {}} onDismissReveal={() => {}} onResume={() => {}} onAct={() => {}}
+      detailOpen={false} summaries={[]}
+      onSelected={() => {}} onDismissReveal={() => {}} onResume={() => {}} onAct={() => {}}
       onClearFilters={() => {}} onShowArchive={() => {}} onRemove={target => { targets.push(target); }} />;
     render(queue ? <RemovalContext.Provider value={queue}>{tree}</RemovalContext.Provider> : tree);
     return { targets };

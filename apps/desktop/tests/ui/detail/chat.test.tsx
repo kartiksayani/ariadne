@@ -261,10 +261,9 @@ describe('the single item chat', () => {
   it('keeps the full reply once and shows both the choice and exact note in each owner bubble', async () => {
     const value = setup(); opened.push(value); await value.store.refresh();
     const session = value.transport.session, answer = session.answers[0]!;
-    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={vi.fn()} highlightedMessageIds={new Set([answer.message_id])} />);
+    render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={vi.fn()} />);
     const chat = await screen.findByRole('region', { name: 'Conversation' });
     const bubble = chat.querySelector(`[data-message-id="${answer.message_id}"]`)!;
-    expect(bubble.classList.contains('excerpt-highlighted')).toBe(true);
     expect(bubble.textContent).toContain('You chose “Keep complete history”');
     expect(bubble.textContent).toContain('Retain the full history, including earlier outcomes.');
     expect(chat.querySelectorAll(`[data-message-id="${answer.message_id}"]`)).toHaveLength(1);

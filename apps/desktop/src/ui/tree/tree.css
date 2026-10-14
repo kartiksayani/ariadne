@@ -579,28 +579,8 @@
   background: color-mix(in srgb, var(--color-text) 4%, transparent);
 }
 
-.tree-item[data-highlight="strong"] {
-  background: color-mix(in srgb, var(--color-accent) 9%, transparent);
-}
-
 .tree-item[aria-selected="true"] {
   background: color-mix(in srgb, var(--color-text) 7%, transparent);
-}
-
-.tree-mark {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 2px;
-}
-
-.tree-item[data-highlight="strong"] > .tree-mark {
-  background: color-mix(in srgb, var(--color-accent) 75%, transparent);
-}
-
-.tree-item[data-highlight="weak"] > .tree-mark {
-  background: color-mix(in srgb, var(--color-accent) 40%, transparent);
 }
 
 .tree-guide {
@@ -830,15 +810,6 @@
 
 .tree-collapsed:hover {
   background: color-mix(in srgb, var(--color-accent) 20%, var(--a-card));
-}
-
-.tree-collapsed[data-weak] {
-  /* Keep the AA text token; a lighter tint distinguishes indirect matches. */
-  background: color-mix(in srgb, var(--color-accent) 7%, var(--a-card));
-}
-
-.tree-collapsed[data-weak]:hover {
-  background: color-mix(in srgb, var(--color-accent) 10%, var(--a-card));
 }
 
 .tree-item-hidden .tree-collapsed {
@@ -1133,7 +1104,6 @@
 .tree-topic-line .btn i {
   font-size: calc(13px * var(--text-scale));
 }
-
 
 .tree-hidden-group {
   --tree-bullet-y: 20px;

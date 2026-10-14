@@ -32,17 +32,15 @@ async function setup(session: Session = graphSession(), view = preferences()) {
   const service = createDesktopService(transport), sessions = new OpenSessions(service); opened.push(sessions);
   const store = sessions.open(route); await store.refresh();
   const routes = new RegisteredRoutes(service, sessions), saved: SessionPreferences[] = [], reveals: [string, boolean][] = [];
-  const hovered: (string | null)[] = [];
   let write: (next: SessionPreferences) => Promise<boolean> = async () => true;
   function Composition({ reveal = null, tight = false, search }: { reveal?: RevealedItem | null; tight?: boolean; search?: string }) {
     const [current, setCurrent] = useState(view);
     return <GraphView store={store} routes={routes} view={immutable(current)} later={new Set()} search={search} reveal={reveal} tight={tight} sessionLabel="codex · yesterday"
       continuedFrom={topic => topic.name === 'Continued context' ? 'Continued from claude-code · yesterday' : null}
       saveView={async next => { saved.push(structuredClone(next)); const ok = await write(next); if (ok) setCurrent(next); return ok; }}
-      onReveal={(result, openDetail) => { if (result.kind === 'item') reveals.push([result.route.item_id, openDetail]); }}
-      onHoverItem={id => hovered.push(id)} />;
+      onReveal={(result, openDetail) => { if (result.kind === 'item') reveals.push([result.route.item_id, openDetail]); }} />;
   }
-  return { Composition, store, routes, saved, reveals, hovered, route,
+  return { Composition, store, routes, saved, reveals, route,
     failReveal: () => { failReveal = true; }, writeWith: (next: typeof write) => { write = next; } };
 }
 const node = (id: string) => document.querySelector<HTMLElement>(`.graph-node[data-item-id="${id}"]`)!;
@@ -393,12 +391,10 @@ describe('session graph view', () => {
     expect(notices.getVisibleSnapshot()).toEqual([]);
   });
 
-  it('reports hover and clears it on unmount; shows nothing for an empty session', async () => {
+  it('uses the tighter layout and shows nothing for an empty session', async () => {
     const value = await setup(), view = render(<value.Composition tight />);
     expect(node('1').style.left).toBe('32px');
-    fireEvent.mouseEnter(node('2')); fireEvent.mouseLeave(node('2'));
     view.unmount();
-    expect(value.hovered).toEqual(['2', null, null]);
     const session = graphSession(); session.items = {};
     const empty = await setup(session); render(<empty.Composition />);
     expect(screen.queryByText('One graph per topic')).toBeNull();

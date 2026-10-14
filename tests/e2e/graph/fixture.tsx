@@ -44,7 +44,7 @@ const routes = new RegisteredRoutes(service, opened), later = new Set<string>();
 // Every root expanded: all 2,000 nodes are laid out and rendered.
 const initial: SessionPreferences = { session: route, tab_open: true, tab_order: 0, selected_item_id: null,
   expanded_item_ids: Array.from({ length: 20 }, (_, index) => String(index + 1)),
-  filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, rail: 'hidden', scroll: null };
+  filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, scroll: null };
 window.__graphEvidence = { mountMs: [], updateMs: [], saved: [] };
 
 function Fixture() {

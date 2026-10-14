@@ -11,7 +11,6 @@ export interface BodyProps {
   readonly detail?: ReactNode;
   /** The detail header's breadcrumb. */
   readonly detailPath?: ReactNode;
-  readonly rail?: ReactNode;
   readonly onCloseDetail?: () => void;
   readonly onRemove?: () => void;
   readonly hidden?: boolean;
@@ -42,7 +41,7 @@ function useWidth(ref: RefObject<HTMLDivElement | null>): number | null {
   return width;
 }
 
-export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail, onRemove, hidden = false, hiddenNotice, onHide, detailWidth = null, onResizeDetail,
+export function Body({ waiting, center, detail, detailPath, onCloseDetail, onRemove, hidden = false, hiddenNotice, onHide, detailWidth = null, onResizeDetail,
   waitingFolded = false, onFoldWaiting }: BodyProps) {
   const ref = useRef<HTMLDivElement>(null);
   const history = useContext(ItemHistoryContext);
@@ -52,9 +51,9 @@ export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail,
   const [drag, setDrag] = useState<number | null>(null);
   const start = useRef<{ x: number; width: number } | null>(null);
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const layout = bodyLayout({ width, detail: !!detail, rail: !!rail, detailWidth: drag ?? detailWidth, folded: waitingFolded, peek });
+  const layout = bodyLayout({ width, detail: !!detail, detailWidth: drag ?? detailWidth, folded: waitingFolded, peek });
   // Resizing can fold Waiting; the current open-column maximum must not stop that transition.
-  const resizeMax = bodyLayout({ width, detail: !!detail, rail: !!rail, detailWidth: DETAIL_MAX, folded: waitingFolded, peek }).detailMax;
+  const resizeMax = bodyLayout({ width, detail: !!detail, detailWidth: DETAIL_MAX, folded: waitingFolded, peek }).detailMax;
   // Peeking ends once the window is wide enough again.
   useEffect(() => { if (!layout.narrow) setPeek(false); }, [layout.narrow]);
   useEffect(() => () => { if (settle.current) clearTimeout(settle.current); }, []);
@@ -127,6 +126,5 @@ export function Body({ waiting, center, detail, detailPath, rail, onCloseDetail,
       </div>
       <div className="shell-detail-scroll">{detail}</div>
     </aside>}
-    {rail}
   </div>;
 }
