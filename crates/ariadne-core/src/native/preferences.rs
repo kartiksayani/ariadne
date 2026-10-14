@@ -303,6 +303,17 @@ fn validate_resolved(ids: &[UuidV4]) -> Result<(), CoreError> {
 /// The companion is authoritative for markers. Its last receipt is also the
 /// recoverable revision projection if publication stopped between the two files.
 fn load(file: &mut UiFile<'_>) -> Result<(Record, RecoveryRecord), Failure> {
+    load_with(file, project_recovery)
+}
+
+fn load_with(
+    file: &mut UiFile<'_>,
+    project: impl FnOnce(
+        &mut UiFile<'_>,
+        Record,
+        RecoveryRecord,
+    ) -> Result<(Record, RecoveryRecord), Failure>,
+) -> Result<(Record, RecoveryRecord), Failure> {
     let original = decode(file.bytes(), &file.path())?;
     let Some(bytes) = file.recovery_bytes() else {
         return Ok((original, empty_recovery()));
@@ -311,14 +322,17 @@ fn load(file: &mut UiFile<'_>) -> Result<(Record, RecoveryRecord), Failure> {
         serde_json::from_slice::<RecoveryRecord>(bytes).map_err(|_| corrupt(&file.recovery_path()));
     let attempt = recovery.and_then(|recovery| {
         validate_recovery(&recovery).map_err(Failure::Core)?;
-        project_recovery(file, original.clone(), recovery)
+        project(file, original.clone(), recovery)
     });
     match attempt {
         Ok(records) => Ok(records),
-        Err(_) => {
+        Err(Failure::Core(_)) => {
             file.discard_recovery();
             Ok((original, empty_recovery()))
         }
+        // A publication or durability failure does not make a valid marker
+        // corrupt. Preserve its receipt so the same operation can retry.
+        Err(error @ Failure::Store(_)) => Err(error),
     }
 }
 
@@ -332,14 +346,29 @@ fn empty_recovery() -> RecoveryRecord {
 
 fn project_recovery(
     file: &mut UiFile<'_>,
+    record: Record,
+    recovery: RecoveryRecord,
+) -> Result<(Record, RecoveryRecord), Failure> {
+    project_recovery_with(
+        file,
+        record,
+        recovery,
+        |file, operation_id| file.confirm_recovery(operation_id),
+        |file, bytes, operation_id| file.publish_current(bytes, operation_id),
+    )
+}
+
+fn project_recovery_with(
+    file: &mut UiFile<'_>,
     mut record: Record,
     recovery: RecoveryRecord,
+    confirm: impl FnOnce(&UiFile<'_>, &UuidV4) -> Result<(), StoreError>,
+    publish: impl FnOnce(&mut UiFile<'_>, &[u8], &UuidV4) -> Result<(), StoreError>,
 ) -> Result<(Record, RecoveryRecord), Failure> {
     record.snapshot.resolved_unsent_input_ids = recovery.resolved_input_ids.clone();
     // Old binaries may publish an ordinary patch at the marker's intended
     // revision. Its fields and history win; the durable marker still applies.
     if let Some(pending) = recovery.operations.last() {
-        file.confirm_recovery(&pending.operation_id)?;
         let wanted = pending.result.preferences_revision;
         if record.snapshot.revision.value() < wanted.value() - 1 {
             return Err(corrupt(&file.recovery_path()));
@@ -356,12 +385,14 @@ fn project_recovery(
             record.operations.push(pending.clone());
             trim(&mut record.operations);
             validate(&record).map_err(|_| corrupt(&file.recovery_path()))?;
-            file.publish_current(&encode(&record)?, &pending.operation_id)
-                .map_err(|_| {
-                    Failure::Store(StoreError::CommitUncertain {
-                        operation_id: Some(pending.operation_id.clone()),
-                    })
-                })?;
+            confirm(file, &pending.operation_id)?;
+            publish(file, &encode(&record)?, &pending.operation_id).map_err(|_| {
+                Failure::Store(StoreError::CommitUncertain {
+                    operation_id: Some(pending.operation_id.clone()),
+                })
+            })?;
+        } else {
+            confirm(file, &pending.operation_id)?;
         }
     }
     validate(&record).map_err(|_| corrupt(&file.path()))?;
@@ -745,4 +776,149 @@ fn apply(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod recovery_retry_tests {
+    use super::*;
+    use std::fs;
+
+    fn id(n: u64) -> UuidV4 {
+        UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
+    }
+
+    fn owner() -> OwnerContext {
+        OwnerContext::from_trusted_entrypoint(OwnerScope::Preferences)
+    }
+
+    struct PendingMarker {
+        home: tempfile::TempDir,
+        registry: Registry,
+        command: OwnerCommand,
+        main: Vec<u8>,
+        companion: Vec<u8>,
+    }
+
+    impl PendingMarker {
+        fn new() -> Self {
+            let home = tempfile::tempdir().unwrap();
+            let registry = Registry::open(home.path()).unwrap();
+            let service = PreferencesService::new(&registry);
+            let command = |op, expected, input| OwnerCommand::PreferencesPatch {
+                api_version: one(),
+                op_id: id(op),
+                params: PreferencesPatch {
+                    expected_preferences_revision: PositiveSafeInteger::new(expected).unwrap(),
+                    entries: vec![PreferencesPatchEntry::ResolveUnsentInput {
+                        input_id: id(input),
+                    }],
+                },
+            };
+            service.patch(&owner(), &command(100, 1, 90)).unwrap();
+            service.patch(&owner(), &command(101, 2, 91)).unwrap();
+            let main_path = home.path().join(".ariadne/ui.json");
+            let main = fs::read(&main_path).unwrap();
+            let command = command(102, 3, 92);
+            service.patch(&owner(), &command).unwrap();
+            let companion = fs::read(home.path().join(".ariadne/ui-recovery.json")).unwrap();
+            // Leave three authoritative markers with the last projection pending.
+            fs::write(main_path, &main).unwrap();
+            Self {
+                home,
+                registry,
+                command,
+                main,
+                companion,
+            }
+        }
+
+        fn assert_preserved(&self) {
+            let root = self.home.path().join(".ariadne");
+            assert_eq!(fs::read(root.join("ui.json")).unwrap(), self.main);
+            assert_eq!(
+                fs::read(root.join("ui-recovery.json")).unwrap(),
+                self.companion
+            );
+            assert!(!fs::read_dir(root).unwrap().any(|entry| entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("ui-recovery.corrupt-")));
+        }
+
+        fn assert_retry_completes(&self) {
+            let service = PreferencesService::new(&self.registry);
+            let receipt = service.patch(&owner(), &self.command).unwrap();
+            assert_eq!(receipt.preferences_revision.value(), 4);
+            assert_eq!(
+                service.get(&owner()).unwrap().resolved_unsent_input_ids,
+                vec![id(90), id(91), id(92)]
+            );
+            assert_eq!(
+                fs::read(self.home.path().join(".ariadne/ui-recovery.json")).unwrap(),
+                self.companion
+            );
+            assert_eq!(service.patch(&owner(), &self.command).unwrap(), receipt);
+        }
+    }
+
+    #[test]
+    fn disk_full_dismissal_projection_retries_preserve_all_markers() {
+        let pending = PendingMarker::new();
+        for _ in 0..3 {
+            let result = pending.registry.with_ui_file(|mut file| {
+                load_with(&mut file, |file, record, recovery| {
+                    project_recovery_with(
+                        file,
+                        record,
+                        recovery,
+                        |file, operation| file.confirm_recovery(operation),
+                        |file, _, _| {
+                            Err(StoreError::Io {
+                                action: "write",
+                                path: file.path(),
+                                kind: std::io::ErrorKind::StorageFull,
+                            })
+                        },
+                    )
+                })
+            });
+            assert!(
+                matches!(result, Err(Failure::Store(StoreError::CommitUncertain {
+                operation_id: Some(ref operation),
+            })) if operation == &id(102))
+            );
+            pending.assert_preserved();
+        }
+        pending.assert_retry_completes();
+    }
+
+    #[test]
+    fn repeated_recovery_directory_sync_failure_never_reports_success_or_quarantines() {
+        let pending = PendingMarker::new();
+        for _ in 0..3 {
+            let result = pending.registry.with_ui_file(|mut file| {
+                load_with(&mut file, |file, record, recovery| {
+                    project_recovery_with(
+                        file,
+                        record,
+                        recovery,
+                        |_, operation| {
+                            Err(StoreError::CommitUncertain {
+                                operation_id: Some(operation.clone()),
+                            })
+                        },
+                        |_, _, _| panic!("unconfirmed marker must not publish main preferences"),
+                    )
+                })
+            });
+            assert!(
+                matches!(result, Err(Failure::Store(StoreError::CommitUncertain {
+                operation_id: Some(ref operation),
+            })) if operation == &id(102))
+            );
+            pending.assert_preserved();
+        }
+        pending.assert_retry_completes();
+    }
 }

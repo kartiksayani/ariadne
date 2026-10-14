@@ -388,36 +388,78 @@ impl Directory {
         source: &str,
         target: &str,
     ) -> Result<(), StoreError> {
+        self.rename_entry_no_replace_with(source, target, |source, target| {
+            // SAFETY: both checked single-component names are relative to this
+            // live directory. Exclusive rename never follows a link target.
+            #[cfg(target_os = "macos")]
+            unsafe {
+                libc::renameatx_np(
+                    self.file.as_raw_fd(),
+                    source.as_ptr(),
+                    self.file.as_raw_fd(),
+                    target.as_ptr(),
+                    libc::RENAME_EXCL,
+                )
+            }
+            #[cfg(not(target_os = "macos"))]
+            unsafe {
+                libc::renameat2(
+                    self.file.as_raw_fd(),
+                    source.as_ptr(),
+                    self.file.as_raw_fd(),
+                    target.as_ptr(),
+                    libc::RENAME_NOREPLACE,
+                )
+            }
+        })
+    }
+
+    fn rename_entry_no_replace_with(
+        &self,
+        source: &str,
+        target: &str,
+        rename: impl FnOnce(&CString, &CString) -> libc::c_int,
+    ) -> Result<(), StoreError> {
         let path = self.path.join(source);
         component(target, &self.path.join(target))?;
-        if self.entry_type(source)? == Some(libc::S_IFDIR) {
+        let source_type = self.entry_type(source)?;
+        if source_type == Some(libc::S_IFDIR) {
             return Err(StoreError::UnsafePath { path });
         }
         let source = c_name(source.as_bytes(), &path)?;
         let target = c_name(target.as_bytes(), &self.path)?;
-        // SAFETY: both checked single-component names are relative to this live
-        // directory. Exclusive rename moves the entry itself, never a link target.
-        #[cfg(target_os = "macos")]
-        let result = unsafe {
-            libc::renameatx_np(
-                self.file.as_raw_fd(),
-                source.as_ptr(),
-                self.file.as_raw_fd(),
-                target.as_ptr(),
-                libc::RENAME_EXCL,
-            )
-        };
-        #[cfg(not(target_os = "macos"))]
-        let result = unsafe {
-            libc::renameat2(
-                self.file.as_raw_fd(),
-                source.as_ptr(),
-                self.file.as_raw_fd(),
-                target.as_ptr(),
-                libc::RENAME_NOREPLACE,
-            )
-        };
-        os_result(result, "rename", &path)
+        let result = rename(&source, &target);
+        if result != -1 {
+            return Ok(());
+        }
+        let error = io::Error::last_os_error();
+        if !matches!(error.raw_os_error(), Some(libc::ENOTSUP | libc::EINVAL)) {
+            return Err(StoreError::io("rename", &path, error));
+        }
+        if !matches!(source_type, Some(libc::S_IFREG | libc::S_IFLNK)) {
+            return Err(StoreError::UnsafePath { path });
+        }
+        // Some filesystems lack exclusive rename. Linking the entry with flags=0
+        // preserves symlinks themselves and refuses an existing destination.
+        // SAFETY: both names remain anchored to this live directory descriptor.
+        os_result(
+            unsafe {
+                libc::linkat(
+                    self.file.as_raw_fd(),
+                    source.as_ptr(),
+                    self.file.as_raw_fd(),
+                    target.as_ptr(),
+                    0,
+                )
+            },
+            "link",
+            &path,
+        )?;
+        // SAFETY: only the source entry is removed after preserving its link.
+        if unsafe { libc::unlinkat(self.file.as_raw_fd(), source.as_ptr(), 0) } == -1 {
+            return Err(StoreError::CommitUncertain { operation_id: None });
+        }
+        Ok(())
     }
 
     pub fn temp(&self, stem: &str, bytes: &[u8]) -> Result<Temporary<'_>, StoreError> {
@@ -640,6 +682,109 @@ unsafe fn errno() -> *mut libc::c_int {
 mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
+
+    fn unsupported_rename(code: libc::c_int) -> impl FnOnce(&CString, &CString) -> libc::c_int {
+        move |_, _| {
+            // SAFETY: errno is the calling thread's writable OS error slot.
+            unsafe { *errno() = code };
+            -1
+        }
+    }
+
+    #[test]
+    fn unsupported_exclusive_rename_falls_back_for_regular_files_and_symlinks() {
+        for code in [libc::ENOTSUP, libc::EINVAL] {
+            for link in [false, true] {
+                let root = tempfile::tempdir().unwrap();
+                let directory = Directory::root(root.path()).unwrap();
+                let outside = root.path().join("outside");
+                std::fs::write(&outside, b"untouched link target").unwrap();
+                let source = root.path().join("source");
+                if link {
+                    symlink(&outside, &source).unwrap();
+                } else {
+                    std::fs::write(&source, b"source evidence").unwrap();
+                }
+                let original = std::fs::symlink_metadata(&source).unwrap();
+                directory
+                    .rename_entry_no_replace_with("source", "preserved", unsupported_rename(code))
+                    .unwrap();
+                let preserved = root.path().join("preserved");
+                let metadata = std::fs::symlink_metadata(&preserved).unwrap();
+                assert_eq!(metadata.ino(), original.ino());
+                assert_eq!(metadata.nlink(), 1);
+                assert!(!source.exists());
+                if link {
+                    assert!(metadata.file_type().is_symlink());
+                    assert_eq!(std::fs::read_link(preserved).unwrap(), outside);
+                } else {
+                    assert_eq!(std::fs::read(preserved).unwrap(), b"source evidence");
+                }
+                assert_eq!(std::fs::read(outside).unwrap(), b"untouched link target");
+            }
+        }
+    }
+
+    #[test]
+    fn unsupported_exclusive_rename_never_replaces_evidence_or_moves_directories() {
+        for code in [libc::ENOTSUP, libc::EINVAL] {
+            for link in [false, true] {
+                let root = tempfile::tempdir().unwrap();
+                let directory = Directory::root(root.path()).unwrap();
+                let source = root.path().join("source");
+                let target = root.path().join("target");
+                std::fs::write(&target, b"existing evidence").unwrap();
+                if link {
+                    symlink(&target, &source).unwrap();
+                } else {
+                    std::fs::write(&source, b"source evidence").unwrap();
+                }
+                let original = std::fs::symlink_metadata(&source).unwrap();
+                assert!(directory
+                    .rename_entry_no_replace_with("source", "target", unsupported_rename(code))
+                    .is_err());
+                assert_eq!(
+                    std::fs::symlink_metadata(&source).unwrap().ino(),
+                    original.ino()
+                );
+                assert_eq!(std::fs::read(&target).unwrap(), b"existing evidence");
+                std::fs::create_dir(root.path().join("directory")).unwrap();
+                assert!(matches!(
+                    directory.rename_entry_no_replace_with(
+                        "directory",
+                        "moved-directory",
+                        |_, _| panic!("directory must be rejected before rename")
+                    ),
+                    Err(StoreError::UnsafePath { .. })
+                ));
+                assert!(root.path().join("directory").is_dir());
+                assert!(!root.path().join("moved-directory").exists());
+            }
+        }
+    }
+
+    #[test]
+    fn exclusive_rename_other_errors_preserve_source_without_fallback() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = Directory::root(root.path()).unwrap();
+        std::fs::write(root.path().join("source"), b"source evidence").unwrap();
+        assert!(matches!(
+            directory.rename_entry_no_replace_with(
+                "source",
+                "preserved",
+                unsupported_rename(libc::EACCES)
+            ),
+            Err(StoreError::Io {
+                kind: io::ErrorKind::PermissionDenied,
+                ..
+            })
+        ));
+        assert_eq!(
+            std::fs::read(root.path().join("source")).unwrap(),
+            b"source evidence"
+        );
+        assert!(!root.path().join("preserved").exists());
+    }
 
     #[test]
     fn exclusive_entry_rename_preserves_collisions_and_moves_links_without_following() {

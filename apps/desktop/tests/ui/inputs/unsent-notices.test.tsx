@@ -192,6 +192,39 @@ it('keeps Copy feedback after the current recovery prerequisite as the session c
   expect(screen.queryByText(/Restore the topic to put it back/)).toBeNull();
 });
 
+it('recomputes a click-time block as prerequisites change without retaining the old reason', async () => {
+  const value = await setup('agent_removed');
+  const action = notices.getSnapshot().find(notice => notice.id.startsWith('unsent:'))!.actions![0];
+  value.session.state = 'closed'; ++value.session.revision;
+  await act(() => value.store.refresh());
+  // An action admitted before the refresh must recheck the current session.
+  act(() => action.run());
+  expect(await screen.findByText(/Reopen the session to put it back/)).toBeTruthy();
+
+  value.session.state = 'active'; value.topic.archived_at = value.session.updated_at; ++value.session.revision;
+  await act(() => value.store.refresh());
+  expect(screen.getByText(/Restore the topic to put it back/)).toBeTruthy();
+  expect(screen.queryByText(/Reopen the session to put it back/)).toBeNull();
+
+  value.topic.archived_at = null; ++value.session.revision;
+  await act(() => value.store.refresh());
+  expect((screen.getByRole('button', { name: 'Put back in reply box' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.queryByText(/Restore the topic to put it back/)).toBeNull();
+  expect(screen.queryByText(/Reopen the session to put it back/)).toBeNull();
+});
+
+it('keeps the newest observed recovery prerequisite when the opened cache is older', async () => {
+  const value = await setup('session_closed');
+  const older = value.store.getSnapshot();
+  value.session.state = 'active'; value.topic.archived_at = value.session.updated_at; ++value.session.revision;
+  await act(() => value.store.refresh());
+  expect(await screen.findByText(/Restore the topic to put it back/)).toBeTruthy();
+  vi.spyOn(value.store, 'getSnapshot').mockReturnValue(older);
+  fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+  expect(await screen.findByText(/Restore the topic to put it back in the reply box\. Copied\./)).toBeTruthy();
+  expect(screen.queryByText(/Reopen the session to put it back/)).toBeNull();
+});
+
 it.each([
   ['already_sent', held.ALREADY_SENT], ['not_taken_back', held.NOT_TAKEN_BACK],
   ['taken_back', held.TAKEN_BACK_NOT_LOADED], ['unavailable', 'Your reply box is busy. Try again when it is ready.'],
@@ -221,6 +254,64 @@ it('keeps the dismissal pending and retries a failed save without losing the wor
   await waitFor(() => expect(value.transport.preferences.resolved_unsent_input_ids).toContain(value.input.id));
   await reload(value);
   expect(notices.getSnapshot().some(notice => notice.id.startsWith('unsent:'))).toBe(false);
+});
+
+function failRecoveryMarkers(value: Awaited<ReturnType<typeof setup>>, code: 'permission_denied' | 'io_error') {
+  const invoke = value.transport.invoke.bind(value.transport);
+  return vi.spyOn(value.transport, 'invoke').mockImplementation(async (name, args) => {
+    const request = args.request;
+    if ('command' in request && request.command.command === 'preferences_patch'
+      && request.command.params.entries.some(entry => entry.kind === 'resolve_unsent_input')) {
+      return { api_version: 1, ok: false, error: { code, message: 'Recovery marker unavailable', hint: '', retryable: false, field_errors: [] } };
+    }
+    return invoke(name, args);
+  });
+}
+
+it('hides dismissal until restart when recovery storage is unavailable without claiming it was saved', async () => {
+  const value = await setup('agent_removed');
+  failRecoveryMarkers(value, 'permission_denied');
+  const button = await screen.findByRole('button', { name: 'Put back in reply box' });
+  fireEvent.click(within(button.closest('[data-notice-id]') as HTMLElement).getByRole('button', { name: 'Dismiss' }));
+  await screen.findByText('Hidden until Ariadne restarts.');
+  expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull();
+  expect(value.transport.preferences.resolved_unsent_input_ids ?? []).not.toContain(value.input.id);
+  ++value.session.revision; await act(() => value.store.refresh());
+  await act(() => value.navigation.refresh());
+  expect(notices.getSnapshot().some(notice => notice.id.startsWith('unsent:'))).toBe(false);
+  await reload(value);
+  expect(await screen.findByRole('button', { name: 'Put back in reply box' })).toBeTruthy();
+});
+
+it('keeps a transient I/O dismissal failure retryable', async () => {
+  const value = await setup('agent_removed');
+  const failure = failRecoveryMarkers(value, 'io_error');
+  const button = await screen.findByRole('button', { name: 'Put back in reply box' });
+  fireEvent.click(within(button.closest('[data-notice-id]') as HTMLElement).getByRole('button', { name: 'Dismiss' }));
+  await screen.findByText(/Couldn’t save the dismissal/);
+  expect(screen.queryByText('Hidden until Ariadne restarts.')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy();
+  failure.mockRestore();
+  fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+  await waitFor(() => expect(value.transport.preferences.resolved_unsent_input_ids).toContain(value.input.id));
+});
+
+it('keeps restored words and offers run-only dismissal when their recovery marker cannot be saved', async () => {
+  const value = await setup('agent_removed');
+  const failure = failRecoveryMarkers(value, 'permission_denied');
+  fireEvent.click(await screen.findByRole('button', { name: 'Put back in reply box' }));
+  await screen.findByText(/Your message is in the reply box, but recovery can’t be saved/);
+  expect(screen.queryByText(/again to save it/)).toBeNull();
+  expect(value.drafts.findTopic(route, value.topic.id)?.draft.text).toBe(value.input.payload.text);
+  expect(value.transport.preferences.resolved_unsent_input_ids ?? []).not.toContain(value.input.id);
+  const calls = failure.mock.calls.length;
+  fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+  await screen.findByText('Hidden until Ariadne restarts.');
+  expect(failure.mock.calls).toHaveLength(calls);
+  expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull();
+  const reopened = await reload(value);
+  expect(await screen.findByRole('button', { name: 'Put back in reply box' })).toBeTruthy();
+  expect(reopened.drafts.findTopic(route, value.topic.id)?.draft.text).toBe(value.input.payload.text);
 });
 
 it('saves the draft before its marker and retries a rejected marker without overwriting newer words', async () => {

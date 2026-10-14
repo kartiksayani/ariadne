@@ -822,7 +822,7 @@ fn companion_ahead_of_restored_or_deleted_main_never_blocks_drafts() {
 }
 
 #[test]
-fn companion_projection_failure_returns_original_main_without_markers() {
+fn companion_projection_failure_preserves_marker_until_publication_retry() {
     let s = Setup::new();
     s.service().patch(&owner(), &patch(100, 1, vec![])).unwrap();
     let original = fs::read(s.live()).unwrap();
@@ -835,19 +835,26 @@ fn companion_projection_failure_returns_original_main_without_markers() {
     let outside = s.home.path().join("untouched");
     fs::write(&outside, b"outside owner evidence").unwrap();
     std::os::unix::fs::symlink(&outside, s.backup()).unwrap();
-    let saved = s.saved();
-    assert_eq!(saved.revision, revision(2));
-    assert!(saved.resolved_unsent_input_ids.is_empty());
+    for _ in 0..3 {
+        assert_eq!(
+            s.service().get(&owner()).unwrap_err().code,
+            CoreErrorCode::CommitUncertain
+        );
+        assert_eq!(fs::read(recovery_path(&s)).unwrap(), companion);
+        assert!(quarantined_paths(&s).is_empty());
+    }
     assert_eq!(fs::read(s.live()).unwrap(), original);
     assert_eq!(fs::read(outside).unwrap(), b"outside owner evidence");
-    assert_quarantined(&s, &companion);
     fs::remove_file(s.backup()).unwrap();
+    let saved = s.saved();
+    assert_eq!(saved.revision, revision(3));
+    assert_eq!(saved.resolved_unsent_input_ids, vec![id(90)]);
     s.service()
         .patch(
             &owner(),
             &patch(
                 102,
-                2,
+                3,
                 vec![PreferencesPatchEntry::UpsertDraft {
                     draft: restored_draft(),
                 }],
@@ -855,6 +862,36 @@ fn companion_projection_failure_returns_original_main_without_markers() {
         )
         .unwrap();
     assert_eq!(s.saved().drafts, vec![restored_draft()]);
+}
+
+#[test]
+fn resolve_after_successful_quarantine_creates_fresh_companion_with_only_new_id() {
+    let s = Setup::new();
+    s.service()
+        .patch(&owner(), &patch(100, 1, vec![resolve(90)]))
+        .unwrap();
+    let corrupt = b"malformed recovery evidence";
+    fs::write(recovery_path(&s), corrupt).unwrap();
+    assert!(s.saved().resolved_unsent_input_ids.is_empty());
+    assert_quarantined(&s, corrupt);
+    let evidence = quarantined_paths(&s);
+    s.service()
+        .patch(&owner(), &patch(101, 2, vec![resolve(91)]))
+        .unwrap();
+    let companion: Value = serde_json::from_slice(&fs::read(recovery_path(&s)).unwrap()).unwrap();
+    assert_eq!(companion["resolved_input_ids"], json!([id(91)]));
+    assert_eq!(companion["operations"].as_array().unwrap().len(), 1);
+    assert_eq!(companion["operations"][0]["operation_id"], json!(id(101)));
+    let reopened = Registry::open(s.home.path()).unwrap();
+    assert_eq!(
+        PreferencesService::new(&reopened)
+            .get(&owner())
+            .unwrap()
+            .resolved_unsent_input_ids,
+        vec![id(91)]
+    );
+    assert_eq!(quarantined_paths(&s), evidence);
+    assert_eq!(fs::read(&evidence[0]).unwrap(), corrupt);
 }
 
 #[test]

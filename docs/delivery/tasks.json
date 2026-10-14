@@ -1257,7 +1257,7 @@
         "apps/desktop/src/generated/core/**"
       ],
       "spec": [
-        "docs/planning/low-level/UI_AND_NATIVE.md#3-tree-detail-message-rail-search-and-filters",
+        "docs/planning/low-level/UI_AND_NATIVE.md#3-tree-detail-search-and-filters",
         "docs/planning/low-level/UI_AND_NATIVE.md#7-keyboard-and-accessibility",
         "docs/planning/DESIGN_TRACEABILITY.md#acceptance-checks",
         "docs/planning/MODULE_CONTRACTS.md#implementation-prerequisites-and-acceptance-joins"
@@ -1297,7 +1297,7 @@
         "tests/e2e/history/**"
       ],
       "spec": [
-        "docs/planning/low-level/UI_AND_NATIVE.md#3-tree-detail-message-rail-search-and-filters",
+        "docs/planning/low-level/UI_AND_NATIVE.md#3-tree-detail-search-and-filters",
         "docs/planning/low-level/API_AND_MCP.md#summary-projections-and-command-naming",
         "docs/planning/DESIGN_TRACEABILITY.md#acceptance-checks",
         "docs/planning/MODULE_CONTRACTS.md#implementation-prerequisites-and-acceptance-joins"

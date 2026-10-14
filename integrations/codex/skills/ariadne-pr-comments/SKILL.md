@@ -97,7 +97,7 @@ shows replies; progress notes are hidden while deciding.
 
 `question`: your plain-words summary, without URLs, `<`, `[`, `]` or backslashes.
 `ask`: "Fix, reply, or skip? Read the conversation; Reply needs your own text."
-With a suggested reply, replace its last clause with: "Reply approves its suggested text or your own."
+With a suggested reply, replace `ask`'s last clause with: "Reply approves its suggested text or your own."
 End context with the same ask to anchor the waiting marker there.
 
 `reply_consequence`: "Post only the exact text you approve in this conversation."
