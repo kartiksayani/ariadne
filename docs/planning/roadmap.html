@@ -110,10 +110,10 @@
   <script id="roadmap-data" type="application/json">{
   "schema_version": 1,
   "status": {
-    "updated_at": "2026-10-13T00:00:00Z",
-    "headline": "Alpha.14 released (v0.1.0-alpha.14, #150–#155); alpha.15 in progress, with PR comments merged in #156.",
+    "updated_at": "2026-10-14T00:00:00Z",
+    "headline": "Alpha.15 released (v0.1.0-alpha.15, #156–#159); alpha.16 in progress, with the item conversation view in review as #160.",
     "notes": [
-      "Next: remove the unused Messages pane, review mock M3 for a larger item conversation view, and finish the alpha.14 follow-ups on fix/a14-polish.",
+      "Next: finish review of #160, then the recovery edge cases from a failure table and the previous-release read test.",
       "Owner decision: no session-wide Conversation view and no host transcript reading. Chat with the agent stays in the terminal.",
       "Before merging a PR whose base is behind main, merge main into it and let push-triggered quality run on that head; the tree-equality check assumes this.",
       "Run cargo test --workspace before pushing integration-resource changes; installed-plugin fixtures live in several crates.",
@@ -2833,10 +2833,13 @@
         "Owner M3 sign-off before implementation; UI tests, design frames and local native journey."
       ],
       "estimate_days": 1,
+      "active": true,
       "progress": {
-        "state": "blocked_owner",
-        "prs": [],
-        "note": "Waiting on owner sign-off for mock M3."
+        "state": "in_progress",
+        "prs": [
+          160
+        ],
+        "note": "Owner signed off mock M3. PR #160 on feat/a15-conversation, in review fix round 3."
       }
     },
     {
@@ -2910,11 +2913,15 @@
         "npm run check; affected UI tests, design frames and local native journey."
       ],
       "estimate_days": 1,
-      "active": true,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/158"
+      },
       "progress": {
-        "state": "in_progress",
-        "prs": [],
-        "note": "In progress on feat/a15-no-rail."
+        "state": "done",
+        "prs": [
+          158
+        ],
+        "note": "Merged in #158, with the Map holding the reading row through resizes and unsent-message notices moved to a separate recovery file. Released in v0.1.0-alpha.15."
       }
     },
     {
@@ -2949,14 +2956,97 @@
         "npm run check; affected UI and Claude integration tests; pr_comments_recipe CLI tests; generated rules and roadmap checks; check-script tests; owner runs the Chromium layout tests."
       ],
       "estimate_days": 1,
-      "active": true,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/157"
+      },
       "progress": {
-        "state": "in_progress",
+        "state": "done",
         "prs": [
           157
         ],
-        "note": "PR #157 on fix/a14-polish."
+        "note": "Merged in #157. Released in v0.1.0-alpha.15."
       }
+    },
+    {
+      "id": "P11.6",
+      "title": "Alpha.15 recovery follow-ups",
+      "phase": "M11",
+      "depends_on": [
+        "P11.4"
+      ],
+      "paths": [
+        "apps/desktop/src-tauri/src/*",
+        "apps/desktop/src/ui/*",
+        "apps/desktop/tests/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "The recovery file for unsent-message notices survives disk errors, reads never fail because of it, and notices can always be dismissed."
+      ],
+      "checks": [
+        "npm run check; affected unit and native tests; independent review."
+      ],
+      "estimate_days": 1,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/159"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          159
+        ],
+        "note": "Merged in #159. Released in v0.1.0-alpha.15."
+      }
+    },
+    {
+      "id": "P11.7",
+      "title": "Recovery edge cases from a failure table",
+      "phase": "M11",
+      "depends_on": [
+        "P11.6"
+      ],
+      "paths": [
+        "apps/desktop/src-tauri/src/*",
+        "apps/desktop/tests/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md",
+        "ORCHESTRATOR.md"
+      ],
+      "acceptance": [
+        "Close three rare cases found in the #159 review: a rollback that could remove the only copy of the recovery file on network filesystems, transient read errors that set a good recovery file aside, and a needless sync on reads.",
+        "The brief is a full failure table that crosses every error source with every outcome, per the ORCHESTRATOR delivery feedback rules."
+      ],
+      "checks": [
+        "npm run check; a test per row of the failure table; independent review."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.8",
+      "title": "Previous-release read test",
+      "phase": "M11",
+      "depends_on": [
+        "P11.6"
+      ],
+      "paths": [
+        "tests/*",
+        "scripts/*",
+        ".github/workflows/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md",
+        "ORCHESTRATOR.md"
+      ],
+      "acceptance": [
+        "An automatic check that the previous release accepts the files the new build writes, so saved formats stay readable by the release the owner may roll back to."
+      ],
+      "checks": [
+        "The check runs in CI against the previous release and fails when it cannot read a file the new build wrote; independent review."
+      ],
+      "estimate_days": 1
     }
   ]
 }</script>
