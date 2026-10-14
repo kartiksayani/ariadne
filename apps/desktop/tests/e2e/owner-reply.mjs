@@ -60,10 +60,27 @@ export async function openOwnerReply(afterSaved = false) {
 /**
  * Opens words behind a held input (owner FIFO). Waiting replies close after saving; open/in-progress
  * boxes stay docked and empty. `afterSaved` awaits that acknowledgement before using the next box.
+ * The bigger conversation view (`.item-conversation`) keeps its one reply box docked even on a waiting item, so there
+ * a saved reply shows as an empty, enabled box rather than a closed one.
  */
 export async function openFollowUp(afterSaved = false) {
-  if (await browser.$('.item-detail').getAttribute('data-status') !== 'waiting') return openOwnerReply(afterSaved);
-  if (afterSaved) await wait(async () => !(await browser.$('.item-detail [data-owner-input] .detail-box').isExisting()), 'The sent reply box did not close');
+  const detail = await browser.$('.item-detail');
+  if (await detail.getAttribute('data-status') !== 'waiting') return openOwnerReply(afterSaved);
+  if (afterSaved) {
+    if ((await detail.getAttribute('class')).split(/\s+/).includes('item-conversation')) {
+      let missing = false;
+      try {
+        await wait(async () => {
+          const box = await browser.$(dockedEditor);
+          missing = !(await box.isExisting());
+          return !missing && (await box.getValue()) === '' && await box.isEnabled();
+        }, 'The sent reply box in the conversation view did not empty and re-enable');
+      } catch (error) {
+        // A box that is gone is not proof of a save: fall through to "Add a reply" below, which fails precisely if it is absent too.
+        if (!missing) throw error;
+      }
+    } else await wait(async () => !(await browser.$('.item-detail [data-owner-input] .detail-box').isExisting()), 'The sent reply box did not close');
+  }
   if (!(await browser.$(dockedEditor).isExisting())) {
     // This section holds the one action; its key hint ("r") follows the label.
     const addReply = await browser.$('.item-detail [aria-label="Reply"] [aria-label="Item actions"] button');

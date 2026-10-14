@@ -283,6 +283,46 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     expect(within(conversation()).getByLabelText('Reply message')).toBeTruthy();
   });
 
+  it('keeps the view reply box docked and empty after each confirmed reply behind a held answer', async () => {
+    const transport = await setup(); await expand(); await switchQuestion();
+    fireEvent.change(within(conversation()).getByLabelText('Reply in your own words'), { target: { value: 'Held answer' } });
+    key(within(conversation()).getByLabelText('Reply in your own words'), 'Enter', { metaKey: true });
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    const box = () => within(conversation()).getByLabelText<HTMLTextAreaElement>('Reply message');
+    await waitFor(() => expect(box().disabled).toBe(false));
+    expect(conversation().querySelector('[data-detail-item-id="2"]')?.getAttribute('data-status')).toBe('waiting');
+    for (const [index, text] of ['First held reply', 'Second held reply'].entries()) {
+      const host = conversation().querySelector('[data-owner-input="2"]')!;
+      fireEvent.change(box(), { target: { value: text } });
+      expect(box().value).toBe(text);
+      fireEvent.click(within(host as HTMLElement).getByRole('button', { name: 'Send reply' }));
+      await waitFor(() => expect(sends(transport)).toHaveLength(index + 2));
+      expect(sends(transport)[index + 1].command).toMatchObject({ params: { kind: 'reply', target: { item_id: '2' }, text } });
+      // A confirmed save leaves the box docked, enabled and empty: it never holds the sent text, so it cannot go out twice.
+      await waitFor(() => expect(box().value).toBe(''));
+      expect(box().disabled).toBe(false);
+      expect(conversation().querySelector('[data-owner-input="2"] .detail-box')).not.toBeNull();
+    }
+    expect(sends(transport)).toHaveLength(3);
+  });
+
+  it('keeps the view reply text when its save is not confirmed', async () => {
+    const transport = await setup(); await expand(); await switchQuestion();
+    fireEvent.change(within(conversation()).getByLabelText('Reply in your own words'), { target: { value: 'Held answer' } });
+    key(within(conversation()).getByLabelText('Reply in your own words'), 'Enter', { metaKey: true });
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    const box = () => within(conversation()).getByLabelText<HTMLTextAreaElement>('Reply message');
+    await waitFor(() => expect(box().disabled).toBe(false));
+    fireEvent.change(box(), { target: { value: 'Unconfirmed reply' } });
+    transport.failNext = 'input_submit';
+    key(box(), 'Enter', { metaKey: true });
+    await waitFor(() => expect(sends(transport)).toHaveLength(2));
+    // An unconfirmed save locks the box with its words (an exact retry may follow); it is neither emptied nor sent again.
+    await waitFor(() => expect(box().disabled).toBe(true));
+    expect(box().value).toBe('Unconfirmed reply');
+    expect(sends(transport)).toHaveLength(2);
+  });
+
   it('Command Enter sends the ordinary overlay composer to its own item', async () => {
     const transport = await setup(); await expand(); await switchQuestion();
     const session = transport.sessions.get(route.session_id)!;
