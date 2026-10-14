@@ -199,7 +199,7 @@ function SessionCenter({ application, view, graph, reveal, onRemoveTarget, ...pr
       onOpenItem={props.onOpenItem} /> : undefined}
     notices={notice || recovering ? <div className="tree-notices">{notice}{recovering && <RecoveryPanel actions={actions} />}</div> : null}
     graph={graph && !view.preferences?.filters.archived ? <NavigationGraph navigation={application.navigation} store={view.store} query={props.query}
-      tight={props.detailOpen} onReveal={props.onSelected} /> : null} />;
+      tight={props.detailOpen} reveal={reveal} onReveal={props.onSelected} /> : null} />;
 }
 function Workspace({ application }: { application: Application }) {
   const navigation = application.navigation, state = useNavigation(navigation);

@@ -25,12 +25,29 @@ import { NavigationGraph } from '../../../src/ui/graph/NavigationGraph';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 import { shortLabel } from '../../../src/ui/shared/short';
 import { peekNames } from '../../../src/ui/peek/names';
-import { RemovalContext, RemovalQueue } from '../../../src/ui/remove/queue';
+import { RemovalContext, RemovalQueue, UNDO_MS } from '../../../src/ui/remove/queue';
 import { removeSubject } from '../../../src/ui/remove/model';
 import { ackAllFor } from '../../../src/ui/navigation/ackAllController';
 
 const stores: NavigationStore[] = [];
-afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); notices.clear(); vi.restoreAllMocks(); vi.useRealTimers(); });
+const removals = new Set<RemovalQueue>();
+async function disposeTrees() {
+  cleanup();
+  // Confirmed removals outlive TreeView. Cancel pending fixture work and wait
+  // for commands already sending before clearing their notices and timers.
+  removals.forEach(queue => queue.pending().forEach(operation => queue.undo(operation)));
+  await Promise.all([...removals].map(queue => queue.flush()));
+  removals.clear();
+  stores.splice(0).forEach(store => store.stop());
+  notices.clear();
+}
+afterEach(async () => {
+  await disposeTrees();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  if (vi.isFakeTimers()) vi.clearAllTimers();
+  vi.useRealTimers();
+});
 const now = () => Date.parse('2026-10-07T12:00:00Z');
 
 interface Recorded {
@@ -41,6 +58,7 @@ interface Recorded {
 async function mount({ transport = new AppTransport(), configure, props = {}, load = true, removal = null }: {
   transport?: AppTransport; configure?: (transport: AppTransport) => void; props?: Partial<TreeViewProps>; load?: boolean; removal?: RemovalQueue | null;
 } = {}) {
+  if (removal) removals.add(removal);
   configure?.(transport);
   transport.preferences.sessions = transport.preferences.sessions.map(view => ({ ...view, tab_open: true }));
   const service = createDesktopService(transport), navigation = new NavigationStore(service); stores.push(navigation);
@@ -106,6 +124,15 @@ describe('session tree rows', () => {
       expect(viewOf(transport).focused_item_id).toBe('1');
       cleanup(); view.navigation.stop();
     }
+  });
+
+  it('keeps a sticky Focus exit before the cold session has loaded', async () => {
+    const view = await mount({ load: false, configure: transport => { viewOf(transport).focused_item_id = '1'; } });
+    expect(view.store.getSnapshot().snapshot).toBeNull();
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name: 'Unfocus 1' }));
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+    await act(async () => { await view.store.refresh(); });
+    expect(viewOf(view.transport).focused_item_id).toBeUndefined();
   });
 
   it('preserves Focus through pending root removal and Undo', async () => {
@@ -180,10 +207,16 @@ describe('session tree rows', () => {
     const name = peekNames(view.store.getSnapshot().snapshot!.session).get('1')!;
     expect(name).toBe('Shared name');
     fireEvent.click(within(row('1')).getByRole('button', { name: `Focus on ${name}` }));
-    expect(screen.getByText(/^Focused:/).textContent).toContain(name);
+    // One place to leave: the focused item's own button, which has taken over from Focus. No banner.
+    expect(screen.queryByText(/^Focused:/)).toBeNull();
+    expect(within(row('1')).getByRole('button', { name: `Unfocus ${name}` }).textContent).toBe('Unfocus');
+    expect(within(row('1')).queryByRole('button', { name: /^Focus on / })).toBeNull();
     const box = document.querySelector<HTMLElement>('.tree-scroll')!; box.scrollTop = 100; fireEvent.scroll(box);
     expect(screen.getByRole('button', { name: /^↑ Selected:/ }).textContent).toContain(name);
-    expect(within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name }).textContent).toBe(name);
+    const crumbs = within(screen.getByRole('navigation', { name: 'Map ancestors' }));
+    expect(crumbs.getByRole('button', { name }).textContent).toBe(name);
+    // Scrolled under the sticky band, the focused item's sticky copy carries Unfocus too.
+    expect(crumbs.getByRole('button', { name: `Unfocus ${name}` }).textContent).toBe('Unfocus');
   });
 
   it('keeps Focus discoverable without a tab stop on every top-level row', async () => {
@@ -217,17 +250,162 @@ describe('session tree rows', () => {
     expect(view.transport.preferences.seen![0]!.items).toEqual([]);
     await act(async () => { release(); await gate; });
   });
-  it('enters Focus by visible action, remembers it on remount, and leaves through the notice', async () => {
+  it('enters Focus by visible action, remembers it on remount, and leaves by the same button, now reading Unfocus', async () => {
     const view = await mount();
     fireEvent.click(within(row('1')).getByRole('button', { name: /^Focus on /  }));
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
     expect(ids()).toEqual(['1', '1.1']);
-    expect(screen.getByText(/^Focused:/).textContent).toContain(shortLabel(view.transport.sessions.get(route.session_id)!.items['1']!));
+    const label = shortLabel(view.transport.sessions.get(route.session_id)!.items['1']!);
+    expect(screen.queryByText(/^Focused:/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Leave Focus' })).toBeNull();
     cleanup(); await mount({ transport: view.transport });
     expect(ids()).toEqual(['1', '1.1']);
-    fireEvent.click(screen.getByRole('button', { name: 'Leave Focus' }));
+    const leave = within(row('1')).getByRole('button', { name: `Unfocus ${label}` });
+    expect(leave.textContent).toBe('Unfocus');
+    expect(leave.tabIndex).toBe(-1);
+    fireEvent.click(leave);
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
     expect(ids()).toContain('8');
+    expect(within(row('1')).getByRole('button', { name: /^Focus on / }).textContent).toBe('Focus');
+  });
+
+  it('leaves Focus by double click on the focused item’s icon', async () => {
+    const view = await mount();
+    fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
+    fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+    expect(ids()).toContain('8');
+  });
+
+  it.each(['row Unfocus button', 'disabled item icon', 'sticky Unfocus button'] as const)('ignores the %s while the view is busy', async control => {
+    const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
+    vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'preferences_patch') await gate;
+      return invoke(name, args);
+    });
+    let saving!: Promise<boolean>;
+    act(() => { saving = view.navigation.saveSessionView(structuredClone(viewOf(view.transport)), view.transport.preferences.revision); });
+    await waitFor(() => expect(view.navigation.getSnapshot().writing).toBe(true));
+    expect(view.navigation.isWritingRecent()).toBe(false);
+    const leave = control === 'sticky Unfocus button' ? within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name: /^Unfocus / })
+      : within(row('1')).getByRole('button', { name: /^Unfocus / });
+    expect((leave as HTMLButtonElement).disabled).toBe(true);
+    if (control === 'disabled item icon') fireEvent.doubleClick(row('1').querySelector('.tree-icon')!); else fireEvent.click(leave);
+    expect(within(row('1')).getByRole('button', { name: /^Unfocus / })).toBeTruthy();
+    await act(async () => { release(); await saving; });
+    expect(viewOf(view.transport).focused_item_id).toBe('1');
+    expect(within(row('1')).getByRole('button', { name: /^Unfocus / })).toBeTruthy();
+  });
+
+  it.each(['row', 'icon', 'sticky'] as const)('allows %s Unfocus through a busy automatic Recent save', async control => {
+    const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
+    vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'preferences_patch') await gate;
+      return invoke(name, args);
+    });
+    let saving!: Promise<boolean>;
+    act(() => { saving = view.navigation.saveRecentItems(route, [{ item_id: '1', action: 'peeked', visited_at: '2026-10-13T12:00:00.000Z' }], view.transport.preferences.revision); });
+    await waitFor(() => expect(view.navigation.isWritingRecent()).toBe(true));
+    expect(view.navigation.getSnapshot().writing).toBe(true);
+    const leave = control === 'sticky' ? within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name: /^Unfocus / })
+      : within(row('1')).getByRole('button', { name: /^Unfocus / });
+    expect((leave as HTMLButtonElement).disabled).toBe(false);
+    if (control === 'icon') fireEvent.doubleClick(row('1').querySelector('.tree-icon')!); else fireEvent.click(leave);
+    expect(within(row('1')).queryByRole('button', { name: /^Unfocus / })).toBeNull();
+    await act(async () => { release(); await saving; });
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+  });
+
+  it.each(['row Hide', 'detail Hide'] as const)('ends Focus on %s and does not restore it on Unhide', async source => {
+    const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
+    if (source === 'row Hide') fireEvent.click(within(row('1')).getByRole('button', { name: 'Hide (x)' }));
+    else await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: ['1'] }, view.transport.preferences.revision); });
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+    expect(viewOf(view.transport).hidden_item_ids).toContain('1');
+    await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: [] }, view.transport.preferences.revision); });
+    expect(viewOf(view.transport).focused_item_id).toBeUndefined();
+    expect(row('1')).toBeTruthy(); expect(row('8')).toBeTruthy();
+  });
+
+  it.each(['search', 'filter', 'folded topic', 'pending removal'] as const)('keeps a sticky Focus exit when %s unmounts the row', async exclusion => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.tree-scroll')) return new DOMRect(0, 0, 300, 400);
+      if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 60);
+      if (this.matches('.tree-item .tree-focus-action')) return new DOMRect(0, 100, 60, 20);
+      return new DOMRect(0, 100, 300, 100);
+    });
+    const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
+    viewOf(transport).focused_item_id = '1';
+    const removal = new RemovalQueue({ service: createDesktopService(transport), notices, read: async () => session });
+    const view = await mount({ transport, removal });
+    const band = within(screen.getByRole('navigation', { name: 'Map ancestors' }));
+    expect(within(row('1')).getByRole('button', { name: /^Unfocus / })).toBeTruthy();
+    expect(band.queryByRole('button', { name: /^Unfocus / })).toBeNull();
+    if (exclusion === 'search') view.rerender({ query: 'no matching item anywhere' });
+    else if (exclusion === 'filter') fireEvent.click(chip('In progress'));
+    else if (exclusion === 'folded topic') fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Expand or collapse topic' }));
+    else {
+      const target = { kind: 'item' as const, item: { ...route, item_id: '1' } };
+      act(() => { removal.schedule(target, removeSubject(session, target)!); });
+    }
+    expect(row('1')).toBeNull();
+    const leave = band.getByRole('button', { name: /^Unfocus / });
+    await waitFor(() => expect((leave as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(leave);
+    await waitFor(() => expect(viewOf(transport).focused_item_id).toBeUndefined());
+  });
+
+  it('ends Focus when hidden ids change for the focused top-level item', async () => {
+    const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
+    const session = view.store.getSnapshot().snapshot!.session;
+    expect(session.items['1']!.parent).toBeNull();
+    expect(viewOf(view.transport).hidden_item_ids ?? []).not.toContain('1');
+    expect(within(row('1')).getByRole('button', { name: /^Unfocus / })).toBeTruthy();
+    await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: ['1'] }, view.transport.preferences.revision); });
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+    expect(viewOf(view.transport).hidden_item_ids).toContain('1');
+    expect(view.store.getSnapshot().snapshot!.session).toBe(session);
+    await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: [] }, view.transport.preferences.revision); });
+    expect(viewOf(view.transport).focused_item_id).toBeUndefined();
+    expect(row('1')).toBeTruthy();
+  });
+
+  it.each(['above', 'below'] as const)('keeps a sticky Focus exit when its button is %s the viewport', async edge => {
+    let buttonTop = 100;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.tree-scroll')) return new DOMRect(0, 0, 300, 400);
+      if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 60);
+      if (this.matches('.tree-item .tree-focus-action')) return new DOMRect(0, buttonTop, 60, 20);
+      return new DOMRect(0, 100, 300, 100);
+    });
+    const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
+    const band = within(screen.getByRole('navigation', { name: 'Map ancestors' }));
+    expect(band.queryByRole('button', { name: /^Unfocus / })).toBeNull();
+    buttonTop = edge === 'above' ? 40 : 450;
+    fireEvent.scroll(document.querySelector('.tree-scroll')!);
+    fireEvent.click(band.getByRole('button', { name: /^Unfocus / }));
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+  });
+
+  it.each(['removed', 'no longer top-level', 'reparented beneath a hidden ancestor'] as const)('ends invalid Focus when the item is %s', async invalid => {
+    const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
+    if (invalid === 'reparented beneath a hidden ancestor') await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: ['2'] }, view.transport.preferences.revision); });
+    expect(viewOf(view.transport).focused_item_id).toBe('1');
+    const session = view.transport.sessions.get(route.session_id)!;
+    if (invalid === 'removed') session.items['1']!.removed_at = session.updated_at;
+    else session.items['1']!.parent = '2';
+    session.revision++;
+    await act(async () => { await view.store.refresh(true); });
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+    if (invalid === 'reparented beneath a hidden ancestor') {
+      await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: [] }, view.transport.preferences.revision); });
+      expect(viewOf(view.transport).focused_item_id).toBeUndefined();
+    }
   });
 
   it('focuses a top-level bullet on double click and focuses the mounted target when an external reveal exits Focus', async () => {
@@ -474,6 +652,63 @@ describe('session tree rows', () => {
     expect(screen.getByRole('alert').textContent).toBe(words);
     expect(screen.getByRole('alert').textContent).not.toContain('loading');
   });
+  it('does not leak a pending removal into a later stale selection', async () => {
+    vi.useFakeTimers();
+    const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
+    const removal = new RemovalQueue({ service: createDesktopService(transport), notices, read: async () => session });
+    await mount({ transport, removal });
+    const target = { kind: 'item' as const, item: { ...route, item_id: '1' } };
+    act(() => { removal.schedule(target, removeSubject(session, target)!); });
+    expect(removal.pending()).toHaveLength(1);
+    // Exercise the same teardown as afterEach, then put its five-second
+    // deadline inside the next fixture's successful stale-selection flow.
+    await disposeTrees();
+    const value = await mount(), { release } = await staleTree(value);
+    fireEvent.click(row('3'));
+    await act(async () => { release(); await value.store.refresh(); });
+    expect(value.calls.selected).toHaveLength(1);
+    expect(viewOf(value.transport).selected_item_id).toBe('3');
+    await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS); });
+    expect(notices.getSnapshot()).toEqual([]);
+    expect(transport.mutations.some(request => request.command.command === 'item_remove')).toBe(false);
+    expect(removal.pending()).toEqual([]);
+  });
+
+  it('waits for a sending removal before teardown clears its notices and timers', async () => {
+    vi.useFakeTimers();
+    const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
+    const removal = new RemovalQueue({ service: createDesktopService(transport), notices, read: async () => session });
+    await mount({ transport, removal });
+    let release!: () => void, entered = false;
+    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'item_remove') { entered = true; await gate; }
+      return invoke(name, args);
+    });
+    const target = { kind: 'item' as const, item: { ...route, item_id: '1' } };
+    act(() => { removal.schedule(target, removeSubject(session, target)!); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS); });
+    const sending = removal.flush();
+    let disposed = false;
+    const disposal = disposeTrees().then(() => { disposed = true; });
+    try {
+      await act(async () => {});
+      expect(entered).toBe(true);
+      expect(removal.pending()).toEqual([]);
+      expect(disposed).toBe(false);
+      expect(notices.getSnapshot()[0]?.text).toContain('Telling demo.local');
+      await act(async () => { release(); await sending; await disposal; });
+      expect(disposed).toBe(true);
+      expect(transport.mutations.filter(request => request.command.command === 'item_remove')).toHaveLength(1);
+      expect(notices.getSnapshot()).toEqual([]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      // A failed assertion must still release the command before afterEach.
+      await act(async () => { release(); await sending; await disposal; });
+      notices.clear();
+    }
+  });
+
   it.each(['click', 'Enter'] as const)('waits for a stale session before selecting with %s', async method => {
     const value = await mount(), { release } = await staleTree(value);
     expect(row('3').getAttribute('aria-disabled')).toBeNull();
@@ -2492,11 +2727,13 @@ describe('scrolling the tree', () => {
     fireEvent.scroll(scroller());
     const marker = () => screen.getByRole('button', { name: edge === 'above' ? /^↑ Selected:/ : /^↓ Selected:/ });
     expect(marker().getAttribute('data-edge')).toBe(edge);
-    const slot = document.querySelector('.tree-filters > .tree-selected-slot')!;
+    const slot = document.querySelector('.tree-path > .tree-selected-slot')!;
     expect(slot.getAttribute('aria-label')).toBe('Selected item navigation');
     expect(slot.closest('[aria-label="Filter items"]')).toBeNull();
     expect(slot.contains(marker())).toBe(true);
-    expect(document.querySelector('.tree-scroll-shell')!.contains(marker())).toBe(false);
+    // The tag shares the fixed path row with the ancestors; it is never inside the scroller.
+    expect(document.querySelector('.tree-scroll')!.contains(marker())).toBe(false);
+    expect(slot.previousElementSibling).toBe(screen.getByRole('navigation', { name: 'Map ancestors' }));
     expect(marker().querySelector('.tree-selected-label')?.textContent).not.toBe('');
     fireEvent.click(marker());
     expect(document.activeElement).toBe(row(edge === 'above' ? '1' : '8'));
@@ -2542,7 +2779,7 @@ describe('scrolling the tree', () => {
     // Session/filter bars end at 150; the scroller starts below them, with a 220 px topic band.
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       if (this.matches('.tree-session-bar')) return new DOMRect(0, 0, 300, 104);
-      if (this.matches('.tree-filters')) return new DOMRect(0, 104, 300, 46);
+      if (this.matches('.tree-recent')) return new DOMRect(0, 104, 300, 46);
       if (this.matches('.tree-topic')) return new DOMRect(0, 150, 300, 220);
       const rect = rectangle.call(this);
       if (this.matches('.tree-scroll, [role="treeitem"][data-item-id]')) return new DOMRect(rect.x, rect.y + 150, rect.width, rect.height);
@@ -2570,7 +2807,7 @@ describe('scrolling the tree', () => {
     }, props: { selectedId: '8' } });
     fireEvent.scroll(scroller());
     const tag = screen.getByRole('button', { name: /^↓ Selected:/ });
-    expect(tag.closest('.tree-filters > .tree-selected-slot')).not.toBeNull();
+    expect(tag.closest('.tree-path > .tree-selected-slot')).not.toBeNull();
     expect(screen.queryByRole('button', { name: /^Filter/ })).toBeNull();
   });
 

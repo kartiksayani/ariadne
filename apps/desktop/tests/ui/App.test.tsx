@@ -76,8 +76,10 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     expect(within(since).getByRole('button', { name: 'New receipt branch' })).toBeTruthy();
     fireEvent.click(chip); await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(within(row()).queryByRole('img', { name: 'New to you' })).toBeNull();
-    expect(within(since).queryByRole('button', { name: 'New receipt branch' })).toBeNull();
-    expect(within(since).getByText('All caught up')).toBeTruthy();
+    // With nothing left to read the Since box is gone (it is not just empty): a check in the brief says so.
+    expect(since.isConnected).toBe(false);
+    expect(screen.queryByRole('button', { name: 'New receipt branch' })).toBeNull();
+    expect(screen.getAllByRole('img', { name: 'All caught up' }).length).toBeGreaterThan(0);
     expect(screen.getByRole('article').getAttribute('data-detail-item-id')).toBe('1');
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(transport.preferences.seen![0].items).toContainEqual({ item_id: target.id, revision: target.revision });

@@ -260,6 +260,62 @@ describe('composed item navigation', { timeout: 10_000 }, () => {
 });
 
 describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
+  it.each(['search', 'status', 'no matching topics', 'collapsed ancestor'] as const)('reveals an undrawn Graph selection through its registered route after %s, preserving the saved view', async cause => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = this.closest<HTMLElement>('.graph-scroll');
+      if (this.matches('.graph-scroll')) return new DOMRect(0, 0, 400, 300);
+      if (box && this.matches('.graph-node')) return new DOMRect(600 - box.scrollLeft, 500 - box.scrollTop, 190, 66);
+      return new DOMRect();
+    });
+    const transport = new AppTransport(), view = transport.preferences.sessions[0]!;
+    view.selected_item_id = '1.1';
+    view.expanded_item_ids = ['2', '3'];
+    view.hidden_item_ids = ['6'];
+    if (cause === 'search') view.filters.search = 'delivery window';
+    if (cause === 'status') view.filters.statuses = ['waiting_on_me'];
+    if (cause === 'no matching topics') view.filters.search = 'no matching question';
+    const saved = structuredClone(view);
+    await setup(transport); await openSession();
+    await click(screen.getByRole('button', { name: 'Close detail' }));
+    // Opening the session reveals its saved selection. An owner search edit
+    // dismisses that temporary reveal; restore the query before asking Graph to reveal it again.
+    const search = screen.getByLabelText<HTMLInputElement>('Search questions and outcomes');
+    await act(async () => { fireEvent.change(search, { target: { value: `${saved.filters.search} ` } }); });
+    await act(async () => { fireEvent.change(search, { target: { value: saved.filters.search } }); });
+    await click(control('Graph'));
+    const target = () => document.querySelector<HTMLElement>('.graph-node[data-item-id="1.1"]');
+    expect(target()).toBeNull();
+    expect(screen.queryByText('Showing an item outside your current filters.')).toBeNull();
+    const before = transport.queries.filter(query => query.request.command === 'reveal_item').length;
+    const reveal = screen.getByRole<HTMLButtonElement>('button', { name: 'Reveal selected' });
+    expect(reveal.disabled).toBe(false);
+    await click(reveal);
+    expect(transport.queries.filter(query => query.request.command === 'reveal_item').slice(before)).toEqual([
+      expect.objectContaining({ session: route, request: { command: 'reveal_item', params: { item_id: '1.1' } } }),
+    ]);
+    expect(target()).not.toBeNull();
+    expect(target()!.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(target());
+    const rectangle = target()!.getBoundingClientRect();
+    expect(rectangle.left + rectangle.width / 2).toBe(200);
+    expect(rectangle.top + rectangle.height / 2).toBe(150);
+    expect(document.querySelector('.graph-node[data-item-id="1"]')!.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.queryByLabelText('Item detail')).toBeNull();
+    const current = transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!;
+    expect(current.filters).toEqual(saved.filters);
+    expect(current.expanded_item_ids).toEqual(saved.expanded_item_ids);
+    expect(current.hidden_item_ids).toEqual(saved.hidden_item_ids);
+    expect(current.selected_item_id).toBe('1.1');
+    expect(screen.getByLabelText<HTMLInputElement>('Search questions and outcomes').value).toBe(saved.filters.search);
+    if (cause !== 'collapsed ancestor') {
+      expect(screen.getByText('Showing an item outside your current filters.')).toBeTruthy();
+      await click(screen.getByRole('button', { name: 'Resume filtered view' }));
+      expect(target()).toBeNull();
+      expect(screen.queryByText('Showing an item outside your current filters.')).toBeNull();
+      expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!.filters).toEqual(saved.filters);
+    }
+  });
+
   it.each([false, true])('opens at the saved anchor when present, otherwise the saved selection (anchor: %s)', async savedAnchor => {
     treeGeometry();
     const transport = new AppTransport(), view = transport.preferences.sessions[0]!;

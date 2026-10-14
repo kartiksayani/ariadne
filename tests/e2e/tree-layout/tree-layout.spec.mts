@@ -107,7 +107,8 @@ async function expectRevealedRow(row: Locator) {
     const usableTop = Math.max(box.top, header.bottom);
     return {
       clearsHeader: bounds.top >= usableTop - 0.5,
-      fits: bounds.height > viewportBottom - usableTop || bounds.bottom <= viewportBottom + 0.5,
+      // A row that cannot keep the reveal's 8px margin at both ends lines up its top instead (scroll.ts nearestDelta).
+      fits: bounds.height > viewportBottom - usableTop - 16 || bounds.bottom <= viewportBottom + 0.5,
     };
   })).toEqual({ clearsHeader: true, fits: true });
 }
@@ -169,11 +170,14 @@ for (const theme of ['light', 'dark']) test(`Getting around keeps breadcrumbs an
     const root = page.locator('.tree-item[data-item-id="1"]');
     const waitingCount = await page.locator('.waiting-card').count();
     await root.getByRole('button', { name: /^Focus on / }).click();
-    await expect(page.getByRole('button', { name: 'Leave Focus' })).toBeVisible();
+    await expect(root.getByRole('button', { name: /^Unfocus / })).toBeVisible();
+    await expect(page.getByText(/^Focused:/)).toHaveCount(0);
     await expect(page.locator('.tree-item[data-item-id="8"]')).toHaveCount(0);
     expect(await page.locator('.waiting-card').count()).toBe(waitingCount);
-    await page.getByRole('button', { name: 'Leave Focus' }).click();
+    await root.getByRole('button', { name: /^Unfocus / }).click();
     await expect(page.locator('.tree-item[data-item-id="8"]')).toHaveCount(1);
+    // The click left keyboard focus on the row's own button; the peek below restores focus to the row.
+    await root.focus();
 
     // Plain hover leaves the Map alone; Command-hover previews after the pause.
     await root.hover(); await page.waitForTimeout(600);
@@ -519,15 +523,16 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
         await page.evaluate(() => document.documentElement.style.setProperty('--text-scale', '1'));
       }
     }
-    const scroller = page.locator('.tree-scroll'), filters = page.locator('.tree-filters');
-    const slot = page.locator('.tree-filters > .tree-selected-slot'), marker = slot.locator('.tree-selected-edge');
+    const scroller = page.locator('.tree-scroll'), filters = page.locator('.tree-path');
+    const slot = page.locator('.tree-path > .tree-selected-slot'), marker = slot.locator('.tree-selected-edge');
     const last = page.locator('.tree-item[data-item-id="18"]');
     await scroller.evaluate(element => { element.scrollTop = 0; });
     await expect(marker).toHaveCount(0);
     await expect(slot).toHaveCount(1);
-    await expect(page.locator('.tree-scroll-shell .tree-selected-slot, .tree-scroll-shell .tree-selected-edge')).toHaveCount(0);
+    await expect(page.locator('.tree-scroll .tree-selected-slot, .tree-scroll .tree-selected-edge')).toHaveCount(0);
+    // The slot is as wide as the tag it holds, so only the fixed path row (and the rows) must keep their boxes.
     const geometry = async () => ({
-      scroller: await scroller.boundingBox(), filters: await filters.boundingBox(), slot: await slot.boundingBox(),
+      scroller: await scroller.boundingBox(), filters: await filters.boundingBox(),
       scroll: await scroller.evaluate(element => ({ width: element.clientWidth, height: element.clientHeight, contentHeight: element.scrollHeight })),
       rows: await Promise.all([root, child, last].map(row => row.evaluate(element => {
         const bounds = element.getBoundingClientRect();
@@ -544,7 +549,9 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
       expect(tag.y).toBeGreaterThanOrEqual(bar.y);
       expect(tag.y + tag.height).toBeLessThanOrEqual(bar.y + bar.height);
       expect(tag.y + tag.height).toBeLessThanOrEqual((await scroller.boundingBox())!.y);
-      expect(tag.width).toBeLessThan(reserved.width);
+      expect(tag.width).toBeLessThanOrEqual(reserved.width);
+      // The tag shares the row with the ancestors, which keep the room it leaves.
+      expect(reserved.x + reserved.width).toBeLessThanOrEqual(bar.x + bar.width);
       expect(await geometry()).toEqual(hiddenGeometry);
       await expectSolidMarker(marker);
       await marker.hover(); await expectSolidMarker(marker);

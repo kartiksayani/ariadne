@@ -108,9 +108,27 @@
   box-shadow: inset 0 0 0 1px var(--color-divider);
 }
 
+/* Reveal selected and the filter control end the legend row together. */
+.graph-legend-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* The funnel is no taller than Reveal selected, so seating it here keeps the legend row's height. */
+.graph-legend .tree-filter-button {
+  width: 22px;
+  height: 22px;
+}
+
+.graph-legend-bare {
+  justify-content: flex-end;
+}
+
 .graph-reveal {
   flex-shrink: 0;
-  margin-left: auto;
   padding: 3px 10px;
   font-size: calc(12.5px * var(--text-scale));
   white-space: nowrap;
@@ -290,6 +308,56 @@
 .graph-node.is-hidden {
   opacity: 0.45;
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+/* The hidden siblings' stub: one small pill where the cards would be (sizes from STUB_* in model.ts). */
+.graph-stub {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border: 1px dashed color-mix(in srgb, var(--color-text) 30%, transparent);
+  border-radius: 999px;
+  font: inherit;
+  font-size: calc(11.5px * var(--text-scale));
+  white-space: nowrap;
+  cursor: pointer;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+  background: var(--a-bg);
+}
+
+.graph-stub:hover,
+.graph-stub:focus-visible {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-text) 8%, var(--a-bg));
+}
+
+.graph-stub:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.graph-stub[aria-expanded="true"] {
+  border-style: solid;
+}
+
+.graph-stub > i {
+  flex: none;
+  font-size: calc(11px * var(--text-scale));
+}
+
+.graph-stub-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.graph-stub-waiting {
+  margin-left: auto;
+  color: var(--st-waiting);
 }
 
 .graph-node.is-dimmed {

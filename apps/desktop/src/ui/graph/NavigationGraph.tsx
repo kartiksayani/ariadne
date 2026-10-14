@@ -9,9 +9,10 @@ import type { RevealedItem } from '../../data/routes';
 
 // Composition reuses navigation's preferences revision and registered router,
 // like the tree; it does not own a second preferences writer.
-export function NavigationGraph({ navigation, store, tight, query, onReveal, now = Date.now }: {
+export function NavigationGraph({ navigation, store, tight, query, reveal, onReveal, now = Date.now }: {
   navigation: NavigationStore; store: SessionStore; tight: boolean;
   query?: string;
+  reveal?: RevealedItem | null;
   onReveal: (result: RevealedItem, openDetail: boolean) => void; now?: () => number;
 }) {
   const state = useNavigation(navigation), session = useSession(store).snapshot?.session, route = store.getSnapshot().route;
@@ -46,7 +47,7 @@ export function NavigationGraph({ navigation, store, tight, query, onReveal, now
       // A competing writer refused admission; retry only after it finishes.
     }
   };
-  return <GraphView store={store} routes={navigation.routes} view={view} later={later} search={query} reveal={state.reveal} tight={tight} sessionLabel={label}
+  return <GraphView store={store} routes={navigation.routes} view={view} later={later} search={query} reveal={reveal === undefined ? state.reveal : reveal} tight={tight} sessionLabel={label}
     continuedFrom={topic => topic.origin ? continuedLabel(topic.origin, summaries, now()) : null}
     preferencesBusy={state.writing || state.pendingOperationId !== null}
     saveView={saveView} onReveal={onReveal} />;

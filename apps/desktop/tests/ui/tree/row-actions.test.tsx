@@ -55,6 +55,21 @@ describe('compact row actions', () => {
     get.mockRestore();
   });
 
+  it('turns the focused item’s Focus button into Unfocus in the same place, and it leaves Focus', () => {
+    const session = structuredClone(demo) as Session;
+    const names = peekNames(immutable(session)), props = itemProps([]), onFocusBranch = vi.fn(), label = names.get('1')!;
+    const mounted = render(<ItemRefs.Provider value={{ lookup: vi.fn(), onOpenItem: vi.fn() }}>
+      <ItemRow {...props} row={{ ...props.row, item: { ...props.row.item, parent: null } }} names={names} onFocusBranch={onFocusBranch} branchFocused />
+    </ItemRefs.Provider>);
+    const button = within(mounted.container).getByRole('button', { name: `Unfocus ${label}` });
+    expect(button.textContent).toBe('Unfocus');
+    expect(button.className).toBe('tree-focus-action');
+    expect(button.tabIndex).toBe(-1);
+    expect(within(mounted.container).queryByRole('button', { name: /^Focus on/ })).toBeNull();
+    fireEvent.click(button);
+    expect(onFocusBranch).toHaveBeenCalledWith(null);
+  });
+
   it('keeps every item action in its existing order with the same names, tab behavior and callbacks', () => {
     const names = ['Ack → Done', 'Bring it up (b)', 'Reply (r)', 'Drop (d)', 'Later (z)', 'Back to Open (o)', 'Hide (x)', 'Remove (⌫)'];
     const actions: RowAction[] = names.map((title, index) => ({ title, icon: 'ph ph-check', run: vi.fn(),

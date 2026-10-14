@@ -53,7 +53,9 @@ describe('topic brief and shared catch-up', () => {
     expect(screen.getByRole('button', { name: '✓ Seen' })).toBeTruthy();
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(screen.queryByRole('button', { name: 'Updated name A' })).toBeNull();
-    expect(screen.getByText('All caught up')).toBeTruthy();
+    // Nothing left to read: no box, only the check in the brief's header line.
+    expect(screen.queryByRole('region', { name: 'Since you were here' })).toBeNull();
+    expect(within(screen.getByRole('region', { name: 'Topic brief' })).getByRole('img', { name: 'All caught up' }).getAttribute('title')).toBe('All caught up');
   });
   it('removes an implicitly read card and records topic caught-up without a click', async () => {
     const value = await setup();
@@ -131,9 +133,12 @@ describe('topic brief and shared catch-up', () => {
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
     expect(document.querySelector('.topic-changes')!.firstElementChild?.classList.contains('topic-brief')).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Mark all seen' }));
-    expect(screen.getByText('All caught up')).toBeTruthy();
+    // Undo stays reachable beside the check in the brief's header line, with no box of its own.
+    const brief = screen.getByRole('region', { name: 'Topic brief' });
+    expect(within(brief).getByRole('img', { name: 'All caught up' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Since you were here' })).toBeNull();
     expect(value.transport.preferences.seen![0].items).toHaveLength(0);
-    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    fireEvent.click(within(brief).getByRole('button', { name: 'Undo' }));
     expect(screen.getByText('2 changes while you were away')).toBeTruthy();
     await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
     expect(value.transport.preferences.seen![0].items).toHaveLength(0);
@@ -157,7 +162,7 @@ describe('topic brief and shared catch-up', () => {
     await setup(1, 1, 1);
     fireEvent.click(screen.getByRole('button', { name: /Since you were here ·/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Mark all caught up' }));
-    expect(screen.getByText('All caught up')).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'All caught up' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
     expect(screen.getByRole('button', { name: 'Updated name A' })).toBeTruthy();
   });

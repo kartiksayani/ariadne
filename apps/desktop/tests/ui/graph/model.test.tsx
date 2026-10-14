@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { applyChange, descendantCount, edgePath, graphMetrics, graphStatus, isClosed, isFiltering, mergeChange,
+import { applyChange, edgePath, graphMetrics, graphStatus, isClosed, isFiltering, mergeChange, NODE_HEIGHT, STUB_HEIGHT,
   sessionChip, sessionGraph, topicCounts, type GraphInput } from '../../../src/ui/graph/model';
+import { hiddenGroupKey } from '../../../src/ui/tree/hidden';
 import { shortLabel } from '../../../src/ui/shared/short';
 import { graphSession, preferences, topicA, topicB } from './fixture';
 import { FILTER_STATUSES } from '../../../src/selectors/tree/folds';
@@ -78,9 +79,10 @@ describe('graph model', () => {
     expect(graph.topics[0].related.find(edge => edge.id === 'related:1:1.1')!.d).toBe('M236 95 L262 53');
     expect(graph.crossTopicRelated).toEqual([{ id: 'related:1:8', from: '1', to: '8' }]);
     expect(build({ session, selectedId: '8' }).crossTopicRelated).toEqual([{ id: 'related:8:1', from: '8', to: '1' }]);
+    // A hidden item is not drawn, so no related line leads to it.
     const hidden = build({ session, selectedId: '1', view: preferences({ hidden_item_ids: ['1.1'] }) });
-    expect(hidden.nodes.get('1.1')!.hidden).toBe(true);
-    expect(hidden.topics[0].related).toEqual(graph.topics[0].related);
+    expect(hidden.nodes.has('1.1')).toBe(false);
+    expect(hidden.topics[0].related.map(edge => edge.id)).toEqual(['related:1:2']);
     const collapsed = build({ session, selectedId: '1', view: preferences({ expanded_item_ids: [] }) });
     expect(collapsed.topics[0].related.map(edge => edge.id)).toEqual(['related:1:2']);
     expect(collapsed.crossTopicRelated).toEqual(graph.crossTopicRelated);
@@ -119,9 +121,11 @@ describe('graph model', () => {
     ack.ack_to = null;
     expect(build({ session }).topics[0].counts).not.toContain('to ack');
   });
-  it('keeps hidden parents and descendants reachable and marks them faded, including the selected node', () => {
-    const graph = build({ view: preferences({ hidden_item_ids: ['1'] }), selectedId: '1.1.1' });
-    expect(graph.order).toEqual(['1', '1.1', '1.1.1', '1.2', '2', '3', '8']);
+  it('marks hidden parents and descendants faded once their stub is open, including the revealed node', () => {
+    const open = new Set([hiddenGroupKey(topicA, null)]);
+    const graph = build({ view: preferences({ hidden_item_ids: ['1'] }), selectedId: '1.1.1', expandedHiddenGroups: open });
+    // Visible siblings first, then the stub's items, as in the Tree.
+    expect(graph.order).toEqual(['2', '3', hiddenGroupKey(topicA, null), '1', '1.1', '1.1.1', '1.2', '8']);
     for (const id of ['1', '1.1', '1.1.1', '1.2']) expect(graph.nodes.get(id)!.hidden).toBe(true);
     expect(graph.nodes.get('1.1.1')!.selected).toBe(true);
     expect(graph.nodes.get('2')!.hidden).toBe(false);
@@ -129,15 +133,137 @@ describe('graph model', () => {
   });
 
   it('keeps a child hidden independently when its parent is unhidden', () => {
-    const both = build({ view: preferences({ hidden_item_ids: ['1', '1.1'] }) });
+    const groups = new Set([hiddenGroupKey(topicA, null), hiddenGroupKey(topicA, '1')]);
+    const both = build({ view: preferences({ hidden_item_ids: ['1', '1.1'] }), expandedHiddenGroups: groups });
     expect(both.nodes.get('1.2')!.hidden).toBe(true);
-    const child = build({ view: preferences({ hidden_item_ids: ['1.1'] }) });
+    const child = build({ view: preferences({ hidden_item_ids: ['1.1'] }), expandedHiddenGroups: groups });
     expect(child.nodes.get('1')!.hidden).toBe(false);
     expect(child.nodes.get('1.2')!.hidden).toBe(false);
     expect(child.nodes.get('1.1')!.hidden).toBe(true);
     expect(child.nodes.get('1.1.1')!.hidden).toBe(true);
     const clear = build({ view: preferences({ hidden_item_ids: [] }) });
     expect([...clear.nodes.values()].some(node => node.hidden)).toBe(false);
+    expect(clear.stubs.size).toBe(0);
+  });
+
+  describe('hidden items fold into a stub, as in the Tree', () => {
+    const rootGroup = hiddenGroupKey(topicA, null), kidsOfOne = hiddenGroupKey(topicA, '1');
+    const edgeIds = (graph: ReturnType<typeof build>) => graph.topics.flatMap(topic => [...topic.edges.map(edge => edge.id), ...topic.related.map(edge => edge.id), ...topic.replacements.map(arc => arc.id)]);
+    it('draws a hidden item that is not selected with no parent, related or replacement line', () => {
+      const session = graphSession();
+      session.items['1']!.related = ['2']; session.items['1.1']!.parent = '1';
+      const graph = build({ session, selectedId: '1', view: preferences({ hidden_item_ids: ['2'] }) });
+      expect(graph.nodes.has('2')).toBe(false);
+      expect(graph.order).not.toContain('2');
+      // Item 3 is replaced by 2: the arc would end on a card that is not drawn.
+      expect(edgeIds(graph).filter(id => /(^|:)2($|:)/.test(id))).toEqual([]);
+      expect(graph.stubs.get(rootGroup)).toMatchObject({ count: 1, parent: null, topicId: topicA, expanded: false });
+    });
+    it('does not draw the children of an unselected hidden item either', () => {
+      const graph = build({ view: preferences({ hidden_item_ids: ['1'] }), selectedId: null });
+      expect(graph.order).toEqual(['2', '3', rootGroup, '8']);
+      const parts = edgeIds(graph).flatMap(id => id.split(':'));
+      for (const id of ['1', '1.1', '1.1.1', '1.2']) expect(parts).not.toContain(id);
+      expect(edgeIds(graph)).toContain(`topic:${rootGroup}`);
+      expect(graph.nodes.get('2')).toMatchObject({ hidden: false });
+    });
+    it('puts one small stub after the visible siblings, and counts what waits on the owner', () => {
+      const none = build({ view: preferences({ hidden_item_ids: ['1.2'] }) });
+      const stub = none.stubs.get(kidsOfOne)!;
+      expect(stub).toMatchObject({ count: 1, parent: '1', waiting: false });
+      expect(stub.x).toBe(none.nodes.get('1.1')!.x);
+      expect(stub.y).toBeGreaterThan(none.nodes.get('1.1.1')!.y);
+      expect(STUB_HEIGHT).toBeLessThan(NODE_HEIGHT / 2);
+      expect(none.children.get('1')).toEqual(['1.1']);
+      expect(none.topics[0].edges.map(edge => edge.id)).toContain(`parent:1:${kidsOfOne}`);
+      // 1.1.1 waits on the owner, so the stub for 1.1 says so, like the Tree's row.
+      const waiting = build({ view: preferences({ hidden_item_ids: ['1.1'] }) });
+      expect(waiting.stubs.get(kidsOfOne)).toMatchObject({ count: 1, waiting: true });
+      expect(waiting.order).toEqual(['1', '1.2', kidsOfOne, '2', '3', '8']);
+    });
+    it('shows the hidden items, faded, after the stub while the owner has it open', () => {
+      const graph = build({ view: preferences({ hidden_item_ids: ['1.1'] }), expandedHiddenGroups: new Set([kidsOfOne]) });
+      expect(graph.order).toEqual(['1', '1.2', kidsOfOne, '1.1', '1.1.1', '2', '3', '8']);
+      expect(graph.stubs.get(kidsOfOne)).toMatchObject({ expanded: true });
+      expect(graph.children.get('1')).toEqual(['1.2', '1.1']);
+      expect(graph.nodes.get('1.1')!.hidden).toBe(true);
+    });
+    it('opens the selected hidden route on the first model pass, including saved folded ancestors', () => {
+      const view = preferences({ hidden_item_ids: ['1'], expanded_item_ids: [] });
+      const revealed = build({ view, selectedId: '1.1.1', revealedItemId: '1.1.1', temporaryExpandedItemIds: ['1', '1.1'] });
+      expect(revealed.order).toContain('1.1.1');
+      expect(revealed.stubs.get(rootGroup)!.expanded).toBe(true);
+      const selectedOnly = build({ view, selectedId: '1.1.1' });
+      expect(selectedOnly.order).toContain('1.1.1');
+      expect(selectedOnly.stubs.get(rootGroup)!.expanded).toBe(true);
+      expect(selectedOnly.nodes.get('1.1.1')).toMatchObject({ selected: true, hidden: true });
+      expect(view.expanded_item_ids).toEqual([]);
+    });
+    it.each(['search', 'status'] as const)('keeps selected hidden items subject to %s filters, just like visible selections', filter => {
+      const filters = { ...preferences().filters, ...(filter === 'search' ? { search: 'Record retry limits' } : { statuses: ['open' as const] }) };
+      for (const hidden_item_ids of [[], ['1', '1.1']]) {
+        const graph = build({ view: preferences({ hidden_item_ids, filters }), selectedId: '1.1.1' });
+        expect(graph.nodes.has('1.1.1')).toBe(false);
+      }
+    });
+    it.each(['search', 'status'] as const)('forces a live revealed hidden item through %s filters', filter => {
+      const filters = { ...preferences().filters, ...(filter === 'search' ? { search: 'Record retry limits' } : { statuses: ['open' as const] }) };
+      const graph = build({ view: preferences({ hidden_item_ids: ['1', '1.1'], filters }), selectedId: '1.1.1', revealedItemId: '1.1.1' });
+      expect(graph.nodes.get('1.1.1')).toMatchObject({ selected: true, hidden: true });
+    });
+    it('keeps a topic whose top items are all hidden, with only its stub', () => {
+      const graph = build({ view: preferences({ hidden_item_ids: ['8'] }) });
+      const topic = graph.topics.find(value => value.topic.id === topicB)!;
+      expect(topic.nodes).toEqual([]);
+      expect(topic.stubs).toHaveLength(1);
+      expect(topic.stubs[0]).toMatchObject({ count: 1, parent: null, topicId: topicB });
+      expect(topic.edges.map(edge => edge.id)).toEqual([`topic:${hiddenGroupKey(topicB, null)}`]);
+      expect(topic.height).toBeLessThan(120);
+      expect(graph.order).not.toContain('8');
+    });
+    it('counts the visible subtree and names hidden-only branches', () => {
+      const folded = preferences({ expanded_item_ids: [], hidden_item_ids: ['1.1'] });
+      const closed = build({ view: folded });
+      expect(closed.nodes.get('1')).toMatchObject({ collapsed: true, below: 1, hiddenBelow: 1 });
+      // Expanding it draws that one card and the stub.
+      const open = build({ view: { ...folded, expanded_item_ids: ['1'] } });
+      expect(open.children.get('1')!.length).toBe(closed.nodes.get('1')!.below);
+      expect(open.stubs.get(kidsOfOne)!.count).toBe(closed.nodes.get('1')!.hiddenBelow);
+      const only = build({ view: preferences({ expanded_item_ids: [], hidden_item_ids: ['1.1', '1.2'] }) });
+      expect(only.nodes.get('1')).toMatchObject({ collapsed: true, below: 0, hiddenBelow: 2 });
+      const onlyOpen = build({ view: preferences({ expanded_item_ids: ['1'], hidden_item_ids: ['1.1', '1.2'] }) });
+      expect(onlyOpen.nodes.get('1')).toMatchObject({ collapsed: false, canCollapse: true });
+      expect(onlyOpen.stubs.get(kidsOfOne)!.count).toBe(2);
+    });
+    it('counts all visible tiers but counts each hidden branch once, separately from sibling stub counts', () => {
+      const session = graphSession();
+      session.items['1.2.1'] = { ...session.items['1.2']!, id: '1.2.1', parent: '1.2', ordinal: 1 };
+      session.items['1.2.1.1'] = { ...session.items['1.2']!, id: '1.2.1.1', parent: '1.2.1', ordinal: 1 };
+      session.items['1.2.1.2'] = { ...session.items['1.2']!, id: '1.2.1.2', parent: '1.2.1', ordinal: 2 };
+      session.items['1.2.1.2.1'] = { ...session.items['1.2']!, id: '1.2.1.2.1', parent: '1.2.1.2', ordinal: 1 };
+      const view = preferences({ expanded_item_ids: [], hidden_item_ids: ['1.1', '1.2.1.2'] });
+      const closed = build({ session, view });
+      expect(closed.nodes.get('1')).toMatchObject({ below: 3, hiddenBelow: 2, collapsed: true });
+      const nextTier = build({ session, view: { ...view, expanded_item_ids: ['1'] } });
+      expect(nextTier.children.get('1')).toEqual(['1.2']);
+      expect(nextTier.stubs.get(kidsOfOne)!.count).toBe(1);
+      expect(nextTier.nodes.get('1.2')).toMatchObject({ below: 2, hiddenBelow: 1, collapsed: true });
+      const open = build({ session, view: { ...view, expanded_item_ids: ['1', '1.2', '1.2.1'] } });
+      expect(open.stubs.get(kidsOfOne)!.count).toBe(1);
+      expect(open.stubs.get(hiddenGroupKey(topicA, '1.2.1'))!.count).toBe(1);
+      expect(open.nodes.has('1.2.1.2.1')).toBe(false);
+    });
+    it('treats search and status filters as the Tree does: hidden matches fold into the stub', () => {
+      const search = build({ view: preferences({ hidden_item_ids: ['1.2'], filters: { ...preferences().filters, search: 'receipt' } }) });
+      expect(search.order).toEqual(['1', '1.1', kidsOfOne]);
+      expect(search.stubs.get(kidsOfOne)).toMatchObject({ count: 1 });
+      const status = build({ view: preferences({ hidden_item_ids: ['1.2'], filters: { ...preferences().filters, statuses: ['in_progress'] } }) });
+      expect(status.order).toEqual(['1', kidsOfOne]);
+      expect(status.nodes.get('1')).toMatchObject({ dimmed: true });
+      expect(status.stubs.get(kidsOfOne)).toMatchObject({ count: 1 });
+      // Nothing hidden matches: no stub.
+      expect(build({ view: preferences({ hidden_item_ids: ['2'], filters: { ...preferences().filters, search: 'receipt' } }) }).stubs.size).toBe(0);
+    });
   });
 
   it('lays out one graph per topic left to right as the prototype does', () => {
@@ -208,8 +334,8 @@ describe('graph model', () => {
     expect([graphStatus('waiting_on_me'), graphStatus('in_progress'), graphStatus('dropped')]).toEqual(['waiting', 'progress', 'dropped']);
     expect([isClosed('done'), isClosed('replaced'), isClosed('open')]).toEqual([true, true, false]);
     expect(topicCounts([])).toBe('');
-    const session = graphSession();
-    expect([descendantCount(session, '1'), descendantCount(session, '1'), descendantCount(session, '8')]).toEqual([3, 3, 0]);
+    const counted = build();
+    expect([counted.nodes.get('1')!.below, counted.nodes.get('8')!.below]).toEqual([3, 0]);
     const filters = preferences().filters;
     expect([isFiltering(filters), isFiltering({ ...filters, statuses: ['open'] }), isFiltering({ ...filters, owners: [{ kind: 'me' }] }),
       isFiltering({ ...filters, hide_later: true }), isFiltering({ ...filters, search: '   ' })]).toEqual([false, true, true, true, false]);

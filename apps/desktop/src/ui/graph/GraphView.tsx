@@ -11,7 +11,9 @@ import { ackTitle } from '../shared/ack';
 import { useWorkspaceKeys } from '../keys';
 import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
-import { applyChange, mergeChange, relatedEdgePath, sessionGraph, statusVisual, type GraphNode, type RelatedEdge, type TopicGraph, type ViewChange } from './model';
+import { GraphFilter } from '../tree/FilterBar';
+import { hiddenGroupsFor } from '../tree/hidden';
+import { applyChange, mergeChange, relatedEdgePath, sessionGraph, statusVisual, STUB_HEIGHT, STUB_WIDTH, type GraphNode, type GraphStub, type RelatedEdge, type TopicGraph, type ViewChange } from './model';
 import './graph.css';
 import { useFilterFolds } from '../shared/filterFolds';
 import { notices } from '../pages/notices';
@@ -37,6 +39,8 @@ export interface GraphViewProps {
   readonly onReveal: (result: RevealedItem, openDetail: boolean) => void;
 }
 
+/** Room kept beside a keyboard-reached target: its focus ring (2px outline + 2px offset) plus a little air. */
+const RING_ROOM = 8;
 /** Scrolls `element` into the scroller: centred (Reveal selected, links) or just into view (Ariadne.dc.html:990). */
 function scrollToNode(scroller: HTMLElement, element: Element, center: boolean) {
   const a = scroller.getBoundingClientRect(), b = element.getBoundingClientRect();
@@ -48,6 +52,10 @@ function scrollToNode(scroller: HTMLElement, element: Element, center: boolean) 
   const top = 48;
   if (b.top < a.top + top) scroller.scrollTop -= a.top + top - b.top;
   else if (b.bottom > a.bottom - 8) scroller.scrollTop += Math.min(b.bottom - a.bottom + 8, b.top - a.top - top);
+  // The same nearest-edge move across: a card or stub reached by key lands whole, with room for its 2px focus ring and
+  // 2px offset (the ring is clipped by this scroller). Nothing moves while the target and its ring are already in view.
+  if (b.left < a.left + RING_ROOM) scroller.scrollLeft -= a.left + RING_ROOM - b.left;
+  else if (b.right > a.right - RING_ROOM) scroller.scrollLeft += Math.min(b.right - a.right + RING_ROOM, b.left - a.left - RING_ROOM);
 }
 
 interface NodeProps {
@@ -60,7 +68,9 @@ const Node = memo(function Node({ node, focusable, onOpen, onCollapse }: NodePro
   const visual = statusVisual[node.status];
   const className = ['graph-node', node.status === 'waiting' && 'is-waiting', node.onThread && 'is-thread', node.selected && 'is-selected',
     node.closed && 'is-closed', node.dimmed && 'is-dimmed', node.hidden && 'is-hidden'].filter(Boolean).join(' ');
-  const belowTitle = `${node.below} items below, collapsed · click to open the next tier`;
+  // Only what expanding can draw is counted; a branch of hidden items has its own stub and is named when nothing else is below.
+  const belowTitle = node.below > 0 ? `${node.below} items below, collapsed · click to open the next tier`
+    : `${node.hiddenBelow} ${node.hiddenBelow === 1 ? 'item' : 'items'} hidden below, collapsed · click to open the next tier`;
   return <div className={className} role="treeitem" aria-selected={node.selected} aria-expanded={node.below ? !node.collapsed : undefined}
     aria-label={`${node.short}: ${node.item.question}${node.hidden ? ' (hidden)' : ''}`} title={node.item.question} tabIndex={focusable ? 0 : -1}
     data-item-id={node.item.id} data-row={node.item.id} style={{ left: node.x, top: node.y }}
@@ -69,7 +79,7 @@ const Node = memo(function Node({ node, focusable, onOpen, onCollapse }: NodePro
       <i className={`graph-node-icon ${visual.icon}`} role="img" aria-label={visual.label} title={visual.label} style={{ color: `var(--st-${node.status})` }} />
       <span className="graph-node-title">{node.short}</span>
       {node.ack && <span className="graph-node-ack" title={`${ackTitle(node.ack, node.item.status)} · open details`}>{ackTitle(node.ack, node.item.status)}</span>}
-      {node.collapsed && <span className="graph-node-below" title={belowTitle}>+{node.below}</span>}
+      {node.collapsed && <span className="graph-node-below" title={belowTitle}>{node.below > 0 ? `+${node.below}` : `${node.hiddenBelow} hidden`}</span>}
       {node.canCollapse && <button type="button" className="graph-node-collapse" title="Collapse branches" aria-label="Collapse branches" tabIndex={-1}
         onClick={(event: MouseEvent) => { event.stopPropagation(); onCollapse(node); }}><i className="ph ph-minus" aria-hidden="true" /></button>}
     </div>
@@ -77,9 +87,21 @@ const Node = memo(function Node({ node, focusable, onOpen, onCollapse }: NodePro
   </div>;
 });
 
-function TopicCard({ graph, sessionLabel, marker, focusId, onOpen, onCollapse }: {
+/** The Map's "N items hidden" row, as a small stub: Enter or a click shows the hidden items, and again folds them. */
+const Stub = memo(function Stub({ stub, focusable, onToggle }: { readonly stub: GraphStub; readonly focusable: boolean; readonly onToggle: (stub: GraphStub) => void }) {
+  const label = `${stub.count} ${stub.count === 1 ? 'item' : 'items'} hidden${stub.waiting ? ', waiting on you' : ''}`;
+  return <button type="button" role="treeitem" className="graph-stub" aria-expanded={stub.expanded} aria-label={label}
+    title={`${label} · ${stub.expanded ? 'fold them again' : 'show them'}`} data-stub={stub.key} tabIndex={focusable ? 0 : -1}
+    style={{ left: stub.x, top: stub.y, width: STUB_WIDTH, height: STUB_HEIGHT }} onClick={() => onToggle(stub)}>
+    <i className={stub.expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} aria-hidden="true" />
+    <span className="graph-stub-text">{stub.count} hidden</span>
+    {stub.waiting && <i className="ph-fill ph-question graph-stub-waiting" aria-hidden="true" />}
+  </button>;
+});
+
+function TopicCard({ graph, sessionLabel, marker, focusId, onOpen, onCollapse, onToggleStub }: {
   readonly graph: TopicGraph; readonly sessionLabel: string | null; readonly marker: string; readonly focusId: string | null;
-  readonly onOpen: NodeProps['onOpen']; readonly onCollapse: NodeProps['onCollapse'];
+  readonly onOpen: NodeProps['onOpen']; readonly onCollapse: NodeProps['onCollapse']; readonly onToggleStub: (stub: GraphStub) => void;
 }) {
   return <section className="graph-card" aria-label={graph.topic.name}>
     <div className="graph-card-head">
@@ -99,6 +121,7 @@ function TopicCard({ graph, sessionLabel, marker, focusId, onOpen, onCollapse }:
         </g>)}
       </svg>
       {graph.nodes.map(node => <Node key={node.item.id} node={node} focusable={node.item.id === focusId} onOpen={onOpen} onCollapse={onCollapse} />)}
+      {graph.stubs.map(stub => <Stub key={stub.key} stub={stub} focusable={stub.key === focusId} onToggle={onToggleStub} />)}
     </div>
   </section>;
 }
@@ -144,8 +167,10 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   const session = useMemo(() => raw && visibleSession(raw, state.route, hidden), [raw, state.route, hidden]);
   const marker = useId().replace(/:/g, '');
   const scroller = useRef<HTMLDivElement>(null);
-  const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
+  const [localReveal, setLocalReveal] = useState<{ result: RevealedItem; external: RevealedItem | null } | null>(null);
+  const [localSelection, setLocalSelection] = useState<{ id: string; external: RevealedItem | null } | null>(null);
   const [dismissedReveal, setDismissedReveal] = useState<RevealedItem | null>(null);
+  const [focusedEntry, setFocusedEntry] = useState<{ id: string; selectedId: string | null } | null>(null);
   // Optimistic view edits: `pending` waits for the current write, `inflight` is being written.
   const [pending, setPending] = useState<ViewChange | null>(null);
   const [inflight, setInflight] = useState<ViewChange | null>(null);
@@ -158,7 +183,7 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   }, [errorNoticeId, error]);
   const [scrollTarget, setScrollTarget] = useState<{ id: string; center: boolean; focus?: boolean } | null>(null);
   const mounted = useRef(true), request = useRef(0);
-  const offered = localReveal ?? reveal;
+  const offered = localReveal?.external === reveal ? localReveal.result : reveal;
   const currentReveal = offered === dismissedReveal ? null : offered;
   const itemReveal = currentReveal?.store === store && currentReveal.kind === 'item' ? currentReveal : null;
   const shown = useMemo(() => {
@@ -166,24 +191,56 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
     return search === undefined || search === changed.filters.search ? changed : { ...changed, filters: { ...changed.filters, search } };
   }, [view, inflight, pending, search]);
   const filterFolds = useFilterFolds(routes, shown.session, shown.filters);
-  const selectedId = pending?.selected ?? inflight?.selected ?? itemReveal?.route.item_id ?? view.selected_item_id;
+  // An outside reveal wins immediately over an older selection whose preference write is still pending.
+  const optimisticSelection = localSelection?.external === reveal && (pending?.selected || inflight?.selected) ? localSelection.id : null;
+  const selectedId = optimisticSelection ?? itemReveal?.route.item_id ?? view.selected_item_id;
+  // Initialize during render so the first commit already contains the route. Later snapshots retain the owner's folds.
+  const [hiddenGroups, setHiddenGroups] = useState<{
+    store: SessionStore; selectedId: string | null; reveal: RevealedItem | null; open: ReadonlySet<string>;
+  } | null>(null);
+  let groupState = hiddenGroups;
+  if (session && (!groupState || groupState.store !== store || groupState.selectedId !== selectedId || groupState.reveal !== itemReveal)) {
+    const explicit = new Set(shown.hidden_item_ids ?? []);
+    const selectionChanged = !groupState || groupState.store !== store || groupState.selectedId !== selectedId;
+    const open = new Set(groupState?.store === store ? groupState.open : []);
+    if (selectionChanged && selectedId) hiddenGroupsFor(session, explicit, selectedId).forEach(key => open.add(key));
+    if (itemReveal && (selectionChanged || groupState?.reveal !== itemReveal)) hiddenGroupsFor(session, explicit, itemReveal.route.item_id).forEach(key => open.add(key));
+    groupState = { store, selectedId, reveal: itemReveal, open };
+    setHiddenGroups(groupState);
+  }
+  const openGroups = groupState?.open;
   const graph = useMemo(() => session ? sessionGraph({ session, view: shown, later, selectedId, tight,
     temporaryExpandedItemIds: itemReveal?.temporaryExpandedItemIds ?? [], revealedItemId: itemReveal?.route.item_id ?? null,
-    filterCollapsedItemIds: filterFolds.items }) : null,
-  [session, shown, later, selectedId, tight, itemReveal, filterFolds.items]);
-  const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId });
-  latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId };
+    filterCollapsedItemIds: filterFolds.items, expandedHiddenGroups: openGroups }) : null,
+  [session, shown, later, selectedId, tight, itemReveal, filterFolds.items, openGroups]);
+  const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: reveal });
+  latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: reveal };
 
-  // The item this graph selected last; its reveal comes back through `reveal` and must not scroll again.
-  const own = useRef<string | null>(null);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
-  // A reveal from outside the graph (a link, a waiting card) centres its item.
+  const toggleStub = useCallback((stub: GraphStub) => {
+    if (currentReveal?.kind !== 'item' || currentReveal.route.item_id !== latest.current.selectedId) setDismissedReveal(currentReveal);
+    setHiddenGroups(groups => {
+      if (!groups) return groups;
+      const open = new Set(groups.open); if (stub.expanded) open.delete(stub.key); else open.add(stub.key);
+      return { ...groups, open };
+    });
+  }, [currentReveal]);
+  // Keep keyboard focus at the same layout position when any focused entry disappears.
+  const focusedRow = useRef<string | null>(null);
+  const previousOrder = useRef<readonly string[]>([]);
   useLayoutEffect(() => {
-    setLocalReveal(null);
-    if (reveal?.store !== store || reveal.kind !== 'item') return;
-    if (reveal.route.item_id === own.current) own.current = null;
-    else setScrollTarget({ id: reveal.route.item_id, center: true, focus: true });
-  }, [reveal]);
+    const before = previousOrder.current;
+    const order = graph?.order ?? [];
+    previousOrder.current = order;
+    const id = focusedRow.current, active = document.activeElement;
+    if (!id || order.includes(id) || (active && active !== document.body)) return;
+    const index = before.indexOf(id), next = order[Math.min(Math.max(index, 0), order.length - 1)];
+    const target = next ? scroller.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(next)}"], [data-stub="${CSS.escape(next)}"]`) : null;
+    (target ?? scroller.current)?.focus({ preventScroll: true });
+  }, [graph]);
+
+  // A selection's reveal comes back through `reveal` and must not scroll again.
+  const ownReveal = useRef<RevealedItem | null>(null);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
   useLayoutEffect(() => { ++request.current; setLocalReveal(null); setPending(null); setInflight(null); setError(null); }, [store]);
 
   // Writes one change at a time through navigation's preference writer; later edits merge into `pending`.
@@ -201,26 +258,30 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   const change = useCallback((next: ViewChange) => setPending(previous => mergeChange(previous, next)), []);
   /** Select an item: show it now, save it, and tell the App (which opens detail when asked). */
   const select = useCallback((id: string, options: { openDetail: boolean; expand?: boolean; center?: boolean }) => {
+    setLocalSelection({ id, external: latest.current.external });
+    setFocusedEntry({ id, selectedId: id });
     if (options.expand && latest.current.graph?.filtering) filterFolds.setFold('items', id, false);
     change({ selected: id, expansion: options.expand ? [{ kind: 'expand', id }] : [] });
-    setScrollTarget({ id, center: !!options.center });
-    own.current = id;
-    const call = ++request.current;
+    if (!options.center) setScrollTarget({ id, center: false });
+    const call = ++request.current, external = latest.current.external;
     void latest.current.routes.revealItem({ ...latest.current.view.session, item_id: id }).then(result => {
-      if (!mounted.current || call !== request.current || !result) return;
-      setLocalReveal(result); latest.current.onReveal(result, options.openDetail);
-    }).catch((failure: unknown) => { if (mounted.current && call === request.current) setError(plainFailure(failure, 'This item could not be opened.')); });
+      if (!mounted.current || call !== request.current || external !== latest.current.external || !result) return;
+      ownReveal.current = result;
+      // An undrawn target and its temporary route must arrive in the same commit.
+      if (options.center) setScrollTarget({ id, center: true, focus: true });
+      setLocalReveal({ result, external }); latest.current.onReveal(result, options.openDetail);
+    }).catch((failure: unknown) => { if (mounted.current && call === request.current && external === latest.current.external) setError(plainFailure(failure, 'This item could not be opened.')); });
   }, [change, filterFolds.setFold]);
   // Clicking a node selects it and opens detail; a collapsed node also opens its next tier (Ariadne.dc.html:1564).
   const open = useCallback((node: GraphNode) => {
-    select(node.item.id, { openDetail: true, expand: node.collapsed, center: true });
+    select(node.item.id, { openDetail: true, expand: node.collapsed });
   }, [select]);
   // "−" collapses the branches; a selection inside moves to this node (Ariadne.dc.html:1569).
   const collapse = useCallback((node: GraphNode) => {
     const selected = latest.current.selectedId;
     let inside = false;
     for (let id = selected ? session?.items[selected]?.parent : null; id; id = session?.items[id]?.parent) if (id === node.item.id) inside = true;
-    if (inside) select(node.item.id, { openDetail: false, center: false });
+    if (inside) select(node.item.id, { openDetail: false });
     if (latest.current.graph?.filtering) filterFolds.setFold('items', node.item.id, true);
     change({ expansion: [{ kind: 'collapse', id: node.item.id }] });
     if (itemReveal?.temporaryExpandedItemIds.includes(node.item.id)) setDismissedReveal(currentReveal);
@@ -230,8 +291,10 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   const keys = useWorkspaceKeys<HTMLDivElement>({
     'move-down': () => move(1), 'move-up': () => move(-1), first: () => move(-Infinity), last: () => move(Infinity),
     unfold: () => {
+      const stub = focusedRow.current ? latest.current.graph?.stubs.get(focusedRow.current) : undefined;
+      if (stub) { if (!stub.expanded) toggleStub(stub); return true; }
       const { graph: current, selectedId: id } = latest.current, node = id ? current?.nodes.get(id) : undefined;
-      if (!current || !node || !node.below) return !!node;
+      if (!current || !node || (!node.below && !node.hiddenBelow)) return !!node;
       if (node.collapsed) {
         if (current.filtering) filterFolds.setFold('items', node.item.id, false);
         change({ expansion: [{ kind: 'expand', id: node.item.id }] }); return true;
@@ -241,6 +304,12 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
       return true;
     },
     fold: () => {
+      const stub = focusedRow.current ? latest.current.graph?.stubs.get(focusedRow.current) : undefined;
+      if (stub) {
+        if (stub.expanded) toggleStub(stub);
+        else if (stub.parent) select(stub.parent, { openDetail: false });
+        return true;
+      }
       const { graph: current, selectedId: id } = latest.current, node = id ? current?.nodes.get(id) : undefined;
       if (!current || !node) return false;
       if (node.canCollapse) { collapse(node); return true; }
@@ -257,40 +326,67 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   function move(step: number): boolean {
     const order = latest.current.graph?.order ?? [];
     if (!order.length) return false;
-    const index = order.indexOf(latest.current.selectedId ?? '');
+    const current = focusedRow.current && order.includes(focusedRow.current) ? focusedRow.current : latest.current.selectedId;
+    const index = order.indexOf(current ?? '');
     const next = step === -Infinity ? 0 : step === Infinity ? order.length - 1 : Math.max(0, Math.min(order.length - 1, index + step));
-    if (order[next] !== latest.current.selectedId) select(order[next], { openDetail: false });
+    const id = order[next];
+    if (latest.current.graph?.stubs.has(id)) {
+      setFocusedEntry({ id, selectedId: latest.current.selectedId }); setScrollTarget({ id, center: false, focus: true });
+    } else if (id !== current) select(id, { openDetail: false });
     return true;
   }
 
   const revealSelected = () => {
-    const id = latest.current.selectedId, element = id ? scroller.current?.querySelector(`[data-row="${CSS.escape(id)}"]`) : null;
-    if (scroller.current && element) scrollToNode(scroller.current, element, true);
+    const id = latest.current.selectedId;
+    if (!id || !session) return;
+    if (!latest.current.graph?.nodes.has(id)) select(id, { openDetail: false, center: true });
+    else setScrollTarget({ id, center: true, focus: true });
   };
-  // Opening the graph centres the selection (Ariadne.dc.html:978); later moves keep it in view.
+  // Consume every cause against this commit's DOM, even when its target is absent.
+  // A later filter, snapshot or layout change must never revive a scroll request.
   const opened = useRef<SessionStore | null>(null);
+  const previousReveal = useRef<RevealedItem | null | undefined>(undefined);
   useLayoutEffect(() => {
-    if (!graph || opened.current === store) return;
-    opened.current = store;
-    const id = latest.current.selectedId, element = id ? scroller.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(id)}"]`) : null;
-    if (scroller.current && element) { scrollToNode(scroller.current, element, true); element.focus({ preventScroll: true }); }
-    else scroller.current?.focus({ preventScroll: true });
-  }, [graph, store]);
-  useLayoutEffect(() => {
-    if (!scrollTarget) return;
-    const element = scroller.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(scrollTarget.id)}"]`);
-    if (!scroller.current || !element) return;
-    setScrollTarget(null);
-    scrollToNode(scroller.current, element, scrollTarget.center);
-    if (scrollTarget.focus || scroller.current.contains(document.activeElement)) element.focus({ preventScroll: true });
-  }, [scrollTarget, graph]);
+    let target = scrollTarget;
+    if (scrollTarget) setScrollTarget(null);
+    if (previousReveal.current !== reveal) {
+      previousReveal.current = reveal;
+      setLocalReveal(null); setLocalSelection(null);
+      const echo = reveal !== null && reveal === ownReveal.current;
+      ownReveal.current = null;
+      if (!echo && reveal?.store === store && reveal.kind === 'item') target = { id: reveal.route.item_id, center: true, focus: true };
+    }
+    const initial = !!graph && opened.current !== store;
+    if (initial) {
+      opened.current = store;
+      if (!target && selectedId) target = { id: selectedId, center: true, focus: true };
+    }
+    const box = scroller.current;
+    const element = target ? box?.querySelector<HTMLElement>(`[data-row="${CSS.escape(target.id)}"], [data-stub="${CSS.escape(target.id)}"]`) : null;
+    if (box && element && target) {
+      scrollToNode(box, element, target.center);
+      if (target.focus || box.contains(document.activeElement)) element.focus({ preventScroll: true });
+    } else if (initial) box?.focus({ preventScroll: true });
+  });
 
-  const focusId = selectedId && graph?.nodes.has(selectedId) ? selectedId : graph?.order[0] ?? null;
+  const focusId = focusedEntry && focusedEntry.selectedId === selectedId && graph?.order.includes(focusedEntry.id) ? focusedEntry.id
+    : selectedId && graph?.nodes.has(selectedId) ? selectedId : graph?.order[0] ?? null;
+  const revealControl = <button type="button" className="btn btn-secondary graph-reveal" disabled={!selectedId || !session?.items[selectedId]} onClick={revealSelected}>
+    <i className="ph ph-crosshair-simple" aria-hidden="true" />Reveal selected</button>;
   // Like the prototype, the graph and its legend show only when a topic has nodes (Ariadne.dc.html:2177).
   return <div className="graph-view">
-    <div ref={scroller} className="graph-scroll" tabIndex={-1} onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+    <div ref={scroller} className="graph-scroll" tabIndex={-1}
+      onFocus={event => {
+        const element = event.target instanceof Element ? event.target.closest('[data-row], [data-stub]') : null;
+        focusedRow.current = element?.getAttribute('data-row') ?? element?.getAttribute('data-stub') ?? null;
+        if (focusedRow.current) setFocusedEntry({ id: focusedRow.current, selectedId: latest.current.selectedId });
+      }}
+      onBlur={event => {
+        if (!(event.relatedTarget instanceof globalThis.Node) || !event.currentTarget.contains(event.relatedTarget)) focusedRow.current = null;
+      }}
+      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
       // A focused button keeps its own Enter and Space (Ariadne.dc.html:1471).
-      if (!(event.target instanceof HTMLButtonElement)) keys(event);
+      if (!(event.target instanceof HTMLButtonElement) || (event.target.hasAttribute('data-stub') && event.key !== 'Enter' && event.key !== ' ')) keys(event);
     }}>
       {!!graph?.topics.length && <><div className="graph-legend">
         <span className="graph-legend-key" aria-label="Thread to the selected item" title="Thread to the selected item"><span className="graph-legend-thread" /><span className="graph-legend-label">Thread</span></span>
@@ -299,14 +395,20 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
         <span className="graph-legend-key" aria-label="Waiting on me" title="Waiting on me"><span className="graph-legend-waiting" /><span className="graph-legend-label">Waiting on me</span></span>
         <span className="graph-legend-key" aria-label="Closed" title="Closed"><span className="graph-legend-closed" /><span className="graph-legend-label">Closed</span></span>
         <span className="graph-legend-note" title="One graph per topic">One graph per topic</span>
-        <button type="button" className="btn btn-secondary graph-reveal" disabled={!selectedId || !graph?.nodes.has(selectedId)} onClick={revealSelected}>
-          <i className="ph ph-crosshair-simple" aria-hidden="true" />Reveal selected</button>
+        <div className="graph-legend-actions">
+          {revealControl}
+          <GraphFilter />
+        </div>
       </div>
       <div className="graph-cards">
         {graph?.topics.map(topic => <TopicCard key={topic.topic.id} graph={topic} sessionLabel={continuedFrom?.(topic.topic) ?? sessionLabel} marker={`${marker}-${topic.topic.id}`}
-          focusId={focusId} onOpen={open} onCollapse={collapse} />)}
+          focusId={focusId} onOpen={open} onCollapse={collapse} onToggleStub={toggleStub} />)}
         {!!graph?.crossTopicRelated.length && <CrossTopicLinks edges={graph.crossTopicRelated} />}
       </div></>}
+      {/* Filters and the selected item's exit remain reachable when no topic is drawn. */}
+      {!graph?.topics.length && (selectedId && session?.items[selectedId]
+        ? <div className="graph-legend graph-legend-bare"><div className="graph-legend-actions">{revealControl}<GraphFilter /></div></div>
+        : <GraphFilter wrap />)}
     </div>
   </div>;
 }

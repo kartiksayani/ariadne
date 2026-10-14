@@ -34,6 +34,8 @@ export interface FrameSpec {
   readonly reconnecting?: boolean;
   readonly expandedAnswer?: number;
   readonly hiddenItems?: readonly string[];
+  /** Items hidden by the saved view only, with their text untouched (hiddenItems also rewrites their question). */
+  readonly foldedItems?: readonly string[];
   /** Compact dock states are app-only, independent of immutable handoff comparisons. */
   readonly dockState?: 'question' | 'open' | 'pending';
   /** Compare a stopped turn after delivery with a rejection before delivery. */
@@ -43,7 +45,7 @@ export interface FrameSpec {
   /** Opens Waiting even when the window squeezes the centre column. */
   readonly peekWaiting?: boolean;
   /** App-only M2 changes states, independent of the original handoff baselines. */
-  readonly changes?: 'typed' | 'choice' | 'away';
+  readonly changes?: 'typed' | 'choice' | 'away' | 'long';
 }
 
 const wide = { width: 1600, height: 960 } as const, narrow = { width: 1280, height: 800 } as const;
@@ -105,6 +107,14 @@ const specs: readonly FrameSpec[] = [
   { ...base, width: 1280, height: 900, id: 'changes-typed', selected: '3.1', detail: true, changes: 'typed' },
   { ...base, width: 1280, height: 900, id: 'changes-choice', selected: '3.1', detail: true, changes: 'choice' },
   { ...base, width: 1000, height: 800, id: 'changes-away', changes: 'away' },
+  // Map layout frames: the brief with many decided names, and the plain Map with the selected thread passing the topic cards.
+  { ...base, ...narrow, id: 'map-brief-long', selected: '3.1', changes: 'long' },
+  { ...base, width: 900, height: 650, id: 'map-brief-long-small', selected: '3.1', changes: 'long' },
+  { ...base, ...narrow, id: 'map-thread', selected: '1.3.1.2' },
+  { ...base, width: 900, height: 650, id: 'map-thread-small', selected: '1.3.1.2' },
+  // The Graph with hidden siblings folded into a stub (the Tree's "N items hidden" rule).
+  { ...base, ...narrow, id: 'graph-hidden', view: 'graph', selected: '1.3.1.2', foldedItems: ['1.1', '1.4', '2.2'] },
+  { ...base, width: 900, height: 650, id: 'graph-hidden-small', view: 'graph', selected: '1.3.1.2', foldedItems: ['1.1', '1.4', '2.2'] },
 ];
 
 /** Harness states drawn from another board frame's card (FrameSpec.design). */
@@ -150,6 +160,17 @@ export function frameSpec(id: string): FrameSpec {
  */
 export const detailMask = { reason: 'chat-style detail pane, owner request 2026-10-08; covered by tests/e2e/owner-input/layout.spec.mts + UI tests', selector: '.shell-detail-scroll' } as const;
 export const detailMasked = (spec: FrameSpec): boolean => !!spec.detail;
+
+/**
+ * Graph frames are compared with the Graph's own rows moved, not with a looser threshold. The handoff puts a
+ * standalone filter row above the legend; the app moved the filter button into the legend row (owner request,
+ * A16), so the legend and the Graph below it sit higher by the height of that row. The legend is measured against
+ * the legend, the Graph body against the selected card (the handoff scrolls the selection to the centre of a
+ * shorter viewport, so the body moves by less than the legend). The strips the move leaves without a counterpart
+ * (the handoff's filter row, the part of the Graph newly in view at the foot) are masked. Everything else is
+ * compared pixel for pixel at the same place.
+ */
+export const graphShift = { reason: 'filter row above the Graph legend removed, filter button moved into the legend row (A16 owner report)' } as const;
 
 /** Graph frames: the handoff's view="graph" or the session scenario (Ariadne.dc.html:961). */
 export const graphFrame = (spec: FrameSpec): boolean => spec.view === 'graph' || spec.scenario === 'session';
