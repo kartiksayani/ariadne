@@ -1,3 +1,5 @@
+import { createPortal } from 'react-dom';
+import { Dialog } from '../dialogs/Dialog';
 import { ItemChanges } from '../changes/ItemChanges';
 import { AnswerChanges } from '../changes/AnswerChanges';
 import { isChangedSinceRead, type SeenState } from '../../selectors/changes/seen';
@@ -47,6 +49,25 @@ import { navigationVisits } from '../navigation/visits';
 const nearEnd = (pane: HTMLElement) => pane.scrollHeight - pane.scrollTop - pane.clientHeight < 80;
 
 const resizeTargets = (pane: HTMLElement) => new Set<Element>([pane, ...pane.children, ...pane.querySelectorAll('.detail-turn-now .detail-bubble-agent')]);
+
+/** Keep the current ask readable above the options, with the pane's one-click full-text pattern. */
+function ConversationQuestion({ text }: { readonly text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const id = useId();
+  return <><div className="conversation-question">
+    <div id={id} className="conversation-question-text"><Markdown text={text} inline compact /></div>
+    <button type="button" className="btn btn-ghost btn-icon conversation-question-toggle" aria-label="Expand question"
+      aria-expanded={expanded} aria-controls={expanded ? `${id}-full` : id} aria-haspopup="dialog" onClick={() => setExpanded(true)}>
+      <i className="ph ph-caret-down" aria-hidden="true" />
+    </button>
+  </div>
+    {expanded && createPortal(<div onKeyDown={event => event.stopPropagation()}><Dialog label="Current question" width={640} onCancel={() => setExpanded(false)}>
+      <h2 className="dialog-title">Current question</h2>
+      <div id={`${id}-full`} className="dialog-body"><Markdown text={text} /></div>
+      <div className="dialog-actions"><button type="button" className="btn btn-secondary" onClick={() => setExpanded(false)}>Close question</button></div>
+    </Dialog></div>, document.body)}
+  </>;
+}
 
 /** Return focus to the item's row so workspace keys work again. */
 function focusRoot(itemId: string) {
@@ -530,7 +551,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   return <ItemRefSession.Provider value={{ project_id: session.project_id, session_id: session.id }}><ItemRefs.Provider value={{ lookup: id => {
     const target = session.items[id];
     return target && !itemRemoved(session, target.id) ? { label: target.question, status: displayStatus(session, target) } : null;
-  }, route: id => ({ project_id: session.project_id, session_id: session.id, item_id: id }), onOpenItem }}><FileRefProject.Provider value={session.project_id}><article className={`item-detail${expanded ? ' item-conversation' : ''}`} data-detail-item-id={itemId} data-status={model.status} aria-label={`Detail of ${item.question}`}>
+  }, route: id => ({ project_id: session.project_id, session_id: session.id, item_id: id }), onOpenItem }}><FileRefProject.Provider value={session.project_id}><article className={`item-detail${expanded ? ' item-conversation' : ''}`} data-detail-item-id={itemId} data-item-revision={item.revision} data-status={model.status} aria-label={`Detail of ${item.question}`}>
     <div className="detail-body" ref={body} onScroll={event => {
       const pane = event.currentTarget;
       if (pane.scrollTop !== positionedScroll.current) followingAsk.current = false;
@@ -722,7 +743,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
       {/* While the follow-up box is open, it is the detail's one data-owner-input. */}
       <AnswerSlot drafts={drafts} store={store} itemId={itemId} compactOptions={expanded} blocked={model.answer?.blocked} focusRequest={answerFocus}
         prompt={expanded && answerState.live ? <div className="conversation-pin"><h3>Your turn · {relatedLabels.get(itemId)}</h3>
-          <Markdown text={item.ask || item.question} /></div> : undefined}
+          <ConversationQuestion key={`${itemId}:${item.ask || item.question}`} text={item.ask || item.question} /></div> : undefined}
         marked={!owner}
         onFocusRequestConsumed={onFocusRequestConsumed} onEscape={() => focusRoot(itemId)} onAgentNotRunning={onAgentNotRunning} onSent={sentJustNow} />
     </section>}

@@ -183,14 +183,14 @@ describe('conversation control regressions', () => {
     expect(screen.getByLabelText('Reply message')).toBeTruthy();
   });
 
-  it('keeps question and options in their scroll region with both Send actions outside it, including an unselected choice', () => {
+  it('keeps only options in their scroll region with question and both Send actions outside it, including an unselected choice', () => {
     const onSendOption = vi.fn(), onSendText = vi.fn(), onSelect = vi.fn();
     const props = { variant: 'chat' as const, compactOptions: true, options: [{ id: 'one', label: 'Use the full window', consequence: 'Full explanation', recommended: false }],
       selected: -1, draft: 'My note', prompt: <p>Current question</p>, onSelect, onDraft: vi.fn(), onSendOption, onSendText };
     const view = render(<AnswerControl {...props} />);
     const send = screen.getByRole('button', { name: 'Send answer' });
     expect(send.hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText('Current question').closest('.answer-choices')).toBeTruthy();
+    expect(screen.getByText('Current question').closest('.answer-choices')).toBeNull();
     expect(screen.getByText('Use the full window').closest('.answer-choices')).toBeTruthy();
     expect(send.closest('.answer-fixed-controls')).toBeTruthy();
     expect(screen.getByLabelText('Reply in your own words').closest('.answer-fixed-controls')).toBeTruthy();
@@ -200,6 +200,64 @@ describe('conversation control regressions', () => {
     view.rerender(<AnswerControl {...props} selected={0} />);
     fireEvent.click(screen.getByRole('button', { name: 'Send “Use the full window” with your note' }));
     expect(onSendOption).toHaveBeenCalledWith(0, 'My note');
+  });
+
+  it('keeps the full pinned question one click away without changing the saved note or choice', async () => {
+    const { source, store, props } = await setup();
+    const question = 'Should we keep all the details of this question available to the owner? '.repeat(8);
+    source.items['2']!.ask = question; ++source.revision; await store.refresh();
+    render(<ConversationView {...props} itemId="2" onClose={vi.fn()} />);
+    const box = screen.getByRole('textbox', { name: 'Reply in your own words' }) as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'My exact saved note' } });
+    const choice = document.querySelector('[data-answer-option][aria-pressed="true"]');
+    const toggle = screen.getByRole('button', { name: 'Expand question' });
+    const text = document.getElementById(toggle.getAttribute('aria-controls')!)!;
+    expect(text.textContent?.trim()).toBe(question.trim());
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(text.closest('.answer-choices')).toBeNull();
+    toggle.focus(); fireEvent.click(toggle);
+    const dialog = screen.getByRole('dialog', { name: 'Current question' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(dialog.querySelector('.dialog-body')?.textContent?.trim()).toBe(question.trim());
+    expect(text.closest('.conversation-pin')).toBeTruthy();
+    expect(box.value).toBe('My exact saved note');
+    expect(document.querySelector('[data-answer-option][aria-pressed="true"]')).toBe(choice);
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Current question' })).toBeNull();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(toggle);
+    expect(screen.getByRole('region', { name: 'Item conversation' })).toBeTruthy();
+    fireEvent.click(toggle); fireEvent.click(screen.getByRole('button', { name: 'Close question' }));
+    expect(screen.queryByRole('dialog', { name: 'Current question' })).toBeNull();
+    expect(box.value).toBe('My exact saved note');
+  });
+
+  it('keeps question dialog keys from selecting or sending the pinned answer', async () => {
+    const { transport, source, store, drafts, props } = await setup();
+    source.items['2']!.options = [
+      { id: 'keep', label: 'Keep the window', consequence: 'Keep the timing.', recommended: true },
+      { id: 'change', label: 'Change the window', consequence: 'Change the timing.', recommended: false },
+    ];
+    ++source.revision; await store.refresh();
+    const onAgentNotRunning = vi.fn();
+    render(<ConversationView {...props} itemId="2" onClose={vi.fn()} onAgentNotRunning={onAgentNotRunning} />);
+    const box = screen.getByRole('textbox', { name: 'Reply in your own words' }) as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'Keep my note' } });
+    const choice = document.querySelector('[data-answer-option][aria-pressed="true"]');
+    const before = drafts.find(route, '2', 'answer')!.draft.selected_option_id;
+    fireEvent.click(screen.getByRole('button', { name: 'Expand question' }));
+    const dialog = screen.getByRole('dialog', { name: 'Current question' });
+    await act(async () => {
+      fireEvent.keyDown(dialog, { key: '2' });
+      fireEvent.keyDown(dialog, { key: 'Enter', metaKey: true });
+    });
+    expect(document.querySelector('[data-answer-option][aria-pressed="true"]')).toBe(choice);
+    expect(drafts.find(route, '2', 'answer')!.draft.selected_option_id).toBe(before);
+    expect(drafts.find(route, '2', 'answer')!.saving).toBe(false);
+    expect(transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(0);
+    expect(box.value).toBe('Keep my note');
+    expect(onAgentNotRunning).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: 'Current question' })).toBe(dialog);
   });
 
   it('reveals a long conversation title with one accessible button press', async () => {

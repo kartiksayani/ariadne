@@ -9,8 +9,8 @@ const props = (changes: Partial<AnswerControlProps> = {}): AnswerControlProps =>
   draft: ' A note with exact spaces \n', onSelect: vi.fn(), onDraft: vi.fn(), onSendOption: vi.fn(), onSendText: vi.fn(), ...changes });
 
 describe('answer choice with an optional note', () => {
-  it.each(['full', 'chat'] as const)('sends option and note together in the %s control and keeps reply-only secondary', variant => {
-    const values = props({ variant }); render(<AnswerControl {...values} />);
+  it.each([{ variant: 'full' as const, compactOptions: false }, { variant: 'chat' as const, compactOptions: false }, { variant: 'chat' as const, compactOptions: true }])('sends option and note together in the $variant control (compact=$compactOptions) and keeps reply-only secondary', ({ variant, compactOptions }) => {
+    const values = props({ variant, compactOptions }); render(<AnswerControl {...values} />);
     const send = screen.getByRole('button', { name: 'Send “Keep the design” with your note' });
     expect(send.classList.contains('btn-primary')).toBe(true);
     expect(screen.getByTitle(/Press 1 to select, ⌥1 to send with your note/).getAttribute('title')).toBe(variant === 'chat'
@@ -88,8 +88,8 @@ describe('compact chat choices', () => {
     expect(values.onSelect).toHaveBeenLastCalledWith(1);
     expect(values.onSendOption).toHaveBeenCalledTimes(1);
   });
-  it('collapses the saved words on Escape while keeping every choice and the exact note for sending', async () => {
-    const user = userEvent.setup(), values = props({ options: choices, variant: 'chat', onEscape: vi.fn() });
+  it.each([false, true])('collapses the saved words on Escape while keeping every choice and the exact note for sending (compact=%s)', async compactOptions => {
+    const user = userEvent.setup(), values = props({ options: choices, variant: 'chat', compactOptions, onEscape: vi.fn() });
     const view = render(<AnswerControl {...values} />);
     const box = screen.getByRole('textbox') as HTMLTextAreaElement;
     box.focus(); await user.keyboard('{Escape}');
@@ -132,6 +132,22 @@ describe('compact chat choices', () => {
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('Changed note');
     choice.focus(); await user.keyboard('{Enter}');
     expect(values.onSendOption).toHaveBeenCalledExactlyOnceWith(0, 'Changed note');
+  });
+  it.each(['blocked', 'frozen', 'locked'] as const)('keeps compact choice and reply sends gated while %s without losing the saved note', state => {
+    const values = props({ options: choices, variant: 'chat', compactOptions: true,
+      ...(state === 'blocked' ? { blocked: 'Review the current question' } : { [state]: true }) });
+    const view = render(<AnswerControl {...values} />);
+    const box = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.click(screen.getByRole('button', { name: 'Send “Keep the design” with your note' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
+    fireEvent.keyDown(box, { key: 'Enter', metaKey: true });
+    fireEvent.keyDown(view.container.querySelector('[data-answer-option="0"]')!, { key: 'Enter' });
+    expect(values.onSendOption).not.toHaveBeenCalled(); expect(values.onSendText).not.toHaveBeenCalled();
+    expect(box.value).toBe(values.draft);
+    expect(box.disabled).toBe(state === 'locked');
+    view.rerender(<AnswerControl {...values} blocked={undefined} frozen={false} locked={false} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Send “Keep the design” with your note' }));
+    expect(values.onSendOption).toHaveBeenCalledExactlyOnceWith(0, values.draft);
   });
   it('keeps 1–9 selection separate from sending and shows one shortcut line', async () => {
     const user = userEvent.setup(), many = Array.from({ length: 9 }, (_, index) => ({ ...choices[1]!, id: `choice-${index}`, label: `Choice ${index + 1}` }));

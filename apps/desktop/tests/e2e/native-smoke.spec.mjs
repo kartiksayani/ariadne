@@ -12,7 +12,7 @@ import { navigationUpdated, runHistoryAcceptance, restoreHistoryAcceptance } fro
 import { runGraphAcceptance } from './graph.spec.mjs';
 import { runRecoveryAcceptance } from './recovery.spec.mjs';
 import { runRemoveAcceptance } from './remove.spec.mjs';
-import { folded, openFollowUp, sendDetailReply } from './owner-reply.mjs';
+import { folded, openFollowUp, ownerReplyTarget, sendDetailReply, waitForOwnerReplyTarget } from './owner-reply.mjs';
 import { acceptanceBlocks } from './block-results.mjs';
 import { historyFailureFacts } from './history-evidence.mjs';
 
@@ -187,14 +187,19 @@ async function delivery(configuration) {
 
   // The first follow-up uses the bigger conversation view; the others use the detail's same composer.
   // The held answer hides the answer slot, so all four replies queue behind it.
+  let replyTarget = ownerReplyTarget(await snapshot(configuration), configuration.itemId);
   for (const [index, text] of ownerTexts.slice(1).entries()) {
     if (index === 0) {
       const expand = await browser.$('.item-detail button[aria-label="Open the conversation in a bigger view"]');
       await expand.waitForDisplayed(); await expand.waitForEnabled(); await expand.click();
       await browser.$('section[aria-label="Item conversation"]').waitForDisplayed();
     }
+    // No agent result is published until this loop finishes. Pin the saved preceding input's
+    // revision and the seeded agent ask before opening a draft, then check them again before typing.
+    await waitForOwnerReplyTarget(configuration, replyTarget);
     await openFollowUp(true);
-    await sendDetailReply(configuration, text);
+    await sendDetailReply(configuration, text, replyTarget);
+    replyTarget = ownerReplyTarget(await snapshot(configuration), configuration.itemId);
     if (index === 0) {
       const saved = Object.values((await snapshot(configuration)).inputs).find(input => input.payload.text === text);
       assert.ok(saved, 'The bigger conversation view saved its reply');

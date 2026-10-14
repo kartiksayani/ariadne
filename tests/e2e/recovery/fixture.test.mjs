@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
-import { openFollowUp, openOwnerReply, replyControlState, sendDetailReply } from '../../../apps/desktop/tests/e2e/owner-reply.mjs';
+import { openFollowUp, openOwnerReply, ownerReplyTarget, replyControlState, sendDetailReply, waitForOwnerReplyTarget } from '../../../apps/desktop/tests/e2e/owner-reply.mjs';
 import { assertRepairAdmission, originalReplyRequest, repairResultRequest } from '../../../apps/desktop/tests/e2e/recovery.spec.mjs';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
 
@@ -222,7 +222,7 @@ const answerBox = `<div class="detail-answer-slot" data-owner-input="1"><button 
 for (const [status, label] of [['waiting', 'Send as a reply only'], ['open', 'Send reply'], ['progress', 'Send note'], ['done', 'Send follow-up']]) {
   test(`sends exact own words with one click from the ${status} composer and diagnoses its actual Send`, async t => {
     const root = await mkdtemp(join(tmpdir(), 'ariadne-owner-composer-'));
-    const dom = new JSDOM(`<article class="item-detail" data-status="${status}">${status === 'waiting' ? answerBox
+    const dom = new JSDOM(`<article class="item-detail" data-detail-item-id="1" data-item-revision="4" data-status="${status}">${status === 'waiting' ? answerBox
       : `<div data-owner-input="1">${wordsBox(label)}${wordsBox(label + ', another draft')}</div>
         <div class="detail-answer-slot"><button>Write another input</button></div>`}</article>`);
     const previousBrowser = globalThis.browser, previousDocument = globalThis.document;
@@ -230,7 +230,9 @@ for (const [status, label] of [['waiting', 'Send as a reply only'], ['open', 'Se
     const document = dom.window.document;
     globalThis.document = document; globalThis.browser = domBrowser(document);
     const configuration = { itemId: '1', sessionPath: join(root, 'session.json') }, text = 'Exact own words\nKeep this full second line.';
-    await writeFile(configuration.sessionPath, JSON.stringify({ inputs: {} }));
+    const session = { items: { 1: { revision: 4, question_revision: 2, status, ask: null } }, messages: [], inputs: {} };
+    const expected = ownerReplyTarget(session, '1');
+    await writeFile(configuration.sessionPath, JSON.stringify(session));
     let clicks = 0;
     // Wrong clicks fail: neither the recommended choice, another draft nor a retained answer may be submitted.
     const send = document.querySelector(status === 'waiting' ? '.answer-reply-send' : '.detail-box button');
@@ -240,12 +242,12 @@ for (const [status, label] of [['waiting', 'Send as a reply only'], ['open', 'Se
     });
     send.addEventListener('click', () => {
       // The snapshot update is awaited by the helper's persistence polling.
-      pending = writeFile(configuration.sessionPath, JSON.stringify({ inputs: { saved: { payload: { text } } } }));
+      pending = writeFile(configuration.sessionPath, JSON.stringify({ ...session, inputs: { saved: { payload: { text } } } }));
     });
     let pending = Promise.resolve();
     globalThis.browser.waitUntil = async (condition, options) => { await pending; assert.ok(await condition(), options.timeoutMsg); };
     await openOwnerReply();
-    await sendDetailReply(configuration, text);
+    await sendDetailReply(configuration, text, expected);
     assert.equal(clicks, 1);
     assert.deepEqual(replyControlState('1'), { formPresent: true, editorPresent: true, value: text,
       editorEnabled: true, sendPresent: true, sendEnabled: true, alerts: [] });
@@ -296,4 +298,139 @@ test('a successive waiting reply waits for its saved box to close, then reopens 
   await openOwnerReply(true);
   assert.equal(polls, 2); assert.equal(clicks, 1);
   assert.equal(detail.querySelector('[data-owner-input] textarea').value, '');
+});
+
+async function targetFixture(t) {
+  const root = await mkdtemp(join(tmpdir(), 'ariadne-reply-target-'));
+  const dom = new JSDOM(`<article class="item-detail" data-detail-item-id="1" data-item-revision="3">
+    <div data-owner-input="1">${wordsBox('Send reply')}</div></article>`);
+  const previousBrowser = globalThis.browser, previousDocument = globalThis.document;
+  const previousHome = process.env.ARIADNE_HOME, previousEvidence = process.env.ARIADNE_E2E_EVIDENCE;
+  t.after(async () => {
+    globalThis.browser = previousBrowser; globalThis.document = previousDocument;
+    for (const [name, value] of [['ARIADNE_HOME', previousHome], ['ARIADNE_E2E_EVIDENCE', previousEvidence]]) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+    dom.window.close(); await rm(root, { recursive: true, force: true });
+  });
+  const configuration = { sessionId: 'session', itemId: '1', sessionPath: join(root, 'session.json') };
+  const message = { id: 'expected-agent-reply', item_id: '1', author: 'agent', body: 'The complete expected agent change.' };
+  const session = { id: 'session', revision: 8, items: { 1: { revision: 4, question_revision: 2, status: 'open', ask: null } },
+    messages: [message], inputs: {} };
+  const expected = ownerReplyTarget(session, '1');
+  const document = dom.window.document, detail = document.querySelector('.item-detail'), editor = document.querySelector('textarea');
+  globalThis.document = document; globalThis.browser = domBrowser(document);
+  process.env.ARIADNE_HOME = root; process.env.ARIADNE_E2E_EVIDENCE = root;
+  await writeFile(join(root, 'ui.json'), JSON.stringify({ snapshot: { revision: 1, drafts: [] } }));
+  const save = value => writeFile(configuration.sessionPath, JSON.stringify(value));
+  await save(session);
+  return { root, configuration, session, expected, document, detail, editor, save };
+}
+
+test('reply typing waits for the canonical revision, expected agent publication and renderer independently before one Send', async t => {
+  const value = await targetFixture(t), { configuration, session, expected, detail, editor, document, save } = value;
+  await save({ ...session, items: { 1: { ...session.items[1], revision: 3 } }, messages: [] });
+  let targetPolls = 0, clicks = 0, writes = 0, pending = Promise.resolve();
+  const controls = domBrowser(document);
+  const get = controls.$;
+  controls.$ = selector => {
+    const control = get(selector);
+    if (selector !== '.item-detail [data-owner-input="1"]') return control;
+    const composer = control.$;
+    control.$ = selector => {
+      const box = composer(selector), child = box.$;
+      box.$ = selector => {
+        const field = child(selector);
+        if (selector === 'textarea') field.setValue = async text => {
+          assert.equal(targetPolls, 4, 'Writing must await all three prerequisites'); writes++; editor.value = text;
+        };
+        return field;
+      };
+      return box;
+    };
+    return control;
+  };
+  controls.waitUntil = async (condition, options) => {
+    if (options.timeoutMsg.startsWith('Owner reply target')) {
+      for (targetPolls = 1; targetPolls <= 4; targetPolls++) {
+        if (targetPolls === 2) await save({ ...session, messages: [] });
+        if (targetPolls === 3) await save(session);
+        if (targetPolls === 4) detail.setAttribute('data-item-revision', '4');
+        const ready = await condition();
+        if (targetPolls < 4) assert.equal(ready, false);
+        else { assert.equal(ready, true); return; }
+      }
+    }
+    await pending; assert.equal(await condition(), true, options.timeoutMsg);
+  };
+  const text = 'Exact owner reply\nKeep the second line.';
+  document.querySelector('button').addEventListener('click', () => {
+    clicks++; pending = save({ ...session, inputs: { saved: { payload: { text } } } });
+  });
+  globalThis.browser = controls;
+  await sendDetailReply(configuration, text, expected);
+  assert.equal(writes, 1); assert.equal(clicks, 1);
+});
+
+for (const mismatch of ['newer revision', 'question revision', 'status', 'ask', 'missing agent message', 'agent body', 'agent identity', 'rendered revision', 'selected item']) {
+  test(`reply target refuses ${mismatch} without typing or silently accepting a different target`, async t => {
+    const { configuration, session, expected, detail, editor, save } = await targetFixture(t);
+    detail.setAttribute('data-item-revision', '4');
+    if (mismatch === 'newer revision') session.items[1].revision = 5;
+    if (mismatch === 'question revision') session.items[1].question_revision = 3;
+    if (mismatch === 'status') session.items[1].status = 'done';
+    if (mismatch === 'ask') session.items[1].ask = 'A different ask';
+    if (mismatch === 'missing agent message') session.messages = [];
+    if (mismatch === 'agent body') session.messages[0].body = 'A different agent change';
+    if (mismatch === 'agent identity') session.messages[0].author = 'owner';
+    if (mismatch === 'rendered revision') detail.setAttribute('data-item-revision', '3');
+    if (mismatch === 'selected item') detail.setAttribute('data-detail-item-id', '2');
+    await save(session);
+    await assert.rejects(waitForOwnerReplyTarget(configuration, expected), /revision 4 and expected agent change did not reach disk and detail/);
+    assert.equal(editor.value, '');
+    assert.equal(expected.revision, 4); assert.equal(expected.agentMessage.body, 'The complete expected agent change.');
+  });
+}
+
+test('an unexpected change after typing preserves the stale guard, never clicks Send and retains target evidence', async t => {
+  const { root, configuration, session, expected, detail, editor, document, save } = await targetFixture(t);
+  detail.setAttribute('data-item-revision', '4');
+  const send = document.querySelector('button'); let clicks = 0;
+  send.addEventListener('click', () => { clicks++; });
+  globalThis.browser.execute = async (callback, ...args) => callback(...args);
+  const originalWait = globalThis.browser.waitUntil;
+  globalThis.browser.waitUntil = async (condition, options) => {
+    if (options.timeoutMsg.startsWith('Detail Reply text')) {
+      session.items[1].revision = 5; await save(session);
+      detail.setAttribute('data-item-revision', '5'); send.setAttribute('aria-disabled', 'true');
+    }
+    return originalWait(condition, options);
+  };
+  const text = 'Preserve these unsent words';
+  await assert.rejects(sendDetailReply(configuration, text, expected), /Detail Reply text and enabled Send were not ready/);
+  assert.equal(editor.value, text); assert.equal(clicks, 0);
+  assert.equal(send.getAttribute('aria-disabled'), 'true');
+  const evidence = JSON.parse(await readFile(join(root, 'reply-failure.json'), 'utf8'));
+  assert.equal(evidence.stage, 'readiness'); assert.equal(evidence.clickRequested, false);
+  assert.deepEqual(evidence.expectedTarget, expected); assert.equal(evidence.canonical.itemRevision, 5);
+});
+
+test('reply target requires an explicit frozen revision and never derives one while typing', async t => {
+  const { configuration, editor } = await targetFixture(t);
+  for (const expected of [undefined, { itemId: '2', revision: 4 }, { itemId: '1', revision: '4' }]) {
+    await assert.rejects(waitForOwnerReplyTarget(configuration, expected), /requires an explicit canonical target/);
+  }
+  assert.equal(editor.value, '');
+});
+
+test('reply target pins the saved preceding owner message as well as the last agent change', async t => {
+  const { configuration, session, detail, editor, save } = await targetFixture(t);
+  detail.setAttribute('data-item-revision', '4');
+  session.messages.push({ id: 'prior-owner-reply', item_id: '1', author: 'owner', body: 'The preceding saved owner input.' });
+  const expected = ownerReplyTarget(session, '1');
+  assert.equal(expected.previousMessage.id, 'prior-owner-reply');
+  assert.equal(expected.agentMessage.id, 'expected-agent-reply');
+  session.messages[1].body = 'A different owner input'; await save(session);
+  await assert.rejects(waitForOwnerReplyTarget(configuration, expected), /expected agent change did not reach disk and detail/);
+  assert.equal(editor.value, '');
 });

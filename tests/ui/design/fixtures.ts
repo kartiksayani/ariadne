@@ -87,7 +87,9 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
   if (spec.conversationOptions !== undefined) {
     const item = items.find(item => item.id === spec.selected)!;
     item.q = 'Should retry backoff keep a short first window and a longer second window so the agent has time to recover while the owner can still follow the result and decide what to do next, including when delivery is interrupted and another attempt needs enough time to finish without making the owner wait through an unexplained pause?';
-    item.ask = 'Which retry window should we use? Pick a choice or add your own words.';
+    item.ask = 'Which retry window should we use? Pick a choice or add your own words. '
+      + 'Consider how long the agent needs to recover, how quickly the owner needs an answer, and what should happen when delivery is interrupted. '
+      + 'Keep the full question available while you compare the four choices and explain the timing you prefer.';
     item.options = Array.from({ length: spec.conversationOptions }, (_, index) => ({ id: `window-${index + 1}`, rec: index === 0,
       label: ['Keep the current window', 'Use a shorter window', 'Use a longer window', 'Choose per attempt'][index],
       consequence: ['Keep the timing already reviewed.', 'Recover sooner after a short failure.', 'Allow more time for the agent to recover.', 'Adjust the timing to each delivery attempt.'][index] }));

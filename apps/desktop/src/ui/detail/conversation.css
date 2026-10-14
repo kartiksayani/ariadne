@@ -89,7 +89,8 @@
 .item-conversation .detail-dock-question .answer-choices {
   flex: 1;
   min-height: 0;
-  overflow: hidden auto;
+  overflow: auto;
+  contain: paint;
   padding: 2px;
 }
 
@@ -98,6 +99,7 @@
   flex: none;
   flex-direction: column;
   gap: 6px;
+  container-type: inline-size;
 }
 
 .item-conversation .answer-fixed-controls .answer-text,
@@ -108,6 +110,36 @@
 
 .item-conversation .answer-send-row {
   min-width: 0;
+}
+
+.item-conversation .answer-conversation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "words reply" "choice choice";
+  align-items: end;
+}
+
+.item-conversation .answer-conversation-row > textarea {
+  grid-area: words;
+}
+
+.item-conversation .answer-conversation-row > .answer-send-row {
+  grid-area: choice;
+}
+
+.item-conversation .answer-conversation-row > .answer-reply-send {
+  grid-area: reply;
+}
+
+@container (width >= 540px) {
+  .item-conversation .answer-conversation-row {
+    grid-template-columns: minmax(120px, 1fr) minmax(0, auto) auto;
+    grid-template-areas: "words choice reply";
+  }
+
+  .item-conversation .answer-conversation-row .answer-send {
+    max-width: 240px;
+  }
 }
 
 .item-conversation .detail-body {
@@ -126,6 +158,17 @@
   }
 }
 
+@media (height < 700px) {
+  .item-conversation .detail-dock-question {
+    height: 50%;
+    max-height: 50%;
+  }
+
+  .item-conversation .answer-fixed-controls > .answer-hint {
+    display: none;
+  }
+}
+
 .item-conversation .detail-bubble {
   max-width: 100%;
 }
@@ -135,10 +178,40 @@
   font-size: calc(14px * var(--text-scale));
 }
 
+.conversation-pin {
+  flex: none;
+}
+
+.conversation-question {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.conversation-question-text {
+  display: -webkit-box;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: calc(13px * var(--text-scale));
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.conversation-question-toggle {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 2px;
+}
+
 .item-conversation .answer-options-compact .answer-options {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  margin: 0;
+  padding: 0;
 }
 
 .item-conversation .answer-options-compact .answer-card {

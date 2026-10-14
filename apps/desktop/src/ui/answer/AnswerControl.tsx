@@ -46,7 +46,7 @@ export interface AnswerControlProps {
   readonly variant: 'compact' | 'full' | 'chat';
   /** The bigger conversation keeps option consequences behind More. */
   readonly compactOptions?: boolean;
-  /** A conversation's current question, scrolling with its options. */
+  /** A conversation's current question; compact chat keeps it outside the options scroller. */
   readonly prompt?: ReactNode;
   readonly selected: number;
   readonly draft: string;
@@ -166,19 +166,21 @@ export function AnswerControl({ options, variant, compactOptions = false, prompt
       {!chat && <span className="answer-hint">{hint}</span>}
     </div>;
   const chatComposer = !noText && <div className="answer-reply answer-composer">
-    <div className="answer-composer-row">
+    <div className={`answer-composer-row${compactOptions ? ' answer-conversation-row' : ''}`}>
       <textarea ref={text} className="input answer-text" aria-label="Reply in your own words" placeholder="Add a note to your choice, or reply on its own…" rows={1}
         value={draft} disabled={locked} onFocus={() => setCollapsed(false)} onClick={event => event.stopPropagation()} onChange={event => { setCollapsed(false); onDraft(event.target.value); }} />
+      {compactOptions && sendButton}
       <button type="button" className="btn btn-secondary answer-reply-send" {...gate(!draft.trim() || locked, frozen || !!blocked)}
         onClick={event => { event.stopPropagation(); sendText(); }}>Send as a reply only</button>
     </div>
   </div>;
-  const chatControls = <>{sendButton}{chatComposer}<span className="answer-hint">{chatHint}</span></>;
+  const chatControls = <>{(!compactOptions || noText) && sendButton}{chatComposer}<span className="answer-hint">{chatHint}</span></>;
   return <div ref={root} className={`answer answer-${variant}${chat ? ' answer-full' : ''}${compactOptions ? ' answer-options-compact' : ''}${collapsed ? ' answer-collapsed' : ''}`} role="group" aria-label={label} onKeyDown={keys}>
     {warn && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{warn}</span>
       {warnAction && <button type="button" className="btn btn-secondary answer-warn-action" onClick={event => { event.stopPropagation(); warnAction.onAction(); }}>{warnAction.label}</button>}</div>}
     {chat ? <>
-      {(prompt || options.length > 0) && <div className="answer-choices">{prompt}{optionCards}</div>}
+      {compactOptions && prompt}
+      {(options.length > 0 || !compactOptions && prompt) && <div className="answer-choices">{!compactOptions && prompt}{optionCards}</div>}
       {compactOptions ? <div className="answer-fixed-controls">{chatControls}</div> : chatControls}
     </> : <>{optionCards}{sendButton}</>}
     {full && !chat && !noText && <div className="answer-reply">

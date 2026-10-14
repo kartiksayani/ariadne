@@ -553,8 +553,7 @@ for (const theme of ['dark', 'light'] as const) for (const viewport of conversat
     expect(messages, 'messages read oldest first').toEqual([...messages].sort());
     await expect(turns.first()).toBeInViewport();
     const pin = dock.locator('.conversation-pin');
-    await expect(pin.getByRole('heading', { name: /^Your turn ·/ })).toBeInViewport();
-    await expect(pin.locator('p').first()).toBeInViewport();
+    const heading = pin.getByRole('heading', { name: /^Your turn ·/ }), question = pin.locator('.conversation-question');
     await expect(conversation.locator('.conversation-header .status-badge')).toHaveText('Waiting on me');
     await expect(page.locator('[data-waiting-item="4.1"]')).toBeVisible();
     if (viewport.width === 1280) for (let index = 0; index < 3; index++) await expect(turns.nth(index), 'at least three messages share the initial chat viewport').toBeInViewport();
@@ -562,16 +561,58 @@ for (const theme of ['dark', 'light'] as const) for (const viewport of conversat
     const replySend = dock.getByRole('button', { name: 'Send as a reply only', exact: true });
     const fullyVisible = async (control: Locator) => {
       await expect(control).toBeVisible();
-      const bounds = (await control.boundingBox())!, footerBounds = (await dock.boundingBox())!;
-      expect(bounds.x).toBeGreaterThanOrEqual(footerBounds.x - 1);
-      expect(bounds.y).toBeGreaterThanOrEqual(footerBounds.y - 1);
-      expect(bounds.x + bounds.width).toBeLessThanOrEqual(footerBounds.x + footerBounds.width + 1);
-      expect(bounds.y + bounds.height).toBeLessThanOrEqual(footerBounds.y + footerBounds.height + 1);
+      await expect(control).toBeInViewport({ ratio: 1 });
+      // A box can be inside the footer while being clipped by a nested scroller.
+      const clipped = await control.evaluate(element => {
+        const rect = element.getBoundingClientRect(), failures: string[] = [];
+        for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+          const style = getComputedStyle(parent), bounds = parent.getBoundingClientRect();
+          const left = bounds.left + parent.clientLeft, top = bounds.top + parent.clientTop;
+          if (/auto|scroll|hidden|clip/.test(style.overflowX) && (rect.left < left - 1 || rect.right > left + parent.clientWidth + 1)) failures.push(`${parent.className}: horizontal`);
+          if (/auto|scroll|hidden|clip/.test(style.overflowY) && (rect.top < top - 1 || rect.bottom > top + parent.clientHeight + 1)) failures.push(`${parent.className}: vertical`);
+        }
+        return failures;
+      });
+      expect(clipped, `${await control.getAttribute('class')} is fully inside every clipping ancestor`).toEqual([]);
     };
-    await fullyVisible(ownWords); await fullyVisible(replySend);
+    const firstOption = dock.locator('[data-answer-option]').first();
+    const choiceSend = dock.getByRole('button', { name: /^Send / }).filter({ hasNotText: 'Send as a reply only' });
+    const controls = [heading, question, firstOption, choiceSend, ownWords, replySend];
+    const assertControls = async (option = firstOption) => {
+      const visible = [heading, question, option, choiceSend, ownWords, replySend];
+      for (const control of visible) await fullyVisible(control);
+      const boxes = await Promise.all(visible.map(control => control.boundingBox()));
+      for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i]!, b = boxes[j]!;
+        const width = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+        const height = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+        expect(width > 0.5 && height > 0.5, `pinned controls ${i} and ${j} never paint over one another`).toBe(false);
+      }
+    };
     await expect(dock.locator('[data-answer-option]')).toHaveCount(4);
-    await dock.locator('[data-answer-option]').first().click();
-    await fullyVisible(ownWords); await fullyVisible(dock.getByRole('button', { name: /^Send / }).filter({ hasNotText: 'Send as a reply only' }));
+    await assertControls();
+    await firstOption.click();
+    await assertControls();
+    const questionGeometry = await question.locator('.conversation-question-text').evaluate(element => ({ height: element.getBoundingClientRect().height, line: parseFloat(getComputedStyle(element).lineHeight), scroll: element.scrollHeight, client: element.clientHeight }));
+    expect(questionGeometry.scroll, 'the fixture actually needs the full-question action').toBeGreaterThan(questionGeometry.client);
+    expect(questionGeometry.height, 'the current question initially takes at most two lines').toBeLessThanOrEqual(questionGeometry.line * 2 + 1);
+    const optionsRegion = dock.locator('.answer-choices');
+    const scrollers = await dock.evaluate(element => [...element.querySelectorAll<HTMLElement>('*')].filter(child => child.tagName !== 'TEXTAREA' && /auto|scroll/.test(getComputedStyle(child).overflowY)).map(child => child.className));
+    expect(scrollers, 'only options own a footer scroller').toEqual(['answer-choices']);
+    const optionsStyle = await optionsRegion.evaluate(element => ({ overflow: getComputedStyle(element).overflowY, sticky: [...element.querySelectorAll('*')].some(child => ['sticky', 'fixed'].includes(getComputedStyle(child).position)) }));
+    expect(optionsStyle.overflow).toBe('auto'); expect(optionsStyle.sticky).toBe(false);
+    if (viewport.height < 700) await expect(dock.locator('.answer-fixed-controls > .answer-hint')).toBeHidden();
+    else await expect(dock.locator('.answer-fixed-controls > .answer-hint')).toBeVisible();
+    const wordsBox = (await ownWords.boundingBox())!, sendBox = (await choiceSend.boundingBox())!;
+    expect(sendBox.y + sendBox.height, 'choice Send shares the own-words row when the width allows').toBeCloseTo(wordsBox.y + wordsBox.height, 0);
+    const fixedBeforeQuestion = await Promise.all(controls.map(control => control.boundingBox()));
+    await pin.getByRole('button', { name: 'Expand question', exact: true }).click();
+    const fullQuestion = page.getByRole('dialog', { name: 'Current question', exact: true });
+    await expect(fullQuestion).toBeVisible();
+    await expect(fullQuestion.locator('.dialog-body')).not.toBeEmpty();
+    expect(await Promise.all(controls.map(control => control.boundingBox())), 'reading the full question cannot move the pinned controls').toEqual(fixedBeforeQuestion);
+    await fullQuestion.getByRole('button', { name: 'Close question', exact: true }).click();
+    await assertControls();
     const title = conversation.locator('.conversation-title');
     const titleGeometry = await title.evaluate(element => ({ height: element.getBoundingClientRect().height, line: parseFloat(getComputedStyle(element).lineHeight), scroll: element.scrollHeight, client: element.clientHeight }));
     expect(titleGeometry.height, 'the full title initially takes at most two lines').toBeLessThanOrEqual(titleGeometry.line * 2 + 1);
@@ -583,9 +624,8 @@ for (const theme of ['dark', 'light'] as const) for (const viewport of conversat
       return { body: body.height / pane.height, dock: dock.height / pane.height,
         bodyBottom: body.bottom, dockTop: dock.top, dockBottom: dock.bottom, paneBottom: pane.bottom };
     });
-    // Short, narrow windows reserve space for the fixed Send controls within
-    // the original 40% allowance; the larger frame retains its 30% target.
-    const footerCap = viewport.width <= 1000 ? 0.4 : 0.3;
+    // Short windows reserve up to half for the question and fixed controls.
+    const footerCap = viewport.height < 700 ? 0.5 : viewport.width <= 1000 ? 0.4 : 0.3;
     expect(geometry.body, 'the transcript keeps most of the conversation pane').toBeGreaterThanOrEqual(1 - footerCap - 0.001);
     expect(geometry.dock, 'the answer footer stays within its responsive cap').toBeLessThanOrEqual(footerCap + 0.001);
     expect(geometry.bodyBottom).toBeLessThanOrEqual(geometry.dockTop + 1);
@@ -606,12 +646,15 @@ for (const theme of ['dark', 'light'] as const) for (const viewport of conversat
     await settle(page);
     expect(await dock.boundingBox(), 'scrolling messages keeps the answer footer pinned').toEqual(footerBefore);
     expect(await pin.boundingBox(), 'the waiting question stays with its answer controls').toEqual(pinBefore);
-    // A capped footer scrolls internally: every answer remains reachable without moving the chat.
+    // Only the options move: heading, question and both Send actions remain fixed.
     const chatScroll = await body.evaluate(element => element.scrollTop);
+    const fixed = controls.filter(control => control !== firstOption);
+    const fixedBefore = await Promise.all(fixed.map(control => control.boundingBox()));
     for (const option of await dock.locator('[data-answer-option]').all()) {
-      await option.scrollIntoViewIfNeeded(); await expect(option).toBeInViewport();
+      await option.scrollIntoViewIfNeeded(); await assertControls(option);
+      expect(await Promise.all(fixed.map(control => control.boundingBox()))).toEqual(fixedBefore);
     }
-    await fullyVisible(ownWords); await fullyVisible(replySend);
+    expect(await dock.evaluate(element => element.scrollTop)).toBe(0);
     expect(await body.evaluate(element => element.scrollTop)).toBe(chatScroll);
     const fullTitle = await title.textContent();
     await title.click(); await expect(title).toHaveAttribute('aria-expanded', 'true');
