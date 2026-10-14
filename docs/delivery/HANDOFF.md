@@ -69,6 +69,8 @@ The remaining rounds are:
 
 ## Next steps
 
+These wait until the redesign rounds above are done, unless the owner asks for one earlier.
+
 1. Follow-ups from #162, each a small task:
    - P11.10 Graph selection reply race: a Graph click's `revealItem` reply is dropped when a reveal is dismissed mid-flight, because the `external` guard in `GraphView.tsx` compares App's `treeReveal`. Fix with a counter that changes only on a non-own, non-null outside reveal.
    - P11.11 Stale "outside your filters" banner: it stays after a Graph fold or stub toggle; the Tree dismisses it through `onDismissReveal`.
@@ -131,7 +133,7 @@ One entry per flake: the test and its first failure, the evidence, and the suspe
   - First failed: #157 CI, 2026-10-13. The rerun passed.
   - A click right after a keyboard Enter selection was never saved.
   - Suspected cause: a click landing while a selection save is in flight.
-- **Native delivery journey, "Detail Reply text and enabled Send were not ready for one click"** (`apps/desktop/tests/e2e/owner-reply.mjs:109`).
+- **Native delivery journey, "Detail Reply text and enabled Send were not ready for one click"** (`apps/desktop/tests/e2e/owner-reply.mjs`).
   - First failed: #159 CI, 2026-10-14. The rerun passed.
   - The fake agent changed the item (revision 3 → 4) while the test typed, so the stale-question guard disabled Send. The app behaved as designed.
   - The cause is known, and it broke the rule that native journeys never race agent-side changes, so it was not a flake to wait on. Fixed in #160: the journey freezes the completed publication (`ownerReplyTarget`) and waits for the app to show that target before typing.
