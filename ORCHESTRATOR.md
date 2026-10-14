@@ -87,6 +87,35 @@ assertion fails again, remove that assertion rather than changing product code.
   affected-flow review when behavior or invariants change. Conflict resolutions
   require review of the resolved behavior and interacting upstream changes.
   Every review identifies the exact head and scope.
+- **Fix the class, not the finding:** When review finds a defect in storage,
+  recovery, concurrency or error handling, the next brief lists the unit's full
+  failure table before code changes. The table crosses every error source (parse,
+  validation, revision mismatch, I/O, sync, publish, unsupported OS call) with every
+  operation (read, save, retry, restart, previous-release read), and gives the
+  owner-visible outcome for each pair. The author implements the whole table with one
+  test per row. The reviewer checks the table for missing rows as well as the diff.
+  A third fix round in one area stops for a re-brief from the table. Recorded
+  2026-10-14: the recovery companion needed three rounds, because each fix moved the
+  failure to a neighbouring path.
+- **Pin before moving:** Before extracting, moving or sharing UI or state code, add
+  tests that pin the current behaviour of every control it touches: open, close,
+  Cancel, Esc, keys, disabled states and saved drafts. They pass before and after
+  the move. Recorded 2026-10-14: extracting the item conversation silently stopped
+  Cancel from closing the Drop box.
+- **Previous-release reads:** A change to any saved format keeps a test that the
+  previous release's reader accepts the new output. Otherwise the PR states the
+  one-way step and the owner approves it. Recorded 2026-10-14: dropping a preference
+  field would have stopped alpha.14 reading ui.json; review caught it only by reading.
+- **CI parity:** Tests find build outputs through `CARGO_TARGET_DIR`, which CI sets,
+  or `CARGO_BIN_EXE_*`, never a hard-coded `target/debug`. Recorded once,
+  2026-10-14. A check-script guard waits for a second occurrence, per the process
+  budget.
+- **Flakes:** When a required check fails on code that already passed it, rerun it
+  once. If the rerun passes, record the test, the failed assertion and the suspected
+  race under "Known flakes" in [HANDOFF](docs/delivery/HANDOFF.md). A second
+  occurrence of the same flake is fixed, in the test or in the race, before the next
+  merge. Native journeys never race agent-side changes: they wait for the canonical
+  state the next step depends on.
 - **Validation and completion:** Application changes retain full required
   application CI; documentation-only changes retain appropriate lightweight
   checks. Use native acceptance for user-visible integration and deterministic

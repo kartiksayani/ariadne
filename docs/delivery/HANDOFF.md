@@ -60,12 +60,34 @@ the agent stays in the terminal.
 - Run `cargo test --workspace` before pushing integration-resource changes.
   Installed-plugin fixtures live in several crates, so a CLI-only test run is
   insufficient for that push.
+- Fix rounds, moved UI code, saved formats, CI parity and flakes follow the
+  ORCHESTRATOR rules under "Delivery feedback rules" ([ORCHESTRATOR](../../ORCHESTRATOR.md)).
 
 After merge, tag `v0.1.0-alpha.N` with `-m "Ariadne v0.1.0-alpha.N"`, wait for the
 release workflow and edit notes with the fixed
 [How to upgrade block](../planning/PERSONAL_RELEASE.md#release-notes).
 Refresh this page, tasks.json and the roadmap chart using
 `python3 scripts/regenerate-roadmap.py`.
+
+## Known flakes
+
+One entry per flake: the test and its first failure, the evidence, and the suspected cause. A second occurrence gets fixed before the next merge (ORCHESTRATOR, Flakes).
+
+- **`tests/e2e/tree-layout/tree-layout.spec.mts:585`, dark theme only.**
+  - First failed: #158 CI, 2026-10-14. The rerun passed.
+  - The check that the child sits under the sticky header failed after the test set `scrollTop` by hand.
+  - Suspected cause: a ⌘J reveal was still settling.
+- **`apps/desktop/tests/e2e/tree.spec.mjs:604`.**
+  - First failed: #157 CI, 2026-10-13. The rerun passed.
+  - A click right after a keyboard Enter selection was never saved.
+  - Suspected cause: a click landing while a selection save is in flight.
+- **Native delivery journey, "Detail Reply text and enabled Send were not ready for one click"** (`apps/desktop/tests/e2e/owner-reply.mjs:109`).
+  - First failed: #159 CI, 2026-10-14. The rerun passed.
+  - The fake agent changed the item (revision 3 → 4) while the test typed, so the stale-question guard disabled Send. The app behaved as designed.
+  - Fix on recurrence: wait for the agent's change before typing.
+- **`crates/ariadne-core/tests/native_connection.rs` `expired_fresh_work_cannot_persist_after_waiting_for_registry_lock`.**
+  - First failed: a local run on 2026-10-14, where it hung for 45 minutes under heavy load.
+  - It then passed 8 of 8 runs on its own.
 
 ## Earlier delivery evidence
 
