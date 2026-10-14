@@ -105,17 +105,22 @@ describe('Paperwhite shell', () => {
     const { rerender } = render(<Shell {...value} />);
     const footer = document.querySelector('.shell-footer')!;
     const keys = () => [...footer.querySelectorAll('.pw-keycap')].map(key => key.textContent);
-    expect(keys()).toEqual(['esc', '↑↓', '1–9', '⌥1–9', '⌥0', '⌘↵', 'Space']);
+    expect(keys()).toEqual(['esc', '↑↓', 'a', 'r', '1–9', '⌥1–9', '⌥0', '⌘↵', 'b d o', 'Space']);
     expect(footer.textContent).toContain('escBack to Map');
     expect(footer.textContent).toContain('↑↓messages');
     expect(footer.textContent).toContain('⌘↵send');
+    expect(footer.textContent).toContain('aack / answer');
+    expect(footer.textContent).toContain('rreply');
+    expect(footer.textContent).toContain('b d oitem actions');
     rerender(<Shell {...value} conversationFooter={{ question: false }} />);
-    expect(keys()).toEqual(['esc', '↑↓', '1–9', '⌘↵', 'Space']);
+    expect(keys()).toEqual(['esc', '↑↓', 'a', 'r', '⌘↵', 'b d o', 'Space']);
     rerender(<Shell {...value} conversationFooter={undefined} />);
-    expect(keys()).toEqual(['esc', '↑↓', '1–9', '⌘↵', 'Space']);
+    expect(keys()).toEqual(['esc', '↑↓', 'a', 'r', '⌘↵', 'b d o', 'Space']);
     rerender(<Shell {...value} body={{ ...value.body, conversation: undefined }} />);
     expect(keys()).toContain('g');
     expect(keys()).toContain('←→');
+    expect(keys()).toContain('b r d z o');
+    expect(keys()).not.toContain('r');
     expect(footer.textContent).toContain('⌘↵reply only');
   });
 
@@ -128,6 +133,9 @@ describe('Paperwhite shell', () => {
     expect(rules(shell, '.shell-center')).toContain('container: shell-center / inline-size;');
     expect(rules(shell, '.shell-center')).toContain('overflow: hidden;');
     expect(rules(shell, '.shell-center-content')).toContain('overflow: auto;');
+    expect(rules(shell, '.shell-notices')).toContain('container: shell-center / inline-size;');
+    expect(rules(shell, '.shell-notices')).toContain('pointer-events: none;');
+    expect(Number(rules(shell, '.shell-notices').match(/z-index: (\d+)/)![1])).toBeGreaterThan(Number(rules(shell, '.shell-conversation').match(/z-index: (\d+)/)![1]));
     expect(rules(notes, '.pw-notices')).toContain('position: absolute;');
     expect(rules(notes, '.pw-notices')).toContain('width: min(480px, calc(100% - 32px));');
     expect(notes).toContain('@container shell-center (max-width: 400px)');
@@ -142,15 +150,19 @@ describe('Paperwhite shell', () => {
     expect(animation).toContain('transform: translateY(0);');
   });
 
-  it('keeps one notification region inside the centre while adjacent panes change, and preserves input focus', () => {
+  it('keeps one notification region above the centre while adjacent panes change, and preserves input focus', () => {
     vi.useFakeTimers();
     try {
       const value = props({ body: { waiting: <p>Waiting column</p>, center: <input aria-label="Centre draft" defaultValue="Draft" />,
         detail: <p>Detail</p> } });
       const { rerender } = render(<Shell {...value} />);
       const center = screen.getByRole('main'), region = screen.getByRole('region', { name: 'Notifications' });
+      const anchor = document.querySelector<HTMLElement>('.shell-notices')!;
       const draft = screen.getByRole<HTMLInputElement>('textbox', { name: 'Centre draft' });
-      expect(region.parentElement).toBe(center);
+      expect(region.parentElement).toBe(anchor);
+      expect(anchor.parentElement?.className).toBe('shell-body-viewport');
+      expect(anchor.style.left).toBe('300px');
+      expect(anchor.style.right).toBe('400px');
       const scroll = center.querySelector('.shell-center-content')!;
       expect(scroll.contains(draft)).toBe(true);
       expect(scroll.contains(region)).toBe(false);
@@ -159,13 +171,38 @@ describe('Paperwhite shell', () => {
       expect(document.activeElement).toBe(draft);
       rerender(<Shell {...value} body={{ ...value.body, waitingFolded: true, detailWidth: 976 }} />);
       expect(screen.getAllByRole('region', { name: 'Notifications' })).toEqual([region]);
-      expect(region.parentElement).toBe(center);
+      expect(region.parentElement).toBe(anchor);
+      expect(anchor.style.left).toBe('44px');
+      expect(anchor.style.right).toBe('976px');
       expect(center.querySelector('.shell-center-content')).toBe(scroll);
       expect(document.activeElement).toBe(draft);
       act(() => { notices.dismiss('shell-anchor'); });
       expect(within(region).queryByText('Reference copied.')).toBeNull();
       expect(document.activeElement).toBe(draft);
       expect(draft.value).toBe('Draft');
+    } finally { notices.clear(); vi.useRealTimers(); }
+  });
+
+  it('keeps notification actions visible, keyboard reachable and clickable above Conversation', () => {
+    vi.useFakeTimers();
+    try {
+      const undo = vi.fn(), value = props({ body: { waiting: null, center: <p>Map</p>, detail: <p>Dock</p> } });
+      const { rerender } = render(<Shell {...value} />);
+      const region = screen.getByRole('region', { name: 'Notifications' });
+      act(() => { notices.push({ id: 'conversation-undo', icon: 'ph ph-check', text: 'Item removed.', actions: [{ label: 'Undo', run: undo }] }); vi.advanceTimersByTime(300); });
+      rerender(<Shell {...value} body={{ ...value.body, conversation: <input aria-label="Conversation reply" /> }} />);
+      expect(screen.getByRole('region', { name: 'Notifications' })).toBe(region);
+      expect(region.closest('[inert],[aria-hidden="true"]')).toBeNull();
+      expect(region.parentElement?.style.right).toBe('0px');
+      const reply = screen.getByRole('textbox', { name: 'Conversation reply' });
+      reply.focus();
+      fireEvent.keyDown(reply, { key: 'F6' });
+      expect(document.activeElement).toBe(within(region).getByText('Item removed.').closest('.pw-note'));
+      fireEvent.click(within(region).getByRole('button', { name: 'Undo' }));
+      expect(undo).toHaveBeenCalledOnce();
+      fireEvent.click(within(region).getByRole('button', { name: 'Dismiss' }));
+      expect(within(region).queryByText('Item removed.')).toBeNull();
+      expect(document.activeElement).toBe(reply);
     } finally { notices.clear(); vi.useRealTimers(); }
   });
 

@@ -162,8 +162,9 @@ function WaitingCard({ card, drafts, current, selected, revealItem, openDetails,
   // A failed send keeps its choice frozen until it is resolved.
   const frozen = card.chosen ?? (entry?.uncertain ? entry.draft.selected_option_id : undefined);
   const selection = frozen !== undefined ? item.options.findIndex(option => option.id === frozen) : defaultSelection(item.options, entry?.draft.selected_option_id);
-  const ring = selected ? '0 0 0 1.5px color-mix(in srgb, var(--color-text) 45%, transparent)' : delivery ? '0 0 0 1px color-mix(in srgb, var(--a-warn) 60%, transparent)'
-    : '0 0 0 1px var(--color-divider)';
+  const selectionRing = '0 0 0 1.5px color-mix(in srgb, var(--color-text) 45%, transparent)';
+  const ring = selected && conversationOpen ? selectionRing : delivery ? '0 0 0 1px color-mix(in srgb, var(--a-warn) 60%, transparent)'
+    : selected ? selectionRing : '0 0 0 1px var(--color-divider)';
   return <ItemRefSession.Provider value={card.route}><ItemRefs.Provider value={{ lookup: id => {
     const target = card.session.items[id];
     return target && !itemRemoved(card.session, target.id) ? { label: target.question, status: displayStatus(card.session, target) } : null;

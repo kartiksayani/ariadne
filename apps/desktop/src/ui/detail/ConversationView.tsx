@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSession } from '../../data/session-store';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { StatusBadge } from '../shared/StatusBadge';
@@ -9,15 +9,18 @@ import './conversation.css';
 
 export function ConversationView({ onClose, ...props }: ItemDetailProps & { readonly onClose: () => void }) {
   const anchor = useRef<HTMLElement>(null);
+  const [titleExpanded, setTitleExpanded] = useState(false);
   const session = useSession(props.store).snapshot?.session, item = session?.items[props.itemId];
-  useEffect(() => { anchor.current?.focus({ preventScroll: true }); }, [props.itemId]);
+  useEffect(() => { setTitleExpanded(false); anchor.current?.focus({ preventScroll: true }); }, [props.itemId]);
   return <section ref={anchor} className="conversation-view" aria-label="Item conversation" tabIndex={-1} data-conversation-anchor="" onKeyDown={event => {
     if (event.target !== event.currentTarget || !['ArrowUp', 'ArrowDown'].includes(event.key) || event.metaKey || event.ctrlKey || event.altKey) return;
     event.preventDefault(); event.stopPropagation();
     event.currentTarget.querySelector<HTMLElement>('[data-message-id]')?.focus({ preventScroll: true });
   }}>
     <header className="conversation-header">
-      <div><h1>{item?.question ?? 'Conversation'}</h1>
+      <div className="conversation-heading"><h1><button type="button" className={`conversation-title${titleExpanded ? ' conversation-title-expanded' : ''}`}
+        aria-expanded={titleExpanded} aria-label={`${titleExpanded ? 'Collapse' : 'Expand'} title: ${item?.question ?? 'Conversation'}`}
+        title={item?.question} onClick={() => setTitleExpanded(value => !value)}>{item?.question ?? 'Conversation'}</button></h1>
         {item && session && <div className="conversation-meta"><span className="conversation-type">{item.type}</span><StatusBadge status={statusKey[displayStatus(session, item)]}
           label={badgeLabel(item, props.later, displayStatus(session, item))} /></div>}
       </div>

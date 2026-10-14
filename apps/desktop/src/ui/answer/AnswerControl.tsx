@@ -1,7 +1,7 @@
 // The answer control (handoff "Answer Control.dc.html"): numbered options, the
 // Send row and, in the full variant, a reply box. Waiting cards (compact), the
 // tree's inline answer and the detail panel (full) all render this one control.
-import { useId, useRef, useState } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 import { useWorkspaceKeys } from '../keys';
 import { useGrow } from './useGrow';
 import './answer.css';
@@ -46,6 +46,8 @@ export interface AnswerControlProps {
   readonly variant: 'compact' | 'full' | 'chat';
   /** The bigger conversation keeps option consequences behind More. */
   readonly compactOptions?: boolean;
+  /** A conversation's current question, scrolling with its options. */
+  readonly prompt?: ReactNode;
   readonly selected: number;
   readonly draft: string;
   readonly warn?: string;
@@ -70,7 +72,7 @@ export function defaultSelection(options: readonly Pick<AnswerOption, 'id' | 're
   return index >= 0 ? index : options.findIndex(option => option.recommended);
 }
 
-export function AnswerControl({ options, variant, compactOptions = false, selected, draft, warn, warnAction, blocked, locked = false, frozen = false, noText = false, label,
+export function AnswerControl({ options, variant, compactOptions = false, prompt, selected, draft, warn, warnAction, blocked, locked = false, frozen = false, noText = false, label,
   onSelect, onDraft, onSendOption, onSendText, onEscape }: AnswerControlProps) {
   const root = useRef<HTMLDivElement>(null), text = useRef<HTMLTextAreaElement>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -155,30 +157,30 @@ export function AnswerControl({ options, variant, compactOptions = false, select
       })}
     </div>
   );
-  const sendButton = picked && <div className="answer-send-row">
-      <button type="button" className="btn btn-primary answer-send" {...gate(locked, frozen || !!blocked)} onClick={event => { event.stopPropagation(); sendOption(selected); }}>
+  const sendButton = (picked || compactOptions && options.length > 0) && <div className="answer-send-row">
+      <button type="button" className="btn btn-primary answer-send" {...gate(locked || !picked, frozen || !!blocked)} onClick={event => { event.stopPropagation(); sendOption(selected); }}>
         <i className="ph ph-paper-plane-right" aria-hidden="true" />
-        <span className="answer-send-label">{full ? `Send “${picked.label}”${withNote ? ' with your note' : ''}` : 'Send answer'}</span>
+        <span className="answer-send-label">{full && picked ? `Send “${picked.label}”${withNote ? ' with your note' : ''}` : 'Send answer'}</span>
         <span className="answer-enter" aria-hidden="true">↵</span>
       </button>
       {!chat && <span className="answer-hint">{hint}</span>}
     </div>;
+  const chatComposer = !noText && <div className="answer-reply answer-composer">
+    <div className="answer-composer-row">
+      <textarea ref={text} className="input answer-text" aria-label="Reply in your own words" placeholder="Add a note to your choice, or reply on its own…" rows={1}
+        value={draft} disabled={locked} onFocus={() => setCollapsed(false)} onClick={event => event.stopPropagation()} onChange={event => { setCollapsed(false); onDraft(event.target.value); }} />
+      <button type="button" className="btn btn-secondary answer-reply-send" {...gate(!draft.trim() || locked, frozen || !!blocked)}
+        onClick={event => { event.stopPropagation(); sendText(); }}>Send as a reply only</button>
+    </div>
+  </div>;
+  const chatControls = <>{sendButton}{chatComposer}<span className="answer-hint">{chatHint}</span></>;
   return <div ref={root} className={`answer answer-${variant}${chat ? ' answer-full' : ''}${compactOptions ? ' answer-options-compact' : ''}${collapsed ? ' answer-collapsed' : ''}`} role="group" aria-label={label} onKeyDown={keys}>
     {warn && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{warn}</span>
       {warnAction && <button type="button" className="btn btn-secondary answer-warn-action" onClick={event => { event.stopPropagation(); warnAction.onAction(); }}>{warnAction.label}</button>}</div>}
     {chat ? <>
-      {options.length > 0 && <div className="answer-choices">{optionCards}</div>}
-      {sendButton}
+      {(prompt || options.length > 0) && <div className="answer-choices">{prompt}{optionCards}</div>}
+      {compactOptions ? <div className="answer-fixed-controls">{chatControls}</div> : chatControls}
     </> : <>{optionCards}{sendButton}</>}
-    {chat && !noText && <div className="answer-reply answer-composer">
-      <div className="answer-composer-row">
-        <textarea ref={text} className="input answer-text" aria-label="Reply in your own words" placeholder="Add a note to your choice, or reply on its own…" rows={1}
-          value={draft} disabled={locked} onFocus={() => setCollapsed(false)} onClick={event => event.stopPropagation()} onChange={event => { setCollapsed(false); onDraft(event.target.value); }} />
-        <button type="button" className="btn btn-secondary answer-reply-send" {...gate(!draft.trim() || locked, frozen || !!blocked)}
-          onClick={event => { event.stopPropagation(); sendText(); }}>Send as a reply only</button>
-      </div>
-    </div>}
-    {chat && <span className="answer-hint">{chatHint}</span>}
     {full && !chat && !noText && <div className="answer-reply">
       <textarea className="input answer-text" aria-label="Reply in your own words" placeholder="Add a note to your choice, or reply on its own…" rows={2}
         value={draft} disabled={locked} onClick={event => event.stopPropagation()} onChange={event => onDraft(event.target.value)} />

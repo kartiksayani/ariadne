@@ -100,7 +100,7 @@ export function Body({ conversation, waiting, center, detail, detailPath, onClos
     <div className="shell-body" style={{ gridTemplateColumns: layout.columns }}>
     <div className={`shell-waiting${layout.folded ? ' shell-waiting-folded' : ''}`}>
       <WaitingFold.Provider value={fold}>{waiting}</WaitingFold.Provider></div>
-    <main className="shell-center" inert={!!conversation || undefined} aria-hidden={!!conversation || undefined}><div className="shell-center-content">{center}</div><Notices /></main>
+    <main className="shell-center" inert={!!conversation || undefined} aria-hidden={!!conversation || undefined}><div className="shell-center-content">{center}</div></main>
     {detail && <aside className={`shell-detail${hidden ? ' shell-detail-hidden' : ''}`} aria-label="Item detail" inert={!!conversation || undefined} aria-hidden={!!conversation || undefined}>
       {onResizeDetail && <div className="shell-detail-resize" role="separator" aria-orientation="vertical" aria-label="Resize detail panel"
         aria-valuemin={DETAIL_MIN} aria-valuemax={resizeMax} aria-valuenow={layout.detailWidth} tabIndex={0} title="Drag to resize; double-click for the default width"
@@ -131,5 +131,6 @@ export function Body({ conversation, waiting, center, detail, detailPath, onClos
     </aside>}
     </div>
     {conversation && <div className="shell-conversation" style={{ left: layout.folded ? WAITING_FOLDED : WAITING_WIDTH }}>{conversation}</div>}
+    <div className="shell-notices" style={{ left: layout.folded ? WAITING_FOLDED : WAITING_WIDTH, right: !conversation && detail ? layout.detailWidth : 0 }}><Notices /></div>
   </div>;
 }

@@ -59,6 +59,16 @@ describe('the conversation reading boundary', () => {
     expect(conversationDivider(session, itemId, seen)).toBeNull();
   });
 
+  it('uses explicit topic catch-up instead of the older session baseline without an item read entry', () => {
+    const { session, itemId, messages, seen } = revisionFixture();
+    seen.items = [];
+    seen.since = '2000-01-01T00:00:00Z';
+    seen.topics = [{ topic_id: session.items[itemId]!.topic_id, at: messages[1].created_at }];
+    expect(conversationDivider(session, itemId, seen)).toBe(messages[2].id);
+    seen.topics[0].at = messages[2].created_at;
+    expect(conversationDivider(session, itemId, seen)).toBeNull();
+  });
+
   it('omits an unmappable later seen revision rather than using the initial baseline as last-read time', () => {
     const { session, itemId, messages, seen } = fixture();
     seen.items.push({ item_id: itemId, revision: session.items[itemId]!.revision - 1 });

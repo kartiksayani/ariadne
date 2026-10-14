@@ -84,6 +84,14 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
     : review ? [...data.MSGS, ...data.REVIEW_MSGS, ...(thread ? data.THREAD_MSGS : [])] : data.MSGS);
   // The thread scenario: the backoff finding on its third round (Ariadne.dc.html:914).
   if (thread && !blank) Object.assign(items.find(item => item.id === '4.1')!, structuredClone(data.THREAD_PATCH));
+  if (spec.conversationOptions !== undefined) {
+    const item = items.find(item => item.id === spec.selected)!;
+    item.q = 'Should retry backoff keep a short first window and a longer second window so the agent has time to recover while the owner can still follow the result and decide what to do next, including when delivery is interrupted and another attempt needs enough time to finish without making the owner wait through an unexplained pause?';
+    item.ask = 'Which retry window should we use? Pick a choice or add your own words.';
+    item.options = Array.from({ length: spec.conversationOptions }, (_, index) => ({ id: `window-${index + 1}`, rec: index === 0,
+      label: ['Keep the current window', 'Use a shorter window', 'Use a longer window', 'Choose per attempt'][index],
+      consequence: ['Keep the timing already reviewed.', 'Recover sooner after a short failure.', 'Allow more time for the agent to recover.', 'Adjust the timing to each delivery attempt.'][index] }));
+  }
   if (spec.answerOptions !== undefined) {
     const item = items.find(item => item.id === spec.selected)!;
     item.q = 'How should we share the examples with the readers?';

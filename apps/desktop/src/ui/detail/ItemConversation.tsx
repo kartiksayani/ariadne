@@ -11,7 +11,9 @@ import { itemRemoved } from '../../selectors/removed';
 import { useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { plainFailure } from '../../data/plain';
-import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
+import type { Immutable } from '../../data';
+import type { Session } from '../../generated/domain/models';
+import { useOwnerDrafts, type DraftEntry, type OwnerDraftStore } from '../../state/drafts/store';
 import { sessionActionsFor } from '../../components/bindings/actions';
 import { PausedNote } from '../../components/bindings/DispatchChip';
 import { useSupervisorHealth } from '../../components/bindings/health';
@@ -106,6 +108,19 @@ export interface ItemDetailProps {
 const sectionLabel = (text: string) => <div className="detail-label">{text}</div>;
 
 const kindName: Readonly<Record<WordsKind, string>> = { reply: 'reply', note: 'note', followup: 'follow-up' };
+
+/** One answer eligibility rule for the pane, conversation and shell footer. */
+export function conversationAnswerState(session: Immutable<Session>, itemId: string, retained?: Pick<DraftEntry, 'uncertain' | 'error'>): { readonly showAnswer: boolean; readonly live: boolean } {
+  const item = session.items[itemId];
+  if (!item) return { showAnswer: false, live: false };
+  const round = item.current_round_id ? session.rounds[item.current_round_id] : null;
+  const currentQuestionOpen = item.status === 'waiting_on_me' && !!round && round.closed_at === null
+    && round.question_revision === item.question_revision;
+  const archived = session.archived_at != null || session.topics[item.topic_id]?.archived_at != null;
+  const model = detailModel({ session, itemId, mode: null, saving: null, later: false, now: Date.now() });
+  const showAnswer = !archived && (closedSessionQuestion(session, item) || currentQuestionOpen && !!(model?.answer || retained?.uncertain || retained?.error));
+  return { showAnswer, live: showAnswer && !!model?.answer && waitingOnOwner(session, item) };
+}
 
 interface WordsFieldProps {
   readonly slot: Words;
@@ -279,9 +294,8 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   const round = item?.current_round_id ? session?.rounds[item.current_round_id] : null;
   const currentQuestionOpen = item?.status === 'waiting_on_me' && !!round && round.closed_at === null
     && round.question_revision === item.question_revision;
-  const archived = session?.archived_at != null || (item && session?.topics[item.topic_id]?.archived_at != null);
-  const showAnswer = expanded ? !!session && !!item && waitingOnOwner(session, item)
-    : !archived && (!!session && !!item && closedSessionQuestion(session, item) || currentQuestionOpen && !!(model?.answer || retained?.uncertain || retained?.error));
+  const answerState = session ? conversationAnswerState(session, itemId, retained) : { showAnswer: false, live: false };
+  const showAnswer = answerState.showAnswer;
   const savedAnswers = !showAnswer && session ? drafts.savedAnswers({ project_id: session.project_id, session_id: session.id }, itemId) : [];
   const ackTo = session && item ? ackTarget(session, item) : null;
   // An open item is replied to and an in-progress item gets notes: that box is always there, never behind a button. Other
@@ -289,11 +303,15 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   // Words are bound to the draft they were typed in: the box edits that draft in place whatever the item's status does, and
   // the label says what the words go out as now (`fit`). Every draft that holds words shows, so none is ever hidden.
   const fit = model?.box ?? null;
-  // A box the owner opened stays only while its action is still offered (Drop goes once a message is on its way).
-  const modeFits = (value: OpenMode) => !!model && ((value === 'reply' && !!model.followUp) || !!model.open?.actions.some(action => action.action === value));
+  // Sending temporarily removes Drop from the actions. Keep an explicitly opened
+  // editor through that attempt; acceptance closes it, while a failure leaves it editable.
+  const dropAttempt = !!dropDraft && !dropDraft.receipt && (dropDraft.saving || dropDraft.uncertain);
+  const modeFits = (value: OpenMode) => !!model && ((value === 'reply' && !!model.followUp)
+    || !!model.open?.actions.some(action => action.action === value)
+    || value === 'drop' && dropAttempt && model.status === 'open' && model.box === 'reply');
   const shownMode = mode && modeFits(mode) ? mode : null;
   const standingEmpty = !!model && !!fit && (expanded && !showAnswer || !!model.open && (model.status === 'open' || model.status === 'progress'));
-  const dropOpen = shownMode === 'drop' || !!dropText && modeFits('drop');
+  const dropOpen = shownMode === 'drop' || dropAttempt;
   const wantBlank = !!fit && ((standingEmpty && !dropOpen) || (!!shownMode && shownMode !== 'drop'));
   const slots: readonly Words[] = !fit ? [] : submit.written.length ? submit.written : wantBlank ? [submit.blank(fit)] : [];
   useEffect(() => { if (mode && model && !modeFits(mode)) setMode(null); });
@@ -410,7 +428,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     return sent;
   };
   const sendWords = (slot: Words) => { if (fit && slot.text.trim()) void send(slot, slot.text, fit); };
-  const sendDrop = () => { if (model) void send('drop', dropText || actionText('drop', model.question)); };
+  const sendDrop = () => { if (model) void send('drop', reason === null ? dropText : actionText('drop', model.question, reason)); };
   const toggleLater = async () => { try { setLaterError(!await onLater?.(!later)); } catch { setLaterError(true); } };
   const act = (action: ActionKey) => {
     if (!model) return;
@@ -467,7 +485,9 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   };
   const dropKey = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Escape') { event.stopPropagation(); event.preventDefault(); closeBox(); return; }
-    if (event.key === 'Enter') { event.stopPropagation(); event.preventDefault(); if (!dropOff) sendDrop(); }
+    if (event.key === 'Enter' && (!(event.currentTarget instanceof HTMLTextAreaElement) || event.metaKey || event.ctrlKey)) {
+      event.stopPropagation(); event.preventDefault(); if (!dropOff) sendDrop();
+    }
   };
   const dropOff = !submit.ready || submit.saving !== null || submit.locked('drop') || submit.changed('drop');
   const owner = !(expanded && showAnswer) && (slots.length > 0 || dropOpen || reopenStale) && <div className="detail-owner-input" data-owner-input={itemId}>
@@ -483,14 +503,15 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
         <button type="button" className="btn btn-secondary" onClick={() => submit.review('drop')}>Review this question</button></div>}
       {(dropDraft?.uncertain || reason === null) ? <>
         <textarea className="input" aria-label="Saved drop message" value={dropText} readOnly={dropDraft?.uncertain} disabled={!dropDraft?.uncertain && submit.locked('drop')} rows={2}
-          onChange={event => submit.edit('drop', event.target.value)} />
+          onChange={event => submit.edit('drop', event.target.value)} onKeyDown={dropKey} />
         {dropDraft?.uncertain ? <>
         <p role="status">This message needs a retry. Your text is kept.</p>
         <button type="button" className="btn btn-secondary" disabled={dropDraft.saving || draftState.preferenceUncertain || !submit.ready}
           onClick={() => { void drafts.submit(dropDraft.draft.op_id); }}>Try sending again</button>
         {dropDraft.rejected && <button type="button" className="btn btn-secondary" disabled={dropDraft.saving || draftState.preferenceUncertain}
-          onClick={() => drafts.prepareRevised(dropDraft.draft.op_id, session)}>Edit and send again</button>}
-        </> : <button type="button" className="btn btn-secondary" disabled={dropOff} onClick={sendDrop}>Drop item</button>}
+          onClick={() => { setMode('drop'); drafts.prepareRevised(dropDraft.draft.op_id, session); }}>Edit and send again</button>}
+        </> : <><button type="button" className="btn btn-secondary" disabled={dropOff} onClick={sendDrop}>Drop item</button>
+          <button type="button" className="btn btn-ghost detail-cancel" onClick={closeBox}>Cancel</button></>}
       </> : <><input ref={dropBox} className="input" aria-label="Drop reason" placeholder="Reason (optional), e.g. the metric already covers it" value={reason}
         disabled={submit.locked('drop')} onChange={event => setReason(event.target.value)} onKeyDown={dropKey} />
       <div className="detail-box-row">
@@ -613,7 +634,8 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
           {entry.marker && <div className="detail-chat-marker">{entry.marker}</div>}
           <div className={`detail-msg${entry.you ? ' detail-msg-you' : ''}`}>
             <div className={`detail-bubble ${entry.you ? 'detail-bubble-you' : 'detail-bubble-agent'}`}>
-              {entry.you ? <><span className="detail-pending-caption">You · {entry.message.when}</span><YouSaid {...entry.you} />
+              {entry.you ? <>{expanded && <span className="detail-pending-caption">You · {entry.message.when}</span>}<YouSaid {...entry.you} />
+                {!expanded && <span className="detail-pending-caption">you · {entry.message.when}</span>}
                 {entry.pending?.caption && <span className="detail-pending-caption">{entry.pending.caption}</span>}</>
                 : <><div className="detail-agent-meta">{expanded ? <span>Agent</span> : <><span>{entry.message.number}</span><span>{entry.message.who}</span></>}<span>{entry.message.when}</span></div>
                   <Markdown text={entry.message.body} />
@@ -654,11 +676,9 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     </section>}
     </div>
 
-    {docked && <div className="detail-dock">
+    {docked && <div className={`detail-dock${expanded && showAnswer ? ' detail-dock-question' : ''}`}>
     {expanded && model.delivery && <div className="detail-delivery" role="status" style={{ color: model.delivery.color }}>
       <i className={model.delivery.icon} aria-hidden="true" /><span>{model.delivery.text}</span></div>}
-    {expanded && showAnswer && <div className="conversation-pin"><h3>Your turn · {relatedLabels.get(itemId)}</h3>
-      <Markdown text={item.ask || item.question} /></div>}
     {!(expanded && showAnswer) && (ackTo || model.open || model.followUp) && <div className="detail-quick-actions">
     {ackTo && <section className="detail-section detail-ack" aria-label="Acknowledge item">
       <button type="button" className="btn btn-secondary detail-action" title={ackTitle(ackTo, item.status)} aria-label={ackTitle(ackTo, item.status)}
@@ -668,7 +688,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     </section>}
     {model.open && <section className="detail-section detail-open" aria-label={model.open.title} title={dockHint ?? model.open.hint}>
       <div className="detail-actions" role="group" aria-label="Item actions">
-        {model.open.actions.map(action => <button type="button" key={action.action} className={`btn ${action.primary ? 'btn-primary' : 'btn-secondary'} detail-action`}
+        {model.open.actions.filter(action => !expanded || action.action !== 'later').map(action => <button type="button" key={action.action} className={`btn ${action.primary ? 'btn-primary' : 'btn-secondary'} detail-action`}
           aria-pressed={action.primary ? undefined : action.pressed} disabled={action.disabled || (!draftState.ready && action.action !== 'later') || (!submit.ready && action.action === 'bring') || (action.action === 'reopen' && submit.locked('reopen'))} title={action.title}
           onClick={() => act(action.action)}>
           <i className={action.icon} aria-hidden="true" />{action.label}<span className="detail-key" aria-hidden="true">{action.key}</span>
@@ -701,6 +721,8 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
       {model.answer && <PausedNote actions={actions} />}
       {/* While the follow-up box is open, it is the detail's one data-owner-input. */}
       <AnswerSlot drafts={drafts} store={store} itemId={itemId} compactOptions={expanded} blocked={model.answer?.blocked} focusRequest={answerFocus}
+        prompt={expanded && answerState.live ? <div className="conversation-pin"><h3>Your turn · {relatedLabels.get(itemId)}</h3>
+          <Markdown text={item.ask || item.question} /></div> : undefined}
         marked={!owner}
         onFocusRequestConsumed={onFocusRequestConsumed} onEscape={() => focusRoot(itemId)} onAgentNotRunning={onAgentNotRunning} onSent={sentJustNow} />
     </section>}

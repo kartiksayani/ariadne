@@ -533,7 +533,7 @@ const conversationSizes = [{ width: 1280, height: 800 }, { width: 900, height: 6
 for (const theme of ['dark', 'light'] as const) for (const viewport of conversationSizes) {
   const id = `conversation-${theme}-${viewport.width}x${viewport.height}`;
   test(`frame ${id}`, async ({ page, origin }, testInfo) => {
-    await openApp(page, origin, { ...frameSpec('1u'), ...viewport, theme });
+    await openApp(page, origin, { ...frameSpec('conversation-four-options'), ...viewport, theme });
     const unfold = page.getByRole('button', { name: /^Show Waiting on me/ });
     if (await unfold.count()) await unfold.click();
     await page.getByRole('button', { name: 'Open the conversation in a bigger view', exact: true }).click();
@@ -558,8 +558,24 @@ for (const theme of ['dark', 'light'] as const) for (const viewport of conversat
     await expect(conversation.locator('.conversation-header .status-badge')).toHaveText('Waiting on me');
     await expect(page.locator('[data-waiting-item="4.1"]')).toBeVisible();
     if (viewport.width === 1280) for (let index = 0; index < 3; index++) await expect(turns.nth(index), 'at least three messages share the initial chat viewport').toBeInViewport();
-    await expect(dock.getByRole('textbox', { name: 'Reply in your own words', exact: true })).toBeAttached();
-    await expect(dock.locator('[data-answer-option]')).not.toHaveCount(0);
+    const ownWords = dock.getByRole('textbox', { name: 'Reply in your own words', exact: true });
+    const replySend = dock.getByRole('button', { name: 'Send as a reply only', exact: true });
+    const fullyVisible = async (control: Locator) => {
+      await expect(control).toBeVisible();
+      const bounds = (await control.boundingBox())!, footerBounds = (await dock.boundingBox())!;
+      expect(bounds.x).toBeGreaterThanOrEqual(footerBounds.x - 1);
+      expect(bounds.y).toBeGreaterThanOrEqual(footerBounds.y - 1);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(footerBounds.x + footerBounds.width + 1);
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(footerBounds.y + footerBounds.height + 1);
+    };
+    await fullyVisible(ownWords); await fullyVisible(replySend);
+    await expect(dock.locator('[data-answer-option]')).toHaveCount(4);
+    await dock.locator('[data-answer-option]').first().click();
+    await fullyVisible(ownWords); await fullyVisible(dock.getByRole('button', { name: /^Send / }).filter({ hasNotText: 'Send as a reply only' }));
+    const title = conversation.locator('.conversation-title');
+    const titleGeometry = await title.evaluate(element => ({ height: element.getBoundingClientRect().height, line: parseFloat(getComputedStyle(element).lineHeight), scroll: element.scrollHeight, client: element.clientHeight }));
+    expect(titleGeometry.height, 'the full title initially takes at most two lines').toBeLessThanOrEqual(titleGeometry.line * 2 + 1);
+    expect(titleGeometry.scroll, 'the fixture actually needs the full-title action').toBeGreaterThan(titleGeometry.client);
     await settle(page);
     const geometry = await pane.evaluate(element => {
       const pane = element.getBoundingClientRect(), body = element.querySelector('.detail-body')!.getBoundingClientRect();
@@ -567,9 +583,11 @@ for (const theme of ['dark', 'light'] as const) for (const viewport of conversat
       return { body: body.height / pane.height, dock: dock.height / pane.height,
         bodyBottom: body.bottom, dockTop: dock.top, dockBottom: dock.bottom, paneBottom: pane.bottom };
     });
-    // Allow subpixel layout rounding around the CSS 30% cap.
-    expect(geometry.body, 'the transcript keeps most of the conversation pane').toBeGreaterThanOrEqual(0.699);
-    expect(geometry.dock, 'the answer footer uses at most 30% of the pane').toBeLessThanOrEqual(0.301);
+    // Short, narrow windows reserve space for the fixed Send controls within
+    // the original 40% allowance; the larger frame retains its 30% target.
+    const footerCap = viewport.width <= 1000 ? 0.4 : 0.3;
+    expect(geometry.body, 'the transcript keeps most of the conversation pane').toBeGreaterThanOrEqual(1 - footerCap - 0.001);
+    expect(geometry.dock, 'the answer footer stays within its responsive cap').toBeLessThanOrEqual(footerCap + 0.001);
     expect(geometry.bodyBottom).toBeLessThanOrEqual(geometry.dockTop + 1);
     expect(geometry.dockBottom).toBeCloseTo(geometry.paneBottom, 0);
     const overlayBox = (await conversation.boundingBox())!, waitingBox = (await page.locator('.shell-waiting').boundingBox())!;
@@ -579,7 +597,7 @@ for (const theme of ['dark', 'light'] as const) for (const viewport of conversat
     expect(overlayBox.x + overlayBox.width).toBeLessThanOrEqual(viewport.width + 1);
     expect(overlayBox.y + overlayBox.height).toBeLessThanOrEqual(footer.y + 1);
     expect(await page.locator('.shell-footer .shell-key').allTextContents()).toEqual([
-      'escBack to Map', '↑↓messages', '1–9select', '⌥1–9send choice + note', '⌥0focus own words', '⌘↵send', 'Spacepeek',
+      'escBack to Map', '↑↓messages', 'aack / answer', 'rreply', '1–9select', '⌥1–9send choice + note', '⌥0focus own words', '⌘↵send', 'b d oitem actions', 'Spacepeek',
     ]);
     await page.screenshot({ path: testInfo.outputPath(`${id}.png`), animations: 'disabled' });
     expect(await body.evaluate(element => element.scrollHeight > element.clientHeight), 'the long transcript scrolls').toBe(true);
@@ -593,9 +611,14 @@ for (const theme of ['dark', 'light'] as const) for (const viewport of conversat
     for (const option of await dock.locator('[data-answer-option]').all()) {
       await option.scrollIntoViewIfNeeded(); await expect(option).toBeInViewport();
     }
-    const ownWords = dock.getByRole('textbox', { name: 'Reply in your own words', exact: true });
-    await ownWords.scrollIntoViewIfNeeded(); await expect(ownWords).toBeInViewport();
+    await fullyVisible(ownWords); await fullyVisible(replySend);
     expect(await body.evaluate(element => element.scrollTop)).toBe(chatScroll);
+    const fullTitle = await title.textContent();
+    await title.click(); await expect(title).toHaveAttribute('aria-expanded', 'true');
+    await expect(title).toHaveText(fullTitle!);
+    const expandedTitle = await title.evaluate(element => ({ height: element.getBoundingClientRect().height, scroll: element.scrollHeight, client: element.clientHeight }));
+    expect(expandedTitle.height).toBeGreaterThan(titleGeometry.height);
+    expect(expandedTitle.scroll, 'one click reveals the complete title without clipping').toBeLessThanOrEqual(expandedTitle.client + 1);
   });
 }
 
@@ -632,9 +655,24 @@ for (const viewport of conversationSizes) test(`owner input keeps the Map readin
   await waiting.locator('.waiting-question').click();
   await expect(conversation.locator('.item-conversation')).toHaveAttribute('data-detail-item-id', '2.1.1');
   await unchanged();
+  await conversation.focus();
+  for (const shortcut of ['Meta+j', 'Meta+e', 'x', 'z', 'Backspace', 'g', 'e', 'r', 'a', 'ArrowDown', 'ArrowUp']) {
+    await page.keyboard.press(shortcut);
+    await unchanged();
+    // Leave any answer control's roving focus before the next workspace key.
+    await conversation.focus();
+  }
+  await expect(page.getByRole('dialog', { name: /Recent/ })).toHaveCount(0);
   await conversation.getByRole('button', { name: 'Back to Map', exact: true }).click();
   await expect(conversation).toHaveCount(0);
   await expect(page.locator('.shell-center')).not.toHaveAttribute('inert', '');
+  await expect(page.locator('.shell-detail .item-detail')).toHaveAttribute('data-detail-item-id', '3.1');
+  await unchanged();
+  await page.getByRole('button', { name: 'Open the conversation in a bigger view', exact: true }).click();
+  await waiting.locator('.waiting-question').click();
+  await unchanged();
+  await conversation.focus(); await page.keyboard.press('Escape');
+  await expect(conversation).toHaveCount(0);
   await expect(page.locator('.shell-detail .item-detail')).toHaveAttribute('data-detail-item-id', '3.1');
   await unchanged();
 });

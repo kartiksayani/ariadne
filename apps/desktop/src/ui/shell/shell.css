@@ -370,6 +370,16 @@
   background: var(--a-bg);
 }
 
+/* Notices stay above Conversation and outside the retained Map's inert subtree. */
+.shell-notices {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 25;
+  container: shell-center / inline-size;
+  pointer-events: none;
+}
+
 /* The detail panel's left edge: drag (or arrow keys) to resize it. */
 .shell-detail-resize {
   position: absolute;

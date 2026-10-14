@@ -16,13 +16,38 @@ const selected = (transport: AppTransport) => transport.preferences.sessions.fin
 const key = (target: Element, value: string, extra = {}) => fireEvent.keyDown(target, { key: value, ...extra });
 const alt = (target: Element, digit: number) => key(target, digit === 0 ? 'º' : '¡', { code: `Digit${digit}`, altKey: true });
 
-async function setup({ otherSession = false, baseline = false, dropReady = false } = {}) {
+async function setup({ otherSession = false, baseline = false, dropReady = false, coveredWaiting = false, cancelledReplies = false } = {}) {
   const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
   const question = session.items['2']!;
   question.options = Array.from({ length: 9 }, (_, index) => ({
     id: `choice-${index + 1}`, label: `Window ${index + 1}`, consequence: `Use window ${index + 1}.`, recommended: index === 0,
   }));
   session.rounds[question.current_round_id!]!.options_snapshot = structuredClone(question.options);
+  if (coveredWaiting) {
+    const covered = session.items['4']!;
+    Object.assign(covered, { status: 'waiting_on_me', waiting_since: question.waiting_since,
+      recipient_binding_id: question.recipient_binding_id, options: structuredClone(question.options),
+      current_round_id: 'covered-question', question_revision: question.question_revision });
+    session.rounds['covered-question'] = { ...structuredClone(session.rounds[question.current_round_id!]!),
+      id: 'covered-question', item_id: covered.id };
+    Object.values(session.inputs).forEach(input => { if (input?.target.item_id === covered.id) input.state = 'handled'; });
+  }
+  if (cancelledReplies) {
+    for (const [index, itemId] of ['2', '4'].entries()) {
+      const input = structuredClone(Object.values(session.inputs).find(input => input?.kind === 'reply')!);
+      const message = structuredClone(session.messages.find(message => message.kind === 'owner_input')!);
+      input.id = `cancelled-${itemId}`; input.message_id = `cancelled-message-${itemId}`;
+      input.seq += 100 + index; input.kind = 'reply'; input.state = 'cancelled'; input.cancel_cause = 'owner'; input.attempts = [];
+      input.target = { ...input.target, topic_id: session.items[itemId]!.topic_id, item_id: itemId };
+      input.payload.text = `Kept words for ${itemId}`; input.payload.intent = 'reply'; input.payload.selected_option_id = null;
+      input.payload.context.round_id = null;
+      input.payload.target_snapshot = { ...input.payload.target_snapshot, item_question: session.items[itemId]!.question,
+        question_revision: session.items[itemId]!.question_revision, options: structuredClone(session.items[itemId]!.options) };
+      Object.assign(message, { id: input.message_id, input_id: input.id, item_id: itemId, topic_id: input.target.topic_id,
+        number: 20 + index, body: input.payload.text });
+      session.inputs[input.id] = input; session.messages.push(message); session.items[itemId]!.updated_message_ids.push(message.id);
+    }
+  }
   const another = session.items['8']!;
   another.status = 'waiting_on_me';
   another.waiting_since = question.waiting_since;
@@ -31,6 +56,10 @@ async function setup({ otherSession = false, baseline = false, dropReady = false
   referenceMessage.id = '00000000-0000-4000-8000-000000000120'; referenceMessage.number = 16;
   referenceMessage.item_id = '4'; referenceMessage.body = 'Review [the delivery question](item:2).';
   session.messages.push(referenceMessage); session.items['4']!.updated_message_ids.push(referenceMessage.id);
+  if (coveredWaiting) {
+    const coveredReference = { ...referenceMessage, id: 'covered-reference', number: 17, item_id: '2', body: 'Review [the covered question](item:4).' };
+    session.messages.push(coveredReference); question.updated_message_ids.push(coveredReference.id);
+  }
   if (dropReady) Object.values(session.inputs).forEach(input => {
     if (input?.target.item_id === '4' && input.state === 'queued') input.state = 'handled';
   });
@@ -48,7 +77,7 @@ async function setup({ otherSession = false, baseline = false, dropReady = false
   await waitFor(() => {
     expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
     expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
-    expect(within(detail('4')).getByLabelText<HTMLTextAreaElement>('Reply message').disabled).toBe(false);
+    expect(within(detail('4')).getByLabelText<HTMLTextAreaElement>(coveredWaiting ? 'Reply in your own words' : 'Reply message').disabled).toBe(false);
     expect(card('2')).not.toBeNull(); expect(card('8')).not.toBeNull();
   });
   return transport;
@@ -70,18 +99,19 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
   it('opens the selected item and returns focus to expand without remounting or scrolling the Map', async () => {
     const transport = await setup();
     const tree = screen.getByRole('region', { name: 'Session tree' }), selectedRow = row('4');
-    tree.scrollTop = 173;
+    const scroller = tree.querySelector<HTMLElement>('.tree-scroll')!;
+    scroller.scrollTop = 173;
     const expandButton = await expand();
     expect(within(conversation()).getByRole('heading', { level: 1 }).textContent).toBe('Record retry limits');
     expect(document.activeElement).toBe(conversation());
     expect(document.querySelectorAll('[data-detail-item-id]')).toHaveLength(1);
     expect(document.querySelector('[data-covered-detail]')).not.toBeNull();
     expect(screen.getByRole('region', { name: 'Session tree', hidden: true })).toBe(tree);
-    expect(row('4')).toBe(selectedRow); expect(tree.scrollTop).toBe(173); expect(selected(transport)).toBe('4');
+    expect(row('4')).toBe(selectedRow); expect(scroller.scrollTop).toBe(173); expect(selected(transport)).toBe('4');
     fireEvent.click(within(conversation()).getByRole('button', { name: 'Back to Map' }));
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Item conversation' })).toBeNull());
     expect(screen.getByRole('region', { name: 'Session tree' })).toBe(tree);
-    expect(row('4')).toBe(selectedRow); expect(tree.scrollTop).toBe(173); expect(selected(transport)).toBe('4');
+    expect(row('4')).toBe(selectedRow); expect(scroller.scrollTop).toBe(173); expect(selected(transport)).toBe('4');
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open the conversation in a bigger view' }));
     expect(expandButton.isConnected).toBe(false);
   });
@@ -100,6 +130,62 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Item conversation' })).toBeNull());
     expect(within(detail('4')).getByLabelText<HTMLTextAreaElement>('Reply message').value).toBe('Keep this draft when I leave.');
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open the conversation in a bigger view' }));
+  });
+
+  it('lets text size and session rename own Escape before the peek and conversation', async () => {
+    await setup();
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    await screen.findByRole('group', { name: 'Rename session' });
+    await expand();
+    fireEvent.click(conversation().querySelector<HTMLButtonElement>('.name-chip')!);
+    await screen.findByRole('dialog', { name: /^Peek:/ });
+    const size = screen.getByRole('button', { name: 'Text size' });
+    fireEvent.click(size);
+    const peekClose = screen.getByRole('button', { name: 'Close peek' });
+    key(peekClose, 'Escape');
+    expect(screen.queryByRole('group', { name: 'Text size' })).toBeNull();
+    expect(document.querySelector('.pw-rename')).not.toBeNull();
+    expect(screen.getByRole('dialog', { name: /^Peek:/ })).toBeTruthy();
+    key(peekClose, 'Escape');
+    expect(document.querySelector('.pw-rename')).toBeNull();
+    expect(screen.getByRole('dialog', { name: /^Peek:/ })).toBeTruthy();
+    expect(conversation()).toBeTruthy();
+    key(conversation(), 'Escape');
+    expect(screen.queryByRole('dialog', { name: /^Peek:/ })).toBeNull();
+    expect(conversation()).toBeTruthy();
+    key(conversation(), 'Escape');
+    expect(screen.queryByRole('region', { name: 'Item conversation' })).toBeNull();
+  });
+
+  it('lets a focused notice own Escape before a clicked peek and the conversation', async () => {
+    await setup(); await expand();
+    fireEvent.click(conversation().querySelector<HTMLButtonElement>('.name-chip')!);
+    await screen.findByRole('dialog', { name: /^Peek:/ });
+    act(() => { notices.push({ id: 'focused-conversation-notice', icon: 'ph ph-check', text: 'Reference copied.' }); });
+    const notice = (await screen.findByText('Reference copied.')).closest<HTMLElement>('.pw-note')!;
+    key(screen.getByRole('button', { name: 'Close peek' }), 'F6');
+    expect(document.activeElement).toBe(notice);
+    key(notice, 'Escape');
+    expect(screen.queryByText('Reference copied.')).toBeNull();
+    expect(screen.getByRole('dialog', { name: /^Peek:/ })).toBeTruthy();
+    expect(conversation()).toBeTruthy();
+    key(screen.getByRole('button', { name: 'Close peek' }), 'Escape');
+    expect(screen.queryByRole('dialog', { name: /^Peek:/ })).toBeNull();
+    expect(conversation()).toBeTruthy();
+  });
+
+  it('keeps notices announced, visible and actionable above the covered Map', async () => {
+    await setup(); await expand();
+    const putBack = vi.fn();
+    act(() => { notices.push({ id: 'conversation-notice', icon: 'ph ph-chat-text', text: 'Another reply was kept.',
+      actions: [{ label: 'Put back in reply box', run: putBack }] }); });
+    const notice = await screen.findByText('Another reply was kept.');
+    expect(notice.closest('[inert],[aria-hidden="true"]')).toBeNull();
+    expect(notice.closest('[role="status"],[role="alert"]')).not.toBeNull();
+    fireEvent.click(within(screen.getByRole('region', { name: 'Notifications' })).getByRole('button', { name: 'Put back in reply box' }));
+    expect(putBack).toHaveBeenCalledOnce();
+    expect(conversation()).toBeTruthy();
   });
 
   it('switches same-session Waiting items without selecting them, while Details closes and navigates', async () => {
@@ -142,7 +228,7 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
   });
 
   it.each(['r', 'a'])('focuses only the overlay answer with %s while the Map selects a different item', async shortcut => {
-    const transport = await setup(); await expand(); await switchQuestion();
+    const transport = await setup({ coveredWaiting: true }); await expand(); await switchQuestion();
     key(conversation(), shortcut);
     await waitFor(() => expect(document.activeElement).toBe(conversation().querySelector('[data-answer-option="0"]')));
     expect(document.querySelectorAll('[data-detail-item-id]')).toHaveLength(1);
@@ -150,7 +236,7 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
   });
 
   it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])('selects and sends overlay option %i instead of targeting the covered Map item', async digit => {
-    const transport = await setup(); await expand(); await switchQuestion();
+    const transport = await setup({ coveredWaiting: true }); await expand(); await switchQuestion();
     key(conversation(), String(digit), { code: `Digit${digit}` });
     await waitFor(() => expect(conversation().querySelector(`[data-answer-option="${digit - 1}"]`)?.getAttribute('aria-pressed')).toBe('true'));
     const words = within(conversation()).getByLabelText('Reply in your own words');
@@ -162,7 +248,7 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
   });
 
   it('Option zero focuses own words and Command Enter answers the pinned question then restores the ordinary composer', async () => {
-    const transport = await setup(); await expand(); await switchQuestion();
+    const transport = await setup({ coveredWaiting: true }); await expand(); await switchQuestion();
     expect(conversation().querySelector('.conversation-pin')?.textContent).toContain('Your turn');
     expect(within(conversation()).queryByLabelText('Reply message')).toBeNull();
     alt(conversation(), 0);
@@ -212,7 +298,7 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
   });
 
   it('retries an uncertain answer with the identical operation and message', async () => {
-    const transport = await setup(); await expand(); await switchQuestion();
+    const transport = await setup({ coveredWaiting: true }); await expand(); await switchQuestion();
     const words = within(conversation()).getByLabelText('Reply in your own words');
     fireEvent.change(words, { target: { value: 'Keep exact retry words: café\nsecond line' } });
     transport.failNext = 'input_submit'; key(words, 'Enter', { metaKey: true });
@@ -222,6 +308,7 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     fireEvent.click(retry);
     await waitFor(() => expect(sends(transport)).toHaveLength(2));
     expect(sends(transport)[1]).toEqual(attempted);
+    expect(sends(transport).every(request => request.command.command === 'input_submit' && request.command.params.target.item_id === '2')).toBe(true);
     await waitFor(() => expect(within(conversation()).queryByRole('button', { name: 'Try sending again' })).toBeNull());
     expect(selected(transport)).toBe('4');
   });
@@ -274,16 +361,105 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     await waitFor(() => expect(selected(transport)).toBe('4'));
     await expand(); await switchQuestion();
     const mutations = transport.mutations.length, reveals = transport.queries.filter(query => query.request.command === 'reveal_item').length;
+    const tree = screen.getByRole('region', { name: 'Session tree', hidden: true });
+    const scroller = tree.querySelector<HTMLElement>('.tree-scroll')!; scroller.scrollTop = 147;
     conversation().focus(); key(conversation(), 'g'); key(conversation(), 'e');
+    key(conversation(), 'j', { metaKey: true }); key(conversation(), 'e', { metaKey: true });
+    key(conversation(), 'x'); key(conversation(), 'Backspace'); key(conversation(), 'Delete'); key(conversation(), 'z');
     key(conversation(), '[', { metaKey: true }); key(document.body, ']', { metaKey: true });
     await act(async () => { await Promise.resolve(); });
     expect(selected(transport)).toBe('4');
+    expect(scroller.scrollTop).toBe(147);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(transport.mutations.slice(mutations).some(request => request.command.command === 'item_remove'
+      || request.command.command === 'preferences_patch' && request.command.params.entries.some(entry => entry.kind === 'set_session_view' || entry.kind === 'set_later'))).toBe(false);
     expect(conversation().querySelector('[data-detail-item-id]')?.getAttribute('data-detail-item-id')).toBe('2');
     expect(transport.queries.filter(query => query.request.command === 'reveal_item')).toHaveLength(reveals);
     expect(transport.mutations.slice(mutations).some(request => request.command.command === 'topic_archive')).toBe(false);
     key(conversation(), 'Escape');
     expect(screen.getByRole('button', { name: 'Tree' }).getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByRole('region', { name: 'Session tree' })).toBeTruthy();
+  });
+
+  it('keeps the covered detail column mounted at its width after the Map selection is removed', async () => {
+    const transport = await setup(); await expand(); await switchQuestion();
+    const map = document.querySelector('.shell-center')!, aside = document.querySelector('.shell-detail')!;
+    const grid = document.querySelector<HTMLElement>('.shell-body')!.style.gridTemplateColumns;
+    const placeholder = aside.querySelector('[data-covered-detail]')!;
+    const session = transport.sessions.get(route.session_id)!;
+    delete session.items['4']; ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    await waitFor(() => expect(row('4')).toBeNull());
+    expect(document.querySelector('.shell-center')).toBe(map);
+    expect(document.querySelector('.shell-detail')).toBe(aside);
+    expect(aside.querySelector('[data-covered-detail]')).toBe(placeholder);
+    expect(document.querySelector<HTMLElement>('.shell-body')!.style.gridTemplateColumns).toBe(grid);
+    expect(conversation()).toBeTruthy();
+  });
+
+  it.each(['b', 'd', 'o'])('keeps %s item actions on the conversation target without moving the Map', async shortcut => {
+    const transport = await setup(); await expand(); await switchQuestion('8');
+    const session = transport.sessions.get(route.session_id)!, item = session.items['8']!;
+    item.status = shortcut === 'o' ? 'done' : 'open';
+    session.rounds[item.current_round_id!]!.closed_at = session.updated_at; ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    await within(conversation()).findByRole('group', { name: 'Item actions' });
+    expect(within(conversation()).queryByRole('button', { name: /^Later/ })).toBeNull();
+    const map = document.querySelector<HTMLElement>('.tree-scroll')!; map.scrollTop = 143;
+    const mapRow = row('4'), reveals = transport.queries.filter(query => query.request.command === 'reveal_item').length;
+    key(conversation(), shortcut);
+    if (shortcut === 'b') {
+      await waitFor(() => expect(sends(transport)).toHaveLength(1));
+      expect(sends(transport)[0].command).toMatchObject({ params: { kind: 'bring', target: { item_id: '8' } } });
+    } else if (shortcut === 'd') await within(conversation()).findByLabelText('Drop reason');
+    else await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    if (shortcut === 'o') expect(sends(transport)[0].command).toMatchObject({ params: { kind: 'reopen', target: { item_id: '8' } } });
+    expect(map.scrollTop).toBe(143); expect(row('4')).toBe(mapRow); expect(selected(transport)).toBe('4');
+    expect(transport.queries.filter(query => query.request.command === 'reveal_item')).toHaveLength(reveals);
+  });
+
+  it('sends quick replies only to the view while the covered waiting question gets no send', async () => {
+    const transport = await setup({ coveredWaiting: true }); await expand(); await switchQuestion();
+    fireEvent.click(conversation().querySelector('[data-answer-option="1"]')!);
+    fireEvent.click(within(conversation()).getByRole('button', { name: 'Send “Window 2”' }));
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0].command).toMatchObject({ params: { kind: 'answer', target: { item_id: '2' }, selected_option_id: 'choice-2' } });
+    expect(selected(transport)).toBe('4');
+  });
+
+  it('keeps a covered waiting question preview free of answer actions until Go to closes the view', async () => {
+    const transport = await setup({ coveredWaiting: true }); await expand(); await switchQuestion();
+    fireEvent.click(within(conversation()).getByRole('button', { name: /^Record retry limits ·/ }));
+    const peek = await screen.findByRole('dialog', { name: 'Peek: Record retry limits' });
+    expect(within(peek).queryByRole('region', { name: 'Answer question' })).toBeNull();
+    expect(within(peek).queryByLabelText('One-line answer')).toBeNull();
+    expect(sends(transport)).toHaveLength(0);
+    fireEvent.click(within(peek).getByRole('button', { name: 'Go to' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Item conversation' })).toBeNull());
+    await within(detail('4')).findByRole('group', { name: 'Answer' });
+    expect(sends(transport)).toHaveLength(0);
+  });
+
+  it('puts back only the view text while the covered waiting question gets no draft or send', async () => {
+    const transport = await setup({ coveredWaiting: true, cancelledReplies: true });
+    expect(within(detail('4')).getByRole('group', { name: 'Answer' })).toBeTruthy();
+    await expand(); await switchQuestion();
+    expect(document.querySelector('.shell-detail [data-owner-input]')).toBeNull();
+    expect(document.querySelector('[data-waiting-item="4"] [data-answer-option]')).toBeNull();
+    const cancelled = conversation().querySelector('[data-message-id="cancelled-message-2"]')!;
+    fireEvent.click(within(cancelled as HTMLElement).getByRole('button', { name: 'Put back in reply box' }));
+    await waitFor(() => expect(transport.preferences.drafts).toContainEqual(expect.objectContaining({ text: 'Kept words for 2', target: expect.objectContaining({ item_id: '2' }) })));
+    const session = transport.sessions.get(route.session_id)!;
+    session.items['2']!.status = 'open'; session.rounds[session.items['2']!.current_round_id!]!.closed_at = session.updated_at; ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    const words = await within(conversation()).findByLabelText<HTMLTextAreaElement>('Reply message');
+    await waitFor(() => expect(words.value).toBe('Kept words for 2'));
+    expect(sends(transport)).toHaveLength(0);
+    key(words, 'Enter', { metaKey: true });
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0].command).toMatchObject({ params: { target: { item_id: '2' }, text: 'Kept words for 2' } });
+    expect(transport.preferences.drafts.filter(draft => draft.target.item_id === '4')).toHaveLength(0);
+    expect(selected(transport)).toBe('4');
   });
 
   it('keeps a typed Drop reason through expansion, a Waiting switch and Back to Map', async () => {
@@ -294,9 +470,13 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     const kept = within(detail('4')).getByLabelText<HTMLInputElement>('Drop reason').value;
     expect(kept).toBe(reason);
     await expand();
+    expect(within(conversation()).queryByLabelText('Drop reason')).toBeNull();
+    fireEvent.click(within(conversation()).getByRole('button', { name: /^Drop/ }));
     expect(within(conversation()).getByLabelText<HTMLInputElement>('Drop reason').value).toBe(kept);
     await switchQuestion();
     fireEvent.click(within(conversation()).getByRole('button', { name: 'Back to Map' }));
+    expect(within(detail('4')).queryByLabelText('Drop reason')).toBeNull();
+    fireEvent.click(within(detail('4')).getByRole('button', { name: /^Drop/ }));
     expect(within(detail('4')).getByLabelText<HTMLInputElement>('Drop reason').value).toBe(kept);
     expect(sends(transport)).toHaveLength(0); expect(selected(transport)).toBe('4');
     const session = transport.sessions.get(route.session_id)!;
@@ -308,6 +488,8 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
       && draft.text === `Let’s drop this (${reason}): Record retry limits`)).toBe(true));
     pending.state = 'handled'; ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    expect(within(detail('4')).queryByLabelText('Drop reason')).toBeNull();
+    fireEvent.click(within(detail('4')).getByRole('button', { name: /^Drop/ }));
     expect((await within(detail('4')).findByLabelText<HTMLInputElement>('Drop reason')).value).toBe(reason);
     expect(sends(transport)).toHaveLength(0);
   });
@@ -329,6 +511,7 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     fireEvent.click(within(detail('4')).getByRole('button', { name: 'Drop item' }));
     expect(sends(transport)).toHaveLength(0);
     await expand();
+    fireEvent.click(within(conversation()).getByRole('button', { name: /^Drop/ }));
     expect(within(conversation()).getByLabelText<HTMLTextAreaElement>('Saved drop message').value).toBe(message);
     expect(within(conversation()).getByLabelText<HTMLTextAreaElement>('Saved drop message').readOnly).toBe(false);
     expect(within(conversation()).getByRole<HTMLButtonElement>('button', { name: 'Drop item' }).disabled).toBe(true);
@@ -348,10 +531,10 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     const transport = await setup({ dropReady: true });
     fireEvent.click(within(detail('4')).getByRole('button', { name: /^Drop/ }));
     fireEvent.change(within(detail('4')).getByLabelText('Drop reason'), { target: { value: ' Keep retry words: café ' } });
-    await expand(); transport.failNext = 'input_submit';
+    await expand(); fireEvent.click(within(conversation()).getByRole('button', { name: /^Drop/ })); transport.failNext = 'input_submit';
     fireEvent.click(within(conversation()).getByRole('button', { name: 'Drop item' }));
     const saved = await within(conversation()).findByLabelText<HTMLTextAreaElement>('Saved drop message');
-    const expected = 'Let’s drop this ( Keep retry words: café ): Record retry limits';
+    const expected = 'Let’s drop this (Keep retry words: café): Record retry limits';
     expect(saved.value).toBe(expected); expect(saved.readOnly).toBe(true);
     expect(within(conversation()).queryByLabelText('Drop reason')).toBeNull();
     expect(sends(transport)).toHaveLength(1);
@@ -383,6 +566,7 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     await waitFor(() => expect(transport.preferences.drafts.some(draft => draft.intent === 'drop' && draft.text === expected)).toBe(true));
     const operation = transport.preferences.drafts.find(draft => draft.intent === 'drop')!.op_id;
     await expand();
+    fireEvent.click(within(conversation()).getByRole('button', { name: /^Drop/ }));
     const invoke = transport.invoke.bind(transport);
     let failRead = true;
     vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
@@ -396,14 +580,17 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     fireEvent.click(within(conversation()).getByRole('button', { name: 'Drop item' }));
     await within(conversation()).findAllByText('Ariadne couldn’t read or save its data. Try again.');
     expect(sends(transport)).toHaveLength(0);
-    expect(within(conversation()).getByLabelText<HTMLInputElement>('Drop reason').value).toBe(reason);
+    expect(within(conversation()).getByLabelText<HTMLInputElement>('Drop reason').value).toBe(reason.trim());
     expect(within(conversation()).queryByLabelText('Saved drop message')).toBeNull();
     fireEvent.click(within(conversation()).getByRole('button', { name: 'Back to Map' }));
-    expect(within(detail('4')).getByLabelText<HTMLInputElement>('Drop reason').value).toBe(reason);
+    expect(within(detail('4')).queryByLabelText('Drop reason')).toBeNull();
+    fireEvent.click(within(detail('4')).getByRole('button', { name: /^Drop/ }));
+    expect(within(detail('4')).getByLabelText<HTMLInputElement>('Drop reason').value).toBe(reason.trim());
     await expand();
+    fireEvent.click(within(conversation()).getByRole('button', { name: /^Drop/ }));
     fireEvent.click(within(conversation()).getByRole('button', { name: 'Drop item' }));
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
-    expect(sends(transport)[0].command).toMatchObject({ op_id: operation, params: { kind: 'drop', target: { item_id: '4' }, text: expected } });
+    expect(sends(transport)[0].command).toMatchObject({ op_id: operation, params: { kind: 'drop', target: { item_id: '4' }, text: 'Let’s drop this (Keep this whitespace and café): Record retry limits' } });
     await waitFor(() => expect(within(conversation()).queryByLabelText('Drop reason')).toBeNull());
   });
 
@@ -412,6 +599,7 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     fireEvent.click(within(detail('4')).getByRole('button', { name: /^Drop/ }));
     fireEvent.change(within(detail('4')).getByLabelText('Drop reason'), { target: { value: ' Original rejected words ' } });
     await expand();
+    fireEvent.click(within(conversation()).getByRole('button', { name: /^Drop/ }));
     const invoke = transport.invoke.bind(transport);
     let reject = true;
     vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
@@ -427,12 +615,12 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     expect(sends(transport)).toHaveLength(1);
     const original = structuredClone(sends(transport)[0]);
     expect(within(conversation()).getByLabelText<HTMLTextAreaElement>('Saved drop message').value)
-      .toBe('Let’s drop this ( Original rejected words ): Record retry limits');
+      .toBe('Let’s drop this (Original rejected words): Record retry limits');
     expect(within(conversation()).getByLabelText<HTMLTextAreaElement>('Saved drop message').readOnly).toBe(true);
     fireEvent.click(revise);
     const reason = await within(conversation()).findByLabelText<HTMLInputElement>('Drop reason');
     await waitFor(() => expect(reason.disabled).toBe(false));
-    expect(reason.value).toBe(' Original rejected words ');
+    expect(reason.value).toBe('Original rejected words');
     expect(within(conversation()).getByRole<HTMLButtonElement>('button', { name: 'Drop item' }).disabled).toBe(true);
     fireEvent.change(reason, { target: { value: ' Revised words: café ' } });
     expect(sends(transport)).toHaveLength(1);
@@ -442,8 +630,8 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     await waitFor(() => expect(sends(transport)).toHaveLength(2));
     expect(sends(transport)[1].command.op_id).not.toBe(original.command.op_id);
     expect(sends(transport)[1].command).toMatchObject({ params: { kind: 'drop', target: { item_id: '4' },
-      text: 'Let’s drop this ( Revised words: café ): Record retry limits' } });
-    expect(original.command).toMatchObject({ params: { text: 'Let’s drop this ( Original rejected words ): Record retry limits' } });
+      text: 'Let’s drop this (Revised words: café): Record retry limits' } });
+    expect(original.command).toMatchObject({ params: { text: 'Let’s drop this (Original rejected words): Record retry limits' } });
     await waitFor(() => expect(within(conversation()).queryByLabelText('Drop reason')).toBeNull());
     expect(within(conversation()).queryByRole('button', { name: 'Try sending again' })).toBeNull();
     expect(selected(transport)).toBe('4');

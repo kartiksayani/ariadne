@@ -48,8 +48,9 @@ it('keeps the sole topic archive notice actionable through queued navigation and
   });
   const assertNotice = () => {
     expect(screen.getByRole('region', { name: 'Notifications' })).toBe(region);
-    expect(region.parentElement).toBe(screen.getByRole('main'));
-    expect(region.parentElement?.querySelector('.shell-center-content')?.contains(region)).toBe(false);
+    expect(region.parentElement).toBe(document.querySelector('.shell-notices'));
+    expect(screen.getByRole('main').contains(region)).toBe(false);
+    expect(region.closest('[inert],[aria-hidden="true"]')).toBeNull();
     expect(within(region).getByRole('button', { name: 'Undo' })).toBe(undo);
     expect(undo.closest('[data-notice-id]')).toBe(card);
     expect(card.isConnected).toBe(true); expect(undo.disabled).toBe(false);

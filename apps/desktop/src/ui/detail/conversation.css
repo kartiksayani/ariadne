@@ -24,6 +24,30 @@
   overflow-wrap: anywhere;
 }
 
+.conversation-heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.conversation-title {
+  display: -webkit-box;
+  width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.conversation-title-expanded {
+  display: block;
+}
+
 .conversation-header > .btn {
   flex-shrink: 0;
 }
@@ -43,6 +67,49 @@
   padding-inline: max(24px, calc((100% - 780px) / 2));
 }
 
+.item-conversation .detail-dock-question {
+  height: 30%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.item-conversation .detail-dock-question > .detail-answer,
+.item-conversation .detail-dock-question .detail-answer-slot,
+.item-conversation .detail-dock-question .answer {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.item-conversation .detail-dock-question > .detail-answer {
+  overflow: hidden;
+}
+
+.item-conversation .detail-dock-question .answer-choices {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden auto;
+  padding: 2px;
+}
+
+.item-conversation .answer-fixed-controls {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.item-conversation .answer-fixed-controls .answer-text,
+.item-conversation .detail-composer-row > textarea {
+  max-height: 68px;
+  overflow-y: auto !important;
+}
+
+.item-conversation .answer-send-row {
+  min-width: 0;
+}
+
 .item-conversation .detail-body {
   padding-top: 24px;
 }
@@ -50,6 +117,13 @@
 .item-conversation .detail-dock {
   max-height: 30%;
   padding-block: 8px;
+}
+
+@media (width <= 1000px) {
+  .item-conversation .detail-dock-question {
+    height: 40%;
+    max-height: 40%;
+  }
 }
 
 .item-conversation .detail-bubble {

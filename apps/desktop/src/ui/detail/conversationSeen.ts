@@ -63,7 +63,7 @@ export function conversationDivider(session: Immutable<Session>, itemId: string,
   const chat = detailModel({ session, itemId, now: Date.now(), later: false, mode: null, saving: null })?.chat ?? [];
   const messages = new Map(session.messages.map(message => [message.id, message]));
   const revisions = read ? messageRevisions(session, item) : null;
-  const baseline = Date.parse(seen.since);
+  const baseline = Date.parse(seen.topics.find(topic => topic.topic_id === item.topic_id)?.at ?? seen.since);
   if (read ? !revisions : !Number.isFinite(baseline)) return null;
   const unread: boolean[] = [];
   let previousRevision = 0;

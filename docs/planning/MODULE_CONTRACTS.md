@@ -193,24 +193,33 @@ show current restore/reopen prerequisites before stored action feedback.
 `ItemConversation` is the shared conversation body consumed by `ItemDetail` and
 `ConversationView`; both use the existing validated session snapshot, history
 selectors, item labels/peeks, delivery recovery and per-item `OwnerDraftStore`.
-Preserve oldest-first messages, Agent/You labels, saved answers, Read as, change
+Preserve oldest-first messages, saved answers, Read as, change
 comparisons and failed-delivery/cancellation actions. The detail expand control is
-labelled `Open the conversation in a bigger view`.
+labelled `Open the conversation in a bigger view`. The view uses Agent/You headings;
+the pane retains its existing `you ·` caption after the owner's text.
 
 App owns a temporary overlay target and return-focus reference, separate from
 canonical Map selection. The overlay covers Map and detail while Waiting remains
 interactive. Map stays mounted at its current dimensions and inert; the covered
-detail interactive body is unmounted. Same-session Waiting targets replace only
+detail interactive body is unmounted, with its width retained by a placeholder
+even if Map selection disappears. Notices remain interactive above the overlay
+outside the inert subtree. Same-session Waiting targets replace only
 the overlay target. Details, cross-session selection and deliberate peek navigation
 close it before the existing reveal route. Back to Map or Escape closes it without
-navigation, with peek dismissal taking precedence. Item shortcuts use the overlay
+navigation, with text-size, rename and peek dismissal taking precedence in that order. Item shortcuts use the overlay
 target and the ordinary revision/operation/receipt guards. No new persisted mode,
 session-wide conversation, host transcript read or owner-input command is added.
+Covered Map shortcuts, hide, remove, archive and Later are blocked. Bring, Drop
+and Reopen target the view's item. `PeekProvider.answerTarget` limits preview
+answers to that same item while the view is open.
 
 An unanswered current question uses a pinned `Your turn · <short name>` footer
-capped at 30% of the conversation pane; compact labels retain consequences behind
-More, and its answer control replaces the ordinary composer
-until answered. Closing or switching keeps shared drafts and uncertain operations.
+capped at 30% of the conversation pane (40% in narrow windows); compact labels retain consequences behind
+More. Only the question and options scroll; own words and Send stay fixed.
+`conversationAnswerState` supplies the shared pane/view answer rule and footer
+shortcut eligibility. It pins only a live current question; closed-session
+questions keep their disabled answer control without Your turn. The live control
+replaces the ordinary composer until answered. Closing or switching keeps shared drafts and uncertain operations.
 The view participates in existing captured-revision seen dwell through the shared
 reading lane.
 
@@ -221,8 +230,8 @@ recorded item-seen R, mapped revisions greater than R are new. Require complete,
 consistent evidence for involved agent messages, validated against creation and
 change provenance; omit the divider when evidence is trimmed or conflicts.
 Owner messages are seen and never anchor it. Nothing/everything new has no divider.
-Without explicit item-seen R, use the existing `SessionSeen.since` timestamp
-baseline. Reuse preferences without adding fields or guessing missing provenance.
+Without explicit item-seen R, use the topic catch-up timestamp `topics[].at ?? since`
+baseline, matching topic changes. Reuse preferences without adding fields or guessing missing provenance.
 
 ### Claude installed-helper acceptance join
 

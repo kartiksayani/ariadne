@@ -196,21 +196,22 @@ export function footerSummary(counts: FooterCounts | null): string {
 export interface FooterKey { readonly k: string; readonly t: string }
 export interface ConversationFooterState { readonly question: boolean }
 
-const footerKeyDefinitions: readonly (FooterKey & { readonly conversationText?: string; readonly questionOnly?: boolean })[] = [
-  { k: '↑↓', t: 'move', conversationText: 'messages' }, { k: '←→', t: 'fold' }, { k: 'a', t: 'ack / answer' }, { k: '1–9', t: 'select', conversationText: 'select' },
+const footerKeyDefinitions: readonly (FooterKey & { readonly conversationText?: string; readonly conversationKey?: string; readonly conversationOnly?: boolean; readonly questionOnly?: boolean })[] = [
+  { k: '↑↓', t: 'move', conversationText: 'messages' }, { k: '←→', t: 'fold' }, { k: 'a', t: 'ack / answer', conversationText: 'ack / answer' },
+  { k: 'r', t: 'reply', conversationText: 'reply', conversationOnly: true }, { k: '1–9', t: 'select', conversationText: 'select', questionOnly: true },
   { k: '⌥1–9', t: 'send choice + note', conversationText: 'send choice + note', questionOnly: true }, { k: '⌥0', t: 'focus own words', conversationText: 'focus own words', questionOnly: true },
   { k: '⌘↵', t: 'reply only', conversationText: 'send' }, { k: '↵', t: 'send / details' },
-  { k: 'b r d z o', t: 'item actions' }, { k: 'x', t: 'hide / unhide' }, { k: '/', t: 'search' }, { k: 'g', t: 'graph' }, { k: 'w', t: 'waiting' }, { k: 'esc', t: 'close', conversationText: 'Back to Map' },
+  { k: 'b r d z o', t: 'item actions', conversationKey: 'b d o', conversationText: 'item actions' }, { k: 'x', t: 'hide / unhide' }, { k: '/', t: 'search' }, { k: 'g', t: 'graph' }, { k: 'w', t: 'waiting' }, { k: 'esc', t: 'close', conversationText: 'Back to Map' },
   { k: 'Space', t: 'peek', conversationText: 'peek' }, { k: '⌘E', t: 'recent' },
 ];
 
-export const footerKeys: readonly FooterKey[] = footerKeyDefinitions.map(({ k, t }) => ({ k, t }));
+export const footerKeys: readonly FooterKey[] = footerKeyDefinitions.filter(key => !key.conversationOnly).map(({ k, t }) => ({ k, t }));
 
 /** The same shortcut catalogue, limited to the keys that work in Conversation. */
 export function footerKeysFor(conversation?: ConversationFooterState): readonly FooterKey[] {
   if (!conversation) return footerKeys;
   return footerKeyDefinitions.flatMap(key => key.conversationText === undefined || (key.questionOnly && !conversation.question)
-    ? [] : [{ k: key.k, t: key.conversationText }])
+    ? [] : [{ k: key.conversationKey ?? key.k, t: key.conversationText }])
     .sort((left, right) => Number(right.k === 'esc') - Number(left.k === 'esc'));
 }
 

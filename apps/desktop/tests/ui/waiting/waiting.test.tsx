@@ -713,12 +713,24 @@ describe('source-backed Waiting and Sent panel', () => {
     // The agent turned it down: a failed delivery, not an uncertain one.
     const tried = failed.attempts.find(value => value.id === failed.active_attempt_id)!; tried.acceptance = 'rejected'; tried.error = null;
     transport.capture(seed); await store.start();
-    render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
+    const answers = drafts();
+    const value = { store, drafts: answers, revealItem: vi.fn(), openSession: vi.fn(), selected: { ...route, item_id: '2' } };
+    const view = render(<WaitingColumn {...value} />);
     // The failed answer leaves it Waiting on me: one card, carrying the failed delivery, and no Sent row.
     const cards = [...document.querySelectorAll('.waiting-card')].filter(card => card.textContent?.includes('Keep the design'));
     expect(cards).toHaveLength(1);
     expect(cards[0]!.textContent).toContain('Couldn’t deliver “Keep the design”');
     expect(screen.getAllByRole('button').some(element => element.classList.contains('waiting-sent') && element.textContent?.includes('Keep the design'))).toBe(false);
+    const card = cards[0] as HTMLElement;
+    expect(card.getAttribute('aria-current')).toBe('true');
+    const warningRing = card.style.boxShadow;
+    expect(warningRing).toContain('var(--a-warn)');
+    view.rerender(<WaitingColumn {...value} conversationOpen />);
+    expect(card.style.boxShadow).toContain('var(--color-text)');
+    expect(card.style.boxShadow).not.toContain('var(--a-warn)');
+    expect(card.textContent).toContain('Couldn’t deliver “Keep the design”');
+    view.rerender(<WaitingColumn {...value} />);
+    expect(card.style.boxShadow).toBe(warningRing);
   });
   it('warns on the card that sending is paused, with Resume', async () => {
     const { store, transport, drafts } = setup(), seed = mutableSession();
