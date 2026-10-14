@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { historyFailureFacts, withFailureEvidence } from './history-evidence.mjs';
-import { folded } from './owner-reply.mjs';
+import { folded, ownerReplyTarget, waitForOwnerReplyTarget } from './owner-reply.mjs';
 import { admissions, assertSlimEnvelope, awaitConnected, cliRequest, completeTurn, journeyResultRequest, snapshot } from './scripted-provider.mjs';
 import { openSessionButton } from './session-button.mjs';
 import { goToPeekItem } from './tree.spec.mjs';
@@ -144,6 +144,8 @@ export async function waitForHistoryControl(control, label) {
     `Native ${label} remained unavailable`);
 }
 async function answer(history, ordinal, text) {
+  // The preceding CLI ask/result is complete; wait for its exact target before opening or reviewing a draft.
+  await waitForOwnerReplyTarget(history, ownerReplyTarget(await snapshot(history), history.itemId));
   const another = await browser.$(ownerInput('1')).$('button=Write another input');
   if (await another.isExisting()) { await another.waitForEnabled(); await another.scrollIntoView(); await another.click(); }
   // The answer slot locks a draft written against an older question until "Review this question" updates it.
@@ -332,6 +334,7 @@ async function conversation(history, saved, paged) {
       error.message += ` conversationState=${JSON.stringify(lastState)}`; throw error;
     }
   });
+  await waitForOwnerReplyTarget(history, ownerReplyTarget(saved, history.itemId));
   const reply = await browser.$('[aria-label="Item actions"]').$('button*=Reply'); await reply.waitForEnabled(); await reply.scrollIntoView(); await reply.click();
   const editor = await browser.$(`${ownerInput('1')} textarea`); await failureEvidence('owner-input-editor-first', () => editor.waitForEnabled());
   const draft = `Unsent native history draft ${process.env.ARIADNE_E2E_NONCE}\nKeep focus and every word.`;
@@ -420,6 +423,7 @@ export async function runHistoryAcceptance(configuration) {
   let previousReply = resultTexts.at(-1).split('\n')[0];
   const reviewedTarget = {};
   for (const [intent, ordinal] of [['followup', 6], ['reopen', 7]]) {
+    await waitForOwnerReplyTarget(history, ownerReplyTarget(await snapshot(history), history.itemId));
     // The renderer must show the previous CLI-applied result before the next intent, or its draft is marked changed.
     await failureEvidence(`previous-result-${intent}`, () => wait(async () => (await detail().getText()).includes(previousReply),
       'Native detail did not show the previous explicit response before the next owner intent'));

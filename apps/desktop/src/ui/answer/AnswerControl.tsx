@@ -1,7 +1,7 @@
 // The answer control (handoff "Answer Control.dc.html"): numbered options, the
 // Send row and, in the full variant, a reply box. Waiting cards (compact), the
 // tree's inline answer and the detail panel (full) all render this one control.
-import { useId, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useWorkspaceKeys } from '../keys';
 import { useGrow } from './useGrow';
 import './answer.css';
@@ -44,6 +44,10 @@ export interface AnswerOption {
 export interface AnswerControlProps {
   readonly options: readonly AnswerOption[];
   readonly variant: 'compact' | 'full' | 'chat';
+  /** The bigger conversation keeps option consequences behind More. */
+  readonly compactOptions?: boolean;
+  /** A conversation's current question; compact chat keeps it outside the options scroller. */
+  readonly prompt?: ReactNode;
   readonly selected: number;
   readonly draft: string;
   readonly warn?: string;
@@ -68,9 +72,10 @@ export function defaultSelection(options: readonly Pick<AnswerOption, 'id' | 're
   return index >= 0 ? index : options.findIndex(option => option.recommended);
 }
 
-export function AnswerControl({ options, variant, selected, draft, warn, warnAction, blocked, locked = false, frozen = false, noText = false, label,
+export function AnswerControl({ options, variant, compactOptions = false, prompt, selected, draft, warn, warnAction, blocked, locked = false, frozen = false, noText = false, label,
   onSelect, onDraft, onSendOption, onSendText, onEscape }: AnswerControlProps) {
-  const root = useRef<HTMLDivElement>(null), text = useRef<HTMLTextAreaElement>(null);
+  const root = useRef<HTMLDivElement>(null), text = useRef<HTMLTextAreaElement>(null), choices = useRef<HTMLDivElement>(null);
+  const [moreBelow, setMoreBelow] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const descriptionId = useId(), [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const chat = variant === 'chat', full = variant !== 'compact', picked = options[selected];
@@ -84,6 +89,19 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
   const gate = (hard: boolean, soft: boolean) => ({ disabled: hard || undefined, 'aria-disabled': soft && !hard ? true : undefined });
   const hasText = full && !noText;
   const withNote = hasText && !!draft.trim();
+  // The cue follows actual overflow, including wrapping, More and composer growth.
+  useLayoutEffect(() => {
+    const region = choices.current;
+    if (!chat || !compactOptions || !region) { setMoreBelow(false); return undefined; }
+    const update = () => setMoreBelow(region.clientHeight > 0 && region.scrollHeight - region.clientHeight - region.scrollTop > 1);
+    update();
+    region.addEventListener('scroll', update);
+    window.addEventListener('resize', update);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    observer?.observe(region);
+    if (region.firstElementChild) observer?.observe(region.firstElementChild);
+    return () => { region.removeEventListener('scroll', update); window.removeEventListener('resize', update); observer?.disconnect(); };
+  }, [chat, compactOptions, options, draft, expanded]);
   const sendOption = (index: number) => { if (options[index] && !blocked && !off) onSendOption(index, hasText ? draft : undefined); };
   const sendText = () => { if (draft.trim() && !blocked && !off) onSendText(draft); };
   const optionIndex = (target: EventTarget) => target instanceof HTMLElement && root.current?.contains(target)
@@ -134,10 +152,11 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
           <span className="answer-option-head">
             <span className="answer-key">{index + 1}</span>
             <span className="answer-label">{option.label}</span>
+            {compactOptions && option.recommended && <span className="answer-recommended"><i className="ph-fill ph-star" aria-hidden="true" />Recommended</span>}
             {on && <span className="answer-picked"><i className="ph ph-check" aria-hidden="true" /></span>}
           </span>
-          <span className="answer-consequence">{option.recommended && <span className="answer-recommended"><i className="ph-fill ph-star" aria-hidden="true" />Recommended</span>}{chat
-            ? <span id={id} className={`answer-description${open ? ' answer-description-open' : ''}`}>{option.consequence}</span> : option.consequence}</span>
+          <span className="answer-consequence">{!compactOptions && option.recommended && <span className="answer-recommended"><i className="ph-fill ph-star" aria-hidden="true" />Recommended</span>}{chat
+            ? <span id={id} hidden={compactOptions && !open || undefined} className={`answer-description${open ? ' answer-description-open' : ''}`}>{option.consequence}</span> : option.consequence}</span>
         </button>;
         return chat ? <div className="answer-card" key={option.id}>
           {button}
@@ -152,30 +171,32 @@ export function AnswerControl({ options, variant, selected, draft, warn, warnAct
       })}
     </div>
   );
-  const sendButton = picked && <div className="answer-send-row">
-      <button type="button" className="btn btn-primary answer-send" {...gate(locked, frozen || !!blocked)} onClick={event => { event.stopPropagation(); sendOption(selected); }}>
+  const sendButton = (picked || compactOptions && options.length > 0) && <div className="answer-send-row">
+      <button type="button" className="btn btn-primary answer-send" {...gate(locked || !picked, frozen || !!blocked)} onClick={event => { event.stopPropagation(); sendOption(selected); }}>
         <i className="ph ph-paper-plane-right" aria-hidden="true" />
-        <span className="answer-send-label">{full ? `Send “${picked.label}”${withNote ? ' with your note' : ''}` : 'Send answer'}</span>
+        <span className="answer-send-label">{full && picked ? `Send “${picked.label}”${withNote ? ' with your note' : ''}` : 'Send answer'}</span>
         <span className="answer-enter" aria-hidden="true">↵</span>
       </button>
       {!chat && <span className="answer-hint">{hint}</span>}
     </div>;
-  return <div ref={root} className={`answer answer-${variant}${chat ? ' answer-full' : ''}${collapsed ? ' answer-collapsed' : ''}`} role="group" aria-label={label} onKeyDown={keys}>
+  const chatComposer = !noText && <div className="answer-reply answer-composer">
+    <div className={`answer-composer-row${compactOptions ? ` answer-conversation-row${!draft.trim() ? ' answer-conversation-row-empty' : ''}` : ''}`}>
+      <textarea ref={text} className="input answer-text" aria-label="Reply in your own words" placeholder="Add a note to your choice, or reply on its own…" rows={1}
+        value={draft} disabled={locked} onFocus={() => setCollapsed(false)} onClick={event => event.stopPropagation()} onChange={event => { setCollapsed(false); onDraft(event.target.value); }} />
+      {compactOptions && sendButton}
+      {(!compactOptions || draft.trim()) && <button type="button" className="btn btn-secondary answer-reply-send" {...gate(!draft.trim() || locked, frozen || !!blocked)}
+        onClick={event => { event.stopPropagation(); sendText(); }}>Send as a reply only</button>}
+    </div>
+  </div>;
+  const chatControls = <>{(!compactOptions || noText) && sendButton}{chatComposer}<span className="answer-hint">{chatHint}</span></>;
+  return <div ref={root} className={`answer answer-${variant}${chat ? ' answer-full' : ''}${compactOptions ? ' answer-options-compact' : ''}${collapsed ? ' answer-collapsed' : ''}`} role="group" aria-label={label} onKeyDown={keys}>
     {warn && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{warn}</span>
       {warnAction && <button type="button" className="btn btn-secondary answer-warn-action" onClick={event => { event.stopPropagation(); warnAction.onAction(); }}>{warnAction.label}</button>}</div>}
     {chat ? <>
-      {options.length > 0 && <div className="answer-choices">{optionCards}</div>}
-      {sendButton}
+      {compactOptions && prompt}
+      {(options.length > 0 || !compactOptions && prompt) && <div ref={choices} className="answer-choices" data-more-below={compactOptions && moreBelow || undefined}>{!compactOptions && prompt}{optionCards}</div>}
+      {compactOptions ? <div className="answer-fixed-controls">{chatControls}</div> : chatControls}
     </> : <>{optionCards}{sendButton}</>}
-    {chat && !noText && <div className="answer-reply answer-composer">
-      <div className="answer-composer-row">
-        <textarea ref={text} className="input answer-text" aria-label="Reply in your own words" placeholder="Add a note to your choice, or reply on its own…" rows={1}
-          value={draft} disabled={locked} onFocus={() => setCollapsed(false)} onClick={event => event.stopPropagation()} onChange={event => { setCollapsed(false); onDraft(event.target.value); }} />
-        <button type="button" className="btn btn-secondary answer-reply-send" {...gate(!draft.trim() || locked, frozen || !!blocked)}
-          onClick={event => { event.stopPropagation(); sendText(); }}>Send as a reply only</button>
-      </div>
-    </div>}
-    {chat && <span className="answer-hint">{chatHint}</span>}
     {full && !chat && !noText && <div className="answer-reply">
       <textarea className="input answer-text" aria-label="Reply in your own words" placeholder="Add a note to your choice, or reply on its own…" rows={2}
         value={draft} disabled={locked} onClick={event => event.stopPropagation()} onChange={event => onDraft(event.target.value)} />

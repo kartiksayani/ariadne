@@ -30,6 +30,8 @@ import './waiting.css';
 export interface WaitingColumnProps {
   readonly store: WaitingStore;
   readonly drafts: OwnerDraftStore;
+  readonly conversationOpen?: boolean;
+  readonly openDetails?: (route: ItemRoute) => void;
   readonly revealItem: (route: ItemRoute) => void;
   readonly openSession: (route: SessionRef) => void;
   /** The item open in the workspace; its card gets the selected ring. */
@@ -72,7 +74,7 @@ export function WaitingFrame({ count, loading = false, children, sent }: { reado
 
 const same = (a: ItemRoute | null | undefined, b: ItemRoute) => !!a && a.project_id === b.project_id && a.session_id === b.session_id && a.item_id === b.item_id;
 
-export function WaitingColumn({ store, drafts, revealItem, openSession, selected, onAgentNotRunning, notice, now }: WaitingColumnProps) {
+export function WaitingColumn({ store, drafts, revealItem, openDetails, conversationOpen = false, openSession, selected, onAgentNotRunning, notice, now }: WaitingColumnProps) {
   const state = useWaiting(store), draftState = useOwnerDrafts(drafts);
   useEffect(() => { void store.start(); }, [store]);
   useEffect(() => { if (!drafts.getSnapshot().ready) void drafts.load(); }, [drafts]);
@@ -107,7 +109,7 @@ export function WaitingColumn({ store, drafts, revealItem, openSession, selected
     <div className="waiting-sent-label">Sent<span>· waiting for the agent to pick up</span></div>
     <div className="waiting-sent-scroll">
       {!loading && model.sent.length === 0 && <p className="waiting-sent-empty">No messages waiting for pickup.</p>}
-      {model.sent.map(row => <SentRow key={row.id} row={row} drafts={drafts} store={store}
+      {model.sent.map(row => <SentRow key={row.id} row={row} drafts={drafts} store={store} conversationOpen={conversationOpen}
         open={() => { if (row.item) revealItem({ ...row.item }); else openSession({ ...row.session }); }} />)}
     </div>
   </section>}>
@@ -127,13 +129,14 @@ export function WaitingColumn({ store, drafts, revealItem, openSession, selected
       <div className="waiting-empty-text">{model.emptyText}</div>
     </div>}
     {model.cards.map(card => <WaitingCard key={card.id} card={card} drafts={drafts} current={current} selected={same(selected, card.route)}
-      revealItem={revealItem} onAgentNotRunning={onAgentNotRunning} onSaved={() => { void store.refresh(); }} sessionStore={store.storeOf(card.route)}
+      revealItem={revealItem} openDetails={openDetails} conversationOpen={conversationOpen} onAgentNotRunning={onAgentNotRunning} onSaved={() => { void store.refresh(); }} sessionStore={store.storeOf(card.route)}
       presence={card.session.active_binding_id ? store.sessionState(card.route)?.presence[card.session.active_binding_id] ?? null : null} />)}
   </WaitingFrame>;
 }
 
-function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRunning, onSaved, presence, sessionStore }: {
+function WaitingCard({ card, drafts, current, selected, revealItem, openDetails, conversationOpen, onAgentNotRunning, onSaved, presence, sessionStore }: {
   readonly card: WaitingCardModel; readonly drafts: OwnerDraftStore; readonly current: boolean; readonly selected: boolean;
+  readonly openDetails?: (route: ItemRoute) => void; readonly conversationOpen: boolean;
   readonly revealItem: (route: ItemRoute) => void; readonly onAgentNotRunning?: (submission: PendingSubmission) => void; readonly onSaved: () => void;
   readonly presence: Immutable<PresenceObservation> | null;
   /** The card's session store: the paused warning's Resume goes through its write barrier. */
@@ -159,8 +162,9 @@ function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRu
   // A failed send keeps its choice frozen until it is resolved.
   const frozen = card.chosen ?? (entry?.uncertain ? entry.draft.selected_option_id : undefined);
   const selection = frozen !== undefined ? item.options.findIndex(option => option.id === frozen) : defaultSelection(item.options, entry?.draft.selected_option_id);
-  const ring = delivery ? '0 0 0 1px color-mix(in srgb, var(--a-warn) 60%, transparent)'
-    : selected ? '0 0 0 1.5px color-mix(in srgb, var(--color-text) 45%, transparent)' : '0 0 0 1px var(--color-divider)';
+  const selectionRing = '0 0 0 1.5px color-mix(in srgb, var(--color-text) 45%, transparent)';
+  const ring = selected && conversationOpen ? selectionRing : delivery ? '0 0 0 1px color-mix(in srgb, var(--a-warn) 60%, transparent)'
+    : selected ? selectionRing : '0 0 0 1px var(--color-divider)';
   return <ItemRefSession.Provider value={card.route}><ItemRefs.Provider value={{ lookup: id => {
     const target = card.session.items[id];
     return target && !itemRemoved(card.session, target.id) ? { label: target.question, status: displayStatus(card.session, target) } : null;
@@ -172,8 +176,8 @@ function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRu
     {card.earlier && <div className="waiting-context"><i className="ph ph-clock-counter-clockwise" aria-hidden="true" /><span>{card.earlier}</span></div>}
     {card.last && <div className="waiting-context"><i className="ph ph-arrows-clockwise" aria-hidden="true" /><span>{card.last}</span></div>}
     {delivery && <div className="waiting-delivery" style={{ color: delivery.color }}><i className={delivery.icon} aria-hidden="true" /><span>{delivery.text}</span>
-      {delivery.retry && <button type="button" className="btn btn-secondary waiting-delivery-action" onClick={retry}>Retry</button>}</div>}
-    <div onClick={event => event.stopPropagation()}>
+      {delivery.retry && !conversationOpen && <button type="button" className="btn btn-secondary waiting-delivery-action" onClick={retry}>Retry</button>}</div>}
+    {!conversationOpen && <div onClick={event => event.stopPropagation()}>
       {actions && <PausedNote actions={actions} />}
       <AnswerControl variant="compact" options={item.options} selected={selection} draft={entry?.draft.text ?? ''} label={`Answer ${item.question}`}
         locked={submit.locked || !!delivery || submit.changed} blocked={delivery || submit.changed ? undefined : submit.blocked ?? undefined}
@@ -182,19 +186,19 @@ function WaitingCard({ card, drafts, current, selected, revealItem, onAgentNotRu
         onSelect={index => { const option = item.options[index]; if (option) submit.select(option.id); }}
         onDraft={submit.write} onSendOption={(index, note) => { const option = item.options[index]; if (option) submit.sendOption(option.id, note); }}
         onSendText={submit.sendText} />
-    </div>
+    </div>}
     {submit.error && !delivery && <p className="waiting-error" role="alert">{submit.error}</p>}
     <div className="waiting-foot"><i className="ph ph-clock" aria-hidden="true" /><span>Waiting {card.age}{card.tag && ` · asked in ${card.tag}`}</span>
-      <button type="button" className="btn btn-ghost waiting-details" onClick={open}>Details</button></div>
+      <button type="button" className="btn btn-ghost waiting-details" onClick={event => { event.stopPropagation(); (openDetails ?? revealItem)({ ...card.route }); }}>Details</button></div>
   </div></FileRefProject.Provider></ItemRefs.Provider></ItemRefSession.Provider>;
 }
 
-function SentRow({ row, drafts, store, open }: { readonly row: SentRowModel; readonly drafts: OwnerDraftStore; readonly store: WaitingStore; readonly open: () => void }) {
+function SentRow({ row, drafts, store, open, conversationOpen }: { readonly row: SentRowModel; readonly drafts: OwnerDraftStore; readonly store: WaitingStore; readonly open: () => void; readonly conversationOpen: boolean }) {
   const keys = useWorkspaceKeys<HTMLDivElement>({ enter: () => { open(); return true; } }, { scope: 'row' });
   const session = store.storeOf(row.session);
   return <div className="waiting-sent" role="button" tabIndex={0} onClick={open} onKeyDown={keys} data-sent-input={row.input?.id}>
     <div className="waiting-sent-question">{row.question}</div>
-    {row.stuck && row.input && session
+    {!conversationOpen && row.stuck && row.input && session
       ? <SentStuck row={row} input={row.input} drafts={drafts} session={session} open={open} />
       : <div className="waiting-sent-line" style={{ color: row.line.color }}><i className={row.line.icon} aria-hidden="true" /><span>{row.line.text}</span></div>}
   </div>;

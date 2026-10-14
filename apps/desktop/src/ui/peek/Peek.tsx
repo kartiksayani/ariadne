@@ -21,6 +21,8 @@ export type PeekVisit = 'peek' | 'opened' | 'answered';
 export interface PeekProviderProps {
   readonly lookup: (route: ItemRoute) => SessionStore | null;
   readonly drafts: OwnerDraftStore;
+  /** When Conversation owns input, only its item may offer answer actions. */
+  readonly answerTarget?: ItemRoute;
   readonly onGoTo: (route: ItemRoute) => void;
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
   /** Records only the first displayed item revision after one uninterrupted second. */
@@ -31,7 +33,7 @@ export interface PeekProviderProps {
 type OpenPeek = { readonly route: ItemRoute; readonly anchor: HTMLElement; readonly anchorRect: DOMRect; readonly store: SessionStore; readonly focus: boolean };
 type Hover = { readonly route: ItemRoute; readonly anchor: HTMLElement };
 
-export function PeekProvider({ lookup, drafts, onGoTo, onAgentNotRunning, onPeekSeen, onVisit, children }: PeekProviderProps) {
+export function PeekProvider({ lookup, drafts, answerTarget, onGoTo, onAgentNotRunning, onPeekSeen, onVisit, children }: PeekProviderProps) {
   const [shown, setShown] = useState<OpenPeek | null>(null);
   const hover = useRef<Hover | null>(null), timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const origin = useRef<{ anchor: HTMLElement; anchorRect: DOMRect } | null>(null);
@@ -72,6 +74,20 @@ export function PeekProvider({ lookup, drafts, onGoTo, onAgentNotRunning, onPeek
     const keydown = (event: globalThis.KeyboardEvent) => {
       if (document.querySelector('[aria-modal="true"]')) { cancelHover(); return; }
       if (event.key === 'Escape' && card.current) {
+        if (event.target instanceof Element && event.target.closest('.pw-note')) return;
+        // These controls own Escape before the peek, including when the Map
+        // holding a session rename is covered. Peek lives in a portal, so route
+        // Escape here even when its target is outside the app root.
+        const control = document.querySelector<HTMLElement>('.shell-text-size-menu')
+          ?? document.querySelector<HTMLElement>('.pw-rename');
+        if (control) {
+          const owner = control.closest('.shell-text-size') ?? control;
+          if (!(event.target instanceof Node) || !owner.contains(event.target)) {
+            event.preventDefault(); event.stopPropagation();
+            control.dispatchEvent(new globalThis.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+          }
+          return;
+        }
         const ownsFocus = tookFocus.current || card.current.contains(document.activeElement);
         close();
         if (ownsFocus) { event.preventDefault(); event.stopPropagation(); }
@@ -108,12 +124,14 @@ export function PeekProvider({ lookup, drafts, onGoTo, onAgentNotRunning, onPeek
     }),
   }), [show, close, schedule, cancelHover]);
   return <PeekContext.Provider value={navigation}>{children}{shown && createPortal(<PeekCard key={JSON.stringify(shown.route)} shown={shown} drafts={drafts} card={card}
+    allowAnswer={!answerTarget || answerTarget.project_id === shown.route.project_id && answerTarget.session_id === shown.route.session_id && answerTarget.item_id === shown.route.item_id}
     onClose={close} onGoTo={() => { close(false); onVisit?.(shown.route, 'opened'); onGoTo(shown.route); }} onAgentNotRunning={onAgentNotRunning}
     onPeekSeen={onPeekSeen} onAnswered={() => onVisit?.(shown.route, 'answered')} />, document.body)}</PeekContext.Provider>;
 }
 
-function PeekCard({ shown, drafts, card, onClose, onGoTo, onAgentNotRunning, onPeekSeen, onAnswered }: {
+function PeekCard({ shown, drafts, card, allowAnswer, onClose, onGoTo, onAgentNotRunning, onPeekSeen, onAnswered }: {
   readonly shown: OpenPeek; readonly drafts: OwnerDraftStore; readonly card: RefObject<HTMLDivElement | null>;
+  readonly allowAnswer: boolean;
   readonly onClose: () => void; readonly onGoTo: () => void; readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
   readonly onPeekSeen?: (route: ItemRoute, observedRevision: number) => void; readonly onAnswered: () => void;
 }) {
@@ -150,12 +168,12 @@ function PeekCard({ shown, drafts, card, onClose, onGoTo, onAgentNotRunning, onP
   }, [shown, card]);
   const title = item?.question ?? 'Item unavailable';
   return <div ref={card} className="item-peek" role="dialog" aria-label={`Peek: ${title}`} style={{ left: position.left, top: position.top, maxWidth: position.maxWidth, maxHeight: position.maxHeight }}
-    onKeyDown={event => event.stopPropagation()}>
+    onKeyDown={event => { if (event.key !== 'F6') event.stopPropagation(); }}>
     <div className="peek-head"><h2>{title}</h2><button type="button" className="btn btn-ghost btn-icon" aria-label="Close peek" title="Close peek (Esc)" onClick={onClose}><i className="ph ph-x" aria-hidden="true" /></button></div>
     {valid ? <ItemRefSession.Provider value={shown.route}><ItemRefs.Provider value={{ lookup: id => { const target = session.items[id]; return target && !itemRemoved(session, id) ? { label: target.question, name: labels?.get(id), status: displayStatus(session, target) } : null; }, route: id => ({ ...shown.route, item_id: id }), onOpenItem: onGoTo }}><FileRefProject.Provider value={session.project_id}>
       <div className="peek-tags"><span>{item.type}</span><StatusBadge status={statusKey[displayStatus(session, item)]} /></div>
       <Markdown className="peek-summary" text={item.outcome || item.ask || item.why || 'No summary yet.'} compact />
-      {item.status === 'waiting_on_me' && !ownerReplied(session, item) && session.state === 'active' && session.archived_at == null
+      {allowAnswer && item.status === 'waiting_on_me' && !ownerReplied(session, item) && session.state === 'active' && session.archived_at == null
         ? <PeekAnswer drafts={drafts} store={shown.store} itemId={item.id} onAgentNotRunning={onAgentNotRunning} onAnswered={onAnswered} onGoTo={onGoTo} />
         : item.status === 'waiting_on_me' && !ownerReplied(session, item) && session.state !== 'active' && <p className="peek-hint">{sessionAnswerBlocked(session)}</p>}
       <div className="peek-footer"><button type="button" className="btn btn-secondary" onClick={() => {

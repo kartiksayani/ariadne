@@ -2239,6 +2239,27 @@ describe('scrolling the tree', () => {
   const link = (view: Awaited<ReturnType<typeof mount>>, id: string): RevealedItem =>
     ({ kind: 'item', route: { ...route, item_id: id }, store: view.store, temporaryExpandedItemIds: [] });
 
+  it('pauses global Map shortcuts while covered and restores them when Conversation closes', async () => {
+    const view = await opened({ props: { selectedId: '8' } });
+    const box = scroller();
+    fireEvent.scroll(box);
+    expect(screen.getByRole('button', { name: /^↓ Selected:/ })).toBeTruthy();
+    view.rerender({ selectedId: '8', covered: true });
+    const offset = box.scrollTop, selectedCalls = view.calls.selected.length;
+    for (const [key, metaKey] of [['j', true], ['e', true], ['n', false]] as const) {
+      expect(fireEvent.keyDown(window, { key, metaKey })).toBe(true);
+      expect(box.scrollTop).toBe(offset);
+      expect(view.calls.selected).toHaveLength(selectedCalls);
+      expect(screen.queryByRole('dialog', { name: 'Recent items' })).toBeNull();
+    }
+    view.rerender({ selectedId: '8', covered: false });
+    expect(fireEvent.keyDown(window, { key: 'j', metaKey: true })).toBe(false);
+    expect(box.scrollTop).not.toBe(offset);
+    expect(screen.queryByRole('button', { name: /Selected:/ })).toBeNull();
+    expect(fireEvent.keyDown(window, { key: 'e', metaKey: true })).toBe(false);
+    expect(screen.getByRole('dialog', { name: 'Recent items' })).toBeTruthy();
+  });
+
   it('holds a revealed ancestor below the sticky header when detail-width clamping shrinks its preceding row', async () => {
     let shrink = 0;
     const callbacks: { run: () => void; targets: Set<Element> }[] = [];

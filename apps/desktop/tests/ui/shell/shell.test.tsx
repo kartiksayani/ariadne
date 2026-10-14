@@ -38,6 +38,92 @@ function measureBody(initialWidth: number): (width: number) => void {
 }
 
 describe('Paperwhite shell', () => {
+  it('bounds Conversation to the viewport while the covered Map and detail retain their grid and mounted state', () => {
+    measureBody(900);
+    const value = props({ body: { waiting: <WaitingFrame count="2" />, center: <input aria-label="Map draft" defaultValue="Preserved" />,
+      detail: <p>Dock content</p>, onFoldWaiting: vi.fn() } });
+    const { rerender } = render(<Shell {...value} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (2)' }));
+    const grid = document.querySelector<HTMLElement>('.shell-body')!, center = screen.getByRole('main');
+    const draft = screen.getByRole<HTMLInputElement>('textbox', { name: 'Map draft' });
+    const detail = screen.getByRole('complementary', { name: 'Item detail' });
+    const columns = grid.style.gridTemplateColumns;
+    // The retained Map's minimum columns extend to 1000px in this 900px viewport.
+    expect(columns).toBe('300px minmax(380px,1fr) 320px');
+    fireEvent.change(draft, { target: { value: 'Still here' } });
+    rerender(<Shell {...value} body={{ ...value.body, conversation: <p>Conversation content</p> }} />);
+    const overlay = screen.getByText('Conversation content').parentElement!;
+    expect(overlay.className).toBe('shell-conversation');
+    expect(overlay.parentElement?.className).toBe('shell-body-viewport');
+    expect(overlay.previousElementSibling).toBe(grid);
+    expect(overlay.style.left).toBe('300px');
+    expect(grid.style.gridTemplateColumns).toBe(columns);
+    expect(grid.querySelector('.shell-center')).toBe(center);
+    expect(grid.querySelector('.shell-detail')).toBe(detail);
+    expect(center.getAttribute('inert')).toBe('');
+    expect(detail.getAttribute('aria-hidden')).toBe('true');
+    expect(draft.value).toBe('Still here');
+    // CSS owns the actual geometry; browser design assertions complement this jsdom ownership check.
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/shell/shell.css'), 'utf8');
+    const rules = (selector: string) => css.split(`${selector} {`)[1]!.split('}')[0];
+    expect(rules('.shell-body-viewport')).toContain('position: relative;');
+    expect(rules('.shell-body-viewport')).toContain('minmax(0, 1fr) / minmax(0, 1fr)');
+    expect(rules('.shell-body-viewport')).toContain('overflow: hidden;');
+    expect(rules('.shell-conversation')).toContain('position: absolute;');
+    expect(rules('.shell-conversation')).toContain('right: 0;');
+    expect(rules('.shell-conversation')).not.toContain('grid-column');
+    rerender(<Shell {...value} />);
+    expect(screen.getByRole('main')).toBe(center);
+    expect(screen.getByRole('complementary', { name: 'Item detail' })).toBe(detail);
+    expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Map draft' })).toBe(draft);
+    expect(draft.value).toBe('Still here');
+    expect(grid.style.gridTemplateColumns).toBe(columns);
+    expect(center.hasAttribute('inert')).toBe(false);
+  });
+
+  it('moves the Conversation edge with the actual Waiting fold and peek as the viewport resizes', () => {
+    const resizeWindow = measureBody(900), fold = vi.fn();
+    const value = props({ body: { waiting: <WaitingFrame count="2" />, center: <p>Map</p>, detail: <p>Dock</p>,
+      conversation: <p>Conversation content</p>, onFoldWaiting: fold } });
+    const { rerender } = render(<Shell {...value} />);
+    const overlay = document.querySelector<HTMLElement>('.shell-conversation')!;
+    expect(overlay.style.left).toBe('44px');
+    fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (2)' }));
+    expect(overlay.style.left).toBe('300px');
+    expect(fold).not.toHaveBeenCalled();
+    resizeWindow(1400);
+    expect(overlay.style.left).toBe('300px');
+    rerender(<Shell {...value} body={{ ...value.body, waitingFolded: true }} />);
+    expect(overlay.style.left).toBe('44px');
+    resizeWindow(900);
+    expect(overlay.style.left).toBe('44px');
+  });
+
+  it('shows only Conversation shortcuts and hides pinned question keys when no question is pinned', () => {
+    const value = props({ body: { waiting: null, center: <p>Map</p>, conversation: <p>Conversation</p> },
+      conversationFooter: { question: true } });
+    const { rerender } = render(<Shell {...value} />);
+    const footer = document.querySelector('.shell-footer')!;
+    const keys = () => [...footer.querySelectorAll('.pw-keycap')].map(key => key.textContent);
+    expect(keys()).toEqual(['esc', '↑↓', 'a', 'r', '1–9', '⌥1–9', '⌥0', '⌘↵', 'b d o', 'Space']);
+    expect(footer.textContent).toContain('escBack to Map');
+    expect(footer.textContent).toContain('↑↓messages');
+    expect(footer.textContent).toContain('⌘↵send');
+    expect(footer.textContent).toContain('aack / answer');
+    expect(footer.textContent).toContain('rreply');
+    expect(footer.textContent).toContain('b d oitem actions');
+    rerender(<Shell {...value} conversationFooter={{ question: false }} />);
+    expect(keys()).toEqual(['esc', '↑↓', 'a', 'r', '⌘↵', 'b d o', 'Space']);
+    rerender(<Shell {...value} conversationFooter={undefined} />);
+    expect(keys()).toEqual(['esc', '↑↓', 'a', 'r', '⌘↵', 'b d o', 'Space']);
+    rerender(<Shell {...value} body={{ ...value.body, conversation: undefined }} />);
+    expect(keys()).toContain('g');
+    expect(keys()).toContain('←→');
+    expect(keys()).toContain('b r d z o');
+    expect(keys()).not.toContain('r');
+    expect(footer.textContent).toContain('⌘↵reply only');
+  });
+
   it('bounds the overlay in a named centre container while its content owns scrolling', () => {
     // jsdom does not lay out CSS; these ownership rules complement the design geometry assertions.
     const shell = readFileSync(resolve(__dirname, '../../../src/ui/shell/shell.css'), 'utf8');
@@ -47,6 +133,9 @@ describe('Paperwhite shell', () => {
     expect(rules(shell, '.shell-center')).toContain('container: shell-center / inline-size;');
     expect(rules(shell, '.shell-center')).toContain('overflow: hidden;');
     expect(rules(shell, '.shell-center-content')).toContain('overflow: auto;');
+    expect(rules(shell, '.shell-notices')).toContain('container: shell-center / inline-size;');
+    expect(rules(shell, '.shell-notices')).toContain('pointer-events: none;');
+    expect(Number(rules(shell, '.shell-notices').match(/z-index: (\d+)/)![1])).toBeGreaterThan(Number(rules(shell, '.shell-conversation').match(/z-index: (\d+)/)![1]));
     expect(rules(notes, '.pw-notices')).toContain('position: absolute;');
     expect(rules(notes, '.pw-notices')).toContain('width: min(480px, calc(100% - 32px));');
     expect(notes).toContain('@container shell-center (max-width: 400px)');
@@ -61,15 +150,19 @@ describe('Paperwhite shell', () => {
     expect(animation).toContain('transform: translateY(0);');
   });
 
-  it('keeps one notification region inside the centre while adjacent panes change, and preserves input focus', () => {
+  it('keeps one notification region above the centre while adjacent panes change, and preserves input focus', () => {
     vi.useFakeTimers();
     try {
       const value = props({ body: { waiting: <p>Waiting column</p>, center: <input aria-label="Centre draft" defaultValue="Draft" />,
         detail: <p>Detail</p> } });
       const { rerender } = render(<Shell {...value} />);
       const center = screen.getByRole('main'), region = screen.getByRole('region', { name: 'Notifications' });
+      const anchor = document.querySelector<HTMLElement>('.shell-notices')!;
       const draft = screen.getByRole<HTMLInputElement>('textbox', { name: 'Centre draft' });
-      expect(region.parentElement).toBe(center);
+      expect(region.parentElement).toBe(anchor);
+      expect(anchor.parentElement?.className).toBe('shell-body-viewport');
+      expect(anchor.style.left).toBe('300px');
+      expect(anchor.style.right).toBe('400px');
       const scroll = center.querySelector('.shell-center-content')!;
       expect(scroll.contains(draft)).toBe(true);
       expect(scroll.contains(region)).toBe(false);
@@ -78,13 +171,38 @@ describe('Paperwhite shell', () => {
       expect(document.activeElement).toBe(draft);
       rerender(<Shell {...value} body={{ ...value.body, waitingFolded: true, detailWidth: 976 }} />);
       expect(screen.getAllByRole('region', { name: 'Notifications' })).toEqual([region]);
-      expect(region.parentElement).toBe(center);
+      expect(region.parentElement).toBe(anchor);
+      expect(anchor.style.left).toBe('44px');
+      expect(anchor.style.right).toBe('976px');
       expect(center.querySelector('.shell-center-content')).toBe(scroll);
       expect(document.activeElement).toBe(draft);
       act(() => { notices.dismiss('shell-anchor'); });
       expect(within(region).queryByText('Reference copied.')).toBeNull();
       expect(document.activeElement).toBe(draft);
       expect(draft.value).toBe('Draft');
+    } finally { notices.clear(); vi.useRealTimers(); }
+  });
+
+  it('keeps notification actions visible, keyboard reachable and clickable above Conversation', () => {
+    vi.useFakeTimers();
+    try {
+      const undo = vi.fn(), value = props({ body: { waiting: null, center: <p>Map</p>, detail: <p>Dock</p> } });
+      const { rerender } = render(<Shell {...value} />);
+      const region = screen.getByRole('region', { name: 'Notifications' });
+      act(() => { notices.push({ id: 'conversation-undo', icon: 'ph ph-check', text: 'Item removed.', actions: [{ label: 'Undo', run: undo }] }); vi.advanceTimersByTime(300); });
+      rerender(<Shell {...value} body={{ ...value.body, conversation: <input aria-label="Conversation reply" /> }} />);
+      expect(screen.getByRole('region', { name: 'Notifications' })).toBe(region);
+      expect(region.closest('[inert],[aria-hidden="true"]')).toBeNull();
+      expect(region.parentElement?.style.right).toBe('0px');
+      const reply = screen.getByRole('textbox', { name: 'Conversation reply' });
+      reply.focus();
+      fireEvent.keyDown(reply, { key: 'F6' });
+      expect(document.activeElement).toBe(within(region).getByText('Item removed.').closest('.pw-note'));
+      fireEvent.click(within(region).getByRole('button', { name: 'Undo' }));
+      expect(undo).toHaveBeenCalledOnce();
+      fireEvent.click(within(region).getByRole('button', { name: 'Dismiss' }));
+      expect(within(region).queryByText('Item removed.')).toBeNull();
+      expect(document.activeElement).toBe(reply);
     } finally { notices.clear(); vi.useRealTimers(); }
   });
 

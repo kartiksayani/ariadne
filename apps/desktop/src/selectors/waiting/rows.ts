@@ -32,7 +32,10 @@ export interface SentRow {
 // Select rows from canonical facts. Totals remain the backend SummaryCounts,
 // including partial/unavailable metadata; visible rows never replace them.
 // A question the owner already replied to waits on the agent, not on the owner.
-const unanswered = (session: Immutable<Session>, item: Immutable<Item>) => item.status === 'waiting_on_me' && !ownerReplied(session, item);
+/** The same owner-turn eligibility for the Waiting rail and conversation pin. */
+export const waitingOnOwner = (session: Immutable<Session>, item: Immutable<Item>): boolean =>
+  !sessionEnded(session) && !itemRemoved(session, item.id) && session.topics[item.topic_id]?.archived_at === null
+  && item.status === 'waiting_on_me' && !ownerReplied(session, item);
 function itemOrder(left: string, right: string): number {
   const a = left.split('.').map(Number), b = right.split('.').map(Number);
   for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i] - b[i];
@@ -43,7 +46,7 @@ export function waitingRows(sessions: readonly WaitingSession[]): readonly Waiti
   for (const { project, summary, session } of sessions) {
     if (sessionEnded(session)) continue;
     for (const item of Object.values(session.items)) {
-      if (!item || itemRemoved(session, item.id) || session.topics[item.topic_id]?.archived_at !== null || !unanswered(session, item)) continue;
+      if (!item || !waitingOnOwner(session, item)) continue;
       const round = item.current_round_id ? session.rounds[item.current_round_id] : undefined;
       const message = session.messages.find(message => message.id === (round?.opened_message_id ?? item.created_message_id));
       if (!item.waiting_since || !message) throw new Error('Waiting episode provenance is unavailable.');

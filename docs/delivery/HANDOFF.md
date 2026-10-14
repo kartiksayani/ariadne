@@ -69,6 +69,12 @@ Refresh this page, tasks.json and the roadmap chart using
 
 One entry per flake: the test and its first failure, the evidence, and the suspected cause. A second occurrence gets fixed before the next merge (ORCHESTRATOR, Flakes).
 
+- **Design harness first load: `tests/ui/design/design.spec.mts` `openApp`'s 60 s `waitForFunction` for the app to render.** Fixed in #160.
+  - First failed: #155 CI. Failed again: #160 CI, "M2 chosen answer and attributed topic lists (dark)" (line 271), one of the first tests a fresh worker runs. Both times a first-load timeout.
+  - Cause: each worker started its own Vite dev server with no warm-up, so the first test paid for the cold transform of the gallery app and the dependency optimisation inside its 60 s render wait. Vite's default dependency scan also crawled every html file under the repo. Two workers did this at once on a slow runner.
+  - Fix: `tests/ui/design/server.mts` starts the server with the dependency scan limited to `gallery.html`, then transforms the gallery's import graph and waits for the server to go idle before it resolves. `setup.mts` (global setup) runs it once before any test, so the dependency cache exists, and each worker's `origin` fixture runs it again to warm its own server. The test timeouts are unchanged.
+  - Checked: a full `npm run test:design` from a cold start (Vite's `node_modules/.vite/deps` cleared) passed, 114 of 114.
+
 - **`tests/e2e/tree-layout/tree-layout.spec.mts:585`, dark theme only.**
   - First failed: #158 CI, 2026-10-14. The rerun passed.
   - The check that the child sits under the sticky header failed after the test set `scrollTop` by hand.

@@ -12,7 +12,7 @@ import { navigationUpdated, runHistoryAcceptance, restoreHistoryAcceptance } fro
 import { runGraphAcceptance } from './graph.spec.mjs';
 import { runRecoveryAcceptance } from './recovery.spec.mjs';
 import { runRemoveAcceptance } from './remove.spec.mjs';
-import { folded, openFollowUp, sendDetailReply } from './owner-reply.mjs';
+import { folded, openFollowUp, ownerReplyTarget, sendDetailReply, waitForOwnerReplyTarget } from './owner-reply.mjs';
 import { acceptanceBlocks } from './block-results.mjs';
 import { historyFailureFacts } from './history-evidence.mjs';
 
@@ -23,6 +23,19 @@ const phase = process.env.ARIADNE_E2E_PHASE;
 const receiptPath = join(root, 'smoke/receipt.json');
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
+// What one surface shows for a saved reply's delivery: its stuck note (when it has words) or else the dock's delivery line.
+// `facts` lists every stuck note and delivery line present, so a failure says what was actually there.
+const replyDelivery = (root, inputId) => browser.execute((root, inputId) => {
+  const scope = document.querySelector(root), shown = element => !!element && element.getClientRects().length > 0;
+  const notes = [...(scope?.querySelectorAll('.stuck-note[data-stuck-input]') ?? [])].filter(shown).map(note => ({
+    input: note.getAttribute('data-stuck-input'), stuck: note.getAttribute('data-stuck'),
+    text: (note.querySelector('[role="status"]')?.textContent ?? '').trim() }));
+  const delivery = [...(scope?.querySelectorAll('.detail-delivery[role="status"]') ?? [])].filter(shown).map(line => (line.textContent ?? '').trim());
+  const own = notes.find(note => note.input === inputId && note.text !== '');
+  const shownState = own ? { kind: 'stuck-note', stuck: own.stuck, text: own.text }
+    : delivery.find(text => text !== '') ? { kind: 'delivery', stuck: null, text: delivery.find(text => text !== '') } : null;
+  return { state: shownState, facts: `stuck notes ${JSON.stringify(notes)}; delivery lines ${JSON.stringify(delivery)}` };
+}, root, inputId);
 const invoke = (command, request) => browser.execute(async (command, request) => {
   try { return { ok: true, data: await window.__TAURI_INTERNALS__.invoke(command, { request }) }; }
   // WebDriver reserves top-level "error" in its script-result envelope.
@@ -185,10 +198,49 @@ async function delivery(configuration) {
     'Waiting answer did not appear in Sent with its chosen option');
   await browser.saveScreenshot(join(evidence, 'native-waiting-answer.png'));
 
-  // The held answer hides the detail's answer slot; each reply queues behind it from the follow-up box.
-  for (const text of ownerTexts.slice(1)) {
+  // The first follow-up uses the bigger conversation view; the others use the detail's same composer.
+  // The held answer hides the answer slot, so all four replies queue behind it.
+  let replyTarget = ownerReplyTarget(await snapshot(configuration), configuration.itemId);
+  for (const [index, text] of ownerTexts.slice(1).entries()) {
+    if (index === 0) {
+      const expand = await browser.$('.item-detail button[aria-label="Open the conversation in a bigger view"]');
+      await expand.waitForDisplayed(); await expand.waitForEnabled(); await expand.click();
+      await browser.$('section[aria-label="Item conversation"]').waitForDisplayed();
+    }
+    // No agent result is published until this loop finishes. Pin the saved preceding input's
+    // revision and the seeded agent ask before opening a draft, then check them again before typing.
+    await waitForOwnerReplyTarget(configuration, replyTarget);
     await openFollowUp(true);
-    await sendDetailReply(configuration, text);
+    await sendDetailReply(configuration, text, replyTarget);
+    replyTarget = ownerReplyTarget(await snapshot(configuration), configuration.itemId);
+    if (index === 0) {
+      const saved = Object.values((await snapshot(configuration)).inputs).find(input => input.payload.text === text);
+      assert.ok(saved, 'The bigger conversation view saved its reply');
+      assert.equal(saved.state, 'queued', 'The conversation reply queues behind the held answer');
+      const pending = await browser.$(`section[aria-label="Item conversation"] [data-pending="${saved.id}"]`);
+      await pending.waitForExist(); await pending.scrollIntoView({ block: 'center' });
+      await wait(async () => await pending.isDisplayed() && folded(await pending.getText()).includes(folded(text))
+        && (await pending.getText()).includes('Not sent yet'), 'The conversation reply and its queued delivery were not visible');
+      // Behind the held answer the reply shows a stuck note instead of the dock line, and the wording depends on the stage.
+      // So capture whichever the view shows for the reply and require the detail pane to show the same kind with the same text.
+      const viewRoot = 'section[aria-label="Item conversation"]', paneRoot = '.item-detail:not(.item-conversation)';
+      let viewShown = await replyDelivery(viewRoot, saved.id);
+      try { await wait(async () => (viewShown = await replyDelivery(viewRoot, saved.id)).state !== null, 'unused'); }
+      catch { assert.fail(`The bigger conversation view did not show a delivery state for the saved reply; it had ${viewShown.facts}`); }
+      const expected = viewShown.state;
+      await browser.saveScreenshot(join(evidence, 'native-item-conversation.png'));
+      const back = await browser.$('section[aria-label="Item conversation"]').$('button=Back to Map');
+      await back.waitForDisplayed(); await back.waitForEnabled(); await back.click();
+      await wait(async () => !(await browser.$('section[aria-label="Item conversation"]').isExisting()), 'Back to Map did not close the bigger conversation view');
+      assert.equal(await browser.$('.item-detail').getAttribute('data-detail-item-id'), configuration.itemId,
+        'Back to Map keeps the conversation item selected');
+      let paneShown = await replyDelivery(paneRoot, saved.id);
+      const same = ({ state }) => state?.kind === expected.kind && state.stuck === expected.stuck && state.text === expected.text;
+      // The message is built after the wait, so it carries what the pane last showed.
+      try { await wait(async () => same(paneShown = await replyDelivery(paneRoot, saved.id)), 'unused'); }
+      catch { assert.fail(`The detail pane did not show the conversation view's ${JSON.stringify(expected)} for the saved reply; it had ${paneShown.facts}`); }
+      await showHistory([text]);
+    }
   }
   const held = await snapshot(configuration), inputs = orderedInputs(held), savedReceipts = receipts(held, inputs);
   assert.equal(inputs.length, 5); assert.equal(new Set(inputs.map(input => input.id)).size, 5);

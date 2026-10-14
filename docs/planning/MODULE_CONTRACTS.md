@@ -188,6 +188,57 @@ preferences omit rail state; persisted snapshots accept and ignore the retired
 field while keeping strict unknown-field validation elsewhere. Recovery notices
 show current restore/reopen prerequisites before stored action feedback.
 
+### Bigger item conversation surface (Alpha.15, 15.2)
+
+`ItemConversation` is the shared conversation body consumed by `ItemDetail` and
+`ConversationView`; both use the existing validated session snapshot, history
+selectors, item labels/peeks, delivery recovery and per-item `OwnerDraftStore`.
+Preserve oldest-first messages, saved answers, Read as, change
+comparisons and failed-delivery/cancellation actions. The detail expand control is
+labelled `Open the conversation in a bigger view`. The view uses Agent/You headings;
+the pane retains its existing `you ·` caption after the owner's text.
+
+App owns a temporary overlay target and return-focus reference, separate from
+canonical Map selection. The overlay covers Map and detail while Waiting remains
+interactive. Map stays mounted at its current dimensions and inert; the covered
+detail interactive body is unmounted, with its width retained by a placeholder
+even if Map selection disappears. Notices remain interactive above the overlay
+outside the inert subtree. Same-session Waiting targets replace only
+the overlay target. Details, cross-session selection and deliberate peek navigation
+close it before the existing reveal route. Back to Map or Escape closes it without
+navigation, with text-size, rename and peek dismissal taking precedence in that order. Item shortcuts use the overlay
+target and the ordinary revision/operation/receipt guards. No new persisted mode,
+session-wide conversation, host transcript read or owner-input command is added.
+Covered Map shortcuts, hide, remove, archive and Later are blocked. Bring, Drop
+and Reopen target the view's item. `PeekProvider.answerTarget` limits preview
+answers to that same item while the view is open.
+
+An unanswered current question uses a pinned `Your turn · <short name>` footer
+that is as tall as its content, up to 30% of the conversation pane (40% in narrow windows, 50% below 700 px
+window height); compact labels retain consequences behind More. Only the options region scrolls: the
+heading, question (two lines, with an expand control that shows only while the text is clipped), status, paused,
+retry and error rows, own words and Send are fixed rows that are never clipped, scrolled or painted over.
+`useDockBudget` subtracts those rows from the cap and gives the options what is left (one whole option
+while the footer stays within half the pane, else none); recovery rows may take the chat below half the pane
+in small windows. While the view is open, notices keep to the band between its header and footer
+(`Body` measures it) and never cover a footer control.
+`conversationAnswerState` supplies the shared pane/view answer rule and footer
+shortcut eligibility. It pins only a live current question; closed-session
+questions keep their disabled answer control without Your turn. The live control
+replaces the ordinary composer until answered. Closing or switching keeps shared drafts and uncertain operations.
+The view participates in existing captured-revision seen dwell through the shared
+reading lane.
+
+Capture the divider's first unread agent message ID per item opening/switch and
+retain it through seen dwell. Apply receipt identities and `item_revisions` map
+messages to the final revision at which their atomic batch became visible. For
+recorded item-seen R, mapped revisions greater than R are new. Require complete,
+consistent evidence for involved agent messages, validated against creation and
+change provenance; omit the divider when evidence is trimmed or conflicts.
+Owner messages are seen and never anchor it. Nothing/everything new has no divider.
+Without explicit item-seen R, use the topic catch-up timestamp `topics[].at ?? since`
+baseline, matching topic changes. Reuse preferences without adding fields or guessing missing provenance.
+
 ### Claude installed-helper acceptance join
 
 P3.3 joins the actual setup-rendered immutable Mod, executable CLI, native

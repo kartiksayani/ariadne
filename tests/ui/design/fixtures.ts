@@ -84,6 +84,17 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
     : review ? [...data.MSGS, ...data.REVIEW_MSGS, ...(thread ? data.THREAD_MSGS : [])] : data.MSGS);
   // The thread scenario: the backoff finding on its third round (Ariadne.dc.html:914).
   if (thread && !blank) Object.assign(items.find(item => item.id === '4.1')!, structuredClone(data.THREAD_PATCH));
+  if (spec.conversationOptions !== undefined) {
+    const item = items.find(item => item.id === spec.selected)!;
+    item.q = 'Should retry backoff keep a short first window and a longer second window so the agent has time to recover while the owner can still follow the result and decide what to do next, including when delivery is interrupted and another attempt needs enough time to finish without making the owner wait through an unexplained pause?';
+    item.ask = 'Which retry window should we use? Pick a choice or add your own words. '
+      + 'Consider how long the agent needs to recover, how quickly the owner needs an answer, and what should happen when delivery is interrupted. '
+      + 'Keep the full question available while you compare the four choices and explain the timing you prefer.';
+    item.options = Array.from({ length: spec.conversationOptions }, (_, index) => ({ id: `window-${index + 1}`, rec: index === 0,
+      label: ['Keep the current window', 'Use a shorter window', 'Use a longer window', 'Choose per attempt'][index],
+      consequence: ['Keep the timing already reviewed.', 'Recover sooner after a short failure.', 'Allow more time for the agent to recover.', 'Adjust the timing to each delivery attempt.'][index] }));
+    if (spec.shortQuestion) { item.q = 'Keep the retry window?'; item.ask = 'Which retry window should we use?'; }
+  }
   if (spec.answerOptions !== undefined) {
     const item = items.find(item => item.id === spec.selected)!;
     item.q = 'How should we share the examples with the readers?';
@@ -148,7 +159,7 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
     ?? (autoTab && autoTab !== 's2' ? autoTab : 's2');
   const openTabs = ({ sessions: ['s2', 's1', 'c1'], projects: ['s2', 's1', 'c1'], projectpage: ['s2', 's1'], first: [], session: ['s2', 's1'], project: ['s2', 's1'],
     notrunning: ['s2', 's1'], archive: ['s2', 's1'], continue: ['s2', 's1'] } as Record<string, string[]>)[spec.scenario] ?? ['s2'];
-  return { topics, items, msgs, sessions, projects, sessionOf, tab, openTabs, submissions, reconnecting: spec.scenario === 'reconnecting',
+  return { topics, items, msgs, sessions, projects, sessionOf, tab, openTabs, submissions, reconnecting: spec.scenario === 'reconnecting' || !!spec.reconnecting,
     now: new Date(frameNow(spec)).toISOString() };
 }
 
@@ -193,18 +204,19 @@ function protoRound(item: ProtoItem, round: ProtoRound, context: RoundContext): 
   const id = uuid('c', 500 + n), [opened, ...rest] = round.msgs;
   const ids = (numbers: number[]) => numbers.flatMap(number => context.messageIds.get(number) ?? []);
   const owner = rest.filter(number => context.authorOf(number) === 'me'), agent = rest.filter(number => context.authorOf(number) === 'agent');
-  const options = round.you?.chosen ? [{ id: `round-${ordinal}`, label: round.you.text, consequence: '', recommended: false }] : [];
+  const options = round.you?.chosen ? [{ id: `round-${ordinal}`, label: round.you.text, consequence: '', recommended: false }]
+    : !round.you ? (item.options ?? []).map(option => ({ id: option.id, label: option.label, consequence: option.consequence, recommended: !!option.rec })) : [];
   const answered = round.you ? context.messageIds.get(owner.at(-1)!)! : null, closed = round.result ? context.messageTimes.get(round.msgs.at(-1)!)! : null;
   const resultInputs: string[] = [];
   if (round.you && answered) {
     const answerId = uuid('c', 600 + n), inputId = uuid('c', 700 + n), at = context.messageTimes.get(owner.at(-1)!)!;
     const target = { topic_id: context.topicId, item_id: item.id };
-    context.answers.push({ id: answerId, seq: context.answers.length + 1, item_id: item.id, question_revision: 1, question_snapshot: item.q, ask_snapshot: round.ask,
+    context.answers.push({ id: answerId, seq: context.answers.length + 1, item_id: item.id, question_revision: ordinal, question_snapshot: item.q, ask_snapshot: round.ask,
       options_snapshot: options, selected_option_id: options[0]?.id ?? null, text: round.you.text, message_id: answered, input_id: inputId, supersedes_answer_id: null, created_at: at });
     const input = structuredClone(demoAnswerInput), attempt = structuredClone(demoAnswerInput.attempts.at(-1)!);
-    context.inputs[inputId] = { ...input, id: inputId, seq: Object.keys(context.inputs).length + 1, binding_id: context.bindingId, target, message_id: answered, answer_id: answerId, created_at: at,
+    context.inputs[inputId] = { ...input, id: inputId, seq: Object.keys(context.inputs).length + 1, binding_id: context.bindingId, target, message_id: answered, answer_id: answerId, created_at: at, expected_question_revision: ordinal,
       payload: { ...input.payload, text: round.you.text, selected_option_id: options[0]?.id ?? null,
-        target_snapshot: { ...input.payload.target_snapshot, topic_name: context.topicName, item_question: item.q, ask: round.ask, options },
+        target_snapshot: { ...input.payload.target_snapshot, question_revision: ordinal, topic_name: context.topicName, item_question: item.q, ask: round.ask, options },
         context: { ...input.payload.context, message_ids: ids([opened]), item_ids: [item.id], round_id: id } },
       attempts: [{ ...attempt, id: uuid('c', 800 + n), repair_for_attempt_id: null, purpose: 'work',
         domain_result: { ...attempt.domain_result!, explanation: round.result ?? '', reply_message_ids: ids(agent), followup_item_ids: round.forks ?? [], committed_at: closed ?? at } }],
@@ -212,7 +224,7 @@ function protoRound(item: ProtoItem, round: ProtoRound, context: RoundContext): 
     if (round.result) resultInputs.push(inputId);
   }
   context.rounds[id] = { id, item_id: item.id, ordinal, opened_message_id: context.messageIds.get(opened)!, question_snapshot: item.q, ask_snapshot: round.ask,
-    options_snapshot: options, question_revision: 1, owner_message_ids: ids(owner), agent_message_ids: ids(agent), result_input_ids: resultInputs,
+    options_snapshot: options, question_revision: ordinal, owner_message_ids: ids(owner), agent_message_ids: ids(agent), result_input_ids: resultInputs,
     fork_item_ids: round.forks ?? [], closed_at: closed, origin: null };
   return id;
 }
@@ -284,7 +296,7 @@ export function designFixture(frame: string, data: PrototypeData, presentation: 
         short: proto.short,
         type: proto.type, status, ...(spec.dockState && spec.dockState !== 'question' && proto.id === spec.selected ? { ack_to: 'decided' as const } : {}),
         owner: proto.owner === 'me' ? { kind: 'me' } : proto.owner === 'agent' ? { kind: 'agent', binding_id: bindingId } : { kind: 'other', name: proto.owner },
-        revision: 1 + proto.updated.length, question_revision: 1, next_child: protoItems.filter(item => item.parent === proto.id).length + 1,
+        revision: 1 + proto.updated.length, question_revision: roundIds.length || 1, next_child: protoItems.filter(item => item.parent === proto.id).length + 1,
         ask: proto.ask || null, note: proto.note || null,
         options: (proto.options ?? []).map(option => ({ id: option.id, label: option.label, consequence: option.consequence, recommended: !!option.rec })),
         // ItemLinkTarget has no display meta yet; the label is the path or PR it names and meta rides along for the views.

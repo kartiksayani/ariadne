@@ -60,10 +60,27 @@ export async function openOwnerReply(afterSaved = false) {
 /**
  * Opens words behind a held input (owner FIFO). Waiting replies close after saving; open/in-progress
  * boxes stay docked and empty. `afterSaved` awaits that acknowledgement before using the next box.
+ * The bigger conversation view (`.item-conversation`) keeps its one reply box docked even on a waiting item, so there
+ * a saved reply shows as an empty, enabled box rather than a closed one.
  */
 export async function openFollowUp(afterSaved = false) {
-  if (await browser.$('.item-detail').getAttribute('data-status') !== 'waiting') return openOwnerReply(afterSaved);
-  if (afterSaved) await wait(async () => !(await browser.$('.item-detail [data-owner-input] .detail-box').isExisting()), 'The sent reply box did not close');
+  const detail = await browser.$('.item-detail');
+  if (await detail.getAttribute('data-status') !== 'waiting') return openOwnerReply(afterSaved);
+  if (afterSaved) {
+    if ((await detail.getAttribute('class')).split(/\s+/).includes('item-conversation')) {
+      let missing = false;
+      try {
+        await wait(async () => {
+          const box = await browser.$(dockedEditor);
+          missing = !(await box.isExisting());
+          return !missing && (await box.getValue()) === '' && await box.isEnabled();
+        }, 'The sent reply box in the conversation view did not empty and re-enable');
+      } catch (error) {
+        // A box that is gone is not proof of a save: fall through to "Add a reply" below, which fails precisely if it is absent too.
+        if (!missing) throw error;
+      }
+    } else await wait(async () => !(await browser.$('.item-detail [data-owner-input] .detail-box').isExisting()), 'The sent reply box did not close');
+  }
   if (!(await browser.$(dockedEditor).isExisting())) {
     // This section holds the one action; its key hint ("r") follows the label.
     const addReply = await browser.$('.item-detail [aria-label="Reply"] [aria-label="Item actions"] button');
@@ -93,9 +110,40 @@ export function replyDraftState(configuration, preferences, text) {
       submissionAttempted: draft.submission_attempted ?? null, textMatchesExpected: draft.text === text })) };
 }
 
-export async function sendDetailReply(configuration, text) {
-  let stage = 'editor', clickRequested = false;
+/** Freeze the completed publication this next owner input depends on, before opening its draft. */
+export function ownerReplyTarget(session, itemId) {
+  const item = session.items[itemId];
+  if (!item) throw new Error(`No canonical reply target ${itemId}`);
+  const previousMessage = session.messages.findLast(message => message.item_id === itemId);
+  const agentMessage = session.messages.findLast(message => message.item_id === itemId && message.author === 'agent');
+  return { itemId, revision: item.revision, questionRevision: item.question_revision, status: item.status,
+    ask: item.ask, previousMessage: previousMessage ? { id: previousMessage.id, body: previousMessage.body, author: previousMessage.author } : null,
+    agentMessage: agentMessage ? { id: agentMessage.id, body: agentMessage.body, author: agentMessage.author } : null };
+}
+
+/** A visible editor is insufficient: both disk and the selected renderer must show the expected target. */
+export async function waitForOwnerReplyTarget(configuration, expected) {
+  if (!expected || expected.itemId !== configuration.itemId || !Number.isSafeInteger(expected.revision)) {
+    throw new Error('Owner reply requires an explicit canonical target before opening or typing');
+  }
+  await wait(async () => {
+    const saved = await snapshot(configuration), item = saved.items[configuration.itemId];
+    if (item?.revision !== expected.revision || item.question_revision !== expected.questionRevision
+      || item.status !== expected.status || item.ask !== expected.ask) return false;
+    if ([expected.previousMessage, expected.agentMessage].some(expectedMessage => expectedMessage
+      && !saved.messages.some(message => message.id === expectedMessage.id && message.item_id === configuration.itemId
+        && message.author === expectedMessage.author && message.body === expectedMessage.body))) return false;
+    const detail = await browser.$('.item-detail');
+    return await detail.getAttribute('data-detail-item-id') === configuration.itemId
+      && await detail.getAttribute('data-item-revision') === String(expected.revision);
+  }, `Owner reply target ${configuration.itemId} revision ${expected.revision} and expected agent change did not reach disk and detail`);
+}
+
+export async function sendDetailReply(configuration, text, expected) {
+  let stage = 'target', clickRequested = false;
   try {
+    await waitForOwnerReplyTarget(configuration, expected);
+    stage = 'editor';
     const selector = ownerInput(configuration.itemId);
     const form = await browser.$(selector);
     await form.waitForExist();
@@ -121,7 +169,7 @@ export async function sendDetailReply(configuration, text) {
       const saved = await snapshot(configuration);
       const preferences = JSON.parse(await readFile(join(process.env.ARIADNE_HOME, 'ui.json'), 'utf8')).snapshot;
       await json(join(process.env.ARIADNE_E2E_EVIDENCE, 'reply-failure.json'), {
-        stage, clickRequested, failure: error.message, expectedText: text, local,
+        stage, clickRequested, failure: error.message, expectedText: text, expectedTarget: expected, local,
         canonical: { sessionId: saved.id, revision: saved.revision, itemRevision: saved.items[configuration.itemId]?.revision,
           inputs: Object.values(saved.inputs).sort((a, b) => b.seq - a.seq).slice(0, 6).map(input => ({ id: input.id, seq: input.seq,
             kind: input.kind, state: input.state, textMatchesExpected: input.payload.text === text })) },

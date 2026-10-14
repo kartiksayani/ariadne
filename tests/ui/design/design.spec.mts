@@ -3,13 +3,12 @@
 // -app.png and -diff.png, a per-frame result that teardown.ts gathers into
 // report.json, and fails a frame whose mismatch ratio exceeds thresholds.json.
 import { test as base, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
-import { createServer } from 'vite';
-import react from '@vitejs/plugin-react';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, extname, resolve, sep } from 'node:path';
 import { answerFrameIds, designNow, detailMask, detailMasked, dockFrameIds, frameNow, frameSpec, graphFrame, toastFrameIds, variantIds, type FrameSpec } from './frames';
+import { startDesignServer } from './server.mts';
 import { handoffMembers, prefix, repo, sourceRoot } from './source.mts';
 import thresholds from './thresholds.json' with { type: 'json' };
 import { changeNames, interpretation, ownerWords } from './changes-fixture';
@@ -43,15 +42,10 @@ const test = base.extend<Record<never, never>, { origin: string; designPage: Pag
       const sri = members['support.js'].match(new RegExp(`var ${name}_SRI = "([^"]+)"`))?.[1];
       expect(`sha384-${createHash('sha384').update(bytes).digest('base64')}`, url).toBe(sri);
     }
-    const server = await createServer({ configFile: false, root: repo, publicDir: resolve(repo, 'apps/desktop/public'), plugins: [react()], logLevel: 'error',
-      server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
-    try {
-      await server.listen();
-      const address = server.httpServer?.address();
-      if (!address || typeof address === 'string') throw new Error('Missing design server address');
-      await use(`http://127.0.0.1:${address.port}`);
-    } finally { await server.close(); }
-  }, { scope: 'worker' }],
+    // Warmed before the first test, so no test pays the cold transform inside its render wait.
+    const { server, origin } = await startDesignServer();
+    try { await use(origin); } finally { await server.close(); }
+  }, { scope: 'worker', timeout: 240_000 }],
   designPage: [async ({ browser, origin }, use) => {
     const context = await browser.newContext({ viewport: { width: 1700, height: 1000 }, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC',
       colorScheme: 'dark', reducedMotion: 'reduce' });
@@ -526,6 +520,413 @@ test('a long waiting conversation opens at its latest ask and keeps the question
   await expect(head.getByRole('button', { name: 'Collapse title', exact: true })).toHaveAttribute('aria-expanded', 'true');
   await expect(head.locator('.detail-meta')).toBeVisible();
   expect(denied).toEqual([]);
+});
+
+const conversationSizes = [{ width: 1280, height: 800 }, { width: 900, height: 650 }] as const;
+
+for (const theme of ['dark', 'light'] as const) for (const viewport of conversationSizes) {
+  const id = `conversation-${theme}-${viewport.width}x${viewport.height}`;
+  test(`frame ${id}`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec('conversation-four-options'), ...viewport, theme });
+    const unfold = page.getByRole('button', { name: /^Show Waiting on me/ });
+    if (await unfold.count()) await unfold.click();
+    await page.getByRole('button', { name: 'Open the conversation in a bigger view', exact: true }).click();
+    const conversation = page.getByRole('region', { name: 'Item conversation', exact: true });
+    await expect(conversation).toBeVisible();
+    await expect(conversation.getByRole('button', { name: 'Back to Map', exact: true })).toBeInViewport();
+    const pane = conversation.locator('.item-detail.item-conversation'), body = pane.locator('.detail-body'), dock = pane.locator('.detail-dock');
+    await expect(page.locator('.item-detail')).toHaveCount(1);
+    await expect(page.locator('.shell-detail .detail-body')).toHaveCount(0);
+    await expect(page.locator('.shell-center')).toHaveAttribute('inert', '');
+    await expect(page.locator('.shell-detail')).toHaveAttribute('inert', '');
+    const turns = pane.locator('.detail-chat-list > li[data-message-id]');
+    const messages = await turns.evaluateAll(elements => elements.map(element => element.getAttribute('data-message-id')!));
+    expect(messages.length, 'the fixture contains several conversation turns').toBeGreaterThan(3);
+    expect(new Set(messages).size, 'each message appears once').toBe(messages.length);
+    // The fixture's zero-padded message IDs encode their original message numbers.
+    expect(messages, 'messages read oldest first').toEqual([...messages].sort());
+    await expect(turns.first()).toBeInViewport();
+    const pin = dock.locator('.conversation-pin');
+    const heading = pin.getByRole('heading', { name: /^Your turn ·/ }), question = pin.locator('.conversation-question');
+    await expect(conversation.locator('.conversation-header .status-badge')).toHaveText('Waiting on me');
+    await expect(page.locator('[data-waiting-item="4.1"]')).toBeVisible();
+    if (viewport.width === 1280) for (let index = 0; index < 3; index++) await expect(turns.nth(index), 'at least three messages share the initial chat viewport').toBeInViewport();
+    const ownWords = dock.getByRole('textbox', { name: 'Reply in your own words', exact: true });
+    const replySend = dock.getByRole('button', { name: 'Send as a reply only', exact: true });
+    const fullyVisible = async (control: Locator) => {
+      await expect(control).toBeVisible();
+      // Sub-pixel scroll positions can leave a fraction of a pixel outside; the clip check below allows 1 px too.
+      await expect(control).toBeInViewport({ ratio: 0.98 });
+      // A box can be inside the footer while being clipped by a nested scroller.
+      const clipped = await control.evaluate(element => {
+        const rect = element.getBoundingClientRect(), failures: string[] = [];
+        for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+          const style = getComputedStyle(parent), bounds = parent.getBoundingClientRect();
+          const left = bounds.left + parent.clientLeft, top = bounds.top + parent.clientTop;
+          if (/auto|scroll|hidden|clip/.test(style.overflowX) && (rect.left < left - 1 || rect.right > left + parent.clientWidth + 1)) failures.push(`${parent.className}: horizontal`);
+          if (/auto|scroll|hidden|clip/.test(style.overflowY) && (rect.top < top - 1 || rect.bottom > top + parent.clientHeight + 1)) failures.push(`${parent.className}: vertical`);
+        }
+        return failures;
+      });
+      expect(clipped, `${await control.getAttribute('class')} is fully inside every clipping ancestor`).toEqual([]);
+    };
+    const firstOption = dock.locator('[data-answer-option]').first();
+    const choiceSend = dock.getByRole('button', { name: /^Send / }).filter({ hasNotText: 'Send as a reply only' });
+    const controls = [heading, question, firstOption, choiceSend, ownWords];
+    const assertControls = async (option = firstOption) => {
+      const visible = [heading, question, option, choiceSend, ownWords];
+      if (await replySend.count()) visible.push(replySend);
+      for (const control of visible) await fullyVisible(control);
+      const boxes = await Promise.all(visible.map(control => control.boundingBox()));
+      for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i]!, b = boxes[j]!;
+        const width = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+        const height = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+        expect(width > 0.5 && height > 0.5, `pinned controls ${i} and ${j} never paint over one another`).toBe(false);
+      }
+    };
+    await expect(dock.locator('[data-answer-option]')).toHaveCount(4);
+    await expect(replySend, 'the reply-only action appears once there are words to send').toHaveCount(0);
+    const optionsRegion = dock.locator('.answer-choices');
+    expect(await optionsRegion.evaluate(element => element.scrollTop), 'the first option starts at rest without an initial scroll').toBe(0);
+    const optionsRoom = await optionsRegion.evaluate(element => {
+      const style = getComputedStyle(element);
+      return element.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+    });
+    expect(optionsRoom, 'the options viewport fits a complete first choice, including its padding').toBeGreaterThanOrEqual((await firstOption.boundingBox())!.height);
+    await assertControls();
+    await firstOption.click();
+    await assertControls();
+    const questionGeometry = await question.locator('.conversation-question-text').evaluate(element => ({ height: element.getBoundingClientRect().height, line: parseFloat(getComputedStyle(element).lineHeight), scroll: element.scrollHeight, client: element.clientHeight }));
+    expect(questionGeometry.scroll, 'the fixture actually needs the full-question action').toBeGreaterThan(questionGeometry.client);
+    expect(questionGeometry.height, 'the current question initially takes at most two lines').toBeLessThanOrEqual(questionGeometry.line * 2 + 1);
+    const scrollers = await dock.evaluate(element => [...element.querySelectorAll<HTMLElement>('*')].filter(child => child.tagName !== 'TEXTAREA' && /auto|scroll/.test(getComputedStyle(child).overflowY)).map(child => child.className));
+    expect(scrollers, 'only options own a footer scroller').toEqual(['answer-choices']);
+    const optionsStyle = await optionsRegion.evaluate(element => ({ overflow: getComputedStyle(element).overflowY, sticky: [...element.querySelectorAll('*')].some(child => ['sticky', 'fixed'].includes(getComputedStyle(child).position)) }));
+    expect(optionsStyle.overflow).toBe('auto'); expect(optionsStyle.sticky).toBe(false);
+    const assertWordsRoom = async () => {
+      const words = (await ownWords.boundingBox())!, row = (await dock.locator('.answer-conversation-row').boundingBox())!;
+      expect(words.width, 'own words always get at least half the composer row').toBeGreaterThanOrEqual(row.width / 2);
+    };
+    await assertWordsRoom();
+    const optionsOverflow = await optionsRegion.evaluate(element => element.scrollHeight > element.clientHeight + 1);
+    if (optionsOverflow) {
+      await expect(optionsRegion).toHaveAttribute('data-more-below', 'true');
+      await expect(optionsRegion).not.toHaveCSS('box-shadow', 'none');
+      await optionsRegion.evaluate(element => { element.scrollTop = element.scrollHeight; });
+      await expect(optionsRegion).not.toHaveAttribute('data-more-below');
+      await expect(optionsRegion).toHaveCSS('box-shadow', 'none');
+      await optionsRegion.evaluate(element => { element.scrollTop = 0; });
+      await expect(optionsRegion).toHaveAttribute('data-more-below', 'true');
+      await assertControls();
+    } else {
+      await expect(optionsRegion).not.toHaveAttribute('data-more-below');
+    }
+    if (viewport.height < 700) await expect(dock.locator('.answer-fixed-controls > .answer-hint')).toBeHidden();
+    else await expect(dock.locator('.answer-fixed-controls > .answer-hint')).toBeVisible();
+    const wordsBox = (await ownWords.boundingBox())!, sendBox = (await choiceSend.boundingBox())!;
+    expect(sendBox.y + sendBox.height, 'choice Send shares the own-words row when the width allows').toBeCloseTo(wordsBox.y + wordsBox.height, 0);
+    const fixedBeforeQuestion = await Promise.all(controls.map(control => control.boundingBox()));
+    await pin.getByRole('button', { name: 'Expand question', exact: true }).click();
+    const fullQuestion = page.getByRole('dialog', { name: 'Current question', exact: true });
+    await expect(fullQuestion).toBeVisible();
+    await expect(fullQuestion.locator('.dialog-body')).not.toBeEmpty();
+    expect(await Promise.all(controls.map(control => control.boundingBox())), 'reading the full question cannot move the pinned controls').toEqual(fixedBeforeQuestion);
+    await fullQuestion.getByRole('button', { name: 'Close question', exact: true }).click();
+    await assertControls();
+    const title = conversation.locator('.conversation-title');
+    const titleGeometry = await title.evaluate(element => ({ height: element.getBoundingClientRect().height, line: parseFloat(getComputedStyle(element).lineHeight), scroll: element.scrollHeight, client: element.clientHeight }));
+    expect(titleGeometry.height, 'the full title initially takes at most two lines').toBeLessThanOrEqual(titleGeometry.line * 2 + 1);
+    expect(titleGeometry.scroll, 'the fixture actually needs the full-title action').toBeGreaterThan(titleGeometry.client);
+    await settle(page);
+    const geometry = await pane.evaluate(element => {
+      const pane = element.getBoundingClientRect(), body = element.querySelector('.detail-body')!.getBoundingClientRect();
+      const dock = element.querySelector('.detail-dock')!.getBoundingClientRect();
+      return { body: body.height / pane.height, dock: dock.height / pane.height,
+        bodyBottom: body.bottom, dockTop: dock.top, dockBottom: dock.bottom, paneBottom: pane.bottom };
+    });
+    // Short windows reserve up to half for the question and fixed controls.
+    const footerCap = viewport.height < 700 ? 0.5 : viewport.width <= 1000 ? 0.4 : 0.3;
+    expect(geometry.body, 'the transcript keeps most of the conversation pane').toBeGreaterThanOrEqual(1 - footerCap - 0.001);
+    expect(geometry.dock, 'the answer footer stays within its responsive cap').toBeLessThanOrEqual(footerCap + 0.001);
+    expect(geometry.bodyBottom).toBeLessThanOrEqual(geometry.dockTop + 1);
+    expect(geometry.dockBottom).toBeCloseTo(geometry.paneBottom, 0);
+    const overlayBox = (await conversation.boundingBox())!, waitingBox = (await page.locator('.shell-waiting').boundingBox())!;
+    const tabs = (await page.locator('.shell-tabs').boundingBox())!, footer = (await page.locator('.shell-footer').boundingBox())!;
+    expect(overlayBox.x, 'Waiting stays beside the bigger conversation').toBeGreaterThanOrEqual(waitingBox.x + waitingBox.width - 1);
+    expect(overlayBox.y).toBeGreaterThanOrEqual(tabs.y + tabs.height - 1);
+    expect(overlayBox.x + overlayBox.width).toBeLessThanOrEqual(viewport.width + 1);
+    expect(overlayBox.y + overlayBox.height).toBeLessThanOrEqual(footer.y + 1);
+    expect(await page.locator('.shell-footer .shell-key').allTextContents()).toEqual([
+      'escBack to Map', '↑↓messages', 'aack / answer', 'rreply', '1–9select', '⌥1–9send choice + note', '⌥0focus own words', '⌘↵send', 'b d oitem actions', 'Spacepeek',
+    ]);
+    await page.screenshot({ path: testInfo.outputPath(`${id}.png`), animations: 'disabled' });
+    await ownWords.fill('My note about the retry window');
+    await expect(replySend).toBeVisible();
+    await assertWordsRoom();
+    await assertControls();
+    const typedWords = (await ownWords.boundingBox())!;
+    if (viewport.width === 900) {
+      for (const send of [choiceSend, replySend]) expect((await send.boundingBox())!.y, 'both Send buttons move below the typing box at narrow widths').toBeGreaterThanOrEqual(typedWords.y + typedWords.height);
+    }
+    expect(await body.evaluate(element => element.scrollHeight > element.clientHeight), 'the long transcript scrolls').toBe(true);
+    const footerBefore = await dock.boundingBox(), pinBefore = await pin.boundingBox();
+    await body.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await settle(page);
+    expect(await dock.boundingBox(), 'scrolling messages keeps the answer footer pinned').toEqual(footerBefore);
+    expect(await pin.boundingBox(), 'the waiting question stays with its answer controls').toEqual(pinBefore);
+    // Only the options move: heading, question and both Send actions remain fixed.
+    const chatScroll = await body.evaluate(element => element.scrollTop);
+    const fixed = [...controls.filter(control => control !== firstOption), replySend];
+    const fixedBefore = await Promise.all(fixed.map(control => control.boundingBox()));
+    for (const option of await dock.locator('[data-answer-option]').all()) {
+      await option.scrollIntoViewIfNeeded(); await assertControls(option);
+      expect(await Promise.all(fixed.map(control => control.boundingBox()))).toEqual(fixedBefore);
+    }
+    expect(await dock.evaluate(element => element.scrollTop)).toBe(0);
+    expect(await body.evaluate(element => element.scrollTop)).toBe(chatScroll);
+    const fullTitle = await title.textContent();
+    await title.click(); await expect(title).toHaveAttribute('aria-expanded', 'true');
+    await expect(title).toHaveText(fullTitle!);
+    const expandedTitle = await title.evaluate(element => ({ height: element.getBoundingClientRect().height, scroll: element.scrollHeight, client: element.clientHeight }));
+    expect(expandedTitle.height).toBeGreaterThan(titleGeometry.height);
+    expect(expandedTitle.scroll, 'one click reveals the complete title without clipping').toBeLessThanOrEqual(expandedTitle.client + 1);
+  });
+}
+
+/** A control is inside the viewport and inside every clipping ancestor (sub-pixel scroll rounding allowed). */
+async function fullyVisible(control: Locator) {
+  await expect(control).toBeVisible();
+  await expect(control).toBeInViewport({ ratio: 0.98 });
+  const clipped = await control.evaluate(element => {
+    const rect = element.getBoundingClientRect(), failures: string[] = [];
+    for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+      const style = getComputedStyle(parent), bounds = parent.getBoundingClientRect();
+      const left = bounds.left + parent.clientLeft, top = bounds.top + parent.clientTop;
+      if (/auto|scroll|hidden|clip/.test(style.overflowX) && (rect.left < left - 1 || rect.right > left + parent.clientWidth + 1)) failures.push(`${parent.className}: horizontal`);
+      if (/auto|scroll|hidden|clip/.test(style.overflowY) && (rect.top < top - 1 || rect.bottom > top + parent.clientHeight + 1)) failures.push(`${parent.className}: vertical`);
+    }
+    return failures;
+  });
+  expect(clipped, `${await control.evaluate(element => element.className || element.tagName)} is fully inside every clipping ancestor`).toEqual([]);
+}
+
+interface FooterState {
+  readonly name: string;
+  /** Recovery rows win over the chat's half of the view at the small size. */
+  readonly recovery?: boolean;
+  readonly frame?: string;
+  readonly prepare?: (page: Page, dock: Locator) => Promise<void>;
+  /** The state's own controls and text, fully visible beside the standing controls. */
+  readonly shows?: (dock: Locator) => Locator[];
+}
+const typed = 'My note about the retry window';
+/** The frame's fake transport as the page sees it; these callbacks run in the page, so each reads it from `window`. */
+interface PageTransport {
+  failNext: string | null;
+  invoke: (name: string, args: { request: { command?: { command: string } } }) => Promise<unknown>;
+  sessions: Map<string, { revision: number; id: string; active_binding_id: string; bindings: Record<string, { owner_paused: boolean; dispatch_state: string; connection_state: string }> }>;
+  emit: (event: string, hint: object) => void;
+}
+type PageWindow = { __designFixture: { transport: PageTransport } };
+const pause = (page: Page) => page.evaluate(() => {
+  const transport = (window as unknown as PageWindow).__designFixture.transport, session = [...transport.sessions.values()].find(value => value.active_binding_id)!;
+  const binding = session.bindings[session.active_binding_id]!;
+  binding.owner_paused = true; binding.dispatch_state = 'paused'; ++session.revision;
+  transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+});
+const sendChoice = (dock: Locator) => dock.getByRole('button', { name: /^Send “/ });
+const holdSaving = (page: Page) => page.evaluate(() => {
+  const transport = (window as unknown as PageWindow).__designFixture.transport, original = transport.invoke.bind(transport);
+  transport.invoke = (name, args) => args.request.command?.command === 'input_submit' ? new Promise(() => {}) : original(name, args);
+});
+/** Loses the response to the first draft save only; background patches such as the seen dwell pass through untouched. */
+const failDraftSave = (page: Page) => page.evaluate(() => {
+  const transport = (window as unknown as PageWindow).__designFixture.transport, original = transport.invoke.bind(transport);
+  let armed = true;
+  transport.invoke = (name, args) => {
+    const command = args.request.command as { command: string; params?: { entries?: { kind: string }[] } } | undefined;
+    if (armed && command?.command === 'preferences_patch' && command.params?.entries?.some(entry => entry.kind === 'upsert_draft')) {
+      armed = false;
+      return Promise.reject(new Error('Lost response'));
+    }
+    return original(name, args);
+  };
+});
+const footerStates: readonly FooterState[] = [
+  { name: 'clean four options' },
+  { name: 'option selected', prepare: async (_page, dock) => { await dock.locator('[data-answer-option]').nth(1).click(); await expect(sendChoice(dock)).toContainText('Use a shorter window'); } },
+  { name: 'own words typed', prepare: async (_page, dock) => {
+    await dock.getByRole('textbox', { name: 'Reply in your own words', exact: true }).fill(typed);
+    await expect(dock.getByRole('button', { name: 'Send as a reply only', exact: true })).toBeVisible();
+  }, shows: dock => [dock.getByRole('button', { name: 'Send as a reply only', exact: true })] },
+  { name: 'saving', recovery: true, prepare: async (page, dock) => {
+    await holdSaving(page);
+    await sendChoice(dock).click();
+    await expect(dock.locator('.detail-delivery')).toContainText('Sending');
+  }, shows: dock => [dock.locator('.detail-delivery'), dock.getByText(/isn’t sure this reply was saved/)] },
+  { name: 'uncertain answer', recovery: true, prepare: async (page, dock) => {
+    await page.evaluate(() => { (window as unknown as PageWindow).__designFixture.transport.failNext = 'input_submit'; });
+    await sendChoice(dock).click();
+    await expect(dock.getByText(/isn’t sure this reply was saved/)).toBeVisible();
+  }, shows: dock => [dock.getByText(/isn’t sure this reply was saved/), dock.getByRole('button', { name: 'Try sending again', exact: true })] },
+  { name: 'error and draft retry', recovery: true, prepare: async (page, dock) => {
+    await failDraftSave(page);
+    await dock.getByRole('textbox', { name: 'Reply in your own words', exact: true }).fill(typed);
+    await expect(dock.getByRole('button', { name: 'Try saving your draft again', exact: true })).toBeVisible();
+  }, shows: dock => [dock.getByRole('alert').first(), dock.getByRole('button', { name: 'Try saving your draft again', exact: true })] },
+  { name: 'shortcut status alert', recovery: true, frame: 'conversation-reconnecting', prepare: async (page, dock) => {
+    await expect(dock.locator('.answer-blocked')).toBeVisible();
+    // Workspace keys listen on the view itself, not inside a text field. A blocked session turns the send key into a status line.
+    await page.getByRole('region', { name: 'Item conversation', exact: true }).focus();
+    await page.keyboard.press('Alt+Digit1');
+    await expect(dock.locator('.detail-answer-slot > p[role="alert"]')).toBeVisible();
+  }, shows: dock => [dock.locator('.detail-answer-slot > p[role="alert"]'), dock.locator('.answer-blocked')] },
+  { name: 'paused', recovery: true, prepare: async (page, dock) => {
+    await pause(page);
+    await expect(dock.locator('.dispatch-note')).toBeVisible();
+  }, shows: dock => [dock.locator('.dispatch-note'), dock.locator('.dispatch-note').getByRole('button', { name: 'Resume' })] },
+  { name: 'paused and uncertain answer', recovery: true, prepare: async (page, dock) => {
+    await page.evaluate(() => { (window as unknown as PageWindow).__designFixture.transport.failNext = 'input_submit'; });
+    await sendChoice(dock).click();
+    await expect(dock.getByText(/isn’t sure this reply was saved/)).toBeVisible();
+    await pause(page);
+    await expect(dock.locator('.dispatch-note')).toBeVisible();
+  }, shows: dock => [dock.locator('.dispatch-note'), dock.locator('.dispatch-note').getByRole('button', { name: 'Resume' }), dock.getByText(/isn’t sure this reply was saved/),
+    dock.getByRole('button', { name: 'Try sending again', exact: true })] },
+  { name: 'actionable notice', prepare: async page => {
+    await page.evaluate(() => {
+      (window as unknown as { __designNotices: { push: (notice: object) => void } }).__designNotices.push({ id: 'design-unsent', icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true,
+        text: 'Your reply was not sent because the conversation moved on. Put it back in the reply box to edit it, or leave it here.',
+        actions: [{ label: 'Put back in reply box', run: () => {} }] });
+    });
+    await expect(page.locator('.pw-notices .pw-note')).toBeVisible();
+  } },
+  { name: 'one option', frame: 'conversation-one-option' },
+  { name: 'short question', frame: 'conversation-short' },
+];
+
+for (const viewport of conversationSizes) for (const state of footerStates) {
+  const id = `${state.name.replace(/ /g, '-')}-${viewport.width}x${viewport.height}`;
+  test(`conversation footer: ${state.name} at ${viewport.width}x${viewport.height}`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec(state.frame ?? 'conversation-four-options'), ...viewport });
+    const unfold = page.getByRole('button', { name: /^Show Waiting on me/ });
+    if (await unfold.count()) await unfold.click();
+    await page.getByRole('button', { name: 'Open the conversation in a bigger view', exact: true }).click();
+    const conversation = page.getByRole('region', { name: 'Item conversation', exact: true });
+    await expect(conversation).toBeVisible();
+    const pane = conversation.locator('.item-detail.item-conversation'), dock = pane.locator('.detail-dock');
+    await settle(page);
+    await state.prepare?.(page, dock);
+    await settle(page);
+    // The standing controls, plus whatever the state adds.
+    const heading = dock.getByRole('heading', { name: /^Your turn ·/ }), question = dock.locator('.conversation-question');
+    const ownWords = dock.getByRole('textbox', { name: 'Reply in your own words', exact: true });
+    // Only a recovery state may fold the options away; everywhere else the first option is complete.
+    const squeezed = await dock.getAttribute('data-squeezed') !== null;
+    if (squeezed) expect(state.recovery, 'the options fold away only for recovery rows').toBe(true);
+    const standing = [heading, question, ...squeezed ? [] : [dock.locator('[data-answer-option]').first()], ownWords, dock.getByRole('button', { name: /^Send / }).first()];
+    for (const control of [...standing, ...(state.shows?.(dock) ?? [])]) await fullyVisible(control);
+    // Every row of the footer: inside it, never under another row, never under a notice, and the footer itself never scrolls.
+    const geometry = await pane.evaluate((element, recovery) => {
+      const dock = element.querySelector<HTMLElement>('.detail-dock')!, dockBox = dock.getBoundingClientRect();
+      const rows = [...dock.querySelectorAll<HTMLElement>('.detail-delivery, .dispatch-note, [role="alert"], .answer-warn, .conversation-pin, .answer-choices, .answer-fixed-controls, .detail-answer-retry, .detail-error, .answer-blocked, .detail-answer-slot > button, .detail-answer-slot > p')]
+        .filter(row => row.getClientRects().length > 0 && !(row.matches('.answer-choices') && row.clientHeight === 0));
+      const boxes = rows.map(row => { const box = row.getBoundingClientRect(); return { name: row.className || row.tagName, top: box.top, bottom: box.bottom, left: box.left, right: box.right }; });
+      const overlaps: string[] = [];
+      for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i]!, b = boxes[j]!;
+        if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5) overlaps.push(`${a.name} / ${b.name}`);
+      }
+      const outside = boxes.filter(box => box.top < dockBox.top - 1 || box.bottom > dockBox.bottom + 1 || box.left < dockBox.left - 1 || box.right > dockBox.right + 1).map(box => box.name);
+      const controls = [...element.closest('.conversation-view')!.querySelectorAll<HTMLElement>('.conversation-header .btn, .detail-dock button, .detail-dock textarea, .detail-dock .answer-choices, .detail-dock p, .detail-dock h3')]
+        .filter(control => control.getClientRects().length > 0).map(control => ({ name: control.className || control.tagName, box: control.getBoundingClientRect() }));
+      const notices = [...document.querySelectorAll('.pw-notices .pw-note')].map(note => note.getBoundingClientRect());
+      const covered = notices.flatMap(note => controls.filter(({ box }) => Math.min(box.right, note.right) - Math.max(box.left, note.left) > 0.5
+        && Math.min(box.bottom, note.bottom) - Math.max(box.top, note.top) > 0.5).map(control => control.name));
+      const pane = element.getBoundingClientRect(), chat = element.querySelector('.detail-body')!.getBoundingClientRect();
+      const scrollers = [...dock.querySelectorAll<HTMLElement>('*')].filter(child => child.tagName !== 'TEXTAREA' && /auto|scroll/.test(getComputedStyle(child).overflowY)).map(child => child.className);
+      return { overlaps, outside, covered, notices: notices.length, scrollers, dockScrolls: dock.scrollHeight - dock.clientHeight > 1,
+        chat: chat.height / pane.height, dock: dockBox.height / pane.height, recovery, firstRow: dock.querySelector<HTMLElement>('.answer-card')?.getBoundingClientRect().height ?? 0 };
+    }, state.recovery ?? false);
+    expect(geometry.overlaps, 'no footer row paints over another').toEqual([]);
+    expect(geometry.outside, 'every footer row is inside the footer').toEqual([]);
+    expect(geometry.covered, 'no notice covers a footer control or Back to Map').toEqual([]);
+    if (state.name === 'actionable notice') expect(geometry.notices).toBeGreaterThan(0);
+    expect(geometry.scrollers.filter(name => name !== 'answer-choices'), 'only the options region scrolls').toEqual([]);
+    expect(geometry.dockScrolls, 'the footer is not itself a scroller').toBe(false);
+    // The chat keeps about half the view; recovery rows may take more of the small view.
+    expect(geometry.chat, 'the chat keeps its room').toBeGreaterThanOrEqual(state.recovery && viewport.width === 900 ? 0.3 : 0.5 - 0.02);
+    const regions = await pane.evaluate(element => { const region = element.querySelector<HTMLElement>('.detail-dock .answer-choices'); return region && { client: region.clientHeight, scroll: region.scrollHeight }; });
+    if (state.name === 'one option') {
+      expect(regions, 'one option needs no scrolling').toMatchObject({});
+      expect(regions!.scroll, 'the footer shrinks to its content: the options region holds exactly the one option').toBeLessThanOrEqual(regions!.client + 1);
+      expect(regions!.client, 'no slack under the single option').toBeLessThanOrEqual(geometry.firstRow + 8);
+    }
+    if (state.name === 'short question') {
+      await expect(dock.locator('.conversation-question-toggle'), 'a question that fits has no expand control').toHaveCount(0);
+      await expect(conversation.getByRole('button', { name: /^(Expand|Collapse) title/ }), 'a title that fits has no expand control').toHaveCount(0);
+    } else if (!state.frame) {
+      await expect(dock.locator('.conversation-question-toggle')).toHaveCount(1);
+      await expect(conversation.getByRole('button', { name: /^Expand title/ })).toHaveCount(1);
+    }
+    await page.screenshot({ path: testInfo.outputPath(`footer-${id}.png`), animations: 'disabled' });
+  });
+}
+
+for (const viewport of conversationSizes) test(`owner input keeps the Map reading position through conversation and Waiting at ${viewport.width}x${viewport.height}`, async ({ page, origin }) => {
+  await openApp(page, origin, { ...frameSpec('1b'), ...viewport });
+  const unfold = page.getByRole('button', { name: /^Show Waiting on me/ });
+  if (await unfold.count()) await unfold.click();
+  const scroller = page.locator('.tree-scroll'), reading = page.locator('[data-item-id="3.1"]');
+  await reading.click();
+  await expect(reading).toHaveAttribute('aria-selected', 'true');
+  await reading.evaluate(element => element.scrollIntoView({ block: 'center', behavior: 'instant' }));
+  await settle(page);
+  const mapNode = await scroller.elementHandle(), rowNode = await reading.elementHandle();
+  const position = async () => ({ top: await reading.evaluate(element => element.getBoundingClientRect().top),
+    scroll: await scroller.evaluate(element => element.scrollTop),
+    selected: await page.locator('.tree-item[aria-selected="true"]').getAttribute('data-item-id') });
+  const before = await position();
+  expect(before.scroll, 'the owner starts partway through the Map').toBeGreaterThan(0);
+  await expect(reading).toBeInViewport();
+  const unchanged = async () => {
+    await settle(page);
+    expect(await position()).toEqual(before);
+    expect(await scroller.evaluate((element, original) => element === original, mapNode), 'the same Map stays mounted').toBe(true);
+    expect(await reading.evaluate((element, original) => element === original, rowNode), 'the reading row stays mounted').toBe(true);
+  };
+  await page.getByRole('button', { name: 'Open the conversation in a bigger view', exact: true }).click();
+  const conversation = page.getByRole('region', { name: 'Item conversation', exact: true });
+  await expect(conversation.locator('.item-conversation')).toHaveAttribute('data-detail-item-id', '3.1');
+  await unchanged();
+  await expect(page.locator('.shell-center')).toHaveAttribute('inert', '');
+  await expect(page.locator('.shell-detail .item-detail')).toHaveCount(0);
+  const waiting = page.locator('[data-waiting-item="2.1.1"]');
+  await expect(waiting).toBeVisible();
+  await waiting.locator('.waiting-question').click();
+  await expect(conversation.locator('.item-conversation')).toHaveAttribute('data-detail-item-id', '2.1.1');
+  await unchanged();
+  await conversation.focus();
+  for (const shortcut of ['Meta+j', 'Meta+e', 'x', 'z', 'Backspace', 'g', 'e', 'r', 'a', 'ArrowDown', 'ArrowUp']) {
+    await page.keyboard.press(shortcut);
+    await unchanged();
+    // Leave any answer control's roving focus before the next workspace key.
+    await conversation.focus();
+  }
+  await expect(page.getByRole('dialog', { name: /Recent/ })).toHaveCount(0);
+  await conversation.getByRole('button', { name: 'Back to Map', exact: true }).click();
+  await expect(conversation).toHaveCount(0);
+  await expect(page.locator('.shell-center')).not.toHaveAttribute('inert', '');
+  await expect(page.locator('.shell-detail .item-detail')).toHaveAttribute('data-detail-item-id', '3.1');
+  await unchanged();
+  await page.getByRole('button', { name: 'Open the conversation in a bigger view', exact: true }).click();
+  await waiting.locator('.waiting-question').click();
+  await unchanged();
+  await conversation.focus(); await page.keyboard.press('Escape');
+  await expect(conversation).toHaveCount(0);
+  await expect(page.locator('.shell-detail .item-detail')).toHaveAttribute('data-detail-item-id', '3.1');
+  await unchanged();
 });
 
 for (const id of answerFrameIds) {

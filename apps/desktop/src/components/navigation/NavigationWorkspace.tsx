@@ -11,7 +11,7 @@ import { RegisterProject, BindSession } from './Registration';
 import type { DiscoveryController } from '../../data/discovery';
 import { Shell } from '../../ui/shell/Shell';
 import type { HeaderProps } from '../../ui/shell/Header';
-import { agentName, footerSummary, headerText, tabModels, type HeaderInput, type SessionFacts } from '../../ui/shell/model';
+import { agentName, footerSummary, headerText, tabModels, type ConversationFooterState, type HeaderInput, type SessionFacts } from '../../ui/shell/model';
 import type { RemoveHandler } from '../../ui/dialogs/remove';
 import { ProjectsPage } from '../../ui/pages/ProjectsPage';
 import { SessionLists, type SessionGroup } from '../../ui/pages/SessionLists';
@@ -36,6 +36,8 @@ export interface NavigationWorkspaceProps {
   readonly store: NavigationStore;
   readonly discovery?: DiscoveryController;
   readonly waitingContent?: ReactNode;
+  readonly conversation?: ReactNode;
+  readonly conversationFooter?: ConversationFooterState;
   readonly detail?: ReactNode;
   /** The detail header's breadcrumb. */
   readonly detailPath?: ReactNode;
@@ -124,7 +126,7 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   </>;
 }
 
-export function NavigationWorkspace({ store, discovery, waitingContent, detail, detailPath, chrome, session, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
+export function NavigationWorkspace({ store, discovery, waitingContent, conversation, conversationFooter, detail, detailPath, chrome, session, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
   actions: injectedActions, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
   const transientError = !state.pendingOperationId && state.error === store.getMutationFailure() ? state.error : null;
@@ -271,9 +273,10 @@ export function NavigationWorkspace({ store, discovery, waitingContent, detail, 
         : state.pendingNavigation.kind === 'project' ? 'Opening the project…' : 'Opening the session…'}</p>}
   </>;
   return <Shell header={{ ...defaultChrome,...chrome, text: headerText(headerInput, at), disabled }}
+    conversationFooter={conversationFooter}
     tabs={{ tabs, disabled: navigationDisabled, closeDisabled: disabled, onSelect: selectTab, onClose: closeTab }}
     body={{ waiting: waitingContent ?? <WaitingFrame count="–" loading />,
-      center, detail, detailPath, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide,
+      center, conversation, detail, detailPath, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide,
       detailWidth: shown.detail_width ?? null, waitingFolded: shown.waiting_collapsed ?? false,
       onResizeDetail: width => saveLayout({ detail_width: width }), onFoldWaiting: folded => saveLayout({ waiting_collapsed: folded }) }}
     summary={footerSummary(global ? { items: Object.values(global.items_by_status).reduce((sum, count) => sum + count, 0), waiting: global.waiting_unanswered,

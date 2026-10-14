@@ -26,6 +26,12 @@ export interface FrameSpec {
   readonly collapseTopics?: readonly string[];
   /** App-only answer frames exercise the dock independently of the immutable handoff. */
   readonly answerOptions?: number;
+  /** M3 conversation fixture keeps the thread and exercises four pinned choices. */
+  readonly conversationOptions?: number;
+  /** The conversation's title and current question fit in two lines, so neither shows an expand control. */
+  readonly shortQuestion?: boolean;
+  /** The agent's connection is reconnecting, so answering is blocked (any scenario; `scenario: 'reconnecting'` also does this). */
+  readonly reconnecting?: boolean;
   readonly expandedAnswer?: number;
   readonly hiddenItems?: readonly string[];
   /** Compact dock states are app-only, independent of immutable handoff comparisons. */
@@ -63,6 +69,10 @@ const specs: readonly FrameSpec[] = [
   { ...base, ...narrow, id: '1r', theme: 'light', selected: '1.4', detail: true, openMode: 'reply' },
   { ...base, id: '1t', scenario: 'review', selected: '4.4', detail: true, collapseTopics: reviewFolds },
   { ...base, id: '1u', scenario: 'thread', selected: '4.1', detail: true, collapseTopics: reviewFolds },
+  { ...base, id: 'conversation-four-options', scenario: 'thread', selected: '4.1', detail: true, conversationOptions: 4, collapseTopics: reviewFolds },
+  { ...base, id: 'conversation-one-option', scenario: 'thread', selected: '4.1', detail: true, conversationOptions: 1, collapseTopics: reviewFolds },
+  { ...base, id: 'conversation-reconnecting', scenario: 'thread', selected: '4.1', detail: true, conversationOptions: 4, reconnecting: true, collapseTopics: reviewFolds },
+  { ...base, id: 'conversation-short', scenario: 'thread', selected: '4.1', detail: true, conversationOptions: 2, shortQuestion: true, collapseTopics: reviewFolds },
   { ...base, ...narrow, id: '1v', selected: '1.3.1', detail: true, openMode: 'followup' },
   { ...base, id: '1w', scenario: 'project', selected: '5.3', detail: true },
   { ...base, id: '1x', scenario: 'archive' },

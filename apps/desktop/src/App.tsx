@@ -20,6 +20,9 @@ import { NavigationWorkspace, type AdapterChoice, type OpenedSessionView } from 
 import { NavigationGraph } from './ui/graph/NavigationGraph';
 import type { OwnerFocusRequest, PendingSubmission } from './ui/answer/useSubmit';
 import { agentNotRunning } from './ui/answer/notRunning';
+import { ConversationView } from './ui/detail/ConversationView';
+import { conversationDivider } from './ui/detail/conversationSeen';
+import { conversationAnswerState } from './ui/detail/ItemConversation';
 import { DetailPath, ItemDetail } from './ui/detail/ItemDetail';
 import { WaitingColumn } from './ui/waiting/WaitingColumn';
 import { PeekProvider } from './ui/peek/Peek';
@@ -107,6 +110,7 @@ function workspaceKeys(app: {
   readonly archiveTopic: (topicId: string) => boolean;
   readonly toggleGraph: () => void;
   readonly closeDetail: () => void;
+  readonly closeConversation?: () => void;
   readonly clearFilters?: () => void;
   readonly askRemove: (target: TreeRemoveTarget) => boolean;
 }): WorkspaceHandlers<HTMLDivElement> {
@@ -114,17 +118,17 @@ function workspaceKeys(app: {
   const onItem = (act: (focused: FocusedItem, intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => boolean | void) =>
     (intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => { const focused = app.focused(event); return focused ? act(focused, intent, event) : false; };
   const search = () => {
-    if (!app.store) return false;
+    if (!app.store || app.closeConversation) return false;
     document.querySelector<HTMLInputElement>('[data-shell-search]')?.focus(); return true;
   };
   return {
     search,
     // Esc closes the answer box first (the editor stops it), then detail, then clears filters.
-    escape: () => { app.closeDetail(); app.clearFilters?.(); return false; },
+    escape: () => { if (app.closeConversation) { app.closeConversation(); return true; } app.closeDetail(); app.clearFilters?.(); return false; },
     answer: (_intent, event) => {
       const focused = app.focused(event);
       if (focused && app.ack(focused.target, event.repeat)) return true;
-      const question = focused && focused.item.status === 'waiting_on_me' ? focused.target : app.oldestWaiting();
+      const question = focused && focused.item.status === 'waiting_on_me' ? focused.target : app.closeConversation ? undefined : app.oldestWaiting();
       if (!question) return false;
       app.focusOwner({ ...question }, 'answer'); return true;
     },
@@ -140,10 +144,10 @@ function workspaceKeys(app: {
     }),
     'choose-send': onItem(({ item, target }, intent) => item.status === 'waiting_on_me' && intent.kind === 'choose-send' && app.quickAnswer(target, intent.index)),
     'answer-words': onItem(({ item, target }) => item.status === 'waiting_on_me' && app.quickAnswer(target)),
-    hide: onItem(({ target }, _intent, event) => event.repeat ? true : app.toggleHidden(target)),
-    later: onItem(({ item, target }) => app.toggleLater(target, item.id)),
-    archive: onItem(({ item }) => app.archiveTopic(item.topic_id)),
-    graph: () => { if (!app.store) return false; app.toggleGraph(); return true; },
+    hide: onItem(({ target }, _intent, event) => !app.closeConversation && (event.repeat ? true : app.toggleHidden(target))),
+    later: onItem(({ item, target }) => !app.closeConversation && app.toggleLater(target, item.id)),
+    archive: onItem(({ item }) => !app.closeConversation && app.archiveTopic(item.topic_id)),
+    graph: () => { if (!app.store || app.closeConversation) return false; app.toggleGraph(); return true; },
     // The Waiting column's own fold button owns the fold (saved layout, narrow-window peek); the key presses it.
     waiting: () => {
       const control = document.querySelector<HTMLButtonElement>('[data-shortcut-waiting-fold]');
@@ -151,7 +155,7 @@ function workspaceKeys(app: {
       control.click(); return true;
     },
     // ⌫/Delete away from a row: ask to remove the focused or selected item (rows handle their own).
-    remove: onItem(({ target }) => app.askRemove({ kind: 'item', item: target })),
+    remove: onItem(({ target }) => !app.closeConversation && app.askRemove({ kind: 'item', item: target })),
   };
 }
 /** The archive (1x): archived topics of every session in the project. */
@@ -171,6 +175,7 @@ interface CenterProps {
   readonly application: Application; readonly view: OpenedSessionView; readonly graph: boolean; readonly query: string;
   readonly reveal: RevealedItem | null; readonly selectedId: string | null; readonly detailOpen: boolean;
   readonly historyReveal: RevealedItem | null;
+  readonly covered?: boolean;
   readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
   readonly onDismissReveal: () => void; readonly onResume: () => void; readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
   readonly onOpenItem: (itemId: string) => void;
@@ -222,6 +227,23 @@ function Workspace({ application }: { application: Application }) {
   const [ownerFocus, setOwnerFocus] = useState<(OwnerFocusRequest & { route: string; itemId: string }) | null>(null);
   const [graphModes, setGraphModes] = useState<Readonly<Record<string, boolean>>>({});
   const showBinTree = useCallback((route: SessionRef) => setGraphModes(previous => ({ ...previous, [routeKey(route)]: false })), []);
+  const [conversation, setConversation] = useState<{ route: string; itemId: string; dividerId: string | null } | null>(null);
+  const conversationOpen = conversation?.route === key;
+  const conversationOrigin = useRef<HTMLElement | null>(null), restoreConversationFocus = useRef(false);
+  const closeConversation = () => {
+    if (!conversationOpen) return;
+    ++shortcutSequence.current; quickRequests.current.clear(); setOwnerFocus(null);
+    restoreConversationFocus.current = true; setConversation(null);
+  };
+  useEffect(() => {
+    if (conversation && conversation.route !== key) { restoreConversationFocus.current = false; setConversation(null); }
+    if (!conversation && restoreConversationFocus.current) {
+      restoreConversationFocus.current = false;
+      const origin = conversationOrigin.current;
+      const expand = document.querySelector<HTMLElement>('[aria-label="Open the conversation in a bigger view"]');
+      (origin?.isConnected ? origin : expand)?.focus({ preventScroll: true });
+    }
+  }, [conversation, key]);
   const [detailOpen, setDetailOpen] = useState(true);
   const detailDismissedAt = useRef<number | null>(null);
   const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
@@ -252,16 +274,26 @@ function Workspace({ application }: { application: Application }) {
   const treeReveal = currentReveal === dismissedReveal ? null : currentReveal;
   const candidateId = currentReveal?.kind === 'item' ? currentReveal.route.item_id : view?.selected_item_id ?? null;
   const selectedId = candidateId && sessionState?.snapshot?.session.items[candidateId] && !itemRemoved(sessionState.snapshot.session, candidateId) ? candidateId : null;
-  const seenRevision = selectedId ? sessionState?.snapshot?.session.items[selectedId]?.revision : null;
+  const readingId = conversation?.route === key ? conversation.itemId : selectedId;
+  const seenRevision = readingId ? sessionState?.snapshot?.session.items[readingId]?.revision : null;
   const readingSeen = useReadingSeen(navigation.reading, state.preferences, route ?? { project_id: '', session_id: '' });
   const observedSeen = useReadingSeen(navigation.reading, state.preferences, route ?? { project_id: '', session_id: '' }, false);
-  const detailNeedsRead = useMemo(() => selectedId != null && seenRevision != null
-    && (observedSeen?.items.find(item => item.item_id === selectedId)?.revision ?? -1) < seenRevision,
-  [observedSeen, selectedId, seenRevision]);
+  const detailNeedsRead = useMemo(() => readingId != null && seenRevision != null
+    && (observedSeen?.items.find(item => item.item_id === readingId)?.revision ?? -1) < seenRevision,
+  [observedSeen, readingId, seenRevision]);
   const observeDetail = useCallback(() => {
-    if (route && selectedId) navigation.markItemSeen(route, selectedId, seenRevision ?? undefined);
-  }, [navigation, route?.project_id, route?.session_id, selectedId, seenRevision]);
-  useSeenDwell(detailOpen && detailNeedsRead && route && selectedId && sessionState?.status === 'ready' && !sessionState.error ? `${key}:${selectedId}` : null, seenRevision, observeDetail);
+    if (route && readingId) navigation.markItemSeen(route, readingId, seenRevision ?? undefined);
+  }, [navigation, route?.project_id, route?.session_id, readingId, seenRevision]);
+  useSeenDwell((!!conversation || detailOpen) && detailNeedsRead && route && readingId && sessionState?.status === 'ready' && !sessionState.error ? `${key}:${readingId}` : null, seenRevision, observeDetail);
+  const openConversation = (itemId: string) => {
+    const session = store?.getSnapshot().snapshot?.session;
+    if (!session?.items[itemId] || !route) return;
+    if (!conversation) conversationOrigin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (conversation?.itemId === itemId && conversation.route === key) return;
+    ++shortcutSequence.current; quickRequests.current.clear(); setOwnerFocus(null);
+    setConversation({ route: key, itemId, dividerId: conversationDivider(session, itemId, observedSeen) });
+    navigationVisits.record(route, itemId, 'viewed');
+  };
   const [answerJump, setAnswerJump] = useState<{ route: string; itemId: string; messageId: string; token: number } | null>(null);
   const answerJumpSequence = useRef(0);
   const consumeAnswerJump = useCallback((token: number) => setAnswerJump(previous => previous?.token === token ? null : previous), []);
@@ -359,6 +391,7 @@ function Workspace({ application }: { application: Application }) {
     if (openDetail) { detailDismissedAt.current = null; setDetailOpen(true); }
   };
   const revealLinkedItem = (target: ItemRoute) => {
+    if (conversation) closeConversation();
     setRouteError(null);
     invalidateOwnerRequest();
     return reveal(target, shortcutSequence.current);
@@ -367,7 +400,7 @@ function Workspace({ application }: { application: Application }) {
     void revealLinkedItem(target).catch((error: unknown) => reportRouteError(navigationFailure(error)));
   };
   const navigateHistory = (direction: HistoryDirection) => {
-    if (!route || state.writing || state.pendingOperationId !== null) return false;
+    if (conversation || !route || state.writing || state.pendingOperationId !== null) return false;
     return itemHistory.navigate(direction, async id => {
       const token = ++shortcutSequence.current;
       setOwnerFocus(null); setRouteError(null);
@@ -393,6 +426,10 @@ function Workspace({ application }: { application: Application }) {
     quickRequests.current.clear();
     if (quick) quickRequests.current.set(identity, token);
     setOwnerFocus(null);
+    if (conversationOpen && conversation && route && sameSession(route, target) && conversation.itemId === target.item_id) {
+      setOwnerFocus({ route: key, itemId: target.item_id, intent, token, optionIndex, sendOption: quick === 'send', ownWords: quick === 'words', answerTarget });
+      return;
+    }
     void reveal(target, token, false, onReveal, true).then(opened => {
       if (!opened || opened.result.kind !== 'item' || shortcutSequence.current !== token || navigation.getNavigationRequest() !== opened.request) return;
       published = true;
@@ -431,6 +468,16 @@ function Workspace({ application }: { application: Application }) {
     const token = ++shortcutSequence.current;
     setOwnerFocus(null);
     try {
+      if (conversationOpen && conversation && route && sameSession(route, target) && target.item_id === conversation.itemId) {
+        await application.drafts.load();
+        const current = store?.getSnapshot(), session = current?.snapshot?.session;
+        if (shortcutSequence.current !== token || !session || current?.status !== 'ready' || current.error) return;
+        const existing = application.drafts.find(target, target.item_id, 'bring');
+        if (existing) return;
+        const operation = application.drafts.begin(session, target.item_id, 'bring');
+        if (operation) { application.drafts.edit(operation, { text: 'Bring this up.' }); await application.drafts.submit(operation); }
+        return;
+      }
       const opened = await reveal(target, token, false, onReveal, true);
       if (!opened || opened.result.kind !== 'item') return;
       const { result, request: openedRequest } = opened;
@@ -534,6 +581,7 @@ function Workspace({ application }: { application: Application }) {
     removals.schedule(target, subject, { restore });
   };
   const showView = (mode: 'tree' | 'graph' | 'archive') => {
+    if (conversation) closeConversation();
     setGraphModes(previous => ({ ...previous, [key]: mode === 'graph' }));
     if (view && archived !== (mode === 'archive')) saveView({ filters: { ...structuredClone(view.filters), archived: mode === 'archive' } } as Partial<SessionPreferences>);
   };
@@ -573,7 +621,7 @@ function Workspace({ application }: { application: Application }) {
   const hiddenNotice = hiddenParent ? selectedId && explicitHidden.has(selectedId)
     ? `Hidden, along with its parent “${hiddenParent}”.` : `Hidden with its parent “${hiddenParent}”` : undefined;
   const keys = useWorkspaceKeys<HTMLDivElement>(workspaceKeys({
-    store: !!store, closeDetail, focusOwner, quickAnswer, queueBring, ack: (target, repeat) => {
+    store: !!store, closeDetail, closeConversation: conversationOpen ? closeConversation : undefined, focusOwner, quickAnswer, queueBring, ack: (target, repeat) => {
       const store = navigation.opened.open(target), session = store.getSnapshot().snapshot?.session, item = session?.items[target.item_id];
       if (!session || !item || !ackTarget(session, item)) return false;
       const actions = application.actions.forSession(store);
@@ -601,6 +649,10 @@ function Workspace({ application }: { application: Application }) {
       control.focus(); control.click(); return true;
     },
     focused: event => {
+      if (conversationOpen && conversation && route) {
+        const item = sessionState?.snapshot?.session.items[conversation.itemId];
+        return item ? { item, target: { ...route, item_id: item.id } } : null;
+      }
       const card = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-waiting-item]') : null;
       if (card) {
         const target = { project_id: card.dataset.projectId!, session_id: card.dataset.sessionId!, item_id: card.dataset.waitingItem! };
@@ -621,9 +673,30 @@ function Workspace({ application }: { application: Application }) {
   const appRoot = useRef<HTMLDivElement>(null);
   useWindowKeys(appRoot, historyControls, intent => changeTextSize(nextTextSize(textSizeIntent.current ?? navigation.getSnapshot().preferences?.global.text_scale, intent)));
   return <PeekProvider lookup={target => navigation.opened.open(target)} drafts={application.drafts} onGoTo={revealItem} onAgentNotRunning={onAgentNotRunning}
+    answerTarget={conversationOpen && conversation && route ? { ...route, item_id: conversation.itemId } : undefined}
     onPeekSeen={(target, observedRevision) => navigation.markItemSeen(target, target.item_id, observedRevision)}
     onVisit={(target, action) => { if (action !== 'opened') navigationVisits.record(target, target.item_id, action === 'peek' ? 'peeked' : 'answered'); }}>
-    <ItemRefSession.Provider value={route ?? null}><ItemHistoryContext.Provider value={historyControls}><RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys}>
+    <ItemRefSession.Provider value={route ?? null}><ItemHistoryContext.Provider value={historyControls}><RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys} onKeyDownCapture={event => {
+      if (!conversationOpen) return;
+      if (event.key === 'Escape' && !event.nativeEvent.isComposing && !event.metaKey && !event.ctrlKey && !event.altKey
+        && !document.querySelector('[aria-modal="true"]')) {
+        // These controls own Escape before a peek or the conversation does.
+        const control = document.querySelector<HTMLElement>('.shell-text-size-menu')
+          ?? document.querySelector<HTMLElement>('.pw-rename');
+        if (control) {
+          const owner = control.closest('.shell-text-size') ?? control;
+          if (!(event.target instanceof Node) || !owner.contains(event.target)) {
+            event.preventDefault(); event.stopPropagation();
+            control.dispatchEvent(new globalThis.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+          }
+          return;
+        }
+        if (event.target instanceof Element && event.target.closest('.pw-note')) return;
+        event.preventDefault(); event.stopPropagation();
+        const peekClose = document.querySelector<HTMLButtonElement>('.item-peek [aria-label="Close peek"]');
+        if (peekClose) peekClose.click(); else closeConversation();
+      }
+    }}>
     <UnsentMessageNotices waiting={application.waiting} drafts={application.drafts} opened={navigation.opened} navigation={navigation}
       selectedStore={store ?? null} />
     <DraftConflictNotices drafts={application.drafts} opened={navigation.opened} selectedSession={route ?? null} />
@@ -635,17 +708,21 @@ function Workspace({ application }: { application: Application }) {
       chrome={{ query, views, theme: shown,
         textSize: shownTextSize, onTextSizeChange: changeTextSize,
         // A new search is a filter change: it drops the temporary reveal (the selection stays as its own row).
-        onQueryChange: view ? text => { setSearchEdit({ route: key, text, attempted: false }); setDismissedReveal(currentReveal); } : undefined,
+        onQueryChange: view ? text => { if (conversation) closeConversation(); setSearchEdit({ route: key, text, attempted: false }); setDismissedReveal(currentReveal); } : undefined,
         onToggleTheme: () => { if (preferences) void navigation.saveTheme(themeToggle(shown).next, preferences.revision); } }}
       hidden={selectedHidden} hiddenNotice={hiddenNotice} onHide={route && selectedId ? () => { toggleHidden({ ...route, item_id: selectedId }); } : undefined}
       onRemove={() => { if (route && selectedId) askRemove({ kind: 'item', item: { ...route, item_id: selectedId } }); }}
-      waitingContent={<WaitingColumn drafts={application.drafts} store={application.waiting} revealItem={revealItem} onAgentNotRunning={onAgentNotRunning}
-        selected={route && selectedId ?{ ...route, item_id: selectedId } : null}
-        openSession={target => { void navigation.navigate({ kind: 'session', session: target }); }} />}
+      waitingContent={<WaitingColumn drafts={application.drafts} store={application.waiting} revealItem={target => {
+        if (conversationOpen && route && sameSession(route, target)) openConversation(target.item_id);
+        else revealItem(target);
+      }} openDetails={revealItem} conversationOpen={conversationOpen} onAgentNotRunning={onAgentNotRunning}
+        selected={route && (conversationOpen ? conversation?.itemId : selectedId) ? { ...route, item_id: conversationOpen ? conversation!.itemId : selectedId! } : null}
+        openSession={target => { if (conversation) closeConversation(); void navigation.navigate({ kind: 'session', session: target }); }} />}
       detailPath={store && selectedId && detailOpen && route ? <DetailPath store={store} itemId={selectedId} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} /> : undefined}
-      detail={store && selectedId && detailOpen && route ? <ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}
+      detail={conversationOpen ? <div data-covered-detail="" /> : store && selectedId && detailOpen && route ? <ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}
         onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined}
         onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onBring={() => { void queueBring({ ...route, item_id: selectedId }); }}
+        onOpenConversation={() => openConversation(selectedId)}
         later={later} onAgentNotRunning={onAgentNotRunning} earlierAgent={earlier}
         hiddenItemIds={view?.hidden_item_ids} seen={readingSeen}
         answerJump={answerJump?.route === key && answerJump.itemId === selectedId ? answerJump : undefined}
@@ -654,10 +731,21 @@ function Workspace({ application }: { application: Application }) {
         onLater={value => preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)}
         provenance={<CopiedProvenance store={store} itemId={selectedId}
           projectPath={projectId => state.projects?.projects.items.find(project => project.project_id === projectId)?.canonical_root ?? null} revealItem={revealLinkedItem} />} /> : undefined}
+      conversationFooter={conversationOpen && conversation && route && sessionState?.snapshot?.session.items[conversation.itemId] ? {
+        question: conversationAnswerState(sessionState.snapshot.session, conversation.itemId, application.drafts.find(route, conversation.itemId, 'answer')).live,
+      } : undefined}
+      conversation={conversation?.route === key && store && route ? <ConversationView key={`${key}:${conversation.itemId}`} drafts={application.drafts}
+        store={store} itemId={conversation.itemId} later={preferences?.later.some(value => sameSession(value, route) && value.item_id === conversation.itemId) ?? false}
+        onClose={closeConversation} onBring={() => { void queueBring({ ...route, item_id: conversation.itemId }); }} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })}
+        dividerId={conversation.dividerId} seen={readingSeen} hiddenItemIds={view?.hidden_item_ids}
+        focusRequest={ownerFocus?.route === key && ownerFocus.itemId === conversation.itemId ? ownerFocus : undefined}
+        onFocusRequestConsumed={consumeOwnerRequest} onAgentNotRunning={onAgentNotRunning}
+        onLater={value => preferences ? navigation.setLater({ ...route, item_id: conversation.itemId }, value, preferences.revision) : Promise.resolve(false)} /> : undefined}
       onCloseDetail={closeDetail}
       renderSession={opened => <SessionCenter application={application} view={opened} graph={graph} query={query} reveal={treeReveal}
+        covered={conversationOpen}
         historyReveal={historyReveal.current === treeReveal ? historyReveal.current : null}
-        selectedId={treeSelectedId} detailOpen={detailOpen && !!selectedId}
+        selectedId={treeSelectedId} detailOpen={conversationOpen || detailOpen && !!selectedId}
         onSelected={selected}
         onOpenItem={itemId => { if (route) revealItem({ ...route, item_id: itemId }); }}
         onDismissReveal={() => setDismissedReveal(currentReveal)} onResume={() => { setDismissedReveal(currentReveal); closeDetail(); }}

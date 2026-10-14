@@ -71,6 +71,8 @@ export interface TreeViewProps {
   readonly historyReveal?: RevealedItem | null;
   readonly selectedId: string | null;
   readonly detailOpen: boolean;
+  /** Conversation covers the retained tree; its global shortcuts pause until Map returns. */
+  readonly covered?: boolean;
   /** Graph content shown in place of the rows. */
   readonly graph?: ReactNode;
   /** Notices above the rows: stale data, recovery. */
@@ -107,7 +109,7 @@ const SKELETON = [
 ];
 
 export function TreeView(props: TreeViewProps) {
-  const { navigation, store, actions, drafts, query, reveal, selectedId, detailOpen, graph, notices,
+  const { navigation, store, actions, drafts, query, reveal, selectedId, detailOpen, covered = false, graph, notices,
     summaries, onSelected, onDismissReveal, onResume, onAct, onClearFilters, onClearSearch, onShowArchive,
     onAgentNotRunning, onRemove } = props;
   const state = useSession(store), raw = state.snapshot?.session ?? null;
@@ -897,7 +899,7 @@ export function TreeView(props: TreeViewProps) {
     return () => noticeStore.dismiss('tree-no-unseen');
   }, [route.project_id, route.session_id]);
   useEffect(() => {
-    if (graph) return;
+    if (graph || covered) return;
     const shortcut = (event: globalThis.KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.key.toLowerCase() !== 'n') return;
       if (event.target instanceof Element && event.target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[role="dialog"],[role="alertdialog"]')) return;
@@ -906,7 +908,7 @@ export function TreeView(props: TreeViewProps) {
     };
     window.addEventListener('keydown', shortcut);
     return () => window.removeEventListener('keydown', shortcut);
-  }, [graph]);
+  }, [graph, covered]);
   const edgeCallbacks = useRef({ updateEdge, revealSelected, holding });
   edgeCallbacks.current = { updateEdge, revealSelected, holding };
   const topicKeys = JSON.stringify(sections.map(section => section.topic.key));
@@ -924,6 +926,7 @@ export function TreeView(props: TreeViewProps) {
     return () => observer.disconnect();
   }, [hasRows, graph, topicKeys]);
   useEffect(() => {
+    if (covered) return;
     const shortcut = (event: globalThis.KeyboardEvent) => {
       if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
         event.preventDefault(); edgeCallbacks.current.revealSelected();
@@ -935,7 +938,7 @@ export function TreeView(props: TreeViewProps) {
     };
     window.addEventListener('keydown', shortcut, true);
     return () => window.removeEventListener('keydown', shortcut, true);
-  }, [graph]);
+  }, [graph, covered]);
 
   // ------------------------------------------------------------ rows
   const running = bar?.running ?? false;

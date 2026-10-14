@@ -12,7 +12,7 @@ const editable = 'input,textarea,select,[contenteditable]:not([contenteditable="
 const dialogs = 'dialog,[role="dialog"],[role="alertdialog"]';
 const openDialogs = 'dialog[open],[role="dialog"],[role="alertdialog"]';
 // The tree's roving row, then the graph's roving node, then the graph scroller.
-const anchors = ['.tree-column [data-row][tabindex="0"]', '.graph-scroll [tabindex="0"]', '.graph-scroll'];
+const anchors = ['[data-conversation-anchor]', '.tree-column [data-row][tabindex="0"]', '.graph-scroll [tabindex="0"]', '.graph-scroll'];
 
 const within = (target: EventTarget | null, selector: string) => target instanceof Element && !!target.closest(selector);
 

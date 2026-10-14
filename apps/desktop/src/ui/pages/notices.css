@@ -36,6 +36,20 @@
   }
 }
 
+/*
+ * Over the bigger conversation view the stack keeps to the band between the view's header and its footer (Body measures it
+ * into --notice-top and --notice-bottom) and hangs from the top, so it never covers Back to Map, own words or Send.
+ */
+.shell-notices[data-conversation] .pw-notices {
+  top: var(--notice-top, 16px);
+  bottom: var(--notice-bottom, 16px);
+}
+
+.shell-notices[data-conversation] .pw-notice-stack {
+  top: 0;
+  transform: none;
+}
+
 .pw-notice-group {
   display: flex;
   flex-direction: column;

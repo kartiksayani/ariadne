@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { delay, json } from '../../../../scripts/run-native-e2e.mjs';
 import { admissions, cliRequest, completeTurn, journeyResultRequest, publishResult, snapshot } from './scripted-provider.mjs';
-import { folded, openFollowUp, openOwnerReply, sendDetailReply } from './owner-reply.mjs';
+import { folded, openFollowUp, openOwnerReply, ownerReplyTarget, sendDetailReply, waitForOwnerReplyTarget } from './owner-reply.mjs';
 import { openSession } from './session-button.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
@@ -84,9 +84,11 @@ async function openDispatch(configuration) {
 
 // The primary item is still waiting: with nothing pending its answer slot takes the reply; once an
 // input is held, the slot hides and the next reply queues behind it from the follow-up box.
-async function ownerReply(configuration, text, held = false) {
+async function ownerReply(configuration, text, expectedSession, held = false) {
+  const expected = ownerReplyTarget(expectedSession, configuration.itemId);
+  await waitForOwnerReplyTarget(configuration, expected);
   if (held) await openFollowUp(true); else await openOwnerReply();
-  await sendDetailReply(configuration, text);
+  await sendDetailReply(configuration, text, expected);
 }
 
 async function holdSuccessor(configuration, expectedCount, successorId, message) {
@@ -108,10 +110,10 @@ export async function runRecoveryAcceptance(configuration) {
   await openPrimary(configuration);
   const workText = `native-recovery-work-${nonce}\nPreserve this completed work; never dispatch its action again.`;
   const successorText = `native-recovery-successor-${nonce}\nDispatch only after the result repair joins.`;
-  await ownerReply(configuration, workText);
+  await ownerReply(configuration, workText, baseline);
   await wait(async () => (await admissions(configuration)).length === queuedBefore.length + 1, 'Recovery original input did not reach real runtime delivery');
   const original = (await admissions(configuration)).at(-1);
-  await ownerReply(configuration, successorText, true);
+  await ownerReply(configuration, successorText, await snapshot(configuration), true);
   let session = await snapshot(configuration);
   const input = session.inputs[original.inputId], successor = Object.values(session.inputs).find(input => input.payload.text === successorText);
   assert.ok(successor); assert.equal(input.payload.text, workText); assert.equal(input.attempts.length, 1);
@@ -230,7 +232,7 @@ export async function runRecoveryAcceptance(configuration) {
   // The window may still be switching from the held follow-up; wait for the answer box before choosing an editor.
   await wait(async () => await browser.$('.item-detail .detail-answer-slot[data-owner-input]').isExisting()
     && !(await browser.$('.item-detail [aria-label="Reply"] [aria-label="Item actions"] button').isExisting()), 'The answer box did not return after the successor finished');
-  await ownerReply(configuration, lateWorkText);
+  await ownerReply(configuration, lateWorkText, await snapshot(configuration));
   await wait(async () => (await admissions(configuration)).length === queuedBefore.length + 4, 'Stop-waiting input did not reach the real provider');
   const lateAdmission = (await admissions(configuration)).at(-1);
   await completeTurn(configuration, lateAdmission);

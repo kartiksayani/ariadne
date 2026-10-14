@@ -11,13 +11,37 @@ import { copyText } from '../../../src/ui/shared/clipboard';
 import { UnsentMessageNotices } from '../../../src/ui/answer/UnsentMessageNotices';
 import { inItemConversation } from '../../../src/selectors/history';
 import { Notices, notices } from '../../../src/ui/pages/notices';
+import { Body } from '../../../src/ui/shell/Body';
 import { AppTransport, route } from '../app/transport';
 
 const openedStores: OpenSessions[] = [];
 const navigations: NavigationStore[] = [];
+const noticeHosts = ['standalone', 'conversation'] as const;
+type NoticeHost = typeof noticeHosts[number];
+
+function noticeHost(host: NoticeHost) {
+  return host === 'conversation' ? <Body waiting={<p>Waiting on me</p>} center={<button>Topic tree</button>}
+    detail={<button>Item details</button>} conversation={<section aria-label="Item conversation"><button>Close conversation</button></section>} /> : <Notices />;
+}
+
+function accessibleNotices(host: NoticeHost) {
+  const region = screen.getByRole('region', { name: 'Notifications' });
+  expect(region.closest('[inert], [aria-hidden="true"]')).toBeNull();
+  if (host === 'conversation') {
+    expect(screen.getByRole('region', { name: 'Item conversation' })).toBeTruthy();
+    for (const covered of document.querySelectorAll('.shell-center, .shell-detail')) {
+      expect(covered.hasAttribute('inert')).toBe(true);
+      expect(covered.getAttribute('aria-hidden')).toBe('true');
+    }
+    expect(region.closest('.shell-notices')).not.toBeNull();
+    expect(region.closest('.shell-center, .shell-detail, .shell-conversation')).toBeNull();
+  }
+  return within(region);
+}
+
 vi.mock('../../../src/ui/shared/clipboard', () => ({ copyText: vi.fn().mockResolvedValue(undefined) }));
 afterEach(() => { cleanup(); navigations.splice(0).forEach(store => store.stop()); openedStores.splice(0).forEach(opened => opened.closeAll()); notices.clear(); vi.restoreAllMocks(); vi.useRealTimers(); });
-async function setup(cause: Input['cancel_cause'], item = false, loadPreferences = true) {
+async function setup(cause: Input['cancel_cause'], item = false, loadPreferences = true, host: NoticeHost = 'standalone') {
   const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
   const input = Object.values(session.inputs).find(value => value?.state === 'queued' && value.kind !== 'continue')!;
   input.state = 'cancelled'; input.cancel_cause = cause;
@@ -39,8 +63,8 @@ async function setup(cause: Input['cancel_cause'], item = false, loadPreferences
   const navigation = new NavigationStore(service); navigations.push(navigation);
   if (loadPreferences) await navigation.refresh();
   const waiting = new WaitingStore(service, opened);
-  const view = render(<><Notices /><UnsentMessageNotices waiting={waiting} drafts={drafts} opened={opened} selectedStore={store} navigation={navigation} /></>);
-  return { ...view, transport, session, topic, input, message, drafts, store, waiting, opened, navigation };
+  const view = render(<>{noticeHost(host)}<UnsentMessageNotices waiting={waiting} drafts={drafts} opened={opened} selectedStore={store} navigation={navigation} /></>);
+  return { ...view, transport, session, topic, input, message, drafts, store, waiting, opened, navigation, host };
 }
 
 async function reload(value: Awaited<ReturnType<typeof setup>>) {
@@ -51,7 +75,7 @@ async function reload(value: Awaited<ReturnType<typeof setup>>) {
   const store = opened.open(route); await store.refresh();
   const drafts = new OwnerDraftStore(service); await drafts.load();
   const waiting = new WaitingStore(service, opened);
-  render(<><Notices /><UnsentMessageNotices waiting={waiting} drafts={drafts} opened={opened} selectedStore={store} navigation={navigation} /></>);
+  render(<>{noticeHost(value.host)}<UnsentMessageNotices waiting={waiting} drafts={drafts} opened={opened} selectedStore={store} navigation={navigation} /></>);
   return { navigation, drafts };
 }
 
@@ -192,8 +216,9 @@ it('keeps Copy feedback after the current recovery prerequisite as the session c
   expect(screen.queryByText(/Restore the topic to put it back/)).toBeNull();
 });
 
-it('recomputes a click-time block as prerequisites change without retaining the old reason', async () => {
-  const value = await setup('agent_removed');
+it.each(noticeHosts)('recomputes a click-time block as prerequisites change without retaining the old reason in the %s host', async host => {
+  const value = await setup('agent_removed', false, true, host);
+  const region = accessibleNotices(host);
   const action = notices.getSnapshot().find(notice => notice.id.startsWith('unsent:'))!.actions![0];
   value.session.state = 'closed'; ++value.session.revision;
   await act(() => value.store.refresh());
@@ -208,9 +233,13 @@ it('recomputes a click-time block as prerequisites change without retaining the 
 
   value.topic.archived_at = null; ++value.session.revision;
   await act(() => value.store.refresh());
-  expect((screen.getByRole('button', { name: 'Put back in reply box' }) as HTMLButtonElement).disabled).toBe(false);
+  const button = region.getByRole<HTMLButtonElement>('button', { name: 'Put back in reply box' });
+  expect(button.disabled).toBe(false);
   expect(screen.queryByText(/Restore the topic to put it back/)).toBeNull();
   expect(screen.queryByText(/Reopen the session to put it back/)).toBeNull();
+  fireEvent.click(button);
+  await region.findByText('Put back. Open “Reply to topic” on its topic to send it.');
+  expect(value.drafts.findTopic(route, value.topic.id)?.draft.text).toBe(value.input.payload.text);
 });
 
 it('keeps the newest observed recovery prerequisite when the opened cache is older', async () => {
@@ -268,12 +297,13 @@ function failRecoveryMarkers(value: Awaited<ReturnType<typeof setup>>, code: 'pe
   });
 }
 
-it('hides dismissal until restart when recovery storage is unavailable without claiming it was saved', async () => {
-  const value = await setup('agent_removed');
+it.each(noticeHosts)('hides dismissal until restart when recovery storage is unavailable without claiming it was saved in the %s host', async host => {
+  const value = await setup('agent_removed', false, true, host);
+  const region = accessibleNotices(host);
   failRecoveryMarkers(value, 'permission_denied');
-  const button = await screen.findByRole('button', { name: 'Put back in reply box' });
+  const button = await region.findByRole('button', { name: 'Put back in reply box' });
   fireEvent.click(within(button.closest('[data-notice-id]') as HTMLElement).getByRole('button', { name: 'Dismiss' }));
-  await screen.findByText('Hidden until Ariadne restarts.');
+  await region.findByText('Hidden until Ariadne restarts.');
   expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull();
   expect(value.transport.preferences.resolved_unsent_input_ids ?? []).not.toContain(value.input.id);
   ++value.session.revision; await act(() => value.store.refresh());
@@ -343,17 +373,18 @@ it('keeps an early refusal retryable despite an old unrelated permission failure
   expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy();
 });
 
-it('keeps restored words and offers run-only dismissal when their recovery marker cannot be saved', async () => {
-  const value = await setup('agent_removed');
+it.each(noticeHosts)('keeps restored words and offers run-only dismissal when their recovery marker cannot be saved in the %s host', async host => {
+  const value = await setup('agent_removed', false, true, host);
+  const region = accessibleNotices(host);
   const failure = failRecoveryMarkers(value, 'permission_denied');
-  fireEvent.click(await screen.findByRole('button', { name: 'Put back in reply box' }));
-  await screen.findByText(/Your message is in the reply box, but recovery can’t be saved/);
+  fireEvent.click(await region.findByRole('button', { name: 'Put back in reply box' }));
+  await region.findByText(/Your message is in the reply box, but recovery can’t be saved/);
   expect(screen.queryByText(/again to save it/)).toBeNull();
   expect(value.drafts.findTopic(route, value.topic.id)?.draft.text).toBe(value.input.payload.text);
   expect(value.transport.preferences.resolved_unsent_input_ids ?? []).not.toContain(value.input.id);
   const calls = failure.mock.calls.length;
-  fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
-  await screen.findByText('Hidden until Ariadne restarts.');
+  fireEvent.click(region.getByRole('button', { name: 'Dismiss' }));
+  await region.findByText('Hidden until Ariadne restarts.');
   expect(failure.mock.calls).toHaveLength(calls);
   expect(screen.queryByRole('button', { name: 'Put back in reply box' })).toBeNull();
   const reopened = await reload(value);
@@ -361,31 +392,36 @@ it('keeps restored words and offers run-only dismissal when their recovery marke
   expect(reopened.drafts.findTopic(route, value.topic.id)?.draft.text).toBe(value.input.payload.text);
 });
 
-it('saves the draft before its marker and retries a rejected marker without overwriting newer words', async () => {
-  const value = await setup('agent_removed');
+it.each(noticeHosts)('saves the draft before its marker and retries a rejected marker without overwriting newer words in the %s host', async host => {
+  const value = await setup('agent_removed', false, true, host);
+  const region = accessibleNotices(host);
   const original = value.navigation.resolveUnsentInput.bind(value.navigation);
   vi.spyOn(value.navigation, 'resolveUnsentInput').mockImplementationOnce(async () => {
     expect(value.transport.preferences.drafts.find(draft => draft.target.topic_id === value.topic.id)?.text).toBe(value.input.payload.text);
     throw new Error('Lost marker response');
   }).mockImplementation(original);
-  fireEvent.click(await screen.findByRole('button', { name: 'Put back in reply box' }));
-  await screen.findByText(/recovery couldn’t be saved/);
+  fireEvent.click(await region.findByRole('button', { name: 'Put back in reply box' }));
+  await region.findByText(/recovery couldn’t be saved/);
   expect(screen.queryByText('Put back. Open “Reply to topic” on its topic to send it.')).toBeNull();
   expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy();
   const op = value.drafts.findTopic(route, value.topic.id)!.draft.op_id;
   await act(() => value.drafts.editSaved(op, { text: 'Edited after putting it back' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Put back in reply box' }));
-  await screen.findByText('Put back. Open “Reply to topic” on its topic to send it.');
+  fireEvent.click(region.getByRole('button', { name: 'Put back in reply box' }));
+  await region.findByText('Put back. Open “Reply to topic” on its topic to send it.');
   expect(value.drafts.findTopic(route, value.topic.id)?.draft.text).toBe('Edited after putting it back');
   await reload(value);
   expect(notices.getSnapshot().some(notice => notice.id.startsWith('unsent:'))).toBe(false);
 });
 
-it('retains recovery after a failed draft save', async () => {
+it.each(noticeHosts)('retains recovery after a failed draft save in the %s host', async host => {
   vi.spyOn(held, 'putBackCancelled').mockRejectedValue(new Error('Draft save failed'));
-  const value = await setup('agent_removed');
-  fireEvent.click(await screen.findByRole('button', { name: 'Put back in reply box' }));
-  await screen.findByText(/Couldn’t put it back/);
+  const value = await setup('agent_removed', false, true, host);
+  const region = accessibleNotices(host);
+  fireEvent.click(await region.findByRole('button', { name: 'Put back in reply box' }));
+  await region.findByText(/Couldn’t put it back/);
   expect(value.transport.preferences.resolved_unsent_input_ids ?? []).not.toContain(value.input.id);
-  expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy();
+  expect(region.getByRole('button', { name: 'Put back in reply box' })).toBeTruthy();
+  fireEvent.click(region.getByRole('button', { name: 'Copy' }));
+  await region.findByText(/Copied\./);
+  expect(copyText).toHaveBeenLastCalledWith(value.input.payload.text);
 });
