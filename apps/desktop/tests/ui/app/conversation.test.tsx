@@ -306,6 +306,35 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     expect(sends(transport)).toHaveLength(3);
   });
 
+  it('shows the queued reply its stuck note in the view and in the pane after closing the view', async () => {
+    const transport = await setup(); await expand(); await switchQuestion();
+    fireEvent.change(within(conversation()).getByLabelText('Reply in your own words'), { target: { value: 'Held answer' } });
+    key(within(conversation()).getByLabelText('Reply in your own words'), 'Enter', { metaKey: true });
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    const box = () => within(conversation()).getByLabelText<HTMLTextAreaElement>('Reply message');
+    await waitFor(() => expect(box().disabled).toBe(false));
+    fireEvent.change(box(), { target: { value: 'Queued reply' } });
+    fireEvent.click(within(conversation().querySelector('[data-owner-input="2"]') as HTMLElement).getByRole('button', { name: 'Send reply' }));
+    await waitFor(() => expect(sends(transport)).toHaveLength(2));
+    const session = transport.sessions.get(route.session_id)!;
+    const saved = Object.values(session.inputs).find(input => input?.payload.text === 'Queued reply')!;
+    expect(saved.state).toBe('queued');
+    const note = (root: Element) => root.querySelector<HTMLElement>(`.stuck-note[data-stuck-input="${saved.id}"]`);
+    await waitFor(() => expect(note(conversation())).not.toBeNull());
+    const inView = note(conversation())!, text = (inView.textContent ?? '').trim();
+    expect(inView.getAttribute('data-stuck')).toBe('behind');
+    expect(text.startsWith('Queued behind your message on')).toBe(true);
+    fireEvent.click(within(conversation()).getByRole('button', { name: 'Back to Map' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Item conversation' })).toBeNull());
+    const pane = () => document.querySelector<HTMLElement>('.item-detail:not(.item-conversation)')!;
+    // Switching the view's item does not move the Map selection, so select the reply's item in the pane.
+    fireEvent.click(row('2'));
+    await waitFor(() => expect(pane().getAttribute('data-detail-item-id')).toBe('2'));
+    await waitFor(() => expect(note(pane())).not.toBeNull());
+    expect(note(pane())!.getAttribute('data-stuck')).toBe('behind');
+    expect((note(pane())!.textContent ?? '').trim()).toBe(text);
+  });
+
   it('keeps the view reply text when its save is not confirmed', async () => {
     const transport = await setup(); await expand(); await switchQuestion();
     fireEvent.change(within(conversation()).getByLabelText('Reply in your own words'), { target: { value: 'Held answer' } });
