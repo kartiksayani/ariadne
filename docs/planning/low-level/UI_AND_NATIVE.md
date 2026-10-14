@@ -13,7 +13,9 @@ AppShell
     SessionWorkspace: session evidence, topic/status/filter/search, TreeView | TopicGraph
     DetailRegion: ItemDetail
       ItemActions / AnswerControl
-      BackAndForthRounds / ItemTimeline
+      ItemConversation: shared messages, rounds and delivery recovery
+    ConversationView: temporary item overlay over SessionWorkspace and DetailRegion
+      ItemConversation / pinned current AnswerControl or ordinary composer
   UnsentMessageNotices: persistent recovery for cancelled messages without an item conversation
   Footer: implemented keyboard hints and scoped counts
   Dialogs: RegisterProject, BindSession, ArchiveTopic, ContinueTopic, ResolveInput, Settings
@@ -29,6 +31,7 @@ Header/tabs/footer are 48/38/30 px. Waiting is 300 px, center at least 560 px, d
 | Binding/runtime evidence | Bridge events plus last persisted lifecycle fact, always qualified when disconnected |
 | Complete message/round history | Domain snapshot; includes item/message relations, answer/request entries, round snapshots, forks, reopen snapshots |
 | UI selection, tabs, tree expansion, filters, scroll | Per-session preferences under `~/.ariadne/ui.json` |
+| Bigger conversation target and return focus | Local renderer state only; no preference or navigation selection write |
 | Owner action drafts and operation IDs | Backend preferences; retain same operation ID while commit status is unresolved |
 | Theme, window geometry, pin, notification watermark | Versioned global preferences |
 
@@ -151,6 +154,16 @@ Item detail renders full item history in two linked forms:
 
 Alpha.15 removes the Messages pane by owner decision, including its layout slot, header toggle, `m` shortcut and saved rail state. Item conversations keep full messages and their cancellation recovery. Topic replies and lifecycle messages with no item conversation remain stored and are not shown; there is no replacement history surface. Cancelled editable owner messages without an item conversation get persistent actionable notices until put back or dismissed. Restore/reopen prerequisites disable recovery until available; `putBackCancelled` preserves existing text and unconfirmed saves. These notices survive session selection changes. Older preference snapshots accept and ignore the retired `rail` field, while current DTOs and generated TypeScript omit it. Live updates never steal keyboard focus or scroll an owner away from older content.
 
+### Bigger item conversation (Alpha.15, 15.2)
+
+`ItemDetail` and `ConversationView` use shared `ItemConversation` rendering for the existing item history. Detail's Conversation expand icon has accessible label and tooltip `Open the conversation in a bigger view`. Its callback opens local overlay state for that item without writing a route or preference. `ConversationView` covers the Map/detail region, keeping the pinned Waiting panel interactive. Keep Map mounted with identical dimensions and mark it inert; unmount the covered detail's interactive body to avoid competing editors and shortcuts. Back to Map or Escape closes the overlay and returns focus to the opener when available, preserving Map selection, reading anchor, folds, filters and dimensions. An open peek closes before the overlay on Escape.
+
+Same-session Waiting selection replaces the overlay target only, without `revealItem`, Map selection or scroll changes. Details, cross-session Waiting selection, and deliberate navigation such as Go to from an item peek close the overlay before invoking ordinary navigation. Item references retain the shared name-chip peek behavior. Item shortcuts resolve the overlay item rather than the saved Map selection; Map row movement and selection actions stay inactive while Map is inert. Existing submission validation, captured revisions, operation IDs, cancellation and uncertain receipt guards apply to that target. Both surfaces consume the same per-item `OwnerDraftStore`; swapping or closing never discards or auto-sends a draft.
+
+Render messages oldest first with `Agent` and `You` labels. Retain the existing changed-item chips, before/after comparisons, saved option/text, `Read as` explanation, delivery facts, failed-delivery actions and `NotSentLine` recovery. An unanswered current question occupies a pinned footer labelled `Your turn · <short name>`, with a maximum height of 40% and independent overflow. Hide the ordinary composer while that question needs an answer; after a confirmed answer, use the ordinary item composer. Closed, archived or otherwise ineligible items keep their existing action guards.
+
+Derive a new-message divider only from trustworthy existing seen state. Capture the first new message ID when an overlay item opens or switches and retain that boundary for its viewing session; the seen dwell must not move or remove it. When there is no explicit `ItemSeen` revision, use `SessionSeen.since` as a timestamp cutoff for messages covered by that session baseline. When the recorded revision matches the current item revision, show no new section. Omit a divider for an explicit later seen revision that cannot be mapped to messages, or when no trustworthy cutoff exists. `Message` contains no item revision; `append_message` increments the item's revision without recording an `ItemChangeRecord`. Therefore current storage cannot reconstruct the full last-seen message boundary. Do not approximate it by message count, latest timestamp, or a nearby change record, and do not introduce preference fields for the overlay.
+
 ### Seeing changes and shared seen state (Alpha.14.4)
 
 Project owner-only preference `seen` through the shared change selectors, keeping
@@ -159,7 +172,7 @@ than the seen revision use a filled dot. Both use one coral-orange attention
 token. Wording-only records remain available in history without a marker. Reading
 never changes waiting status or counts.
 
-Opening detail starts a roughly one-second dwell for the captured item revision;
+Opening detail or the bigger conversation starts a roughly one-second dwell for the captured item revision;
 item peeks use the same rule. Leaving the item or closing the
 surface cancels that dwell. Save only the revision actually presented, so a later
 agent update remains unseen. The shared seen state clears its Map marker and
@@ -430,6 +443,8 @@ Keyboard navigation works when focus is outside editable controls:
 | Cmd+Enter | Submit the currently focused valid owner input |
 
 The `b` shortcut creates and submits a fresh Bring draft with the explicit text `Bring this up.` through the ordinary durable owner-input path. If that target already has a Bring draft or receipt, reveal that entry without editing, submitting or retrying it; existing text and uncertain outcomes require the normal explicit review or reconciliation action. Key repeat cannot create another input.
+
+With `ConversationView` open, item-action shortcuts target its item and Map navigation shortcuts cannot operate on the inert Map. Escape dismisses a peek first, then the conversation view. Ordinary navigation closes the view before following its route; drafts remain in the shared store.
 
 Roving tree focus uses visible row IDs and correct `aria-level`, `aria-expanded`, and `aria-selected`. All icons have labels; status always has adjacent text. Focus-visible is a 2 px accent outline. Dialogs trap and restore focus. Announce new waiting items and resolved inputs once through a polite live region; do not announce every message delta. Respect reduced motion and system appearance changes while theme is System. Verify contrast in both themes.
 

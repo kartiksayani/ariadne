@@ -188,6 +188,41 @@ preferences omit rail state; persisted snapshots accept and ignore the retired
 field while keeping strict unknown-field validation elsewhere. Recovery notices
 show current restore/reopen prerequisites before stored action feedback.
 
+### Bigger item conversation surface (Alpha.15, 15.2)
+
+`ItemConversation` is the shared conversation body consumed by `ItemDetail` and
+`ConversationView`; both use the existing validated session snapshot, history
+selectors, item labels/peeks, delivery recovery and per-item `OwnerDraftStore`.
+Preserve oldest-first messages, Agent/You labels, saved answers, Read as, change
+comparisons and failed-delivery/cancellation actions. The detail expand control is
+labelled `Open the conversation in a bigger view`.
+
+App owns a temporary overlay target and return-focus reference, separate from
+canonical Map selection. The overlay covers Map and detail while Waiting remains
+interactive. Map stays mounted at its current dimensions and inert; the covered
+detail interactive body is unmounted. Same-session Waiting targets replace only
+the overlay target. Details, cross-session selection and deliberate peek navigation
+close it before the existing reveal route. Back to Map or Escape closes it without
+navigation, with peek dismissal taking precedence. Item shortcuts use the overlay
+target and the ordinary revision/operation/receipt guards. No new persisted mode,
+session-wide conversation, host transcript read or owner-input command is added.
+
+An unanswered current question uses a pinned `Your turn · <short name>` footer
+capped at 40% of the view height; its answer control replaces the ordinary composer
+until answered. Closing or switching keeps shared drafts and uncertain operations.
+The view participates in existing captured-revision seen dwell through the shared
+reading lane.
+
+Capture the divider's first new message ID per item opening/switch and retain it
+through that viewing session, including seen dwell. The divider may derive a
+timestamp boundary from `SessionSeen.since` for baseline-covered messages when
+no explicit item seen revision exists. A current
+recorded item revision has no new section; an explicit later revision that cannot
+map to messages has no divider. Messages lack item revisions and `append_message`
+creates no `ItemChangeRecord`, so the full last-seen message boundary is not
+recoverable. Reuse existing seen preferences without adding fields or guessing a
+boundary from unrelated change records.
+
 ### Claude installed-helper acceptance join
 
 P3.3 joins the actual setup-rendered immutable Mod, executable CLI, native

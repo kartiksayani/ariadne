@@ -6,6 +6,7 @@ import { HideIcon } from '../shared/HideIcon';
 import { Notices } from '../pages/notices';
 
 export interface BodyProps {
+  readonly conversation?: ReactNode;
   readonly waiting: ReactNode;
   readonly center: ReactNode;
   readonly detail?: ReactNode;
@@ -41,7 +42,7 @@ function useWidth(ref: RefObject<HTMLDivElement | null>): number | null {
   return width;
 }
 
-export function Body({ waiting, center, detail, detailPath, onCloseDetail, onRemove, hidden = false, hiddenNotice, onHide, detailWidth = null, onResizeDetail,
+export function Body({ conversation, waiting, center, detail, detailPath, onCloseDetail, onRemove, hidden = false, hiddenNotice, onHide, detailWidth = null, onResizeDetail,
   waitingFolded = false, onFoldWaiting }: BodyProps) {
   const ref = useRef<HTMLDivElement>(null);
   const history = useContext(ItemHistoryContext);
@@ -97,8 +98,8 @@ export function Body({ waiting, center, detail, detailPath, onCloseDetail, onRem
   return <div ref={ref} className="shell-body" style={{ gridTemplateColumns: layout.columns }}>
     <div className={`shell-waiting${layout.folded ? ' shell-waiting-folded' : ''}`}>
       <WaitingFold.Provider value={fold}>{waiting}</WaitingFold.Provider></div>
-    <main className="shell-center"><div className="shell-center-content">{center}</div><Notices /></main>
-    {detail && <aside className={`shell-detail${hidden ? ' shell-detail-hidden' : ''}`} aria-label="Item detail">
+    <main className="shell-center" inert={!!conversation || undefined} aria-hidden={!!conversation || undefined}><div className="shell-center-content">{center}</div><Notices /></main>
+    {detail && <aside className={`shell-detail${hidden ? ' shell-detail-hidden' : ''}`} aria-label="Item detail" inert={!!conversation || undefined} aria-hidden={!!conversation || undefined}>
       {onResizeDetail && <div className="shell-detail-resize" role="separator" aria-orientation="vertical" aria-label="Resize detail panel"
         aria-valuemin={DETAIL_MIN} aria-valuemax={resizeMax} aria-valuenow={layout.detailWidth} tabIndex={0} title="Drag to resize; double-click for the default width"
         onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onKeyDown={keyDown}
@@ -126,5 +127,6 @@ export function Body({ waiting, center, detail, detailPath, onCloseDetail, onRem
       </div>
       <div className="shell-detail-scroll">{detail}</div>
     </aside>}
+    {conversation && <div className="shell-conversation">{conversation}</div>}
   </div>;
 }

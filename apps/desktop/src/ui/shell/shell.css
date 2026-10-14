@@ -298,12 +298,15 @@
 /* — body — */
 .shell-body {
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
   min-width: 0;
   overflow: auto hidden;
 }
 
 .shell-waiting {
+  grid-column: 1;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -311,6 +314,8 @@
 }
 
 .shell-center {
+  grid-column: 2;
+  grid-row: 1;
   position: relative;
   container: shell-center / inline-size;
   display: flex;
@@ -332,6 +337,8 @@
 }
 
 .shell-detail {
+  grid-column: 3;
+  grid-row: 1;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -339,6 +346,16 @@
   min-width: 0;
   background: var(--a-side);
   border-left: 1px solid var(--color-divider);
+}
+
+.shell-conversation {
+  z-index: 3;
+  grid-column: 2 / -1;
+  grid-row: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  background: var(--a-bg);
 }
 
 /* The detail panel's left edge: drag (or arrow keys) to resize it. */

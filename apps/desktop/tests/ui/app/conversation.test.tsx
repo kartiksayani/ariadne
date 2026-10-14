@@ -1,0 +1,431 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { DesktopApp } from '../../../src/App';
+import { createDesktopService } from '../../../src/data/service';
+import { notices } from '../../../src/ui/pages/notices';
+import { AppTransport, route, secondId } from './transport';
+
+afterEach(() => { cleanup(); notices.clear(); vi.restoreAllMocks(); });
+
+const sends = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'input_submit');
+const conversation = () => screen.getByRole('region', { name: 'Item conversation' });
+const detail = (id: string) => screen.getByLabelText(/^Detail of /, { selector: `[data-detail-item-id="${id}"]` });
+const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
+const card = (id: string, sessionId = route.session_id) => document.querySelector<HTMLElement>(`[data-waiting-item="${id}"][data-session-id="${sessionId}"]`)!;
+const selected = (transport: AppTransport) => transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id;
+const key = (target: Element, value: string, extra = {}) => fireEvent.keyDown(target, { key: value, ...extra });
+const alt = (target: Element, digit: number) => key(target, digit === 0 ? 'º' : '¡', { code: `Digit${digit}`, altKey: true });
+
+async function setup({ otherSession = false, baseline = false, dropReady = false } = {}) {
+  const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
+  const question = session.items['2']!;
+  question.options = Array.from({ length: 9 }, (_, index) => ({
+    id: `choice-${index + 1}`, label: `Window ${index + 1}`, consequence: `Use window ${index + 1}.`, recommended: index === 0,
+  }));
+  session.rounds[question.current_round_id!]!.options_snapshot = structuredClone(question.options);
+  const another = session.items['8']!;
+  another.status = 'waiting_on_me';
+  another.waiting_since = question.waiting_since;
+  another.recipient_binding_id = question.recipient_binding_id;
+  const referenceMessage = structuredClone(session.messages.find(message => message.kind === 'reply')!);
+  referenceMessage.id = '00000000-0000-4000-8000-000000000120'; referenceMessage.number = 16;
+  referenceMessage.item_id = '4'; referenceMessage.body = 'Review [the delivery question](item:2).';
+  session.messages.push(referenceMessage); session.items['4']!.updated_message_ids.push(referenceMessage.id);
+  if (dropReady) Object.values(session.inputs).forEach(input => {
+    if (input?.target.item_id === '4' && input.state === 'queued') input.state = 'handled';
+  });
+  session.rounds[another.current_round_id!]!.closed_at = null;
+  session.rounds[another.current_round_id!]!.question_revision = another.question_revision;
+  if (otherSession) {
+    const other = structuredClone(session); other.id = secondId; other.title = 'Other questions';
+    transport.sessions.set(secondId, other);
+  }
+  transport.preferences.global.selected_navigation = { kind: 'session', session: route };
+  Object.assign(transport.preferences.sessions[0], { tab_open: true, selected_item_id: '4' });
+  if (baseline) transport.preferences.seen = [{ session: route, since: '2026-10-03T12:00:30.000Z', items: [], topics: [] }];
+  render(<DesktopApp service={createDesktopService(transport)} />);
+  await screen.findByRole('region', { name: 'Session tree' });
+  await waitFor(() => {
+    expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
+    expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    expect(within(detail('4')).getByLabelText<HTMLTextAreaElement>('Reply message').disabled).toBe(false);
+    expect(card('2')).not.toBeNull(); expect(card('8')).not.toBeNull();
+  });
+  return transport;
+}
+
+async function expand() {
+  const button = screen.getByRole('button', { name: 'Open the conversation in a bigger view' });
+  button.focus(); fireEvent.click(button);
+  await screen.findByRole('region', { name: 'Item conversation' });
+  return button;
+}
+
+async function switchQuestion(id = '2') {
+  fireEvent.click(card(id));
+  await waitFor(() => expect(conversation().querySelector('[data-detail-item-id]')?.getAttribute('data-detail-item-id')).toBe(id));
+}
+
+describe('desktop item conversation', { timeout: 10_000 }, () => {
+  it('opens the selected item and returns focus to expand without remounting or scrolling the Map', async () => {
+    const transport = await setup();
+    const tree = screen.getByRole('region', { name: 'Session tree' }), selectedRow = row('4');
+    tree.scrollTop = 173;
+    const expandButton = await expand();
+    expect(within(conversation()).getByRole('heading', { level: 1 }).textContent).toBe('Record retry limits');
+    expect(document.activeElement).toBe(conversation());
+    expect(document.querySelectorAll('[data-detail-item-id]')).toHaveLength(1);
+    expect(document.querySelector('[data-covered-detail]')).not.toBeNull();
+    expect(screen.getByRole('region', { name: 'Session tree', hidden: true })).toBe(tree);
+    expect(row('4')).toBe(selectedRow); expect(tree.scrollTop).toBe(173); expect(selected(transport)).toBe('4');
+    fireEvent.click(within(conversation()).getByRole('button', { name: 'Back to Map' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Item conversation' })).toBeNull());
+    expect(screen.getByRole('region', { name: 'Session tree' })).toBe(tree);
+    expect(row('4')).toBe(selectedRow); expect(tree.scrollTop).toBe(173); expect(selected(transport)).toBe('4');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open the conversation in a bigger view' }));
+    expect(expandButton.isConnected).toBe(false);
+  });
+
+  it('closes a peek before the conversation, including Escape in a typed editor, and keeps the draft', async () => {
+    await setup(); await expand();
+    const words = within(conversation()).getByLabelText('Reply message');
+    fireEvent.change(words, { target: { value: 'Keep this draft when I leave.' } });
+    const reference = conversation().querySelector<HTMLButtonElement>('.name-chip');
+    expect(reference).toBeTruthy(); fireEvent.click(reference!);
+    const peek = await screen.findByRole('dialog', { name: /^Peek:/ });
+    key(within(peek).getByRole('button', { name: 'Close peek' }), 'Escape');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Peek:/ })).toBeNull());
+    expect(conversation()).toBeTruthy();
+    words.focus(); key(words, 'Escape');
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Item conversation' })).toBeNull());
+    expect(within(detail('4')).getByLabelText<HTMLTextAreaElement>('Reply message').value).toBe('Keep this draft when I leave.');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open the conversation in a bigger view' }));
+  });
+
+  it('switches same-session Waiting items without selecting them, while Details closes and navigates', async () => {
+    const transport = await setup(); await expand();
+    const tree = screen.getByRole('region', { name: 'Session tree', hidden: true }), mapRow = row('4');
+    const reveals = transport.queries.filter(query => query.request.command === 'reveal_item').length;
+    await switchQuestion(); await switchQuestion('8');
+    expect(selected(transport)).toBe('4'); expect(row('4')).toBe(mapRow);
+    expect(screen.getByRole('region', { name: 'Session tree', hidden: true })).toBe(tree);
+    expect(transport.queries.filter(query => query.request.command === 'reveal_item')).toHaveLength(reveals);
+    fireEvent.click(within(card('2')).getByRole('button', { name: 'Details' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Item conversation' })).toBeNull());
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
+    await waitFor(() => expect(selected(transport)).toBe('2'));
+  });
+
+  it('closes the conversation and navigates when a Waiting item belongs to another session', async () => {
+    const transport = await setup({ otherSession: true }); await expand();
+    await waitFor(() => expect(card('2', secondId)).not.toBeNull());
+    fireEvent.click(card('2', secondId));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Item conversation' })).toBeNull());
+    await waitFor(() => expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: { ...route, session_id: secondId } }));
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
+  });
+
+  it('keeps separate item drafts through Waiting switches and returning to the Map', async () => {
+    const transport = await setup();
+    fireEvent.change(within(detail('4')).getByLabelText('Reply message'), { target: { value: 'Map item draft' } });
+    await expand(); await switchQuestion();
+    fireEvent.change(within(conversation()).getByLabelText('Reply in your own words'), { target: { value: 'First answer draft' } });
+    await switchQuestion('8');
+    fireEvent.change(within(conversation()).getByLabelText('Reply in your own words'), { target: { value: 'Second answer draft' } });
+    await switchQuestion();
+    expect(within(conversation()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe('First answer draft');
+    await switchQuestion('8');
+    expect(within(conversation()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe('Second answer draft');
+    key(conversation(), 'Escape');
+    expect(within(detail('4')).getByLabelText<HTMLTextAreaElement>('Reply message').value).toBe('Map item draft');
+    expect(selected(transport)).toBe('4'); expect(sends(transport)).toHaveLength(0);
+  });
+
+  it.each(['r', 'a'])('focuses only the overlay answer with %s while the Map selects a different item', async shortcut => {
+    const transport = await setup(); await expand(); await switchQuestion();
+    key(conversation(), shortcut);
+    await waitFor(() => expect(document.activeElement).toBe(conversation().querySelector('[data-answer-option="0"]')));
+    expect(document.querySelectorAll('[data-detail-item-id]')).toHaveLength(1);
+    expect(selected(transport)).toBe('4'); expect(sends(transport)).toHaveLength(0);
+  });
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])('selects and sends overlay option %i instead of targeting the covered Map item', async digit => {
+    const transport = await setup(); await expand(); await switchQuestion();
+    key(conversation(), String(digit), { code: `Digit${digit}` });
+    await waitFor(() => expect(conversation().querySelector(`[data-answer-option="${digit - 1}"]`)?.getAttribute('aria-pressed')).toBe('true'));
+    const words = within(conversation()).getByLabelText('Reply in your own words');
+    fireEvent.change(words, { target: { value: `Note for option ${digit}` } });
+    conversation().focus(); alt(conversation(), digit);
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0]).toMatchObject({ session: route, command: { params: { kind: 'answer', target: { item_id: '2' }, selected_option_id: `choice-${digit}`, text: `Note for option ${digit}` } } });
+    expect(selected(transport)).toBe('4');
+  });
+
+  it('Option zero focuses own words and Command Enter answers the pinned question then restores the ordinary composer', async () => {
+    const transport = await setup(); await expand(); await switchQuestion();
+    expect(conversation().querySelector('.conversation-pin')?.textContent).toContain('Your turn');
+    expect(within(conversation()).queryByLabelText('Reply message')).toBeNull();
+    alt(conversation(), 0);
+    const words = within(conversation()).getByLabelText('Reply in your own words');
+    await waitFor(() => expect(document.activeElement).toBe(words));
+    fireEvent.change(words, { target: { value: 'Answer from the larger view' } });
+    key(words, 'Enter', { metaKey: true });
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0].command).toMatchObject({ params: { kind: 'answer', target: { item_id: '2' }, text: 'Answer from the larger view' } });
+    await waitFor(() => expect(conversation().querySelector('.conversation-pin')).toBeNull());
+    expect(within(conversation()).getByLabelText('Reply message')).toBeTruthy();
+    expect(selected(transport)).toBe('4');
+  });
+
+  it('Command Enter sends the ordinary overlay composer to its own item', async () => {
+    const transport = await setup(); await expand(); await switchQuestion();
+    const session = transport.sessions.get(route.session_id)!;
+    session.items['2']!.status = 'open'; session.rounds[session.items['2']!.current_round_id!]!.closed_at = session.updated_at; ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    const words = await within(conversation()).findByLabelText('Reply message');
+    fireEvent.change(words, { target: { value: 'Reply to the overlay item' } });
+    key(conversation(), 'r'); await waitFor(() => expect(document.activeElement).toBe(words));
+    key(words, 'Enter', { metaKey: true });
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0].command).toMatchObject({ params: { kind: 'reply', target: { item_id: '2' }, text: 'Reply to the overlay item' } });
+    expect(selected(transport)).toBe('4');
+  });
+
+  it('retries an uncertain answer with the identical operation and message', async () => {
+    const transport = await setup(); await expand(); await switchQuestion();
+    const words = within(conversation()).getByLabelText('Reply in your own words');
+    fireEvent.change(words, { target: { value: 'Keep exact retry words: café\nsecond line' } });
+    transport.failNext = 'input_submit'; key(words, 'Enter', { metaKey: true });
+    const retry = await within(conversation()).findByRole('button', { name: 'Try sending again' });
+    expect(sends(transport)).toHaveLength(1);
+    const attempted = structuredClone(sends(transport)[0]);
+    fireEvent.click(retry);
+    await waitFor(() => expect(sends(transport)).toHaveLength(2));
+    expect(sends(transport)[1]).toEqual(attempted);
+    await waitFor(() => expect(within(conversation()).queryByRole('button', { name: 'Try sending again' })).toBeNull());
+    expect(selected(transport)).toBe('4');
+  });
+
+  it('keeps the opening divider anchored after the conversation dwell marks its item seen', async () => {
+    const transport = await setup({ baseline: true }); await expand(); await switchQuestion();
+    const divider = within(conversation()).getByText('New since you last looked');
+    const message = divider.closest('[data-message-id]')!;
+    expect(message.getAttribute('data-message-id')).toBe('00000000-0000-4000-8000-000000000114');
+    expect(transport.preferences.seen![0].items.some(item => item.item_id === '2')).toBe(false);
+    await waitFor(() => expect(transport.preferences.seen![0].items).toContainEqual({
+      item_id: '2', revision: transport.sessions.get(route.session_id)!.items['2']!.revision,
+    }), { timeout: 3000 });
+    expect(within(conversation()).getByText('New since you last looked')).toBe(divider);
+    expect(divider.closest('[data-message-id]')).toBe(message);
+    expect(selected(transport)).toBe('4');
+  });
+
+  it.each(['Command Enter', 'Option digit'])('sends only once during a held %s burst', async shortcut => {
+    const transport = await setup(); await expand(); await switchQuestion();
+    const words = within(conversation()).getByLabelText('Reply in your own words');
+    fireEvent.change(words, { target: { value: 'Exactly one answer' } });
+    const invoke = transport.invoke.bind(transport);
+    let release!: () => void, requested = 0;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if ('command' in args.request && args.request.command.command === 'input_submit') { ++requested; await gate; }
+      return invoke(name, args);
+    });
+    try {
+      await act(async () => {
+        if (shortcut === 'Command Enter') {
+          key(words, 'Enter', { metaKey: true }); key(words, 'Enter', { metaKey: true }); key(words, 'Enter', { metaKey: true, repeat: true });
+        } else {
+          alt(conversation(), 1); alt(conversation(), 1); alt(conversation(), 2);
+          key(conversation(), '¡', { code: 'Digit1', altKey: true, repeat: true });
+        }
+      });
+      await waitFor(() => expect(requested).toBe(1));
+      await act(async () => { release(); });
+      await waitFor(() => expect(sends(transport)).toHaveLength(1));
+      expect(sends(transport)[0].command).toMatchObject({ params: { kind: 'answer', target: { item_id: '2' }, text: 'Exactly one answer' } });
+    } finally { await act(async () => { release(); }); }
+  });
+
+  it('keeps graph, history and archive keys away from the covered Map', async () => {
+    const transport = await setup();
+    fireEvent.click(row('3')); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="3"]' });
+    fireEvent.click(row('4')); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' });
+    await waitFor(() => expect(selected(transport)).toBe('4'));
+    await expand(); await switchQuestion();
+    const mutations = transport.mutations.length, reveals = transport.queries.filter(query => query.request.command === 'reveal_item').length;
+    conversation().focus(); key(conversation(), 'g'); key(conversation(), 'e');
+    key(conversation(), '[', { metaKey: true }); key(document.body, ']', { metaKey: true });
+    await act(async () => { await Promise.resolve(); });
+    expect(selected(transport)).toBe('4');
+    expect(conversation().querySelector('[data-detail-item-id]')?.getAttribute('data-detail-item-id')).toBe('2');
+    expect(transport.queries.filter(query => query.request.command === 'reveal_item')).toHaveLength(reveals);
+    expect(transport.mutations.slice(mutations).some(request => request.command.command === 'topic_archive')).toBe(false);
+    key(conversation(), 'Escape');
+    expect(screen.getByRole('button', { name: 'Tree' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('region', { name: 'Session tree' })).toBeTruthy();
+  });
+
+  it('keeps a typed Drop reason through expansion, a Waiting switch and Back to Map', async () => {
+    const transport = await setup({ dropReady: true });
+    fireEvent.click(within(detail('4')).getByRole('button', { name: /^Drop/ }));
+    const reason = ' Keep the exact reason: café · remove the old window ';
+    fireEvent.change(within(detail('4')).getByLabelText('Drop reason'), { target: { value: reason } });
+    const kept = within(detail('4')).getByLabelText<HTMLInputElement>('Drop reason').value;
+    expect(kept).toBe(reason);
+    await expand();
+    expect(within(conversation()).getByLabelText<HTMLInputElement>('Drop reason').value).toBe(kept);
+    await switchQuestion();
+    fireEvent.click(within(conversation()).getByRole('button', { name: 'Back to Map' }));
+    expect(within(detail('4')).getByLabelText<HTMLInputElement>('Drop reason').value).toBe(kept);
+    expect(sends(transport)).toHaveLength(0); expect(selected(transport)).toBe('4');
+    const session = transport.sessions.get(route.session_id)!;
+    const pending = Object.values(session.inputs).find(input => input?.target.item_id === '4' && input.kind === 'drop')!;
+    pending.state = 'queued'; ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    await waitFor(() => expect(within(detail('4')).queryByLabelText('Drop reason')).toBeNull());
+    await waitFor(() => expect(transport.preferences.drafts.some(draft => draft.intent === 'drop'
+      && draft.text === `Let’s drop this (${reason}): Record retry limits`)).toBe(true));
+    pending.state = 'handled'; ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    expect((await within(detail('4')).findByLabelText<HTMLInputElement>('Drop reason')).value).toBe(reason);
+    expect(sends(transport)).toHaveLength(0);
+  });
+
+  it('keeps an editable saved Drop message when the question changes and requires review before sending', async () => {
+    const transport = await setup({ dropReady: true });
+    fireEvent.click(within(detail('4')).getByRole('button', { name: /^Drop/ }));
+    fireEvent.change(within(detail('4')).getByLabelText('Drop reason'), { target: { value: 'Original raw reason' } });
+    const session = transport.sessions.get(route.session_id)!, item = session.items['4']!;
+    item.question = 'Record revised retry limits'; ++item.revision; ++item.question_revision; ++session.revision;
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    await within(detail('4')).findByText('This item changed. Review the current question and options; your text is retained.');
+    expect(within(detail('4')).getByRole<HTMLButtonElement>('button', { name: 'Drop item' }).disabled).toBe(true);
+    const message = 'Please drop the revised retry limits. Keep these exact words: café\nsecond line';
+    const saved = within(detail('4')).getByLabelText<HTMLTextAreaElement>('Saved drop message');
+    expect(saved.value).toBe('Let’s drop this (Original raw reason): Record retry limits');
+    expect(saved.readOnly).toBe(false);
+    fireEvent.change(saved, { target: { value: message } });
+    fireEvent.click(within(detail('4')).getByRole('button', { name: 'Drop item' }));
+    expect(sends(transport)).toHaveLength(0);
+    await expand();
+    expect(within(conversation()).getByLabelText<HTMLTextAreaElement>('Saved drop message').value).toBe(message);
+    expect(within(conversation()).getByLabelText<HTMLTextAreaElement>('Saved drop message').readOnly).toBe(false);
+    expect(within(conversation()).getByRole<HTMLButtonElement>('button', { name: 'Drop item' }).disabled).toBe(true);
+    await waitFor(() => expect(transport.preferences.drafts.some(draft => draft.intent === 'drop' && draft.text === message)).toBe(true));
+    fireEvent.click(within(conversation()).getByRole('button', { name: 'Review this question' }));
+    await waitFor(() => expect(within(conversation()).getByRole<HTMLButtonElement>('button', { name: 'Drop item' }).disabled).toBe(false));
+    expect(within(conversation()).queryByText('This item changed. Review the current question and options; your text is retained.')).toBeNull();
+    fireEvent.click(within(conversation()).getByRole('button', { name: 'Drop item' }));
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0].command).toMatchObject({ params: { kind: 'drop', target: { item_id: '4' },
+      text: message } });
+    await waitFor(() => expect(within(conversation()).queryByLabelText('Drop reason')).toBeNull());
+    expect(within(conversation()).queryByLabelText('Saved drop message')).toBeNull();
+  });
+
+  it('keeps an uncertain Drop submission read-only across surfaces and retries the original operation exactly', async () => {
+    const transport = await setup({ dropReady: true });
+    fireEvent.click(within(detail('4')).getByRole('button', { name: /^Drop/ }));
+    fireEvent.change(within(detail('4')).getByLabelText('Drop reason'), { target: { value: ' Keep retry words: café ' } });
+    await expand(); transport.failNext = 'input_submit';
+    fireEvent.click(within(conversation()).getByRole('button', { name: 'Drop item' }));
+    const saved = await within(conversation()).findByLabelText<HTMLTextAreaElement>('Saved drop message');
+    const expected = 'Let’s drop this ( Keep retry words: café ): Record retry limits';
+    expect(saved.value).toBe(expected); expect(saved.readOnly).toBe(true);
+    expect(within(conversation()).queryByLabelText('Drop reason')).toBeNull();
+    expect(sends(transport)).toHaveLength(1);
+    const attempted = structuredClone(sends(transport)[0]);
+    expect(attempted.command).toMatchObject({ params: { kind: 'drop', target: { item_id: '4' }, text: expected } });
+    await switchQuestion();
+    fireEvent.click(within(conversation()).getByRole('button', { name: 'Back to Map' }));
+    const kept = within(detail('4')).getByLabelText<HTMLTextAreaElement>('Saved drop message');
+    expect(kept.value).toBe(expected); expect(kept.readOnly).toBe(true);
+    await expand();
+    expect(within(conversation()).getByLabelText<HTMLTextAreaElement>('Saved drop message').value).toBe(expected);
+    expect(sends(transport)).toHaveLength(1);
+    fireEvent.click(within(conversation()).getByRole('button', { name: 'Try sending again' }));
+    await waitFor(() => expect(sends(transport)).toHaveLength(2));
+    expect(sends(transport)[1]).toEqual(attempted);
+    expect(new Set(sends(transport).map(request => request.command.op_id)).size).toBe(1);
+    await waitFor(() => expect(within(conversation()).queryByRole('button', { name: 'Try sending again' })).toBeNull());
+    expect(within(conversation()).queryByLabelText('Saved drop message')).toBeNull();
+    expect(within(conversation()).queryByLabelText('Drop reason')).toBeNull();
+    expect(selected(transport)).toBe('4');
+  });
+
+  it('sends the stored Drop message once after a pre-submit session read failure without nesting the envelope', async () => {
+    const transport = await setup({ dropReady: true });
+    fireEvent.click(within(detail('4')).getByRole('button', { name: /^Drop/ }));
+    const reason = ' Keep this whitespace and café ';
+    const expected = 'Let’s drop this ( Keep this whitespace and café ): Record retry limits';
+    fireEvent.change(within(detail('4')).getByLabelText('Drop reason'), { target: { value: reason } });
+    await waitFor(() => expect(transport.preferences.drafts.some(draft => draft.intent === 'drop' && draft.text === expected)).toBe(true));
+    const operation = transport.preferences.drafts.find(draft => draft.intent === 'drop')!.op_id;
+    await expand();
+    const invoke = transport.invoke.bind(transport);
+    let failRead = true;
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (failRead && 'request' in args.request && args.request.request.command === 'session_get'
+        && args.request.session?.session_id === route.session_id) {
+        failRead = false;
+        return { api_version: 1, ok: false, error: { code: 'io_error', message: 'Session read temporarily failed.', hint: '', retryable: true, field_errors: [] } };
+      }
+      return invoke(name, args);
+    });
+    fireEvent.click(within(conversation()).getByRole('button', { name: 'Drop item' }));
+    await within(conversation()).findAllByText('Ariadne couldn’t read or save its data. Try again.');
+    expect(sends(transport)).toHaveLength(0);
+    expect(within(conversation()).getByLabelText<HTMLInputElement>('Drop reason').value).toBe(reason);
+    expect(within(conversation()).queryByLabelText('Saved drop message')).toBeNull();
+    fireEvent.click(within(conversation()).getByRole('button', { name: 'Back to Map' }));
+    expect(within(detail('4')).getByLabelText<HTMLInputElement>('Drop reason').value).toBe(reason);
+    await expand();
+    fireEvent.click(within(conversation()).getByRole('button', { name: 'Drop item' }));
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0].command).toMatchObject({ op_id: operation, params: { kind: 'drop', target: { item_id: '4' }, text: expected } });
+    await waitFor(() => expect(within(conversation()).queryByLabelText('Drop reason')).toBeNull());
+  });
+
+  it('recovers a definitively rejected Drop through an editable revised operation and a fresh review', async () => {
+    const transport = await setup({ dropReady: true });
+    fireEvent.click(within(detail('4')).getByRole('button', { name: /^Drop/ }));
+    fireEvent.change(within(detail('4')).getByLabelText('Drop reason'), { target: { value: ' Original rejected words ' } });
+    await expand();
+    const invoke = transport.invoke.bind(transport);
+    let reject = true;
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const request = args.request;
+      if (reject && 'command' in request && request.command.command === 'input_submit') {
+        reject = false; transport.mutations.push(structuredClone(request));
+        return { api_version: 1, ok: false, error: { code: 'queue_full', message: 'Queue full.', hint: '', retryable: true, field_errors: [] } };
+      }
+      return invoke(name, args);
+    });
+    fireEvent.click(within(conversation()).getByRole('button', { name: 'Drop item' }));
+    const revise = await within(conversation()).findByRole('button', { name: 'Edit and send again' });
+    expect(sends(transport)).toHaveLength(1);
+    const original = structuredClone(sends(transport)[0]);
+    expect(within(conversation()).getByLabelText<HTMLTextAreaElement>('Saved drop message').value)
+      .toBe('Let’s drop this ( Original rejected words ): Record retry limits');
+    expect(within(conversation()).getByLabelText<HTMLTextAreaElement>('Saved drop message').readOnly).toBe(true);
+    fireEvent.click(revise);
+    const reason = await within(conversation()).findByLabelText<HTMLInputElement>('Drop reason');
+    await waitFor(() => expect(reason.disabled).toBe(false));
+    expect(reason.value).toBe(' Original rejected words ');
+    expect(within(conversation()).getByRole<HTMLButtonElement>('button', { name: 'Drop item' }).disabled).toBe(true);
+    fireEvent.change(reason, { target: { value: ' Revised words: café ' } });
+    expect(sends(transport)).toHaveLength(1);
+    fireEvent.click(within(conversation()).getByRole('button', { name: 'Review this question' }));
+    await waitFor(() => expect(within(conversation()).getByRole<HTMLButtonElement>('button', { name: 'Drop item' }).disabled).toBe(false));
+    fireEvent.click(within(conversation()).getByRole('button', { name: 'Drop item' }));
+    await waitFor(() => expect(sends(transport)).toHaveLength(2));
+    expect(sends(transport)[1].command.op_id).not.toBe(original.command.op_id);
+    expect(sends(transport)[1].command).toMatchObject({ params: { kind: 'drop', target: { item_id: '4' },
+      text: 'Let’s drop this ( Revised words: café ): Record retry limits' } });
+    expect(original.command).toMatchObject({ params: { text: 'Let’s drop this ( Original rejected words ): Record retry limits' } });
+    await waitFor(() => expect(within(conversation()).queryByLabelText('Drop reason')).toBeNull());
+    expect(within(conversation()).queryByRole('button', { name: 'Try sending again' })).toBeNull();
+    expect(selected(transport)).toBe('4');
+  });
+});

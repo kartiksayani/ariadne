@@ -528,6 +528,110 @@ test('a long waiting conversation opens at its latest ask and keeps the question
   expect(denied).toEqual([]);
 });
 
+const conversationSizes = [{ width: 1280, height: 800 }, { width: 900, height: 650 }] as const;
+
+for (const theme of ['dark', 'light'] as const) for (const viewport of conversationSizes) {
+  const id = `conversation-${theme}-${viewport.width}x${viewport.height}`;
+  test(`frame ${id}`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec('1u'), ...viewport, theme });
+    const unfold = page.getByRole('button', { name: /^Show Waiting on me/ });
+    if (await unfold.count()) await unfold.click();
+    await page.getByRole('button', { name: 'Open the conversation in a bigger view', exact: true }).click();
+    const conversation = page.getByRole('region', { name: 'Item conversation', exact: true });
+    await expect(conversation).toBeVisible();
+    await expect(conversation.getByRole('button', { name: 'Back to Map', exact: true })).toBeInViewport();
+    const pane = conversation.locator('.item-detail.item-conversation'), body = pane.locator('.detail-body'), dock = pane.locator('.detail-dock');
+    await expect(page.locator('.item-detail')).toHaveCount(1);
+    await expect(page.locator('.shell-detail .detail-body')).toHaveCount(0);
+    await expect(page.locator('.shell-center')).toHaveAttribute('inert', '');
+    await expect(page.locator('.shell-detail')).toHaveAttribute('inert', '');
+    const turns = pane.locator('.detail-chat-list > li[data-message-id]');
+    const messages = await turns.evaluateAll(elements => elements.map(element => element.getAttribute('data-message-id')!));
+    expect(messages.length, 'the fixture contains several conversation turns').toBeGreaterThan(3);
+    expect(new Set(messages).size, 'each message appears once').toBe(messages.length);
+    // The fixture's zero-padded message IDs encode their original message numbers.
+    expect(messages, 'messages read oldest first').toEqual([...messages].sort());
+    await expect(turns.first()).toBeInViewport();
+    const pin = dock.locator('.conversation-pin');
+    await expect(pin.getByRole('heading', { name: /^Your turn ·/ })).toBeInViewport();
+    await expect(pin.locator('p').first()).toBeInViewport();
+    await expect(dock.getByRole('textbox', { name: 'Reply in your own words', exact: true })).toBeAttached();
+    await expect(dock.locator('[data-answer-option]')).not.toHaveCount(0);
+    await settle(page);
+    const geometry = await pane.evaluate(element => {
+      const pane = element.getBoundingClientRect(), body = element.querySelector('.detail-body')!.getBoundingClientRect();
+      const dock = element.querySelector('.detail-dock')!.getBoundingClientRect();
+      return { body: body.height / pane.height, dock: dock.height / pane.height,
+        bodyBottom: body.bottom, dockTop: dock.top, dockBottom: dock.bottom, paneBottom: pane.bottom };
+    });
+    expect(geometry.body, 'the transcript keeps most of the conversation pane').toBeGreaterThanOrEqual(0.55);
+    expect(geometry.dock, 'the answer footer uses at most 40% of the pane').toBeLessThanOrEqual(0.40);
+    expect(geometry.bodyBottom).toBeLessThanOrEqual(geometry.dockTop + 1);
+    expect(geometry.dockBottom).toBeCloseTo(geometry.paneBottom, 0);
+    const overlayBox = (await conversation.boundingBox())!, waitingBox = (await page.locator('.shell-waiting').boundingBox())!;
+    const tabs = (await page.locator('.shell-tabs').boundingBox())!, footer = (await page.locator('.shell-footer').boundingBox())!;
+    expect(overlayBox.x, 'Waiting stays beside the bigger conversation').toBeGreaterThanOrEqual(waitingBox.x + waitingBox.width - 1);
+    expect(overlayBox.y).toBeGreaterThanOrEqual(tabs.y + tabs.height - 1);
+    expect(overlayBox.x + overlayBox.width).toBeLessThanOrEqual(viewport.width + 1);
+    expect(overlayBox.y + overlayBox.height).toBeLessThanOrEqual(footer.y + 1);
+    await page.screenshot({ path: testInfo.outputPath(`${id}.png`), animations: 'disabled' });
+    expect(await body.evaluate(element => element.scrollHeight > element.clientHeight), 'the long transcript scrolls').toBe(true);
+    const footerBefore = await dock.boundingBox(), pinBefore = await pin.boundingBox();
+    await body.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await settle(page);
+    expect(await dock.boundingBox(), 'scrolling messages keeps the answer footer pinned').toEqual(footerBefore);
+    expect(await pin.boundingBox(), 'the waiting question stays with its answer controls').toEqual(pinBefore);
+    // A capped footer scrolls internally: every answer remains reachable without moving the chat.
+    const chatScroll = await body.evaluate(element => element.scrollTop);
+    for (const option of await dock.locator('[data-answer-option]').all()) {
+      await option.scrollIntoViewIfNeeded(); await expect(option).toBeInViewport();
+    }
+    const ownWords = dock.getByRole('textbox', { name: 'Reply in your own words', exact: true });
+    await ownWords.scrollIntoViewIfNeeded(); await expect(ownWords).toBeInViewport();
+    expect(await body.evaluate(element => element.scrollTop)).toBe(chatScroll);
+  });
+}
+
+for (const viewport of conversationSizes) test(`owner input keeps the Map reading position through conversation and Waiting at ${viewport.width}x${viewport.height}`, async ({ page, origin }) => {
+  await openApp(page, origin, { ...frameSpec('1b'), ...viewport });
+  const unfold = page.getByRole('button', { name: /^Show Waiting on me/ });
+  if (await unfold.count()) await unfold.click();
+  const scroller = page.locator('.tree-scroll'), reading = page.locator('[data-item-id="3.1"]');
+  await reading.click();
+  await expect(reading).toHaveAttribute('aria-selected', 'true');
+  await reading.evaluate(element => element.scrollIntoView({ block: 'center', behavior: 'instant' }));
+  await settle(page);
+  const mapNode = await scroller.elementHandle(), rowNode = await reading.elementHandle();
+  const position = async () => ({ top: await reading.evaluate(element => element.getBoundingClientRect().top),
+    scroll: await scroller.evaluate(element => element.scrollTop),
+    selected: await page.locator('.tree-item[aria-selected="true"]').getAttribute('data-item-id') });
+  const before = await position();
+  expect(before.scroll, 'the owner starts partway through the Map').toBeGreaterThan(0);
+  await expect(reading).toBeInViewport();
+  const unchanged = async () => {
+    await settle(page);
+    expect(await position()).toEqual(before);
+    expect(await scroller.evaluate((element, original) => element === original, mapNode), 'the same Map stays mounted').toBe(true);
+    expect(await reading.evaluate((element, original) => element === original, rowNode), 'the reading row stays mounted').toBe(true);
+  };
+  await page.getByRole('button', { name: 'Open the conversation in a bigger view', exact: true }).click();
+  const conversation = page.getByRole('region', { name: 'Item conversation', exact: true });
+  await expect(conversation.locator('.item-conversation')).toHaveAttribute('data-detail-item-id', '3.1');
+  await unchanged();
+  await expect(page.locator('.shell-center')).toHaveAttribute('inert', '');
+  await expect(page.locator('.shell-detail .item-detail')).toHaveCount(0);
+  const waiting = page.locator('[data-waiting-item="2.1.1"]');
+  await expect(waiting).toBeVisible();
+  await waiting.locator('.waiting-question').click();
+  await expect(conversation.locator('.item-conversation')).toHaveAttribute('data-detail-item-id', '2.1.1');
+  await unchanged();
+  await conversation.getByRole('button', { name: 'Back to Map', exact: true }).click();
+  await expect(conversation).toHaveCount(0);
+  await expect(page.locator('.shell-center')).not.toHaveAttribute('inert', '');
+  await expect(page.locator('.shell-detail .item-detail')).toHaveAttribute('data-detail-item-id', '3.1');
+  await unchanged();
+});
+
 for (const id of answerFrameIds) {
   test(`frame ${id}`, async ({ page, origin }, testInfo) => {
     const spec = frameSpec(id), denied: string[] = [];

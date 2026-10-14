@@ -1,0 +1,65 @@
+.conversation-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--a-side);
+}
+
+.conversation-header {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.conversation-header h1 {
+  margin: 0 0 8px;
+  font-size: calc(20px * var(--text-scale));
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.conversation-header > .btn {
+  flex-shrink: 0;
+}
+
+.conversation-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-transform: capitalize;
+}
+
+.item-conversation .detail-body,
+.item-conversation .detail-dock {
+  padding-inline: max(24px, calc((100% - 780px) / 2));
+}
+
+.item-conversation .detail-body {
+  padding-top: 24px;
+}
+
+.item-conversation .detail-dock {
+  padding-block: 12px;
+}
+
+.item-conversation .detail-bubble {
+  max-width: 100%;
+}
+
+.conversation-pin h3 {
+  margin: 0 0 8px;
+  font-size: calc(14px * var(--text-scale));
+}
+
+.conversation-unseen {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-divider);
+  color: color-mix(in srgb, var(--color-text) 65%, transparent);
+  font-size: calc(12px * var(--text-scale));
+}

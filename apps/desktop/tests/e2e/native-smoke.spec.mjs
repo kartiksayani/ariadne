@@ -185,10 +185,35 @@ async function delivery(configuration) {
     'Waiting answer did not appear in Sent with its chosen option');
   await browser.saveScreenshot(join(evidence, 'native-waiting-answer.png'));
 
-  // The held answer hides the detail's answer slot; each reply queues behind it from the follow-up box.
-  for (const text of ownerTexts.slice(1)) {
+  // The first follow-up uses the bigger conversation view; the others use the detail's same composer.
+  // The held answer hides the answer slot, so all four replies queue behind it.
+  for (const [index, text] of ownerTexts.slice(1).entries()) {
+    if (index === 0) {
+      const expand = await browser.$('.item-detail button[aria-label="Open the conversation in a bigger view"]');
+      await expand.waitForDisplayed(); await expand.waitForEnabled(); await expand.click();
+      await browser.$('section[aria-label="Item conversation"]').waitForDisplayed();
+    }
     await openFollowUp(true);
     await sendDetailReply(configuration, text);
+    if (index === 0) {
+      const saved = Object.values((await snapshot(configuration)).inputs).find(input => input.payload.text === text);
+      assert.ok(saved, 'The bigger conversation view saved its reply');
+      assert.equal(saved.state, 'queued', 'The conversation reply queues behind the held answer');
+      const pending = await browser.$(`section[aria-label="Item conversation"] [data-pending="${saved.id}"]`);
+      await pending.waitForExist(); await pending.scrollIntoView({ block: 'center' });
+      await wait(async () => await pending.isDisplayed() && folded(await pending.getText()).includes(folded(text))
+        && (await pending.getText()).includes('Not sent yet'), 'The conversation reply and its queued delivery were not visible');
+      const delivery = await browser.$('section[aria-label="Item conversation"] .detail-delivery[role="status"]');
+      await wait(async () => await delivery.isDisplayed() && (await delivery.getText()).startsWith('Queued for '),
+        'The bigger conversation view did not show the saved reply delivery');
+      await browser.saveScreenshot(join(evidence, 'native-item-conversation.png'));
+      const back = await browser.$('section[aria-label="Item conversation"]').$('button=Back to Map');
+      await back.waitForDisplayed(); await back.waitForEnabled(); await back.click();
+      await wait(async () => !(await browser.$('section[aria-label="Item conversation"]').isExisting()), 'Back to Map did not close the bigger conversation view');
+      assert.equal(await browser.$('.item-detail').getAttribute('data-detail-item-id'), configuration.itemId,
+        'Back to Map keeps the conversation item selected');
+      await showHistory([text]);
+    }
   }
   const held = await snapshot(configuration), inputs = orderedInputs(held), savedReceipts = receipts(held, inputs);
   assert.equal(inputs.length, 5); assert.equal(new Set(inputs.map(input => input.id)).size, 5);
