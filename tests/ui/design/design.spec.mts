@@ -740,6 +740,19 @@ const holdSaving = (page: Page) => page.evaluate(() => {
   const transport = (window as unknown as PageWindow).__designFixture.transport, original = transport.invoke.bind(transport);
   transport.invoke = (name, args) => args.request.command?.command === 'input_submit' ? new Promise(() => {}) : original(name, args);
 });
+/** Loses the response to the first draft save only; background patches such as the seen dwell pass through untouched. */
+const failDraftSave = (page: Page) => page.evaluate(() => {
+  const transport = (window as unknown as PageWindow).__designFixture.transport, original = transport.invoke.bind(transport);
+  let armed = true;
+  transport.invoke = (name, args) => {
+    const command = args.request.command as { command: string; params?: { entries?: { kind: string }[] } } | undefined;
+    if (armed && command?.command === 'preferences_patch' && command.params?.entries?.some(entry => entry.kind === 'upsert_draft')) {
+      armed = false;
+      return Promise.reject(new Error('Lost response'));
+    }
+    return original(name, args);
+  };
+});
 const footerStates: readonly FooterState[] = [
   { name: 'clean four options' },
   { name: 'option selected', prepare: async (_page, dock) => { await dock.locator('[data-answer-option]').nth(1).click(); await expect(sendChoice(dock)).toContainText('Use a shorter window'); } },
@@ -758,7 +771,7 @@ const footerStates: readonly FooterState[] = [
     await expect(dock.getByText(/isn’t sure this reply was saved/)).toBeVisible();
   }, shows: dock => [dock.getByText(/isn’t sure this reply was saved/), dock.getByRole('button', { name: 'Try sending again', exact: true })] },
   { name: 'error and draft retry', recovery: true, prepare: async (page, dock) => {
-    await page.evaluate(() => { (window as unknown as PageWindow).__designFixture.transport.failNext = 'preferences_patch'; });
+    await failDraftSave(page);
     await dock.getByRole('textbox', { name: 'Reply in your own words', exact: true }).fill(typed);
     await expect(dock.getByRole('button', { name: 'Try saving your draft again', exact: true })).toBeVisible();
   }, shows: dock => [dock.getByRole('alert').first(), dock.getByRole('button', { name: 'Try saving your draft again', exact: true })] },
