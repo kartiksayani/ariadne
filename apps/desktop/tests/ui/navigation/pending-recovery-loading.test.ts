@@ -13,7 +13,8 @@ import { NavigationStore } from '../../../src/state/navigation/store';
 const id = (number: number) => `00000000-0000-4000-8000-${number.toString(16).padStart(12, '0')}`;
 
 it('loads saved navigation and drafts through real CLI/Core while pending recovery cannot publish main preferences', async () => {
-  const cli = process.env.ARIADNE_FIXTURE_TEST_CLI ?? join(process.cwd(), 'target/debug/ariadne');
+  // CI builds into CARGO_TARGET_DIR; check-commit.py prebuilds the CLI before coverage.
+  const cli = process.env.ARIADNE_FIXTURE_TEST_CLI ?? join(process.env.CARGO_TARGET_DIR ?? join(process.cwd(), 'target'), 'debug/ariadne');
   expect(existsSync(cli), 'Build the CLI first: cargo build -p ariadne-cli --locked --offline').toBe(true);
   const root = await mkdtemp(join(tmpdir(), 'ariadne-pending-recovery-loading-'));
   const home = join(root, 'data'), project = join(root, 'project');
