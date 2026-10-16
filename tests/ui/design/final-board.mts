@@ -7,7 +7,7 @@
 // its "Back to ..." pill follows) fire at the same moments every run and cost no waiting. Fonts are loaded before the shot,
 // motion is off (reduced motion, and animation and transition are cut in the host page), and every request outside the
 // served files is blocked and recorded.
-import { expect, type BrowserContext, type Page } from '@playwright/test';
+import { chromium, expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { finalNow, variants, type FinalState, type Variant } from './final-frames';
 import { hostName, routeFinal } from './final-source.mts';
 
@@ -18,9 +18,23 @@ import { hostName, routeFinal } from './final-source.mts';
 export const labelHeight = 27;
 
 /**
+ * What the board's browser is launched with, so that the network is shut below the page and not only by what the page's script
+ * is given. Name resolution answers "not found" for every host but the dev server's loopback address (the board is served from
+ * 127.0.0.1), and WebRTC may not use UDP outside a proxy (a STUN request would reach the network without being a request a route sees).
+ */
+export const boardBrowserArgs = ['--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'];
+
+/** The browser the board's contexts are created in: Chromium launched with `boardBrowserArgs`. The caller closes it. */
+export function launchBoardBrowser(): Promise<Browser> {
+  return chromium.launch({ args: boardBrowserArgs });
+}
+
+/**
  * A context for board pages: UTC, no motion, every request outside the served files recorded in `denied` and blocked.
  * Routes do not see WebSockets or service-worker traffic, so those are shut separately: a socket is closed at once and
- * recorded, and service workers cannot be registered.
+ * recorded, and service workers cannot be registered. The WebSocket block is a script-level replacement that board script can
+ * undo (the replacement's `_apiConnect()` opens a real socket), so it is backed by two layers it cannot reach: `connect-src 'self'`
+ * in the board files' CSP (final-source.mts) and the host resolver rules of `launchBoardBrowser`.
  */
 export async function boardContext(browser: { newContext: (options: object) => Promise<BrowserContext> }, origin: string, denied: string[]): Promise<BrowserContext> {
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light', reducedMotion: 'reduce', serviceWorkers: 'block' });
@@ -97,10 +111,10 @@ export async function boardFrame(page: Page, variant: Variant): Promise<Buffer> 
 export async function renderBoard(context: BrowserContext, origin: string, state: Pick<FinalState, 'part' | 'sid'>, variant: Variant, denied: readonly string[]): Promise<{ png: Buffer; denied: string[] }> {
   const seen = denied.length;
   const page = await openBoard(context, origin, state.part, state.sid, variant);
-  try {
-    const png = await boardFrame(page, variant);
-    return { png, denied: denied.slice(seen) };
-  } finally { await page.close(); }
+  let png: Buffer;
+  try { png = await boardFrame(page, variant); } finally { await page.close(); }
+  // After the close: a request the board made as the page went away is still its request.
+  return { png, denied: denied.slice(seen) };
 }
 
 /** Fonts, then two frames of stillness, for the app's page (which runs on real time). */

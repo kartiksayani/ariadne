@@ -4,7 +4,7 @@
 // renders it; nothing in it runs in Node.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, extname, resolve, sep } from 'node:path';
 import type { BrowserContext } from '@playwright/test';
@@ -121,11 +121,19 @@ export function runtimeHashes(support: string): { url: string; expected: string 
 }
 
 /**
+ * Where the browser posts a CSP violation. It is outside /final/, so the route below answers it 404 and records it in `denied`: a
+ * request the CSP refused before it was made (a fetch to another origin) would otherwise leave no evidence.
+ */
+export const cspReportPath = '/csp-report';
+
+/**
  * Sent with every served board file. Playwright's `serviceWorkers: 'block'` only replaces `navigator.serviceWorker.register` with a
  * no-op, which untrusted script can undo (`ServiceWorkerContainer.prototype.register.call(...)`); a response header cannot be removed
  * by the page, and `worker-src 'none'` refuses service workers (and every other kind of worker) for the document it comes with.
+ * Likewise Playwright's WebSocket block is a replacement class that script can reach past (`new WebSocket(url)._apiConnect()` opens
+ * a real socket), so `connect-src 'self'` keeps fetch, XHR, EventSource and WebSocket on the board's own origin.
  */
-const documentHeaders = { 'content-security-policy': "worker-src 'none'" };
+const documentHeaders = { 'content-security-policy': `worker-src 'none'; connect-src 'self'; report-uri ${cspReportPath}` };
 
 /**
  * Serves the unzipped board at /final/ (and the fonts it names) offline; every other origin is blocked and
@@ -140,8 +148,12 @@ export async function routeFinal(context: BrowserContext, origin: string, denied
     const parsed = new URL(url);
     if (parsed.origin !== origin) { denied.push(url); return request.abort('blockedbyclient'); }
     if (!parsed.pathname.startsWith('/final/')) { denied.push(url); return request.fulfill({ status: 404, body: '' }); }
-    const path = decodeURIComponent(parsed.pathname.slice('/final/'.length));
+    // A malformed escape (`%zz`) cannot name a file: answered 404 and recorded, never left to throw with the request unanswered.
+    let path: string;
+    try { path = decodeURIComponent(parsed.pathname.slice('/final/'.length)); } catch { denied.push(url); return request.fulfill({ status: 404, body: '' }); }
     const file = resolve(finalServed, path);
+    // A directory is not a file (`/final/ariadne-ds/`): answered 404 and recorded, instead of throwing on the read.
+    if (file.startsWith(finalServed + sep) && existsSync(file) && statSync(file).isDirectory()) { denied.push(url); return request.fulfill({ status: 404, body: '' }); }
     if (file.startsWith(finalServed + sep) && existsSync(file)) return request.fulfill({ body: readFileSync(file), contentType: contentTypes[extname(file)] ?? 'application/octet-stream', headers: documentHeaders });
     try {
       const font = path.startsWith('ariadne-ds/fonts/') ? fontFile(path.slice('ariadne-ds/fonts/'.length)) : undefined;

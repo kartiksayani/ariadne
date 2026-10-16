@@ -1,14 +1,17 @@
 // The final-board project (playwright.config.ts `final`): every registered state (final-frames.ts) is drawn by the board
 // (designs/Ariadne-final-board.zip, offline) and, once its `pending` flag is off, by the real app in the matching fixture,
 // and the two are compared pixel for pixel against final-thresholds.json. See README.md in this folder.
-import { test as base, expect, type BrowserContext, type Page } from '@playwright/test';
+import { test as base, expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createSocket } from 'node:dgram';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { captureFrame, crop, type CaptureInput, type CompareResult, type Region } from './compare.mts';
-import { boardContext, boardFrame, labelHeight, openBoard, renderBoard, settle } from './final-board.mts';
+import { boardContext, boardFrame, labelHeight, launchBoardBrowser, openBoard, renderBoard, settle } from './final-board.mts';
 import { finalNow, finalStates, notYet, regionsFor, unhonoured, variantNames, variants, type FinalState, type Step, type Variant } from './final-frames';
-import { finalMembers, fontFile, fontPins, runtimeHashes } from './final-source.mts';
+import { cspReportPath, finalMembers, fontFile, fontPins, runtimeHashes } from './final-source.mts';
 import { startDesignServer } from './server.mts';
 import { repo } from './source.mts';
 import thresholds from './final-thresholds.json' with { type: 'json' };
@@ -27,7 +30,7 @@ const threshold = (id: string, variant: Variant): number => (thresholds as Recor
 
 /** The worker's board context: every board page is opened in it and closed after its shot. */
 interface Board { readonly context: BrowserContext; readonly denied: string[] }
-const test = base.extend<Record<never, never>, { origin: string; board: Board }>({
+const test = base.extend<Record<never, never>, { origin: string; boardBrowser: Browser; board: Board }>({
   origin: [async ({ browserName }, use) => {
     expect(browserName).toBe('chromium');
     // The board's support.js checks SRI on its CDN scripts; the same pinned bytes are served offline.
@@ -36,8 +39,14 @@ const test = base.extend<Record<never, never>, { origin: string; board: Board }>
     const { server, origin } = await startDesignServer();
     try { await use(origin); } finally { await server.close(); }
   }, { scope: 'worker', timeout: 240_000 }],
-  board: [async ({ browser, origin }, use) => {
-    const denied: string[] = [], context = await boardContext(browser, origin, denied);
+  // The board's own browser, launched with the resolver and WebRTC rules (boardBrowserArgs): the app's contexts stay in the default one.
+  boardBrowser: [async ({ browserName }, use) => {
+    expect(browserName).toBe('chromium');
+    const browser = await launchBoardBrowser();
+    try { await use(browser); } finally { await browser.close(); }
+  }, { scope: 'worker' }],
+  board: [async ({ boardBrowser, origin }, use) => {
+    const denied: string[] = [], context = await boardContext(boardBrowser, origin, denied);
     await use({ context, denied });
     await context.close();
   }, { scope: 'worker' }],
@@ -100,10 +109,14 @@ function scoring(state: Pick<FinalState, 'id' | 'regions'>, variant: Variant, re
 for (const state of finalStates) for (const variant of variantNames) {
   test(`final ${state.id} ${variant}: ${state.title}`, async ({ browser, origin, board, page: canvas }, testInfo) => {
     testInfo.annotations.push({ type: 'pending', description: String(state.pending) });
-    const { png: design, denied: boardDenied } = await renderBoard(board.context, origin, state, variant, board.denied);
+    const id = `${state.id}-${variant}`, { width, height } = variants[variant], seen = board.denied.length;
+    // A frame that cannot be drawn still leaves its JSON, with what the board asked for meanwhile: that is the evidence a timeout needs.
+    const failed = (reason: string) => writeFileSync(resolve(output, 'frames', `${id}.json`), `${JSON.stringify({ pending: state.pending, owner: state.owner, size: { width, height }, failed: reason, denied: board.denied.slice(seen) }, null, 2)}\n`);
+    const drawn = await renderBoard(board.context, origin, state, variant, board.denied).catch((error: unknown) => { failed(error instanceof Error ? error.message : String(error)); throw error; });
+    const { png: design, denied: boardDenied } = drawn;
     // A frame the board failed to draw is blank or a placeholder; every state draws at least this many bytes of PNG.
+    if (design.length <= 5_000) failed(`the board frame is ${design.length} bytes`);
     expect(design.length, 'the board frame is drawn').toBeGreaterThan(5_000);
-    const id = `${state.id}-${variant}`, { width, height } = variants[variant];
     // Fields the fixture accepts but the current app cannot yet honour (see `unhonoured` in final-frames.ts): recorded in the frame's JSON.
     const notHonoured = unhonoured(state.app);
     if (state.pending && !compareAlways && !canary(state, variant)) {
@@ -146,8 +159,8 @@ test('font route: a name outside the six fonts is refused', async ({ origin, boa
 
 // The board is untrusted and its renders are published, so its context reaches nothing but its own files. Each test builds its own
 // context and record, so what it provokes does not land in the worker's record that the render tests assert on.
-test('board context: a request to the dev server outside /final/ is answered 404 and recorded', async ({ browser, origin }) => {
-  const denied: string[] = [], context = await boardContext(browser, origin, denied);
+test('board context: a request to the dev server outside /final/ is answered 404 and recorded', async ({ boardBrowser, origin }) => {
+  const denied: string[] = [], context = await boardContext(boardBrowser, origin, denied);
   try {
     const page = await context.newPage();
     await page.goto(`${origin}/final/ariadne-ds/styles.css`);
@@ -157,13 +170,21 @@ test('board context: a request to the dev server outside /final/ is answered 404
     const outside = ['/package.json', '/apps/desktop/package.json', '/tests/ui/design/server.mts', '/@fs/etc/hosts', '/final'].map(path => `${origin}${path}`);
     for (const url of outside) expect(await status(url), url).toBe(404);
     expect(denied).toEqual(outside);
-    // Another origin is refused and recorded as before.
+    // A malformed escape and a directory are answered too (they used to throw in the route and leave the request hanging), and recorded.
+    const unanswered = ['/final/%zz', '/final/ariadne-ds/', '/final/ariadne-ds'].map(path => `${origin}${path}`);
+    for (const url of unanswered) expect(await status(url), url).toBe(404);
+    expect(denied.slice(outside.length), 'the unanswerable requests are recorded').toEqual(unanswered);
+    // Another origin is refused. The CSP (`connect-src 'self'`) stops the fetch before a route sees it, so its violation report is what is recorded.
     expect(await page.evaluate(async url => fetch(url).then(() => 'fetched', () => 'blocked'), 'http://example.invalid/x')).toBe('blocked');
-    expect(denied.at(-1)).toBe('http://example.invalid/x');
+    await expect.poll(() => denied.at(-1), 'the refused fetch is recorded').toBe(`${origin}${cspReportPath}`);
+    // A page with no CSP (about:blank) reaches the route, which blocks and records the URL itself.
+    const bare = await context.newPage();
+    expect(await bare.evaluate(async url => fetch(url).then(() => 'fetched', () => 'blocked'), 'http://example.invalid/y')).toBe('blocked');
+    expect(denied.at(-1)).toBe('http://example.invalid/y');
   } finally { await context.close(); }
 });
-test('board context: a WebSocket is closed and recorded, and no service worker can be registered', async ({ browser, origin }) => {
-  const denied: string[] = [], context = await boardContext(browser, origin, denied);
+test('board context: a WebSocket is closed and recorded, and no service worker can be registered', async ({ boardBrowser, origin }) => {
+  const denied: string[] = [], context = await boardContext(boardBrowser, origin, denied);
   try {
     const page = await context.newPage();
     await page.goto(`${origin}/final/ariadne-ds/styles.css`);
@@ -183,6 +204,78 @@ test('board context: a WebSocket is closed and recorded, and no service worker c
     });
     expect(attempts, 'no service worker is registered, by either route').toEqual({ api: true, original: 'refused: SecurityError', registrations: 0 });
   } finally { await context.close(); }
+});
+
+// Playwright's WebSocket block is a replacement class in the page, and board script can reach past it: `_apiConnect()` on the replacement
+// opens a real socket, and so does `_ws.constructor`. These tests start a real WebSocket server and require that none of those attempts
+// reaches it. Two layers hold: the board files' CSP (`connect-src 'self'`), and the browser's resolver rules (every host but 127.0.0.1).
+interface WebSocketMock { _apiConnect(): void; _ws: WebSocket }
+/** A WebSocket server on the loopback address that counts every connection made to it, a TCP connection included. */
+async function listening(run: (port: number, connections: () => number) => Promise<void>): Promise<void> {
+  let count = 0;
+  const server = createServer().on('connection', socket => { count++; socket.destroy(); });
+  await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+  try { await run((server.address() as AddressInfo).port, () => count); } finally { await new Promise(done => server.close(done)); }
+}
+/** Opens real sockets to `url` from the page, by every route round the replacement; resolves when all are closed (or after 10 s). */
+const reachPast = (page: Page, url: string) => page.evaluate(target => new Promise<string>(done => {
+  const mock = new WebSocket(target) as unknown as WebSocketMock;
+  mock._apiConnect();
+  const direct = new (mock._ws.constructor as typeof WebSocket)(target), sockets = [mock._ws, direct];
+  const timer = setInterval(() => {
+    if (sockets.some(socket => socket.readyState !== WebSocket.CLOSED)) return;
+    clearInterval(timer); done('closed');
+  }, 50);
+  setTimeout(() => { clearInterval(timer); done('still open'); }, 10_000);
+}), url);
+
+test('board context: board script cannot open a real WebSocket past the replacement (CSP)', async ({ boardBrowser, origin }) => {
+  const denied: string[] = [], context = await boardContext(boardBrowser, origin, denied);
+  try {
+    await listening(async (port, connections) => {
+      const page = await context.newPage();
+      await page.goto(`${origin}/final/ariadne-ds/styles.css`);
+      expect(await reachPast(page, `ws://127.0.0.1:${port}/`), 'both attempts end').toBe('closed');
+      await page.waitForTimeout(500);
+      expect(connections(), 'the server was never reached').toBe(0);
+      expect(denied, 'the refusal is recorded').toContain(`${origin}${cspReportPath}`);
+    });
+  } finally { await context.close(); }
+});
+test('board context: a page without the CSP still reaches no host but the loopback (resolver rules)', async ({ boardBrowser, origin }) => {
+  const context = await boardContext(boardBrowser, origin, []);
+  try {
+    await listening(async (port, connections) => {
+      // about:blank carries no CSP. The loopback address is excluded from the rules (the board is served from it), so the control reaches
+      // the server: the attempts work, and only the CSP stands between a board file and the loopback.
+      const page = await context.newPage();
+      await reachPast(page, `ws://127.0.0.1:${port}/`);
+      await expect.poll(connections, 'the control reaches the server').toBeGreaterThan(0);
+      const before = connections();
+      // Every other name does not resolve, though it would lead to the same server (localhost is 127.0.0.1).
+      expect(await reachPast(page, `ws://localhost:${port}/`), 'both attempts end').toBe('closed');
+      await page.waitForTimeout(500);
+      expect(connections(), 'a name other than 127.0.0.1 reaches nothing').toBe(before);
+    });
+  } finally { await context.close(); }
+});
+test('board context: WebRTC sends no UDP of its own (STUN)', async ({ boardBrowser, origin }) => {
+  const context = await boardContext(boardBrowser, origin, []), packets: number[] = [];
+  const udp = createSocket('udp4').on('message', message => packets.push(message.length));
+  await new Promise<void>(done => udp.bind(0, '127.0.0.1', done));
+  try {
+    const page = await context.newPage();
+    await page.goto(`${origin}/final/ariadne-ds/styles.css`);
+    // The offer is gathered against a STUN server on the loopback: with the browser's default policy it is sent a binding request.
+    await page.evaluate(async port => {
+      const peer = new RTCPeerConnection({ iceServers: [{ urls: `stun:127.0.0.1:${port}` }] });
+      peer.createDataChannel('probe');
+      await peer.setLocalDescription(await peer.createOffer());
+      await new Promise(done => setTimeout(done, 3000));
+      peer.close();
+    }, udp.address().port);
+    expect(packets, 'no STUN request reached the server').toEqual([]);
+  } finally { udp.close(); await context.close(); }
 });
 
 // A frame whose render asked for something it may not leaves its evidence: the report carries `denied`, and the assertion comes after.
@@ -244,7 +337,7 @@ for (const { name, regions, variant, recordOnly, passes, ratios, whole } of scor
     });
   });
 }
-test('final-frames: every region is a whole-pixel rectangle inside the frames it applies to', () => {
+test('final-frames: every region is a whole-pixel rectangle inside the frames it applies to, with a threshold of at least 0 and below 1', () => {
   for (const state of finalStates) {
     const names = (state.regions ?? []).map(region => region.name);
     expect(new Set(names).size, `${state.id} region names are distinct`).toBe(names.length);
@@ -252,6 +345,8 @@ test('final-frames: every region is a whole-pixel rectangle inside the frames it
       const [x, y, width, height] = region.rect;
       expect([x, y, width, height].every(Number.isInteger) && x >= 0 && y >= 0 && width > 0 && height > 0, `${state.id} ${region.name} is a whole-pixel rectangle`).toBe(true);
       for (const variant of region.variants ?? variantNames) expect(x + width <= variants[variant].width && y + height <= variants[variant].height, `${state.id} ${region.name} fits ${variant}`).toBe(true);
+      // A threshold is a share of the region's pixels: below 0 or from 1 up it would assert nothing (or nothing can fail).
+      expect(region.threshold === undefined || (region.threshold >= 0 && region.threshold < 1), `${state.id} ${region.name} threshold is at least 0 and below 1`).toBe(true);
     }
   }
 });
