@@ -12,9 +12,15 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const sends = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'input_submit');
 const row = () => document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
 const detail = () => screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
+// ⌥1–9 and ⌥0 are unbound (SPEC 6.1): `alt` is kept only to prove they do nothing now.
 const alt = (target: Element, digit: number, repeat = false) => fireEvent.keyDown(target, {
   key: digit === 1 ? '¡' : digit === 0 ? 'º' : '™', code: `Digit${digit}`, altKey: true, repeat,
 });
+/** The fast keyboard send now: Enter on option card `digit` (1-based) in Details sends that card. */
+const press = (digit: number, repeat = false) => {
+  const card = detail().querySelector<HTMLElement>(`[data-answer-option="${digit - 1}"]`)!;
+  card.focus(); fireEvent.keyDown(card, { key: 'Enter', repeat });
+};
 /** Details' answer cards take input: "Write my own answer" is enabled (a send or save in progress disables it). */
 const answerReady = () => {
   const own = detail().querySelector<HTMLButtonElement>('[data-answer-own]');
@@ -40,33 +46,36 @@ async function openQuestion() {
   await screen.findByRole('region', { name: 'Session tree' });
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
     });
   fireEvent.click(row());
   await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
   await waitFor(answerReady);
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
     });
 }
 
 describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
-  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])('sends option %i using its physical digit code, including macOS Option characters', async digit => {
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])('Enter on option card %i in Details sends that option, and the same ⌥ digit sends nothing', async digit => {
     const transport = setup(); await openQuestion();
-    row().focus(); alt(row(), digit);
+    row().focus(); alt(row(), digit); alt(detail(), digit);
+    await act(async () => { await Promise.resolve(); });
+    expect(sends(transport)).toHaveLength(0);
+    press(digit);
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     expect(sends(transport)[0]).toMatchObject({ session: route, command: { params: {
       kind: 'answer', target: { item_id: '2' }, selected_option_id: `choice-${digit}`,
     } } });
   });
 
-  it.each(['tree', 'detail'] as const)('keeps the typed note when sending from the %s', async entry => {
+  // The tree row has no inline answer any more (SPEC, Removed): only Details sends from the keyboard on the Map.
+  it('keeps the typed note when sending from Details', async () => {
     const transport = setup(); await openQuestion();
     const note = 'Keep these exact words: café\nsecond line';
     fireEvent.change(words(), { target: { value: note } });
-    const target = entry === 'tree' ? row() : detail();
-    target.focus(); alt(target, 2);
+    press(2);
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     expect(sends(transport)[0].command).toMatchObject({ params: { selected_option_id: 'choice-2', text: note } });
     await screen.findByText('Not sent yet');
@@ -101,7 +110,15 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
     expect(input.payload.text).toBe(note);
   });
 
-  it('ignores repeat, bursts and another shortcut while this item is sending', async () => {
+  // The old ⌥digit key ignored repeats; Enter on a card must too, so a key held down onto a card sends nothing.
+  it('ignores a held Enter that repeats onto an option card before any real press', async () => {
+    const transport = setup(); await openQuestion();
+    press(1, true);
+    await act(async () => { await Promise.resolve(); });
+    expect(sends(transport)).toHaveLength(0);
+  });
+
+  it('ignores bursts, repeats and another card while this item is sending', async () => {
     const transport = setup(); await openQuestion();
     const invoke = transport.invoke.bind(transport);
     let release!: () => void, requested = 0;
@@ -110,12 +127,9 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
       if ('command' in args.request && args.request.command.command === 'input_submit') { ++requested; await gate; }
       return invoke(name, args);
     });
-    row().focus(); alt(row(), 1, true);
-    await act(async () => { await Promise.resolve(); });
-    expect(requested).toBe(0);
-    await act(async () => { alt(row(), 1); alt(row(), 1); });
+    await act(async () => { press(1); press(1); });
     await waitFor(() => expect(requested).toBe(1));
-    alt(row(), 2); alt(detail(), 3); alt(row(), 1, true);
+    press(2); press(3); press(1, true);
     await act(async () => { await Promise.resolve(); });
     expect(requested).toBe(1);
     await act(async () => { release(); });
@@ -123,31 +137,34 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
     expect(sends(transport)[0].command).toMatchObject({ params: { selected_option_id: 'choice-1' } });
   });
 
-  it('leaves Option characters to text fields and does nothing for a missing option', async () => {
+  it('leaves Option characters to text fields and does nothing for a missing option or an Enter on none', async () => {
     const transport = setup(2); await openQuestion();
     const box = words();
     box.focus(); fireEvent.change(box, { target: { value: 'Already typed' } });
     alt(box, 1); alt(box, 0);
-    const search = document.querySelector<HTMLInputElement>('[data-shell-search]')!;
+    fireEvent.click(screen.getByRole('button', { name: 'Search the Map' }));
+    const search = await screen.findByRole<HTMLInputElement>('textbox', { name: 'Search the Map' });
     search.focus(); alt(search, 1); alt(search, 0);
     row().focus(); alt(row(), 9);
+    // Only two options exist: there is no third card to press.
+    expect(detail().querySelector('[data-answer-option="2"]')).toBeNull();
     await act(async () => { await Promise.resolve(); });
     expect(sends(transport)).toHaveLength(0);
     expect(box.value).toBe('Already typed');
   });
 
-  it('offers the same not-running dialog for a disconnected shortcut as a click, and Cancel keeps the note', async () => {
+  it('offers the same not-running dialog for a disconnected key send as a click, and Cancel keeps the note', async () => {
     const transport = setup(2, 'disconnected'); await openQuestion();
     const note = 'Keep this while I decide.';
     fireEvent.change(words(), { target: { value: note } });
-    row().focus(); alt(row(), 2);
+    press(2);
     const dialog = await screen.findByRole('dialog', { name: /isn’t running for this session/ });
     expect(within(dialog).getByRole('button', { name: /^Queue it/ })).toBeTruthy();
     expect(sends(transport)).toHaveLength(0);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(words().value).toBe(note);
-    row().focus(); alt(row(), 2);
+    press(2);
     const queued = await screen.findByRole('dialog', { name: /isn’t running for this session/ });
     fireEvent.click(within(queued).getByRole('button', { name: /^Queue it/ }));
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
@@ -161,43 +178,13 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
     const observation = { ...structuredClone(sessionsFixture.items[0].active_binding.presence), connection_state: connection,
       last_seen_at: '2026-10-03T12:01:00.000Z' } as PresenceObservation;
     await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: binding.id, generation: binding.generation, observation }); });
-    row().focus(); alt(row(), 1);
+    press(1);
     await act(async () => { await Promise.resolve(); });
     expect(sends(transport)).toHaveLength(0);
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('reports a queued shortcut that reaches the detail while refreshing, then sends only on a new press', async () => {
-    const transport = setup(); await openQuestion();
-    const invoke = transport.invoke.bind(transport);
-    let release!: () => void, reveal!: () => void, entered = false, revealing = false, holdingRefresh = false;
-    const gate = new Promise<void>(resolve => { release = resolve; });
-    const revealGate = new Promise<void>(resolve => { reveal = resolve; });
-    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
-      if ('command' in args.request && args.request.command.command === 'preferences_patch') { revealing = true; await revealGate; }
-      if (holdingRefresh && 'request' in args.request && args.request.request.command === 'session_get' && args.request.session?.session_id === route.session_id) {
-        entered = true; await gate;
-      }
-      return invoke(name, args);
-    });
-    row().focus(); alt(row(), 1);
-    await waitFor(() => expect(revealing).toBe(true));
-    holdingRefresh = true;
-    const session = transport.sessions.get(route.session_id)!;
-    ++session.revision;
-    await act(async () => { transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: session.revision }); });
-    await waitFor(() => expect(entered).toBe(true));
-    await act(async () => { reveal(); });
-    expect(await within(detail()).findByRole('alert')).toHaveProperty('textContent', "Ariadne is still loading this session's latest changes. Try again.");
-    expect(sends(transport)).toHaveLength(0);
-    await act(async () => { release(); });
-    await waitFor(answerReady);
-    expect(sends(transport)).toHaveLength(0);
-    row().focus(); alt(row(), 1);
-    await waitFor(() => expect(sends(transport)).toHaveLength(1));
-  });
-
-  it('explains an initially stale numeric shortcut and never replays it after refresh', async () => {
+  it('does not send while Details is refreshing, never replays that press after, and sends on a new one', async () => {
     const transport = setup(); await openQuestion();
     const invoke = transport.invoke.bind(transport);
     let release!: () => void;
@@ -209,17 +196,17 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
     const session = transport.sessions.get(route.session_id)!;
     ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: session.revision }); });
-    row().focus(); alt(row(), 1);
-    expect(await screen.findByText("Ariadne is still loading this session's latest changes. Try again.")).toBeTruthy();
+    press(1);
+    await act(async () => { await Promise.resolve(); });
     expect(sends(transport)).toHaveLength(0);
     await act(async () => { release(); });
     await waitFor(answerReady);
     expect(sends(transport)).toHaveLength(0);
-    row().focus(); alt(row(), 1);
+    press(1);
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
   });
 
-  it('shows feedback for a question changed before the shortcut, then sends once after review', async () => {
+  it('shows feedback for a question changed before the press, then sends once after review', async () => {
     const transport = setup(2); await openQuestion();
     const note = 'Keep my note while I review the changed question.';
     fireEvent.change(words(), { target: { value: note } });
@@ -228,62 +215,33 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
     session.rounds[item.current_round_id!]!.question_revision = item.question_revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: session.revision }); });
     await within(detail()).findByText('This item changed. Review the current question and options; your text is retained.');
-    row().focus(); alt(row(), 1);
-    await within(detail()).findByText('This item changed. Review it before sending. Your note is kept.');
+    press(1);
+    await act(async () => { await Promise.resolve(); });
     expect(sends(transport)).toHaveLength(0);
     expect(words().value).toBe(note);
     fireEvent.click(within(detail()).getByRole('button', { name: 'Review this question' }));
-    await waitFor(() => expect(within(detail()).queryByText('This item changed. Review it before sending. Your note is kept.')).toBeNull());
-    row().focus(); alt(row(), 1);
+    await waitFor(() => expect(within(detail()).queryByText('This item changed. Review the current question and options; your text is retained.')).toBeNull());
+    press(1);
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     expect(sends(transport)[0].command).toMatchObject({ params: { selected_option_id: 'choice-1', text: note } });
   });
 
-  it.each(['options reorder', 'question revision'] as const)('keeps the note and refuses a send after %s changes during reveal', async change => {
+  // The press acts on the card the owner sees, not on a number resolved later: after the options reorder under the
+  // owner, the first card is the new first one, and its choice and the typed note are what is sent.
+  it('sends the option shown on the pressed card after the options reorder, with the note', async () => {
     const transport = setup(2); await openQuestion();
-    const note = 'Keep my note even if the question changes.';
+    const note = 'Keep my note even if the options move.';
     fireEvent.change(words(), { target: { value: note } });
-    const invoke = transport.invoke.bind(transport);
-    let release!: () => void, entered = false;
-    const gate = new Promise<void>(resolve => { release = resolve; });
-    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
-      if ('request' in args.request && args.request.request.command === 'reveal_item') { entered = true; await gate; }
-      return invoke(name, args);
-    });
-    row().focus(); alt(row(), 1);
-    await waitFor(() => expect(entered).toBe(true));
     const session = transport.sessions.get(route.session_id)!, item = session.items['2']!;
-    if (change === 'options reorder') item.options.reverse();
-    else { ++item.revision; ++item.question_revision; session.rounds[item.current_round_id!]!.question_revision = item.question_revision; }
-    ++session.revision;
+    item.options.reverse(); ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: session.revision }); });
-    if (change === 'options reorder') await waitFor(() => expect(detail().querySelector('[data-answer-option="0"]')?.textContent).toContain('Window 2'));
-    else await waitFor(() => expect(within(detail()).getByText('This item changed. Review the current question and options; your text is retained.')).toBeTruthy());
-    await act(async () => { release(); });
-    await waitFor(() => {
-        expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-        expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
-      });
-    expect((await within(detail()).findByText('This item changed. Review it before sending. Your note is kept.')).getAttribute('role')).toBe('alert');
+    await waitFor(() => expect(detail().querySelector('[data-answer-option="0"]')?.textContent).toContain('Window 2'));
+    await waitFor(answerReady);
     expect(sends(transport)).toHaveLength(0);
     expect(words().value).toBe(note);
-    if (change === 'question revision') {
-      fireEvent.click(within(detail()).getByRole('button', { name: 'Review this question' }));
-      await waitFor(() => expect(within(detail()).queryByText('This item changed. Review it before sending. Your note is kept.')).toBeNull());
-    }
-    row().focus(); alt(row(), 1);
+    press(1);
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
-    expect(sends(transport)[0].command).toMatchObject({ params: { selected_option_id: change === 'options reorder' ? 'choice-2' : 'choice-1', text: note } });
-  });
-
-  it.each(['tree', 'detail'] as const)('Option 0 opens the answer and focuses own words from the %s', async entry => {
-    const transport = setup(); await openQuestion();
-    if (entry === 'tree') fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
-    const target = entry === 'tree' ? row() : detail();
-    target.focus(); alt(target, 0);
-    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
-    await waitFor(() => expect(document.activeElement).toBe(within(detail()).getByLabelText('Reply in your own words')));
-    expect(sends(transport)).toHaveLength(0);
+    expect(sends(transport)[0].command).toMatchObject({ params: { selected_option_id: 'choice-2', text: note } });
   });
 
   it('answers another session’s question from the dock’s list instead of the selected tree item', async () => {

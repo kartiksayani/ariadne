@@ -208,7 +208,7 @@ describe('Paperwhite shell', () => {
     const value = props({ body: { center: null, detail: <p>Detail</p>, onHide: hide } });
     const { rerender } = render(<Shell {...value} />);
     const button = screen.getByRole('button', { name: 'Hide item' });
-    expect(button.title).toBe('Hide (x)');
+    expect(button.title).toBe('Hide (h)');
     expect(button.querySelector('svg path[d="m3 3 18 18"]')).not.toBeNull();
     expect(button.nextElementSibling?.getAttribute('aria-label')).toBe('Remove item');
     fireEvent.click(button); expect(hide).toHaveBeenCalledOnce();

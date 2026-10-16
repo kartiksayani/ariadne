@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { notices } from '../../../src/ui/pages/notices';
-import { AppTransport, route } from './transport';
+import { AppTransport, route, secondId } from './transport';
 
 afterEach(() => { cleanup(); notices.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -53,13 +53,19 @@ describe('queued navigation in the current tree', () => {
       }
       return invoke(name, args);
     });
-    const header = document.querySelector<HTMLElement>('.shell-header')!;
-    const theme = within(header).getByRole<HTMLButtonElement>('button', { name: 'Switch to light' });
+    const bar = document.querySelector<HTMLElement>('.tb')!;
+    const theme = within(bar).getByRole<HTMLButtonElement>('button', { name: 'Switch to light' });
     await waitFor(() => expect(theme.disabled).toBe(false));
     fireEvent.click(theme);
     await waitFor(() => expect(writing).toBe(true));
-    fireEvent.click(within(document.querySelector<HTMLElement>('[aria-label="Projects and sessions"]')!).getByRole('button', { name: 'Projects' }));
-    const opening = screen.getByText('Opening Projects…');
+    // Only a session is a saved destination now (pages show at once), so the two queued destinations are two sessions,
+    // chosen from the switcher while the write is held; the newest is the session already shown.
+    const choose = (name: RegExp) => {
+      fireEvent.click(document.querySelector<HTMLButtonElement>('[data-popover-trigger="switcher"]')!);
+      fireEvent.click(within(screen.getByRole('dialog', { name: 'Switch session or project' })).getByRole('option', { name }));
+    };
+    choose(/Separate session/);
+    const opening = screen.getByText('Opening the session…');
     expect(opening.closest('.nav-session-content')).toBeNull();
     expect(opening.closest('.shell-center-content')).toBe(tree.closest('.shell-center-content'));
     const css = readFileSync(resolve(__dirname, '../../../src/styles/navigation.css'), 'utf8');
@@ -71,7 +77,7 @@ describe('queued navigation in the current tree', () => {
       expect(tree.scrollTop).toBe(2_000);
     };
     assertTree();
-    fireEvent.click(document.querySelector<HTMLButtonElement>(`.shell-tab-open[data-session-tab='${JSON.stringify([route.project_id, route.session_id])}']`)!);
+    choose(/Notes review/);
     expect(screen.getByText('Opening the session…')).toBeTruthy();
     assertTree();
     await act(async () => { release(); });
@@ -79,6 +85,7 @@ describe('queued navigation in the current tree', () => {
     assertTree();
     expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
     expect(transport.mutations.some(request => request.command.command === 'preferences_patch'
-      && request.command.params.entries.some(entry => entry.kind === 'set_global' && entry.preferences.selected_navigation.kind === 'projects'))).toBe(false);
+      && request.command.params.entries.some(entry => entry.kind === 'set_global'
+        && entry.preferences.selected_navigation.kind === 'session' && entry.preferences.selected_navigation.session.session_id === secondId))).toBe(false);
   }, 10_000);
 });

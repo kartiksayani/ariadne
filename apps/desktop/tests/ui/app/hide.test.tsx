@@ -245,7 +245,9 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
   it('explains hidden search matches and adjusts the ordinary status chip counts', async () => {
     await mount(); await hide('1.1');
     expect(chip('All').textContent).toContain('8'); expect(chip('Open').textContent).toContain('2');
-    fireEvent.change(screen.getByRole('textbox', { name: 'Search questions and outcomes' }), { target: { value: 'receipt' } });
+    // The top bar's search box opens from its "Search the Map" button.
+    fireEvent.click(screen.getByRole('button', { name: 'Search the Map' }));
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Search the Map' }), { target: { value: 'receipt' } });
     expect(await screen.findByText('Showing 1 of 8 items matching “receipt” (1 hidden)')).toBeTruthy();
     expect(chip('All').textContent).toContain('1'); expect(chip('Open').textContent).toContain('0');
     fireEvent.click(chip('Open'));

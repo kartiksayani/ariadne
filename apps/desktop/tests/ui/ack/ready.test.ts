@@ -109,3 +109,15 @@ it('explains an uncertain save that appeared while Ack waited for the ready sess
     .toBe('Ariadne isn’t sure your last change was saved. Check again before trying Ack.');
   expect(transport.mutations).toHaveLength(0);
 });
+
+// A write in flight (a close, a rename) blocks Ack on the same session. The keyboard cannot reach this state any more,
+// because the lifecycle's review owns the keys while it saves, so the rule is pinned where it lives.
+it('refuses Ack while another change is being saved, before and after the session is ready', async () => {
+  const { transport, store, state, actions } = await ready();
+  const action = actions.getSnapshot();
+  vi.spyOn(actions, 'getSnapshot').mockReturnValue({ ...action, writing: true });
+  expect(await acknowledge(actions, '1.1').catch(ackFailure)).toBe('Another change is being saved. Wait for it, then try Ack again.');
+  vi.mocked(store.getSnapshot).mockReturnValue(state);
+  expect(await acknowledge(actions, '1.1').catch(ackFailure)).toBe('Another change is being saved. Wait for it, then try Ack again.');
+  expect(transport.mutations).toHaveLength(0);
+});

@@ -1,4 +1,4 @@
-// Copy session ID from its two homes: the All sessions row, and the connection card of the session on screen.
+// Copy session ID has one home, the connection card of the session on screen (SPEC 14.2: the All sessions row no longer copies it).
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DesktopApp } from '../../../src/App';
@@ -11,15 +11,16 @@ vi.mock('../../../src/ui/shared/clipboard', () => ({ copyText: vi.fn() }));
 afterEach(() => { cleanup(); notices.clear(); vi.resetAllMocks(); });
 
 describe('session ID actions', () => {
-  it('copies the listed session before opening it, then copies it from the connection card', { timeout: 15_000 }, async () => {
+  it('lists a session without its ID or a Copy ID action, then copies it from the connection card once opened', { timeout: 15_000 }, async () => {
     const transport = new AppTransport();
     render(<DesktopApp service={createDesktopService(transport)} />);
     const list = await screen.findByRole('region', { name: 'All sessions' });
     vi.mocked(copyText).mockResolvedValue(undefined);
-    await act(async () => { fireEvent.click(await within(list).findByRole('button', { name: 'Copy the ID of Notes review' })); });
-    expect(copyText).toHaveBeenCalledExactlyOnceWith(route.session_id);
-    await waitFor(() => expect(notices.getSnapshot().map(notice => notice.text)).toContain('Connection reference copied.'));
-    expect(list.innerHTML).not.toContain(route.session_id);
+    await within(list).findByRole('button', { name: 'Rename Notes review' });
+    expect(within(list).queryByRole('button', { name: /^Copy the ID of/ })).toBeNull();
+    // (Rows carry the ID only as a data-session-id hook for tests and automation, never as text.)
+    expect(list.textContent).not.toContain(route.session_id);
+    expect(copyText).not.toHaveBeenCalled();
     fireEvent.click([...list.querySelectorAll<HTMLButtonElement>('.sl-name')].find(button => button.textContent === 'Notes review')!);
     await screen.findByRole('region', { name: 'Session tree' });
     const bar = document.querySelector<HTMLElement>('.tb')!;
@@ -27,8 +28,8 @@ describe('session ID actions', () => {
     await waitFor(() => expect(bar.querySelector('[data-popover-trigger="connection"]')).not.toBeNull());
     fireEvent.click(bar.querySelector<HTMLButtonElement>('[data-popover-trigger="connection"]')!);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy session ID' })); });
-    expect(copyText).toHaveBeenCalledTimes(2);
-    expect(copyText).toHaveBeenLastCalledWith(route.session_id);
+    expect(copyText).toHaveBeenCalledExactlyOnceWith(route.session_id);
+    await waitFor(() => expect(notices.getSnapshot().map(notice => notice.text)).toContain('Connection reference copied.'));
     expect(bar.innerHTML).not.toContain(route.session_id);
   });
 });

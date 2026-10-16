@@ -13,6 +13,7 @@ import * as catalogue from '../../../src/state/navigation/catalogue';
 import { NavigationWorkspace, type AdapterChoice } from '../../../src/components/navigation/NavigationWorkspace';
 import { BindSession, RegisterProject } from '../../../src/components/navigation/Registration';
 import { notices } from '../../../src/ui/pages/notices';
+import { quietWaiting, stopQuietWaiting } from './quietWaiting';
 
 const projectId = demo.project_id;
 const route: SessionRef = { project_id: projectId, session_id: demo.id };
@@ -93,7 +94,23 @@ async function deferredStartup(transport: Transport, store: NavigationStore) {
 const cursor = (view: 'projects' | 'sessions', revision = 21): QueryCursor => ({ schema: 1, view,
   revision, filter_digest: 'a'.repeat(64), after: view === 'projects' ? { kind: 'project', canonical_root: '/fixtures/ariadne-demo', id: projectId }
     : { kind: 'session', project_id: projectId, id: demo.id, updated_at: demo.updated_at } });
-afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); notices.clear(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); stopQuietWaiting(); notices.clear(); vi.useRealTimers(); });
+// Pages are reached from the top bar's switcher (SPEC 5.13): its button, then the Projects / All sessions / Archive links.
+// The button is disabled while a save, an uncertain save or an explicit Refresh holds navigation.
+const switcher = () => document.querySelector<HTMLButtonElement>('[data-popover-trigger="switcher"]')!;
+const navigationReady = () => waitFor(() => { expect(switcher()).not.toBeNull(); expect(switcher().disabled).toBe(false); });
+async function goTo(page: 'Projects' | 'All sessions' | 'Archive') {
+  fireEvent.click(switcher());
+  const menu = await screen.findByRole('dialog', { name: 'Switch session or project' });
+  await act(async () => { fireEvent.click(within(menu).getByRole('button', { name: page })); });
+}
+// Pages are views and are not saved. Opening a session is the one navigation that is saved to the preferences, so the
+// tests of a saved navigation (conflicts, refresh, uncertain saves) open the demo session from the switcher.
+async function openDemoSession() {
+  fireEvent.click(switcher());
+  const menu = await screen.findByRole('dialog', { name: 'Switch session or project' });
+  await act(async () => { fireEvent.click(within(menu).getByRole('option', { name: /Canonical domain v1 demo/ })); });
+}
 
 describe('complete registered navigation reads', () => {
   it.each([false, true])('normalizes every loaded full status set to All with duplicates=%s', async duplicates => {
@@ -218,7 +235,8 @@ describe('canonical preference mutations', () => {
     const snapshot = vi.spyOn(store, 'getSnapshot').mockReturnValue({ ...ready, error: first });
     const mutationFailure = vi.spyOn(store, 'getMutationFailure').mockReturnValue(first);
     const renderSession = () => null;
-    const workspace = () => <NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={renderSession} />;
+    const waiting = quietWaiting();
+    const workspace = () => <NavigationWorkspace store={store} waitingStore={waiting} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={renderSession} />;
     vi.useFakeTimers();
     const view = render(workspace());
     await act(async () => { await vi.advanceTimersByTimeAsync(300); });
@@ -556,10 +574,10 @@ const adapter: AdapterChoice = { adapter_id: 'demo.local', label: 'Installed ada
 describe('source-backed navigation views and explicit registration', () => {
   it.each(['succeeds', 'fails'] as const)('waits for a deferred revision-conflict refresh before reporting that it %s', async outcome => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'projects' };
-    read(transport, prefs); transport.enqueue('session_get', loaded());
-    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => null} />);
-    const allSessions = screen.getByRole('button', { name: /^All sessions/ });
-    await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
+    // Opening the session reads it to validate the route, then the Map loads it.
+    read(transport, prefs); transport.enqueue('session_get', loaded(), loaded());
+    render(<NavigationWorkspace store={store} waitingStore={quietWaiting()} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => null} />);
+    await navigationReady();
     const conflict: CoreError = { ...error, code: 'revision_conflict', current_revision: 3 };
     transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: { ...conflict, current_revision: 2 } },
       { api_version: 1, ok: false, error: conflict });
@@ -571,7 +589,7 @@ describe('source-backed navigation views and explicit registration', () => {
       transport.enqueue('project_list', success('project_list', projectResult()));
       transport.enqueue('session_list', success('session_list', sessionResult()));
     }
-    await act(async () => { fireEvent.click(allSessions); });
+    await openDemoSession();
     await waitFor(() => expect(transport.calls.filter(call => call.name === 'preferences_get')).toHaveLength(3));
     expect(store.getSnapshot().preferences).toEqual(first);
     expect(notices.getSnapshot().some(notice => notice.text === 'Updated to the latest. Try again if needed.')).toBe(false);
@@ -599,15 +617,14 @@ describe('source-backed navigation views and explicit registration', () => {
   it('automatically refreshes a rejected navigation snapshot without retrying the write or losing saved text', async () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'projects' };
     read(transport, prefs);
-    transport.enqueue('session_get', loaded());
-    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => null} />);
-    const allSessions = screen.getByRole('button', { name: /^All sessions/ });
-    await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
+    transport.enqueue('session_get', loaded(), loaded());
+    render(<NavigationWorkspace store={store} waitingStore={quietWaiting()} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => null} />);
+    await navigationReady();
     const latest = structuredClone(prefs); latest.revision = 2;
     latest.global.window = { x: 25, y: 30, width: 1100, height: 750, monitor_id: 'main' };
     transport.enqueue('preferences_patch', { api_version: 1, ok: false, error });
     read(transport, latest);
-    await act(async () => { fireEvent.click(allSessions); });
+    await openDemoSession();
     const region = screen.getByRole('region', { name: 'Notifications' });
     expect(await within(region).findByText('Updated to the latest. Try again if needed.')).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
@@ -619,16 +636,16 @@ describe('source-backed navigation views and explicit registration', () => {
     expect(transport.calls.filter(call => call.name === 'preferences_get')).toHaveLength(2);
     expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(1);
     expect(screen.getByRole('heading', { name: 'Projects', level: 1 })).toBeTruthy();
-    expect((allSessions as HTMLButtonElement).disabled).toBe(false);
+    expect(switcher().disabled).toBe(false);
   });
   it.each(['projects', 'project', 'all_sessions'] as const)('blocks %s navigation during explicit Refresh until fresh preferences are published', async kind => {
     const { transport, store } = setup(); const prefs = preferences();
     prefs.global.selected_navigation = kind === 'project' ? { kind, project_id: projectId } : { kind };
     read(transport, prefs);
-    transport.enqueue('session_get', loaded());
-    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => null} />);
-    const allSessions = screen.getByRole('button', { name: /^All sessions/ });
-    await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
+    // Each attempt to open the session reads it to validate the route and again for the Map that would show it.
+    transport.enqueue('session_get', loaded(), loaded(), loaded(), loaded());
+    render(<NavigationWorkspace store={store} waitingStore={quietWaiting()} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => null} />);
+    await navigationReady();
     const conflict: CoreError = { ...error, code: 'revision_conflict', message: 'Preferences revision changed.', current_revision: 3 };
     const native = structuredClone(prefs); native.revision = 3;
     native.global.window = { x: 100, y: 100, width: 1000, height: 700, monitor_id: 'main' };
@@ -637,12 +654,12 @@ describe('source-backed navigation views and explicit registration', () => {
     const first = structuredClone(prefs); first.revision = 2;
     transport.enqueue('preferences_patch', { api_version: 1, ok: false, error: { ...conflict, current_revision: 2 } }, { api_version: 1, ok: false, error: conflict });
     read(transport, first); read(transport, native);
-    await act(async () => { fireEvent.click(allSessions); });
+    await openDemoSession();
     expect(store.getSnapshot().preferences).toEqual(native);
     expect(await within(screen.getByRole('region', { name: 'Notifications' })).findByText('Updated to the latest. Try again if needed.')).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
-    expect((allSessions as HTMLButtonElement).disabled).toBe(false);
+    expect(switcher().disabled).toBe(false);
 
     // Read failures keep a persistent recovery banner even after a conflict was automatically refreshed.
     transport.enqueue('preferences_get', { api_version: 1, ok: false, error });
@@ -660,17 +677,24 @@ describe('source-backed navigation views and explicit registration', () => {
     const snapshotReads = sessionReads();
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     expect((screen.getByRole('button', { name: 'Refreshing…' }) as HTMLButtonElement).disabled).toBe(true);
-    const tabs = screen.getByRole('navigation', { name: 'Projects and sessions' });
-    within(tabs).getAllByRole('button').forEach(button => {
+    // Where the tab row was: the switcher button and the Archive button hold navigation too.
+    [switcher(), screen.getByRole('button', { name: 'Archive' })].forEach(button => {
       expect((button as HTMLButtonElement).disabled).toBe(true); fireEvent.click(button);
     });
+    expect(screen.queryByRole('dialog', { name: 'Switch session or project' })).toBeNull();
     if (kind === 'projects') {
-      expect((screen.getByRole('button', { name: 'Register project' }) as HTMLButtonElement).disabled).toBe(true);
-      const cards = [...document.querySelectorAll<HTMLButtonElement>('.pw-project-open')]; expect(cards).not.toHaveLength(0);
-      cards.forEach(card => { expect(card.disabled).toBe(true); fireEvent.click(card); fireEvent.click(card.closest('.pw-project-card')!); });
+      // Register waits: the page's "…" menu opens, but its Register item opens nothing.
+      fireEvent.click(screen.getByRole('button', { name: 'Register a project, discover sessions' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /^Register a project/ }));
+      expect(screen.queryByRole('dialog', { name: 'Register project' })).toBeNull();
+      const cards = [...document.querySelectorAll<HTMLButtonElement>('.pj-name')]; expect(cards).not.toHaveLength(0);
+      cards.forEach(card => { fireEvent.click(card); fireEvent.click(card.closest('.pj-card')!); });
+      document.querySelectorAll<HTMLButtonElement>('.pj-sess').forEach(row => fireEvent.click(row));
+      expect(screen.getByRole('heading', { name: 'Projects', level: 1 })).toBeTruthy();
     } else {
+      // A session row ignores the click while navigation waits.
       const open = document.querySelector<HTMLButtonElement>(`button[data-session-id="${demo.id}"]`)!;
-      expect(open.disabled).toBe(true); fireEvent.click(open);
+      expect(open).not.toBeNull(); fireEvent.click(open);
       if (kind === 'project') expect((screen.getByRole('button', { name: 'Connect existing session' }) as HTMLButtonElement).disabled).toBe(true);
     }
     fireEvent.click(screen.getByRole('button', { name: 'Refreshing…' }));
@@ -679,36 +703,37 @@ describe('source-backed navigation views and explicit registration', () => {
     await waitFor(() => expect(transport.calls.filter(call => call.name === 'preferences_get')).toHaveLength(readCount + 1));
     await act(async () => { preferenceRead.resolve(success('preferences_get', fresh)); });
     expect(store.getSnapshot().preferences).toEqual(native);
-    expect((allSessions as HTMLButtonElement).disabled).toBe(true);
+    expect(switcher().disabled).toBe(true);
     expect(screen.getByRole('button', { name: 'Refreshing…' })).toBeTruthy();
     await act(async () => { projectRead.resolve(success('project_list', projectResult())); });
     expect(store.getSnapshot().preferences).toEqual(fresh);
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
-    expect((allSessions as HTMLButtonElement).disabled).toBe(false);
+    expect(switcher().disabled).toBe(false);
     expect(screen.queryByRole('alert')).toBeNull();
     expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(2);
     expect(transport.calls.filter(call => call.name === 'preferences_get')).toHaveLength(readCount + 1);
 
-    const saved = structuredClone(fresh); saved.revision = 5; saved.global.selected_navigation = { kind: 'all_sessions' };
+    const saved = structuredClone(fresh); saved.revision = 5; saved.global.selected_navigation = { kind: 'session', session: route };
     transport.enqueue('preferences_patch', patchReceipt(5)); read(transport, saved);
-    await act(async () => { fireEvent.click(allSessions); });
-    const mutations = transport.calls.filter(call => call.name === 'preferences_patch'); expect(mutations).toHaveLength(3);
-    expect(mutations[2].request).toMatchObject({ command: { params: { expected_preferences_revision: 4,
-      entries: [{ kind: 'set_global', preferences: saved.global }] } } });
-    expect(store.getSnapshot().preferences).toEqual(saved);
+    await openDemoSession();
+    const patches = () => transport.calls.filter(call => call.name === 'preferences_patch');
+    await waitFor(() => expect(patches()).toHaveLength(3));
+    // Opening the session saves it as the selection and marks its view open (older releases still read tab_open).
+    expect(patches()[2].request).toMatchObject({ command: { params: { expected_preferences_revision: 4,
+      entries: [{ kind: 'set_global', preferences: saved.global }, { kind: 'set_session_view', preferences: { session: route, tab_open: true } }] } } });
+    await waitFor(() => expect(store.getSnapshot().preferences).toEqual(saved));
     expect(screen.queryByRole('alert')).toBeNull();
-    expect(await screen.findByRole('heading', { name: 'All sessions', level: 1 })).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole('heading', { level: 1 })).toBeNull());
   });
   it('clears explicit Refresh progress after a failed read and keeps failure visible without changing navigation', async () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'projects' };
     read(transport, prefs);
-    transport.enqueue('session_get', loaded());
-    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => null} />);
-    const allSessions = screen.getByRole('button', { name: /^All sessions/ });
-    await waitFor(() => expect((allSessions as HTMLButtonElement).disabled).toBe(false));
+    transport.enqueue('session_get', loaded(), loaded());
+    render(<NavigationWorkspace store={store} waitingStore={quietWaiting()} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => null} />);
+    await navigationReady();
     transport.enqueue('preferences_patch', { api_version: 1, ok: false, error });
     read(transport, prefs);
-    await act(async () => { fireEvent.click(allSessions); });
+    await openDemoSession();
     expect(await within(screen.getByRole('region', { name: 'Notifications' })).findByText('Updated to the latest. Try again if needed.')).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
@@ -718,11 +743,11 @@ describe('source-backed navigation views and explicit registration', () => {
     transport.enqueue('preferences_get', pending.promise);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     expect((screen.getByRole('button', { name: 'Refreshing…' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((allSessions as HTMLButtonElement).disabled).toBe(true);
+    expect(switcher().disabled).toBe(true);
     const failure: CoreError = { ...error, message: 'Preferences read failed.', hint: 'Try refreshing again.' };
     await act(async () => { pending.resolve({ api_version: 1, ok: false, error: failure }); });
     expect((screen.getByRole('button', { name: 'Refresh' }) as HTMLButtonElement).disabled).toBe(false);
-    expect((allSessions as HTMLButtonElement).disabled).toBe(false);
+    expect(switcher().disabled).toBe(false);
     expect(screen.getByRole('alert').textContent).toContain('This changed while you were working. Look at it as it is now, then try again.');
     expect(screen.getByRole('alert').textContent).not.toContain(failure.message);
     expect(screen.getByRole('alert').textContent).not.toContain(failure.hint);
@@ -738,13 +763,22 @@ describe('source-backed navigation views and explicit registration', () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'all_sessions' };
     const result = sessionResult(); result.sessions.items.push({ ...result.sessions.items[0], session_id: '00000000-0000-4000-8000-000000000003', title: 'Closed work', state: 'closed', closed_at: demo.updated_at });
     read(transport, prefs, projectResult(), result);
-    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    render(<NavigationWorkspace store={store} waitingStore={quietWaiting()} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
     expect(await screen.findByRole('heading', { name: 'All sessions', level: 1 })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: /^Closed · \d+$/, level: 3 })).toBeTruthy();
-    const closed = document.querySelector('[data-session-card="00000000-0000-4000-8000-000000000003"]')!;
-    expect(within(closed as HTMLElement).getByRole('button', { name: 'Reopen' })).toBeTruthy();
-    const next = preferences(2); transport.enqueue('preferences_patch', patchReceipt()); read(transport, next);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Projects' })); });
+    // The Open / Closed / All tabs count the listed sessions; Closed shows the closed one, whose Close is greyed (SPEC 14.2).
+    const closedId = '00000000-0000-4000-8000-000000000003';
+    expect(document.querySelector(`button[data-session-id="${closedId}"]`)).toBeNull();
+    const tabs = screen.getByRole('group', { name: 'Show' });
+    expect(within(tabs).getByRole('button', { name: /^Open/ }).textContent).toBe('Open1');
+    expect(within(tabs).getByRole('button', { name: /^Closed/ }).textContent).toBe('Closed1');
+    fireEvent.click(within(tabs).getByRole('button', { name: /^Closed/ }));
+    const closed = document.querySelector(`button[data-session-id="${closedId}"]`)!.closest('.sl-row') as HTMLElement;
+    expect(closed).not.toBeNull();
+    const close = within(closed).getByRole('button', { name: 'Close Closed work' }) as HTMLButtonElement;
+    expect(close.disabled).toBe(true); expect(close.title).toBe('Already closed');
+    // Pages are views, not saved navigation: Projects opens with a refresh and no preferences write.
+    const next = preferences(2); read(transport, next);
+    await goTo('Projects');
     expect(await screen.findByRole('heading', { name: 'Projects', level: 1 })).toBeTruthy();
     expect(screen.getByText(/^Counts are incomplete\./)).toBeTruthy();
     expect(screen.getByText('Unavailable project')).toBeTruthy();
@@ -803,8 +837,8 @@ describe('source-backed navigation views and explicit registration', () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'project', project_id: projectId };
     read(transport, prefs);
     const binding = Object.values((demo as Session).bindings)[0]!;
-    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
-    await screen.findByRole('navigation', { name: 'Projects and sessions' });
+    render(<NavigationWorkspace store={store} waitingStore={quietWaiting()} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    await navigationReady();
     transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
       data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities: binding.capabilities,
         setup_instruction: 'Saved Ariadne rules.' } } }); read(transport, prefs);
@@ -823,15 +857,16 @@ describe('source-backed navigation views and explicit registration', () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'project', project_id: projectId };
     read(transport, prefs);
     const binding = Object.values((demo as Session).bindings)[0]!;
-    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
-    await screen.findByRole('navigation', { name: 'Projects and sessions' });
+    render(<NavigationWorkspace store={store} waitingStore={quietWaiting()} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    await navigationReady();
     transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
       data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities: binding.capabilities,
         setup_instruction: 'Run /opt/ariadne read --binding B.' } } }); read(transport, prefs);
     await act(async () => { await store.bind({ project_id: projectId, adapter_id: 'codex', configuration: adapter.configuration,
       external_session_id: 'thread', endpoint: { kind: 'local_bridge', name: 'local' }, existing_session_id: demo.id }); });
     const card = await screen.findByLabelText('Session setup');
-    const active = await screen.findByRole('heading', { name: /^Active sessions · \d+$/, level: 3 });
+    // The project's page lists its sessions in one group; the card sits above that list.
+    const active = await waitFor(() => { const group = document.querySelector('.sl-group'); expect(group).not.toBeNull(); return group!; });
     expect(card.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(card).queryByRole('list')).toBeNull();
     expect(within(card).getByText('Unavailable capabilities: domain mcp, streaming output.')).toBeTruthy();
@@ -847,8 +882,8 @@ describe('source-backed navigation views and explicit registration', () => {
     const binding = Object.values((demo as Session).bindings)[0]!;
     const capabilities = structuredClone(binding.capabilities);
     for (const value of Object.values(capabilities)) if (typeof value === 'object') value.supported = true;
-    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
-    await screen.findByRole('navigation', { name: 'Projects and sessions' });
+    render(<NavigationWorkspace store={store} waitingStore={quietWaiting()} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    await navigationReady();
     transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
       data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities,
         setup_instruction: 'Saved Ariadne rules.' } } }); read(transport, prefs);
@@ -860,9 +895,11 @@ describe('source-backed navigation views and explicit registration', () => {
     expect(card.querySelector('pre')).toBeNull();
   });
   it('passes the hidden item and unhide action to the detail header', async () => {
-    const { transport, store } = setup(); read(transport, preferences());
+    // Details sits beside a session's Map; pages take its place.
+    const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'session', session: route };
+    read(transport, prefs); transport.enqueue('session_get', loaded());
     const hide = vi.fn();
-    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} hidden onHide={hide}
+    render(<NavigationWorkspace store={store} waitingStore={quietWaiting()} onRemoveTarget={() => {}} adapterChoices={[adapter]} hidden onHide={hide}
       detail={<p>Hidden item detail</p>} renderSession={() => null} />);
     const button = await screen.findByRole('button', { name: 'Unhide item' });
     expect(button.title).toBe('Unhide');
@@ -873,9 +910,10 @@ describe('source-backed navigation views and explicit registration', () => {
   });
 
   it('saves the detail width with the global preferences and applies it at once', async () => {
-    const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs);
-    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} detail={<p>Detail</p>} renderSession={() => <p>Session workspace</p>} />);
-    await screen.findByRole('navigation', { name: 'Projects and sessions' });
+    const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'session', session: route };
+    read(transport, prefs); transport.enqueue('session_get', loaded());
+    render(<NavigationWorkspace store={store} waitingStore={quietWaiting()} onRemoveTarget={() => {}} adapterChoices={[adapter]} detail={<p>Detail</p>} renderSession={() => <p>Session workspace</p>} />);
+    await navigationReady();
     // The Waiting column and its saved fold are gone; the answer dock keeps its height in localStorage, not here.
     expect(screen.queryByRole('button', { name: /Waiting on me/ })).toBeNull();
     const patches = () => transport.calls.filter(call => call.name === 'preferences_patch');
@@ -896,8 +934,8 @@ describe('source-backed navigation views and explicit registration', () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'project', project_id: projectId };
     read(transport, prefs);
     const binding = Object.values((demo as Session).bindings)[0]!;
-    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
-    await screen.findByRole('navigation', { name: 'Projects and sessions' });
+    render(<NavigationWorkspace store={store} waitingStore={quietWaiting()} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => <p>Session workspace</p>} />);
+    await navigationReady();
     const connect = async () => {
       transport.enqueue('binding_connect', { api_version: 1, ok: true, data: { operation_id: operationId, session_id: demo.id, revision: 22,
         data: { kind: 'binding_connect', binding_id: binding.id, generation: binding.generation, capabilities: binding.capabilities,
@@ -953,18 +991,6 @@ describe('source-backed navigation views and explicit registration', () => {
     render(<BindSession store={store} project={projectsFixture.items[0] as ProjectSummary} sessions={sessionsFixture.items as SessionSummary[]} adapters={[adapter]} disabled={false} close={() => {}} />);
     expect(screen.getByRole('alert').textContent).toContain('Resolve its queued inputs before rebinding.');
   });
-  it('offers tab close separately from session lifecycle controls', async () => {
-    const { transport, store } = setup(); read(transport);
-    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => <p>Session workspace</p>} />);
-    const tabs = screen.getByRole('navigation', { name: 'Projects and sessions' });
-    const close = /^Close .* tab$/;
-    await waitFor(() => expect(within(tabs).getByRole('button', { name: close })).toBeTruthy());
-    const next = preferences(2); next.sessions[0].tab_open = false;
-    transport.enqueue('preferences_patch', patchReceipt()); read(transport, next);
-    await act(async () => { fireEvent.click(within(tabs).getByRole('button', { name: close })); });
-    expect(within(tabs).queryByRole('button', { name: close })).toBeNull();
-    expect(transport.calls.some(call => call.name === 'session_close')).toBe(false);
-  });
   it('renders the opened-session seam with retained selection/filter/scroll preferences', async () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'session', session: route };
     read(transport, prefs); transport.enqueue('session_get', loaded());
@@ -972,7 +998,7 @@ describe('source-backed navigation views and explicit registration', () => {
       <p>Selected item {view.preferences?.selected_item_id}</p><p>{view.preferences?.filters.search}</p>
       <p>Scroll {view.preferences?.scroll?.offset}</p><p>{view.store.getSnapshot().snapshot?.session.title}</p>
     </div>;
-    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={received} />);
+    render(<NavigationWorkspace store={store} waitingStore={quietWaiting()} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={received} />);
     expect(await screen.findByText('Selected item 1.1')).toBeTruthy();
     expect(screen.getByText('Scroll 124')).toBeTruthy();
     expect(await screen.findByText('Canonical domain v1 demo', { selector: 'p' })).toBeTruthy();
@@ -980,14 +1006,18 @@ describe('source-backed navigation views and explicit registration', () => {
   });
   it('reuses the source dialog focus trap, Escape and focus return', async () => {
     const { transport, store } = setup(); read(transport);
-    render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => null} />);
-    await screen.findByRole('heading', { name: 'Projects', level: 1 });
-    const opener = screen.getByRole('button', { name: 'Register project' }); opener.focus(); fireEvent.click(opener);
-    const dialog = screen.getByRole('dialog', { name: 'Register project' });
-    // The Paperwhite dialog holds focus on its card first (ui/dialogs/Dialog).
-    expect(document.activeElement).toBe(dialog);
-    const input = within(dialog).getByLabelText('Project root'); input.focus(); fireEvent.keyDown(input, { key: 'Tab', shiftKey: true });
-    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Register project' }));
+    render(<NavigationWorkspace store={store} waitingStore={quietWaiting()} onRemoveTarget={() => {}} adapterChoices={[]} renderSession={() => null} />);
+    await screen.findByRole('heading', { name: 'Projects', level: 1 }); await navigationReady();
+    // Register is an item of the Projects page's "…" menu; the dialog gives focus back to that button.
+    const opener = screen.getByRole('button', { name: 'Register a project, discover sessions' }); opener.focus(); fireEvent.click(opener);
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Register a project/ }));
+    const dialog = screen.getByRole('dialog', { name: 'Register a project' });
+    // The dialog takes focus into its folder field (ui/dialogs/DialogFrame) and keeps it inside.
+    const input = within(dialog).getByLabelText('Folder');
+    expect(document.activeElement).toBe(input);
+    fireEvent.keyDown(input, { key: 'Tab', shiftKey: true });
+    // Register project is disabled until a folder is typed, so the last control to wrap to is Cancel.
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: /^Cancel/ }));
     fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull(); expect(document.activeElement).toBe(opener);
     expect(transport.calls.some(call => call.name === 'project_register')).toBe(false);

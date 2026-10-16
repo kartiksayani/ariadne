@@ -39,13 +39,11 @@ describe('shell slots', () => {
     for (const declaration of ['position: absolute;', 'right: 0;', 'bottom: 0;', 'left: 0;']) expect(rules(shell, '.shell-dock')).toContain(declaration);
     expect(rules(shell, '.shell-body-viewport')).toContain('position: relative;');
   });
-  it('keeps the header, tab bar and footer at 48, 38 and 30px in the slot grid', () => {
+  it('keeps one 40px top bar in the slot grid, with no header, tab row or footer rows left (SPEC 2)', () => {
     const shell = css('ui/shell/shell.css');
     expect(rules(shell, '.shell')).toContain('grid-template-rows: auto minmax(0, 1fr) auto;');
-    for (const [selector, height] of [['.shell-header', '48px'], ['.shell-tabs', '38px'], ['.shell-footer', '30px']] as const) {
-      expect(rules(shell, selector)).toContain('box-sizing: border-box;');
-      expect(rules(shell, selector)).toContain(`height: ${height};`);
-    }
+    expect(rules(css('ui/topbar/topbar.css'), '.tb')).toContain('height: 40px;');
+    for (const selector of ['.shell-header', '.shell-tabs', '.shell-footer']) expect(rules(shell, selector)).toBe('');
   });
 });
 

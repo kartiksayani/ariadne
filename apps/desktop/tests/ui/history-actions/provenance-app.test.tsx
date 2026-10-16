@@ -115,9 +115,13 @@ it('discards a delayed unavailable-source failure after Projects supersedes its 
     fireEvent.click(source);
     await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
     expect(screen.getByText('Opening the session…')).toBeTruthy();
-    fireEvent.click(within(screen.getByLabelText('Projects and sessions')).getByRole('button', { name: 'Projects' }));
+    // Projects is a page link in the switcher (not a saved selection): it shows at once and cancels the queued handoff.
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-popover-trigger="switcher"]')!);
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Switch session or project' })).getByRole('button', { name: 'Projects' }));
     await act(async () => { await vi.advanceTimersByTimeAsync(0); release(); await vi.advanceTimersByTimeAsync(0); });
-    expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'projects' });
+    expect(screen.getByRole('heading', { name: 'Projects', level: 1 })).toBeTruthy();
+    // The page is not saved: the selection stays on the session it was on, and the handoff never lands.
+    expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
     expect(screen.queryByText(/Opening|Full copied history|couldn’t read or save|could not be opened/)).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
     expect(notices.getSnapshot()).toEqual([]);

@@ -32,7 +32,10 @@ describe('All sessions status tabs', () => {
     expect(tab(/^Open/).getAttribute('aria-pressed')).toBe('true');
     expect(rowName('Open review')).toBeTruthy(); expect(rowName('Closed review')).toBeNull();
     fireEvent.click(tab(/^Closed/));
-    expect(screen.getByRole('button', { name: 'Reopen Closed review' })).toBeTruthy(); expect(rowName('Open review')).toBeNull();
+    // A closed row keeps Close, greyed (SPEC 14.2); Reopen lives on the connection card of the opened session.
+    const close = screen.getByRole('button', { name: 'Close Closed review' }) as HTMLButtonElement;
+    expect(close.disabled).toBe(true); expect(close.title).toBe('Already closed');
+    expect(rowName('Open review')).toBeNull();
     fireEvent.click(tab(/^All/));
     expect(rowName('Open review')).toBeTruthy(); expect(rowName('Closed review')).toBeTruthy();
     expect(transport.mutations).toEqual([]);
