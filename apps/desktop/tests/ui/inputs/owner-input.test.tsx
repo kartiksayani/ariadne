@@ -25,6 +25,7 @@ import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { sentAs } from '../../../src/ui/detail/model';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
 import { HistoryTransport } from '../history/fixtures';
+import { dispatchIntent } from '../../../src/ui/intents';
 import { useWindowKeys } from '../../../src/ui/shell/windowKeys';
 import { answerWords } from '../answer/words';
 // @ts-expect-error Native e2e helpers are plain ESM without type declarations.
@@ -2498,8 +2499,10 @@ describe('J1 answer invariants', () => {
       await atItem('2', 4000);
     } else if (trigger === '[' || trigger === ']') {
       if (trigger === '[') { fireEvent.click(screen.getByRole('button', { name: 'Next question' })); await atItem('8'); }
-      fireEvent.keyDown(document.body, { key: trigger });
-      if (trigger === ']') { await atItem('8'); fireEvent.keyDown(document.body, { key: '[' }); }
+      // The keys [ and ] ask for these intents (ui/keys.ts); the dock answers them.
+      const press = (key: '[' | ']') => act(() => { dispatchIntent(key === '[' ? 'dock.prev' : 'dock.next'); });
+      await press(trigger);
+      if (trigger === ']') { await atItem('8'); await press('['); }
       await atItem('2');
     } else if (trigger === 'folding') {
       fireEvent.click(screen.getByRole('button', { name: 'Fold the dock' }));
