@@ -100,10 +100,13 @@ plugin store's bounded `connect-log` diagnostics. See [ADR-0096](../../docs/adr/
 
 One conversation health record collects announce, helper, claim, report, automatic
 reconnect and qualification outcomes. Producers drop out after three of their own
-call intervals without a call. The current condition is the most important live
-outcome: terminal, installation failure, held state, transient failure, then healthy.
-Among equal priorities the line already showing stays while its producer still
-fails; otherwise the most recent failed call wins, with a fixed producer order for ties.
+call intervals without a call. A call in flight keeps its producer live, because one
+poll's helper calls can take far longer than its one-second tick; the intervals count
+from when a call ends. The current condition is the most important live outcome:
+terminal, installation failure, owner-needed held advice, generic held advice,
+transient failure, then healthy. The line already showing stays while its producer
+still fails and nothing more important is live; otherwise the most recent failed call
+wins, with a fixed producer order for ties.
 Terminal, installation and owner-needed held advice (paused, closed, recovery,
 conflicting or removed sessions, uncertain saves) speaks immediately when it becomes
 current; identical consecutive lines are suppressed. Generic held codes, such as an
@@ -112,7 +115,8 @@ resources and version mismatches share one installation repair sentence. Structu
 spawn codes distinguish these from temporary process failures; raw text is never shown.
 A helper stopped before it wrote anything counts as a temporary timeout.
 
-Transient failures share one retry sentence. They and generic held advice speak after
+Transient failures share one retry sentence, except that a missing or inaccessible
+project folder keeps its own words. They and generic held advice speak after
 two minutes of continuous unhealthy outcomes, even when codes change or urgent advice
 intervenes, and are spaced at least two minutes apart. A retry line never replaces
 held, installation or terminal advice until the producer that printed it recovers or

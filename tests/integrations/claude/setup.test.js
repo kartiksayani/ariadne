@@ -76,6 +76,14 @@ describe('installed owner helper setup', () => {
       .rejects.toMatchObject({code:'host_unreachable',plain:'Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.'});
     expect(h.calls.filter(call => call.argv[2] === 'connection-status')).toHaveLength(1);
   });
+  it('keeps the project folder words when connection status cannot reach the folder', async () => {
+    const folder = {exitCode:4,stdout:JSON.stringify({api_version:1,ok:false,error:{code:'host_unreachable',
+      message:'The selected project folder is missing or inaccessible; restore access to the project folder or select it again before reconnecting',
+      hint:'Restore access.',retryable:true,field_errors:[]}}),stderr:''};
+    const h = host({handler:argv => argv[2] === 'connection-status' ? folder : undefined});
+    await expect(setup(descriptor.helperPath,undefined,{waitMs:2000,pollMs:1}).connect(h.$))
+      .rejects.toMatchObject({code:'host_unreachable',plain:'The project folder is missing or inaccessible. Restore access or select it again; Ariadne will keep trying.'});
+  });
   it('uses canonical bootstrap wrappers and installed fixed provider facts, then validates scoped status', async () => {
     const h = host();const owner = setup(descriptor.helperPath);
     const result = await owner.connect(h.$);

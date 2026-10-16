@@ -1,7 +1,7 @@
 import installed from './installed.js';
 import { BUSY, claimLoop } from './claims.js';
 import { forget, qualify, recall, remember, setup } from './setup.js';
-import { BACKGROUND_RETRY, bounded, descriptorValid, failureCode, ModError, conversationHealth, backgroundOutcome, plainFailure, uuid } from './contracts.js';
+import { BACKGROUND_RETRY, bounded, descriptorValid, failureCode, folderFailure, ModError, conversationHealth, backgroundOutcome, plainFailure, uuid } from './contracts.js';
 import { announcements } from './discovery.js';
 import { prCommentsPrompt } from './pr-comments.js';
 
@@ -33,6 +33,8 @@ function healthFor(state) {
   return {
     record:($,producer,outcome) => {if (state.health === health) health.record($,producer,outcome);},
     delete:($,producer) => {if (state.health === health) health.delete($,producer);},
+    begin:($,producer) => state.health === health ? health.begin($,producer) : () => {},
+    during:($,producer,action) => state.health === health ? health.during($,producer,action) : action(),
   };
 }
 function resetHealth(state) {
@@ -90,8 +92,11 @@ function notice(health, h, error, text, terminal = false) {
 function announcementGood(health, h) {
   health.record(h,'announce',{kind:'ok'});
 }
-async function announce(state, h) {
+function announce(state, h) {
   const health = healthFor(state);
+  return health.during(h,'announce',() => announceOnce(state,h,health));
+}
+async function announceOnce(state, h, health) {
   try {
     if (await state.discovery.announce(h,state.announcementScope)) {
       announcementGood(health,h);
@@ -115,20 +120,24 @@ function qualifyConnection(state, $) {
   }).finally(() => { state.qualifying = null; });
   return state.qualifying;
 }
+// One startup or heartbeat qualification call and its outcome.
+function qualification(state, $) {
+  const health = healthFor(state), h = host($);
+  return health.during(h,'qualification',async () => {
+    try {
+      await qualifyConnection(state,$);
+      health.record(h,'qualification',{kind:'ok'});
+    } catch (error) {
+      health.record(h,'qualification',backgroundOutcome(error,failureText(state,error)));
+    }
+  });
+}
 async function heartbeat(state, $) {
   if (state.sessionEnded) return;
   await follow(state,$);
   if (state.sessionEnded || state.ownerTransition) return;
-  const health = healthFor(state);
   await announce(state,host($));
-  if (!state.qualified) {
-    try {
-      await qualifyConnection(state,$);
-      health.record(host($),'qualification',{kind:'ok'});
-    } catch (error) {
-      health.record(host($),'qualification',backgroundOutcome(error,failureText(state,error)));
-    }
-  }
+  if (!state.qualified) await qualification(state,$);
   if (state.target && !state.loop) await autoConnect(state,$);
   else await drainRetired(state,host($));
 }
@@ -187,7 +196,8 @@ async function transition(state, $, action, recover = false) {
     if (reason) return {text:BUSY[reason]};
     return await action();
   } catch (error) {
-    if (reachable && error instanceof ModError && error.code === 'host_unreachable') error.plain = TEXT.connectAgain;
+    // A project-folder failure keeps its own repair words.
+    if (reachable && error instanceof ModError && error.code === 'host_unreachable' && !folderFailure(error)) error.plain = TEXT.connectAgain;
     throw error;
   } finally {
     state.ownerTransition = false;
@@ -239,14 +249,17 @@ async function retire(state, h) {
   state.retired.push(...old);
   for (const loop of old) await loop.stop(h,true);
 }
-async function drainRetired(state, h) {
-  const left = [], attempted = state.retired.length > 0, health = healthFor(state);
-  // Retired reports block this background reconnect attempt. Preserve the real
-  // failure and this caller's cadence; their stopped claim loop no longer polls.
-  for (const loop of state.retired) if (!await loop.drain(h,error => health.record(h,'auto',backgroundOutcome(error)))) left.push(loop);
-  state.retired = left;
-  if (attempted && !left.length) health.record(h,'auto',{kind:'ok'});
-  return left.length === 0;
+function drainRetired(state, h) {
+  const health = healthFor(state);
+  return health.during(h,'auto',async () => {
+    const left = [], attempted = state.retired.length > 0;
+    // Retired reports block this background reconnect attempt. Preserve the real
+    // failure and this caller's cadence; their stopped claim loop no longer polls.
+    for (const loop of state.retired) if (!await loop.drain(h,error => health.record(h,'auto',backgroundOutcome(error)))) left.push(loop);
+    state.retired = left;
+    if (attempted && !left.length) health.record(h,'auto',{kind:'ok'});
+    return left.length === 0;
+  });
 }
 // A new Claude conversation in this process (/clear, /resume) takes over: the
 // old conversation's loop reports its end, and the new conversation follows the
@@ -313,6 +326,9 @@ async function autoConnect(state, $) {
   const h = host($), health = healthFor(state), conversation = state.health;
   state.reconnectSoon = false;
   state.ownerTransition = true;
+  return health.during(h,'auto',() => reconnect(state,$,h,health,conversation));
+}
+async function reconnect(state, $, h, health, conversation) {
   try {
     // The app accepts the new conversation once the old one's end is saved.
     if (!await drainRetired(state,h)) return;
@@ -351,7 +367,6 @@ async function sessionStart(state, $, event, next) {
   }
   await $.command.register({name:'ariadne-pr-comments',description:'Choose what to do with open PR review comments',argumentHint:'<PR>'});
   try { state.claudeSessionId = await $.session.id(); } catch { state.claudeSessionId = null; }
-  const health = healthFor(state);
   // Discovery may describe an unqualified engine; only native inspection can
   // qualify it. Its heartbeat never enables the independent claim loop.
   if (descriptorValid(state.descriptor,{name:pluginName($),root:pluginRoot($)})) {
@@ -359,10 +374,7 @@ async function sessionStart(state, $, event, next) {
     await announce(state,host($));
   }
   if (state.sessionEnded) return next(event);
-  try {
-    await qualifyConnection(state,$);
-    health.record(host($),'qualification',{kind:'ok'});
-  } catch (error) { health.record(host($),'qualification',backgroundOutcome(error,failureText(state,error))); }
+  await qualification(state,$);
   // `claude --resume` of a connected conversation reconnects it; a new
   // conversation has no remembered session and only announces itself.
   if (!state.sessionEnded) {
@@ -454,20 +466,24 @@ async function disconnectAction(state, $) {
   return {text:JSON.stringify(receipt)};
 }
 async function turnStart(state, $, event, next) {
-  const health = healthFor(state);
-  try { if (state.loop) { await state.loop.start(host($),event); health.record(host($),'helper',{kind:'ok'}); } }
-  catch (error) { failure(state,$,error,health); }
+  const health = healthFor(state), loop = state.loop;
+  if (loop) await health.during(host($),'helper',async () => {
+    try { await loop.start(host($),event); health.record(host($),'helper',{kind:'ok'}); }
+    catch (error) { failure(state,$,error,health); }
+  });
   return next(event);
 }
 async function turnComplete(state, $, event, next) {
   const health = healthFor(state);
   // A retired loop still records the end of a turn it delivered.
-  try {
-    const active = [state.loop,...state.retired].filter(Boolean);
-    for (const loop of active) await loop.complete(host($),event);
-    if (active.length) health.record(host($),'helper',{kind:'ok'});
-  }
-  catch (error) { failure(state,$,error,health); }
+  const active = [state.loop,...state.retired].filter(Boolean);
+  if (active.length) await health.during(host($),'helper',async () => {
+    try {
+      for (const loop of active) await loop.complete(host($),event);
+      health.record(host($),'helper',{kind:'ok'});
+    }
+    catch (error) { failure(state,$,error,health); }
+  });
   return next(event);
 }
 // /clear and /resume end this conversation but not the process: report the

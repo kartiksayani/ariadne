@@ -1,4 +1,4 @@
-import { BACKGROUND_RETRY, bounded, claudeSessionEndEventId, clip, envelope, hash, lifecycle, ModError, conversationHealth, backgroundOutcome, plainFailure, prepared, reportReceipt, HELPER_TIMEOUT_MS } from './contracts.js';
+import { bounded,claudeSessionEndEventId, clip, envelope, hash, lifecycle, ModError, conversationHealth, backgroundOutcome, plainFailure, prepared, reportReceipt, HELPER_TIMEOUT_MS } from './contracts.js';
 import { bindingStatus, connectionGone } from './setup.js';
 
 // 'exact' when text is the payload, 'framed' when the payload sits intact as whole
@@ -14,15 +14,9 @@ function carried(text, captured) {
   return null;
 }
 
-// Owner-facing notices. Each prints once when its state starts, never every poll.
+// Owner-facing notice of a stopped loop. Held and retry notices come from plainFailure.
 export const NOTICES = Object.freeze({
   removed:'This session was removed from Ariadne (or connected elsewhere). Run /ariadne-connect to connect again.',
-  owner_paused:plainFailure('invalid_transition',{reason:'owner_paused'}),
-  session_closed:plainFailure('invalid_transition',{reason:'session_closed'}),
-  recovery_required:plainFailure('invalid_transition',{reason:'recovery_required'}),
-  blocked:plainFailure('invalid_transition'),
-  failure:BACKGROUND_RETRY,
-  reports:BACKGROUND_RETRY,
 });
 // What still holds a loop open, in the words /ariadne-connect and /ariadne-disconnect use.
 export const BUSY = Object.freeze({
@@ -95,6 +89,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
         if (record.release && active === record.claim) active = null;
       }
     })();
+    const call = health.begin($,'reports');
     try {
       await reporting;
       if (!stopped) health.record($,'reports',{kind:'ok'});
@@ -102,7 +97,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
       if (!stopped) health.record($,'reports',backgroundOutcome(error,
         (error instanceof ModError ? error.plain : undefined) ?? plainFailure(error?.code,error?.details)));
       throw error;
-    } finally { reporting = null; }
+    } finally { reporting = null; call(); }
   }
   async function emit($, claim, kind, payload, release = false) {
     const event = await lifecycle(binding,claim,kind,payload,claim.turnId);
@@ -145,7 +140,10 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
   function poll($) {
     if (polling) return Promise.resolve();
     if (stopped) return Promise.resolve();
-    polling = Promise.resolve().then(() => runPoll($)).finally(() => { polling = null; });
+    // A poll is one call of both producers: it saves reports, then claims. Its
+    // helper calls can each take HELPER_TIMEOUT_MS, far longer than the tick.
+    polling = Promise.resolve().then(() => health.during($,'claim',() => health.during($,'reports',() => runPoll($))))
+      .finally(() => { polling = null; });
     return polling;
   }
   async function quiesce() {

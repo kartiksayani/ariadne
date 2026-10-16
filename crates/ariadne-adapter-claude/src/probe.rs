@@ -201,8 +201,13 @@ fn version_output(path: &Path, deadline: Instant) -> Result<String, AdapterError
             read_pipe(&mut stdout, Some(&mut output), &mut diagnostic_bytes)?;
             read_pipe(&mut stderr, None, &mut diagnostic_bytes)?;
             if let Some(signal) = status.signal() {
+                // SIGKILL is how macOS reclaims memory under pressure, so it is
+                // temporary; crash signals mean the installation is broken.
                 return Err(
-                    if matches!(signal, libc::SIGTERM | libc::SIGINT | libc::SIGHUP) {
+                    if matches!(
+                        signal,
+                        libc::SIGTERM | libc::SIGINT | libc::SIGHUP | libc::SIGKILL
+                    ) {
                         io_error()
                     } else {
                         resource_error()

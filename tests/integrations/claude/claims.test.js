@@ -1,7 +1,9 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { FOLD_GRACE_MS, NOTICES, claimLoop } from '../../../integrations/claude/plugin/hooks/claims.js';
-import { hash, plainFailure } from '../../../integrations/claude/plugin/hooks/contracts.js';
+import { BACKGROUND_RETRY, hash, plainFailure } from '../../../integrations/claude/plugin/hooks/contracts.js';
 import { binding, deferred, descriptor, failure, host, ids, prepared, success } from './fixtures.js';
+
+const held = reason => plainFailure('invalid_transition',reason ? {reason} : undefined);
 
 afterEach(() => vi.useRealTimers());
 
@@ -91,7 +93,7 @@ describe('captured Claude claim lifecycle', () => {
     const loop = claimLoop(descriptor.helperPath,binding);
     for (let index=0;index<3;index++) await loop.poll(h.$);
     expect(h.calls.filter(call => call.argv[2] === 'claim')).toHaveLength(3);
-    expect(h.logs).toEqual([NOTICES.owner_paused]);
+    expect(h.logs).toEqual([held('owner_paused')]);
     expect(h.logs.join('')).not.toMatch(/owner_paused|needs_attention|generation/);
     expect(loop.status().admission_open).toBe(true);
     expect(h.prompts).toHaveLength(0);
@@ -102,7 +104,7 @@ describe('captured Claude claim lifecycle', () => {
     const h = host({claim:value,handler:argv => argv[2] === 'claim' && closed ? failure('invalid_transition',{reason:'session_closed'}) : undefined});
     const loop = claimLoop(descriptor.helperPath,binding);
     for (let index=0;index<3;index++) await loop.poll(h.$);
-    expect(h.logs).toEqual([NOTICES.session_closed]);
+    expect(h.logs).toEqual([held('session_closed')]);
     closed = false;await loop.poll(h.$);
     expect(h.prompts).toEqual([{text:value.formatted_payload,asUser:true}]);
   });
@@ -110,7 +112,7 @@ describe('captured Claude claim lifecycle', () => {
     const h = host({handler:argv => argv[2] === 'claim' ? failure('invalid_transition',{reason:'evil\nreason $(x)'}) : undefined});
     const loop = claimLoop(descriptor.helperPath,binding);
     await loop.poll(h.$);
-    expect(h.logs).toEqual([NOTICES.blocked]);
+    expect(h.logs).toEqual([held()]);
     expect(h.logs.join('')).not.toContain('evil');
   });
   it('keeps a claim request ID the app may have saved while it holds no lease, and retries it quietly', async () => {
@@ -216,7 +218,7 @@ describe('captured Claude claim lifecycle', () => {
     await loop.poll(h.$);await loop.poll(h.$);
     mode = 'empty';await loop.poll(h.$);
     mode = 'blocked';await loop.poll(h.$);await loop.poll(h.$);
-    expect(h.logs).toEqual([NOTICES.owner_paused,NOTICES.owner_paused]);
+    expect(h.logs).toEqual([held('owner_paused'),held('owner_paused')]);
   });
   it('keeps short repeated transient claim failures quiet', async () => {
     const h = host({handler:argv => argv[2] === 'claim' ? failure('host_unreachable') : undefined});
@@ -250,10 +252,10 @@ describe('captured Claude claim lifecycle', () => {
       [2000,'session_closed',true],[3000,'session_closed',false],[4000,'recovery_required',true],
       [5000,'recovery_required',false],[6000,'owner_paused',true],[7000,'owner_paused',false]]) {
       vi.setSystemTime(time);reason = next;await loop.poll(h.$);
-      if (shown) transcript.push(NOTICES[next]);
+      if (shown) transcript.push(held(next));
       expect(h.logs).toEqual(transcript);
     }
-    expect(h.logs).toEqual([NOTICES.owner_paused,NOTICES.session_closed,NOTICES.recovery_required,NOTICES.owner_paused]);
+    expect(h.logs).toEqual([held('owner_paused'),held('session_closed'),held('recovery_required'),held('owner_paused')]);
   });
   it('serializes concurrent poll callbacks and retains lifecycle exactly across desktop/helper failure', async () => {
     const value = await prepared();const response = deferred();const admitted = deferred();const submission = deferred();let failing = true;
@@ -616,7 +618,7 @@ describe('captured Claude claim lifecycle', () => {
     await loop.complete(h.$,{turnId:'turn',answer:'done',reason:'answer',isAborted:false});
     expect(loop.status().pending_reports).toBe(3);
     // Rapid transient save failures stay quiet while the exact reports retry.
-    expect(h.logs.filter(log => log === NOTICES.reports)).toHaveLength(0);
+    expect(h.logs.filter(log => log === BACKGROUND_RETRY)).toHaveLength(0);
     failing = false;await loop.settle(h.$);
     expect(loop.status().pending_reports).toBe(0);
     expect(loop.busy()).toBe(null);

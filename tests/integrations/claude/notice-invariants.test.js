@@ -1,76 +1,68 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createRegister } from '../../../integrations/claude/plugin/hooks/register.js';
 import { claimLoop } from '../../../integrations/claude/plugin/hooks/claims.js';
+import { BACKGROUND_RETRY, ModError, backgroundOutcome, conversationHealth, envelope, plainFailure } from '../../../integrations/claude/plugin/hooks/contracts.js';
 import { binding, deferred, descriptor, failure, host, prepared } from './fixtures.js';
-import * as liveContracts from '../../../integrations/claude/plugin/hooks/contracts.js';
 
-const contracts = process.env.ARIADNE_NOTICE_BASELINE
-  ? await import(/* @vite-ignore */ process.env.ARIADNE_NOTICE_BASELINE) : liveContracts;
-const { BACKGROUND_RETRY, ModError, plainFailure } = contracts;
-const MINUTE = 60000;
+const MINUTE = 60000, GRACE = 2 * MINUTE;
 const PRODUCERS = ['announce','helper','auto','qualification','claim','reports'];
-const INTERVALS = Object.fromEntries(PRODUCERS.map(producer => [producer,['claim','reports'].includes(producer) ? 1000 : 30000]));
-const TRANSIENTS = ['host_unreachable','store_busy','timeout','io_error','process_rejected'];
-const HELD = ['owner_paused','session_closed','recovery_required','unrecognized'];
-// Generic held codes: not owner-needed, so they wait out the grace like retries.
-const GENERIC_HELD = ['protocol_error','revision_conflict','queue_full'];
-const TERMINALS = ['stale_generation','binding_mismatch','not_found','delivery_uncertain','commit_uncertain'];
-const INSTALL = plainFailure('incompatible_adapter');
-function error(code, details) {
-  return Object.assign(new ModError('Fixture diagnostic.'),{code,details});
+// Call cadence: the poll tick for claims and reports, the heartbeat for the rest.
+const INTERVALS = Object.freeze({announce:30000,helper:30000,auto:30000,qualification:30000,claim:1000,reports:1000});
+// One poll is one call of both claims and reports: it saves reports first.
+const POLLED = ['claim','reports'];
+// A helper call may run to its eight-second kill, plus a store-lock wait.
+const MAX_LATENCY = 10000;
+// "Prints by two minutes plus one interval, whatever the call latency": one
+// interval is one call cycle, the cadence plus the slowest call (two in a poll).
+const cycle = producer => INTERVALS[producer] + 2 * MAX_LATENCY;
+const FOLDER_MESSAGE = 'The selected project folder is missing or inaccessible; restore access to the project folder or select it again before reconnecting';
+
+function coded(code, details) {
+  return Object.assign(new ModError('PRIVATE fixture diagnostic.'),{code,details});
 }
-function outcome(kind, code, reason) {
-  const text = kind === 'transient' ? BACKGROUND_RETRY : kind === 'install' ? INSTALL : plainFailure(code,reason ? {reason} : undefined);
-  return {kind,code,text,reason};
-}
-// Baseline-only bridge preserves the old implementation's real fail/good logic.
-// Production always exercises conversationHealth directly once it is exported.
-function health(now, intervals = INTERVALS) {
-  if (contracts.conversationHealth) return contracts.conversationHealth(now,intervals);
-  const old = contracts.noticeEpisodes(now);
-  return {
-    record($,producer,value) {
-      if (value.kind === 'ok') return old.good($,producer);
-      const code = value.kind === 'install' ? 'incompatible_adapter' : value.code;
-      return old.fail($,producer,error(code,value.reason ? {reason:value.reason} : undefined),value.text,BACKGROUND_RETRY,{terminal:value.kind === 'terminal'});
-    },
-    delete($,producer) {old.delete(producer);},
-    reset() {old.reset();},
-  };
-}
-function fixture() {
-  let time = 0;
-  const lines = [];
-  const $ = {store:{get:async () => [],set:async () => {}},ui:{log:text => lines.push({at:time,text})}};
-  const model = health(() => time);
-  return {$,lines,model,call(at,producer,value) {time = at;model.record($,producer,value);}};
+const unreadable = (() => {try {envelope({exitCode:0,stdout:'{',stderr:''});} catch (error) {return error;}})();
+const CONNECT = 'Ariadne could not finish connecting this conversation. PRIVATE diagnostic.';
+// Examples taken from the README health section, labelled with what it calls
+// them, each with the sentence the owner should read. They are spec examples,
+// not copies of the code's code tables or selection rules.
+const SPEC = {
+  // "Transient failures share one retry sentence."
+  retry:['host_unreachable','store_busy','timeout','io_error','process_rejected']
+    .map(code => ({cause:coded(code),given:CONNECT,text:BACKGROUND_RETRY})),
+  // "Generic held codes, such as an unreadable reply, wait like retries."
+  generic:[
+    {cause:unreadable,text:unreadable.plain},
+    {cause:coded('queue_full'),text:plainFailure('queue_full')},
+    {cause:coded('revision_conflict'),text:plainFailure('revision_conflict')},
+    {cause:new ModError('PRIVATE unknown reply.'),text:plainFailure('protocol_error')},
+  ],
+  // "Owner-needed held advice (paused, closed, recovery, conflicting or
+  // removed sessions, uncertain saves) speaks immediately."
+  owner:[
+    ...['owner_paused','session_closed','recovery_required'].map(reason => ({cause:coded('invalid_transition',{reason}),text:plainFailure('invalid_transition',{reason})})),
+    {cause:coded('binding_conflict'),text:plainFailure('binding_conflict')},
+    {cause:coded('not_found'),text:plainFailure('not_found')},
+    {cause:coded('delivery_uncertain'),text:plainFailure('delivery_uncertain')},
+  ],
+  // "Missing or unusable helpers ... share one installation repair sentence."
+  install:['ENOENT','EACCES'].map(code => ({cause:Object.assign(new Error('PRIVATE spawn diagnostic'),{code}),given:CONNECT,text:plainFailure('incompatible_adapter')})),
+  // A removed session or replaced connection stops the loop with one notice.
+  terminal:[
+    {cause:coded('stale_generation'),text:'This session was removed from Ariadne (or connected elsewhere). Run /ariadne-connect to connect again.'},
+    {cause:coded('not_found'),text:'Ariadne: the Ariadne session for this conversation no longer exists. Run /ariadne-connect to connect again.'},
+  ],
+};
+const EXAMPLES = Object.fromEntries(Object.entries(SPEC).map(([label,list]) => [label,list.map(example => Object.freeze({...example,label}))]));
+const LABELS = new Map(Object.values(EXAMPLES).flat().map(example => [example.text,example.label]));
+// "terminal, installation failure, held state": the urgent order.
+const URGENCY = Object.freeze({owner:1,install:2,terminal:3});
+const urgent = example => Boolean(URGENCY[example.label]);
+function outcome(example) {
+  if (!example) return {kind:'ok'};
+  return backgroundOutcome(example.cause,example.given ?? example.text,{terminal:example.label === 'terminal'});
 }
 
-describe('conversation-health generated regressions',() => {
-  it('blocker 1: an idle report producer cannot suppress a later outage after one successful flush',() => {
-    const h = fixture();
-    for (let at = 0; at <= 120000; at += 1000) h.call(at,'reports',outcome('transient','store_busy'));
-    expect(h.lines.map(line => line.text)).toEqual([BACKGROUND_RETRY]);
-    h.call(121000,'reports',{kind:'ok'});
-    // The report queue drains and never calls again. A later outage belongs to
-    // a fresh continuous unhealthy interval, with its own grace and visible line.
-    for (let at = 9000000; at <= 9120000; at += 30000) h.call(at,'announce',outcome('transient','host_unreachable'));
-    expect(h.lines.map(line => line.text)).toEqual([BACKGROUND_RETRY,BACKGROUND_RETRY]);
-    expect(h.lines.at(-1).at).toBe(9120000);
-  });
-  it('I5 finding 3: every current urgent held meaning is visible during one-second A/B flaps',() => {
-    const h = fixture();
-    for (let at = 0; at <= 10000; at += 1000) {
-      const reason = at % 2000 ? 'session_closed' : 'owner_paused';
-      const value = outcome('held','invalid_transition',reason);
-      h.call(at,'helper',value);
-      expect(h.lines.at(-1)).toEqual({at,text:value.text});
-    }
-  });
-});
-
-
-const SEEDS = 256;
+function check(condition, message) {if (!condition) throw new Error(message);}
 function random(seed) {
   let state = seed;
   return max => {
@@ -78,257 +70,348 @@ function random(seed) {
     return (state >>> 0) % max;
   };
 }
-function check(condition, message) {if (!condition) throw new Error(message);}
-const priority = {transient:1,held:2,install:3,terminal:4};
-// Held advice the owner must act on speaks at once; generic held codes wait.
-const OWNER_NEEDED = ['invalid_transition','binding_conflict','stale_generation','binding_mismatch','binding_ambiguous',
-  'not_found','permission_denied','unsupported','unsupported_host_version','delivery_uncertain','commit_uncertain','protocol_conflict'];
-const urgent = value => Boolean(value) && (value.kind === 'terminal' || value.kind === 'install' || (value.kind === 'held' && OWNER_NEEDED.includes(value.code)));
-function visible(value) {return value && {kind:value.kind,code:value.code,text:value.text,producer:value.producer};}
+const pick = (rng, list) => list[rng(list.length)];
+const anyExample = rng => pick(rng,pick(rng,Object.values(EXAMPLES)));
 
-// Oracle reconstructs each producer's evidence from its input history. It has no
-// implementation slots, forks, episode counters, debounce or implementation keys.
-// Beyond the history it remembers only what was printed: the last line, its
-// producer and kind, the continuous bad clock and non-urgent spacing.
-function oracle(intervals) {
-  // Per-producer input history. A delete retires everything before it, so each
-  // list keeps only events since that producer's last delete.
-  let history = new Map(), badSince = null, lastText = null, nonurgentAt = null, shown = null;
-  function selected(at) {
-    const candidates = failing(at);
-    // I7: the line showing stays while its producer still fails at the top priority.
-    return candidates.find(candidate => candidate.producer === shown?.producer && priority[candidate.kind] === priority[candidates[0]?.kind])
-      ?? candidates[0] ?? null;
+// Drives conversationHealth with timed calls: each call opens, takes its
+// latency, records its result and closes. After every step it checks plain
+// statements from the README against what printed. It keeps only what the
+// README lets an observer know: who called when, each producer's latest
+// result, and the lines printed.
+function simulation(intervals = INTERVALS) {
+  let time = 0, order = 0, failedAt = [], shown = null, advisers = [], quietAt = null;
+  const queue = [], lines = [], trace = [];
+  const $ = {store:{get:async () => [],set:async () => {}},ui:{log:text => lines.push({at:time,text,label:LABELS.get(text)})}};
+  const model = conversationHealth(() => time,intervals);
+  // `ends` counts successes, drop-outs, deletes and resets: each ends advice.
+  const known = new Map(PRODUCERS.map(producer => [producer,{open:0,seen:-Infinity,latest:null,ends:0}]));
+  const forget = p => {p.latest = null;p.ends += 1;};
+  // "Producers drop out after three of their own call intervals without a call."
+  const live = producer => {const p = known.get(producer);return p.open > 0 || time - p.seen <= intervals[producer] * 3;};
+  const at = (when, step) => queue.push({at:when,order:order++,...step});
+  function apply(step) {
+    const p = step.producer && known.get(step.producer);
+    trace.push({at:time,op:step.op,producer:step.producer,text:step.example?.text});
+    if (step.op === 'begin') {
+      if (!p.open && !live(step.producer)) forget(p);
+      p.open += 1;
+      step.call.finish = model.begin($,step.producer);
+    } else if (step.op === 'result') {
+      const value = outcome(step.example);
+      if (step.example) check(value.text === step.example.text,`I4: background sentence was ${value.text}`);
+      model.record($,step.producer,value);
+      p.seen = time;
+      if (step.example) {p.latest = step.example;failedAt.push(time);}
+      else forget(p);
+    } else if (step.op === 'finish') {
+      step.call.finish();
+      p.open -= 1;
+      p.seen = time;
+    } else if (step.op === 'delete') {
+      model.delete($,step.producer);
+      forget(p);
+    } else if (step.op === 'reset') {
+      model.reset();
+      for (const each of known.values()) forget(each);
+      failedAt = [];shown = null;advisers = [];quietAt = null;
+    } else if (step.op === 'owner') model.record({...$,background:false},step.producer,outcome(step.example));
   }
-  function failing(at) {
-    const candidates = [];
-    for (const producer of PRODUCERS) {
-      const events = history.get(producer) ?? [];
-      const last = events.at(-1);
-      if (!last || last.op === 'delete' || at - last.at > intervals[producer] * 3) continue;
-      const failed = events.findLastIndex(event => event.op === 'record' && event.value.kind !== 'ok');
-      if (failed < 0) continue;
-      const evidence = events[failed];
-      const successes = events.length - failed - 1;
-      if (successes >= (evidence.value.kind === 'transient' ? 3 : 1)) continue;
-      // A previous producer lifetime cannot revive after an idle gap.
-      let idle = false;
-      for (let index = failed + 1; index < events.length && !idle; index += 1) idle = events[index].at - events[index - 1].at > intervals[producer] * 3;
-      if (idle) continue;
-      candidates.push({...evidence.value,producer,at:evidence.at});
-    }
-    candidates.sort((left,right) => priority[right.kind] - priority[left.kind] || right.at - left.at || PRODUCERS.indexOf(left.producer) - PRODUCERS.indexOf(right.producer));
-    return candidates;
-  }
-  return {
-    step(event) {
-      if (!selected(event.at)) {badSince = null;lastText = null;shown = null;}
-      if (event.op === 'reset') {history = new Map();badSince = null;lastText = null;nonurgentAt = null;shown = null;}
-      else if (event.op === 'delete') history.set(event.producer,[event]);
-      else if (event.op !== 'owner') {
-        if (!history.has(event.producer)) history.set(event.producer,[]);
-        history.get(event.producer).push(event);
+  function verify(step, emitted) {
+    check(emitted.length <= 1,'One step printed more than one line');
+    if (step.op === 'owner') check(!emitted.length,'An owner command printed a background notice');
+    for (const line of emitted) {
+      check(line.label && !/PRIVATE|could not finish connecting/.test(line.text),`I4: unknown or private line: ${line.text}`);
+      if (line.label === 'retry' || line.label === 'generic') {
+        check(failedAt.some(failed => failed <= time - GRACE),'I1: a retry or generic line printed before two minutes of failure');
+        check(quietAt === null || time - quietAt >= GRACE,'I6: retry or generic lines less than two minutes apart');
+        quietAt = time;
       }
-      const current = selected(event.at);
-      if (!current) {badSince = null;lastText = null;shown = null;return {current:null,line:null};}
-      badSince ??= event.at;
-      if (current.text === lastText) return {current,line:null};
-      const due = urgent(current) || (event.at - badSince >= 120000 && (nonurgentAt === null || event.at - nonurgentAt >= 120000));
-      // I8: retry never replaces held, install or terminal advice whose producer
-      // has neither recovered nor expired.
-      const anchored = current.kind === 'transient' && shown !== null && shown.kind !== 'transient'
-        && failing(event.at).some(candidate => candidate.producer === shown.producer);
-      // Owner commands are observational: they neither consume spacing nor emit.
-      if (!due || anchored || event.op === 'owner') return {current,line:null};
-      lastText = current.text;
-      shown = {producer:current.producer,kind:current.kind};
-      if (!urgent(current)) nonurgentAt = event.at;
-      return {current,line:{at:event.at,text:current.text,urgent:urgent(current)}};
-    },
-  };
-}
-function generatedHarness(seed, intervals = INTERVALS) {
-  let time = 0, lastNonurgent = null;
-  const trace = [], actual = [], wanted = [];
-  const $ = {store:{get:async () => [],set:async () => {}},ui:{log:text => actual.push({at:time,text})}};
-  const model = health(() => time,intervals), expected = oracle(intervals);
-  return {
-    trace,actual,wanted,
-    call(event) {
-      check(event.at >= time,'Generated time moved backwards');
-      time = event.at;trace.push(event);
-      const before = actual.length;
-      const result = expected.step(event);
-      if (result.line) wanted.push(result.line);
-      if (event.op === 'reset') {model.reset();lastNonurgent = null;}
-      else if (event.op === 'delete') model.delete($,event.producer);
-      else if (event.op === 'owner') model.record({...$,background:false},event.producer,event.value);
-      else {
-        let value = event.value;
-        if (value.kind !== 'ok' && contracts.backgroundOutcome) {
-          const cause = value.kind === 'install' ? Object.assign(new Error('private fixture diagnostics'),{code:seed % 2 ? 'ENOENT' : 'EACCES'})
-            : error(value.code,value.reason ? {reason:value.reason} : undefined);
-          value = contracts.backgroundOutcome(cause,value.kind === 'transient' || value.kind === 'install' ? 'Ariadne could not finish connecting this conversation. PRIVATE diagnostic.' : value.text,{terminal:value.kind === 'terminal'});
-          check(value.kind === event.value.kind && value.code === (event.value.kind === 'install' ? 'incompatible_adapter' : event.value.code) && value.text === event.value.text,'I4: background classification leaked command or diagnostic wording');
+      if (line.label === 'retry') {
+        // "A retry line never replaces held, installation or terminal advice
+        // until the producer that printed it recovers or expires."
+        for (const {producer,ends} of advisers) {
+          check(!(live(producer) && known.get(producer).ends === ends),`I8: retry replaced advice from ${producer}, which neither recovered nor expired`);
         }
-        model.record($,event.producer,value);
+      } else if (step.op === 'result' && step.example?.text === line.text) advisers = [{producer:step.producer,ends:known.get(step.producer).ends}];
+      else {
+        const holders = PRODUCERS.filter(producer => live(producer) && known.get(producer).latest?.text === line.text);
+        advisers = holders.length === 1 ? holders.map(producer => ({producer,ends:known.get(producer).ends})) : [];
       }
-      if (model.current) {
-        const current = model.current();
-        check(JSON.stringify(current?.kind === 'ok' ? null : visible(current)) === JSON.stringify(visible(result.current)),`I5: current selected meaning differs: ${JSON.stringify(current)} expected ${JSON.stringify(visible(result.current))}`);
-      }
-      // Every family checks every observable invariant after every event.
-      const emitted = actual.slice(before);
-      check(emitted.length === (result.line ? 1 : 0),'I1/I2/I3/I5: missing, duplicated, delayed or stale current notice');
-      if (result.line) check(emitted[0].at === result.line.at && emitted[0].text === result.line.text,'I5: emitted meaning was not current at its eligible deadline');
-      check(actual.every(line => !/PRIVATE|Fixture diagnostic|could not finish connecting this conversation|host_unreachable|store_busy/.test(line.text)),'I4: background line exposed command or diagnostic text');
-      if (result.line && !result.line.urgent) {
-        check(lastNonurgent === null || time - lastNonurgent >= 120000,'I6: nonurgent lines exceeded the shared two-minute spacing');
-        lastNonurgent = time;
+      shown = line;
+    }
+    // "Owner-needed advice always shows within one call unless terminal or
+    // install is showing", and likewise install unless terminal is showing.
+    if (step.op === 'result' && step.example && urgent(step.example)) {
+      check(shown !== null,`I5: ${step.example.label} advice never showed`);
+      const holds = shown.text === step.example.text || PRODUCERS.some(producer => live(producer) && known.get(producer).latest?.text === shown.text);
+      check((URGENCY[shown.label] ?? 0) >= URGENCY[step.example.label] && holds,
+        `I5: ${step.example.label} advice from ${step.producer} did not show within one call; showing: ${shown.text}`);
+    }
+  }
+  const sim = {
+    lines,trace,model,
+    get time() {return time;},
+    get failedAt() {return failedAt;},
+    begin(when, producer) {
+      const call = {finish:null};
+      at(when,{op:'begin',producer,call});
+      return {finish:end => at(end,{op:'finish',producer,call})};
+    },
+    result(when, producer, example) {at(when,{op:'result',producer,example});},
+    call(producer, start, latency, example) {
+      const call = sim.begin(start,producer);
+      sim.result(start + latency,producer,example);
+      call.finish(start + latency);
+      return start + latency;
+    },
+    delete(when, producer) {at(when,{op:'delete',producer});},
+    reset(when) {at(when,{op:'reset'});},
+    owner(when, producer, example) {at(when,{op:'owner',producer,example});},
+    run(until = Infinity) {
+      queue.sort((left,right) => left.at - right.at || left.order - right.order);
+      while (queue.length && queue[0].at <= until) {
+        const step = queue.shift();
+        check(step.at >= time,'Generated time moved backwards');
+        time = step.at;
+        const before = lines.length;
+        apply(step);
+        verify(step,lines.slice(before));
       }
     },
   };
+  return sim;
 }
+// Schedules each producer's calls. A plan entry returns, for a call starting
+// at a time, a failure example, null for success, or undefined for no call.
+// Latencies are 0-10 s; a poll saves reports and then claims, so claim and
+// report results land 2-8 s apart, and a failed save holds the claim back.
+function drive(sim, rng, plan, from, until) {
+  for (const producer of Object.keys(plan).filter(name => !POLLED.includes(name))) {
+    for (let start = from; start <= until;) {
+      const example = plan[producer](start);
+      if (example === undefined) {start += INTERVALS[producer];continue;}
+      start = sim.call(producer,start,rng(MAX_LATENCY + 1),example) + INTERVALS[producer];
+    }
+  }
+  if (!POLLED.some(producer => plan[producer])) return;
+  for (let start = from; start <= until;) {
+    // An empty report flush is a successful call.
+    const report = plan.reports ? plan.reports(start) : null, claim = plan.claim?.(start);
+    if (report === undefined && claim === undefined) {start += INTERVALS.claim;continue;}
+    const calls = [report !== undefined && sim.begin(start,'reports'),claim !== undefined && sim.begin(start,'claim')].filter(Boolean);
+    let end = start;
+    if (report !== undefined) {end += rng(8001);sim.result(end,'reports',report);}
+    if (claim !== undefined && !report) {end += 2000 + rng(6001);sim.result(end,'claim',claim);}
+    for (const call of calls) call.finish(end);
+    start = end + INTERVALS.claim;
+  }
+}
+const SEEDS = 128;
 function generated(name, exercise) {
   it(name,() => {
     let failures = 0, first;
     for (let seed = 1; seed <= SEEDS; seed += 1) {
-      const h = generatedHarness(seed);
-      try {exercise(h,random(seed));}
-      catch (failure) {failures += 1;first ??= {seed,message:failure.message,trace:h.trace,actual:h.actual,wanted:h.wanted};}
+      const sim = simulation(), rng = random(seed);
+      try {exercise(sim,rng);}
+      catch (error) {failures += 1;first ??= {seed,message:error.message,lines:sim.lines,trace:sim.trace.slice(-40)};}
     }
-    expect(failures,`${failures}/${SEEDS} failed seeded sequences; replay seed and trace:\n${JSON.stringify(first)}`).toBe(0);
-  // 256 seeds take a few seconds alone and longer under the full suite's load.
-  },30000);
+    expect(failures,`${failures}/${SEEDS} failed seeded sequences; first failure:\n${JSON.stringify(first)}`).toBe(0);
+  // The seeds take a few seconds alone and longer under the full suite's load.
+  },60000);
 }
-const record = (at,producer,value) => ({at,producer,value,op:'record'});
-const ok = (at,producer) => record(at,producer,{kind:'ok'});
-const bad = (at,producer,code = 'store_busy') => record(at,producer,outcome('transient',code));
-const hold = (at,producer,reason) => record(at,producer,outcome('held','invalid_transition',reason));
-function anyFailure(rng) {
-  const kind = rng(9);
-  if (kind < 4) return outcome('transient',TRANSIENTS[rng(TRANSIENTS.length)]);
-  if (kind < 6) return outcome('held','invalid_transition',HELD[rng(HELD.length)]);
-  if (kind === 6) return outcome('held',GENERIC_HELD[rng(GENERIC_HELD.length)]);
-  if (kind === 7) return outcome('install','incompatible_adapter');
-  return outcome('terminal',TERMINALS[rng(TERMINALS.length)]);
-}
+// The README's "most recent failed call wins" leaves pollmates out: a failed
+// report save holds the claim back, so its claim never runs.
+const partners = producer => PRODUCERS.filter(other => other !== producer && !(POLLED.includes(producer) && POLLED.includes(other)));
 
-describe('I1–I8 independent observable oracle (2,560 seeded sequences)',() => {
-  generated('all six producers alternate all transient codes at their real cadence', (h,rng) => {
-    const producer = PRODUCERS[rng(PRODUCERS.length)], interval = INTERVALS[producer];
-    for (let at = 0; at <= 10 * MINUTE; at += interval) h.call(bad(at,producer,TRANSIENTS[(at / interval) % TRANSIENTS.length]));
-    check(h.actual.length === 1 && h.actual[0].at <= 120000 + interval,'I1: continuous transient outage missed its first eligible deadline');
+describe('conversation-health regressions',() => {
+  it('an idle report producer cannot suppress a later outage after one successful flush',() => {
+    let time = 0;
+    const lines = [], $ = {store:{get:async () => [],set:async () => {}},ui:{log:text => lines.push({at:time,text})}};
+    const model = conversationHealth(() => time);
+    for (time = 0; time <= 120000; time += 1000) model.record($,'reports',outcome(EXAMPLES.retry[1]));
+    expect(lines.map(line => line.text)).toEqual([BACKGROUND_RETRY]);
+    time = 121000;model.record($,'reports',{kind:'ok'});
+    // The report queue drains and never calls again. A later outage belongs to
+    // a fresh continuous unhealthy interval, with its own grace and visible line.
+    for (time = 9000000; time <= 9120000; time += 30000) model.record($,'announce',outcome(EXAMPLES.retry[0]));
+    expect(lines).toEqual([{at:120000,text:BACKGROUND_RETRY},{at:9120000,text:BACKGROUND_RETRY}]);
   });
-  generated('overlapping responsibility keeps one continuous bad clock', (h,rng) => {
-    let previous = PRODUCERS[rng(4)];
-    h.call(bad(0,previous));
-    for (let at = 30000; at <= 600000; at += 30000) {
-      const next = PRODUCERS[(PRODUCERS.indexOf(previous) + 1 + rng(3)) % 4];
-      h.call(bad(at,next,TRANSIENTS[rng(5)]));
-      for (let i = 1; i <= 3; i += 1) h.call(ok(at + i,previous));
-      previous = next;
+  it('every urgent held meaning is visible during one-second A/B flaps',() => {
+    let time = 0;
+    const lines = [], $ = {store:{get:async () => [],set:async () => {}},ui:{log:text => lines.push({at:time,text})}};
+    const model = conversationHealth(() => time);
+    for (time = 0; time <= 10000; time += 1000) {
+      const example = EXAMPLES.owner[time % 2000 ? 1 : 0];
+      model.record($,'helper',outcome(example));
+      expect(lines.at(-1)).toEqual({at:time,text:example.text});
     }
-    check(h.actual[0]?.at <= 150000,'I1: handoffs restarted continuous unhealthy grace');
   });
-  generated('idle and dropped producers cannot suppress a subsequent outage', (h,rng) => {
-    const producer = PRODUCERS[rng(PRODUCERS.length)], interval = INTERVALS[producer];
-    for (let at = 0; at <= 120000; at += interval) h.call(bad(at,producer));
-    h.call(ok(120001,producer));
-    const start = 120001 + interval * 3 + 1;
-    for (let at = start; at <= start + 120000; at += 1000) h.call(bad(at,'reports',TRANSIENTS[rng(5)]));
-    check(h.actual.length === 2,'I1/I2: idle evidence prevented rearming the later unhealthy interval');
-  });
-  generated('transient one/two successes retain meaning; three successes rearm grace', (h,rng) => {
-    const producer = PRODUCERS[rng(4)];
-    for (let i = 0; i < 24; i += 1) {
-      const at = i * 30000;
-      h.call(bad(at,producer,TRANSIENTS[rng(5)]));
-      for (let good = 0, count = rng(3); good < count; good += 1) h.call(ok(at + good,producer));
+  it('owner-needed claim advice replaces generic announce advice at once',() => {
+    let time = 0;
+    const lines = [], $ = {store:{get:async () => [],set:async () => {}},ui:{log:text => lines.push({at:time,text})}};
+    const model = conversationHealth(() => time);
+    const generic = EXAMPLES.generic[1], paused = EXAMPLES.owner[0];
+    for (time = 0; time <= 150000; time += 30000) model.record($,'announce',outcome(generic));
+    expect(lines).toEqual([{at:120000,text:generic.text}]);
+    for (time = 151000; time <= 160000; time += 1000) {
+      model.record($,'announce',outcome(generic));
+      model.record($,'claim',outcome(paused));
     }
-    for (let i = 0; i < 3; i += 1) h.call(ok(720000 + i,producer));
-    for (let at = 721000; at <= 841000; at += 30000) h.call(bad(at,producer));
-    check(h.actual.length === 2,'I1/I2: recovery evidence did not separate transient unhealthy stretches');
+    expect(lines).toEqual([{at:120000,text:generic.text},{at:151000,text:paused.text}]);
   });
-  generated('urgent held/install/terminal flaps immediately replace the current line', (h,rng) => {
-    const producer = PRODUCERS[rng(PRODUCERS.length)];
-    for (let at = 0; at <= 600000; at += rng(2) ? 1000 : 30000) {
-      const kind = rng(3);
-      const value = kind === 0 ? outcome('held','invalid_transition',HELD[rng(4)]) : kind === 1 ? outcome('install','incompatible_adapter') : outcome('terminal',TERMINALS[rng(5)]);
-      h.call(record(at,producer,value));
-      if (rng(3) === 0) h.call(ok(at,producer));
-    }
-    check(h.actual.length > 6,'Urgent flaps must exercise the standing exemption from I6');
+});
+
+describe('slow helper calls',() => {
+  // The real claim loop over a helper whose every call takes `latency` ms.
+  async function slow(latency, reply, {claim = null, slowed = 'claim'} = {}) {
+    let time = 0;
+    const lines = [];
+    const h = host({claim,handler:async argv => {
+      if (argv[2] !== slowed) return undefined;
+      time += latency;
+      return reply();
+    }});
+    const log = h.$.ui.log;
+    h.$.ui.log = text => {lines.push({at:time,text});log(text);};
+    const loop = claimLoop(descriptor.helperPath,binding,{now:() => time,health:conversationHealth(() => time)});
+    while (time < 4 * MINUTE) {time += 1000;await loop.poll(h.$);await new Promise(resolve => setTimeout(resolve,0));}
+    await loop.stop({...h.$,background:false});
+    return lines;
+  }
+  // The helper's own five-second control timeout, the eight-second kill and a
+  // store-lock wait each push results more than three ticks apart.
+  it.each([2500,5000,8000])('a claim timeout that persists prints once by two minutes plus one call when each call takes %i ms',async latency => {
+    const lines = await slow(latency,() => ({exitCode:null,stdout:'',stderr:''}));
+    expect(lines.map(line => line.text)).toEqual([BACKGROUND_RETRY]);
+    expect(lines[0].at).toBeLessThanOrEqual(1000 + latency + GRACE + 1000 + latency);
   });
-  generated('urgent enter/clear never restarts continuous transient time or nonurgent spacing', (h,rng) => {
-    const producer = PRODUCERS[rng(4)];
-    h.call(bad(0,producer));
-    for (let at = 30000; at <= 600000; at += 30000) {
-      h.call(bad(at,producer,TRANSIENTS[rng(5)]));
-      h.call(hold(at,'claim',HELD[rng(4)]));
-      h.call(ok(at + 1000,'claim'));
-    }
-    const retries = h.actual.filter(line => line.text === BACKGROUND_RETRY);
-    check(retries[0]?.at <= 121000,'I1/I5: urgent flap reset the continuous unhealthy clock');
-    check(retries.length >= 4,'I5: transient current meaning never returned after urgent recovery');
+  it.each([2500,5000,8000])('a paused claim prints once, not on every call, when each call takes %i ms',async latency => {
+    const lines = await slow(latency,() => failure('invalid_transition',{reason:'owner_paused'}));
+    expect(lines).toEqual([{at:1000 + latency,text:EXAMPLES.owner[0].text}]);
   });
-  generated('delete and reset retire evidence; owner observations preserve background state', (h,rng) => {
-    let at = 0;
-    for (let i = 0; i < 160; i += 1) {
-      at += rng(2) ? 1000 : 30000;
-      const producer = PRODUCERS[rng(6)], op = rng(12);
-      if (op === 0) h.call({at,op:'reset'});
-      else if (op < 3) h.call({at,op:'delete',producer});
-      else if (op < 5) h.call({at,op:'owner',producer,value:anyFailure(rng)});
-      else h.call(record(at,producer,op < 7 ? {kind:'ok'} : anyFailure(rng)));
-    }
-    h.call({at:at + 1,op:'reset'});
-    h.call(hold(at + 2,'helper','owner_paused'));
-    check(h.actual.at(-1)?.at === at + 2,'I3/I5: reset kept stale suppression or urgency spacing');
+  it.each([5000,8000])('a report save that keeps failing prints once by two minutes plus one call when each save takes %i ms',async latency => {
+    const lines = await slow(latency,() => failure('store_busy'),{claim:await prepared(),slowed:'report'});
+    expect(lines.map(line => line.text)).toEqual([BACKGROUND_RETRY]);
+    expect(lines[0].at).toBeLessThanOrEqual(GRACE + 3 * (1000 + latency));
   });
-  generated('irregular mixed prefixes settle to the live meaning at every eligible deadline', (h,rng) => {
-    let at = 0;
-    for (let i = 0; i < 192; i += 1) {
-      at += [1000,30000,90001,9000000][rng(4)];
-      const producer = PRODUCERS[rng(6)];
-      h.call(record(at,producer,rng(4) === 0 ? {kind:'ok'} : anyFailure(rng)));
-    }
-    // Let all previous producers drop out, then settle to a single current cause.
-    at += 90001;
-    const producer = PRODUCERS[rng(6)], value = anyFailure(rng), interval = INTERVALS[producer];
-    for (let offset = 0; offset <= 240000; offset += interval) h.call(record(at + offset,producer,value));
-    check(h.actual.at(-1)?.text === value.text,'I5: stable current meaning did not replace stale advice');
+  it('a project folder failure keeps its folder words in the background line',async () => {
+    const lines = await slow(1000,() => ({exitCode:4,stdout:JSON.stringify({api_version:1,ok:false,error:{code:'host_unreachable',
+      message:FOLDER_MESSAGE,hint:'Restore access.',retryable:true,field_errors:[]}}),stderr:''}));
+    expect(lines.map(line => line.text)).toEqual(['The project folder is missing or inaccessible. Restore access or select it again; Ariadne will keep trying.']);
   });
-  generated('equal-priority failing producers keep the line already showing until it recovers', (h,rng) => {
-    const first = PRODUCERS[rng(PRODUCERS.length)], second = PRODUCERS.filter(producer => producer !== first)[rng(PRODUCERS.length - 1)];
-    const a = HELD[rng(HELD.length)], b = HELD.filter(reason => reason !== a)[rng(HELD.length - 1)];
-    const end = 600000;
-    for (let at = 0; at <= end; at += 1000) {
-      const due = [[first,a],[second,b]].filter(([producer]) => at % INTERVALS[producer] === 0);
-      if (rng(2)) due.reverse();
-      for (const [producer,reason] of due) h.call(hold(at,producer,reason));
-    }
-    check(h.actual.length === 1,'I7: two equally important producers flipped the shown line');
-    // Either producer may have spoken first; recover that one.
-    const firstShown = h.actual[0].text === outcome('held','invalid_transition',a).text;
-    h.call(ok(end + 1,firstShown ? first : second));
-    check(h.actual.length === 2 && h.actual[1].text === outcome('held','invalid_transition',firstShown ? b : a).text,'I5/I7: the other advice did not speak once the shown producer recovered');
+});
+
+describe('README health statements over 128 seeded histories with 0-10 s calls',() => {
+  generated('a failure that persists prints once, on time, whatever the call latency',(sim,rng) => {
+    const producer = pick(rng,PRODUCERS), example = anyExample(rng);
+    drive(sim,rng,{[producer]:() => example},0,10 * MINUTE);
+    sim.run();
+    const first = sim.failedAt[0];
+    check(sim.lines.length === 1 && sim.lines[0].text === example.text,`${producer} ${example.label}: printed ${sim.lines.length} lines`);
+    const due = urgent(example) ? first : first + GRACE + cycle(producer);
+    check(sim.lines[0].at <= due,`I1/I5: ${producer} ${example.label} printed at ${sim.lines[0].at}, due by ${due}`);
   });
-  generated('a retry line never replaces held or install advice until its producer recovers or expires', (h,rng) => {
-    const producer = PRODUCERS[rng(PRODUCERS.length)], interval = INTERVALS[producer];
-    const other = PRODUCERS.filter(name => name !== producer)[rng(PRODUCERS.length - 1)];
-    const advice = rng(2) ? outcome('install','incompatible_adapter') : outcome('held','invalid_transition',HELD[rng(HELD.length)]);
-    h.call(record(0,producer,advice));
-    let at = interval;
-    for (; at <= 600000; at += interval) h.call(record(at,producer,rng(2) ? advice : outcome('transient',TRANSIENTS[rng(TRANSIENTS.length)])));
-    check(h.actual.length === 1 && h.actual[0].text === advice.text,'I8: retry alternated with held or install advice from the same producer');
-    if (rng(2)) {
-      // Recovery: three good calls clear even a transient last outcome.
-      for (let good = 0; good < 3; good += 1, at += interval) h.call(ok(at,producer));
+  generated('owner-needed advice shows at once while generic advice from another producer is showing',(sim,rng) => {
+    const generic = pick(rng,EXAMPLES.generic), owner = pick(rng,EXAMPLES.owner);
+    const first = pick(rng,PRODUCERS), second = pick(rng,partners(first));
+    // The generic line shows by about three minutes; owner-needed advice follows.
+    const plan = {[first]:() => generic,[second]:start => start >= 4 * MINUTE ? owner : undefined};
+    drive(sim,rng,plan,0,7 * MINUTE);
+    // Both still call until seven minutes; afterwards the advice may drop out.
+    sim.run(7 * MINUTE);
+    check(sim.lines.map(line => line.text).join('|') === `${generic.text}|${owner.text}`,`${first} generic then ${second} owner printed: ${sim.lines.map(line => line.label)}`);
+    const shown = sim.trace.find(step => step.op === 'result' && step.producer === second);
+    check(sim.lines[1].at === shown.at,'I5: owner-needed advice waited behind generic advice');
+  });
+  generated('generic advice never hides owner-needed advice that arrives first',(sim,rng) => {
+    const generic = pick(rng,EXAMPLES.generic), owner = pick(rng,EXAMPLES.owner);
+    const first = pick(rng,PRODUCERS), second = pick(rng,partners(first));
+    drive(sim,rng,{[first]:() => owner,[second]:() => generic},0,6 * MINUTE);
+    sim.run(6 * MINUTE);
+    check(sim.lines.length === 1 && sim.lines[0].text === owner.text,`generic advice replaced owner-needed advice: ${sim.lines.map(line => line.label)}`);
+  });
+  generated('mixed slow producers keep every statement at every step and settle on the live cause',(sim,rng) => {
+    const plan = {};
+    for (const producer of PRODUCERS) {
+      let example = null, until = 0;
+      // Phases: idle, healthy, or one failure that repeats for a while.
+      plan[producer] = start => {
+        if (start >= until) {
+          const roll = rng(10);
+          example = roll < 2 ? undefined : roll < 4 ? null : anyExample(rng);
+          until = start + pick(rng,[5000,30000,GRACE,5 * MINUTE]);
+        }
+        return example;
+      };
     }
-    // Otherwise the producer goes idle and expires while another one fails.
-    for (const stop = at + 240000 + INTERVALS[other] * 3; at <= stop; at += INTERVALS[other]) h.call(bad(at,other,TRANSIENTS[rng(TRANSIENTS.length)]));
-    check(h.actual.at(-1)?.text === BACKGROUND_RETRY,'I8: retry stayed hidden after the advising producer recovered or expired');
+    drive(sim,rng,plan,0,15 * MINUTE);
+    for (let i = 0; i < 8; i += 1) {
+      const when = rng(15 * MINUTE), op = rng(8);
+      if (op === 0) sim.reset(when);
+      else if (op < 4) sim.delete(when,pick(rng,PRODUCERS));
+      else sim.owner(when,pick(rng,PRODUCERS),anyExample(rng));
+    }
+    // Let every producer drop out, then settle on one live cause.
+    const producer = pick(rng,PRODUCERS), example = anyExample(rng);
+    drive(sim,rng,{[producer]:() => example},18 * MINUTE,24 * MINUTE);
+    sim.run();
+    check(sim.lines.at(-1)?.text === example.text,`I5: the live ${example.label} cause from ${producer} did not replace stale advice`);
+  });
+  generated('one or two successes keep an outage; three successes or dropping out end it',(sim,rng) => {
+    const producer = pick(rng,PRODUCERS), example = pick(rng,EXAMPLES.retry), ends = rng(2);
+    let goods = 0, recovered = 0;
+    const plan = {[producer]:start => {
+      if (start < 4 * MINUTE) {
+        // Never three successes in a row inside the first outage.
+        goods = goods < 2 && rng(4) === 0 ? goods + 1 : 0;
+        return goods ? null : example;
+      }
+      if (start < 10 * MINUTE) return ends && recovered++ < 3 ? null : undefined;
+      return start < 14 * MINUTE ? example : undefined;
+    }};
+    drive(sim,rng,plan,0,14 * MINUTE);
+    sim.run();
+    const second = sim.failedAt.find(at => at >= 10 * MINUTE);
+    check(sim.lines.length === 2,`I1/I2: two outages printed ${sim.lines.length} lines`);
+    check(sim.lines[1].at >= second + GRACE && sim.lines[1].at <= second + GRACE + cycle(producer),'I1: the second outage did not wait its own two minutes');
+  });
+  generated('a retry never replaces held or install advice until its producer recovers or expires',(sim,rng) => {
+    const producer = pick(rng,PRODUCERS), other = pick(rng,partners(producer));
+    const advice = pick(rng,[...EXAMPLES.owner,...EXAMPLES.install]), recovers = rng(2);
+    let goods = 0;
+    drive(sim,rng,{[producer]:start => {
+      if (start === 0) return advice;
+      if (start < 10 * MINUTE) return rng(2) ? advice : pick(rng,EXAMPLES.retry);
+      return recovers && goods++ < 3 ? null : undefined;
+    }},0,16 * MINUTE);
+    sim.run(10 * MINUTE);
+    check(sim.lines.length === 1 && sim.lines[0].text === advice.text,'I8: retry alternated with held or install advice from the same producer');
+    drive(sim,rng,{[other]:() => pick(rng,EXAMPLES.retry)},11 * MINUTE,16 * MINUTE);
+    sim.run();
+    check(sim.lines.at(-1).text === BACKGROUND_RETRY,'I8: retry stayed hidden after the advising producer recovered or expired');
+  });
+  generated('two equally urgent producers keep the line already showing until it recovers',(sim,rng) => {
+    const first = pick(rng,PRODUCERS), second = pick(rng,partners(first));
+    const a = pick(rng,EXAMPLES.owner), b = pick(rng,EXAMPLES.owner.filter(example => example.text !== a.text));
+    let recovering = null;
+    const plan = {[first]:start => start < 10 * MINUTE || recovering !== first ? a : null,
+      [second]:start => start < 10 * MINUTE || recovering !== second ? b : null};
+    drive(sim,rng,plan,0,10 * MINUTE);
+    sim.run(10 * MINUTE);
+    check(sim.lines.length === 1,`I7: two equally urgent producers flipped the shown line ${sim.lines.length} times`);
+    recovering = sim.lines[0].text === a.text ? first : second;
+    drive(sim,rng,plan,10 * MINUTE + 2 * MAX_LATENCY,12 * MINUTE);
+    sim.run();
+    check(sim.lines.length === 2 && sim.lines[1].text === (recovering === first ? b : a).text,'I5/I7: the other advice did not show once the shown producer recovered');
+  });
+  generated('urgent advice that clears never restarts the outage clock or retry spacing',(sim,rng) => {
+    const producer = pick(rng,PRODUCERS.filter(name => !POLLED.includes(name)));
+    drive(sim,rng,{[producer]:() => pick(rng,EXAMPLES.retry)},0,10 * MINUTE);
+    drive(sim,rng,{claim:start => Math.floor(start / 30000) % 2 ? pick(rng,EXAMPLES.owner) : null},30000,10 * MINUTE);
+    sim.run();
+    const retries = sim.lines.filter(line => line.text === BACKGROUND_RETRY);
+    check(retries[0]?.at <= sim.failedAt[0] + GRACE + cycle(producer),'I1/I5: clearing urgent advice reset the outage clock');
+    check(retries.length >= 3,`I5: the retry line returned only ${retries.length} times after urgent advice cleared`);
   });
 });
 
@@ -342,9 +425,7 @@ function callbacks() {
   return hooks;
 }
 const next = async event => event;
-function injected(model, now) {
-  return contracts.conversationHealth ? {health:model,now} : {notices:contracts.noticeEpisodes(now),now};
-}
+const HELD = ['owner_paused','session_closed','recovery_required','unrecognized'];
 
 describe('real background producers use the conversation-health outcome boundary',() => {
   it('claim and report held notices are current immediately and never use connect-failure text',async () => {
@@ -354,8 +435,8 @@ describe('real background producers use the conversation-health outcome boundary
       if (mode === 'claim' && argv[2] === 'claim') return failure('invalid_transition',{reason});
       if (mode === 'report' && argv[2] === 'report') return failure('invalid_transition',{reason});
     }});
-    const model = health(() => time);
-    const loop = claimLoop(descriptor.helperPath,binding,injected(model,() => time));
+    const model = conversationHealth(() => time);
+    const loop = claimLoop(descriptor.helperPath,binding,{health:model,now:() => time});
     await loop.poll(h.$);
     expect(h.logs.at(-1)).toMatch(/paused/);
     time = 1000;reason = 'session_closed';await loop.poll(h.$);
@@ -374,18 +455,18 @@ describe('real background producers use the conversation-health outcome boundary
     let time = 0, refuse = true;
     const value = await prepared();
     const h = host({claim:value,handler:argv => argv[2] === 'report' && refuse ? failure('invalid_transition',{reason:'owner_paused'}) : undefined});
-    const model = health(() => time);
-    const loop = claimLoop(descriptor.helperPath,binding,injected(model,() => time));
+    const model = conversationHealth(() => time);
+    const loop = claimLoop(descriptor.helperPath,binding,{health:model,now:() => time});
     await loop.poll(h.$);
     await vi.waitFor(() => expect(h.calls.filter(call => call.argv[2] === 'report')).toHaveLength(1));
     expect(h.logs.at(-1)).toMatch(/paused/);
     refuse = false;time = 1000;await loop.poll(h.$);
     expect(h.events.map(event => event.kind)).toEqual(['accepted']);
-    if (model.current) expect(model.current()).toEqual({kind:'ok'});
+    expect(model.current()).toEqual({kind:'ok'});
     // No more report events exist. Empty flushes must remain successful evidence.
     time = 2000;await loop.poll(h.$);
-    time = 9000000;model.record(h.$,'announce',outcome('transient','host_unreachable'));
-    for (time = 9030000; time <= 9120000; time += 30000) model.record(h.$,'announce',outcome('transient','host_unreachable'));
+    time = 9000000;model.record(h.$,'announce',outcome(EXAMPLES.retry[0]));
+    for (time = 9030000; time <= 9120000; time += 30000) model.record(h.$,'announce',outcome(EXAMPLES.retry[0]));
     expect(h.logs.at(-1)).toBe(BACKGROUND_RETRY);
     await loop.stop(h.$);
   });
