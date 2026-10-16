@@ -1,14 +1,44 @@
 # Delivery
 
-The maintainer is Claude Code on **Opus 5.5**. Implementers are **Codex
-(gpt-6.1-sol, high effort)**, launched through the Codex companion in isolated git
-worktrees with declared, disjoint owned paths; at most **3 Codex jobs** run at once.
+The maintainer is Claude Code on **Opus 5.5**. It plans, sets the contracts
+between pieces of work, integrates them and talks to the owner. Implementers are
+Claude sub-agents working as a team. Owner ruling, 2026-10-16: the team model
+below replaces Codex implementers. Codex is used only when the owner asks for it.
 Independent review uses a separate **Opus 5.5** context at the exact head, with one
-targeted re-review after fixes. Use fresh contexts for new assignments.
+targeted re-review after fixes.
 
-Codex sandbox limits: jobs cannot run browsers (Playwright/Chromium), sockets,
-the app, native e2e, or `git add`/commits. The maintainer runs Playwright, design
-frames and the local native journey, stages and commits, and plans time for it.
+### Team mode
+
+- **Model by risk.** **Opus 5.5 (high effort)** takes anything critical or large:
+  delivery and send-once, drafts and typed text, storage and saved formats,
+  concurrency and locks, scroll and focus side effects, and shell refactors that
+  others build on. **Sonnet 5.5 (high effort)** takes well-specified, bounded
+  pieces: a component built to a drawn state, a test rewrite, harness tooling.
+  **Haiku 5.5** takes mechanical work: renames, deleting dead code, records,
+  release-notes formatting.
+- **Plan first.** No implementer starts before the owner approves a written plan.
+- **Break the work down.** Split each feature into mini and micro features that can
+  run in parallel, each with declared, disjoint owned paths. Before launch, the
+  maintainer writes the contracts between them: slot names, context and hook
+  signatures, intent names, and CSS variables.
+- **Team size.** Run 6–7 implementers at once, grouped into teams by feature.
+- **Team communication.**
+  - After launch, the maintainer sends every team member the agent IDs of its
+    teammates.
+  - Teammates message each other directly (SendMessage) about a shared contract.
+    They copy the maintainer on any change to it.
+  - A teammate asks the maintainer before changing a decision in the plan.
+  - Messages to a running agent are cheap. Message a finished agent only when its
+    context is worth the replay cost.
+- **Local first, and one full run at a time.**
+  - Implementers have no sandbox limits. They run targeted tests while working,
+    and the full local gate set before handing back.
+  - Full suites run one at a time, behind `/tmp/ariadne-gates.lock`. Machine load
+    above about 30 makes timeout flakes, so concurrent full runs waste time.
+  - A failure is rerun alone, on a quiet machine, before anyone judges it.
+- **Integration.** The maintainer, or a designated integrator, merges a feature's
+  pieces in contract order. It runs the full gate set once on the combined head,
+  then pushes, so CI runs once per head.
 
 Before UI implementation, the maintainer shares a clickable HTML mock under
 `designs/mocks/` and gets owner sign-off. Implementation follows the approved mock.
