@@ -102,7 +102,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     expect(bubble.querySelector('a, .name-chip')).toBeNull();
   });
 
-  it('reserves a newer item reveal before resolution and prevents an older queued tab from being submitted', async () => {
+  it('reserves a newer item reveal before resolution and prevents an older queued page choice from being saved', async () => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
@@ -127,8 +127,8 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     const initialProjectWrites = projectWrites().length;
     fireEvent.click(screen.getByRole('button', { name: 'Switch to light' }));
     await waitFor(() => expect(writing).toBe(true));
-    expect(screen.getByRole('button', { name: /^Switch session or project/ }).hasAttribute('disabled')).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: /^Switch session or project/ }));
+    // The switcher stays usable during an owner save; a page opens at once and is never saved, so no Projects write can queue.
+    expect(screen.getByRole('button', { name: /^Switch session or project/ }).hasAttribute('disabled')).toBe(false);
     await goToChip(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     expect(projectWrites()).toHaveLength(initialProjectWrites);
     await act(async () => { releaseOwner(); });

@@ -6,6 +6,7 @@ import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { notices } from '../../../src/ui/pages/notices';
+import { goToPage } from './open';
 import { AppTransport, route } from './transport';
 
 afterEach(() => { cleanup(); notices.clear(); vi.useRealTimers(); vi.restoreAllMocks(); });
@@ -94,11 +95,10 @@ describe('Reply after queued navigation', { timeout: 10_000 }, () => {
   });
 
   it('abandons Reply focus when a newer Projects navigation supersedes the queued one', async () => {
-    const { transport, row, release, replyFocus } = await queuedReply();
+    const { transport, release, replyFocus } = await queuedReply();
     try {
-      // The bar's switcher button is disabled while the owner's save is in flight; ⌘O still opens the switcher.
-      fireEvent.keyDown(row, { key: 'o', metaKey: true });
-      fireEvent.click(within(await screen.findByRole('dialog', { name: 'Switch session or project' })).getByRole('button', { name: 'Projects' }));
+      // The switcher stays usable while the owner's save is in flight.
+      await goToPage('Projects');
       // A page opens at once and cancels the queued session navigation (the store's openPage); there is no "Opening Projects…" wait.
       await screen.findByRole('heading', { name: 'Projects' });
       expect(screen.queryByText('Opening the session…')).toBeNull();
