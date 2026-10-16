@@ -420,9 +420,9 @@ async function dockUI(configure: (transport: AppTransport) => void = () => {}) {
   stores.push(waiting); sessions.push(opened);
   await waiting.start();
   const drafts = new OwnerDraftStore(service); await drafts.load();
-  const current = opened.open(route), onHeight = vi.fn();
-  const view = render(<AnswerDock store={current} waiting={waiting} drafts={drafts} onHeight={onHeight} />);
-  return { transport, opened, waiting, drafts, current, onHeight, view };
+  const current = opened.open(route);
+  const view = render(<AnswerDock store={current} waiting={waiting} drafts={drafts} />);
+  return { transport, opened, waiting, drafts, current, view };
 }
 const dock = () => screen.getByRole('region', { name: 'Answer dock' });
 const openDock = () => fireEvent.click(within(dock()).getByRole('button', { name: /waiting on you/ }));
@@ -579,7 +579,7 @@ describe('source-backed answer dock', () => {
 
   it('explains an incomplete other-session refresh while retaining the last questions', async () => {
     const { store, transport, drafts } = setup(); transport.capture(withOptions()); await store.start();
-    render(<OtherSessionQuestions waiting={store} drafts={drafts()} currentSession="another-session" onClose={vi.fn()} />);
+    render(<OtherSessionQuestions waiting={store} drafts={drafts()} currentSession="another-session" />);
     transport.push('project_list', { api_version: 1, ok: false, error });
     await act(async () => { await store.refresh(); });
     expect(screen.getByText('Some sessions could not be read. Showing the last questions.')).toBeTruthy();

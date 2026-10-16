@@ -27,6 +27,7 @@ export interface DraftEntry {
 }
 /** What a draft says when the same words are already queued or on their way. */
 export const ALREADY_WAITING = 'This same message is already waiting to be sent. Delete it first if you want to change it.';
+export const ANSWER_WAITING = 'This question already has an answer on its way.';
 export interface DraftState {
   readonly entries: Readonly<Record<string, DraftEntry>>;
   readonly ready: boolean;
@@ -65,14 +66,17 @@ const words = new Set<InputKind>(['reply', 'note', 'followup']);
  * Sending them again would deliver them twice. The kind is not compared: Edit can move a queued note or follow-up into
  * the reply box. An attempted draft is excluded: it is that message's own exact retry.
  */
-function alreadyWaiting(draft: Immutable<OwnerDraft>, session: Immutable<Session>): boolean {
-  if (draft.submission_attempted || !typed.has(draft.intent) || (!draft.text.trim() && !draft.selected_option_id)) return false;
-  return Object.values(session.inputs).some(input => !!input && (input.state === 'queued' || input.state === 'in_flight')
-    && input.target.topic_id === draft.target.topic_id && input.target.item_id === draft.target.item_id
-    && input.payload.text === draft.text && input.payload.selected_option_id === draft.selected_option_id);
+function alreadyWaiting(draft: Immutable<OwnerDraft>, session: Immutable<Session>): string | null {
+  if (draft.submission_attempted || !typed.has(draft.intent) || (!draft.text.trim() && !draft.selected_option_id)) return null;
+  const inputs = Object.values(session.inputs).filter(input => !!input && input.target.topic_id === draft.target.topic_id && input.target.item_id === draft.target.item_id);
+  // One answer per question: an answer to the same question round that is on its way, or stuck, blocks a second one, whatever its words.
+  if (draft.intent === 'answer' && inputs.some(input => input!.kind === 'answer' && ['queued', 'in_flight', 'needs_attention'].includes(input!.state)
+    && input!.payload.target_snapshot.question_revision === draft.question_revision)) return ANSWER_WAITING;
+  return inputs.some(input => (input!.state === 'queued' || input!.state === 'in_flight')
+    && input!.payload.text === draft.text && input!.payload.selected_option_id === draft.selected_option_id) ? ALREADY_WAITING : null;
 }
 const sendBlocked = (draft: Immutable<OwnerDraft>, session: Immutable<Session>): string | null =>
-  contentBlocked(draft) ?? (alreadyWaiting(draft, session) ? ALREADY_WAITING : null);
+  contentBlocked(draft) ?? alreadyWaiting(draft, session);
 /** A reply to a whole topic: the topic is there and open, the binding is current, and there is text. */
 function topicBlocked(draft: Immutable<OwnerDraft>, session: Immutable<Session>): string | null {
   const topic = session.topics[draft.target.topic_id];
@@ -95,7 +99,7 @@ export function blockedDraft(draft: Immutable<OwnerDraft>, session: Immutable<Se
   if (item.revision !== draft.target_revision || item.question_revision !== draft.question_revision) return 'This question changed. Read it again before sending.';
   if (!ownerActions(item).includes(draft.intent as OwnerIntent)) return "You can't do that on this item right now.";
   if (draft.intent === 'answer') {
-    if (!draft.submission_attempted && ownerReplied(session, item)) return 'This question already has an answer on its way.';
+    if (!draft.submission_attempted && ownerReplied(session, item)) return ANSWER_WAITING;
     if (item.recipient_binding_id !== draft.binding_id) return 'This question was asked by a different agent connection.';
     const round = item.current_round_id ? session.rounds[item.current_round_id] : null;
     if (!round || round.closed_at !== null || round.question_revision !== item.question_revision) return "The agent isn't waiting for an answer to this any more.";

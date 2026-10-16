@@ -79,7 +79,6 @@ export interface Submit {
   retry: () => Promise<boolean>;
   review: () => void;
   prepareRevised: () => void;
-  another: () => void;
   retryPreferences: () => void;
 }
 
@@ -157,7 +156,6 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
       ? entry.uncertain && !entry.rejected ? drafts.check(entry.draft.op_id) : submit() : Promise.resolve(false),
     review: () => { if (entry && session) drafts.review(entry.draft.op_id, session); },
     prepareRevised: () => { if (entry && session) drafts.prepareRevised(entry.draft.op_id, session); },
-    another: () => { if (entry && session) drafts.another(entry.draft.op_id, session); },
     retryPreferences: () => { void drafts.retryPreferences(); },
   };
 }

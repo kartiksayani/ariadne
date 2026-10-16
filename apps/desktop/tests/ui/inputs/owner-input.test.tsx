@@ -293,8 +293,8 @@ describe('attempted drafts reconcile from durable owner receipts', () => {
   it('reconciles an unknown dock answer from the shared session receipt', async () => {
     const saved = attemptedDraft(), value = await setup([saved]), queue = new WaitingStore(value.service, value.sessions);
     waitingStores.push(queue); await queue.start();
-    render(<AnswerDock drafts={value.drafts} store={value.store} waiting={queue} onHeight={() => {}} />);
-    fireEvent.click(screen.getByRole('button', { name: /waiting on you/ }));
+    render(<AnswerDock drafts={value.drafts} store={value.store} waiting={queue} />);
+    fireEvent.click(screen.getByRole('button', { name: /^\d+ waiting$/ }));
     await screen.findByRole('button', { name: 'Check delivery' });
     recordSubmitted(value.session, saved, 'queued'); value.session.revision++;
     await act(async () => { await value.store.refresh(); });
@@ -1104,9 +1104,9 @@ describe('owner input component and durable draft controller', () => {
   });
   it('connects the dock and Details to one durable draft and send lock', async () => {
     const value = await setup(), queue = new WaitingStore(value.service, value.sessions); waitingStores.push(queue); await queue.start();
-    render(<><AnswerDock drafts={value.drafts} store={value.store} waiting={queue} onHeight={() => {}} />
+    render(<><AnswerDock drafts={value.drafts} store={value.store} waiting={queue} />
       <AnswerSlot drafts={value.drafts} store={value.store} itemId="2" onEscape={() => {}} /></>);
-    fireEvent.click(screen.getByRole('button', { name: /waiting on you/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^\d+ waiting$/ }));
     const boxes = await screen.findAllByRole('textbox');
     fireEvent.change(boxes[0]!, { target: { value: 'Shared between both surfaces' } });
     await waitFor(() => expect((boxes[1] as HTMLTextAreaElement).value).toBe('Shared between both surfaces'));
@@ -2351,9 +2351,9 @@ describe('J1 answer invariants', () => {
     if (trigger === 'dock Send' || trigger === 'other-sessions Send') {
       const waiting = new WaitingStore(env.service, env.sessions); waitingStores.push(waiting); await waiting.start();
       if (trigger === 'dock Send') {
-        render(<AnswerDock drafts={env.drafts} store={env.store} waiting={waiting} onHeight={() => {}} />);
-        fireEvent.click(await screen.findByRole('button', { name: /waiting on you/ }));
-      } else render(<OtherSessionQuestions drafts={env.drafts} waiting={waiting} currentSession="another session" onClose={() => {}} />);
+        render(<AnswerDock drafts={env.drafts} store={env.store} waiting={waiting} />);
+        fireEvent.click(await screen.findByRole('button', { name: /^\d+ waiting$/ }));
+      } else render(<OtherSessionQuestions drafts={env.drafts} waiting={waiting} currentSession="another session" />);
     } else if (trigger === 'peek Send') {
       render(<PeekProvider lookup={() => env.store} drafts={env.drafts} onGoTo={() => {}}><OpenAnswerPeek /></PeekProvider>);
       fireEvent.click(screen.getByRole('button', { name: 'Open answer peek' }));
@@ -2431,8 +2431,8 @@ describe('J1 answer invariants', () => {
       session.items['4']!.waiting_since = session.items['2']!.waiting_since;
     });
     const waiting = new WaitingStore(env.service, env.sessions); waitingStores.push(waiting); await waiting.start();
-    const view = render(<AnswerDock drafts={env.drafts} store={env.store} waiting={waiting} onHeight={() => {}} />);
-    fireEvent.click(screen.getByRole('button', { name: /waiting on you/ }));
+    const view = render(<AnswerDock drafts={env.drafts} store={env.store} waiting={waiting} />);
+    fireEvent.click(screen.getByRole('button', { name: /^\d+ waiting$/ }));
     const box = await screen.findByRole('textbox', { name: 'Reply in your own words' });
     fireEvent.change(box, { target: { value: 'Words survive every transition\nExactly as written  ' } });
     await waitFor(() => expect(env.prefs.drafts.some(draft => draft.text === 'Words survive every transition\nExactly as written  ')).toBe(true));
@@ -2451,7 +2451,7 @@ describe('J1 answer invariants', () => {
     } else if (trigger === 'folding') {
       fireEvent.click(screen.getByRole('button', { name: 'Fold the dock' }));
       expect(screen.queryByRole('textbox')).toBeNull();
-      fireEvent.click(screen.getByRole('button', { name: /waiting on you/ }));
+      fireEvent.click(screen.getByRole('button', { name: /^\d+ waiting$/ }));
     } else if (trigger === 'dock to Details') {
       view.rerender(<ItemDetail drafts={env.drafts} store={env.store} itemId="2" later={false} onOpenItem={() => {}} />);
     } else if (trigger === 'withdrawn question' || trigger === 'session closing') {

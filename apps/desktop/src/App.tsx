@@ -25,6 +25,8 @@ import { conversationDivider } from './ui/detail/conversationSeen';
 import { conversationAnswerState } from './ui/detail/ItemConversation';
 import { DetailPath, ItemDetail } from './ui/detail/ItemDetail';
 import { AnswerDock } from './ui/dock/AnswerDock';
+import { DockProvider } from './ui/dock/api';
+import { WaitingSync } from './ui/dock/WaitingSync';
 import { PeekProvider } from './ui/peek/Peek';
 import { ItemRefSession } from './ui/peek/context';
 import { navigationVisits } from './ui/navigation/visits';
@@ -421,6 +423,9 @@ function Workspace({ application }: { application: Application }) {
   };
   const closeDetail = () => { invalidateOwnerRequest(); detailDismissedAt.current = navigation.getNavigationRequest(); setDetailOpen(false); };
   const later = route && selectedId ? preferences?.later.some(item => routeKey(item) === key && item.item_id === selectedId) ?? false : false;
+  // The waiting question Details (or the bigger view) is answering leaves the dock's list.
+  const answeringId = conversationOpen ? conversation?.itemId ?? null : detailOpen ? selectedId : null;
+  const answering = answeringId && sessionState?.snapshot?.session.items[answeringId]?.status === 'waiting_on_me' ? answeringId : null;
   const shown = useAppliedTheme(theme);
   const [textSizeTarget, setTextSizeTarget] = useState<TextSize | null>(null);
   const textSizeIntent = useRef<TextSize | null>(null);
@@ -611,6 +616,7 @@ function Workspace({ application }: { application: Application }) {
     <UnsentMessageNotices waiting={application.waiting} drafts={application.drafts} opened={navigation.opened} navigation={navigation}
       selectedStore={store ?? null} />
     <DraftConflictNotices drafts={application.drafts} opened={navigation.opened} selectedSession={route ?? null} />
+    <WaitingSync waiting={application.waiting} drafts={application.drafts} />
     <AgentRemovalNotices waiting={application.waiting} controllers={application.actions} navigation={navigation}
       selectedSession={sessionState?.snapshot?.session ?? null} onTree={showBinTree} />
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
@@ -623,8 +629,9 @@ function Workspace({ application }: { application: Application }) {
         onToggleTheme: () => { if (preferences) void navigation.saveTheme(themeToggle(shown).next, preferences.revision); } }}
       hidden={selectedHidden} hiddenNotice={hiddenNotice} onHide={route && selectedId ? () => { toggleHidden({ ...route, item_id: selectedId }); } : undefined}
       onRemove={() => { if (route && selectedId) askRemove({ kind: 'item', item: { ...route, item_id: selectedId } }); }}
-      dockContent={store ? <AnswerDock store={store} waiting={application.waiting} drafts={application.drafts} onHeight={() => {}}
-        onAgentNotRunning={onAgentNotRunning} /> : undefined}
+      dockContent={store && route ? <AnswerDock store={store} waiting={application.waiting} drafts={application.drafts} answering={answering}
+        onAgentNotRunning={onAgentNotRunning} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })}
+        onSeen={(itemId, revision) => navigation.markItemSeen(route, itemId, revision)} /> : undefined}
       detailPath={store && selectedId && detailOpen && route ? <DetailPath store={store} itemId={selectedId} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} /> : undefined}
       detail={conversationOpen ? <div data-covered-detail="" /> : store && selectedId && detailOpen && route ? <ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}
         onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined}
@@ -715,7 +722,7 @@ export function DesktopApp({ service }: { service: RendererService }) {
   const openLink = useMemo(() => linkOpener(service), [service]);
   // Files named in agent text open in the owner's text editor, only when they sit inside the item's project folder.
   const files = useMemo(() => fileOpener(service), [service]);
-  return application ? <LinkOpener.Provider value={openLink}><FileRefs.Provider value={files}><Workspace application={application} /></FileRefs.Provider></LinkOpener.Provider> : <p role="status">Opening Ariadne…</p>;
+  return application ? <LinkOpener.Provider value={openLink}><FileRefs.Provider value={files}><DockProvider><Workspace application={application} /></DockProvider></FileRefs.Provider></LinkOpener.Provider> : <p role="status">Opening Ariadne…</p>;
 }
 export default function App() {
   const [service] = useState(() => createDesktopService());

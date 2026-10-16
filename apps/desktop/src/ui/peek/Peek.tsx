@@ -190,7 +190,7 @@ function PeekAnswer({ drafts, store, itemId, onAgentNotRunning, onAnswered, onGo
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void; readonly onAnswered: () => void; readonly onGoTo: () => void;
 }) {
   return <section className="peek-answer" aria-label="Answer question">
-    <AnswerSlot drafts={drafts} store={store} itemId={itemId} onAgentNotRunning={onAgentNotRunning}
+    <AnswerSlot drafts={drafts} store={store} itemId={itemId} layout="compact" head onAgentNotRunning={onAgentNotRunning}
       onEscape={() => {}} onSent={() => { onAnswered(); void store.refresh(); }} />
     <button type="button" className="btn btn-ghost peek-details" onClick={onGoTo}>Open details</button>
   </section>;
