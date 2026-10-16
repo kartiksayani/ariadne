@@ -33,11 +33,12 @@ import { editQueued, inEditor } from '../answer/held';
 import { InlineRecovery } from '../../components/recovery/RecoveryPanel';
 import { Banner, SessionBar } from './SessionBar';
 import { FilterBar, GraphFilterSlot } from './FilterBar';
-import { useLifecycle } from './Lifecycle';
+import { useSessionLifecycle } from '../shared/useSessionLifecycle';
 import { ItemRefs } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
 import { peekNames } from '../peek/names';
 import { nearestDelta, openingTop } from './scroll';
+import { useDockInset } from '../shell/dockInset';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { sessionEnded, sessionClosedReason, sessionAnswerBlocked } from '../../selectors/sessionClosed';
 import { useUnfolded } from './unfold';
@@ -161,7 +162,7 @@ export function TreeView(props: TreeViewProps) {
   const [recentOpen, setRecentOpen] = useState(false);
   useEffect(() => navigationVisits.bind(navigation), [navigation]);
   useOwnerDrafts(drafts, raw);
-  const lifecycle = useLifecycle(actions);
+  const lifecycle = useSessionLifecycle(actions);
   const ack = useAck(actions, selectedId);
   const [ackItemId, setAckItemId] = useState<string | null>(null);
   const runAck = (itemId: string) => { setAckItemId(itemId); return ack.run(itemId).then(saved => {
@@ -573,6 +574,10 @@ export function TreeView(props: TreeViewProps) {
     setFocusKey(next);
     if (hadFocus) elements.current.get(next)?.focus({ preventScroll: true });
   }, [rows, focusKey, session]);
+  // The floating dock covers the bottom of the scroller: a row under it counts as hidden.
+  const dockInset = useDockInset(), inset = useRef(dockInset);
+  inset.current = dockInset;
+  const visibleBottom = (box: HTMLElement) => box.getBoundingClientRect().bottom - inset.current;
   // Reserve the target topic's actual height, including wrapped names and delivery lines.
   const headerHeight = (element: HTMLElement) => element.classList.contains('tree-topic') ? 0
     : element.closest('.tree-topic-group')?.querySelector('.tree-topic')?.getBoundingClientRect().height ?? 0;
@@ -592,7 +597,7 @@ export function TreeView(props: TreeViewProps) {
     const box = scroller.current, element = elements.current.get(key);
     if (!box || !element) return;
     const a = box.getBoundingClientRect(), b = element.getBoundingClientRect();
-    box.scrollTop += b.top - a.top - openingTop(a.height, b.height, headerHeight(element));
+    box.scrollTop += b.top - a.top - openingTop(a.height, b.height, headerHeight(element), 8, inset.current);
   };
   // Saved reading positions win on session restoration; otherwise place the initial selection once.
   const place = (target: Anchor | null) => {
@@ -607,7 +612,7 @@ export function TreeView(props: TreeViewProps) {
     const box = scroller.current, element = elements.current.get(key);
     if (!box || !element) return;
     const a = box.getBoundingClientRect(), b = element.getBoundingClientRect();
-    box.scrollTop += nearestDelta(a.height, b.top - a.top, b.height, headerHeight(element), margin);
+    box.scrollTop += nearestDelta(a.height, b.top - a.top, b.height, headerHeight(element), margin, inset.current);
   };
   const centered = useRef(false), settled = useRef(false), openingReveal = useRef<string | null>(null);
   const openingPlacement = useRef<string | null>(null);
@@ -729,7 +734,7 @@ export function TreeView(props: TreeViewProps) {
     const top = readingTop(), list = latest.current.rows.filter(row => row.kind === 'item');
     const panelKey = latest.current.answering ?? latest.current.selectedId;
     const panelRect = panelKey ? elements.current.get(panelKey)?.getBoundingClientRect() : undefined;
-    panelTarget.current = panelKey && panelRect && panelRect.top >= top && panelRect.top < box.getBoundingClientRect().bottom
+    panelTarget.current = panelKey && panelRect && panelRect.top >= top && panelRect.top < visibleBottom(box)
       ? { key: panelKey, top: panelRect.top, scrollTop: box.scrollTop } : null;
     // Rows are stacked in order. Skip predecessors ending within a pixel of the sticky edge.
     let low = 0, high = list.length;
@@ -753,7 +758,7 @@ export function TreeView(props: TreeViewProps) {
     const first = key ? elements.current.get(key) : undefined;
     const completeKey = list[low + (first && first.getBoundingClientRect().top >= top ? 0 : 1)]?.key;
     const complete = completeKey ? elements.current.get(completeKey)?.getBoundingClientRect() : undefined;
-    const breadcrumbKey = complete && complete.top >= top && complete.bottom <= Math.min(box.getBoundingClientRect().bottom, window.innerHeight)
+    const breadcrumbKey = complete && complete.top >= top && complete.bottom <= Math.min(visibleBottom(box), window.innerHeight)
       ? completeKey : null;
     const currentSession = latest.current.session;
     const next = breadcrumbKey && currentSession ? breadcrumbItems(currentSession, breadcrumbKey).filter(id => {
@@ -764,7 +769,7 @@ export function TreeView(props: TreeViewProps) {
     const focusRoot = latest.current.focusedId ? elements.current.get(latest.current.focusedId) : undefined;
     const leave = focusRoot?.querySelector('.tree-focus-action');
     const rect = leave?.getBoundingClientRect();
-    const bottom = Math.min(box.getBoundingClientRect().bottom, window.innerHeight);
+    const bottom = Math.min(visibleBottom(box), window.innerHeight);
     const missing = !rect || rect.width <= 0 || rect.height <= 0 || rect.top < top || rect.bottom > bottom;
     setFocusExitMissing(previous => previous === missing ? previous : missing);
   };
@@ -834,7 +839,7 @@ export function TreeView(props: TreeViewProps) {
     if (box && element && !graph) {
       const a = box.getBoundingClientRect(), b = element.getBoundingClientRect();
       if (b.top < readingTop()) edge = 'above';
-      else if (b.top >= a.bottom) edge = 'below';
+      else if (b.top >= a.bottom - inset.current) edge = 'below';
     }
     if (box && !element && selectedId && session?.items[selectedId] && !graph) edge = 'below';
     setSelectedEdge(previous => previous === edge ? previous : edge);

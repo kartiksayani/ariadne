@@ -14,7 +14,7 @@
   position: relative;
   flex: 1;
   min-height: 0;
-  padding-bottom: 40px;
+  padding-bottom: calc(40px + var(--dock-inset, 0px));
   scroll-padding-top: var(--tree-header-height, 0);
   overflow: auto;
   overflow-anchor: none; /* Use Ariadne's position hold in Chromium as in the shipped WKWebView. */

@@ -6,7 +6,7 @@ import { waitForLifecycleReady } from './ui/shared/lifecycleReady';
 import { itemRemoved } from './selectors/removed';
 import { hasStatusFilter } from './selectors/tree/folds';
 import { AgentRemovalNotices } from './ui/remove/AgentRemovalNotices';
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createDesktopService, type RendererService } from './data/service';
 import { DiscoveryController } from './data/discovery';
 import { useSession, type Immutable, type SessionState, type SessionStore } from './data/session-store';
@@ -59,7 +59,9 @@ import { earlierAgent } from './ui/shared/excerpt';
 import { FileRefs, LinkOpener } from './ui/shared/MarkdownText';
 import { fileOpener, linkOpener, listenForLinkFailures } from './ui/shared/openers';
 import type { ViewTab } from './ui/shell/Header';
-import { useWorkspaceKeys, type WorkspaceHandlers, type WorkspaceIntent } from './ui/keys';
+import { useWorkspaceKeys } from './ui/keys';
+import { workspaceKeys, type TreeRemoveTarget } from './ui/shell/workspaceKeys';
+import { useConversation } from './ui/detail/useConversation';
 
 const adapters: readonly AdapterChoice[] = [
   { adapter_id: 'claude_code_mod', label: 'Claude Code Mod', configuration: { namespace: 'claude_code_mod', values: {} } },
@@ -78,7 +80,6 @@ interface Application {
   discovery: DiscoveryController;
   removals: RemovalQueue;
 }
-type TreeRemoveTarget = Extract<RemoveTarget, { kind: 'item' | 'topic' }>;
 const sameSession = (a: SessionRef, b: SessionRef) => a.project_id === b.project_id && a.session_id === b.session_id;
 /** Header facts for the selected session, from its loaded snapshot. */
 function sessionFacts(state: SessionState | null, projectName: (projectId: string) => string): SessionFacts | null {
@@ -95,69 +96,6 @@ const clearedFilters = (filters: { readonly archived: boolean }): SessionPrefere
   ({ search: '', statuses: [], owners: [], topic_id: null, hide_later: false, archived: filters.archived });
 const filtering = (filters: Immutable<SessionPreferences['filters']>) => !!filters.search.trim() || hasStatusFilter(filters.statuses)
   || filters.owners.length > 0 || filters.hide_later;
-interface FocusedItem { readonly item: { readonly id: string; readonly status: string; readonly topic_id: string }; readonly target: ItemRoute }
-/** The App's share of the workspace keymap: actions on the focused or selected item, views and Esc. */
-function workspaceKeys(app: {
-  readonly store: boolean;
-  readonly focused: (event: KeyboardEvent<HTMLDivElement>) => FocusedItem | null;
-  readonly oldestWaiting: () => ItemRoute | undefined;
-  readonly focusOwner: (target: ItemRoute, intent: OwnerFocusRequest['intent'], optionIndex?: number) => void;
-  readonly quickAnswer: (target: ItemRoute, index?: number) => boolean;
-  readonly ack: (target: ItemRoute, repeat: boolean) => boolean;
-  readonly queueBring: (target: ItemRoute) => Promise<void>;
-  readonly toggleHidden: (target: ItemRoute) => boolean;
-  readonly toggleLater: (target: ItemRoute, itemId: string) => boolean;
-  readonly archiveTopic: (topicId: string) => boolean;
-  readonly toggleGraph: () => void;
-  readonly closeDetail: () => void;
-  readonly closeConversation?: () => void;
-  readonly clearFilters?: () => void;
-  readonly askRemove: (target: TreeRemoveTarget) => boolean;
-}): WorkspaceHandlers<HTMLDivElement> {
-  const closed = ['done', 'decided', 'dropped'];
-  const onItem = (act: (focused: FocusedItem, intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => boolean | void) =>
-    (intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => { const focused = app.focused(event); return focused ? act(focused, intent, event) : false; };
-  const search = () => {
-    if (!app.store || app.closeConversation) return false;
-    document.querySelector<HTMLInputElement>('[data-shell-search]')?.focus(); return true;
-  };
-  return {
-    search,
-    // Esc closes the answer box first (the editor stops it), then detail, then clears filters.
-    escape: () => { if (app.closeConversation) { app.closeConversation(); return true; } app.closeDetail(); app.clearFilters?.(); return false; },
-    answer: (_intent, event) => {
-      const focused = app.focused(event);
-      if (focused && app.ack(focused.target, event.repeat)) return true;
-      const question = focused && focused.item.status === 'waiting_on_me' ? focused.target : app.closeConversation ? undefined : app.oldestWaiting();
-      if (!question) return false;
-      app.focusOwner({ ...question }, 'answer'); return true;
-    },
-    bring: onItem(({ target }, _intent, event) => { if (!event.repeat) void app.queueBring(target); return true; }),
-    respond: onItem(({ item, target }) => {
-      app.focusOwner(target, [...closed, 'replaced'].includes(item.status) ? 'followup' : item.status === 'in_progress' ? 'note' : 'reply'); return true;
-    }),
-    drop: onItem(({ target }) => { app.focusOwner(target, 'drop'); return true; }),
-    reopen: onItem(({ item, target }) => { if (!closed.includes(item.status)) return false; app.focusOwner(target, 'reopen'); return true; }),
-    choose: onItem(({ item, target }, intent) => {
-      if (item.status !== 'waiting_on_me' || intent.kind !== 'choose') return false;
-      app.focusOwner(target, 'answer', intent.index); return true;
-    }),
-    'choose-send': onItem(({ item, target }, intent) => item.status === 'waiting_on_me' && intent.kind === 'choose-send' && app.quickAnswer(target, intent.index)),
-    'answer-words': onItem(({ item, target }) => item.status === 'waiting_on_me' && app.quickAnswer(target)),
-    hide: onItem(({ target }, _intent, event) => !app.closeConversation && (event.repeat ? true : app.toggleHidden(target))),
-    later: onItem(({ item, target }) => !app.closeConversation && app.toggleLater(target, item.id)),
-    archive: onItem(({ item }) => !app.closeConversation && app.archiveTopic(item.topic_id)),
-    graph: () => { if (!app.store || app.closeConversation) return false; app.toggleGraph(); return true; },
-    // The Waiting column's own fold button owns the fold (saved layout, narrow-window peek); the key presses it.
-    waiting: () => {
-      const control = document.querySelector<HTMLButtonElement>('[data-shortcut-waiting-fold]');
-      if (!control || control.disabled) return false;
-      control.click(); return true;
-    },
-    // ⌫/Delete away from a row: ask to remove the focused or selected item (rows handle their own).
-    remove: onItem(({ target }) => !app.closeConversation && app.askRemove({ kind: 'item', item: target })),
-  };
-}
 /** The archive (1x): archived topics of every session in the project. */
 function SessionArchive({ application, view, onRemove }: { application: Application; view: OpenedSessionView; onRemove: RemoveHandler }) {
   const state = useSession(view.store), navigation = useNavigation(application.navigation);
@@ -227,23 +165,8 @@ function Workspace({ application }: { application: Application }) {
   const [ownerFocus, setOwnerFocus] = useState<(OwnerFocusRequest & { route: string; itemId: string }) | null>(null);
   const [graphModes, setGraphModes] = useState<Readonly<Record<string, boolean>>>({});
   const showBinTree = useCallback((route: SessionRef) => setGraphModes(previous => ({ ...previous, [routeKey(route)]: false })), []);
-  const [conversation, setConversation] = useState<{ route: string; itemId: string; dividerId: string | null } | null>(null);
-  const conversationOpen = conversation?.route === key;
-  const conversationOrigin = useRef<HTMLElement | null>(null), restoreConversationFocus = useRef(false);
-  const closeConversation = () => {
-    if (!conversationOpen) return;
-    ++shortcutSequence.current; quickRequests.current.clear(); setOwnerFocus(null);
-    restoreConversationFocus.current = true; setConversation(null);
-  };
-  useEffect(() => {
-    if (conversation && conversation.route !== key) { restoreConversationFocus.current = false; setConversation(null); }
-    if (!conversation && restoreConversationFocus.current) {
-      restoreConversationFocus.current = false;
-      const origin = conversationOrigin.current;
-      const expand = document.querySelector<HTMLElement>('[aria-label="Open the conversation in a bigger view"]');
-      (origin?.isConnected ? origin : expand)?.focus({ preventScroll: true });
-    }
-  }, [conversation, key]);
+  const invalidateOwnerRequest = () => { ++shortcutSequence.current; quickRequests.current.clear(); setOwnerFocus(null); };
+  const { conversation, conversationOpen, showConversation, closeConversation } = useConversation(key, invalidateOwnerRequest);
   const [detailOpen, setDetailOpen] = useState(true);
   const detailDismissedAt = useRef<number | null>(null);
   const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
@@ -288,11 +211,7 @@ function Workspace({ application }: { application: Application }) {
   const openConversation = (itemId: string) => {
     const session = store?.getSnapshot().snapshot?.session;
     if (!session?.items[itemId] || !route) return;
-    if (!conversation) conversationOrigin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    if (conversation?.itemId === itemId && conversation.route === key) return;
-    ++shortcutSequence.current; quickRequests.current.clear(); setOwnerFocus(null);
-    setConversation({ route: key, itemId, dividerId: conversationDivider(session, itemId, observedSeen) });
-    navigationVisits.record(route, itemId, 'viewed');
+    if (showConversation(itemId, () => conversationDivider(session, itemId, observedSeen))) navigationVisits.record(route, itemId, 'viewed');
   };
   const [answerJump, setAnswerJump] = useState<{ route: string; itemId: string; messageId: string; token: number } | null>(null);
   const answerJumpSequence = useRef(0);
@@ -350,7 +269,6 @@ function Workspace({ application }: { application: Application }) {
     }, 250);
     return () => { clearTimeout(timer); };
   }, [navigation, searchEdit, key, view, preferences, state.writing, state.pendingOperationId]);
-  const invalidateOwnerRequest = () => { ++shortcutSequence.current; quickRequests.current.clear(); setOwnerFocus(null); };
   const consumeOwnerRequest = (token: number) => {
     for (const [target, request] of quickRequests.current) if (request === token) quickRequests.current.delete(target);
     setOwnerFocus(current => current?.token === token ? null : current);
