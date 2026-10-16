@@ -425,11 +425,12 @@
   writing-mode: vertical-rl;
 }
 
+/* The bigger view stops where the dock starts, so its composer is never under it. */
 .shell-conversation {
   position: absolute;
   top: 0;
   right: 0;
-  bottom: 0;
+  bottom: var(--dock-inset, 0);
   z-index: 3;
   display: flex;
   min-width: 0;

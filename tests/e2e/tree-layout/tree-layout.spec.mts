@@ -601,3 +601,85 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
     await expectRevealedRow(last);
   } finally { await server.close(); }
 });
+
+/** Opens the tree with Details beside it and one row scrolled to the reading edge; returns how to read where rows sit. */
+async function readingSetup(page: Page, origin: string) {
+  await openTree(page, origin);
+  await page.evaluate(async () => { await document.fonts.ready; });
+  const close = page.getByRole('button', { name: 'Close detail' });
+  if (await close.count()) await close.click();
+  const scroller = page.locator('.tree-scroll'), anchored = page.locator('.tree-item[data-item-id="7"]');
+  await anchored.evaluate(element => {
+    const box = element.closest('.tree-scroll')!;
+    const header = element.closest('.tree-topic-group')!.querySelector('.tree-topic')!;
+    box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top - header.getBoundingClientRect().height;
+  });
+  const settle = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await settle();
+  await anchored.locator('.tree-question').click();
+  await expect(page.locator('.item-detail')).toBeVisible();
+  await settle();
+  await expect(anchored).toBeInViewport();
+  // Where a row sits below the sticky topic bar, which may wrap to another line when the Map narrows. The row the owner is
+  // reading is the first one that reaches below the bar, as the Tree itself keeps it (or the one named).
+  const reading = (id?: string) => scroller.evaluate((box, wanted) => {
+    const edge = box.getBoundingClientRect().top;
+    let bar = 0;
+    for (const header of box.querySelectorAll('.tree-topic')) {
+      const rect = header.getBoundingClientRect();
+      if (rect.top <= edge && rect.bottom > edge) bar = Math.max(bar, rect.bottom - edge);
+    }
+    const rows = [...box.querySelectorAll<HTMLElement>('.tree-item')];
+    const row = wanted ? rows.find(element => element.dataset.itemId === wanted)! : rows.find(element => element.getBoundingClientRect().bottom > edge + bar + 1)!;
+    return { id: row.dataset.itemId!, top: row.getBoundingClientRect().top - edge - bar };
+  }, id);
+  /** Runs a change to the column; the Map's width changes, and the row the owner was reading stays where it was. */
+  const holds = async (change: () => Promise<void>) => {
+    const width = (await scroller.boundingBox())!.width, before = await reading();
+    await change();
+    await settle();
+    await expect.poll(async () => (await scroller.boundingBox())!.width).not.toBe(width);
+    await expect.poll(async () => Math.abs((await reading(before.id)).top - before.top)).toBeLessThanOrEqual(3);
+    // The body never scrolls sideways.
+    expect(await page.locator('.shell-body').evaluate(element => element.scrollLeft + element.scrollWidth - element.clientWidth)).toBe(0);
+    return (await scroller.boundingBox())!.width;
+  };
+  return { holds, edge: page.getByRole('separator', { name: 'Resize detail panel' }) };
+}
+
+test('keeps the Map still while Details folds, unfolds and narrows the Map by its edge', async ({ page }) => {
+  const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+    logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+  try {
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    const { holds, edge } = await readingSetup(page, `http://127.0.0.1:${address.port}`);
+    const widths = [await holds(() => page.getByRole('button', { name: 'Fold Details' }).click())];
+    widths.push(await holds(() => page.getByRole('button', { name: 'Show Details' }).click()));
+    await edge.focus();
+    const handle = (await edge.boundingBox())!, x = handle.x + handle.width / 2, y = handle.y + handle.height / 2;
+    widths.push(await holds(async () => { await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x - 90, y, { steps: 5 }); await page.mouse.up(); }));
+    await edge.focus();
+    widths.push(await holds(() => page.keyboard.press('End')));
+    expect(new Set(widths).size).toBe(widths.length);
+  } finally { await server.close(); }
+});
+
+// The Tree keeps the reading row exactly through a width change, except where the topic bar unwraps to one line as the Map
+// widens (End, then Home): the row then ends about 20px below where it was. The same drift is on the shell-seams base, where
+// it is larger, so it is the Tree's hold (ui/tree/TreeView.tsx `holding` and `remembering`), not the column. Remove `fixme`
+// when the hold counts the bar's new height.
+test.fixme('keeps the Map still while Details widens the Map back across the topic bar unwrapping', async ({ page }) => {
+  const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+    logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+  try {
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    const { holds, edge } = await readingSetup(page, `http://127.0.0.1:${address.port}`);
+    await edge.focus();
+    await holds(() => page.keyboard.press('End'));
+    await holds(() => page.keyboard.press('Home'));
+  } finally { await server.close(); }
+});

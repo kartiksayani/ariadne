@@ -1,6 +1,8 @@
 // The Details column beside the Map: where it sits and how wide, how it folds to its rail and unfolds, how its left edge
 // resizes it, and that the open dock never covers anything in it. The width and fold themselves are tested in
 // tests/ui/details/column.test.tsx; this is the column and the shell body that lay them out.
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -314,6 +316,11 @@ describe('dock', () => {
       rerender(tree({ inset }));
       expect(parseFloat(aside().style.paddingBottom || '0')).toBe(inset);
     }
+  });
+
+  it('stops the bigger view where the dock starts, so its composer is never under the dock either', () => {
+    const css = readFileSync(resolve(__dirname, '../../../src/ui/shell/shell.css'), 'utf8');
+    expect(css.match(/\.shell-conversation \{([^}]*)\}/)?.[1]).toContain('bottom: var(--dock-inset, 0);');
   });
 
   it('keeps the composer in the free space: it is the last child of the scroll host, and the host is not padded further', () => {

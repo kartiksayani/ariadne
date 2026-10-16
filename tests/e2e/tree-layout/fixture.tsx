@@ -92,10 +92,13 @@ function ActionGridFixture() {
  * The Details column in the real shell, under a stand-in dock of the height in the query (`?details&dock=200`): a long
  * conversation that scrolls above a pinned composer, as the item detail lays them out.
  */
-function DetailsFixture({ dock }: { dock: number }) {
+function DetailsFixture({ dock, bigger }: { dock: number; bigger: boolean }) {
   const messages = Array.from({ length: 40 }, (_, index) => <p key={index} className="fixture-message">Message {index + 1} in a long conversation.</p>);
   return <DockInsetProvider height={dock}><DetailsColumnProvider saved={null}>
     <Shell topBar={<div style={{ height: 40 }} />} main={<p>Map</p>}
+      legacy={{ conversation: bigger ? <div className="item-conversation" style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+        <div className="detail-body" style={{ flex: 1, minHeight: 0 }}>{messages}</div>
+        <div className="detail-dock" data-testid="bigger-composer"><textarea aria-label="Reply in the bigger view" rows={2} /></div></div> : undefined }}
       side={<DetailsColumn path={<span>Topic / item</span>} rail={<i className="ph ph-check-circle" />}>
         <div className="item-detail"><div className="detail-body">{messages}</div>
           <div className="detail-dock"><textarea aria-label="Reply" rows={2} /><button type="button">Send</button></div></div>
@@ -105,7 +108,7 @@ function DetailsFixture({ dock }: { dock: number }) {
 }
 
 const query = new URLSearchParams(window.location.search);
-createRoot(document.getElementById('root')!).render(query.has('details') ? <DetailsFixture dock={Number(query.get('dock') ?? 0)} />
+createRoot(document.getElementById('root')!).render(query.has('details') ? <DetailsFixture dock={Number(query.get('dock') ?? 0)} bigger={query.has('bigger')} />
   : query.has('grid') ? <ActionGridFixture /> : query.has('bar')
   ? <div className="tree-column" style={{ width: 220 }}><SessionBar busy={false} onClose={() => {}} bar={{
     sessionId: route.session_id, title: 'A long session name that needs to fit in a narrow column', secondary: null,

@@ -91,7 +91,8 @@ test('Details resizes from an 8px edge on its left, by drag and by keys, inside 
     const edge = page.getByRole('separator', { name: 'Resize detail panel' });
     const handle = (await edge.boundingBox())!, side = await box(page, '.shell-detail');
     expect(handle.width).toBe(8);
-    expect(handle.x).toBe(side.x - 4);
+    // left: -4px from the column's padding edge, inside its 1px divider.
+    expect(handle.x).toBe(side.x - 3);
     expect(handle.height).toBe(side.height);
     await expect(edge).toHaveCSS('cursor', 'col-resize');
     const x = handle.x + handle.width / 2, y = handle.y + handle.height / 2;
@@ -160,3 +161,17 @@ test('Details folded to the rail ends above the dock too, and the dock floats ac
     expect(dock.width).toBe(WIDE.width);
   });
 });
+
+// The bigger view takes the Map's place and the dock still floats over it: its composer stays above the dock.
+for (const dock of [40, 200, 400]) {
+  test(`The bigger view keeps its composer above a dock ${dock}px tall`, async ({ page }) => {
+    await withFixture(page, `details&bigger&dock=${dock}`, WIDE, async () => {
+      const floor = (await box(page, '[data-testid="dock"]')).y;
+      const view = await box(page, '.shell-conversation'), composer = await box(page, '[data-testid="bigger-composer"]');
+      expect(view.y + view.height).toBe(floor);
+      expect(composer.y + composer.height).toBeLessThanOrEqual(floor);
+      await page.getByRole('textbox', { name: 'Reply in the bigger view' }).fill('Still reachable');
+      await expect(page.getByRole('textbox', { name: 'Reply in the bigger view' })).toHaveValue('Still reachable');
+    });
+  });
+}
