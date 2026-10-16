@@ -31,7 +31,9 @@ const barrierNavigations: NavigationStore[] = [];
 let activeTransport: AppTransport;
 afterEach(() => { cleanup(); notices.clear(); barrierNavigations.splice(0).forEach(navigation => navigation.stop()); vi.restoreAllMocks(); vi.useRealTimers(); });
 /** The "Review notes" row of All sessions, a project's page or Archive; null when none lists it. */
-const card = () => [...document.querySelectorAll<HTMLElement>('.sl-row, .ar-row')].find(row => row.textContent?.includes('Review notes')) as HTMLElement;
+const card = () => ([...document.querySelectorAll<HTMLElement>('.sl-row, .ar-row')].find(row => row.textContent?.includes('Review notes')) ?? null) as HTMLElement;
+/** A row shows its standing by its Close: enabled on an active session, greyed ("Already closed") on a closed one (SPEC 14.2). */
+const rowClosed = () => cardButton('Close').disabled;
 /** A row's action by its verb: "Archive Review notes", "Restore Review notes", "Close Review notes". */
 const cardButton = (verb: string) => within(card()).getByRole<HTMLButtonElement>('button', { name: new RegExp(`^${verb} `) });
 const queryCardButton = (verb: string) => within(card()).queryByRole('button', { name: new RegExp(`^${verb} `) });
@@ -40,9 +42,16 @@ function openRemove() {
   fireEvent.click(within(card()).getByRole('button', { name: /^More for / }));
   fireEvent.click(screen.getByRole('menuitem', { name: /^Remove from Ariadne/ }));
 }
-/** A row's Reopen asks through the lifecycle review. */
+/** Reopen lives on the connection card of the opened session (SPEC 14.2): open it from its row, then ask through the lifecycle review. */
 async function reopen() {
-  fireEvent.click(cardButton('Reopen'));
+  fireEvent.click(within(card()).getByRole('button', { name: 'Review notes' }));
+  const dot = await waitFor(() => {
+    const found = document.querySelector<HTMLButtonElement>('[data-popover-trigger="connection"]');
+    expect(found).not.toBeNull(); expect(found!.disabled).toBe(false); return found!;
+  });
+  fireEvent.click(dot);
+  const connection = await waitFor(() => { const found = document.querySelector<HTMLElement>('.cc'); expect(found).not.toBeNull(); return found!; });
+  fireEvent.click(within(connection).getByRole('button', { name: 'Reopen session' }));
   const review = await screen.findByRole('dialog', { name: 'Reopen this session?' });
   await act(async () => { fireEvent.click(within(review).getByRole('button', { name: 'Reopen session' })); });
 }
@@ -509,7 +518,7 @@ describe('Session archive cards', () => {
     await act(async () => { fireEvent.click(cardButton('Restore')); });
     await waitFor(() => expect(transport.sessions.get(route.session_id)!.archived_at).toBeUndefined());
     await page('All sessions'); showTab(/^Closed/);
-    await waitFor(() => expect(cardButton('Reopen')).toBeTruthy());
+    await waitFor(() => expect(rowClosed()).toBe(true));
     expect(transport.sessions.get(route.session_id)!.state).toBe('closed');
     await reopen();
     expect(commands(transport)).toEqual(['session_archive', 'session_restore', 'session_reopen']);
@@ -590,7 +599,7 @@ describe('Session archive cards', () => {
     const fixture = new AppTransport(), session = fixture.sessions.get(route.session_id)!;
     session.state = 'closed'; session.closed_at = session.updated_at;
     const transport = await setup(false, false, fixture);
-    expect(cardButton('Reopen')).toBeTruthy();
+    expect(rowClosed()).toBe(true);
     await archive(); await unfold(); notices.clear();
     openRemove();
     await act(async () => { fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove session' })); });
@@ -633,7 +642,7 @@ describe('Session archive cards', () => {
     await waitArchived();
     expect(await screen.findByText('Archived “Review notes”.')).toBeTruthy();
     await act(async () => { fireEvent.click((await screen.findByRole('button', { name: 'Undo' }))); });
-    await waitFor(() => expect(cardButton('Reopen')).toBeTruthy());
+    await waitFor(() => expect(rowClosed()).toBe(true));
     expect(session).toMatchObject({ state: 'closed', closed_at: closedAt });
     expect(session.bindings[session.active_binding_id!]!).toMatchObject({ owner_paused: true });
   });
@@ -675,7 +684,7 @@ describe('Session archive cards', () => {
     await waitArchived();
     expect(await screen.findByText(submitted === 'active' ? 'Archived and closed “Review notes”.' : 'Archived “Review notes”.')).toBeTruthy();
     await act(async () => { fireEvent.click((await screen.findByRole('button', { name: 'Undo' }))); });
-    await waitFor(() => expect(cardButton(submitted === 'active' ? 'Close' : 'Reopen')).toBeTruthy());
+    await waitFor(() => expect(rowClosed()).toBe(submitted === 'closed'));
     await waitFor(() => expect(session.state).toBe(submitted));
     expect(transport.mutations.find(request => request.command.command === 'session_restore')?.command).toMatchObject({ params: { expected_revision: session.revision - 1 } });
     expect(session.bindings[session.active_binding_id!]!.owner_paused).toBe(submitted === 'closed');
@@ -749,7 +758,7 @@ describe('Session archive cards', () => {
     expect((await screen.findByRole('button', { name: 'Undo' }))).toBeTruthy();
     expect(commands(transport)).toEqual(['session_archive']);
     await act(async () => { fireEvent.click((await screen.findByRole('button', { name: 'Undo' }))); });
-    await waitFor(() => expect(cardButton(initial === 'active' ? 'Close' : 'Reopen')).toBeTruthy());
+    await waitFor(() => expect(rowClosed()).toBe(initial === 'closed'));
     expect(session.state).toBe(initial);
     const restore = transport.mutations.find(request => request.command.command === 'session_restore')!.command;
     expect(restore.command === 'session_restore' && !!restore.params.reopen).toBe(initial === 'active');

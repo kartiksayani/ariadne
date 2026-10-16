@@ -80,6 +80,8 @@ async function openApp(transport: BinTransport) {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
     });
 }
+/** The top bar's search box shows while it holds words; an empty search is the closed "Search the Map" button. */
+const searchValue = () => document.querySelector<HTMLInputElement>('.tb-search-input')?.value ?? '';
 async function refreshApp(transport: BinTransport) {
   const queries = transport.queries.filter(request => request.request.command === 'session_get').length;
   ++transport.source.revision;
@@ -662,7 +664,7 @@ describe('agent removal receipts in the composed app', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Resume filtered view' }));
     await waitFor(() => expect(rows()).toEqual(['1', '1.1']));
     expect(screen.queryByRole('button', { name: 'Resume filtered view' })).toBeNull();
-    expect((screen.getByRole('textbox', { name: 'Search questions and outcomes' }) as HTMLInputElement).value).toBe('Matching');
+    expect(searchValue()).toBe('Matching');
   });
 
   it('shows the current marked receipt once, deduplicates refreshes and respects owner dismissal', async () => {
@@ -708,7 +710,7 @@ describe('agent removal receipts in the composed app', () => {
     const fold = await screen.findByRole('button', { name: 'Removed by agent · 4' });
     await waitFor(() => expect(fold.getAttribute('aria-expanded')).toBe('true'));
     expect(document.querySelector('.graph-view')).toBeNull();
-    expect((screen.getByRole('textbox', { name: 'Search questions and outcomes' }) as HTMLInputElement).value).toBe('');
+    expect(searchValue()).toBe('');
     expect(transport.preferences.sessions.find(view => view.session.session_id === session.id)!.filters)
       .toEqual({ search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false });
     expect(screen.getByText('Old delivery plans · 4 items')).toBeTruthy();
@@ -719,7 +721,7 @@ describe('agent removal receipts in the composed app', () => {
     transport.preferences.sessions[0]!.filters.search = 'a question that does not match';
     await openApp(transport);
     const receipt = within((await screen.findByText(removalNotice(session, notice()))).closest<HTMLElement>('.pw-note')!);
-    const theme = within(document.querySelector<HTMLElement>('.shell-header')!).getByRole<HTMLButtonElement>('button', { name: 'Switch to light' });
+    const theme = within(document.querySelector<HTMLElement>('.tb')!).getByRole<HTMLButtonElement>('button', { name: 'Switch to light' });
     await waitFor(() => expect(theme.disabled).toBe(false));
     let release!: () => void, writing = false;
     const held = new Promise<void>(resolve => { release = resolve; });
@@ -740,12 +742,17 @@ describe('agent removal receipts in the composed app', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
       expect(screen.getByText('Opening the session…')).toBeTruthy();
       expect(transport.preferences.sessions[0].filters.search).toBe('a question that does not match');
-      if (superseded) fireEvent.click(within(screen.getByLabelText('Projects and sessions')).getByRole('button', { name: 'Projects' }));
+      if (superseded) {
+        // Projects is a page link in the switcher: it shows at once and cancels the queued handoff (pages are not saved).
+        fireEvent.click(document.querySelector<HTMLButtonElement>('[data-popover-trigger="switcher"]')!);
+        fireEvent.click(within(screen.getByRole('dialog', { name: 'Switch session or project' })).getByRole('button', { name: 'Projects' }));
+      }
       vi.useRealTimers();
       await act(async () => { release(); });
       if (superseded) {
-        await waitFor(() => expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'projects' }));
-        await waitFor(() => expect(screen.queryByText('Opening Projects…')).toBeNull());
+        await screen.findByRole('heading', { name: 'Projects', level: 1 });
+        await waitFor(() => expect(screen.queryByText('Opening the session…')).toBeNull());
+        expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
         expect(transport.preferences.sessions[0].filters.search).toBe('a question that does not match');
         expect(screen.queryByText('Old delivery plans · 4 items')).toBeNull();
       } else {
@@ -832,8 +839,12 @@ describe('agent removal receipts in the composed app', () => {
     await waitFor(() => expect(fold.getAttribute('aria-expanded')).toBe('true'));
     expect(transport.preferences.sessions.find(view => view.session.session_id === session.id)!.filters.archived).toBe(true);
     expect(screen.getByText('Old delivery plans · 4 items')).toBeTruthy();
-    const archivedCard = fold.closest<HTMLElement>('.pw-archive-card')!;
-    fireEvent.click(within(archivedCard).getByRole('button', { name: 'Remove' }));
+    // Removing the archived topic for good is asked from its row on the Archive page (SPEC §5.14: one Archive page for sessions and topics), not from the Map.
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-popover-trigger="switcher"]')!);
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Switch session or project' })).getByRole('button', { name: 'Archive' }));
+    const archivedRow = (await screen.findAllByText(session.topics[topicA]!.name)).map(name => name.closest<HTMLElement>('.ar-row')).find(Boolean)!;
+    fireEvent.click(within(archivedRow).getByRole('button', { name: /^More for / }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Remove from Ariadne/ }));
     const confirm = within(await screen.findByRole('alertdialog'));
     expect(confirm.getByText(/The topic and its 6 items are removed from Ariadne/)).toBeTruthy();
     fireEvent.click(confirm.getByRole('button', { name: 'Cancel' }));
@@ -888,25 +899,35 @@ describe('permanent removal scope with only binned work', () => {
     for (const id of transport.sessions.keys()) if (id !== session.id) transport.sessions.delete(id);
     await openApp(transport);
     expect(activeItems(session)).toEqual([]); expect(activeTopics(session)).toEqual([]);
-    const projects = document.querySelector<HTMLButtonElement>('[data-shell-tab="projects"]')!;
-    await waitFor(() => expect(projects.disabled).toBe(false)); fireEvent.click(projects);
-    const open = await waitFor(() => {
-      const button = document.querySelector<HTMLButtonElement>(`[data-project-id="${route.project_id}"] .pw-project-open`);
-      expect(button).not.toBeNull(); expect(button?.disabled).toBe(false); return button!;
+    return { transport, session };
+  }
+  /** A page from the switcher's footer (pages are views the owner opens from the top bar). */
+  async function page(name: 'Projects' | 'All sessions' | 'Archive') {
+    const trigger = await waitFor(() => {
+      const button = document.querySelector<HTMLButtonElement>('[data-popover-trigger="switcher"]');
+      expect(button).not.toBeNull(); expect(button!.disabled).toBe(false); return button!;
     });
-    fireEvent.click(open);
-    const card = await waitFor(() => {
-      const element = document.querySelector<HTMLElement>(`[data-session-card="${session.id}"]`);
-      expect(element).not.toBeNull(); return element!;
-    });
-    await waitFor(() => expect(within(card).getByRole('button', { name: 'Close session' }).hasAttribute('disabled')).toBe(false));
-    return { transport, card };
+    fireEvent.click(trigger);
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Switch session or project' })).getByRole('button', { name }));
+    await screen.findByRole('heading', { name, level: 1 });
   }
 
   it('warns that permanent session removal includes all binned topics and items', async () => {
-    const { transport, card } = await onlyBinApp();
-    expect(card.querySelector('.pw-topic-chips')).toBeNull();
-    fireEvent.click(within(card).getByRole('button', { name: 'Remove' }));
+    const { transport } = await onlyBinApp();
+    // A session is removed for good from the Archive page, so archive it first from All sessions.
+    await page('All sessions');
+    const archive = await waitFor(() => {
+      const button = screen.getByRole<HTMLButtonElement>('button', { name: /^Archive / });
+      expect(button.disabled).toBe(false); return button;
+    });
+    await act(async () => { fireEvent.click(archive); });
+    const archiving = screen.queryByRole('dialog');
+    if (archiving) await act(async () => { fireEvent.click(within(archiving).getByRole('button', { name: 'Archive session' })); });
+    await waitFor(() => expect(transport.sessions.get(route.session_id)!.archived_at).toBeTruthy());
+    await page('Archive');
+    const archived = await waitFor(() => { const row = document.querySelector<HTMLElement>('.ar-row'); expect(row).not.toBeNull(); return row!; });
+    fireEvent.click(within(archived).getByRole('button', { name: /^More for / }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Remove from Ariadne/ }));
     const confirm = within(await screen.findByRole('alertdialog'));
     expect(confirm.getByText(/and the 2 topics only it has \(7 items\)/)).toBeTruthy();
     expect(confirm.getByRole('button', { name: 'Remove session' })).toBeTruthy();
@@ -915,14 +936,17 @@ describe('permanent removal scope with only binned work', () => {
     expect(transport.source.items['1']).toBeTruthy();
   });
 
-  it('warns that permanent project removal includes every binned topic and item in its sessions', async () => {
+  it('warns that permanent project removal includes its sessions and their Maps, even with only binned work', async () => {
     const { transport } = await onlyBinApp();
-    fireEvent.click(screen.getByRole('button', { name: 'Remove project' }));
-    const confirm = within(await screen.findByRole('alertdialog'));
-    expect(confirm.getByText(/its 1 session, 2 topics and 7 items/)).toBeTruthy();
+    await page('Projects');
+    fireEvent.click(await screen.findByRole('button', { name: /^More for .*: remove project$/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Remove project/ }));
+    const confirm = within(await screen.findByRole('dialog', { name: /^Remove “.*” from Ariadne\?$/ }));
+    // The dialog names the sessions it forgets and their Maps (SPEC 14.x); it no longer counts topics and items.
+    expect(confirm.getByText(/forgets its 1 session and their Maps/)).toBeTruthy();
     expect(confirm.getByRole('button', { name: 'Remove project' })).toBeTruthy();
     expect(transport.mutations.some(request => request.command.command === 'project_remove')).toBe(false);
-    fireEvent.click(confirm.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(confirm.getByRole('button', { name: /^Cancel/ }));
     expect(transport.source.topics[topicA]).toBeTruthy(); expect(transport.source.items['8']).toBeTruthy();
   });
 });

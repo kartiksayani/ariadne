@@ -17,7 +17,8 @@ describe('shell model', () => {
     expect(dayWord(at(0, 9, 5), now)).toBe('');
     expect(dayWord(at(1, 9, 5), now)).toBe('Yesterday');
     expect(dayWord(at(3, 9, 5), now)).toBe(new Date(at(3, 9, 5)).toLocaleDateString('en-GB', { weekday: 'short' }));
-    expect(dayWord(at(9, 9, 5), now)).toBe(new Date(at(9, 9, 5)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }));
+    // The board writes "28 Sep"; newer ICU writes "28 Sept" for en-GB, so the expected words use the board's three letters.
+    expect(dayWord(at(9, 9, 5), now)).toBe(new Date(at(9, 9, 5)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }).replace('Sept', 'Sep'));
     expect(sessionWhen(at(0, 14, 2), now)).toBe('Today 14:02');
     expect(sessionWhen(at(1, 14, 2), now)).toBe('Yesterday');
     expect(sessionWhen(at(3, 14, 2), now)).toBe('3 days ago');
