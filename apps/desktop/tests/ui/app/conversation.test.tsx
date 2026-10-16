@@ -79,7 +79,7 @@ async function setup({ otherSession = false, baseline = false, dropReady = false
   await screen.findByRole('region', { name: 'Session tree' });
   await waitFor(() => {
     expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-    expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
     if (coveredWaiting) expect(detail('4').querySelector<HTMLButtonElement>('[data-answer-own]')?.disabled).toBe(false);
     else expect(within(detail('4')).getByLabelText<HTMLTextAreaElement>('Reply message').disabled).toBe(false);
     // Questions 2 and 8 wait in the dock (4, when waiting, is the one Details answers).
@@ -152,23 +152,19 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open the conversation in a bigger view' }));
   });
 
-  it('lets text size and session rename own Escape before the peek and conversation', async () => {
+  // Rename is a modal dialog now, opened only from a row on a page (SPEC 5.14), so it can never be open under the
+  // conversation; the Text size menu is the one popover left to own Escape first.
+  it('lets text size own Escape before the peek and conversation', async () => {
     await setup();
-    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
-    await screen.findByRole('group', { name: 'Rename session' });
     await expand();
     fireEvent.click(conversation().querySelector<HTMLButtonElement>('.name-chip')!);
     await screen.findByRole('dialog', { name: /^Peek:/ });
     const size = screen.getByRole('button', { name: 'Text size' });
     fireEvent.click(size);
+    expect(screen.getByRole('menu', { name: 'Text size' })).toBeTruthy();
     const peekClose = screen.getByRole('button', { name: 'Close peek' });
     key(peekClose, 'Escape');
-    expect(screen.queryByRole('group', { name: 'Text size' })).toBeNull();
-    expect(document.querySelector('.pw-rename')).not.toBeNull();
-    expect(screen.getByRole('dialog', { name: /^Peek:/ })).toBeTruthy();
-    key(peekClose, 'Escape');
-    expect(document.querySelector('.pw-rename')).toBeNull();
+    expect(screen.queryByRole('menu', { name: 'Text size' })).toBeNull();
     expect(screen.getByRole('dialog', { name: /^Peek:/ })).toBeTruthy();
     expect(conversation()).toBeTruthy();
     key(conversation(), 'Escape');
@@ -256,12 +252,27 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     expect(selected(transport)).toBe('4'); expect(sends(transport)).toHaveLength(0);
   });
 
-  it.each(['r', 'a'])('focuses only the overlay answer with %s while the Map selects a different item', async shortcut => {
+  it('focuses only the overlay answer with r while the Map selects a different item', async () => {
     const transport = await setup({ coveredWaiting: true }); await expand(); await switchQuestion();
-    key(conversation(), shortcut);
+    key(conversation(), 'r');
     await waitFor(() => expect(document.activeElement).toBe(conversation().querySelector('[data-answer-option="0"]')));
     expect(document.querySelectorAll('[data-detail-item-id]')).toHaveLength(1);
     expect(selected(transport)).toBe('4'); expect(sends(transport)).toHaveLength(0);
+  });
+
+  // `a` is Ack only now (SPEC 6.1; it was the answer fallback): it never focuses, picks or sends an answer.
+  it('does not turn a into an answer shortcut: it neither focuses the overlay answer nor sends, and the Map stays', async () => {
+    const transport = await setup({ coveredWaiting: true }); await expand(); await switchQuestion();
+    const before = document.activeElement;
+    const pressed = () => [...conversation().querySelectorAll('[data-answer-option][aria-pressed="true"]')].map(button => button.getAttribute('data-answer-option'));
+    const picked = pressed();
+    key(conversation(), 'a');
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+    expect(document.activeElement).toBe(before);
+    expect(pressed()).toEqual(picked);
+    expect(document.querySelectorAll('[data-detail-item-id]')).toHaveLength(1);
+    expect(selected(transport)).toBe('4'); expect(sends(transport)).toHaveLength(0);
+    expect(transport.mutations.some(request => request.command.command === 'ack')).toBe(false);
   });
 
   it.each([1, 2, 3, 4, 5, 6, 7, 8, 9])('selects and sends overlay option %i instead of targeting the covered Map item', async digit => {
@@ -270,17 +281,24 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     await waitFor(() => expect(conversation().querySelector(`[data-answer-option="${digit - 1}"]`)?.getAttribute('aria-pressed')).toBe('true'));
     const words = answerWords(conversation());
     fireEvent.change(words, { target: { value: `Note for option ${digit}` } });
+    // ⌥digit no longer picks and sends (SPEC 6.1): it sends nothing; ⌘↵ in the words box sends the picked option.
     conversation().focus(); alt(conversation(), digit);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(sends(transport)).toHaveLength(0);
+    key(words, 'Enter', { metaKey: true });
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     expect(sends(transport)[0]).toMatchObject({ session: route, command: { params: { kind: 'answer', target: { item_id: '2' }, selected_option_id: `choice-${digit}`, text: `Note for option ${digit}` } } });
     expect(selected(transport)).toBe('4');
   });
 
-  it('Option zero focuses own words and Command Enter answers the pinned question then restores the ordinary composer', async () => {
+  it('Write my own answer focuses own words and Command Enter answers the pinned question then restores the ordinary composer', async () => {
     const transport = await setup({ coveredWaiting: true }); await expand(); await switchQuestion();
     expect(conversation().querySelector('.conversation-pin')?.textContent).toContain('Your turn');
     expect(within(conversation()).queryByLabelText('Reply message')).toBeNull();
+    // ⌥0 no longer focuses own words (SPEC 6.1); the "Write my own answer" card does.
     alt(conversation(), 0);
+    expect(conversation().querySelector('.answer textarea')).toBeNull();
+    fireEvent.click(conversation().querySelector<HTMLButtonElement>('.answer [data-answer-own]')!);
     const words = answerWords(conversation());
     await waitFor(() => expect(document.activeElement).toBe(words));
     fireEvent.change(words, { target: { value: 'Answer from the larger view' } });
@@ -299,8 +317,8 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     expect(header().textContent).toBe('Waiting on me');
     // The conversation answers 2, so the dock holds only 8.
     expect(pill()?.textContent).toBe('1 more waiting'); expect(conversation().querySelector('.conversation-pin')).toBeTruthy();
-    expect(document.querySelector('.shell-footer')?.textContent).toContain('⌥0focus own words');
-    expect(document.querySelector('.shell-footer')?.textContent).not.toContain('hide / unhide');
+    // The footer keys strip is gone (SPEC, Removed): the conversation advertises no key legend of its own.
+    expect(document.querySelector('.shell-footer')).toBeNull();
     const words = answerWords(conversation());
     fireEvent.change(words, { target: { value: 'This is my answer.' } });
     key(words, 'Enter', { metaKey: true });
@@ -312,7 +330,6 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
       expect(conversation().querySelector('.conversation-pin')).toBeNull();
     });
     expect(row('2').querySelector('.status-badge')?.textContent).toBe('Queued');
-    expect(document.querySelector('.shell-footer')?.textContent).not.toContain('⌥0');
     expect(within(conversation()).getByLabelText('Reply message')).toBeTruthy();
   });
 
@@ -431,7 +448,8 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     expect(selected(transport)).toBe('4');
   });
 
-  it.each(['Command Enter', 'Option digit'])('sends only once during a held %s burst', async shortcut => {
+  // ⌥digit quick-send is gone (SPEC 6.1); the other fast send is Enter on a focused option card.
+  it.each(['Command Enter', 'Enter on an option'])('sends only once during a held %s burst', async shortcut => {
     const transport = await setup(); await expand(); await switchQuestion();
     const words = answerWords(conversation());
     fireEvent.change(words, { target: { value: 'Exactly one answer' } });
@@ -447,8 +465,9 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
         if (shortcut === 'Command Enter') {
           key(words, 'Enter', { metaKey: true }); key(words, 'Enter', { metaKey: true }); key(words, 'Enter', { metaKey: true, repeat: true });
         } else {
-          alt(conversation(), 1); alt(conversation(), 1); alt(conversation(), 2);
-          key(conversation(), '¡', { code: 'Digit1', altKey: true, repeat: true });
+          const card = conversation().querySelector<HTMLButtonElement>('[data-answer-option="0"]')!;
+          card.focus();
+          key(card, 'Enter'); key(card, 'Enter'); key(card, 'Enter', { repeat: true });
         }
       });
       await waitFor(() => expect(requested).toBe(1));
@@ -468,10 +487,22 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     const tree = screen.getByRole('region', { name: 'Session tree', hidden: true });
     const scroller = tree.querySelector<HTMLElement>('.tree-scroll')!; scroller.scrollTop = 147;
     conversation().focus(); key(conversation(), 'g'); key(conversation(), 'e');
-    key(conversation(), 'j', { metaKey: true }); key(conversation(), 'e', { metaKey: true });
-    key(conversation(), 'x'); key(conversation(), 'Backspace'); key(conversation(), 'Delete'); key(conversation(), 'z');
+    key(conversation(), 'j', { metaKey: true });
+    key(conversation(), 'x');
     key(conversation(), '[', { metaKey: true }); key(document.body, ']', { metaKey: true });
     await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // ⌘E is the one Map key that still works over the conversation (it opens the Recent list, SPEC 6.11): the list
+    // opens, closes with Escape, and leaves the conversation and the Map selection alone.
+    key(conversation(), 'e', { metaKey: true });
+    const recent = await screen.findByRole('dialog', { name: 'Recent items' });
+    key(recent, 'Escape');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(conversation()).toBeTruthy();
+    // ⌫ and Delete stay with the Map's selected row: over the conversation they ask nothing about the covered item.
+    key(conversation(), 'Backspace'); key(conversation(), 'Delete');
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(selected(transport)).toBe('4');
     expect(scroller.scrollTop).toBe(147);
     expect(screen.queryByRole('dialog')).toBeNull();
