@@ -197,7 +197,8 @@ export function SessionLists({ navigation, actions, projects, sessions, single =
     <SessionsList<SessionRef> narrow={narrow} back={back} title={title} sub={sub}
       tabs={single ? undefined : { value: tab, counts, onChange: setTab }}
       groups={sessionGroups(projects, listed, shownTab, now, currentSession, single, onOpenArchive)}
-      onOpen={row => onOpenSession(row.route)} onRename={act('rename')} onClose={act('close')}
+      // While navigation is held (a Refresh, a save) a row opens nothing, as Rename, Close and Archive wait too.
+      onOpen={row => { if (!disabled) onOpenSession(row.route); }} onRename={act('rename')} onClose={act('close')}
       onArchive={row => { const summary = summaryOf(row); if (summary && !acting) void archive.archive(summary); }} />
     {children}
     {acting && store && <SessionRowAction key={`${sessionKey(acting.summary)}:${acting.act}`} actions={actions.forSession(store)} act={acting.act}
