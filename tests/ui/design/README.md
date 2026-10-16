@@ -73,7 +73,7 @@ Data fields are built into the session, preferences and drafts. State that is no
 
 ## The loader's self-check
 
-`selfcheck <id> <size>` tests render the board locally and compare it with the Claude Design screenshots (`~/Documents/Code/ariadne-mocks/final-design/shots/`; set `ARIADNE_FINAL_SHOTS` to move them). Twelve states across the screens run by default; `FINAL_SELFCHECK=all` runs every state at every size. They skip when the screenshots are absent, as in CI. Most match exactly. The screenshots of 2.1 (a "Back to" pill that only appears after a real scroll), 2.6 and 3.1 (the Map is scrolled to another place) differ from a fresh render of the board; their entries in `final-thresholds.json` record that and are only used with `FINAL_SELFCHECK=all`.
+`selfcheck <id> <size>` tests render the board locally and compare it with the Claude Design screenshots (`~/Documents/Code/ariadne-mocks/final-design/shots/`; set `ARIADNE_FINAL_SHOTS` to move them). Twelve states across the screens run by default; `FINAL_SELFCHECK=all` runs every state at every size. They skip when the screenshots are absent, as in CI. Each may differ in at most 0.02% of the frame; nearly all match exactly. The screenshots of 2.1 (a "Back to" pill that only appears after a real scroll), 2.6 and 3.1 (the Map is scrolled to another place) differ from a fresh render of the board; their entries in `final-thresholds.json` record that and are only used with `FINAL_SELFCHECK=all`.
 
 ## The archive
 

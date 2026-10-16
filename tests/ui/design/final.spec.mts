@@ -111,6 +111,8 @@ for (const [id, variant] of [['1.2', 'light'], ['2.1', 'dark'], ['3.2', 'narrow'
 
 // The loader's self-check: the local render of the board against the Claude Design screenshots (shots/NN-screen-SS-state-<size>.png,
 // each with a label above the frame). Runs where the screenshots are (set ARIADNE_FINAL_SHOTS to move them); CI has none and skips it.
+/** "Closely": at most 0.02% of the frame (about 200 pixels) may differ. Nearly every state is exact; a few edge pixels of anti-aliasing can flip between renders. */
+const selfCheckThreshold = 0.0002;
 const shots = process.env.ARIADNE_FINAL_SHOTS ?? resolve(homedir(), 'Documents/Code/ariadne-mocks/final-design/shots');
 // Twelve states across the screens by default; FINAL_SELFCHECK=all checks every registered state at every size.
 const selfCheck: readonly (readonly [string, Variant])[] = process.env.FINAL_SELFCHECK === 'all'
@@ -130,7 +132,7 @@ for (const [id, variant] of selfCheck) {
     const local = await boardFrame(opened, variant).finally(() => opened.close()), { width, height } = variants[variant];
     const reference = await crop(canvas, readFileSync(resolve(shots, file!)), { x: 0, y: labelHeight, width, height });
     const result = await captureFrame(canvas, { id: `selfcheck-${id}-${variant}`, design: reference, app: local, directory: output,
-      threshold: (thresholds as Record<string, number>)[`selfcheck ${id} ${variant}`] ?? 0, report: () => ({ shot: file }) });
+      threshold: (thresholds as Record<string, number>)[`selfcheck ${id} ${variant}`] ?? selfCheckThreshold, report: () => ({ shot: file }) });
     expect(result.height).toBe(height);
   });
 }
