@@ -24,6 +24,7 @@ import { ConversationView } from './ui/detail/ConversationView';
 import { conversationDivider } from './ui/detail/conversationSeen';
 import { conversationAnswerState } from './ui/detail/ItemConversation';
 import { DetailPath, ItemDetail } from './ui/detail/ItemDetail';
+import { RailStatus } from './ui/detail/RailStatus';
 import { WaitingColumn } from './ui/waiting/WaitingColumn';
 import { PeekProvider } from './ui/peek/Peek';
 import { ItemRefSession } from './ui/peek/context';
@@ -168,6 +169,8 @@ function Workspace({ application }: { application: Application }) {
   const invalidateOwnerRequest = () => { ++shortcutSequence.current; quickRequests.current.clear(); setOwnerFocus(null); };
   const { conversation, conversationOpen, showConversation, closeConversation } = useConversation(key, invalidateOwnerRequest);
   const [detailOpen, setDetailOpen] = useState(true);
+  // Counts the owner's choices of an item to show in Details; each one unfolds a folded Details column.
+  const [detailAsked, setDetailAsked] = useState(0);
   const detailDismissedAt = useRef<number | null>(null);
   const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
   // "Resume filtered view", a filter change or a fold drops the tree's temporary reveal.
@@ -296,7 +299,7 @@ function Workspace({ application }: { application: Application }) {
     if (!saved) { if (failure) throw failure; return null; }
     if (!result) return null;
     recordViewed(result);
-    detailDismissedAt.current = null; setLocalReveal(result); setDetailOpen(true);
+    detailDismissedAt.current = null; setLocalReveal(result); setDetailOpen(true); setDetailAsked(count => count + 1);
     // Continuations use this exact admitted request, including queued reveals.
     return { request, result };
   };
@@ -306,7 +309,7 @@ function Workspace({ application }: { application: Application }) {
     recordViewed(result);
     historyReveal.current = null;
     invalidateOwnerRequest(); setLocalReveal(result);
-    if (openDetail) { detailDismissedAt.current = null; setDetailOpen(true); }
+    if (openDetail) { detailDismissedAt.current = null; setDetailOpen(true); setDetailAsked(count => count + 1); }
   };
   const revealLinkedItem = (target: ItemRoute) => {
     if (conversation) closeConversation();
@@ -637,6 +640,8 @@ function Workspace({ application }: { application: Application }) {
         selected={route && (conversationOpen ? conversation?.itemId : selectedId) ? { ...route, item_id: conversationOpen ? conversation!.itemId : selectedId! } : null}
         openSession={target => { if (conversation) closeConversation(); void navigation.navigate({ kind: 'session', session: target }); }} />}
       detailPath={store && selectedId && detailOpen && route ? <DetailPath store={store} itemId={selectedId} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} /> : undefined}
+      detailAsked={detailAsked}
+      detailRail={store && selectedId && detailOpen && route ? <RailStatus store={store} itemId={selectedId} /> : undefined}
       detail={conversationOpen ? <div data-covered-detail="" /> : store && selectedId && detailOpen && route ? <ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}
         onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined}
         onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onBring={() => { void queueBring({ ...route, item_id: selectedId }); }}

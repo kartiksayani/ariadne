@@ -11,6 +11,7 @@ import { RegisterProject, BindSession } from './Registration';
 import type { DiscoveryController } from '../../data/discovery';
 import { Shell } from '../../ui/shell/Shell';
 import { DetailsColumn } from '../../ui/shell/DetailsColumn';
+import { DetailsColumnProvider } from '../../state/details/column';
 import { Footer } from '../../ui/shell/Footer';
 import { Header, type HeaderProps } from '../../ui/shell/Header';
 import { TabBar } from '../../ui/shell/TabBar';
@@ -44,6 +45,10 @@ export interface NavigationWorkspaceProps {
   readonly detail?: ReactNode;
   /** The detail header's breadcrumb. */
   readonly detailPath?: ReactNode;
+  /** The selected item's status icon, shown on the rail while Details is folded. */
+  readonly detailRail?: ReactNode;
+  /** Counts the owner's choices of an item to show; each one unfolds a folded Details column. */
+  readonly detailAsked?: number;
   /** Header controls owned by the composition: search, views and theme. */
   readonly chrome?: Omit<HeaderProps, 'text' | 'disabled'>;
   /** Facts for the selected session tab's header; null while it opens. */
@@ -129,7 +134,7 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   </>;
 }
 
-export function NavigationWorkspace({ store, discovery, waitingContent, conversation, conversationFooter, detail, detailPath, chrome, session, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
+export function NavigationWorkspace({ store, discovery, waitingContent, conversation, conversationFooter, detail, detailPath, detailRail, detailAsked, chrome, session, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
   actions: injectedActions, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
   const transientError = !state.pendingOperationId && state.error === store.getMutationFailure() ? state.error : null;
@@ -277,18 +282,17 @@ export function NavigationWorkspace({ store, discovery, waitingContent, conversa
   </>;
   const summary = footerSummary(global ? { items: Object.values(global.items_by_status).reduce((sum, count) => sum + count, 0), waiting: global.waiting_unanswered,
     inProgress: global.items_by_status.in_progress, open: global.items_by_status.open, archivedTopics: global.archived_topics } : null);
-  return <Shell topBar={<>
+  return <DetailsColumnProvider saved={shown.detail_width ?? null} unfoldWhen={detailAsked} onSave={width => saveLayout({ detail_width: width })}><Shell topBar={<>
     <Header {...defaultChrome} {...chrome} text={headerText(headerInput, at)} disabled={disabled} />
     <TabBar tabs={tabs} disabled={navigationDisabled} closeDisabled={disabled} onSelect={selectTab} onClose={closeTab} />
   </>}
     main={center}
-    side={detail ? <DetailsColumn path={detailPath} onClose={onCloseDetail} onRemove={onRemove} hidden={hiddenItem} hiddenNotice={hiddenNotice} onHide={onHide}
-      onResize={width => saveLayout({ detail_width: width })}>{detail}</DetailsColumn> : undefined}
+    side={detail ? <DetailsColumn path={detailPath} rail={detailRail} onClose={onCloseDetail} onRemove={onRemove} hidden={hiddenItem} hiddenNotice={hiddenNotice} onHide={onHide}>{detail}</DetailsColumn> : undefined}
     footer={<Footer summary={summary} conversation={conversation ? conversationFooter ?? { question: false } : undefined} />}
     legacy={{ waiting: waitingContent ?? <WaitingFrame count="–" loading />, conversation,
-      sideWidth: shown.detail_width ?? null, waitingFolded: shown.waiting_collapsed ?? false, onFoldWaiting: folded => saveLayout({ waiting_collapsed: folded }) }}
+      waitingFolded: shown.waiting_collapsed ?? false, onFoldWaiting: folded => saveLayout({ waiting_collapsed: folded }) }}
     overlay={registering
       ? <RegisterProject store={store} initialRoot={registrationRoot} disabled={mutationDisabled} close={() => setRegistering(false)} />
       : binding ? <BindSession store={store} project={binding} sessions={sessions.filter(session => session.project_id === binding.project_id)}
-        adapters={adapterChoices} discovery={discovery} disabled={mutationDisabled} close={() => setBinding(null)} /> : undefined} />;
+        adapters={adapterChoices} discovery={discovery} disabled={mutationDisabled} close={() => setBinding(null)} /> : undefined} /></DetailsColumnProvider>;
 }

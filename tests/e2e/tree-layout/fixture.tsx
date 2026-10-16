@@ -9,6 +9,11 @@ import { ItemRow, type RowAction } from '../../../apps/desktop/src/ui/tree/ItemR
 import { immutable } from '../../../apps/desktop/src/data';
 import type { ItemRow as Row } from '../../../apps/desktop/src/ui/tree/model';
 import { SessionBar } from '../../../apps/desktop/src/ui/tree/SessionBar';
+import { Shell } from '../../../apps/desktop/src/ui/shell/Shell';
+import { DetailsColumn } from '../../../apps/desktop/src/ui/shell/DetailsColumn';
+import { DockInsetProvider } from '../../../apps/desktop/src/ui/shell/dockInset';
+import { DetailsColumnProvider } from '../../../apps/desktop/src/state/details/column';
+import '../../../apps/desktop/src/ui/detail/detail.css';
 
 // The ordinary App over its real stores; only the native transport is replaced.
 // Item 1 carries a long finding (it must fold to four lines), item 5 a paragraph that
@@ -83,8 +88,25 @@ function ActionGridFixture() {
   </>;
 }
 
+/**
+ * The Details column in the real shell, under a stand-in dock of the height in the query (`?details&dock=200`): a long
+ * conversation that scrolls above a pinned composer, as the item detail lays them out.
+ */
+function DetailsFixture({ dock }: { dock: number }) {
+  const messages = Array.from({ length: 40 }, (_, index) => <p key={index} className="fixture-message">Message {index + 1} in a long conversation.</p>);
+  return <DockInsetProvider height={dock}><DetailsColumnProvider saved={null}>
+    <Shell topBar={<div style={{ height: 40 }} />} main={<p>Map</p>}
+      side={<DetailsColumn path={<span>Topic / item</span>} rail={<i className="ph ph-check-circle" />}>
+        <div className="item-detail"><div className="detail-body">{messages}</div>
+          <div className="detail-dock"><textarea aria-label="Reply" rows={2} /><button type="button">Send</button></div></div>
+      </DetailsColumn>}
+      dock={dock ? <div data-testid="dock" style={{ height: dock, background: 'rgb(200 60 60 / 85%)' }} /> : undefined} />
+  </DetailsColumnProvider></DockInsetProvider>;
+}
+
 const query = new URLSearchParams(window.location.search);
-createRoot(document.getElementById('root')!).render(query.has('grid') ? <ActionGridFixture /> : query.has('bar')
+createRoot(document.getElementById('root')!).render(query.has('details') ? <DetailsFixture dock={Number(query.get('dock') ?? 0)} />
+  : query.has('grid') ? <ActionGridFixture /> : query.has('bar')
   ? <div className="tree-column" style={{ width: 220 }}><SessionBar busy={false} onClose={() => {}} bar={{
     sessionId: route.session_id, title: 'A long session name that needs to fit in a narrow column', secondary: null,
     description: null, named: true, agent: 'codex', where: 'iTerm', meta: '12 topics', running: false,
