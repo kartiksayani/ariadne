@@ -104,6 +104,23 @@ describe('liveness: calls that have nothing to report still record an outcome',(
     await loop.stop(h.$);
     await balanced();
   });
+  // The helper producer only records on turn callbacks, so its last failure would
+  // stay current in an idle conversation until the binding ended it.
+  it('a helper failure is retired when its binding ends: no stale line stays current and nothing prints after',async () => {
+    let time = 0;
+    const h = host({claim:await prepared()}), health = conversationHealth(() => time);
+    const loop = claimLoop(descriptor.helperPath,binding,{now:() => time,health});
+    health.record(h.$,'helper',{kind:'transient',code:'timeout',text:BACKGROUND_RETRY});
+    expect(health.current()).toMatchObject({kind:'transient',producer:'helper'});
+    time = 30000;
+    await loop.stop(h.$,true);
+    expect(health.current()).toEqual({kind:'ok'});
+    // Another producer's calls keep evaluating health; the old failure never speaks.
+    for (time = 31000; time <= 10 * MINUTE; time += 1000) health.record(h.$,'auto',{kind:'ok'});
+    expect(health.current()).toEqual({kind:'ok'});
+    expect(h.logs).toEqual([]);
+    await balanced();
+  });
   // Long runs of polls with nothing to claim, nothing to save, or a claim
   // already active, while the app's answers change at random. Each poll's
   // report and claim calls settle exactly once, and a stale claim blip never

@@ -71,6 +71,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     // Evidence for a binding that no longer exists has nowhere to go.
     pending.length = 0;
     health.retire($,'reports');
+    health.retire($,'helper');
     if (ended) return false;
     ended = true;
     if (!live) return false;
@@ -356,6 +357,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     await quiesce();
     health.retire($,'claim');
     health.retire($,'reports');
+    health.retire($,'helper');
     const captured = active;
     if (captured && captured.turnId === null && !captured.released && !ended) {
       // A pending fold is confirmed only on evidence that the turn it was folded
@@ -411,6 +413,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     stopped = true;
     health.retire($,'claim');
     health.retire($,'reports');
+    health.retire($,'helper');
     recovered = true;
     admissionOpen = false;
     return true;
