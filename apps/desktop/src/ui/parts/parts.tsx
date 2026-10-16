@@ -66,14 +66,15 @@ export function usePopover(open: boolean, onClose: (restoreFocus: boolean) => vo
 
 /** A popover that took focus on open gives it back to whatever had it, when it closes and focus is still inside it or lost. */
 export function useRestoreFocus(panel: RefObject<HTMLElement | null>): void {
+  // Read while rendering: an autoFocus inside the popover has not moved focus yet.
+  const [before] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : null);
   useEffect(() => {
-    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const node = panel.current;
     return () => {
       const now = document.activeElement;
       if (before?.isConnected && (now === document.body || now === null || node?.contains(now))) before.focus();
     };
-  }, [panel]);
+  }, [panel, before]);
 }
 
 const MENU_ITEM = 'button:not(:disabled)';

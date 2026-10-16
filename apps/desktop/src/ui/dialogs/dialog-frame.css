@@ -1,0 +1,169 @@
+/* The redesign's dialog card. Values follow the Claude Design board (SPEC 3.1 scrim, 5.14 dialogs). */
+.dg-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  box-sizing: border-box;
+  place-items: center;
+  padding: 20px;
+
+  /* Dark by default; the light theme's scrim is paler. */
+  background: oklch(8% 0.005 80deg / 55%);
+}
+
+[data-theme="light"] .dg-scrim { background: oklch(30% 0.01 80deg / 22%); }
+
+.dg {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-sizing: border-box;
+  max-width: 100%;
+  max-height: 100%;
+  padding: 18px 20px 16px;
+  overflow: auto;
+  scrollbar-width: thin;
+  border-radius: 10px;
+  background: var(--a-card);
+  box-shadow: var(--shadow-lg);
+  font-size: calc(13px * var(--text-scale));
+  line-height: 1.55;
+  color: var(--color-text);
+  outline: none;
+}
+
+.dg-title {
+  margin: 0;
+  font-family: inherit;
+  font-size: calc(15.5px * var(--text-scale));
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
+.dg-text {
+  margin: 0;
+  color: color-mix(in srgb, var(--color-text) 76%, transparent);
+  text-wrap: pretty;
+}
+
+.dg-warn,
+.dg-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 11px;
+  border-radius: 6px;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.5;
+}
+
+.dg-warn { background: color-mix(in srgb, var(--a-warn) 11%, transparent); }
+.dg-error { background: color-mix(in srgb, var(--a-danger) 11%, transparent); }
+
+.dg-warn > i,
+.dg-error > i {
+  flex: none;
+  margin-top: 2px;
+}
+
+.dg-warn > i { color: var(--a-warn); }
+.dg-error > i { color: var(--a-danger); }
+
+.dg-warn > span,
+.dg-error > span { text-wrap: pretty; }
+
+.dg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.dg-label {
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 64%, transparent);
+}
+
+.dg-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  outline: none;
+  background: var(--a-bg);
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+  font: inherit;
+  color: var(--color-text);
+}
+
+.dg-input::placeholder { color: color-mix(in srgb, var(--color-text) 45%, transparent); }
+.dg-input:focus { box-shadow: inset 0 0 0 1.5px var(--color-accent); }
+
+.dg-hint {
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 56%, transparent);
+}
+
+.dg-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.dg-actions > :first-child { margin-left: auto; }
+
+.dg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+  font-size: calc(12.5px * var(--text-scale));
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dg-btn-primary {
+  background: var(--a-acc-text);
+  color: var(--a-bg);
+  font-weight: 500;
+}
+
+.dg-btn-danger {
+  background: var(--a-danger);
+  color: var(--a-bg);
+  font-weight: 500;
+}
+
+.dg-btn-ghost {
+  background: transparent;
+  color: var(--color-text);
+}
+
+.dg-btn:hover { background-image: linear-gradient(color-mix(in srgb, var(--color-text) 8%, transparent), color-mix(in srgb, var(--color-text) 8%, transparent)); }
+
+.dg-btn:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--a-edge), 0 0 0 2px var(--a-card), 0 0 0 3.5px var(--color-accent);
+}
+
+.dg-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.dg-btn:disabled:hover { background-image: none; }
+
+.dg-btn .p-key {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentcolor 40%, transparent);
+  font-size: calc(10.5px * var(--text-scale));
+  font-weight: 400;
+}

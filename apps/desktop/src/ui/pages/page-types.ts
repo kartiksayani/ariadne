@@ -37,7 +37,10 @@ export interface ProjectsCardsProps<R> {
   /** "4 projects · 5 questions waiting on you" */
   readonly sub: string;
   readonly projects: readonly ProjectCardData<R>[];
+  /** The card, or its name. */
   readonly onOpenProject: (project: ProjectCardData<R>) => void;
+  /** One of the card's session rows. */
+  readonly onOpenSession: (project: ProjectCardData<R>, session: PageSession<R>) => void;
   readonly onRegister: () => void;
   readonly onDiscover: () => void;
   readonly onRemoveProject: (project: ProjectCardData<R>) => void;

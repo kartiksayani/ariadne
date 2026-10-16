@@ -94,6 +94,9 @@ for (const { frame, theme, narrow, name, shot } of cases()) {
     await page.setViewportSize(size);
     await page.goto(`${origin}/tests/ui/components/gallery.html?frame=${frame.id}&theme=${theme}${narrow ? '&narrow=1' : ''}`);
     await page.locator('.gallery-window').waitFor();
+    // A real pointer press, so a menu opens as it does for a mouse: no focus ring on its first row.
+    for (const selector of frame.click ?? []) await page.locator(selector).first().click();
+    if (frame.click) await page.mouse.move(0, 0);
     await page.evaluate(() => document.fonts.ready);
     const app = await page.screenshot({ animations: 'disabled', clip: { x: 0, y: 0, ...size } });
     writeFileSync(resolve(output, `${name}.png`), app);

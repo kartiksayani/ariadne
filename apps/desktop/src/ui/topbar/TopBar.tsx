@@ -81,7 +81,7 @@ function MoreMenu({ props, withArchive }: { readonly props: TopBarProps; readonl
   const pick = (run: () => void) => () => { close(false); run(); };
   return <div className="tb-anchor" ref={root}>
     <button type="button" ref={button} className="p-iconbtn tb-icon" title="Archive, text size, theme, help" aria-label="More: archive, text size, theme, help" aria-haspopup="menu"
-      aria-expanded={open} aria-controls={open ? id : undefined} disabled={props.disabled} data-active={open || props.help.open || props.archive.active || undefined}
+      aria-expanded={open} aria-controls={open ? id : undefined} disabled={props.disabled} data-active={open || props.help.open || undefined}
       onClick={event => { setKeyboard(event.detail === 0); setOpen(value => !value); }}><i className="ph ph-dots-three" aria-hidden="true" /></button>
     {open && <div ref={menu} id={id} role="menu" aria-label="Archive, text size, theme, help" className="tb-pop tb-more" onKeyDown={event => menuKeys(event, close)}>
       {withArchive && <button type="button" role="menuitem" className="tb-more-row" onClick={pick(props.archive.onOpen)}><i className="ph ph-archive" aria-hidden="true" />Archive</button>}
@@ -101,7 +101,7 @@ export function TopBar(props: TopBarProps) {
   const first = variant === 'first-run';
   const badge = !first && props.connection ? connectionBadge(props.connection, narrow) : null;
   const toggle = themeToggle(props.theme);
-  const filterWords = props.filter.count > 0 ? `Filter by status, ${plural(props.filter.count, 'status')} picked` : 'Filter by status';
+  const filterWords = props.filter.count > 0 ? `Filter by status, ${props.filter.count} ${props.filter.count === 1 ? 'status' : 'statuses'} picked` : 'Filter by status';
   return <header className={narrow ? 'tb tb-narrow' : 'tb'}>
     <Mark />
     {first

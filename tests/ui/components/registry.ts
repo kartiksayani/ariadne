@@ -17,6 +17,8 @@ export interface FrameMeta {
   readonly zones: Readonly<Record<string, string | Zone>>;
   /** The 900-wide frame has no counterpart for this frame. */
   readonly wideOnly?: boolean;
+  /** Controls pressed once the frame is drawn, to show a menu open (CSS selectors). */
+  readonly click?: readonly string[];
   /** The most pixels a zone may have with no match within one pixel in the design, as a ratio; the spec's default is 0.03. */
   readonly limit?: number;
 }
@@ -35,6 +37,15 @@ export const registry: readonly FrameMeta[] = [
   { id: 'connection-live', shot: '12-connection-01-live', zones: { bar: '.tb', card: { selector: '.cc', designX: 318, designXNarrow: 214, limit: 0.25 } } },
   { id: 'help-keys', shot: '16-help-behind-01-keys-grouped-by-what-im-doing', zones: { bar: '.tb', panel: '.hlp' } },
   { id: 'help-markers', shot: '16-help-behind-02-markers-and-statuses', zones: { bar: '.tb', panel: '.hlp' } },
+  { id: 'projects', shot: '14-pages-01-projects', zones: { bar: '.tb', page: '.pp-scroll' } },
+  { id: 'projects-menu', shot: '14-pages-04-projects-with-the-pages-open', click: ['.pp-more'], zones: { bar: '.tb', page: '.pp-scroll', menu: '.pp-menu' } },
+  { id: 'register', shot: '14-pages-04b-register-a-project', zones: { dialog: '.dg' } },
+  { id: 'remove-project', shot: '14-pages-04c-remove-a-project', zones: { dialog: '.dg' } },
+  { id: 'sessions', shot: '14-pages-02-all-sessions-grouped-by-project-rename-c', zones: { bar: '.tb', page: '.pp-scroll' } },
+  { id: 'archive', shot: '14-pages-03-archive', zones: { bar: '.tb', page: '.pp-scroll' } },
+  { id: 'first-run', shot: '15-empty-and-first-run-states-01-no-projects-yet', zones: { bar: '.tb', page: '.fr' } },
+  { id: 'no-sessions', shot: '15-empty-and-first-run-states-02-a-project-with-no-sessions', zones: { bar: '.tb', page: '.pp-scroll' } },
+  { id: 'name-session', shot: '10-dialogs-10-name-a-session', zones: { dialog: '.dg' } },
   connection('none', '02-not-connected'),
   connection('off', '03-agent-not-running'),
   connection('closed', '04-session-closed'),

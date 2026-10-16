@@ -42,7 +42,11 @@ export function connectionCopy(view: ConnectionView): CardCopy {
       if (view.lastMessageAt) parts.push(`Last message at ${view.lastMessageAt}.`);
       if (sending) {
         const on = sending.onItsWay, queued = sending.queued;
-        parts.push(`Sending is on; ${on} ${on === 1 ? 'answer is' : 'answers are'} on its way and ${queued} ${queued === 1 ? 'reply is' : 'replies are'} queued behind it.`);
+        const way = `${on} ${on === 1 ? 'answer is' : 'answers are'} on its way`, behind = `${queued} ${queued === 1 ? 'reply is' : 'replies are'} queued`;
+        if (on && queued) parts.push(`Sending is on; ${way} and ${behind} behind it.`);
+        else if (on) parts.push(`Sending is on; ${way}.`);
+        else if (queued) parts.push(`Sending is on; ${behind}.`);
+        else parts.push('Sending is on; nothing is waiting to go out.');
       } else parts.push('Sending is on.');
       return { title: 'Live', lines: [`Connected to ${where}.`, parts.join(' ')] };
     }
