@@ -6,6 +6,7 @@ import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { notices } from '../../../src/ui/pages/notices';
+import { goToPage } from './open';
 import { AppTransport, route } from './transport';
 
 afterEach(() => { cleanup(); notices.clear(); vi.useRealTimers(); vi.restoreAllMocks(); });
@@ -41,8 +42,8 @@ async function queuedReply() {
     }
     return invoke(name, args);
   });
-  const header = document.querySelector<HTMLElement>('.shell-header')!;
-  const theme = within(header).getByRole<HTMLButtonElement>('button', { name: 'Switch to light' });
+  const bar = document.querySelector<HTMLElement>('.tb')!;
+  const theme = within(bar).getByRole<HTMLButtonElement>('button', { name: 'Switch to light' });
   await waitFor(() => expect(theme.disabled).toBe(false));
   fireEvent.click(theme);
   await waitFor(() => expect(writing).toBe(true));
@@ -57,7 +58,7 @@ async function queuedReply() {
     expect(replyFocus()).toHaveLength(0);
   } catch (error) { await act(async () => { release(); }); throw error; }
   finally { vi.useRealTimers(); }
-  return { transport, session, release, replyFocus };
+  return { transport, session, row, release, replyFocus };
 }
 
 describe('Reply after queued navigation', { timeout: 10_000 }, () => {
@@ -96,11 +97,16 @@ describe('Reply after queued navigation', { timeout: 10_000 }, () => {
   it('abandons Reply focus when a newer Projects navigation supersedes the queued one', async () => {
     const { transport, release, replyFocus } = await queuedReply();
     try {
-      fireEvent.click(within(screen.getByLabelText('Projects and sessions')).getByRole('button', { name: 'Projects' }));
-      expect(screen.getByText('Opening Projects…')).toBeTruthy();
+      // The switcher stays usable while the owner's save is in flight.
+      await goToPage('Projects');
+      // A page opens at once and cancels the queued session navigation (the store's openPage); there is no "Opening Projects…" wait.
+      await screen.findByRole('heading', { name: 'Projects' });
+      expect(screen.queryByText('Opening the session…')).toBeNull();
       await act(async () => { release(); });
-      await waitFor(() => expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'projects' }));
-      await waitFor(() => expect(screen.queryByText('Opening Projects…')).toBeNull());
+      // A page is never saved (SPEC 6.16): the saved selection stays the session, while the Projects page is what shows.
+      await waitFor(() => expect(screen.queryByText('Opening the session…')).toBeNull());
+      expect(screen.getByRole('heading', { name: 'Projects' })).toBeTruthy();
+      expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
       expect(screen.queryByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' })).toBeNull();
       expect(replyFocus()).toHaveLength(0);
       expect(transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(0);

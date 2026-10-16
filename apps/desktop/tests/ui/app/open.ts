@@ -4,13 +4,16 @@ const enabled = (selector: string) => waitFor(() => {
   const button = document.querySelector<HTMLButtonElement>(selector);
   expect(button).not.toBeNull(); expect(button?.disabled).toBe(false); return button!;
 });
+/** Opens one of the pages (Projects, All sessions, Archive) from the switcher's footer links. There are no tabs to click. */
+export async function goToPage(name: 'Projects' | 'All sessions' | 'Archive') {
+  fireEvent.click(await enabled('[data-popover-trigger="switcher"]'));
+  fireEvent.click(within(await screen.findByRole('dialog', { name: 'Switch session or project' })).getByRole('button', { name }));
+}
+
 /** Every registered session is available from All sessions (the switcher's footer), without opening it first. */
 export async function sessionButton(route: { readonly project_id: string; readonly session_id: string }) {
   const selector = `button[data-session-id="${route.session_id}"]`;
-  if (!document.querySelector(selector)) {
-    fireEvent.click(await enabled('[data-popover-trigger="switcher"]'));
-    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Switch session or project' })).getByRole('button', { name: 'All sessions' }));
-  }
+  if (!document.querySelector(selector)) await goToPage('All sessions');
   return enabled(selector);
 }
 
