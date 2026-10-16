@@ -1,17 +1,19 @@
 // What happens to an answer after Send (§6.14): Sending (locked, no Undo) → Sent or Queued (Undo while the input is
-// still queued, through core's atomic input_cancel) → Picked up at HH:MM (the claim; no Undo) — or Failed (Copy, and
-// StuckNote's Retry of the same input). Shared by the dock, Details, the peek and other sessions.
+// still queued, through core's atomic input_cancel) → Picked up at HH:MM (the claim; no Undo) — or Failed: why, Copy and
+// Retry in the bar (StuckNote's one resend of the same input; the note below keeps its other actions). Shared by the
+// dock, Details, the peek and other sessions.
 import { useMemo, useState, type ReactNode } from 'react';
 import { useSession, type Immutable, type SessionStore } from '../../data/session-store';
 import type { Input, Session } from '../../generated/domain/models';
 import { sessionActionsFor, useSessionActions } from '../../components/bindings/actions';
 import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
-import { agentReceived, stuckInput } from '../../selectors/waiting/stuck';
+import { agentReceived, recoveryProblem, stuckInput } from '../../selectors/waiting/stuck';
+import { ActionFailure } from '../../components/edge-states/EdgeState';
 import { copyText } from '../shared/clipboard';
-import { clock } from '../shell/model';
+import { agentName, clock } from '../shell/model';
 import { editQueued, type ReviewOutcome } from './held';
-import { ReviewResult, StuckNote } from './StuckNote';
+import { ReviewResult, StuckNote, useStuckRetry } from './StuckNote';
 import type { AnswerBar } from './AnswerControl';
 
 const replyKinds = ['answer', 'reply', 'note', 'followup', 'drop'];
@@ -80,6 +82,15 @@ export function useQuestionDelivery({ drafts, store, itemId, inputId }: {
   const extraOf = (stuck: ReactNode) => <>{stuck}{outcome && <ReviewResult outcome={outcome} />}
     {copyFailed && <textarea className="answer-copy-fallback" aria-label="Copy your answer" readOnly value={words} />}</>;
   const done = (value: Omit<Delivery, 'words'>): Delivery => ({ ...value, words: value.content ? words : '' });
+  const binding = input ? session?.bindings[input.binding_id] ?? null : null;
+  const presence = binding ? state.presence[binding.id] ?? null : null;
+  const evidence = input ? deliveryEvidence(input, binding ? { ...binding, presence } : null, session?.operation_receipts, presence) : null;
+  const attempt = input?.attempts.find(value => value.id === input.active_attempt_id);
+  const failed = evidence?.kind === 'failed' || evidence?.kind === 'rejected' || evidence?.kind === 'stopped';
+  // Failed before the agent had it: the bar says why and carries the Retry.
+  const failedHere = !!input && failed && !agentReceived(attempt);
+  const stuck = failedHere && session ? stuckInput(session, input, presence) : null;
+  const retry = useStuckRetry(actions, failedHere ? input : null, stuck);
   if (!input) {
     if (!receiptId && !entry?.saving) return done({ content: null, bar: null, extra: extraOf(null) });
     const held = entry?.sent ?? (entry ? { selected_option_id: entry.draft.selected_option_id, text: entry.draft.text } : null);
@@ -92,19 +103,18 @@ export function useQuestionDelivery({ drafts, store, itemId, inputId }: {
       bar: { icon: 'ph ph-check', tone: 'done', text: `Sent at ${at}. Waiting for the agent to pick it up.`, narrow: `Sent at ${at}. Waiting for the agent.`, sealed: true,
         actions: button({ label: 'Sent', icon: 'ph ph-paper-plane-right', title: 'Already sent', kind: 'ghost' }) } });
   }
-  const binding = session?.bindings[input.binding_id] ?? null;
-  const presence = binding ? state.presence[binding.id] ?? null : null;
-  const evidence = deliveryEvidence(input, binding ? { ...binding, presence } : null, session?.operation_receipts, presence);
-  const attempt = input.attempts.find(value => value.id === input.active_attempt_id);
-  const failed = evidence.kind === 'failed' || evidence.kind === 'rejected' || evidence.kind === 'stopped';
-  const checking = evidence.kind === 'uncertain' || evidence.kind === 'unavailable';
+  const checking = evidence?.kind === 'uncertain' || evidence?.kind === 'unavailable';
   const sentAt = clock(Date.parse(input.created_at));
   const pickedAt = input.attempts[0]?.prepared_at;
   const copyButton = button({ label: 'Copy', icon: 'ph ph-copy', title: 'Copy your answer', onClick: copy });
-  if (failed && !agentReceived(attempt) && session) {
-    const stuck = stuckInput(session, input, presence);
-    return done({ content, extra: extraOf(stuck && <StuckNote actions={actions} input={input} stuck={stuck} />),
-      bar: { icon: 'ph ph-warning-circle', tone: 'danger', text: 'Not sent. Your answer is kept.', sealed: true, actions: copyButton } });
+  if (failedHere && session) {
+    // Board 2.5: why, then Copy and Retry in the bar. Retry is StuckNote's: one resend of this same input.
+    const why = attempt ? recoveryProblem(attempt, binding ? agentName(binding.adapter_id) : 'the agent') : null;
+    const retryButton = retry && button({ label: 'Retry', icon: 'ph ph-arrow-clockwise', title: retry.title, disabled: retry.disabled, kind: 'primary', onClick: retry.run });
+    return done({ content, extra: <>{stuck && <StuckNote actions={actions} input={input} stuck={stuck} retryInBar={!!retry} />}
+      {retry?.acted && <div className="stuck-failure"><ActionFailure actions={actions} /></div>}{extraOf(null)}</>,
+      bar: { icon: 'ph ph-warning-circle', tone: 'danger', text: `Not sent${why ? `: ${why}` : '.'} Your answer is kept.`, narrow: 'Not sent. Your words are kept.', sealed: true,
+        actions: <>{copyButton}{retryButton}</> } });
   }
   if (checking) return done({ content, extra: extraOf(null),
     bar: { icon: 'ph ph-circle-notch', tone: 'accent', text: 'Checking delivery. Your answer is kept.', narrow: 'Checking delivery.', sealed: true,
@@ -112,7 +122,7 @@ export function useQuestionDelivery({ drafts, store, itemId, inputId }: {
   if (input.state === 'queued') {
     const undoButton = button({ label: 'Undo', icon: 'ph ph-arrow-counter-clockwise', title: 'Take the answer back; it works until the agent picks it up',
       disabled: busy || operation.writing || !!operation.pending || state.status !== 'ready', onClick: () => { void undo(); } });
-    const queued = evidence.kind === 'queued';
+    const queued = evidence?.kind === 'queued';
     return done({ content, extra: extraOf(null), bar: queued
       ? { icon: 'ph ph-hourglass-medium', text: `Queued at ${sentAt}. It goes when the agent is running.`, narrow: `Queued at ${sentAt}.`, sealed: true,
         actions: <>{undoButton}{button({ label: 'Queued', icon: 'ph ph-hourglass-medium', title: 'Already queued', kind: 'ghost' })}</> }

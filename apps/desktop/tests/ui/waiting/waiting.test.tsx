@@ -597,6 +597,36 @@ describe('source-backed answer dock', () => {
     expect(transport.mutations.find(request => request.command.command === 'input_submit')!.command.op_id).toBe(refused[0]);
   });
 
+  it('puts why a delivery failed and its one Retry in the bar, and leaves the note its other actions', async () => {
+    const { transport } = await dockUI(transport => {
+      const session = transport.sessions.get(route.session_id)!, failed = answerInput(session, '74'), item = session.items['2']!;
+      failed.target = { topic_id: item.topic_id, item_id: '2' };
+      failed.payload = { ...failed.payload, selected_option_id: item.options[1]!.id, text: 'Keep it short.',
+        target_snapshot: { ...failed.payload.target_snapshot, question_revision: item.question_revision } };
+      const attempt = failed.attempts.find(value => value.id === failed.active_attempt_id)!;
+      Object.assign(attempt, { acceptance: 'rejected', error: null });
+    });
+    openDock();
+    const retry = await within(dock()).findByRole('button', { name: 'Retry' });
+    const bar = retry.closest('.answer-bar')!;
+    expect(bar.querySelector('.answer-bar-text')?.textContent).toMatch(/^Not sent: .+ didn’t take it\. Your answer is kept\./);
+    expect(within(bar as HTMLElement).getByRole('button', { name: 'Copy' })).toBeTruthy();
+    // The note below keeps Mark as done, Cancel and More options, with no second Retry and no second reason.
+    const note = dock().querySelector<HTMLElement>('.stuck-note')!;
+    expect(within(note).queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(within(note).getByRole('button', { name: 'Mark as done' })).toBeTruthy();
+    expect(note.textContent).not.toMatch(/Couldn’t deliver/);
+    expect(option(1).getAttribute('aria-pressed')).toBe('true');
+    // A double click is one replay.
+    fireEvent.click(retry); fireEvent.click(retry);
+    const resolves = () => transport.mutations.filter(request => request.command.command === 'input_resolve');
+    await waitFor(() => expect(resolves()).toHaveLength(1));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 100)); });
+    expect(resolves()).toHaveLength(1);
+    expect(resolves()[0]).toMatchObject({ command: { params: { input_id: inputId('74'), decision: 'resend' } } });
+    expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(false);
+  });
+
   it('locks sending and offers reconciliation when a draft preference write is uncertain', async () => {
     const { transport } = await dockUI(); openDock();
     await waitFor(() => expect(option(0)?.disabled).toBe(false));

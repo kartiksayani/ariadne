@@ -297,6 +297,11 @@
   flex: 1 1 auto;
 }
 
+/* A failed answer's other recovery actions sit under the bar, on its inset. */
+.answer-dock-current > .detail-answer-slot > .stuck-note {
+  padding: 0 10px 10px 14px;
+}
+
 .dock-question {
   flex: none;
   max-height: 150px;
