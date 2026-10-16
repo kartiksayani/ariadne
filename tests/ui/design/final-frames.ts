@@ -1,0 +1,138 @@
+// The registry of final-board states the app is held to (see README.md in this folder). One entry per board state:
+// where the board draws it (part + sid), what the app is put in to match it (an AppFixture), whether the app is
+// compared yet (`pending`), and who is expected to turn that on. Thresholds live in final-thresholds.json.
+// Kept free of app imports: Node (final.spec.mts) and Vite (final-gallery.tsx) read it alike.
+import { Q1, Q2, note1 } from './final-world';
+
+/** The three renders of every state: the board's light and dark at 1280 x 800, and its light at 900 x 650. */
+export type Variant = 'light' | 'dark' | 'narrow';
+export const variants: Readonly<Record<Variant, { theme: 'light' | 'dark'; width: number; height: number; vi: 0 | 1; shot: string }>> = {
+  light: { theme: 'light', width: 1280, height: 800, vi: 0, shot: 'light' },
+  dark: { theme: 'dark', width: 1280, height: 800, vi: 0, shot: 'dark' },
+  narrow: { theme: 'light', width: 900, height: 650, vi: 1, shot: 'light-900' }
+};
+export const variantNames = Object.keys(variants) as readonly Variant[];
+
+/** The board's clock: 7 Oct 2026 21:25 UTC (final-world.ts `clock`). Every final frame, board and app, runs on it. */
+export const finalNow = Date.UTC(2026, 9, 7, 21, 25);
+
+/** What the owner has typed in one waiting question's box (the board's `drafts`). `own` is "Write my own answer". */
+export interface Draft { readonly item: string; readonly pick?: number; readonly note?: string; readonly own?: string }
+
+/** A step taken in the app after it mounts, to reach a state that is not data (an open menu, a hover). */
+export type Step =
+  | { readonly key: string }
+  | { readonly click: string }
+  | { readonly hover: string }
+  | { readonly type: string };
+
+/** Fields of a world item (final-world.ts) a state changes. */
+export interface ItemEdit { readonly s?: 'decided' | 'done' | 'in_progress' | 'open' | 'waiting_on_me' | 'replaced'; readonly q?: string; readonly o?: string; readonly why?: string }
+
+/**
+ * What the app is put in to match one board state. Everything is optional: the default is the board's base window
+ * (the world of final-world.ts, "cache PR review" open, nothing selected, the dock a 40px line).
+ * - sessions: which session is open and what state the others are in.
+ * - items: edits to the world's items; `afterAnswer` adds the two warm-up items the agent writes after "prefix bump timing" is answered.
+ * - questions: which of the two waiting questions have been answered (sent, or failed to send); the questions in other sessions.
+ * - drafts: what is typed in a waiting question's box.
+ * - view: what the owner has open (selection, Tree or Graph, Details, the dock).
+ * - chrome: the top bar, the line above the Map, a page or an empty Map.
+ * - act: steps taken after mount.
+ */
+export interface AppFixture {
+  readonly sessions?: { readonly current?: string; readonly connection?: Connection; readonly unnamed?: boolean };
+  readonly items?: { readonly edit?: Readonly<Record<string, ItemEdit>>; readonly afterAnswer?: boolean; readonly longText?: boolean; readonly hidden?: readonly string[]; readonly empty?: boolean };
+  readonly questions?: { readonly sent?: readonly string[]; readonly failed?: readonly string[]; readonly othersSent?: boolean };
+  readonly drafts?: readonly Draft[];
+  readonly view?: {
+    readonly selected?: string | null; readonly mode?: 'tree' | 'graph';
+    /** Default: open when something is selected. */
+    readonly details?: 'open' | 'folded' | 'bigger';
+    readonly dock?: 'open' | 'line'; /** Which waiting question the open dock is on: 0 = first. */ readonly dockQuestion?: 0 | 1;
+    /** Dragged height of the open dock: px, or the board's 'tall' (window - 40 - 130) / 'short' (200). */
+    readonly dockHeight?: number | 'tall' | 'short';
+    /** Which "Show more" links are open (item keys); the board opens "self-hosted cache" in 1.4. */
+    readonly shown?: readonly string[];
+  };
+  readonly chrome?: { readonly page?: Page; readonly overlay?: Overlay; readonly otherPopover?: string };
+  readonly act?: readonly Step[];
+}
+export type Connection = 'live' | 'none' | 'off' | 'closed' | 'loading' | 'reconnecting' | 'unreadable' | 'stale' | 'unsaved';
+export type Page = 'projects' | 'sessions' | 'archive' | 'first' | 'project-empty';
+export type Overlay = 'switcher' | 'switcher-search' | 'help-keys' | 'help-marks' | 'connection-card' | 'projects-menu';
+
+export interface FinalState {
+  /** "2.1": the screen and the state, as SPEC.md numbers them. */
+  readonly id: string;
+  /** Where the board draws it: the part and state id of its `only` mechanism (`Board Check.dc.html`). */
+  readonly part: string;
+  readonly sid: string;
+  readonly title: string;
+  /** While true the app side is not compared (the board side still renders and is checked). The owner turns it off when the app matches. */
+  readonly pending: boolean;
+  /** Which release 1 builder turns `pending` off. */
+  readonly owner: 'shell' | 'dock' | 'nav-state' | 'topbar' | 'details';
+  readonly app: AppFixture;
+}
+
+const d = (item: string, draft: Omit<Draft, 'item'>): Draft => ({ item, ...draft });
+
+export const finalStates: readonly FinalState[] = [
+  // 1. The window and the Map
+  { id: '1.1', part: 'Window', sid: 'b-wait', owner: 'dock', pending: true, title: 'Question waiting', app: { view: { dock: 'open', dockQuestion: 0 } } },
+  { id: '1.2', part: 'Window', sid: 'b-sel', owner: 'details', pending: true, title: 'Item selected', app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' } } },
+  { id: '1.3', part: 'Window', sid: 'b-graph', owner: 'details', pending: true, title: 'Graph', app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' } } },
+  { id: '1.4', part: 'Window', sid: 'b-long', owner: 'shell', pending: true, title: 'Long text', app: { items: { longText: true }, view: { selected: 'a8', details: 'open', dock: 'line', shown: ['a7'] } } },
+  // 2. Answering in the dock
+  { id: '2.1', part: 'Answering', sid: 'd-opts', owner: 'dock', pending: true, title: 'Three options, one recommended, with a note on the picked one', app: { view: { selected: Q1, dock: 'open', dockQuestion: 0 }, drafts: [d(Q1, { pick: 0, note: note1 })] } },
+  { id: '2.2', part: 'Answering', sid: 'd-own', owner: 'dock', pending: true, title: 'Writing my own answer instead of picking one', app: { view: { selected: Q1, dock: 'open', dockQuestion: 0 }, drafts: [d(Q1, { own: 'Add the note, but link to the deploy docs instead of explaining the rebuild.' })] } },
+  { id: '2.3', part: 'Answering', sid: 'd-long', owner: 'dock', pending: true, title: 'A long question with long options', app: { view: { selected: Q2, dock: 'open', dockQuestion: 1 }, drafts: [d(Q2, { pick: 0 })] } },
+  { id: '2.4', part: 'Answering', sid: 'd-send', owner: 'dock', pending: true, title: 'Sending, then sent, then waiting for the agent', app: { view: { selected: Q1, dock: 'open', dockQuestion: 0 }, drafts: [d(Q1, { pick: 0 })], questions: { sent: [Q1] } } },
+  { id: '2.5', part: 'Answering', sid: 'd-fail', owner: 'dock', pending: true, title: 'A send that failed', app: { view: { selected: Q1, dock: 'open', dockQuestion: 0 }, drafts: [d(Q1, { pick: 1, note: 'Keep it under five lines, and link the deploy docs.' })], questions: { failed: [Q1] } } },
+  { id: '2.6', part: 'Answering', sid: 'd-none', owner: 'dock', pending: true, title: 'Nothing waiting on me', app: { view: { selected: null, dock: 'line' }, questions: { sent: [Q1, Q2] } } },
+  { id: '2.7', part: 'Answering', sid: 'd-other', owner: 'dock', pending: true, title: 'Questions waiting in other sessions', app: { view: { selected: Q1, dock: 'open', dockQuestion: 0 }, chrome: { otherPopover: 'schema-1' } } },
+  { id: '2.8', part: 'Answering', sid: 'd-move', owner: 'dock', pending: true, title: 'Moving between waiting questions, with a draft kept on the first', app: { view: { selected: Q2, dock: 'open', dockQuestion: 1 }, drafts: [d(Q1, { pick: 0, note: note1 })] } },
+  { id: '2.9', part: 'Answering', sid: 'd-tall', owner: 'dock', pending: true, title: 'The dock dragged tall by its top edge', app: { view: { selected: Q2, dock: 'open', dockQuestion: 1, dockHeight: 'tall' }, drafts: [d(Q2, { pick: 0 })] } },
+  { id: '2.10', part: 'Answering', sid: 'd-short', owner: 'dock', pending: true, title: 'The dock dragged short', app: { view: { selected: Q2, dock: 'open', dockQuestion: 1, dockHeight: 'short' }, drafts: [d(Q2, { pick: 0 })] } },
+  // 3. An item's conversation: where Details sits (its content is a later release)
+  { id: '3.1', part: 'Conversation', sid: 'c-details', owner: 'details', pending: true, title: 'Details beside the Map', app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' } } },
+  { id: '3.2', part: 'Conversation', sid: 'c-read', owner: 'details', pending: true, title: 'A bigger view for a long thread', app: { view: { selected: 'a2.2.1', details: 'bigger', dock: 'line' } } },
+  { id: '3.6', part: 'Conversation', sid: 'c-fold', owner: 'details', pending: true, title: 'Details folded to a strip, dock open', app: { view: { selected: 'a2.2.1.1', details: 'folded', dock: 'open', dockQuestion: 0 } } },
+  // 12. Connection
+  { id: '12.1', part: 'R4-Connection', sid: 'c-live', owner: 'topbar', pending: true, title: 'Live', app: { sessions: { connection: 'live' }, chrome: { overlay: 'connection-card' } } },
+  { id: '12.2', part: 'R4-Connection', sid: 'c-none', owner: 'topbar', pending: true, title: 'Not connected', app: { sessions: { connection: 'none' } } },
+  { id: '12.3', part: 'R4-Connection', sid: 'c-off', owner: 'topbar', pending: true, title: 'Agent not running', app: { sessions: { connection: 'off' } } },
+  { id: '12.4', part: 'R4-Connection', sid: 'c-closed', owner: 'topbar', pending: true, title: 'Session closed', app: { sessions: { connection: 'closed' } } },
+  { id: '12.5', part: 'R4-Connection', sid: 'c-loading', owner: 'topbar', pending: true, title: 'Loading', app: { sessions: { connection: 'loading' } } },
+  { id: '12.6', part: 'R4-Connection', sid: 'c-reconnect', owner: 'topbar', pending: true, title: 'Reconnecting', app: { sessions: { connection: 'reconnecting' } } },
+  { id: '12.7', part: 'R4-Connection', sid: 'c-unreadable', owner: 'topbar', pending: true, title: 'This session can’t be read', app: { sessions: { connection: 'unreadable' } } },
+  { id: '12.8', part: 'R4-Connection', sid: 'c-stale', owner: 'topbar', pending: true, title: 'Showing the last good copy', app: { sessions: { connection: 'stale' } } },
+  { id: '12.9', part: 'R4-Connection', sid: 'c-unsaved', owner: 'topbar', pending: true, title: 'Your last change may not be saved', app: { sessions: { connection: 'unsaved' }, items: { edit: { a8: { s: 'open' } } } } },
+  // 13. Session and project switcher
+  { id: '13.1', part: 'R4-Switcher', sid: 's-open', owner: 'nav-state', pending: true, title: 'Open', app: { chrome: { overlay: 'switcher' }, act: [{ key: 'Meta+o' }] } },
+  { id: '13.2', part: 'R4-Switcher', sid: 's-search', owner: 'nav-state', pending: true, title: 'Typing finds sessions and projects by name', app: { chrome: { overlay: 'switcher-search' }, act: [{ key: 'Meta+o' }, { type: 'sch' }] } },
+  // 14. Pages
+  { id: '14.1', part: 'R4-Pages', sid: 'p-projects', owner: 'nav-state', pending: true, title: 'Projects', app: { chrome: { page: 'projects' } } },
+  { id: '14.2', part: 'R4-Pages', sid: 'p-sessions', owner: 'nav-state', pending: true, title: 'All sessions', app: { chrome: { page: 'sessions' } } },
+  { id: '14.3', part: 'R4-Pages', sid: 'p-archive', owner: 'nav-state', pending: true, title: 'Archive', app: { chrome: { page: 'archive' } } },
+  { id: '14.4', part: 'R4-Pages', sid: 'p-projmenu', owner: 'nav-state', pending: true, title: 'Projects, with its … menus', app: { chrome: { page: 'projects', overlay: 'projects-menu' } } },
+  { id: '14.5', part: 'R4-Pages', sid: 'p-chip', owner: 'nav-state', pending: true, title: 'From a page back to the dock', app: { view: { selected: null, dock: 'open', dockQuestion: 0 } } },
+  // 15. Empty and first-run states
+  { id: '15.1', part: 'R4-Empty', sid: 'e-first', owner: 'nav-state', pending: true, title: 'No projects yet', app: { chrome: { page: 'first' } } },
+  { id: '15.2', part: 'R4-Empty', sid: 'e-nosess', owner: 'nav-state', pending: true, title: 'A project with no sessions', app: { chrome: { page: 'project-empty' } } },
+  { id: '15.3', part: 'R4-Empty', sid: 'e-emptymap', owner: 'nav-state', pending: true, title: 'Empty Map', app: { sessions: { unnamed: true }, items: { empty: true }, view: { dock: 'line' } } },
+  { id: '15.4', part: 'R4-Empty', sid: 'e-nowait', owner: 'nav-state', pending: true, title: 'Nothing waiting on me', app: { questions: { sent: [Q1], othersSent: false }, view: { dock: 'line' } } },
+  // 16. Help
+  { id: '16.1', part: 'R4-Help', sid: 'h-keys', owner: 'topbar', pending: true, title: 'Keys, grouped by what I’m doing', app: { chrome: { overlay: 'help-keys' }, act: [{ key: '?' }] } },
+  { id: '16.2', part: 'R4-Help', sid: 'h-marks', owner: 'topbar', pending: true, title: 'Markers and statuses', app: { chrome: { overlay: 'help-marks' }, act: [{ key: '?' }, { click: 'Markers and statuses' }] } }
+];
+
+export const finalIds: readonly string[] = finalStates.map(state => state.id);
+
+/** The state with this id; throws for an id that is not registered. */
+export function finalState(id: string): FinalState {
+  const state = finalStates.find(value => value.id === id);
+  if (!state) throw new Error(`no final-board state ${id}`);
+  return state;
+}

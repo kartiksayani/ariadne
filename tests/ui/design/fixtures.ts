@@ -30,6 +30,8 @@ export interface ProtoProject { readonly id: string; readonly name: string; read
 export interface ProtoSession {
   readonly id: string; readonly project: string; readonly agent: string; readonly where: string; readonly when: string;
   readonly range: string; readonly running: boolean; readonly status: 'active' | 'closed'; readonly msgs?: number;
+  /** The owner's name for the session (the final-board frames); the handoff's sessions are titled by agent and time. */
+  readonly name?: string;
 }
 export interface ProtoReply { readonly progress: string; readonly status: ProtoItem['status']; readonly outcome: string; readonly reply: string }
 export interface PrototypeData {
@@ -148,6 +150,7 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
     submissions.push({ item: '2.1.1', choice: 0, stage: 'received', message: 19 });
   }
   if (spec.scenario === 'failed') submissions.push({ item: '3.1', choice: 0, stage: spec.acceptedFailure ? 'stopped' : 'failed' }, { item: '2.1.1', choice: 0, stage: 'checking' });
+  for (const submission of spec.submissions ?? []) submissions.push(submission);
   const sessions = project ? data.PROJECT_SESSIONS : [data.PROJECT_SESSIONS[0]];
   const projects = project ? data.PROJECTS : [data.PROJECTS[0]];
   // A topic lives in the last session it was worked in (TOPIC_SESSIONS); the
@@ -249,7 +252,12 @@ const archivedAt = (words: string | undefined, fallback: string) => {
 
 /** Builds the frame's application state; throws "fixture not written" for frames without one. */
 export function designFixture(frame: string, data: PrototypeData, presentation: Partial<Pick<FrameSpec, 'theme'>> = {}): DesignFixture {
-  const spec = { ...frameSpec(frame), ...presentation }, world = scenarioWorld(spec, data);
+  return buildFixture({ ...frameSpec(frame), ...presentation }, data);
+}
+
+/** The same, for a spec that is not in frames.ts: the final-board frames (final-fixtures.ts) bring their own world. */
+export function buildFixture(spec: FrameSpec, data: PrototypeData): DesignFixture {
+  const world = scenarioWorld(spec, data);
   const projectIds = new Map(world.projects.map((project, index) => [project.id, uuid('a', index + 1)]));
   const refs = new Map(world.sessions.map((session, index) => [session.id, { project_id: projectIds.get(session.project)!, session_id: uuid('b', index + 1) }]));
   const messageIds = new Map(world.msgs.map(message => [message.number, uuid('d', message.number)]));
@@ -337,7 +345,7 @@ export function designFixture(frame: string, data: PrototypeData, presentation: 
           domain_result: null, result_state: 'pending', sealed_at: null, reconciliation_checkpoint: null }],
         active_attempt_id: attemptId, resolution_history: [] };
     });
-    return { schema_version: 1, id: ref.session_id, project_id: ref.project_id, title: `${proto.agent} · ${proto.when}`, state: proto.status,
+    return { schema_version: 1, id: ref.session_id, project_id: ref.project_id, title: proto.name ?? `${proto.agent} · ${proto.when}`, state: proto.status,
       // A session that ended keeps its range end ("Yesterday 16:40 – 17:25").
       created_at: times.created, updated_at: times.ended ?? messages.at(-1)?.created_at ?? times.created, revision: 1,
       closed_at: proto.status === 'closed' ? times.ended ?? times.created : null,
@@ -400,7 +408,7 @@ export function designFixture(frame: string, data: PrototypeData, presentation: 
   if (changesSeen) transport.preferences.seen = [changesSeen];
   transport.preferences.global = { theme: spec.theme, text_scale: 100, window: null, pinned: false, notification_watermark: null,
     selected_navigation: spec.scenario === 'sessions' ? { kind: 'all_sessions' } : spec.scenario === 'projects' || spec.scenario === 'first' ? { kind: 'projects' }
-      : spec.scenario === 'projectpage' ? { kind: 'project', project_id: projectIds.get('notes')! } : { kind: 'session', session: route! } };
+      : spec.scenario === 'projectpage' ? { kind: 'project', project_id: projectIds.get(spec.projectPage ?? 'notes')! } : { kind: 'session', session: route! } };
   transport.preferences.sessions = world.openTabs.map((id, order): SessionPreferences => {
     const session = sessions.find(value => value.id === refs.get(id)!.session_id)!, current = id === world.tab;
     return { session: refs.get(id)!, tab_open: true, tab_order: order, selected_item_id: current ? spec.selected ?? null : null, expanded_item_ids: expanded(session),
