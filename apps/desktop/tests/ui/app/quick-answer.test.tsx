@@ -110,10 +110,8 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
     expect(input.payload.text).toBe(note);
   });
 
-  // SRC BUG (reported to nav-state): AnswerControl's `enter` handler (src/ui/answer/AnswerControl.tsx) does not check
-  // `event.repeat`, so an Enter that auto-repeats onto a card before any real press sends it. The old ⌥digit key
-  // ignored repeats. `it.fails` keeps this red-marked until that is fixed, then flags that it should become `it`.
-  it.fails('ignores a held Enter that repeats onto an option card before any real press', async () => {
+  // The old ⌥digit key ignored repeats; Enter on a card must too, so a key held down onto a card sends nothing.
+  it('ignores a held Enter that repeats onto an option card before any real press', async () => {
     const transport = setup(); await openQuestion();
     press(1, true);
     await act(async () => { await Promise.resolve(); });
