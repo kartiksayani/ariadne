@@ -46,6 +46,12 @@ export interface FrameSpec {
   readonly peekWaiting?: boolean;
   /** App-only M2 changes states, independent of the original handoff baselines. */
   readonly changes?: 'typed' | 'choice' | 'away' | 'long';
+  /** The frame's own wall clock in ms (the final-board frames); the handoff frames derive theirs from the scenario. */
+  readonly now?: number;
+  /** The project the 'projectpage' scenario shows (default: the handoff's current project, 'notes'). */
+  readonly projectPage?: string;
+  /** Answers already on their way (the final-board frames): the item, the option picked, and how far the send got. */
+  readonly submissions?: readonly { readonly item: string; readonly choice: number; readonly stage: 'received' | 'failed' | 'stopped' | 'checking'; readonly message?: number }[];
 }
 
 const wide = { width: 1600, height: 960 } as const, narrow = { width: 1280, height: 800 } as const;
@@ -136,6 +142,7 @@ export const designNow = Date.UTC(2026, 9, 7, 15, 10);
  * "Waiting N min" is measured from it.
  */
 export function frameNow(spec: FrameSpec): number {
+  if (spec.now !== undefined) return spec.now;
   const minutes = spec.scenario === 'thread' ? 28 : spec.scenario === 'review' ? 15
     : spec.state === 'clear' ? 10 : spec.scenario === 'sent' ? 7 : 6;
   return Date.UTC(2026, 9, 7, 15, minutes);
