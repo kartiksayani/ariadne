@@ -6,7 +6,7 @@ import { createRoot } from 'react-dom/client';
 import { DesktopApp } from '../../../apps/desktop/src/App';
 import { createDesktopService } from '../../../apps/desktop/src/data/service';
 import { notices } from '../../../apps/desktop/src/ui/pages/notices';
-import { finalState, variantNames, type Variant } from './final-frames';
+import { finalState, variantNames, variants, type Variant } from './final-frames';
 import { finalFixture } from './final-fixtures';
 import type { DesignFixture } from './fixtures';
 
@@ -15,7 +15,12 @@ declare global { interface Window { __designFixture?: DesignFixture; __designErr
 function mount() {
   const params = new URLSearchParams(window.location.search), variant = params.get('variant') as Variant;
   if (!variantNames.includes(variant)) throw new Error(`unknown variant ${variant}`);
-  const fixture = finalFixture(finalState(params.get('state') ?? ''), variant);
+  const state = finalState(params.get('state') ?? ''), fixture = finalFixture(state, variant);
+  // The dock's dragged height is browser-local (state/dock/height.ts); the board's 'tall' is the window less 40 and 130.
+  const dockHeight = state.app.view?.dockHeight;
+  if (dockHeight !== undefined) {
+    localStorage.setItem('ariadne.dock.height.v1', JSON.stringify(dockHeight === 'tall' ? variants[variant].height - 170 : dockHeight === 'short' ? 200 : dockHeight));
+  }
   window.__designFixture = fixture;
   window.__designNotices = notices;
   createRoot(document.getElementById('root')!).render(<DesktopApp service={createDesktopService(fixture.transport)} />);

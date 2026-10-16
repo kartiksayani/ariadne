@@ -902,29 +902,24 @@ describe('source-backed navigation views and explicit registration', () => {
     fireEvent.click(button); expect(hide).toHaveBeenCalledOnce();
   });
 
-  it('saves the Waiting column fold and the detail width with the global preferences and applies them at once', async () => {
+  it('saves the detail width with the global preferences and applies it at once', async () => {
     const { transport, store } = setup(); const prefs = preferences(); read(transport, prefs);
     render(<NavigationWorkspace store={store} onRemoveTarget={() => {}} adapterChoices={[adapter]} detail={<p>Detail</p>} renderSession={() => <p>Session workspace</p>} />);
     await screen.findByRole('navigation', { name: 'Projects and sessions' });
-    transport.enqueue('preferences_patch', patchReceipt(2));
-    const folded = structuredClone(prefs); folded.revision = 2; folded.global.waiting_collapsed = true; read(transport, folded);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Hide Waiting on me' })); });
+    // The Waiting column and its saved fold are gone; the answer dock keeps its height in localStorage, not here.
+    expect(screen.queryByRole('button', { name: /Waiting on me/ })).toBeNull();
     const patches = () => transport.calls.filter(call => call.name === 'preferences_patch');
-    expect(patches()[0].request).toMatchObject({ command: { params: { expected_preferences_revision: 1,
-      entries: [{ kind: 'set_global', preferences: { ...prefs.global, waiting_collapsed: true } }] } } });
-    expect(screen.getByRole('button', { name: /^Show Waiting on me/ })).toBeTruthy();
-    await waitFor(() => expect(store.getSnapshot().preferences?.revision).toBe(2));
-    transport.enqueue('preferences_patch', patchReceipt(3));
-    const resized = structuredClone(folded); resized.revision = 3; resized.global.detail_width = 416; read(transport, resized);
+    transport.enqueue('preferences_patch', patchReceipt(2));
+    const resized = structuredClone(prefs); resized.revision = 2; resized.global.detail_width = 416; read(transport, resized);
     const edge = screen.getByRole('separator', { name: 'Resize detail panel' });
     vi.useFakeTimers();
     try {
       fireEvent.keyDown(edge, { key: 'ArrowLeft' });
       await act(async () => { vi.advanceTimersByTime(600); });
     } finally { vi.useRealTimers(); }
-    await waitFor(() => expect(patches()).toHaveLength(2));
-    expect(patches()[1].request).toMatchObject({ command: { params: { expected_preferences_revision: 2,
-      entries: [{ kind: 'set_global', preferences: { ...folded.global, detail_width: 416 } }] } } });
+    await waitFor(() => expect(patches()).toHaveLength(1));
+    expect(patches()[0].request).toMatchObject({ command: { params: { expected_preferences_revision: 1,
+      entries: [{ kind: 'set_global', preferences: { ...prefs.global, detail_width: 416 } }] } } });
     expect(edge.getAttribute('aria-valuenow')).toBe('416');
   });
   it('keeps the setup card on its own project page, collapsed, without a session ID, until dismissed or its session is gone', async () => {

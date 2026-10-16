@@ -1,7 +1,7 @@
 import { AgentBin } from '../remove/AgentBin';
 import { itemRemoved } from '../../selectors/removed';
 // The session tree column (handoff "Session tree"): session bar, status menu,
-// banners, topic bands and item rows, with the tree keyboard, inline answering
+// banners, topic bands and item rows, with the tree keyboard
 // and the empty and loading states. Selection, expansion, topic folds and filters
 // persist through navigation's preference writer.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
@@ -17,8 +17,6 @@ import { DispatchChip } from '../../components/bindings/DispatchChip';
 import { useSupervisorHealth } from '../../components/bindings/health';
 import { DispatchDialog } from '../pages/SessionDialogs';
 import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
-import { AnswerControl } from '../answer/AnswerControl';
-import type { PendingSubmission } from '../answer/useSubmit';
 import { notices as noticeStore } from '../pages/notices';
 import { chipsOf, closed, collapsedNote, mapChanges, nextMarkedItem, oldestWaiting, parentKey, sessionBar, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
 import { HiddenRow } from './HiddenRow';
@@ -40,13 +38,12 @@ import { peekNames } from '../peek/names';
 import { nearestDelta, openingTop } from './scroll';
 import { useDockInset } from '../shell/dockInset';
 import { displayStatus } from '../../selectors/waiting/replied';
-import { sessionEnded, sessionClosedReason, sessionAnswerBlocked } from '../../selectors/sessionClosed';
+import { sessionAnswerBlocked } from '../../selectors/sessionClosed';
 import { useUnfolded } from './unfold';
 import type { RemoveTarget } from '../dialogs/remove';
 import { ContinuePicker, continueTargets, openContinueTopic } from '../dialogs/ContinueTopicDialog';
 import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
-import { reconnectingNote } from '../shared/connection';
 import { useFilterFolds } from '../shared/filterFolds';
 import { isViewConflict } from '../shared/conflictNotice';
 import { TreeFonts, useTreeFonts } from './fonts';
@@ -91,8 +88,6 @@ export interface TreeViewProps {
   readonly onClearFilters: () => void;
   readonly onClearSearch?: () => void;
   readonly onShowArchive: () => void;
-  /** Called instead of sending when the agent is not running; without it the send queues. */
-  readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
   /** Asks to remove an item (and everything below it) or a topic: row trash, topic Remove, ⌫/Delete. */
   readonly onRemove: (target: Extract<RemoveTarget, { kind: 'item' | 'topic' }>) => void;
 }
@@ -112,7 +107,7 @@ const SKELETON = [
 export function TreeView(props: TreeViewProps) {
   const { navigation, store, actions, drafts, query, reveal, selectedId, detailOpen, covered = false, graph, notices,
     summaries, onSelected, onDismissReveal, onResume, onAct, onClearFilters, onClearSearch, onShowArchive,
-    onAgentNotRunning, onRemove } = props;
+    onRemove } = props;
   const state = useSession(store), raw = state.snapshot?.session ?? null;
   const fontEpoch = useTreeFonts();
   const peek = usePeek();
@@ -155,7 +150,6 @@ export function TreeView(props: TreeViewProps) {
   const seen = useReadingSeen(navigation.reading, preferences, route);
   const changes = useMemo(() => session ? mapChanges(session, seen) : null, [session, seen]);
   const [kbd, setKbd] = useState(false);
-  const [answering, setAnswering] = useState<string | null>(null);
   const [continuing, setContinuing] = useState<string | null>(null);
   const [replying, setReplying] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -238,8 +232,8 @@ export function TreeView(props: TreeViewProps) {
     }
     return groups;
   }, [rows]);
-  const latest = useRef({ view, preferences, rows, session, selectedId, answering, focusedId });
-  latest.current = { view, preferences, rows, session, selectedId, answering, focusedId };
+  const latest = useRef({ view, preferences, rows, session, selectedId, focusedId });
+  latest.current = { view, preferences, rows, session, selectedId, focusedId };
 
   const hiddenSelection = useRef<{ sessionId?: string; selectedId: string | null }>({ selectedId: null });
   useEffect(() => {
@@ -425,59 +419,7 @@ export function TreeView(props: TreeViewProps) {
     if (outsideSelected) void saveView(next => { next.selected_item_id = null; });
   };
 
-  // ------------------------------------------------------------ answering
-  const answerable = (row: Row | undefined): row is ItemRowModel => row?.kind === 'item' && row.item.status === 'waiting_on_me'
-    && (!row.delivery || row.delivery.failed) && !archivedMode;
-  const openAnswer = (id: string) => {
-    setAnswering(id);
-    const begin = () => {
-      const current = store.getSnapshot().snapshot?.session;
-      if (!current || !mounted.current) return;
-      const existing = drafts.find(route, id, 'answer');
-      if (existing?.receipt) drafts.another(existing.draft.op_id, current);
-      else if (!existing) drafts.begin(current, id, 'answer');
-    };
-    if (drafts.getSnapshot().ready) begin(); else void drafts.load().then(begin);
-  };
-  // Answering ends once the item has an answer on its way or stops waiting.
-  const answerRow = rows.find((row): row is ItemRowModel => row.key === answering && answerable(row));
-  const entry = answerRow ? drafts.find(route, answerRow.item.id, 'answer') : undefined;
-  const options = answerRow?.item.options ?? [];
-  const pickedIndex = entry?.draft.selected_option_id ? options.findIndex(option => option.id === entry.draft.selected_option_id) : -1;
-  const chosen = pickedIndex >= 0 ? pickedIndex : options.findIndex(option => option.recommended);
-  const blocked = session && sessionEnded(session) ? sessionAnswerBlocked(session)
-    : session?.state !== 'active' ? sessionClosedReason
-    : bar?.connection === 'reconnecting' ? reconnectingNote(bar.agent) : null;
   const focusRow = (key: string) => { setFocusKey(key); elements.current.get(key)?.focus({ preventScroll: true }); };
-  const send = (change: { selected_option_id: string | null; text: string }) => {
-    if (!entry || entry.saving || blocked) return;
-    const id = entry.draft.op_id, itemKey = answering, item = answerRow?.item;
-    // The change is saved only when the input goes out: a cancelled "not running" dialog keeps the draft as typed.
-    const submit = () => { drafts.edit(id, change); return drafts.submit(id).then(saved => {
-      if (saved && mounted.current) {
-        if (itemKey) navigationVisits.record(route, itemKey, 'answered');
-        setAnswering(current => current === itemKey ? null : current);
-        if (itemKey) focusRow(itemKey);
-      }
-      return saved;
-    }); };
-    if (item && bar?.connection !== 'connected' && onAgentNotRunning) {
-      const label = change.selected_option_id ? item.options.find(option => option.id === change.selected_option_id)?.label ?? '' : change.text;
-      onAgentNotRunning({ route: { ...route, item_id: item.id }, intent: 'answer', question: item.question, label, agent: bar?.agent ?? 'the agent', change, queue: submit });
-    } else void submit();
-  };
-  const sendOption = (index: number, note?: string) => {
-    const option = options[index];
-    if (entry && option) send({ selected_option_id: option.id, text: note ?? drafts.getSnapshot().entries[entry.draft.op_id]?.draft.text ?? entry.draft.text });
-  };
-  const answerControl = answerRow ? <AnswerControl variant="full" selected={chosen} draft={entry?.draft.text ?? ''}
-    options={options.map(option => ({ id: option.id, label: option.label, consequence: option.consequence, recommended: option.recommended }))}
-    warn={entry?.error ? plainFailure(entry.error) : undefined} blocked={blocked ?? undefined} locked={!entry || entry.saving || !!session && sessionEnded(session)}
-    onSelect={index => { if (entry && options[index]) drafts.edit(entry.draft.op_id, { selected_option_id: options[index].id }); focusRow(answerRow.key); }}
-    onDraft={text => { if (entry) drafts.edit(entry.draft.op_id, { text }); }}
-    onSendOption={sendOption} onSendText={text => send({ selected_option_id: null, text })}
-    onEscape={() => { setAnswering(null); focusRow(answerRow.key); }} /> : null;
-  useEffect(() => { if (answering && !answerRow) setAnswering(null); }, [answering, answerRow]);
 
   // ------------------------------------------------------------ keyboard
   const onRow = (act: (row: Row, index: number, intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => boolean | void) => (intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => {
@@ -511,7 +453,6 @@ export function TreeView(props: TreeViewProps) {
     enter: onRow(row => {
       if (row.kind === 'topic') { toggleTopic(row.topic.id); return true; }
       if (row.kind === 'hidden') { toggleHiddenGroup(row.key); return true; }
-      if (answering === row.key && chosen >= 0) { sendOption(chosen); return true; }
       select(row.item.id); return true;
     }),
     peek: onRow((row, _index, _intent, event) => {
@@ -529,18 +470,8 @@ export function TreeView(props: TreeViewProps) {
         }
         return true;
       }
-      if (answerable(row)) { if (answering === row.key) setAnswering(null); else openAnswer(row.key); return true; }
-      const oldest = session ? oldestWaiting(session) : null, target = oldest ? latest.current.rows.find(value => value.key === oldest.id) : undefined;
-      if (!answerable(target)) return false;
-      focusRow(target.key); openAnswer(target.key); return true;
+      return false;
     }),
-    choose: onRow((row, _index, intent) => {
-      if (row.kind !== 'item') return true;
-      if (answering !== row.key || intent.kind !== 'choose') return false;
-      if (entry && options[intent.index]) drafts.edit(entry.draft.op_id, { selected_option_id: options[intent.index].id });
-      return true;
-    }),
-    escape: onRow(row => { if (answering !== row.key) return false; setAnswering(null); return true; }),
     archive: onRow(row => {
       const topicId = row.kind === 'topic' ? row.topic.id : row.kind === 'hidden' ? row.topicId : row.item.topic_id;
       if (archivedMode) lifecycle.restore(topicId); else lifecycle.archive(topicId);
@@ -732,7 +663,7 @@ export function TreeView(props: TreeViewProps) {
       if (Math.abs(delta) >= 1) box.scrollTop += delta;
     }
     const top = readingTop(), list = latest.current.rows.filter(row => row.kind === 'item');
-    const panelKey = latest.current.answering ?? latest.current.selectedId;
+    const panelKey = latest.current.selectedId;
     const panelRect = panelKey ? elements.current.get(panelKey)?.getBoundingClientRect() : undefined;
     panelTarget.current = panelKey && panelRect && panelRect.top >= top && panelRect.top < visibleBottom(box)
       ? { key: panelKey, top: panelRect.top, scrollTop: box.scrollTop } : null;
@@ -788,10 +719,10 @@ export function TreeView(props: TreeViewProps) {
     const width = scroller.current?.getBoundingClientRect().width ?? null;
     const resized = previousWidth.current !== null && previousWidth.current !== width;
     previousWidth.current = width;
-    // Closing detail widens previews above the selected/answered row. Preserve
+    // Closing detail widens previews above the selected row. Preserve
     // that row's last screen position rather than the earlier reading anchor.
     const target = panelTarget.current;
-    if (previous.detailOpen && !current.detailOpen && target && target.key === (latest.current.answering ?? current.selectedId)) {
+    if (previous.detailOpen && !current.detailOpen && target && target.key === current.selectedId) {
       const offset = Math.max(target.top, readingTop() + 8) - readingTop();
       revealedAnchor.current = { key: target.key, offset };
       held.current = { key: target.key, offset, top: readingTop() + offset - (scroller.current?.getBoundingClientRect().top ?? 0), scrollTop: target.scrollTop };
@@ -1032,7 +963,7 @@ export function TreeView(props: TreeViewProps) {
         : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={focusDisabled} closedReason={session ? sessionAnswerBlocked(session) : undefined}
         changeMarker={changes?.markers.get(row.key)} nextUnseen={nextTarget?.id === row.key} nextUnseenPulse={nextPulse && nextTarget?.id === row.key}
         note={row.collapsed ? collapsedNote(row.collapsed) : null}
-        actions={itemActions(row)} answer={answering === row.key ? answerControl : null} fix={fixOf(row)}
+        actions={itemActions(row)} fix={fixOf(row)}
         unfolded={isUnfolded(row.key)} onUnfold={unfold}
         onFocusBranch={focusBranch} branchFocused={focusedId === row.key} names={names}
         onPeekHover={(id, event) => { const handlers = peek?.chipProps({ ...route, item_id: id });

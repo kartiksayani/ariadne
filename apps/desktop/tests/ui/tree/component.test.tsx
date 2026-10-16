@@ -15,7 +15,6 @@ import { NavigationStore } from '../../../src/state/navigation/store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { SessionActionControllers } from '../../../src/components/bindings/actions';
 import { TreeView, type RowIntent, type TreeViewProps } from '../../../src/ui/tree/TreeView';
-import type { PendingSubmission } from '../../../src/ui/answer/useSubmit';
 import { AppTransport, route } from '../app/transport';
 import { HistoryTransport } from '../history-actions/fixture';
 import { LinkOpener } from '../../../src/ui/shared/MarkdownText';
@@ -1579,87 +1578,47 @@ describe('Reply to topic', () => {
   });
 });
 
-describe('session tree inline answering', () => {
-  const options = (transport: AppTransport) => { transport.sessions.get(route.session_id)!.items['2']!.options = [
-    { id: 'morning', label: 'Morning', consequence: 'Deliver before lunch.', recommended: false },
-    { id: 'afternoon', label: 'Afternoon', consequence: 'Deliver after lunch.', recommended: true },
-  ]; };
-  const control = () => row('2').querySelector<HTMLElement>('.answer');
-  const picked = () => [...control()!.querySelectorAll('.answer-option')].map(button => button.getAttribute('aria-pressed'));
-  it('opens on a with the recommended option picked, changes it by number and sends it on Enter', async () => {
-    const { transport, drafts } = await mount({ configure: options });
-    row('2').focus(); fireEvent.keyDown(row('2'), { key: 'a' });
-    await waitFor(() => expect(control()).not.toBeNull());
-    expect(picked()).toEqual(['false', 'true']);
-    await waitFor(() => expect(drafts.getSnapshot().ready).toBe(true));
-    await waitFor(() => expect(within(control()!).getByRole('button', { name: /Send “Afternoon”/ })).toBeTruthy());
-    fireEvent.keyDown(row('2'), { key: '1' });
-    await waitFor(() => expect(picked()).toEqual(['true', 'false']));
-    fireEvent.keyDown(row('2'), { key: 'Enter' });
-    await waitFor(() => expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(true));
-    expect(transport.mutations.find(request => request.command.command === 'input_submit')!.command).toMatchObject({ params: { target: { item_id: '2' } } });
+describe('session tree answer handoff', () => {
+  it.each(['2', '4', 'Delivery decisions'])('leaves a on %s for the workspace without opening a row editor', async target => {
+    const { transport, calls } = await mount();
+    const element = target === 'Delivery decisions' ? topicRow(target) : row(target);
+    const reached: { target: EventTarget | null; prevented: boolean }[] = [];
+    const record = (event: KeyboardEvent) => { reached.push({ target: event.target, prevented: event.defaultPrevented }); };
+    document.body.addEventListener('keydown', record);
+    try {
+      element.focus(); fireEvent.keyDown(element, { key: 'a' });
+      expect(reached).toEqual([{ target: element, prevented: false }]);
+      expect(document.activeElement).toBe(element);
+      expect(document.querySelector('.tree-answer')).toBeNull();
+      expect(screen.queryByRole('textbox')).toBeNull();
+      expect(calls.selected).toEqual([]);
+      expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(false);
+    } finally { document.body.removeEventListener('keydown', record); }
   });
-  it('picks by click, keeps a typed reply and closes on Escape', async () => {
-    await mount({ configure: options });
-    row('2').focus(); fireEvent.keyDown(row('2'), { key: 'a' });
-    await waitFor(() => expect(control()).not.toBeNull());
-    await waitFor(() => expect((within(control()!).getByRole('button', { name: /Send “/ }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(within(control()!).getAllByRole('button', { pressed: false })[0]);
-    await waitFor(() => expect(picked()).toEqual(['true', 'false']));
-    const text = within(control()!).getByLabelText('Reply in your own words');
-    fireEvent.change(text, { target: { value: 'Neither, ship tomorrow.' } });
-    await waitFor(() => expect((within(control()!).getByRole('button', { name: 'Send as a reply only' }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.keyDown(text, { key: 'Escape' });
-    expect(control()).toBeNull(); expect(document.activeElement).toBe(row('2'));
-    fireEvent.keyDown(row('2'), { key: 'a' });
-    await waitFor(() => expect((within(control()!).getByLabelText('Reply in your own words') as HTMLTextAreaElement).value).toBe('Neither, ship tomorrow.'));
-    fireEvent.keyDown(row('2'), { key: 'Escape' }); expect(control()).toBeNull();
+
+  it.each(['2', 'Delivery decisions'])('leaves number keys on %s for the workspace', async target => {
+    await mount();
+    const element = target === 'Delivery decisions' ? topicRow(target) : row(target);
+    const reached: { key: string; prevented: boolean }[] = [];
+    const record = (event: KeyboardEvent) => { reached.push({ key: event.key, prevented: event.defaultPrevented }); };
+    document.body.addEventListener('keydown', record);
+    try {
+      element.focus();
+      fireEvent.keyDown(element, { key: '1' });
+      fireEvent.keyDown(element, { key: '9' });
+      expect(reached).toEqual([{ key: '1', prevented: false }, { key: '9', prevented: false }]);
+    } finally { document.body.removeEventListener('keydown', record); }
   });
-  it('asks before sending when the agent is not running, and queues only on request', async () => {
-    const held: PendingSubmission[] = [];
-    const { transport, drafts } = await mount({ props: { onAgentNotRunning: submission => { held.push(submission); } }, configure: transport => {
-      options(transport);
-      const binding = transport.sessions.get(route.session_id)!.bindings[transport.sessions.get(route.session_id)!.active_binding_id!]!;
-      binding.connection_state = 'disconnected'; binding.dispatch_state = 'disconnected';
-    } });
+
+  it('selects a waiting row into Details on Enter without sending an answer', async () => {
+    const { transport, calls } = await mount();
     row('2').focus(); fireEvent.keyDown(row('2'), { key: 'a' });
-    await waitFor(() => expect(control()).not.toBeNull());
-    await waitFor(() => expect(drafts.getSnapshot().ready).toBe(true));
-    await waitFor(() => expect((within(control()!).getByRole('button', { name: /Send “Afternoon”/ }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.change(within(control()!).getByRole('textbox'), { target: { value: ' After the review, please.  ' } });
-    expect(within(control()!).getByRole('button', { name: 'Send “Afternoon” with your note' })).toBeTruthy();
     fireEvent.keyDown(row('2'), { key: 'Enter' });
-    await waitFor(() => expect(held).toHaveLength(1));
-    expect(held[0]).toMatchObject({ route: { ...route, item_id: '2' }, intent: 'answer', label: 'Afternoon', question: transport.sessions.get(route.session_id)!.items['2']!.question,
-      change: { selected_option_id: 'afternoon', text: ' After the review, please.  ' } });
+    await waitFor(() => expect(calls.selected).toHaveLength(1));
+    expect(calls.selected[0]).toMatchObject({ kind: 'item', route: { item_id: '2' } });
+    expect(calls.openedDetail).toEqual([true]);
     expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(false);
-    expect(await held[0].queue()).toBe(true);
-    expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(true);
-    expect(transport.mutations.find(request => request.command.command === 'input_submit')?.command).toMatchObject({ params: { selected_option_id: 'afternoon', text: ' After the review, please.  ' } });
-  });
-  it('answers the oldest waiting question when a is pressed elsewhere', async () => {
-    await mount({ configure: options });
-    row('4').focus(); fireEvent.keyDown(row('4'), { key: 'a' });
-    await waitFor(() => expect(control()).not.toBeNull()); expect(document.activeElement).toBe(row('2'));
-  });
-  it('explains Restore before Reopen when answering in an archived session', async () => {
-    await mount({ configure: transport => {
-      options(transport);
-      const session = transport.sessions.get(route.session_id)!;
-      session.state = 'closed'; session.archived_at = session.updated_at;
-    } });
-    row('2').focus(); fireEvent.keyDown(row('2'), { key: 'a' });
-    await waitFor(() => expect(control()).not.toBeNull());
-    const reason = 'This session is archived. Restore it, then reopen it to answer.';
-    expect(within(row('2')).getByText('Session closed').title).toBe(reason);
-    expect(within(control()!).getByText(reason)).toBeTruthy();
-  });
-  it('blocks sending in a closed session', async () => {
-    await mount({ configure: transport => { options(transport); transport.sessions.get(route.session_id)!.state = 'closed'; } });
-    row('2').focus(); fireEvent.keyDown(row('2'), { key: 'a' });
-    await waitFor(() => expect(control()).not.toBeNull());
-    expect(within(row('2')).getByText('Session closed').title).toBe(sessionClosedReason);
-    expect(within(control()!).getByText(sessionClosedReason)).toBeTruthy();
+    expect(document.querySelector('.tree-answer')).toBeNull();
   });
 });
 
@@ -2179,20 +2138,16 @@ describe('item details in the tree', () => {
     } finally { vi.unstubAllGlobals(); }
   });
 
-  it('never hides question options inside the body clamp', async () => {
+  it('clamps a long waiting preview without rendering answer controls in the row', async () => {
     measure();
     await mount({ configure: transport => {
       const item = transport.sessions.get(route.session_id)!.items['2']!; item.ask = long;
       item.options = Array.from({ length: 3 }, (_, index) => ({ id: crypto.randomUUID(), label: `Option ${index + 1}`, consequence: long, recommended: index === 0 }));
     } });
     row('2').focus(); fireEvent.keyDown(row('2'), { key: 'a' });
-    await waitFor(() => expect(row('2').querySelector('.answer-full')).not.toBeNull());
-    const answer = row('2').querySelector('.tree-answer')!;
-    expect(answer.closest('.tree-preview')).toBeNull();
-    expect(answer.querySelectorAll('.tree-clamp')).toHaveLength(0);
-    expect(answer.textContent).toContain('Recommended');
-    expect(answer.querySelectorAll('.answer-option')).toHaveLength(3);
-    for (const option of answer.querySelectorAll('.answer-option')) expect(option.textContent).toContain('Line 20 of a long finding');
+    expect(row('2').querySelector('.tree-answer')).toBeNull();
+    expect(row('2').querySelector('.answer-option')).toBeNull();
+    expect(within(row('2')).queryByRole('textbox')).toBeNull();
     expect(row('2').querySelector('.tree-preview[data-clamped]')).not.toBeNull();
   });
 

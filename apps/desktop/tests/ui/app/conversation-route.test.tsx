@@ -1,6 +1,6 @@
 import { useLayoutEffect, type ComponentProps } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { NavigationWorkspace } from '../../../src/components/navigation/NavigationWorkspace';
@@ -29,8 +29,12 @@ it('guards conversation targets and footer on the first render of a different se
   render(<DesktopApp service={createDesktopService(transport)} />);
   await screen.findByRole('button', { name: 'Open the conversation in a bigger view' });
   fireEvent.click(screen.getByRole('button', { name: 'Open the conversation in a bigger view' }));
-  const waiting = document.querySelector<HTMLElement>('[data-waiting-item="2"][data-session-id="' + route.session_id + '"]')!;
-  fireEvent.click(waiting);
+  // The dock's path switches the open conversation to its question, as the Waiting card did.
+  const dock = screen.getByRole('region', { name: 'Answer dock' });
+  fireEvent.click(within(dock).getByRole('button', { name: /^\d+ (more )?waiting$/ }));
+  await waitFor(() => expect(dock.querySelector('.answer-dock-current [data-owner-input="2"]')).not.toBeNull());
+  const crumbs = dock.querySelectorAll<HTMLButtonElement>('.dock-path .dock-link');
+  fireEvent.click(crumbs[crumbs.length - 1]!);
   await waitFor(() => expect(screen.getByRole('region', { name: 'Item conversation' }).querySelector('[data-detail-item-id]')?.getAttribute('data-detail-item-id')).toBe('2'));
   let inspected = false;
   probe.inspect = props => {

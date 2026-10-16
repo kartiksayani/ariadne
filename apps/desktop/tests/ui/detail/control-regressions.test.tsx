@@ -9,6 +9,7 @@ import { conversationAnswerState, ItemConversation } from '../../../src/ui/detai
 import { notices } from '../../../src/ui/pages/notices';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 import { AppTransport, route } from '../app/transport';
+import { answerWords } from '../answer/words';
 
 const stores: SessionStore[] = [];
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.close()); notices.clear(); vi.restoreAllMocks(); });
@@ -196,22 +197,23 @@ describe('conversation control regressions', () => {
     expect(screen.getByLabelText('Reply message')).toBeTruthy();
   });
 
-  it('keeps only options in their scroll region with question and both Send actions outside it, including an unselected choice', () => {
+  it('keeps only the cards in their scroll region with Send in the bar outside it, including an unselected choice', () => {
     const onSendOption = vi.fn(), onSendText = vi.fn(), onSelect = vi.fn();
-    const props = { variant: 'chat' as const, compactOptions: true, options: [{ id: 'one', label: 'Use the full window', consequence: 'Full explanation', recommended: false }],
-      selected: -1, draft: 'My note', prompt: <p>Current question</p>, onSelect, onDraft: vi.fn(), onSendOption, onSendText };
+    const props = { layout: 'wide' as const, options: [{ id: 'one', label: 'Use the full window', consequence: 'Full explanation', recommended: false }],
+      selected: -1, draft: 'My note', onSelect, onDraft: vi.fn(), onSendOption, onSendText };
     const view = render(<AnswerControl {...props} />);
-    const send = screen.getByRole('button', { name: 'Send answer' });
-    expect(send.hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText('Current question').closest('.answer-choices')).toBeNull();
-    expect(screen.getByText('Use the full window').closest('.answer-choices')).toBeTruthy();
-    expect(send.closest('.answer-fixed-controls')).toBeTruthy();
-    expect(screen.getByLabelText('Reply in your own words').closest('.answer-fixed-controls')).toBeTruthy();
-    const reply = screen.getByRole('button', { name: 'Send as a reply only' });
-    expect(reply.closest('.answer-choices')).toBeNull();
-    fireEvent.click(reply); expect(onSendText).toHaveBeenCalledWith('My note');
+    const send = screen.getByRole('button', { name: /^Send/ });
+    expect(send.hasAttribute('disabled')).toBe(false);
+    expect(screen.getByText('Use the full window').closest('.answer-options')).toBeTruthy();
+    expect(send.closest('.answer-bar')).toBeTruthy();
+    expect(send.closest('.answer-options')).toBeNull();
+    // No option picked: the words are my own answer, in the "Write my own answer" card.
+    expect(screen.getByLabelText('Reply in your own words').closest('.answer-own')).toBeTruthy();
+    fireEvent.click(send); expect(onSendText).toHaveBeenCalledWith('My note');
     view.rerender(<AnswerControl {...props} selected={0} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Send “Use the full window” with your note' }));
+    // Picked: the same words are that card's note.
+    expect(screen.getByLabelText('Add a note for the agent').closest('.answer-card-on')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /^Send/ }));
     expect(onSendOption).toHaveBeenCalledWith(0, 'My note');
   });
 
@@ -219,11 +221,13 @@ describe('conversation control regressions', () => {
     clamp(true);
     const { source, store, props } = await setup();
     const question = 'Should we keep all the details of this question available to the owner? '.repeat(8);
+    source.items['2']!.options = [{ id: 'keep', label: 'Keep all the details', consequence: 'Preserve them.', recommended: true }];
     source.items['2']!.ask = question; ++source.revision; await store.refresh();
     render(<ConversationView {...props} itemId="2" onClose={vi.fn()} />);
-    const box = screen.getByRole('textbox', { name: 'Reply in your own words' }) as HTMLTextAreaElement;
-    fireEvent.change(box, { target: { value: 'My exact saved note' } });
+    fireEvent.click(document.querySelector('[data-answer-option]')!);
     const choice = document.querySelector('[data-answer-option][aria-pressed="true"]');
+    const box = answerWords(screen.getByRole('group', { name: 'Answer' }));
+    fireEvent.change(box, { target: { value: 'My exact saved note' } });
     const toggle = screen.getByRole('button', { name: 'Expand question' });
     const text = document.getElementById(toggle.getAttribute('aria-controls')!)!;
     expect(text.textContent?.trim()).toBe(question.trim());
@@ -256,9 +260,10 @@ describe('conversation control regressions', () => {
     ++source.revision; await store.refresh();
     const onAgentNotRunning = vi.fn();
     render(<ConversationView {...props} itemId="2" onClose={vi.fn()} onAgentNotRunning={onAgentNotRunning} />);
-    const box = screen.getByRole('textbox', { name: 'Reply in your own words' }) as HTMLTextAreaElement;
-    fireEvent.change(box, { target: { value: 'Keep my note' } });
+    fireEvent.click(document.querySelector('[data-answer-option]')!);
     const choice = document.querySelector('[data-answer-option][aria-pressed="true"]');
+    const box = answerWords(screen.getByRole('group', { name: 'Answer' }));
+    fireEvent.change(box, { target: { value: 'Keep my note' } });
     const before = drafts.find(route, '2', 'answer')!.draft.selected_option_id;
     fireEvent.click(screen.getByRole('button', { name: 'Expand question' }));
     const dialog = screen.getByRole('dialog', { name: 'Current question' });

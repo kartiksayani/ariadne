@@ -7,7 +7,7 @@ import type { OwnerDraft } from '../../../apps/desktop/src/generated/core';
 import { buildFixture, type DesignFixture, type PrototypeData, type ProtoItem, type ProtoMessage, type ProtoSession, type ProtoTopic } from './fixtures';
 import type { FrameSpec, Scenario } from './frames';
 import { finalNow, variants, type AppFixture, type FinalState, type Variant } from './final-frames';
-import { conversations, items as worldItems, longText, others, projects, sessions as worldSessions, topicName, topicShort, type WItem } from './final-world';
+import { conversations, items as worldItems, longText, others, projects, Q1, Q2, sessions as worldSessions, topicName, topicShort, type WItem } from './final-world';
 
 const statusOf = { decided: 'decided', done: 'done', in_progress: 'progress', open: 'open', waiting_on_me: 'waiting', replaced: 'replaced' } as const;
 const typeOf = (item: WItem): ProtoItem['type'] => item.kind === 'task' ? 'task' : item.kind === 'finding' ? 'finding' : item.kind === 'explanation' ? 'explanation'
@@ -77,7 +77,10 @@ export function finalSpec(state: Pick<FinalState, 'id' | 'app'>, variant: Varian
   const submissions = [...(app.questions?.sent ?? []).map(item => ({ item, choice: picked(item), stage: 'received' as const })),
     ...(app.questions?.failed ?? []).map(item => ({ item, choice: picked(item), stage: 'failed' as const }))];
   const folded = ['h1', ...(app.items?.hidden ?? [])];
-  const selected = view.selected ?? undefined;
+  // Board screen 2 lights the open dock question's Map row without Details. In the app the dock never selects in the
+  // Map (a selection opens Details and takes its question out of the dock), so that row is not selected.
+  const lit = view.dock === 'open' && (view.selected === Q1 || view.selected === Q2);
+  const selected = lit ? undefined : view.selected ?? undefined;
   return { id: `final-${state.id}`, width, height, theme, scenario: page ? pageScenario[page] : 'project',
     state: app.items?.empty ? 'empty' : app.sessions?.connection === 'loading' ? 'loading' : 'ready',
     ...(selected ? { selected } : {}), ...(selected && (view.details ?? 'open') !== 'folded' ? { detail: true } : {}), ...(view.mode === 'graph' ? { view: 'graph' as const } : {}),
@@ -91,15 +94,19 @@ export function finalFixture(state: Pick<FinalState, 'id' | 'app'>, variant: Var
   const drafts = state.app.drafts ?? [];
   if (!fixture.route) return fixture;
   const route = fixture.route, session = fixture.transport.sessions.get(route.session_id)!;
+  // The board's agent is running and waiting for me: idle, so an answer sent now reads "Sent at", not queued behind a turn.
+  fixture.transport.idle(route.session_id);
   // "Later" is the owner's own mark (a preference), not a status of the item.
   fixture.transport.preferences.later = (state.app.items?.later ?? []).map(item => {
     if (!session.items[item]) throw new Error(`final ${state.id}: later on an item that is not in the session: ${item}`);
     return { ...route, item_id: item };
   });
   fixture.transport.preferences.drafts = drafts.map((draft, at): OwnerDraft => {
-    const item = session.items[draft.item];
-    if (!item) throw new Error(`final ${state.id}: draft on an item that is not in the session: ${draft.item}`);
-    return { op_id: uuid(100 + at), session: route, binding_id: session.active_binding_id!, target: { topic_id: item.topic_id, item_id: item.id }, intent: 'answer',
+    // A draft on a question in another session (2.7's picked option in the other-sessions list) lives with that session.
+    const owner = session.items[draft.item] ? session : [...fixture.transport.sessions.values()].find(value => value.items[draft.item]);
+    const item = owner?.items[draft.item];
+    if (!owner || !item) throw new Error(`final ${state.id}: draft on an item that is in no session: ${draft.item}`);
+    return { op_id: uuid(100 + at), session: { project_id: owner.project_id, session_id: owner.id }, binding_id: owner.active_binding_id!, target: { topic_id: item.topic_id, item_id: item.id }, intent: 'answer',
       text: draft.own ?? draft.note ?? '', selected_option_id: draft.pick === undefined ? null : item.options[draft.pick]?.id ?? null,
       target_revision: item.revision, question_revision: item.question_revision, supersedes_answer_id: null };
   });

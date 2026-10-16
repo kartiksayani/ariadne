@@ -1,7 +1,7 @@
 // "Item Row" of the handoff (Item Row.dc.html): guides and the accent thread,
 // the status icon, the question with search hits, the item's details (folded to
 // four lines, with Show more) and under them the delivery of the owner's latest
-// message, the collapsed note, the inline answer box, the round tag, hover actions, the
+// message, the collapsed note, the round tag, hover actions, the
 // top-line text badge.
 import { useCallback, useContext, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { TreeFonts } from './fonts';
@@ -109,7 +109,6 @@ export interface ItemRowProps {
   readonly closedReason?: string;
   readonly note: string | null;
   readonly actions: readonly RowAction[];
-  readonly answer: ReactNode;
   /** A stopped delivery's inline fix (ui/answer/StuckNote); it takes the delivery line's place. */
   readonly fix?: ReactNode;
   /** The long preview is shown in full ("Show less" offered) instead of folded to four lines. */
@@ -129,7 +128,7 @@ export interface ItemRowProps {
   readonly onPeekLeave?: () => void;
 }
 
-export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, note, actions, answer, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, onFocusBranch, branchFocused = false, names, onPeekHover, onPeekLeave }: ItemRowProps) {
+export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, note, actions, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, onFocusBranch, branchFocused = false, names, onPeekHover, onPeekLeave }: ItemRowProps) {
   const item = row.item, status = visual(row.status);
   const details = preview(row);
   const muted = closed(item.status) || row.context || row.later || row.hidden;
@@ -168,7 +167,6 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
       {delivery(row, fix)}
       {note && <button type="button" className="tree-collapsed" tabIndex={-1}
         onClick={event => { event.stopPropagation(); onToggle(item.id); }}><i className="ph ph-dots-three" />{note}</button>}
-      {answer && <div className="tree-answer" onClick={event => event.stopPropagation()}>{answer}</div>}
     </div>
     <div className="tree-end">
       {row.relatedCount > 0 && <span className="tree-related" role="img" aria-label={`${row.relatedCount} related item${row.relatedCount === 1 ? '' : 's'}`}

@@ -201,7 +201,7 @@ const footerKeyDefinitions: readonly (FooterKey & { readonly conversationText?: 
   { k: 'r', t: 'reply', conversationText: 'reply', conversationOnly: true }, { k: '1–9', t: 'select', conversationText: 'select', questionOnly: true },
   { k: '⌥1–9', t: 'send choice + note', conversationText: 'send choice + note', questionOnly: true }, { k: '⌥0', t: 'focus own words', conversationText: 'focus own words', questionOnly: true },
   { k: '⌘↵', t: 'reply only', conversationText: 'send' }, { k: '↵', t: 'send / details' },
-  { k: 'b r d z o', t: 'item actions', conversationKey: 'b d o', conversationText: 'item actions' }, { k: 'x', t: 'hide / unhide' }, { k: '/', t: 'search' }, { k: 'g', t: 'graph' }, { k: 'w', t: 'waiting' }, { k: 'esc', t: 'close', conversationText: 'Back to Map' },
+  { k: 'b r d z o', t: 'item actions', conversationKey: 'b d o', conversationText: 'item actions' }, { k: 'x', t: 'hide / unhide' }, { k: '/', t: 'search' }, { k: 'g', t: 'graph' }, { k: 'esc', t: 'close', conversationText: 'Back to Map' },
   { k: 'Space', t: 'peek', conversationText: 'peek' }, { k: '⌘E', t: 'recent' },
 ];
 
@@ -216,58 +216,28 @@ export function footerKeysFor(conversation?: ConversationFooterState): readonly 
 }
 
 /** Body column widths in CSS pixels. The detail bounds match the saved `detail_width` bounds. */
-export const WAITING_WIDTH = 300, WAITING_FOLDED = 44, CENTRE_MIN = 560;
+export const CENTRE_MIN = 560;
 export const DETAIL_MIN = 320, DETAIL_MAX = 2400, DETAIL_DEFAULT = 400;
 const CENTRE_RESIZE_MIN = 380;
-
 export interface BodyLayoutInput {
-  /** The body's width; null before it is measured. */
   readonly width: number | null;
   readonly detail: boolean;
-  /** The owner's detail width; null for the default. */
   readonly detailWidth?: number | null;
-  /** The owner folded the Waiting column. */
-  readonly folded?: boolean;
-  /** The owner opened the Waiting column although the window is too narrow for it. */
-  readonly peek?: boolean;
 }
-
 export interface BodyLayout {
   readonly columns: string;
-  /** The Waiting column shows as a strip. */
-  readonly folded: boolean;
-  /** Folded only because the window is too narrow. */
-  readonly auto: boolean;
-  /** The window is too narrow for the open Waiting column. */
-  readonly narrow: boolean;
   readonly detailWidth: number;
-  /** The widest the detail panel can be without the body scrolling sideways. */
   readonly detailMax: number;
 }
-
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
-
-/**
- * Body grid: waiting | centre | [detail]. When the open columns do not fit, the Waiting
- * column folds to a strip and the detail panel narrows, so the body never scrolls sideways.
- */
-export function bodyLayout({ width, detail, detailWidth, folded = false, peek = false }: BodyLayoutInput): BodyLayout {
+/** Map | Details; the dock floats outside the grid. */
+export function bodyLayout({ width, detail, detailWidth }: BodyLayoutInput): BodyLayout {
   const room = width ?? Number.POSITIVE_INFINITY;
   const wanted = clamp(Math.round(detailWidth ?? DETAIL_DEFAULT), DETAIL_MIN, DETAIL_MAX);
-  const narrow = room < WAITING_WIDTH + CENTRE_MIN + (detail ? wanted : 0);
-  const strip = folded || (narrow && !peek);
-  const waiting = strip ? WAITING_FOLDED : WAITING_WIDTH;
-  // Opening Waiting can squeeze the centre; a detail pane shrinks first to keep the tree usable.
-  const peekMin = narrow && !strip ? detail ? CENTRE_RESIZE_MIN : 0 : CENTRE_MIN;
-  const resizeMin = detail ? CENTRE_RESIZE_MIN : peekMin;
-  const detailMax = clamp(Math.floor(room - waiting - resizeMin), DETAIL_MIN, DETAIL_MAX);
-  // Only an owner-widened panel can borrow from the centre's usual minimum.
-  const widened = detail && wanted > DETAIL_DEFAULT;
-  const shown = Math.min(wanted, widened ? detailMax : clamp(Math.floor(room - waiting - peekMin), DETAIL_MIN, DETAIL_MAX));
-  const centreMin = widened ? Math.min(CENTRE_MIN, Math.max(resizeMin, Math.floor(room - waiting - shown))) : peekMin;
-  const centre = `minmax(${centreMin ? `${centreMin}px` : '0'},1fr)`;
-  return { columns: `${waiting}px ${centre}${detail ? ` ${shown}px` : ''}`,
-    folded: strip, auto: strip && !folded, narrow, detailWidth: shown, detailMax };
+  const detailMax = clamp(Math.floor(room - CENTRE_RESIZE_MIN), DETAIL_MIN, DETAIL_MAX);
+  const shown = Math.min(wanted, detailMax);
+  const minimum = detail ? Math.min(CENTRE_MIN, Math.max(0, room - shown)) : 0;
+  return { columns: `minmax(${minimum}px,1fr)${detail ? ` ${shown}px` : ''}`, detailWidth: shown, detailMax };
 }
 
 export function themeToggle(theme: ShellTheme): { readonly icon: string; readonly title: string; readonly next: ShellTheme } {

@@ -55,7 +55,7 @@ it.each(['registered lookup', 'source capture', 'navigation capture'] as const)(
     expect(screen.getByRole('button', { name: 'Source item' })).toBe(sourceButton);
   }, 10_000);
 
-it.each(['waiting card', 'Back history'] as const)('reports an unavailable %s link without changing selection or leaving Opening', async caller => {
+it.each(['dock path', 'Back history'] as const)('reports an unavailable %s link without changing selection or leaving Opening', async caller => {
   const transport = new AppTransport();
   transport.preferences.global.selected_navigation = { kind: 'session', session: route };
   transport.preferences.sessions = [{ ...transport.view(), selected_item_id: '1' }];
@@ -76,11 +76,12 @@ it.each(['waiting card', 'Back history'] as const)('reports an unavailable %s li
   });
   if (caller === 'Back history') fireEvent.click(screen.getByLabelText('Back', { selector: 'button' }));
   else {
-    const card = await waitFor(() => {
-      const card = document.querySelector<HTMLElement>('[data-waiting-item="2"]');
-      expect(card).not.toBeNull(); return card!;
-    });
-    fireEvent.click(within(card).getByRole('button', { name: 'Details' }));
+    // The dock's last path segment opens its question in Details.
+    const dock = screen.getByRole('region', { name: 'Answer dock' });
+    fireEvent.click(await within(dock).findByRole('button', { name: /^\d+ (more )?waiting$/ }));
+    await waitFor(() => expect(dock.querySelector('.answer-dock-current [data-owner-input="2"]')).not.toBeNull());
+    const crumbs = dock.querySelectorAll<HTMLButtonElement>('.dock-path .dock-link');
+    fireEvent.click(crumbs[crumbs.length - 1]!);
   }
   await screen.findByText('This session could not be opened. Check that its project folder is available, then try again.');
   expect(screen.queryByText(/couldn’t read or save/)).toBeNull();

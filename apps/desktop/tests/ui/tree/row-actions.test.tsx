@@ -17,7 +17,7 @@ function itemProps(actions: readonly RowAction[]): ItemRowProps {
   return { row: { kind: 'item', key: item.id, item, status: 'open', ack: null, depth: 1, hasKids: false,
     expanded: false, context: false, guides: [], later: false, hidden: false, segments: [{ text: item.question, hit: false }],
     replacedBy: null, rounds: 3, relatedCount: 2, collapsed: null, delivery: null, badge: 'Open' },
-  selected: false, focused: true, note: null, actions, answer: null, unfolded: false,
+  selected: false, focused: true, note: null, actions, unfolded: false,
   onUnfold: vi.fn(), remember: vi.fn(), onFocus: vi.fn(), onKeyDown: vi.fn(), onSelect: vi.fn(),
   onToggle: vi.fn() };
 }

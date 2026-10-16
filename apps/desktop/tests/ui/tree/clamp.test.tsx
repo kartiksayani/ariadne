@@ -54,7 +54,7 @@ function mount(body: string, extra: Partial<ItemRowProps> = {}) {
     const [unfolded, setUnfolded] = useState(false);
     const epoch = useTreeFonts();
     return <ItemRefs.Provider value={{ lookup: id => { const value = extra.row?.replacedBy; return value?.id === id ? { label: value.question, name: shortLabel(value), status: value.status } : null; }, onOpenItem: openItem }}><TreeFonts.Provider value={epoch}><LinkOpener.Provider value={openLink}><ItemRow row={row} selected={false} focused={true} note={null}
-      actions={[]} answer={null} unfolded={unfolded} onUnfold={() => setUnfolded(value => !value)} remember={() => {}}
+      actions={[]} unfolded={unfolded} onUnfold={() => setUnfolded(value => !value)} remember={() => {}}
       onFocus={() => {}} onKeyDown={() => {}} onSelect={onSelect} onToggle={() => {}} {...extra} /></LinkOpener.Provider></TreeFonts.Provider></ItemRefs.Provider>;
   }
   const view = render(<Harness />);
@@ -129,16 +129,6 @@ describe('rendered preview lines', () => {
     expect(view.preview().style.getPropertyValue('--tree-clamp-height')).toBe('92px');
     view.unmount();
     expect(observers.every(observer => observer.targets.size === 0)).toBe(true);
-  });
-
-  it('keeps answer options and their complete text outside the folded body', () => {
-    geometry(() => Array.from({ length: 7 }, (_, index) => rectangle(100 + index * 21)));
-    const option = text(12);
-    const view = mount(text(7), { answer: <div className="answer-full"><button className="answer-option">{option}</button></div> });
-    expect(view.preview().hasAttribute('data-clamped')).toBe(true);
-    const answer = screen.getByRole('button', { name: /Line 12/ });
-    expect(answer.closest('.tree-preview')).toBeNull();
-    expect(answer.textContent).toBe(option);
   });
 
   it('observes natural content height when direct text scaling leaves the clipped box size unchanged', () => {

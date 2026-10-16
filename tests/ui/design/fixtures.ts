@@ -438,12 +438,51 @@ export class DesignTransport extends AppTransport {
   }
   override async invoke<T>(name: string, args: { request: OwnerQueryRequest | OwnerMutationRequest }): Promise<T> {
     const { request } = args;
-    if ('command' in request) return super.invoke(name, args);
+    if ('command' in request) return request.command.command === 'input_submit' ? this.submit(name, args) : super.invoke(name, args);
     assertOwnerWire(request);
     this.queries.push(structuredClone(request));
     // The loading frame: the session read never completes.
     if (request.request.command === 'session_get' && request.session?.session_id === this.hang?.session_id) return new Promise<T>(() => {});
     return { api_version: 1, ok: true, data: { kind: name, data: structuredClone(this.answer(request)) } } as T;
+  }
+  /** The session's running agent is connected and idle, not mid-turn (final frames: a new answer is sent, not queued behind it). */
+  idle(sessionId: string): void {
+    const presence = this.summaries.find(summary => summary.session_id === sessionId)?.active_binding?.presence;
+    if (presence) (presence as { execution_state: string }).execution_state = 'idle';
+  }
+  /**
+   * A Send in a frame (final 2.4). AppTransport copies the session's own queued input and owner message, which a
+   * frame's world may not have: it lends the demo's for the copy, then stamps the new input with this session's
+   * binding, the question's revision and the frame clock, so it reads "Sent at <now>".
+   */
+  private async submit<T>(name: string, args: { request: OwnerQueryRequest | OwnerMutationRequest }): Promise<T> {
+    const request = args.request as OwnerMutationRequest, session = this.sessions.get(request.session!.session_id)!;
+    const lentInput = Object.values(session.inputs).some(value => value?.state === 'queued') ? null
+      : { ...structuredClone(Object.values((demo as unknown as Session).inputs).find(value => value?.state === 'queued')!), id: 'design-lent-input' };
+    const lentMessage = session.messages.some(value => value.kind === 'owner_input') ? null
+      : { ...structuredClone((demo as unknown as Session).messages.find(value => value.kind === 'owner_input')!), id: 'design-lent-message', number: 0 };
+    if (lentInput) session.inputs[lentInput.id] = lentInput;
+    if (lentMessage) session.messages.push(lentMessage);
+    // The app reads the session only once the new input is stamped and the loans are gone: a read of the half-made
+    // copy would put the question back in the dock and end its Sent hold.
+    const emit = this.emit;
+    this.emit = () => {};
+    let result: { ok: boolean; data?: { data: { input_id: string } } };
+    try {
+      result = await super.invoke(name, args);
+    } finally {
+      this.emit = emit;
+      if (lentInput) delete session.inputs[lentInput.id];
+      if (lentMessage) session.messages.splice(session.messages.indexOf(lentMessage), 1);
+    }
+    const input = result.ok ? session.inputs[result.data!.data.input_id] : undefined;
+    const item = input?.target.item_id ? session.items[input.target.item_id] : undefined;
+    if (input) {
+      Object.assign(input, { state: 'queued', binding_id: session.active_binding_id, attempts: [], active_attempt_id: null, created_at: new Date(Date.now()).toISOString() });
+      if (item) input.payload.target_snapshot = { ...input.payload.target_snapshot, question_revision: item.question_revision, item_question: item.question };
+    }
+    this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+    return result as T;
   }
   private answer(request: OwnerQueryRequest): unknown {
     const query = request.request;

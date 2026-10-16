@@ -750,10 +750,10 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     {showAnswer && <section className="detail-section detail-answer" aria-label="Your answer">
       {model.answer && <PausedNote actions={actions} />}
       {/* While the follow-up box is open, it is the detail's one data-owner-input. */}
-      <AnswerSlot drafts={drafts} store={store} itemId={itemId} compactOptions={expanded} blocked={model.answer?.blocked} focusRequest={answerFocus}
-        prompt={expanded && answerState.live ? <div className="conversation-pin"><h3>Your turn · {relatedLabels.get(itemId)}</h3>
-          {/* Keyed by the item alone: an edit to the question text keeps an open full-question dialog (and its focus) mounted. */}
-          <ConversationQuestion key={itemId} text={item.ask || item.question} /></div> : undefined}
+      {expanded && answerState.live && <div className="conversation-pin"><h3>Your turn · {relatedLabels.get(itemId)}</h3>
+        {/* Keyed by the item alone: an edit to the question text keeps an open full-question dialog (and its focus) mounted. */}
+        <ConversationQuestion key={itemId} text={item.ask || item.question} /></div>}
+      <AnswerSlot drafts={drafts} store={store} itemId={itemId} layout={expanded ? 'wide' : 'details'} head blocked={model.answer?.blocked} focusRequest={answerFocus}
         marked={!owner}
         onFocusRequestConsumed={onFocusRequestConsumed} onEscape={() => focusRoot(itemId)} onAgentNotRunning={onAgentNotRunning} onSent={sentJustNow} />
     </section>}

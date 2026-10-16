@@ -4,6 +4,7 @@ import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { notices } from '../../../src/ui/pages/notices';
 import { AppTransport, route, secondId } from './transport';
+import { answerWords } from '../answer/words';
 
 afterEach(() => { cleanup(); notices.clear(); vi.restoreAllMocks(); });
 
@@ -11,7 +12,9 @@ const sends = (transport: AppTransport) => transport.mutations.filter(request =>
 const conversation = () => screen.getByRole('region', { name: 'Item conversation' });
 const detail = (id: string) => screen.getByLabelText(/^Detail of /, { selector: `[data-detail-item-id="${id}"]` });
 const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
-const card = (id: string, sessionId = route.session_id) => document.querySelector<HTMLElement>(`[data-waiting-item="${id}"][data-session-id="${sessionId}"]`)!;
+const dock = () => screen.getByRole('region', { name: 'Answer dock' });
+/** The dock's "N waiting" / "N more waiting" pill, while it is folded. */
+const pill = () => within(dock()).queryByRole('button', { name: /^\d+ (more )?waiting$/ });
 const selected = (transport: AppTransport) => transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id;
 const key = (target: Element, value: string, extra = {}) => fireEvent.keyDown(target, { key: value, ...extra });
 const alt = (target: Element, digit: number) => key(target, digit === 0 ? 'º' : '¡', { code: `Digit${digit}`, altKey: true });
@@ -77,8 +80,10 @@ async function setup({ otherSession = false, baseline = false, dropReady = false
   await waitFor(() => {
     expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
     expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
-    expect(within(detail('4')).getByLabelText<HTMLTextAreaElement>(coveredWaiting ? 'Reply in your own words' : 'Reply message').disabled).toBe(false);
-    expect(card('2')).not.toBeNull(); expect(card('8')).not.toBeNull();
+    if (coveredWaiting) expect(detail('4').querySelector<HTMLButtonElement>('[data-answer-own]')?.disabled).toBe(false);
+    else expect(within(detail('4')).getByLabelText<HTMLTextAreaElement>('Reply message').disabled).toBe(false);
+    // Questions 2 and 8 wait in the dock (4, when waiting, is the one Details answers).
+    expect(pill()?.textContent).toMatch(coveredWaiting ? /^2 more waiting$/ : /^2 waiting$/);
   });
   return transport;
 }
@@ -90,8 +95,23 @@ async function expand() {
   return button;
 }
 
+/** The dock at question `id`: opened from its pill, then paged. */
+async function dockAt(id: string) {
+  if (!dock().hasAttribute('data-open')) fireEvent.click(pill()!);
+  const at = () => dock().querySelector(`.answer-dock-current [data-owner-input="${id}"]`);
+  await waitFor(() => expect(dock().querySelector('.answer-dock-current')).not.toBeNull());
+  const previous = () => within(dock()).getByRole<HTMLButtonElement>('button', { name: 'Previous question' });
+  const next = () => within(dock()).getByRole<HTMLButtonElement>('button', { name: 'Next question' });
+  while (!at() && !previous().disabled) fireEvent.click(previous());
+  while (!at() && !next().disabled) fireEvent.click(next());
+  await waitFor(() => expect(at()).not.toBeNull());
+}
+
+/** Shows waiting question `id` in the conversation from the dock's path, as the Waiting card did: the Map selection stays. */
 async function switchQuestion(id = '2') {
-  fireEvent.click(card(id));
+  await dockAt(id);
+  const crumbs = dock().querySelectorAll<HTMLButtonElement>('.dock-path .dock-link');
+  fireEvent.click(crumbs[crumbs.length - 1]!);
   await waitFor(() => expect(conversation().querySelector('[data-detail-item-id]')?.getAttribute('data-detail-item-id')).toBe(id));
 }
 
@@ -188,7 +208,7 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     expect(conversation()).toBeTruthy();
   });
 
-  it('switches same-session Waiting items without selecting them, while Details closes and navigates', async () => {
+  it('switches the conversation between dock questions without selecting them; from the Map the path selects and opens Details', async () => {
     const transport = await setup(); await expand();
     const tree = screen.getByRole('region', { name: 'Session tree', hidden: true }), mapRow = row('4');
     const reveals = transport.queries.filter(query => query.request.command === 'reveal_item').length;
@@ -196,32 +216,41 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     expect(selected(transport)).toBe('4'); expect(row('4')).toBe(mapRow);
     expect(screen.getByRole('region', { name: 'Session tree', hidden: true })).toBe(tree);
     expect(transport.queries.filter(query => query.request.command === 'reveal_item')).toHaveLength(reveals);
-    fireEvent.click(within(card('2')).getByRole('button', { name: 'Details' }));
+    fireEvent.click(within(conversation()).getByRole('button', { name: 'Back to Map' }));
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Item conversation' })).toBeNull());
+    await dockAt('2');
+    const crumbs = dock().querySelectorAll<HTMLButtonElement>('.dock-path .dock-link');
+    expect(crumbs[crumbs.length - 1]!.title).toBe('Go to “Which delivery window?”');
+    fireEvent.click(crumbs[crumbs.length - 1]!);
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     await waitFor(() => expect(selected(transport)).toBe('2'));
   });
 
-  it('closes the conversation and navigates when a Waiting item belongs to another session', async () => {
+  it('answers another session’s question from the dock while the conversation stays open and nothing navigates', async () => {
     const transport = await setup({ otherSession: true }); await expand();
-    await waitFor(() => expect(card('2', secondId)).not.toBeNull());
-    fireEvent.click(card('2', secondId));
-    await waitFor(() => expect(screen.queryByRole('region', { name: 'Item conversation' })).toBeNull());
-    await waitFor(() => expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: { ...route, session_id: secondId } }));
-    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
+    fireEvent.click(await within(dock()).findByRole('button', { name: /in other sessions$/ }));
+    const list = within(dock()).getByRole('dialog', { name: 'Questions in other sessions' });
+    fireEvent.click(list.querySelector<HTMLElement>('.dock-other-head')!);
+    fireEvent.click(await within(list).findByRole('button', { name: /^Window 2/ }));
+    fireEvent.click(within(list).getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    expect(sends(transport)[0]).toMatchObject({ session: { ...route, session_id: secondId }, command: { params: { kind: 'answer', selected_option_id: 'choice-2' } } });
+    expect(conversation()).toBeTruthy();
+    expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
+    expect(selected(transport)).toBe('4');
   });
 
   it('keeps separate item drafts through Waiting switches and returning to the Map', async () => {
     const transport = await setup();
     fireEvent.change(within(detail('4')).getByLabelText('Reply message'), { target: { value: 'Map item draft' } });
     await expand(); await switchQuestion();
-    fireEvent.change(within(conversation()).getByLabelText('Reply in your own words'), { target: { value: 'First answer draft' } });
+    fireEvent.change(answerWords(conversation()), { target: { value: 'First answer draft' } });
     await switchQuestion('8');
-    fireEvent.change(within(conversation()).getByLabelText('Reply in your own words'), { target: { value: 'Second answer draft' } });
+    fireEvent.change(answerWords(conversation()), { target: { value: 'Second answer draft' } });
     await switchQuestion();
-    expect(within(conversation()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe('First answer draft');
+    expect(answerWords(conversation()).value).toBe('First answer draft');
     await switchQuestion('8');
-    expect(within(conversation()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe('Second answer draft');
+    expect(answerWords(conversation()).value).toBe('Second answer draft');
     key(conversation(), 'Escape');
     expect(within(detail('4')).getByLabelText<HTMLTextAreaElement>('Reply message').value).toBe('Map item draft');
     expect(selected(transport)).toBe('4'); expect(sends(transport)).toHaveLength(0);
@@ -239,7 +268,7 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     const transport = await setup({ coveredWaiting: true }); await expand(); await switchQuestion();
     key(conversation(), String(digit), { code: `Digit${digit}` });
     await waitFor(() => expect(conversation().querySelector(`[data-answer-option="${digit - 1}"]`)?.getAttribute('aria-pressed')).toBe('true'));
-    const words = within(conversation()).getByLabelText('Reply in your own words');
+    const words = answerWords(conversation());
     fireEvent.change(words, { target: { value: `Note for option ${digit}` } });
     conversation().focus(); alt(conversation(), digit);
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
@@ -252,7 +281,7 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     expect(conversation().querySelector('.conversation-pin')?.textContent).toContain('Your turn');
     expect(within(conversation()).queryByLabelText('Reply message')).toBeNull();
     alt(conversation(), 0);
-    const words = within(conversation()).getByLabelText('Reply in your own words');
+    const words = answerWords(conversation());
     await waitFor(() => expect(document.activeElement).toBe(words));
     fireEvent.change(words, { target: { value: 'Answer from the larger view' } });
     key(words, 'Enter', { metaKey: true });
@@ -263,30 +292,34 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     expect(selected(transport)).toBe('4');
   });
 
-  it('keeps the header, Waiting card and pin aligned before and after an owner reply', async () => {
+  it('keeps the header, the dock and the pin aligned before and after an owner reply', async () => {
     const transport = await setup(); await expand(); await switchQuestion();
+    fireEvent.click(within(dock()).getByRole('button', { name: 'Fold the dock' }));
     const header = () => conversation().querySelector('.conversation-header .status-badge')!;
     expect(header().textContent).toBe('Waiting on me');
-    expect(card('2')).toBeTruthy(); expect(conversation().querySelector('.conversation-pin')).toBeTruthy();
+    // The conversation answers 2, so the dock holds only 8.
+    expect(pill()?.textContent).toBe('1 more waiting'); expect(conversation().querySelector('.conversation-pin')).toBeTruthy();
     expect(document.querySelector('.shell-footer')?.textContent).toContain('⌥0focus own words');
     expect(document.querySelector('.shell-footer')?.textContent).not.toContain('hide / unhide');
-    const words = within(conversation()).getByLabelText('Reply in your own words');
+    const words = answerWords(conversation());
     fireEvent.change(words, { target: { value: 'This is my answer.' } });
     key(words, 'Enter', { metaKey: true });
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     await waitFor(() => {
-      expect(header().textContent).toBe('Waiting on agent');
-      expect(card('2')).toBeNull(); expect(conversation().querySelector('.conversation-pin')).toBeNull();
+      // Saved and not attempted yet: Queued, as core counts it, and "1 sent" in the dock until the agent picks it up.
+      expect(header().textContent).toBe('Queued');
+      expect(within(dock()).getByRole('button', { name: '1 sent, waiting for the agent' })).toBeTruthy();
+      expect(conversation().querySelector('.conversation-pin')).toBeNull();
     });
-    expect(row('2').querySelector('.status-badge')?.textContent).toBe('Waiting on agent');
+    expect(row('2').querySelector('.status-badge')?.textContent).toBe('Queued');
     expect(document.querySelector('.shell-footer')?.textContent).not.toContain('⌥0');
     expect(within(conversation()).getByLabelText('Reply message')).toBeTruthy();
   });
 
   it('keeps the view reply box docked and empty after each confirmed reply behind a held answer', async () => {
     const transport = await setup(); await expand(); await switchQuestion();
-    fireEvent.change(within(conversation()).getByLabelText('Reply in your own words'), { target: { value: 'Held answer' } });
-    key(within(conversation()).getByLabelText('Reply in your own words'), 'Enter', { metaKey: true });
+    fireEvent.change(answerWords(conversation()), { target: { value: 'Held answer' } });
+    key(answerWords(conversation()), 'Enter', { metaKey: true });
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     const box = () => within(conversation()).getByLabelText<HTMLTextAreaElement>('Reply message');
     await waitFor(() => expect(box().disabled).toBe(false));
@@ -308,8 +341,8 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
 
   it('shows the queued reply its stuck note in the view and in the pane after closing the view', async () => {
     const transport = await setup(); await expand(); await switchQuestion();
-    fireEvent.change(within(conversation()).getByLabelText('Reply in your own words'), { target: { value: 'Held answer' } });
-    key(within(conversation()).getByLabelText('Reply in your own words'), 'Enter', { metaKey: true });
+    fireEvent.change(answerWords(conversation()), { target: { value: 'Held answer' } });
+    key(answerWords(conversation()), 'Enter', { metaKey: true });
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     const box = () => within(conversation()).getByLabelText<HTMLTextAreaElement>('Reply message');
     await waitFor(() => expect(box().disabled).toBe(false));
@@ -337,8 +370,8 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
 
   it('keeps the view reply text when its save is not confirmed', async () => {
     const transport = await setup(); await expand(); await switchQuestion();
-    fireEvent.change(within(conversation()).getByLabelText('Reply in your own words'), { target: { value: 'Held answer' } });
-    key(within(conversation()).getByLabelText('Reply in your own words'), 'Enter', { metaKey: true });
+    fireEvent.change(answerWords(conversation()), { target: { value: 'Held answer' } });
+    key(answerWords(conversation()), 'Enter', { metaKey: true });
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     const box = () => within(conversation()).getByLabelText<HTMLTextAreaElement>('Reply message');
     await waitFor(() => expect(box().disabled).toBe(false));
@@ -368,9 +401,11 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
 
   it('retries an uncertain answer with the identical operation and message', async () => {
     const transport = await setup({ coveredWaiting: true }); await expand(); await switchQuestion();
-    const words = within(conversation()).getByLabelText('Reply in your own words');
+    const words = answerWords(conversation());
     fireEvent.change(words, { target: { value: 'Keep exact retry words: café\nsecond line' } });
     transport.failNext = 'input_submit'; key(words, 'Enter', { metaKey: true });
+    // An unknown result: Check delivery reads the session and sends nothing; not found, Try sending again repeats the exact operation.
+    fireEvent.click(await within(conversation()).findByRole('button', { name: 'Check delivery' }));
     const retry = await within(conversation()).findByRole('button', { name: 'Try sending again' });
     expect(sends(transport)).toHaveLength(1);
     const attempted = structuredClone(sends(transport)[0]);
@@ -398,7 +433,7 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
 
   it.each(['Command Enter', 'Option digit'])('sends only once during a held %s burst', async shortcut => {
     const transport = await setup(); await expand(); await switchQuestion();
-    const words = within(conversation()).getByLabelText('Reply in your own words');
+    const words = answerWords(conversation());
     fireEvent.change(words, { target: { value: 'Exactly one answer' } });
     const invoke = transport.invoke.bind(transport);
     let release!: () => void, requested = 0;
@@ -490,7 +525,7 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
   it('sends quick replies only to the view while the covered waiting question gets no send', async () => {
     const transport = await setup({ coveredWaiting: true }); await expand(); await switchQuestion();
     fireEvent.click(conversation().querySelector('[data-answer-option="1"]')!);
-    fireEvent.click(within(conversation()).getByRole('button', { name: 'Send “Window 2”' }));
+    fireEvent.click(within(conversation().querySelector<HTMLElement>('.answer')!).getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     expect(sends(transport)[0].command).toMatchObject({ params: { kind: 'answer', target: { item_id: '2' }, selected_option_id: 'choice-2' } });
     expect(selected(transport)).toBe('4');
@@ -514,7 +549,9 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     expect(within(detail('4')).getByRole('group', { name: 'Answer' })).toBeTruthy();
     await expand(); await switchQuestion();
     expect(document.querySelector('.shell-detail [data-owner-input]')).toBeNull();
-    expect(document.querySelector('[data-waiting-item="4"] [data-answer-option]')).toBeNull();
+    // The dock lists the covered question 4 but no one opened it there.
+    fireEvent.click(within(dock()).getByRole('button', { name: 'Fold the dock' }));
+    expect(dock().querySelector('[data-owner-input="4"]')).toBeNull();
     const cancelled = conversation().querySelector('[data-message-id="cancelled-message-2"]')!;
     fireEvent.click(within(cancelled as HTMLElement).getByRole('button', { name: 'Put back in reply box' }));
     await waitFor(() => expect(transport.preferences.drafts).toContainEqual(expect.objectContaining({ text: 'Kept words for 2', target: expect.objectContaining({ item_id: '2' }) })));

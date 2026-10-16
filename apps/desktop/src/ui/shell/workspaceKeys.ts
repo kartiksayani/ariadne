@@ -58,12 +58,6 @@ export function workspaceKeys(app: {
     later: onItem(({ item, target }) => !app.closeConversation && app.toggleLater(target, item.id)),
     archive: onItem(({ item }) => !app.closeConversation && app.archiveTopic(item.topic_id)),
     graph: () => { if (!app.store || app.closeConversation) return false; app.toggleGraph(); return true; },
-    // The Waiting column's own fold button owns the fold (saved layout, narrow-window peek); the key presses it.
-    waiting: () => {
-      const control = document.querySelector<HTMLButtonElement>('[data-shortcut-waiting-fold]');
-      if (!control || control.disabled) return false;
-      control.click(); return true;
-    },
     // ⌫/Delete away from a row: ask to remove the focused or selected item (rows handle their own).
     remove: onItem(({ target }) => !app.closeConversation && app.askRemove({ kind: 'item', item: target })),
   };

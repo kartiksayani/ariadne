@@ -6,6 +6,7 @@ import { AppTransport, route, secondId } from './transport';
 import { goToSession } from './open';
 import sessionsFixture from '../../../../../fixtures/domain/projections/sessions.json';
 import type { PresenceObservation } from '../../../src/generated/domain/models';
+import { answerWords } from '../answer/words';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const sends = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'input_submit');
@@ -14,6 +15,13 @@ const detail = () => screen.getByLabelText(/^Detail of /, { selector: '[data-det
 const alt = (target: Element, digit: number, repeat = false) => fireEvent.keyDown(target, {
   key: digit === 1 ? '¡' : digit === 0 ? 'º' : '™', code: `Digit${digit}`, altKey: true, repeat,
 });
+/** Details' answer cards take input: "Write my own answer" is enabled (a send or save in progress disables it). */
+const answerReady = () => {
+  const own = detail().querySelector<HTMLButtonElement>('[data-answer-own]');
+  expect(own && !own.disabled).toBe(true);
+};
+/** Details' words box: the picked card's note, else "Write my own answer". */
+const words = () => answerWords(detail());
 
 function setup(options = 9, connection: 'connected' | 'disconnected' | 'reconnecting' = 'connected') {
   const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
@@ -36,7 +44,7 @@ async function openQuestion() {
     });
   fireEvent.click(row());
   await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
-  await waitFor(() => expect(within(detail()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').disabled).toBe(false));
+  await waitFor(answerReady);
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
       expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
@@ -53,12 +61,11 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
     } } });
   });
 
-  it.each(['tree', 'waiting', 'detail'] as const)('keeps the typed note when sending from the %s', async entry => {
+  it.each(['tree', 'detail'] as const)('keeps the typed note when sending from the %s', async entry => {
     const transport = setup(); await openQuestion();
     const note = 'Keep these exact words: café\nsecond line';
-    fireEvent.change(within(detail()).getByLabelText('Reply in your own words'), { target: { value: note } });
-    const target = entry === 'tree' ? row() : entry === 'waiting'
-      ? document.querySelector<HTMLElement>('[data-waiting-item="2"]')! : detail();
+    fireEvent.change(words(), { target: { value: note } });
+    const target = entry === 'tree' ? row() : detail();
     target.focus(); alt(target, 2);
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     expect(sends(transport)[0].command).toMatchObject({ params: { selected_option_id: 'choice-2', text: note } });
@@ -71,15 +78,19 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
     expect(within(detail()).getByRole('button', { name: 'Cancel message' })).toBeTruthy();
   });
 
-  it.each(['Send answer', 'Enter on an option'] as const)('keeps a detail note when sending from the Waiting card with %s', async action => {
+  it.each(['Send', 'Enter on an option'] as const)('keeps a Details note when the dock sends the question with %s after Details closes', async action => {
     const transport = setup(2); await openQuestion();
     const note = ' Keep my exact note: café\nsecond line ';
-    fireEvent.change(within(detail()).getByLabelText('Reply in your own words'), { target: { value: note } });
-    const card = document.querySelector<HTMLElement>('[data-waiting-item="2"]')!;
-    const choice = within(card).getByTitle('Press 2 to select, ⌥2 to send with your note');
-    if (action === 'Send answer') {
+    fireEvent.change(words(), { target: { value: note } });
+    // Details holds the question, so the dock leaves it out; closing Details hands it to the dock with the same draft.
+    fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
+    const dock = screen.getByRole('region', { name: 'Answer dock' });
+    fireEvent.click(await within(dock).findByRole('button', { name: /^1 waiting$/ }));
+    await waitFor(() => expect(answerWords(dock).value).toBe(note));
+    const choice = dock.querySelector<HTMLElement>('[data-answer-option="1"]')!;
+    if (action === 'Send') {
       fireEvent.click(choice);
-      fireEvent.click(within(card).getByRole('button', { name: 'Send answer' }));
+      fireEvent.click(within(dock).getByRole('button', { name: 'Send' }));
     } else {
       choice.focus(); fireEvent.keyDown(choice, { key: 'Enter' });
     }
@@ -114,31 +125,31 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
 
   it('leaves Option characters to text fields and does nothing for a missing option', async () => {
     const transport = setup(2); await openQuestion();
-    const words = within(detail()).getByLabelText<HTMLTextAreaElement>('Reply in your own words');
-    words.focus(); fireEvent.change(words, { target: { value: 'Already typed' } });
-    alt(words, 1); alt(words, 0);
+    const box = words();
+    box.focus(); fireEvent.change(box, { target: { value: 'Already typed' } });
+    alt(box, 1); alt(box, 0);
     const search = document.querySelector<HTMLInputElement>('[data-shell-search]')!;
     search.focus(); alt(search, 1); alt(search, 0);
     row().focus(); alt(row(), 9);
     await act(async () => { await Promise.resolve(); });
     expect(sends(transport)).toHaveLength(0);
-    expect(words.value).toBe('Already typed');
+    expect(box.value).toBe('Already typed');
   });
 
   it('offers the same not-running dialog for a disconnected shortcut as a click, and Cancel keeps the note', async () => {
     const transport = setup(2, 'disconnected'); await openQuestion();
     const note = 'Keep this while I decide.';
-    fireEvent.change(within(detail()).getByLabelText('Reply in your own words'), { target: { value: note } });
+    fireEvent.change(words(), { target: { value: note } });
     row().focus(); alt(row(), 2);
     const dialog = await screen.findByRole('dialog', { name: /isn’t running for this session/ });
-    expect(within(dialog).getByRole('button', { name: /Queue it for/ })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: /^Queue it/ })).toBeTruthy();
     expect(sends(transport)).toHaveLength(0);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(within(detail()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe(note);
+    expect(words().value).toBe(note);
     row().focus(); alt(row(), 2);
     const queued = await screen.findByRole('dialog', { name: /isn’t running for this session/ });
-    fireEvent.click(within(queued).getByRole('button', { name: /Queue it for/ }));
+    fireEvent.click(within(queued).getByRole('button', { name: /^Queue it/ }));
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     expect(sends(transport)[0].command).toMatchObject({ params: { selected_option_id: 'choice-2', text: note } });
   });
@@ -180,7 +191,7 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
     expect(await within(detail()).findByRole('alert')).toHaveProperty('textContent', "Ariadne is still loading this session's latest changes. Try again.");
     expect(sends(transport)).toHaveLength(0);
     await act(async () => { release(); });
-    await waitFor(() => expect(within(detail()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').disabled).toBe(false));
+    await waitFor(answerReady);
     expect(sends(transport)).toHaveLength(0);
     row().focus(); alt(row(), 1);
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
@@ -202,7 +213,7 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
     expect(await screen.findByText("Ariadne is still loading this session's latest changes. Try again.")).toBeTruthy();
     expect(sends(transport)).toHaveLength(0);
     await act(async () => { release(); });
-    await waitFor(() => expect(within(detail()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').disabled).toBe(false));
+    await waitFor(answerReady);
     expect(sends(transport)).toHaveLength(0);
     row().focus(); alt(row(), 1);
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
@@ -211,7 +222,7 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
   it('shows feedback for a question changed before the shortcut, then sends once after review', async () => {
     const transport = setup(2); await openQuestion();
     const note = 'Keep my note while I review the changed question.';
-    fireEvent.change(within(detail()).getByLabelText('Reply in your own words'), { target: { value: note } });
+    fireEvent.change(words(), { target: { value: note } });
     const session = transport.sessions.get(route.session_id)!, item = session.items['2']!;
     ++item.revision; ++item.question_revision; ++session.revision;
     session.rounds[item.current_round_id!]!.question_revision = item.question_revision;
@@ -220,7 +231,7 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
     row().focus(); alt(row(), 1);
     await within(detail()).findByText('This item changed. Review it before sending. Your note is kept.');
     expect(sends(transport)).toHaveLength(0);
-    expect(within(detail()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe(note);
+    expect(words().value).toBe(note);
     fireEvent.click(within(detail()).getByRole('button', { name: 'Review this question' }));
     await waitFor(() => expect(within(detail()).queryByText('This item changed. Review it before sending. Your note is kept.')).toBeNull());
     row().focus(); alt(row(), 1);
@@ -231,7 +242,7 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
   it.each(['options reorder', 'question revision'] as const)('keeps the note and refuses a send after %s changes during reveal', async change => {
     const transport = setup(2); await openQuestion();
     const note = 'Keep my note even if the question changes.';
-    fireEvent.change(within(detail()).getByLabelText('Reply in your own words'), { target: { value: note } });
+    fireEvent.change(words(), { target: { value: note } });
     const invoke = transport.invoke.bind(transport);
     let release!: () => void, entered = false;
     const gate = new Promise<void>(resolve => { release = resolve; });
@@ -255,7 +266,7 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
       });
     expect((await within(detail()).findByText('This item changed. Review it before sending. Your note is kept.')).getAttribute('role')).toBe('alert');
     expect(sends(transport)).toHaveLength(0);
-    expect(within(detail()).getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe(note);
+    expect(words().value).toBe(note);
     if (change === 'question revision') {
       fireEvent.click(within(detail()).getByRole('button', { name: 'Review this question' }));
       await waitFor(() => expect(within(detail()).queryByText('This item changed. Review it before sending. Your note is kept.')).toBeNull());
@@ -265,27 +276,30 @@ describe('quick owner answers from the desktop', { timeout: 10_000 }, () => {
     expect(sends(transport)[0].command).toMatchObject({ params: { selected_option_id: change === 'options reorder' ? 'choice-2' : 'choice-1', text: note } });
   });
 
-  it.each(['tree', 'waiting', 'detail'] as const)('Option 0 opens the answer and focuses own words from the %s', async entry => {
+  it.each(['tree', 'detail'] as const)('Option 0 opens the answer and focuses own words from the %s', async entry => {
     const transport = setup(); await openQuestion();
     if (entry === 'tree') fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
-    const target = entry === 'tree' ? row() : entry === 'waiting'
-      ? document.querySelector<HTMLElement>('[data-waiting-item="2"]')! : detail();
+    const target = entry === 'tree' ? row() : detail();
     target.focus(); alt(target, 0);
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     await waitFor(() => expect(document.activeElement).toBe(within(detail()).getByLabelText('Reply in your own words')));
     expect(sends(transport)).toHaveLength(0);
   });
 
-  it('answers a focused Waiting card from another session instead of the selected tree item', async () => {
+  it('answers another session’s question from the dock’s list instead of the selected tree item', async () => {
     const transport = setup(), first = transport.sessions.get(route.session_id)!;
     const other = structuredClone(first); other.id = secondId; other.title = 'Other questions';
     transport.sessions.set(secondId, other);
     await openQuestion();
-    const cards = [...document.querySelectorAll<HTMLElement>('[data-waiting-item="2"]')];
-    expect(cards).toHaveLength(2);
-    const target = cards.find(card => card.getAttribute('aria-current') !== 'true')!;
-    alt(target, 2);
+    const dock = screen.getByRole('region', { name: 'Answer dock' });
+    fireEvent.click(await within(dock).findByRole('button', { name: /in other sessions$/ }));
+    const list = within(dock).getByRole('dialog', { name: 'Questions in other sessions' });
+    fireEvent.click(list.querySelector<HTMLElement>('.dock-other-head')!);
+    fireEvent.click(await within(list).findByRole('button', { name: /^Window 2/ }));
+    fireEvent.click(within(list).getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     expect(sends(transport)[0]).toMatchObject({ session: { ...route, session_id: secondId }, command: { params: { selected_option_id: 'choice-2' } } });
+    // The Map keeps its selection in this session.
+    expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
   });
 });

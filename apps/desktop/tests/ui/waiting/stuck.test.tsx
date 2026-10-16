@@ -193,17 +193,17 @@ describe('a message taken back to edit', () => {
   });
 });
 
-describe('Waiting on agent', () => {
+describe('Sent and Queued replies', () => {
   it('reads Waiting on me until the owner replies to the current question', () => {
     const session = seed();
     expect(ownerReplied(immutable(session), immutable(session.items['2']!))).toBe(false);
     expect(displayStatus(immutable(session), immutable(session.items['2']!))).toBe('waiting_on_me');
   });
   // The same cases are pinned in Rust (crates/ariadne-core/src/queries/counts.rs) so every count agrees.
-  it.each(['answer', 'reply', 'note', 'drop'] as const)('a queued or in-flight %s to the current question makes it Waiting on agent', kind => {
+  it.each(['answer', 'reply', 'note', 'drop'] as const)('an unattempted queued or in-flight %s stays Queued', kind => {
     for (const state of ['queued', 'in_flight'] as const) {
       const session = seed(); reply(session, state).kind = kind;
-      expect(displayStatus(immutable(session), immutable(session.items['2']!))).toBe('waiting_on_agent');
+      expect(displayStatus(immutable(session), immutable(session.items['2']!))).toBe('queued');
     }
   });
   it.each(['needs_attention', 'cancelled', 'skipped'] as const)('a %s reply still waits on the owner', state => {
@@ -218,7 +218,7 @@ describe('Waiting on agent', () => {
     input.state = 'queued'; input.answer_id = id('89');
     session.answers.push({ ...session.answers[0], id: id('90'), item_id: '2', input_id: id('92'), question_revision: 1, supersedes_answer_id: id('89') });
     // answer 89 is superseded by 90, whose input is unknown to the session: answer 90 stands.
-    expect(displayStatus(immutable(session), immutable(session.items['2']!))).toBe('waiting_on_agent');
+    expect(displayStatus(immutable(session), immutable(session.items['2']!))).toBe('sent');
     session.inputs[id('92')] = { ...input, id: id('92'), state: 'cancelled', answer_id: id('90') };
     expect(displayStatus(immutable(session), immutable(session.items['2']!))).toBe('waiting_on_me');
   });
@@ -228,10 +228,10 @@ describe('Waiting on agent', () => {
     const cancelled = seed(); reply(cancelled, 'cancelled');
     expect(displayStatus(immutable(cancelled), immutable(cancelled.items['2']!))).toBe('waiting_on_me');
   });
-  it('a standing answer to the current question waits on the agent until it acts', () => {
+  it('a standing answer to the current question stays Sent until the item advances', () => {
     const session = seed(), input = reply(session, 'handled');
     session.answers.push({ ...session.answers[0], id: id('89'), item_id: '2', input_id: input.id, question_revision: 1, supersedes_answer_id: null });
-    expect(displayStatus(immutable(session), immutable(session.items['2']!))).toBe('waiting_on_agent');
+    expect(displayStatus(immutable(session), immutable(session.items['2']!))).toBe('sent');
     // The agent asks again (a new question revision): the owner's turn again.
     session.items['2']!.question_revision = 2;
     expect(displayStatus(immutable(session), immutable(session.items['2']!))).toBe('waiting_on_me');
@@ -355,11 +355,11 @@ describe('stuck inputs explain themselves', () => {
     session.bindings[id('95')] = { ...structuredClone(old), id: id('95'), generation: id('96') };
     session.active_binding_id = id('95');
     const moved = reply(session, 'queued'); moved.binding_id = id('95');
-    expect(displayStatus(immutable(session), immutable(session.items['2']!))).toBe('waiting_on_agent');
+    expect(displayStatus(immutable(session), immutable(session.items['2']!))).toBe('queued');
     expect(stuckInput(immutable(session), immutable(moved))).toMatchObject({ kind: 'waiting', text: 'demo.local hasn’t picked it up yet' });
-    // The detail tracker finds the moved message by its item, not its binding, and the item still reads Waiting on agent.
+    // The detail tracker follows the moved message and its unattempted Queued status.
     const detail = detailModel({ session: immutable(session), itemId: '2', now: Date.parse('2026-10-03T12:00:00.000Z'), mode: null, later: false, saving: null });
-    expect(detail?.display).toBe('agent');
+    expect(detail?.display).toBe('queued');
     expect(pendingInChat(detail).at(-1)?.input.id).toBe(moved.id);
     // Paused on the new binding: the moved message says so.
     session.bindings[id('95')]!.owner_paused = true;

@@ -16,6 +16,7 @@ import { ActionFailure } from '../../components/edge-states/EdgeState';
 import { attestIdle, RecoveryReview, resolveCommand } from '../../components/recovery/RecoveryPanel';
 import { agentReceived, awaitingAnswer, keepsLateAnswer, skipWithoutIdle, stoppedAttempt, type Stuck } from '../../selectors/waiting/stuck';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
+import { agentName } from '../shell/model';
 import { ALREADY_SENT, editable, NOT_TAKEN_BACK, TAKEN_BACK_NOT_LOADED, type ReviewOutcome } from './held';
 import '../../components/bindings/controls.css';
 
@@ -27,6 +28,8 @@ export interface StuckNoteProps {
   readonly onEdit?: () => Promise<ReviewOutcome>;
   /** Queued cards use small Edit/Delete icons on their bottom line. */
   readonly compactActions?: boolean;
+  /** An answer bar above already says why and carries the Retry (`useStuckRetry`): the note keeps its other actions. */
+  readonly retryInBar?: boolean;
 }
 
 /** What Edit ("Review and send again") says when it could not simply move the message. */
@@ -50,7 +53,38 @@ export function ReviewResult({ outcome }: { readonly outcome: ReviewOutcome }) {
   </div>;
 }
 
-export function StuckNote({ actions, input, stuck, onEdit, compactActions = false }: StuckNoteProps) {
+/** The Retry of a stopped delivery the agent never received, for an answer bar: one `resend` of the same input. */
+export interface StuckRetry {
+  readonly run: () => void;
+  readonly disabled: boolean;
+  readonly title: string;
+  /** This Retry wrote: a failure of that write is the caller's to show (`ActionFailure`). */
+  readonly acted: boolean;
+}
+
+/** StuckNote's Retry, lifted out so an answer bar can carry it; null when the stuck input offers no Retry. */
+export function useStuckRetry(actions: SessionActions, input: Immutable<Input> | null, stuck: Stuck | null): StuckRetry | null {
+  const state = useSession(actions.session), operation = useSessionActions(actions);
+  const [acted, setActed] = useState(false);
+  const session = state.snapshot?.session;
+  const attempt = input ? stoppedAttempt(input) : null;
+  const binding = input ? session?.bindings[input.binding_id] : undefined;
+  if (!input || !session || !binding || !attempt || !stuck?.retry || agentReceived(input.attempts.find(value => value.id === input.active_attempt_id))) return null;
+  const presence = qualifiedPresence(binding, state.presence[binding.id]);
+  const agent = agentName(binding.adapter_id);
+  const busy = state.status !== 'ready' || !!state.error || operation.writing || !!operation.pending;
+  const working = presence?.busy ? `${agent} is still working. Wait, or stop it in the terminal first.` : null;
+  return { acted, disabled: busy || !!working,
+    title: working ?? (presence?.idle ? 'Send again ( ↵ )' : `Send again ( ↵ ). Use this only if ${agent} isn’t working on it now.`),
+    run: () => {
+      if (busy || working) return;
+      setActed(true);
+      void actions.execute(resolveCommand({ input_id: input.id, attempt_id: attempt.id, expected_revision: session.revision,
+        decision: 'resend', reason: '', evidence: presence?.idle ? null : attestIdle() }), session.revision);
+    } };
+}
+
+export function StuckNote({ actions, input, stuck, onEdit, compactActions = false, retryInBar = false }: StuckNoteProps) {
   const state = useSession(actions.session), operation = useSessionActions(actions), dispatch = useDispatch(actions);
   /** This note wrote last: a failure of that write shows here. */
   const [acted, setActed] = useState(false);
@@ -92,10 +126,12 @@ export function StuckNote({ actions, input, stuck, onEdit, compactActions = fals
   // Before receipt the owner can cancel; queued messages can also be edited or deleted.
   const unsent = input.state === 'queued', canEdit = unsent && !!onEdit && editable(input.kind);
   const icons = compactActions && unsent;
+  // The bar above says why and offers Retry; the note keeps the rest.
+  const barred = retryInBar && stuck.retry && !received;
   return <div className="stuck-note" data-stuck={stuck.kind} data-stuck-input={input.id}>
-    {!onItsWay && <i className={stuck.kind === 'paused' ? 'ph ph-pause-circle' : stuck.kind === 'decision' || stuck.kind === 'blocked' || stuck.kind === 'held'
+    {!onItsWay && !barred && <i className={stuck.kind === 'paused' ? 'ph ph-pause-circle' : stuck.kind === 'decision' || stuck.kind === 'blocked' || stuck.kind === 'held'
       ? 'ph ph-warning-circle' : 'ph ph-hourglass-medium'} aria-hidden="true" />}
-    {!onItsWay && <span role="status">{stuck.text}</span>}
+    {!onItsWay && !barred && <span role="status">{stuck.text}</span>}
     <span className={`stuck-actions${icons ? ' stuck-actions-compact' : ''}`}>
       {canEdit && <button type="button" className={icons ? 'btn btn-ghost btn-icon' : stuck.kind === 'held' ? 'btn btn-secondary dispatch-action' : 'btn btn-ghost dispatch-action'}
         disabled={busy || review.running} aria-label={icons ? 'Edit message' : undefined} title={icons ? 'Edit message' : 'Put it back in your editor to change it; it won’t be sent until you send it again'}
@@ -108,7 +144,7 @@ export function StuckNote({ actions, input, stuck, onEdit, compactActions = fals
       {repair && <button type="button" className="btn btn-secondary dispatch-action" disabled={busy || !!working}
         title={`Asks ${agent} to save its answer now. An answer it’s still working on won’t be linked to this message.`}
         onClick={quiet(() => resolve('request_result_repair'))}>Ask for the answer</button>}
-      {stuck.retry && <button type="button" className={`btn ${waiting ? 'btn-ghost' : received ? 'btn-primary' : 'btn-secondary'} dispatch-action`} disabled={busy || !!working}
+      {stuck.retry && !barred && <button type="button" className={`btn ${waiting ? 'btn-ghost' : received ? 'btn-primary' : 'btn-secondary'} dispatch-action`} disabled={busy || !!working}
         title={working ?? (presence?.idle ? 'Send it again' : `Send it again. Use this only if ${agent} isn’t working on it now.`)}
         onClick={quiet(() => { if (received && attempt) setResending(attempt.id); else resolve('resend'); })}>{received ? 'Send again' : 'Retry'}</button>}
       {!waiting && stuck.settle === 'skip' && <button type="button" className="btn btn-secondary dispatch-action" disabled={busy || !stopWithoutIdle && !!working}

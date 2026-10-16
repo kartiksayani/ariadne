@@ -6,7 +6,8 @@ import type { OwnerDraftStore } from '../../state/drafts/store';
 import { displayStatus, ownerReplied } from '../../selectors/waiting/replied';
 import { itemRemoved } from '../../selectors/removed';
 import { sessionAnswerBlocked } from '../../selectors/sessionClosed';
-import { useSubmit, type PendingSubmission } from '../answer/useSubmit';
+import type { PendingSubmission } from '../answer/useSubmit';
+import { AnswerSlot } from '../detail/AnswerSlot';
 import { FileRefProject, ItemRefs, Markdown } from '../shared/MarkdownText';
 import { StatusBadge } from '../shared/StatusBadge';
 import { statusKey } from '../shared/status';
@@ -174,7 +175,7 @@ function PeekCard({ shown, drafts, card, allowAnswer, onClose, onGoTo, onAgentNo
       <div className="peek-tags"><span>{item.type}</span><StatusBadge status={statusKey[displayStatus(session, item)]} /></div>
       <Markdown className="peek-summary" text={item.outcome || item.ask || item.why || 'No summary yet.'} compact />
       {allowAnswer && item.status === 'waiting_on_me' && !ownerReplied(session, item) && session.state === 'active' && session.archived_at == null
-        ? <PeekAnswer drafts={drafts} store={shown.store} itemId={item.id} onAgentNotRunning={onAgentNotRunning} onAnswered={onAnswered} onGoTo={onGoTo} />
+        ? <PeekAnswer drafts={drafts} store={shown.store} itemId={item.id} words={item.options.length === 0} onAgentNotRunning={onAgentNotRunning} onAnswered={onAnswered} onGoTo={onGoTo} />
         : item.status === 'waiting_on_me' && !ownerReplied(session, item) && session.state !== 'active' && <p className="peek-hint">{sessionAnswerBlocked(session)}</p>}
       <div className="peek-footer"><button type="button" className="btn btn-secondary" onClick={() => {
         void copyText(`${item.id} — ${item.question}`).then(() => { setCopied(true); setCopyFailed(false); }, () => setCopyFailed(true));
@@ -184,41 +185,15 @@ function PeekCard({ shown, drafts, card, allowAnswer, onClose, onGoTo, onAgentNo
   </div>;
 }
 
-function PeekAnswer({ drafts, store, itemId, onAgentNotRunning, onAnswered, onGoTo }: {
-  readonly drafts: OwnerDraftStore; readonly store: SessionStore; readonly itemId: string;
+/** The peek answers with option cards and Send only; a question that wants words is answered in Details. */
+function PeekAnswer({ drafts, store, itemId, words, onAgentNotRunning, onAnswered, onGoTo }: {
+  readonly drafts: OwnerDraftStore; readonly store: SessionStore; readonly itemId: string; readonly words: boolean;
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void; readonly onAnswered: () => void; readonly onGoTo: () => void;
 }) {
-  const state = useSession(store), session = state.snapshot?.session, item = session?.items[itemId];
-  const submit = useSubmit({ drafts, session, current: state.status === 'ready' && !state.error, itemId, intent: 'answer', onAgentNotRunning,
-    onSaved: () => { onAnswered(); void store.refresh(); }, presence: session?.active_binding_id ? state.presence[session.active_binding_id] ?? null : null });
-  const receipt = submit.entry?.receipt?.data.kind === 'input_submit' ? session?.inputs[submit.entry.receipt.data.input_id] : undefined;
-  const oldRound = receipt && receipt.payload.context.round_id !== item?.current_round_id ? submit.entry!.draft.op_id : null;
-  const { another } = submit;
-  useEffect(() => { if (oldRound) another(); }, [oldRound]);
-  const text = submit.entry?.draft.text ?? '', multiline = /[\r\n]/.test(text);
-  const disabled = submit.locked || submit.changed || !!submit.blocked || !!submit.entry?.receipt;
-  if (!item) return null;
   return <section className="peek-answer" aria-label="Answer question">
-    <div className="peek-options">{item.options.map(option => <div key={option.id} className="peek-option">
-      <button type="button" className="peek-option-pick" disabled={disabled || multiline}
-        aria-pressed={submit.entry?.draft.selected_option_id === option.id} onClick={() => submit.sendOption(option.id)}>
-        {option.label}{option.recommended && <>{' '}<small>Recommended</small></>}
-      </button>{option.consequence && <Markdown text={option.consequence} compact />}
-    </div>)}</div>
-    {multiline ? <p className="peek-hint">Your longer draft is saved. Open details to finish it.</p> : <form className="peek-reply" onSubmit={event => { event.preventDefault(); if (!disabled) submit.sendText(text); }}>
-      <input type="text" className="input" aria-label="One-line answer" placeholder="Reply in your own words…" value={text} disabled={submit.locked || !!submit.entry?.receipt}
-        onChange={event => submit.write(event.currentTarget.value)} onPaste={event => {
-          const pasted = event.clipboardData.getData('text');
-          if (!/[\r\n]/.test(pasted)) return;
-          event.preventDefault();
-          const input = event.currentTarget, start = input.selectionStart ?? text.length, end = input.selectionEnd ?? start;
-          submit.write(`${text.slice(0, start)}${pasted}${text.slice(end)}`);
-        }} />
-      <button type="submit" className="btn btn-secondary" disabled={disabled || !text.trim()}>Send</button>
-    </form>}
-    {submit.changed && <p className="peek-hint">This question changed. Review it in details; your draft is kept.</p>}
-    {submit.blocked && <p className="peek-hint">{submit.blocked}</p>}
-    {submit.error && <p className="peek-error" role="alert">{submit.error}</p>}
+    {words ? <p className="peek-hint">This question wants your own words. Answer it in Details.</p>
+      : <AnswerSlot drafts={drafts} store={store} itemId={itemId} layout="compact" head onAgentNotRunning={onAgentNotRunning}
+        onEscape={() => {}} onSent={() => { onAnswered(); void store.refresh(); }} />}
     <button type="button" className="btn btn-ghost peek-details" onClick={onGoTo}>Open details</button>
   </section>;
 }

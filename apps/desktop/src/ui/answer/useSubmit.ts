@@ -9,6 +9,7 @@ import type { Immutable } from '../../data/session-store';
 import { plainFailure } from '../../data/plain';
 import { blockedDraft, emptyDraft, ownerActions, useOwnerDrafts, type DraftEntry, type OwnerDraftStore, type OwnerIntent } from '../../state/drafts/store';
 import { agentName } from '../shell/model';
+import { ownerReplied } from '../../selectors/waiting/replied';
 import { sessionAnswerBlocked } from '../../selectors/sessionClosed';
 
 /** A keyboard request to open the input for an intent, optionally choosing option `optionIndex`. */
@@ -35,6 +36,8 @@ export interface PendingSubmission {
   readonly change: DraftChange;
   /** Saves `change` into the draft and queues it for that agent; resolves true once the input is saved. */
   readonly queue: () => Promise<boolean>;
+  /** Releases a stopped-agent send without changing its draft. */
+  readonly cancel?: () => void;
 }
 
 export interface SubmitOptions {
@@ -72,11 +75,10 @@ export interface Submit {
   sendText: (text: string) => void;
   /** Sends the draft as written (non-answer intents). */
   send: () => void;
-  /** Replays the exact attempted operation, or resends after a definite failure. */
+  /** Checks an unknown result without sending; repeats the exact operation only after a definite failure. */
   retry: () => Promise<boolean>;
   review: () => void;
   prepareRevised: () => void;
-  another: () => void;
   retryPreferences: () => void;
 }
 
@@ -87,6 +89,8 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
   const route = session ? { project_id: session.project_id, session_id: session.id } : null;
   const entry = route ? drafts.find(route, itemId, intent) : undefined;
   const item = session?.items[itemId];
+  const previousQuestion = !!entry?.receipt && !!item && entry.draft.question_revision !== item.question_revision;
+  useEffect(() => { if (previousQuestion && session && entry) drafts.another(entry.draft.op_id, session); }, [previousQuestion, session, entry, drafts]);
   const eligible = !!item && ownerActions(item).includes(intent);
   useEffect(() => { if (!drafts.getSnapshot().ready) void drafts.load(); }, [drafts]);
   useEffect(() => {
@@ -96,7 +100,7 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
   const connection = connectionOf(binding, presence), agent = binding ? agentName(binding.adapter_id) : 'the agent';
   const draft = entry?.draft;
   // An untouched draft follows a revised question or a rebind; only owner content needs a deliberate review.
-  // Only a newer view moves it: the detail and Waiting stores read the same session at different
+  // Only a newer view moves it: the detail and other-session stores read the same session at different
   // moments, and a stale view re-basing the draft backwards would loop with the fresh one. A view
   // that knows the draft's binding yet has another active one is the newer one.
   const rebound = !!draft && !!session && !!session.active_binding_id && session.active_binding_id !== draft.binding_id && !!session.bindings[draft.binding_id];
@@ -115,7 +119,7 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
     : session.archived_at != null || session.state !== 'active' && intent === 'answer' ? sessionAnswerBlocked(session)
       : connection === 'reconnecting' ? reconnectingNote(agent)
         : guard === emptyDraft ? null : guard;
-  const locked = !entry || entry.saving || entry.uncertain || state.preferenceUncertain;
+  const locked = !entry || !!entry.holding || entry.saving || entry.uncertain || !!entry.receipt || intent === 'answer' && !!session && !!item && ownerReplied(session, item) || state.preferenceUncertain;
   const submit = () => entry ? drafts.submit(entry.draft.op_id).then(saved => { if (saved) onSaved?.(); return saved; }) : Promise.resolve(false);
   // The change is saved only when the input goes out: a cancelled "not running" dialog keeps the draft as typed.
   const dispatch = (label: string, change: DraftChange) => {
@@ -124,8 +128,13 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
     const apply = () => { const saved = drafts.getSnapshot().entries[id]?.draft;
       if (saved && (saved.text !== change.text || saved.selected_option_id !== change.selected_option_id)) drafts.edit(id, change); };
     const queue = () => { apply(); return submit(); };
-    if (connection !== 'connected' && onAgentNotRunning) onAgentNotRunning({ route: { ...route, item_id: itemId }, intent, question: item?.question ?? '', label, agent, change, queue });
-    else void queue();
+    if (connection !== 'connected' && onAgentNotRunning) {
+      const token = drafts.reserve(id); if (!token) return;
+      const cancel = () => { drafts.release(id, token); };
+      const heldQueue = () => drafts.release(id, token) ? queue() : Promise.resolve(false);
+      try { onAgentNotRunning({ route: { ...route, item_id: itemId }, intent, question: item?.question ?? '', label, agent, change, queue: heldQueue, cancel }); }
+      catch { cancel(); }
+    } else void queue();
   };
   const ready = () => !!entry && !locked && !changed && !blocked;
   return {
@@ -143,10 +152,10 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
       dispatch(text, { selected_option_id: null, text });
     },
     send: () => { if (entry && ready() && guard !== emptyDraft) dispatch(entry.draft.text, { text: entry.draft.text, selected_option_id: entry.draft.selected_option_id }); },
-    retry: () => entry && !entry.saving && !state.preferenceUncertain && (entry.uncertain || entry.error) ? submit() : Promise.resolve(false),
+    retry: () => entry && !entry.saving && !state.preferenceUncertain && (entry.uncertain || entry.error)
+      ? entry.uncertain && !entry.rejected ? drafts.check(entry.draft.op_id) : submit() : Promise.resolve(false),
     review: () => { if (entry && session) drafts.review(entry.draft.op_id, session); },
     prepareRevised: () => { if (entry && session) drafts.prepareRevised(entry.draft.op_id, session); },
-    another: () => { if (entry && session) drafts.another(entry.draft.op_id, session); },
     retryPreferences: () => { void drafts.retryPreferences(); },
   };
 }

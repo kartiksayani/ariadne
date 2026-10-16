@@ -87,7 +87,7 @@ export interface DetailModel {
   readonly id: string;
   readonly question: string;
   readonly status: StatusKey;
-  /** The header badge: the status, or Waiting on agent once the owner replied. */
+  /** The header badge, including the Sent/Queued projection once the owner replied. */
   readonly display: StatusKey;
   readonly badgeLabel: string;
   readonly meta: string;

@@ -32,7 +32,7 @@ describe('saved status filter chips', () => {
     expect(sentenceRows(frozen, preferences, new Set()).matchingTotal).toBe(0);
     expect(sentenceRows(frozen, preferences, new Set()).rows).toEqual([]);
   });
-  it.each(['closed', 'archived'] as const)('preserves an answered question waiting on the agent in a %s session', state => {
+  it.each(['closed', 'archived'] as const)('preserves a Sent standing answer in a %s session', state => {
     const session = seed(), item = session.items['2']!;
     const answer = structuredClone(session.answers[session.answers.length - 1]!);
     answer.id = crypto.randomUUID(); answer.item_id = item.id; answer.question_revision = item.question_revision;
@@ -42,20 +42,20 @@ describe('saved status filter chips', () => {
     session.state = 'closed';
     if (state === 'archived') session.archived_at = session.updated_at;
     const frozen = immutable(session), preferences = view(session);
-    expect(displayStatus(frozen, item)).toBe('waiting_on_agent');
+    expect(displayStatus(frozen, item)).toBe('sent');
     expect(closedSessionQuestion(frozen, item)).toBe(false);
     expect(waitingOnOwner(frozen, item)).toBe(false);
     preferences.filters.statuses = ['in_progress'];
     const model = treeModel({ session: frozen, view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
       selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) });
-    expect(model.rows.find(row => row.kind === 'item' && row.item.id === item.id)).toMatchObject({ status: 'waiting_on_agent', sessionClosed: false });
+    expect(model.rows.find(row => row.kind === 'item' && row.item.id === item.id)).toMatchObject({ status: 'sent', sessionClosed: false });
     expect(model.counts.waiting).toBe(0);
     expect(sentenceRows(frozen, preferences, new Set()).rows.some(row => row.item.id === item.id)).toBe(true);
   });
   it('places Ack counts after both waiting counts and before other statuses', () => {
-    const statuses = ['open', 'waiting_on_agent', 'done', 'waiting_on_me', 'in_progress'] as const;
+    const statuses = ['open', 'sent', 'queued', 'done', 'waiting_on_me', 'in_progress'] as const;
     expect(topicCounts(statuses, 1).map(count => count.text)).toEqual([
-      '1 waiting on you', '1 waiting on agent', '1 to ack', '1 open', '1 in progress', '1 closed',
+      '1 waiting on you', '1 sent', '1 queued', '1 to ack', '1 open', '1 in progress', '1 closed',
     ]);
     expect(topicCounts(statuses).map(count => count.text)).not.toContain('0 to ack');
   });

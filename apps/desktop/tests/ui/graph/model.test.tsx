@@ -25,7 +25,7 @@ describe('graph model', () => {
     expect(graph.filtering).toBe(false);
     expect(graph.order).toEqual(['1', '2', '3', '8']);
   });
-  it('matches Waiting on agent under In progress rather than Waiting on me', () => {
+  it('matches a Queued reply under In progress rather than Waiting on me', () => {
     const session = graphSession(), item = session.items['1.1.1']!;
     const input = structuredClone(Object.values(session.inputs).find(input => input)!);
     session.answers = []; session.inputs = {};
@@ -35,7 +35,7 @@ describe('graph model', () => {
     const waiting = preferences({ filters: { ...preferences().filters, statuses: ['waiting_on_me'] } });
     expect(build({ session, view: waiting }).nodes.has(item.id)).toBe(false);
     const progress = preferences({ filters: { ...preferences().filters, statuses: ['in_progress'] } });
-    expect(build({ session, view: progress }).nodes.get(item.id)).toMatchObject({ status: 'agent', dimmed: false });
+    expect(build({ session, view: progress }).nodes.get(item.id)).toMatchObject({ status: 'queued', dimmed: false });
   });
   it('ignores a saved topic filter and honors explicit folds of matching ancestors', () => {
     const view = preferences({ expanded_item_ids: [], filters: { ...preferences().filters, topic_id: 'retired-topic-filter' } });
@@ -112,7 +112,7 @@ describe('graph model', () => {
     input.payload.target_snapshot.question_revision = waitingOnAgent.question_revision;
     session.inputs[input.id] = input;
     const counts = build({ session }).topics[0].counts;
-    expect(counts).toBe('1 waiting on you · 1 waiting on agent · 1 to ack · 1 open · 1 in progress · 2 closed');
+    expect(counts).toBe('1 waiting on you · 1 queued · 1 to ack · 1 open · 1 in progress · 2 closed');
     session.archived_at = session.updated_at;
     expect(build({ session }).topics[0].counts).not.toContain('to ack');
     expect(build({ session }).nodes.get(ack.id)!.ack).toBeNull();

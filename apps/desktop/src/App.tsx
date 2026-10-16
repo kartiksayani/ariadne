@@ -24,7 +24,9 @@ import { ConversationView } from './ui/detail/ConversationView';
 import { conversationDivider } from './ui/detail/conversationSeen';
 import { conversationAnswerState } from './ui/detail/ItemConversation';
 import { DetailPath, ItemDetail } from './ui/detail/ItemDetail';
-import { WaitingColumn } from './ui/waiting/WaitingColumn';
+import { AnswerDock } from './ui/dock/AnswerDock';
+import { DockProvider } from './ui/dock/api';
+import { WaitingSync } from './ui/dock/WaitingSync';
 import { PeekProvider } from './ui/peek/Peek';
 import { ItemRefSession } from './ui/peek/context';
 import { navigationVisits } from './ui/navigation/visits';
@@ -119,7 +121,6 @@ interface CenterProps {
   readonly onOpenItem: (itemId: string) => void;
   readonly onClearFilters: () => void; readonly onClearSearch: () => void; readonly onShowArchive: () => void;
   readonly onRemove: (target: TreeRemoveTarget) => void; readonly onRemoveTarget: RemoveHandler;
-  readonly onAgentNotRunning: (submission: PendingSubmission) => void;
 }
 function SessionCenter({ application, view, graph, reveal, onRemoveTarget, ...props }: CenterProps) {
   const state = useSession(view.store), session = state.snapshot?.session;
@@ -335,7 +336,7 @@ function Workspace({ application }: { application: Application }) {
     back: () => navigateHistory('back'), forward: () => navigateHistory('forward') };
   // Send while the session's agent isn't running asks first (1ad); see ui/answer/notRunning.
   const onAgentNotRunning = (submission: PendingSubmission) => {
-    void agentNotRunning({ navigation, drafts: application.drafts, reveal: revealItem })(submission);
+    void agentNotRunning()(submission);
   };
   const focusOwner = (target: ItemRoute, intent: OwnerFocusRequest['intent'], optionIndex?: number, onReveal?: (result: RevealedItem) => void, quick?: 'send' | 'words', answerTarget?: OwnerFocusRequest['answerTarget']) => {
     const token = ++shortcutSequence.current;
@@ -422,6 +423,14 @@ function Workspace({ application }: { application: Application }) {
   };
   const closeDetail = () => { invalidateOwnerRequest(); detailDismissedAt.current = navigation.getNavigationRequest(); setDetailOpen(false); };
   const later = route && selectedId ? preferences?.later.some(item => routeKey(item) === key && item.item_id === selectedId) ?? false : false;
+  // The waiting question Details (or the bigger view) is answering leaves the dock's list.
+  const answeringId = conversationOpen ? conversation?.itemId ?? null : detailOpen ? selectedId : null;
+  const answering = answeringId && sessionState?.snapshot?.session.items[answeringId]?.status === 'waiting_on_me' ? answeringId : null;
+  // As the Waiting column did: with the conversation open, a dock path segment shows that item there and the Map stays.
+  const openFromDock = (itemId: string) => {
+    if (conversationOpen) openConversation(itemId);
+    else if (route) revealItem({ ...route, item_id: itemId });
+  };
   const shown = useAppliedTheme(theme);
   const [textSizeTarget, setTextSizeTarget] = useState<TextSize | null>(null);
   const textSizeIntent = useRef<TextSize | null>(null);
@@ -571,12 +580,6 @@ function Workspace({ application }: { application: Application }) {
         const item = sessionState?.snapshot?.session.items[conversation.itemId];
         return item ? { item, target: { ...route, item_id: item.id } } : null;
       }
-      const card = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-waiting-item]') : null;
-      if (card) {
-        const target = { project_id: card.dataset.projectId!, session_id: card.dataset.sessionId!, item_id: card.dataset.waitingItem! };
-        const session = application.waiting.sessionState(target)?.snapshot?.session, item = session?.items[target.item_id];
-        return session && item && !itemRemoved(session, item.id) && !hidden.item(target, session, item.id) ? { item, target } : null;
-      }
       const focusedId = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-item-id]')?.dataset.itemId : undefined;
       const session = sessionState?.snapshot?.session, item = session?.items[focusedId ?? selectedId ?? ''];
       return route && session && item && !itemRemoved(session, item.id) && !hidden.item(route, session, item.id) ? { item, target: { ...route, item_id: item.id } } : null;
@@ -618,6 +621,7 @@ function Workspace({ application }: { application: Application }) {
     <UnsentMessageNotices waiting={application.waiting} drafts={application.drafts} opened={navigation.opened} navigation={navigation}
       selectedStore={store ?? null} />
     <DraftConflictNotices drafts={application.drafts} opened={navigation.opened} selectedSession={route ?? null} />
+    <WaitingSync waiting={application.waiting} drafts={application.drafts} />
     <AgentRemovalNotices waiting={application.waiting} controllers={application.actions} navigation={navigation}
       selectedSession={sessionState?.snapshot?.session ?? null} onTree={showBinTree} />
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
@@ -630,12 +634,9 @@ function Workspace({ application }: { application: Application }) {
         onToggleTheme: () => { if (preferences) void navigation.saveTheme(themeToggle(shown).next, preferences.revision); } }}
       hidden={selectedHidden} hiddenNotice={hiddenNotice} onHide={route && selectedId ? () => { toggleHidden({ ...route, item_id: selectedId }); } : undefined}
       onRemove={() => { if (route && selectedId) askRemove({ kind: 'item', item: { ...route, item_id: selectedId } }); }}
-      waitingContent={<WaitingColumn drafts={application.drafts} store={application.waiting} revealItem={target => {
-        if (conversationOpen && route && sameSession(route, target)) openConversation(target.item_id);
-        else revealItem(target);
-      }} openDetails={revealItem} conversationOpen={conversationOpen} onAgentNotRunning={onAgentNotRunning}
-        selected={route && (conversationOpen ? conversation?.itemId : selectedId) ? { ...route, item_id: conversationOpen ? conversation!.itemId : selectedId! } : null}
-        openSession={target => { if (conversation) closeConversation(); void navigation.navigate({ kind: 'session', session: target }); }} />}
+      dockContent={store && route ? <AnswerDock store={store} waiting={application.waiting} drafts={application.drafts} answering={answering}
+        onAgentNotRunning={onAgentNotRunning} onOpenItem={openFromDock}
+        onSeen={(itemId, revision) => navigation.markItemSeen(route, itemId, revision)} /> : undefined}
       detailPath={store && selectedId && detailOpen && route ? <DetailPath store={store} itemId={selectedId} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} /> : undefined}
       detail={conversationOpen ? <div data-covered-detail="" /> : store && selectedId && detailOpen && route ? <ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}
         onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined}
@@ -678,7 +679,7 @@ function Workspace({ application }: { application: Application }) {
           if (view) saveView({ filters: { ...structuredClone(view.filters), search: '' } as SessionPreferences['filters'] });
         }}
         onClearFilters={clearFilters} onShowArchive={() => showView('archive')}
-        onRemove={target => { askRemove(target); }} onRemoveTarget={removeTarget} onAgentNotRunning={onAgentNotRunning} />} />
+        onRemove={target => { askRemove(target); }} onRemoveTarget={removeTarget} />} />
     {asking && <RemoveDialog subject={asking.subject} onCancel={() => setAsking(null)} onConfirm={() => removeTarget(asking.target, asking.subject)} />}
     <ContinueTopicHost navigation={navigation} actions={application.actions} onSent={target => {
       // The continued topic now lives in the target session: show it there in the tree.
@@ -726,7 +727,7 @@ export function DesktopApp({ service }: { service: RendererService }) {
   const openLink = useMemo(() => linkOpener(service), [service]);
   // Files named in agent text open in the owner's text editor, only when they sit inside the item's project folder.
   const files = useMemo(() => fileOpener(service), [service]);
-  return application ? <LinkOpener.Provider value={openLink}><FileRefs.Provider value={files}><Workspace application={application} /></FileRefs.Provider></LinkOpener.Provider> : <p role="status">Opening Ariadne…</p>;
+  return application ? <LinkOpener.Provider value={openLink}><FileRefs.Provider value={files}><DockProvider><Workspace application={application} /></DockProvider></FileRefs.Provider></LinkOpener.Provider> : <p role="status">Opening Ariadne…</p>;
 }
 export default function App() {
   const [service] = useState(() => createDesktopService());
