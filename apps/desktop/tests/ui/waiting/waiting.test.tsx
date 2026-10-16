@@ -615,6 +615,25 @@ describe('source-backed answer dock', () => {
     expect(dock().querySelector('.dock-question-title')?.textContent).toBe(question);
   });
 
+  it.each(['busy', 'disconnected'] as const)('says when a queued answer goes: agent %s', async state => {
+    const { transport, current } = await dockUI(transport => {
+      if (state === 'disconnected') { const session = transport.sessions.get(route.session_id)!; session.bindings[session.active_binding_id!]!.connection_state = 'disconnected'; }
+    });
+    if (state === 'busy') {
+      const active = current.getSnapshot().snapshot!.session.bindings[demo.active_binding_id!]!;
+      await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation,
+        observation: { ...structuredClone(binding.presence!), generation: active.generation, freshness: 'fresh', connection_state: 'connected',
+          execution_state: 'running', last_seen_at: '2026-10-05T02:05:00.000Z' } }); });
+    }
+    openDock();
+    await waitFor(() => expect(option(0)?.disabled).toBe(false));
+    fireEvent.click(option(0));
+    await waitFor(() => expect(send().disabled).toBe(false));
+    fireEvent.click(send());
+    await waitFor(() => expect(transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(1));
+    expect(await within(dock()).findByText(new RegExp(`^Queued at \\d\\d:\\d\\d\\. It goes when the agent is ${state === 'busy' ? 'free' : 'running'}\\.$`))).toBeTruthy();
+  });
+
   it('puts why a delivery failed and its one Retry in the bar, and leaves the note its other actions', async () => {
     const { transport } = await dockUI(transport => {
       const session = transport.sessions.get(route.session_id)!, failed = answerInput(session, '74'), item = session.items['2']!;

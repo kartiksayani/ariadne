@@ -123,8 +123,10 @@ export function useQuestionDelivery({ drafts, store, itemId, inputId }: {
     const undoButton = button({ label: 'Undo', icon: 'ph ph-arrow-counter-clockwise', title: 'Take the answer back; it works until the agent picks it up',
       disabled: busy || operation.writing || !!operation.pending || state.status !== 'ready', onClick: () => { void undo(); } });
     const queued = evidence?.kind === 'queued';
+    // Queued behind a busy agent (connected, sending on, working) goes when it is free; otherwise when it runs again.
+    const busyAgent = !!binding && binding.connection_state === 'connected' && !binding.owner_paused && binding.dispatch_state === 'enabled';
     return done({ content, extra: extraOf(null), bar: queued
-      ? { icon: 'ph ph-hourglass-medium', text: `Queued at ${sentAt}. It goes when the agent is running.`, narrow: `Queued at ${sentAt}.`, sealed: true,
+      ? { icon: 'ph ph-hourglass-medium', text: `Queued at ${sentAt}. It goes when the agent is ${busyAgent ? 'free' : 'running'}.`, narrow: `Queued at ${sentAt}.`, sealed: true,
         actions: <>{undoButton}{button({ label: 'Queued', icon: 'ph ph-hourglass-medium', title: 'Already queued', kind: 'ghost' })}</> }
       : { icon: 'ph ph-check', tone: 'done', text: `Sent at ${sentAt}. Waiting for the agent to pick it up.`, narrow: `Sent at ${sentAt}. Waiting for the agent.`, sealed: true,
         actions: <>{undoButton}{button({ label: 'Sent', icon: 'ph ph-paper-plane-right', title: 'Already sent', kind: 'ghost' })}</> } });

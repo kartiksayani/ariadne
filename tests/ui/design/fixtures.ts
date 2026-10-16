@@ -445,6 +445,11 @@ export class DesignTransport extends AppTransport {
     if (request.request.command === 'session_get' && request.session?.session_id === this.hang?.session_id) return new Promise<T>(() => {});
     return { api_version: 1, ok: true, data: { kind: name, data: structuredClone(this.answer(request)) } } as T;
   }
+  /** The session's running agent is connected and idle, not mid-turn (final frames: a new answer is sent, not queued behind it). */
+  idle(sessionId: string): void {
+    const presence = this.summaries.find(summary => summary.session_id === sessionId)?.active_binding?.presence;
+    if (presence) (presence as { execution_state: string }).execution_state = 'idle';
+  }
   /**
    * A Send in a frame (final 2.4). AppTransport copies the session's own queued input and owner message, which a
    * frame's world may not have: it lends the demo's for the copy, then stamps the new input with this session's

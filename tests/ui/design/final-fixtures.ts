@@ -93,6 +93,8 @@ export function finalFixture(state: Pick<FinalState, 'id' | 'app'>, variant: Var
   const spec = finalSpec(state, variant), fixture = buildFixture(spec, worldData(state.app));
   const drafts = state.app.drafts ?? [];
   if (!fixture.route) return fixture;
+  // The board's agent is running and waiting for me: idle, so an answer sent now reads "Sent at", not queued behind a turn.
+  fixture.transport.idle(fixture.route.session_id);
   const current = fixture.transport.sessions.get(fixture.route.session_id)!;
   fixture.transport.preferences.drafts = drafts.map((draft, at): OwnerDraft => {
     // A draft on a question in another session (2.7's picked option in the other-sessions list) lives with that session.
