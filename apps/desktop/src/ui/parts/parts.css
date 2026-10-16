@@ -1,0 +1,201 @@
+/* Shared parts of the redesign chrome (top bar, pages, dialogs). Values follow the Claude Design board, SPEC sections 3 and 5. */
+
+/* A bare button: the board draws spans; ours are real buttons that look the same. */
+.p-btn,
+.tb-btn,
+.p-menu-row,
+.p-iconbtn {
+  appearance: none;
+  margin: 0;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.p-key {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+  font-size: calc(11px * var(--text-scale));
+  line-height: 16px;
+}
+
+.p-key-md {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  line-height: 18px;
+}
+
+.p-wait {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 7px 0 5px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-size: calc(11.5px * var(--text-scale));
+  font-weight: 500;
+  color: var(--a-acc-text);
+  box-shadow: inset 0 0 0 1.25px var(--st-waiting);
+}
+
+.p-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin: 0 1px;
+  border-radius: 50%;
+}
+
+.p-dot-live { background: var(--st-done); }
+.p-dot-off { box-shadow: inset 0 0 0 1.5px var(--st-open); }
+
+.p-lock {
+  flex: none;
+  width: 9px;
+  font-size: calc(11px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+/* An outlined small button: Copy, Restore, Try again. */
+.p-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 6px;
+  white-space: nowrap;
+  font-size: calc(12px * var(--text-scale));
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+}
+
+.p-btn:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+
+.p-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.p-btn:disabled:hover { background: transparent; }
+
+.p-iconbtn {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+
+.p-iconbtn:hover {
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+  color: var(--color-text);
+}
+
+.p-iconbtn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.p-iconbtn:disabled:hover {
+  background: transparent;
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+
+/* The "…" popover of the topic band, the Projects page and each project card. */
+.p-menu {
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 300px;
+  padding: 6px;
+  border-radius: 8px;
+  background: var(--a-card);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-divider);
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.4;
+}
+
+.p-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--color-divider);
+}
+
+.p-menu-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.p-menu-row:hover,
+.p-menu-row:focus-visible { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
+
+.p-menu-row:focus-visible { outline-offset: -2px; }
+
+.p-menu-row:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.p-menu-row > i {
+  flex: none;
+  margin-top: 2px;
+  font-size: calc(15px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+
+.p-menu-text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.p-menu-label { font-weight: 500; }
+
+.p-menu-sub {
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  text-wrap: pretty;
+}
+
+.p-menu-danger > i,
+.p-menu-danger .p-menu-label { color: var(--a-danger); }
+
+@keyframes p-spin { to { transform: rotate(360deg); } }
+.p-spin { animation: p-spin 1s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .p-spin { animation: none; }
+}
+
+/* Section label: "MARKERS", "SESSIONS · 3". */
+.p-label {
+  font-size: calc(11px * var(--text-scale));
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
