@@ -5,7 +5,7 @@ import type { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { AppTransport, route } from '../app/transport';
-import { sessionButton } from '../app/open';
+import { goToSession } from '../app/open';
 
 // Hold acknowledgments at the component boundary to reproduce an older editor
 // reporting completion after a newer ordinary App request has been published.
@@ -20,7 +20,7 @@ vi.mock('../../../src/ui/detail/ItemDetail', () => ({
 afterEach(() => { cleanup(); editor.acknowledgments.clear(); });
 it('an older editor acknowledgment cannot clear the newer owner request', async () => {
   const transport = new AppTransport(); render(<DesktopApp service={createDesktopService(transport)} />);
-  fireEvent.click(await sessionButton(route)); await screen.findByRole('tree', { name: 'Session items' });
+  await goToSession(route); await screen.findByRole('tree', { name: 'Session items' });
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
       expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');

@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { AppTransport, route, secondId } from './transport';
-import { sessionButton } from './open';
+import { goToSession } from './open';
 import sessionsFixture from '../../../../../fixtures/domain/projections/sessions.json';
 import type { PresenceObservation } from '../../../src/generated/domain/models';
 
@@ -28,7 +28,7 @@ function setup(options = 9, connection: 'connected' | 'disconnected' | 'reconnec
 }
 
 async function openQuestion() {
-  fireEvent.click(await sessionButton(route));
+  await goToSession(route);
   await screen.findByRole('region', { name: 'Session tree' });
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');

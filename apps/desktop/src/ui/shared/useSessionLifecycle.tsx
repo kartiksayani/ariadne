@@ -14,8 +14,9 @@ import { archiveImpact, archiveWarning, closeImpact, closeWarning } from '../../
 import { announceClosed } from '../pages/SessionDialogs';
 import { agentName, ownerName, sessionPhrase, sessionWhen } from '../shell/model';
 import { waitingOnOwner } from '../../selectors/sessionClosed';
-import { saveSessionLabel } from '../shared/SessionRename';
-import { loadingError, savingError, waitForLifecycleReady } from '../shared/lifecycleReady';
+import { saveSessionLabel } from './SessionRename';
+import { loadingError, savingError, waitForLifecycleReady } from './lifecycleReady';
+import { copySessionReference } from './CopySessionId';
 import '../../components/history-actions/history-actions.css';
 
 type Kind = 'topic_archive' | 'topic_restore' | 'session_close' | 'session_reopen';
@@ -29,9 +30,21 @@ const confirmWords: Record<Kind, { readonly title: string; readonly button: stri
 interface Review { kind: Kind; topicId: string | null; revision: number; sessionRevision: number; error: CoreFailure | ServiceFailure | string | null }
 /** A saved archive: its waiting questions left the panel, and `cancelled` unsent messages were cancelled. */
 export interface Archived { readonly topicId: string; readonly name: string; readonly waiting: number; readonly cancelled: number }
-export interface Lifecycle {
-  /** Close or reopen the session through the review. */
+/** Where the session stands: what its Close, Reopen or Restore control does; null until it loads. */
+export type SessionLifecycleState = 'active' | 'closed' | 'archived' | null;
+export interface SessionLifecycle {
+  /** Close or reopen the session through the review; restore an archived session (as Closed) at once. */
   readonly session: () => void;
+  /** The session bar's Close, Reopen and Restore: each is `session`, acting on the session as it is now. */
+  readonly close: () => void;
+  readonly reopen: () => void;
+  readonly restoreSession: () => void;
+  /** `archive` and `restore` under the names the top bar uses. */
+  readonly archiveTopic: (topicId: string) => void;
+  readonly restoreTopic: (topicId: string) => void;
+  /** Copies the session's connection reference and says so in a notice. */
+  readonly copySessionId: () => void;
+  readonly state: SessionLifecycleState;
   /** Rename against the latest ready session capture. */
   readonly rename: (name: string, description: string) => Promise<string | null>;
   /** Archive: confirm first when open items stay or unsent messages are cancelled, else at once. */
@@ -48,7 +61,12 @@ export interface Lifecycle {
   readonly dialog: ReactNode;
 }
 
-export function useLifecycle(actions: SessionActions): Lifecycle {
+/**
+ * Close, reopen and restore the session; rename it; archive and restore its topics. `actions` is the session's
+ * controller (`SessionActionControllers.forSession`). The review dialogs and the running guard are local to each
+ * call, so one view owns a session's lifecycle at a time.
+ */
+export function useSessionLifecycle(actions: SessionActions): SessionLifecycle {
   const state = useSession(actions.session), operation = useSessionActions(actions);
   const [review, setReview] = useState<Review | null>(null);
   /** The topic whose archive confirmation is open, with the failure of its last try. */
@@ -233,15 +251,19 @@ export function useLifecycle(actions: SessionActions): Lifecycle {
       {(error || review.error || operation.pending && operation.error) && <p role="alert">{error ?? (typeof review.error === 'string' ? review.error : plainFailure(review.error ?? operation.error))} {operation.pending && 'Ariadne isn’t sure your last change was saved. Check again before confirming another.'}</p>}
     </div><div className="dialog-actions">{buttons}</div></Dialog>;
   }
+  const sessionAction = () => {
+    if (operation.pending && !operation.writing) { if (session) prepare(session.state === 'closed' ? 'session_reopen' : 'session_close'); else setError(loadingError); return; }
+    void withReady('session', current => {
+      if (current.archived_at != null) return run({ command: 'session_restore', api_version: 1, op_id: '', params: { expected_revision: current.revision } }, current);
+      prepare(current.state === 'closed' ? 'session_reopen' : 'session_close', null, current);
+      return false;
+    });
+  };
   return {
-    session: () => {
-      if (operation.pending && !operation.writing) { if (session) prepare(session.state === 'closed' ? 'session_reopen' : 'session_close'); else setError(loadingError); return; }
-      void withReady('session', current => {
-        if (current.archived_at != null) return run({ command: 'session_restore', api_version: 1, op_id: '', params: { expected_revision: current.revision } }, current);
-        prepare(current.state === 'closed' ? 'session_reopen' : 'session_close', null, current);
-        return false;
-      });
-    },
+    session: sessionAction, close: sessionAction, reopen: sessionAction, restoreSession: sessionAction,
+    archiveTopic: archive, restoreTopic: restore,
+    copySessionId: () => { void copySessionReference(actions.session.getSnapshot().route.session_id); },
+    state: !session ? null : session.archived_at != null ? 'archived' : session.state === 'closed' ? 'closed' : 'active',
     rename, archive, restore, archived, undo, dismiss: () => setArchived(null), busy: disabled, error, dialog,
     pending: operation.pending && !review ? unconfirmedText(operation.pending.command.command) : null,
     reconcile: () => {

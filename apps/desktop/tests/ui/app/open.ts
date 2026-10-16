@@ -19,3 +19,12 @@ export async function sessionButton(route: { readonly project_id: string; readon
   }
   return enabled(selector);
 }
+
+/**
+ * Opens a session's Map from wherever the app is now. Every test that just needs a session open comes here, so a
+ * change in how the owner reaches a session (the switcher) edits this one function. `press` clicks the control.
+ */
+export async function goToSession(route: { readonly project_id: string; readonly session_id: string },
+  press: (control: HTMLButtonElement) => unknown = control => { fireEvent.click(control); }) {
+  await press(await sessionButton(route));
+}

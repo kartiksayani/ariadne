@@ -3,12 +3,12 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { AppTransport, route, secondId } from '../app/transport';
-import { sessionButton } from '../app/open';
+import { goToSession } from '../app/open';
 import userEvent from '@testing-library/user-event';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 async function openFirst() {
-  fireEvent.click(await sessionButton(route));
+  await goToSession(route);
   await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
 }
 

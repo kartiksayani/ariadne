@@ -10,7 +10,7 @@ import { WaitingStore } from '../../src/selectors/waiting/store';
 import { ItemDetail } from '../../src/ui/detail/ItemDetail';
 import { TreeView } from '../../src/ui/tree/TreeView';
 import { AppTransport, route, secondId } from './app/transport';
-import { sessionButton } from './app/open';
+import { goToSession } from './app/open';
 import { page, projections } from './history/fixtures';
 
 vi.mock('react-dom/client', async importOriginal => {
@@ -29,7 +29,7 @@ vi.mock('../../src/ui/tree/TreeView', async importOriginal => {
 const mutations = (transport: AppTransport, command: string) => transport.mutations.filter(request => request.command.command === command
   && (request.command.command !== 'preferences_patch' || request.command.params.entries.some(entry => entry.kind !== 'mark_seen')));
 async function openSession(id = route.session_id, pending = false) {
-  fireEvent.click(await sessionButton({ project_id: route.project_id, session_id: id }));
+  await goToSession({ project_id: route.project_id, session_id: id });
   await screen.findByRole('region', { name: 'Session tree' });
   if (!pending) await waitFor(() => {
     expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');

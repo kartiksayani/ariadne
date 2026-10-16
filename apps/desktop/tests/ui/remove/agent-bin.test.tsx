@@ -22,7 +22,7 @@ import { Notices, notices } from '../../../src/ui/pages/notices';
 import { AgentBin, binView, removalNotice, restoreRemoved } from '../../../src/ui/remove/AgentBin';
 import type { RemoveTarget } from '../../../src/ui/dialogs/remove';
 import { AppTransport, route } from '../app/transport';
-import { sessionButton } from '../app/open';
+import { goToSession } from '../app/open';
 import { graphSession, preferences, topicA, topicB } from '../graph/fixture';
 
 const opened: OpenSessions[] = [];
@@ -74,7 +74,7 @@ function receiptSession(removal = notice()): Session {
 }
 async function openApp(transport: BinTransport) {
   render(<DesktopApp service={createDesktopService(transport)} />);
-  fireEvent.click(await sessionButton(route));
+  await goToSession(route);
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
       expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
@@ -551,7 +551,7 @@ describe('agent removal bin', () => {
   it('keeps Delete forever behind the ordinary app confirmation and preserves Undo before permanent removal', async () => {
     const session = removedSession(), input = cancelledInput(session); session.inputs = { [input.id]: input };
     const transport = new BinTransport(session); render(<DesktopApp service={createDesktopService(transport)} />);
-    fireEvent.click(await sessionButton(route)); await screen.findByRole('tree', { name: 'Session items' });
+    await goToSession(route); await screen.findByRole('tree', { name: 'Session items' });
     await waitFor(() => {
         expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
         expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');

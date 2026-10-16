@@ -2,7 +2,7 @@
 .shell {
   position: relative;
   display: grid;
-  grid-template-rows: 48px 38px minmax(0, 1fr) 30px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   width: 100%;
   height: 100%;
   overflow: hidden;
@@ -20,8 +20,18 @@
   padding-top: 28px;
 }
 
+/* — top bar slot: the old header and tab bar stack in it — */
+.shell-top {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 /* — header — */
 .shell-header {
+  box-sizing: border-box;
+  flex: none;
+  height: 48px;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -201,6 +211,9 @@
 
 /* — tab bar — */
 .shell-tabs {
+  box-sizing: border-box;
+  flex: none;
+  height: 38px;
   display: flex;
   align-items: stretch;
   gap: 2px;
@@ -370,6 +383,16 @@
   background: var(--a-bg);
 }
 
+/* The dock floats over the main and side areas, anchored to the bottom of the body. Its height
+   reaches the Map's scrollers as --dock-inset (ui/shell/dockInset.tsx). */
+.shell-dock {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
+}
+
 /* Notices stay above Conversation and outside the retained Map's inert subtree. */
 .shell-notices {
   position: absolute;
@@ -490,6 +513,8 @@
 
 /* — footer — */
 .shell-footer {
+  box-sizing: border-box;
+  height: 30px;
   display: flex;
   align-items: center;
   gap: 14px;
