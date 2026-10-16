@@ -30,16 +30,16 @@ agent CLI's catalogue read touches every session's lock.
 
    | Entrypoint | Caller | Budget |
    |---|---|---|
-   | agent `read`, `item messages\|changes\|rounds`, `apply --dry-run` | agent CLI | 4.5 s |
-   | owner queries | owner CLI | 4.5 s |
-   | MCP queries | MCP server | 4.5 s |
+   | agent `read`, `item messages\|changes\|rounds`, `apply --dry-run` | agent CLI | 5 s |
+   | owner queries | owner CLI | 5 s |
+   | MCP queries | MCP server | 5 s |
    | `bridge connection-status` | plugin, helper timeout 5 s (8 s with quieter hook notices) | 2.5 s |
    | `owner binding connect --replay-only` (saved-connect lookup) | plugin, same helper timeout | 2.5 s |
 
-   4.5 s fits a second try after one full lock wait. 2.5 s fits only one: the
+   5 s fits a second try after one full lock wait, with about 1 s of headroom. 2.5 s fits only one: the
    lock's own 2 s wait rides out a short hold, and the call ends well inside the
    helper timeout. The plugin's other helper calls (`bridge claim`, `report`,
-   `announce`, owner connect, register and disconnect) are not retried here.
+   `announce`, owner connect, register and disconnect) are not retried here. A plugin read can still wait on two locks in its one try (the registry lock, then the session lock), so its worst case is about 4 s plus process start; that stays inside the 5 s helper timeout, and the 8 s one once quieter hook notices land.
    Writes never retry here; their caller resends the same operation.
 3. **Lock-free claim check.** `Store::peek` reads the committed session file without
    the session lock. Every session write publishes a complete, synced temp file by
@@ -65,7 +65,7 @@ No file, field or saved format is added; older releases read the store unchanged
 - A write landing after a poll's open is seen by the next poll: no input is lost or
   delayed past one poll interval, and each input is still claimed exactly once.
 - A read that stays busy still fails, with `retryable: true`. A try that waits on
-  one busy lock never runs past the budget: 4.5 s, or 2.5 s for the plugin's reads.
+  one busy lock never runs past the budget: 5 s, or 2.5 s for the plugin's reads.
   One agent CLI try can wait on `k` busy locks, because the catalogue read touches
   every session's lock, and so cost `k × 2 s`. The bound is then
   `budget − 2 s + k × 2 s`: 2.5 s + `k` × 2 s for the agent CLI, for example

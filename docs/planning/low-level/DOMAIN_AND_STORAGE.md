@@ -700,7 +700,7 @@ takes the lock, rereads and decides again whenever it may send an input or repla
 saved claim receipt. The parsed snapshot is cached by file identity (device,
 inode, size, mtime and ctime) and reparsed when a commit replaced the file or
 something rewrote it in place. Read-only entrypoints retry `store_busy` within a
-budget (4.5 s, or 2.5 s for reads the plugin runs) before returning it; see
+budget (5 s, or 2.5 s for reads the plugin runs) before returning it; see
 [ADR-0101](../../adr/ADR-0101-lock-free-claim-check-and-busy-read-retry.md).
 
 The transaction follows this algorithm:

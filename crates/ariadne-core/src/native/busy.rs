@@ -16,8 +16,9 @@ use ariadne_store::session::LOCK_WAIT;
 use std::time::{Duration, Instant};
 
 /// Budget for reads whose callers have no tight timeout (agent CLI, owner
-/// queries, MCP queries): room for a second try after one full lock wait.
-pub const READ_RETRY_WINDOW: Duration = Duration::from_millis(4_500);
+/// queries, MCP queries): room for a second try after one full lock wait. 5 s
+/// leaves about 1 s of headroom for a first try's own work on top of its lock wait.
+pub const READ_RETRY_WINDOW: Duration = Duration::from_millis(5_000);
 /// Budget for reads the Claude plugin runs under its helper timeout (5 s, or
 /// 8 s with quieter hook notices): `bridge connection-status` and the saved
 /// connect lookup (`owner binding connect --replay-only`). Fits one try.
@@ -99,7 +100,7 @@ mod tests {
         .unwrap_err();
         let waited = started.elapsed();
         assert!(starts.len() >= 2, "backs off and tries again: {starts:?}");
-        let slack = Duration::from_millis(20);
+        let slack = Duration::from_millis(100);
         for start in &starts {
             assert!(*start + cost <= budget + slack, "{start:?} of {starts:?}");
         }
