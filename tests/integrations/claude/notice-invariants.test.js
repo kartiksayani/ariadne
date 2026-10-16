@@ -8,9 +8,10 @@ const MINUTE = 60000, GRACE = 2 * MINUTE;
 const PRODUCERS = ['announce','helper','auto','qualification','claim','reports'];
 // Call cadence: the poll tick for claims and reports, the heartbeat for the rest.
 const INTERVALS = Object.freeze({announce:30000,helper:30000,auto:30000,qualification:30000,claim:1000,reports:1000});
-// One poll is one call of both claims and reports: it saves reports first.
+// One poll is a report call, then a claim call once the reports are saved.
 const POLLED = ['claim','reports'];
-// A helper call may run to its eight-second kill, plus a store-lock wait.
+// A helper call may run to its eight-second kill, plus a store-lock wait, and
+// still not count as hung.
 const MAX_LATENCY = 10000;
 // "Prints by two minutes plus one interval, whatever the call latency": one
 // interval is one call cycle, the cadence plus the slowest call (two in a poll).
@@ -73,46 +74,61 @@ function random(seed) {
 const pick = (rng, list) => list[rng(list.length)];
 const anyExample = rng => pick(rng,pick(rng,Object.values(EXAMPLES)));
 
+// "A call still open after ten seconds (the helper's eight-second limit plus
+// two seconds) counts as a temporary timeout for its producer until it ends."
+const HUNG = 10000;
+const TIMEOUT = Object.freeze({label:'retry',text:BACKGROUND_RETRY});
+
 // Drives conversationHealth with timed calls: each call opens, takes its
-// latency, records its result and closes. After every step it checks plain
+// latency and settles with its one outcome. After every step it checks plain
 // statements from the README against what printed. It keeps only what the
 // README lets an observer know: who called when, each producer's latest
-// result, and the lines printed.
-function simulation(intervals = INTERVALS) {
+// outcome, retirements and the lines printed. Its liveness is the README's,
+// not the code's: a producer counts from its first outcome until it is
+// retired or reset, and each call adds exactly one outcome.
+function simulation() {
   let time = 0, order = 0, failedAt = [], shown = null, advisers = [], quietAt = null;
   const queue = [], lines = [], trace = [];
   const $ = {store:{get:async () => [],set:async () => {}},ui:{log:text => lines.push({at:time,text,label:LABELS.get(text)})}};
-  const model = conversationHealth(() => time,intervals);
-  // `ends` counts successes, drop-outs, deletes and resets: each ends advice.
-  const known = new Map(PRODUCERS.map(producer => [producer,{open:0,seen:-Infinity,latest:null,ends:0}]));
+  const model = conversationHealth(() => time);
+  // `ends` counts successes, retirements and resets: each ends advice.
+  // `calls` and `outcomes` count what the generator opened and settled.
+  const known = new Map(PRODUCERS.map(producer => [producer,{counted:false,latest:null,ends:0,open:new Set(),calls:0,outcomes:0}]));
   const forget = p => {p.latest = null;p.ends += 1;};
-  // "Producers drop out after three of their own call intervals without a call."
-  const live = producer => {const p = known.get(producer);return p.open > 0 || time - p.seen <= intervals[producer] * 3;};
+  const hung = producer => [...known.get(producer).open].filter(call => time - call.start > HUNG);
+  const live = producer => known.get(producer).counted || hung(producer).length > 0;
+  // A producer's current outcome: a hung call counts as a timeout.
+  const current = producer => hung(producer).length ? TIMEOUT : known.get(producer).latest;
+  // A retired or reset producer's hung calls stop counting then.
+  const close = p => {for (const call of p.open) if (time - call.start > HUNG) failedAt.push(call.start + HUNG);p.open.clear();};
   const at = (when, step) => queue.push({at:when,order:order++,...step});
   function apply(step) {
     const p = step.producer && known.get(step.producer);
     trace.push({at:time,op:step.op,producer:step.producer,text:step.example?.text});
-    if (step.op === 'begin') {
-      if (!p.open && !live(step.producer)) forget(p);
-      p.open += 1;
-      step.call.finish = model.begin($,step.producer);
-    } else if (step.op === 'result') {
+    if (step.op === 'open') {
+      p.calls += 1;
+      p.open.add(step.call);
+      step.call.settle = model.call($,step.producer);
+    } else if (step.op === 'settle') {
+      p.outcomes += 1;
       const value = outcome(step.example);
       if (step.example) check(value.text === step.example.text,`I4: background sentence was ${value.text}`);
-      model.record($,step.producer,value);
-      p.seen = time;
+      step.call.settle(value);
+      // A call that outlived its producer's retirement records nothing.
+      step.dead = !p.open.delete(step.call);
+      if (step.dead) return;
+      if (time - step.call.start > HUNG) failedAt.push(step.call.start + HUNG);
+      p.counted = true;
       if (step.example) {p.latest = step.example;failedAt.push(time);}
       else forget(p);
-    } else if (step.op === 'finish') {
-      step.call.finish();
-      p.open -= 1;
-      p.seen = time;
-    } else if (step.op === 'delete') {
-      model.delete($,step.producer);
+    } else if (step.op === 'retire') {
+      model.retire($,step.producer);
+      close(p);
+      p.counted = false;
       forget(p);
     } else if (step.op === 'reset') {
       model.reset();
-      for (const each of known.values()) forget(each);
+      for (const each of known.values()) {close(each);each.counted = false;forget(each);}
       failedAt = [];shown = null;advisers = [];quietAt = null;
     } else if (step.op === 'owner') model.record({...$,background:false},step.producer,outcome(step.example));
   }
@@ -122,49 +138,49 @@ function simulation(intervals = INTERVALS) {
     for (const line of emitted) {
       check(line.label && !/PRIVATE|could not finish connecting/.test(line.text),`I4: unknown or private line: ${line.text}`);
       if (line.label === 'retry' || line.label === 'generic') {
-        check(failedAt.some(failed => failed <= time - GRACE),'I1: a retry or generic line printed before two minutes of failure');
+        const failures = [...failedAt,...PRODUCERS.flatMap(producer => hung(producer).map(call => call.start + HUNG))];
+        check(failures.some(failed => failed <= time - GRACE),'I1: a retry or generic line printed before two minutes of failure');
         check(quietAt === null || time - quietAt >= GRACE,'I6: retry or generic lines less than two minutes apart');
         quietAt = time;
       }
       if (line.label === 'retry') {
         // "A retry line never replaces held, installation or terminal advice
-        // until the producer that printed it recovers or expires."
+        // until the producer that printed it recovers or is retired."
         for (const {producer,ends} of advisers) {
-          check(!(live(producer) && known.get(producer).ends === ends),`I8: retry replaced advice from ${producer}, which neither recovered nor expired`);
+          check(!(live(producer) && known.get(producer).ends === ends),`I8: retry replaced advice from ${producer}, which neither recovered nor retired`);
         }
-      } else if (step.op === 'result' && step.example?.text === line.text) advisers = [{producer:step.producer,ends:known.get(step.producer).ends}];
+      } else if (step.op === 'settle' && step.example?.text === line.text) advisers = [{producer:step.producer,ends:known.get(step.producer).ends}];
       else {
-        const holders = PRODUCERS.filter(producer => live(producer) && known.get(producer).latest?.text === line.text);
+        const holders = PRODUCERS.filter(producer => live(producer) && current(producer)?.text === line.text);
         advisers = holders.length === 1 ? holders.map(producer => ({producer,ends:known.get(producer).ends})) : [];
       }
       shown = line;
     }
     // "Owner-needed advice always shows within one call unless terminal or
-    // install is showing", and likewise install unless terminal is showing.
-    if (step.op === 'result' && step.example && urgent(step.example)) {
+    // install advice that is still current is showing", and likewise install
+    // unless current terminal advice is showing. The line showing must be some
+    // live producer's current outcome, and nothing live may be more urgent.
+    if (step.op === 'settle' && !step.dead && step.example && urgent(step.example)) {
       check(shown !== null,`I5: ${step.example.label} advice never showed`);
-      const holds = shown.text === step.example.text || PRODUCERS.some(producer => live(producer) && known.get(producer).latest?.text === shown.text);
-      check((URGENCY[shown.label] ?? 0) >= URGENCY[step.example.label] && holds,
-        `I5: ${step.example.label} advice from ${step.producer} did not show within one call; showing: ${shown.text}`);
+      const outcomes = PRODUCERS.filter(live).map(current).filter(Boolean);
+      const showing = URGENCY[shown.label] ?? 0, top = Math.max(0,...outcomes.map(each => URGENCY[each.label] ?? 0));
+      check(showing >= URGENCY[step.example.label],`I5: ${step.example.label} advice from ${step.producer} did not show within one call; showing: ${shown.text}`);
+      check(outcomes.some(each => each.text === shown.text),`I5: the line showing is no live producer's current outcome: ${shown.text}`);
+      check(showing >= top,`I5: a more urgent current outcome is hidden behind ${shown.text}`);
     }
   }
   const sim = {
     lines,trace,model,
     get time() {return time;},
     get failedAt() {return failedAt;},
-    begin(when, producer) {
-      const call = {finish:null};
-      at(when,{op:'begin',producer,call});
-      return {finish:end => at(end,{op:'finish',producer,call})};
-    },
-    result(when, producer, example) {at(when,{op:'result',producer,example});},
+    // One call: it opens at `start` and settles `latency` later with its one outcome.
     call(producer, start, latency, example) {
-      const call = sim.begin(start,producer);
-      sim.result(start + latency,producer,example);
-      call.finish(start + latency);
+      const call = {start,settle:null};
+      at(start,{op:'open',producer,call});
+      at(start + latency,{op:'settle',producer,call,example});
       return start + latency;
     },
-    delete(when, producer) {at(when,{op:'delete',producer});},
+    retire(when, producer) {at(when,{op:'retire',producer});},
     reset(when) {at(when,{op:'reset'});},
     owner(when, producer, example) {at(when,{op:'owner',producer,example});},
     run(until = Infinity) {
@@ -177,14 +193,17 @@ function simulation(intervals = INTERVALS) {
         apply(step);
         verify(step,lines.slice(before));
       }
+      // "Each call adds exactly one outcome": counted from the outside.
+      if (!queue.length) for (const [producer,p] of known) check(p.calls === p.outcomes,`${producer} opened ${p.calls} calls but settled ${p.outcomes}`);
     },
   };
   return sim;
 }
 // Schedules each producer's calls. A plan entry returns, for a call starting
 // at a time, a failure example, null for success, or undefined for no call.
-// Latencies are 0-10 s; a poll saves reports and then claims, so claim and
-// report results land 2-8 s apart, and a failed save holds the claim back.
+// Latencies are 0-10 s; a poll saves reports and then claims, so a claim call
+// opens when its report call settles and takes 2-8 s, and a failed save holds
+// the claim back. Every call settles with exactly one outcome.
 function drive(sim, rng, plan, from, until) {
   for (const producer of Object.keys(plan).filter(name => !POLLED.includes(name))) {
     for (let start = from; start <= until;) {
@@ -198,11 +217,9 @@ function drive(sim, rng, plan, from, until) {
     // An empty report flush is a successful call.
     const report = plan.reports ? plan.reports(start) : null, claim = plan.claim?.(start);
     if (report === undefined && claim === undefined) {start += INTERVALS.claim;continue;}
-    const calls = [report !== undefined && sim.begin(start,'reports'),claim !== undefined && sim.begin(start,'claim')].filter(Boolean);
     let end = start;
-    if (report !== undefined) {end += rng(8001);sim.result(end,'reports',report);}
-    if (claim !== undefined && !report) {end += 2000 + rng(6001);sim.result(end,'claim',claim);}
-    for (const call of calls) call.finish(end);
+    if (report !== undefined) end = sim.call('reports',end,rng(8001),report);
+    if (claim !== undefined && !report) end = sim.call('claim',end,2000 + rng(6001),claim);
     start = end + INTERVALS.claim;
   }
 }
@@ -224,15 +241,15 @@ function generated(name, exercise) {
 const partners = producer => PRODUCERS.filter(other => other !== producer && !(POLLED.includes(producer) && POLLED.includes(other)));
 
 describe('conversation-health regressions',() => {
-  it('an idle report producer cannot suppress a later outage after one successful flush',() => {
+  it('an idle report producer cannot suppress a later outage after three successful flushes',() => {
     let time = 0;
     const lines = [], $ = {store:{get:async () => [],set:async () => {}},ui:{log:text => lines.push({at:time,text})}};
     const model = conversationHealth(() => time);
     for (time = 0; time <= 120000; time += 1000) model.record($,'reports',outcome(EXAMPLES.retry[1]));
     expect(lines.map(line => line.text)).toEqual([BACKGROUND_RETRY]);
-    time = 121000;model.record($,'reports',{kind:'ok'});
-    // The report queue drains and never calls again. A later outage belongs to
-    // a fresh continuous unhealthy interval, with its own grace and visible line.
+    for (time = 121000; time <= 123000; time += 1000) model.record($,'reports',{kind:'ok'});
+    // The report queue drains and stays healthy. A later outage belongs to a
+    // fresh continuous unhealthy interval, with its own grace and visible line.
     for (time = 9000000; time <= 9120000; time += 30000) model.record($,'announce',outcome(EXAMPLES.retry[0]));
     expect(lines).toEqual([{at:120000,text:BACKGROUND_RETRY},{at:9120000,text:BACKGROUND_RETRY}]);
   });
@@ -317,10 +334,9 @@ describe('README health statements over 128 seeded histories with 0-10 s calls',
     // The generic line shows by about three minutes; owner-needed advice follows.
     const plan = {[first]:() => generic,[second]:start => start >= 4 * MINUTE ? owner : undefined};
     drive(sim,rng,plan,0,7 * MINUTE);
-    // Both still call until seven minutes; afterwards the advice may drop out.
     sim.run(7 * MINUTE);
     check(sim.lines.map(line => line.text).join('|') === `${generic.text}|${owner.text}`,`${first} generic then ${second} owner printed: ${sim.lines.map(line => line.label)}`);
-    const shown = sim.trace.find(step => step.op === 'result' && step.producer === second);
+    const shown = sim.trace.find(step => step.op === 'settle' && step.producer === second);
     check(sim.lines[1].at === shown.at,'I5: owner-needed advice waited behind generic advice');
   });
   generated('generic advice never hides owner-needed advice that arrives first',(sim,rng) => {
@@ -348,16 +364,17 @@ describe('README health statements over 128 seeded histories with 0-10 s calls',
     for (let i = 0; i < 8; i += 1) {
       const when = rng(15 * MINUTE), op = rng(8);
       if (op === 0) sim.reset(when);
-      else if (op < 4) sim.delete(when,pick(rng,PRODUCERS));
+      else if (op < 4) sim.retire(when,pick(rng,PRODUCERS));
       else sim.owner(when,pick(rng,PRODUCERS),anyExample(rng));
     }
-    // Let every producer drop out, then settle on one live cause.
+    // Every loop stops and its producer retires; then one live cause settles.
+    for (const each of PRODUCERS) sim.retire(17 * MINUTE,each);
     const producer = pick(rng,PRODUCERS), example = anyExample(rng);
     drive(sim,rng,{[producer]:() => example},18 * MINUTE,24 * MINUTE);
     sim.run();
     check(sim.lines.at(-1)?.text === example.text,`I5: the live ${example.label} cause from ${producer} did not replace stale advice`);
   });
-  generated('one or two successes keep an outage; three successes or dropping out end it',(sim,rng) => {
+  generated('one or two successes keep an outage; three successes or retiring end it',(sim,rng) => {
     const producer = pick(rng,PRODUCERS), example = pick(rng,EXAMPLES.retry), ends = rng(2);
     let goods = 0, recovered = 0;
     const plan = {[producer]:start => {
@@ -370,12 +387,15 @@ describe('README health statements over 128 seeded histories with 0-10 s calls',
       return start < 14 * MINUTE ? example : undefined;
     }};
     drive(sim,rng,plan,0,14 * MINUTE);
+    // A producer that stops calling without recovering is retired once its last
+    // call ends: its loop stopped.
+    if (!ends) sim.retire(4 * MINUTE + 2 * MAX_LATENCY,producer);
     sim.run();
     const second = sim.failedAt.find(at => at >= 10 * MINUTE);
     check(sim.lines.length === 2,`I1/I2: two outages printed ${sim.lines.length} lines`);
     check(sim.lines[1].at >= second + GRACE && sim.lines[1].at <= second + GRACE + cycle(producer),'I1: the second outage did not wait its own two minutes');
   });
-  generated('a retry never replaces held or install advice until its producer recovers or expires',(sim,rng) => {
+  generated('a retry never replaces held or install advice until its producer recovers or retires',(sim,rng) => {
     const producer = pick(rng,PRODUCERS), other = pick(rng,partners(producer));
     const advice = pick(rng,[...EXAMPLES.owner,...EXAMPLES.install]), recovers = rng(2);
     let goods = 0;
@@ -384,11 +404,36 @@ describe('README health statements over 128 seeded histories with 0-10 s calls',
       if (start < 10 * MINUTE) return rng(2) ? advice : pick(rng,EXAMPLES.retry);
       return recovers && goods++ < 3 ? null : undefined;
     }},0,16 * MINUTE);
+    if (!recovers) sim.retire(10 * MINUTE + 2 * MAX_LATENCY,producer);
     sim.run(10 * MINUTE);
     check(sim.lines.length === 1 && sim.lines[0].text === advice.text,'I8: retry alternated with held or install advice from the same producer');
     drive(sim,rng,{[other]:() => pick(rng,EXAMPLES.retry)},11 * MINUTE,16 * MINUTE);
     sim.run();
-    check(sim.lines.at(-1).text === BACKGROUND_RETRY,'I8: retry stayed hidden after the advising producer recovered or expired');
+    check(sim.lines.at(-1).text === BACKGROUND_RETRY,'I8: retry stayed hidden after the advising producer recovered or retired');
+  });
+  generated('long runs of empty calls on one producer never hide owner-needed advice from another',(sim,rng) => {
+    const first = pick(rng,PRODUCERS), second = pick(rng,partners(first));
+    const stale = anyExample(rng), owner = pick(rng,EXAMPLES.owner), arrives = MINUTE + rng(8 * MINUTE);
+    // One failure, then only calls with nothing to report, each recording ok.
+    drive(sim,rng,{[first]:start => start === 0 ? stale : null,[second]:start => start >= arrives ? owner : undefined},0,10 * MINUTE);
+    sim.run();
+    const shown = sim.trace.find(step => step.op === 'settle' && step.producer === second);
+    check(sim.lines.some(line => line.at === shown.at && line.text === owner.text),`I5: ${second} owner-needed advice waited behind ${first}'s stale ${stale.label} outcome`);
+  });
+  generated('a hung call counts as a timeout until it settles, and nothing longer',(sim,rng) => {
+    const producer = pick(rng,PRODUCERS), other = pick(rng,partners(producer));
+    const hang = HUNG + 1 + rng(5 * MINUTE), settles = pick(rng,[null,pick(rng,EXAMPLES.retry)]);
+    // The other producer keeps calling with nothing to report, so health is
+    // evaluated throughout.
+    drive(sim,rng,{[other]:() => null},0,8 * MINUTE);
+    sim.call(producer,0,hang,settles);
+    sim.run();
+    // A hang is seen at the first check after ten seconds, and prints at the
+    // first check after the grace: each comes with the other producer's calls.
+    const retries = sim.lines.filter(line => line.text === BACKGROUND_RETRY), due = HUNG + GRACE + 2 * cycle(other);
+    check(sim.lines.length === retries.length && retries.length <= 1,`a hung call printed ${sim.lines.map(line => line.label)}`);
+    if (hang >= due) check(retries[0]?.at <= due,`a call hung for ${hang} ms printed its retry line at ${retries[0]?.at}, due by ${due}`);
+    if (hang < HUNG + GRACE && settles === null) check(!retries.length,`a call hung for ${hang} ms then healthy printed a retry line`);
   });
   generated('two equally urgent producers keep the line already showing until it recovers',(sim,rng) => {
     const first = pick(rng,PRODUCERS), second = pick(rng,partners(first));

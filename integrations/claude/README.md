@@ -99,10 +99,15 @@ The owner gets plain instructions, while exact operation IDs remain in the
 plugin store's bounded `connect-log` diagnostics. See [ADR-0096](../../docs/adr/ADR-0096-recover-stale-claude-connect.md).
 
 One conversation health record collects announce, helper, claim, report, automatic
-reconnect and qualification outcomes. Producers drop out after three of their own
-call intervals without a call. A call in flight keeps its producer live, because one
-poll's helper calls can take far longer than its one-second tick; the intervals count
-from when a call ends. The current condition is the most important live outcome:
+reconnect and qualification outcomes. Which producers count follows one rule. Every
+call records exactly one outcome: a call with nothing to report records ok, such as
+a heartbeat with nothing to drain, a poll that finds a message already being
+answered, or an empty report flush. A producer counts from its first outcome until it
+is retired: its loop stops, its binding ends, it qualifies, or the conversation
+resets. A call that ends after its producer retired records nothing. Nothing expires
+with time. A call still open after ten seconds (the helper's eight-second limit plus
+two seconds) counts as a temporary timeout for its producer until it ends. The
+current condition is the most important live outcome:
 terminal, installation failure, owner-needed held advice, generic held advice,
 transient failure, then healthy. The line already showing stays while its producer
 still fails and nothing more important is live; otherwise the most recent failed call
@@ -120,9 +125,9 @@ project folder keeps its own words. They and generic held advice speak after
 two minutes of continuous unhealthy outcomes, even when codes change or urgent advice
 intervenes, and are spaced at least two minutes apart. A retry line never replaces
 held, installation or terminal advice until the producer that printed it recovers or
-expires. Kinds come from error codes only, never from `retryable` or the hint. Transient producers need three
+retires. Kinds come from error codes only, never from `retryable` or the hint. Transient producers need three
 consecutive successful calls to recover; other conditions clear on their next success.
-An empty report flush is successful. Only every live producer being healthy resets
+Only every live producer being healthy resets
 the continuous failure clock and last line. New conversations and `/clear` reset
 all evidence and spacing. Owner commands answer directly without changing health.
 Project-folder access failures retain retry authority and ask the owner to restore access.
