@@ -17,13 +17,29 @@ agent CLI's catalogue read touches every session's lock.
 ## Decision
 
 1. **Plain error hints.** Local errors carry one plain hint per code. `retryable`
-   comes from the code: `CoreErrorCode::is_transient` is true only for `store_busy`
-   (a lock wait ran out before anything was read or written). The wire shape and
-   the code names are unchanged.
-2. **Reads ride out Busy.** Read-only entrypoints (agent `read`, `item
-   messages|changes|rounds`, `apply --dry-run`, owner queries and saved-connect
-   lookup, `bridge connection-status`, MCP queries) retry `store_busy` with a
-   doubling backoff (50 ms to 400 ms) for 3 s, then return the plain busy error.
+   comes from the code: `CoreErrorCode::is_transient` is true only for `store_busy`.
+   Usually a lock wait ran out before anything was read or written. A removal can
+   also report it after a resumable step (`remove_session` saved its backup,
+   `evict_all` moved some sessions), and sending it again resumes there. The wire
+   shape and the code names are unchanged.
+2. **Reads ride out Busy, within a budget.** Read-only entrypoints retry
+   `store_busy` with a doubling backoff (50 ms to 400 ms), then return the plain
+   busy error. A busy try has already spent the store's full 2 s lock wait
+   (`LOCK_WAIT`) on each lock it touched. So a new try starts only while the backoff
+   plus one full lock wait still fits in the entrypoint's budget:
+
+   | Entrypoint | Caller | Budget |
+   |---|---|---|
+   | agent `read`, `item messages\|changes\|rounds`, `apply --dry-run` | agent CLI | 4.5 s |
+   | owner queries | owner CLI | 4.5 s |
+   | MCP queries | MCP server | 4.5 s |
+   | `bridge connection-status` | plugin, helper timeout 5 s (8 s with quieter hook notices) | 2.5 s |
+   | `owner binding connect --replay-only` (saved-connect lookup) | plugin, same helper timeout | 2.5 s |
+
+   4.5 s fits a second try after one full lock wait. 2.5 s fits only one: the
+   lock's own 2 s wait rides out a short hold, and the call ends well inside the
+   helper timeout. The plugin's other helper calls (`bridge claim`, `report`,
+   `announce`, owner connect, register and disconnect) are not retried here.
    Writes never retry here; their caller resends the same operation.
 3. **Lock-free claim check.** `Store::peek` reads the committed session file without
    the session lock. Every session write publishes a complete, synced temp file by
@@ -33,9 +49,13 @@ agent CLI's catalogue read touches every session's lock.
    (an input to send, or a saved receipt for this request id) it takes the lock,
    rereads and decides again; a snapshot never authorizes a write.
 4. **Parse cache.** `peek` caches each parsed, validated session by the file's
-   `(dev, ino)` and keeps that file open, so the inode number cannot be reused while
-   cached. It re-parses only when a commit replaced the file. At most 32 sessions are
-   kept.
+   identity from one fstat: `(dev, ino)` plus size, mtime and ctime in nanoseconds.
+   It keeps that file open, so the inode number cannot be reused while cached. A
+   commit changes the inode. A rewrite in place from outside Ariadne (`cp
+   backup.json sessions/<id>.json`) keeps the inode but changes ctime, so it is
+   re-parsed too. A peek that finds the file gone drops its entry and open file at
+   once; any insert first drops cached files that have no link left. At most 32
+   sessions are kept, least recently used evicted first.
 
 No file, field or saved format is added; older releases read the store unchanged.
 
@@ -44,8 +64,12 @@ No file, field or saved format is added; older releases read the store unchanged
 - An idle poll costs one open and fstat and never contends with readers or writers.
 - A write landing after a poll's open is seen by the next poll: no input is lost or
   delayed past one poll interval, and each input is still claimed exactly once.
-- A read that stays busy for longer than the window still fails, after 3 to 5 s
-  (one more 2 s lock wait may run past the window), with `retryable: true`.
+- A read that stays busy still fails, with `retryable: true`. A try that waits on
+  one busy lock never runs past the budget: 4.5 s, or 2.5 s for the plugin's reads.
+  One agent CLI try can wait on `k` busy locks, because the catalogue read touches
+  every session's lock, and so cost `k × 2 s`. The bound is then
+  `budget − 2 s + k × 2 s`: 2.5 s + `k` × 2 s for the agent CLI, for example
+  6.5 s with two busy sessions.
 - The desktop process keeps up to 32 parsed sessions in memory.
 
 ## Spec references

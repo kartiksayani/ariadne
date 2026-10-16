@@ -129,15 +129,19 @@ fn execute(args: &[&str], input: &mut dyn Read) -> Result<serde_json::Value, Cor
                 invalid("Explicit --request-id is required for status correlation.")
             })?;
             let home = home_from_environment()?;
-            // A status read changes nothing: ride out a briefly busy store.
-            serde_json::to_value(ariadne_core::native::retry_busy_read(|| {
-                connection_status(
-                    home.clone(),
-                    binding_id.clone(),
-                    generation.clone(),
-                    request_id.clone(),
-                )
-            })?)
+            // A status read changes nothing: ride out a briefly busy store,
+            // within the plugin's helper timeout.
+            serde_json::to_value(ariadne_core::native::retry_busy_within(
+                ariadne_core::native::PLUGIN_READ_BUDGET,
+                || {
+                    connection_status(
+                        home.clone(),
+                        binding_id.clone(),
+                        generation.clone(),
+                        request_id.clone(),
+                    )
+                },
+            )?)
             .map_err(|_| invalid("Cannot serialize canonical binding summary."))
         }
         "claim" => {
