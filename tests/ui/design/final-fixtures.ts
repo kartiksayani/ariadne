@@ -93,10 +93,13 @@ export function finalFixture(state: Pick<FinalState, 'id' | 'app'>, variant: Var
   const spec = finalSpec(state, variant), fixture = buildFixture(spec, worldData(state.app));
   const drafts = state.app.drafts ?? [];
   if (!fixture.route) return fixture;
-  const route = fixture.route, session = fixture.transport.sessions.get(route.session_id)!;
+  const current = fixture.transport.sessions.get(fixture.route.session_id)!;
   fixture.transport.preferences.drafts = drafts.map((draft, at): OwnerDraft => {
-    const item = session.items[draft.item];
-    if (!item) throw new Error(`final ${state.id}: draft on an item that is not in the session: ${draft.item}`);
+    // A draft on a question in another session (2.7's picked option in the other-sessions list) lives with that session.
+    const session = current.items[draft.item] ? current : [...fixture.transport.sessions.values()].find(value => value.items[draft.item]);
+    const item = session?.items[draft.item];
+    if (!session || !item) throw new Error(`final ${state.id}: draft on an item that is in no session: ${draft.item}`);
+    const route = { project_id: session.project_id, session_id: session.id };
     return { op_id: uuid(100 + at), session: route, binding_id: session.active_binding_id!, target: { topic_id: item.topic_id, item_id: item.id }, intent: 'answer',
       text: draft.own ?? draft.note ?? '', selected_option_id: draft.pick === undefined ? null : item.options[draft.pick]?.id ?? null,
       target_revision: item.revision, question_revision: item.question_revision, supersedes_answer_id: null };

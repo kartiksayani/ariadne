@@ -137,7 +137,9 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
   const standing = session ? Object.values(session.inputs).filter(input => !!input && input.target.item_id
     && ['queued', 'in_flight', 'needs_attention'].includes(input.state)
     && !(input.state === 'needs_attention' && input.kind === 'answer' && inDock.has(input.target.item_id))).sort((a, b) => b!.seq - a!.seq) : [];
-  const index = questions.findIndex(question => question.id === state.current?.id);
+  // The pager reads the model's list, which keeps a just-sent question in its place: "1 of N" stays true during the hold.
+  const paged = state.session === sessionKey ? state.questions : questions;
+  const index = paged.findIndex(question => question.id === state.current?.id);
   const item = open ? session?.items[state.current!.itemId] : undefined;
   const waitingNow = unsent.length > 0;
   const toggle = (name: 'others' | 'drafts' | 'sent') => setPopover(value => value === name ? null : name);
@@ -199,8 +201,8 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
         <span className="dock-pager">
           <button type="button" className="dock-icon dock-small" aria-label="Previous question" title="Previous question ( [ )" disabled={index <= 0} onClick={() => model.step(-1)}>
             <i className="ph ph-arrow-left" aria-hidden="true" /></button>
-          <span aria-live="polite">{Math.max(1, index + 1)} of {Math.max(1, questions.length)}</span>
-          <button type="button" className="dock-icon dock-small" aria-label="Next question" title="Next question ( ] )" disabled={index >= questions.length - 1} onClick={() => model.step(1)}>
+          <span aria-live="polite">{Math.max(1, index + 1)} of {Math.max(1, paged.length)}</span>
+          <button type="button" className="dock-icon dock-small" aria-label="Next question" title="Next question ( ] )" disabled={index >= paged.length - 1} onClick={() => model.step(1)}>
             <i className="ph ph-arrow-right" aria-hidden="true" /></button>
         </span>
         {keptChip}

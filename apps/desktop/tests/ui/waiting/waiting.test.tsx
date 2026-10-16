@@ -597,6 +597,24 @@ describe('source-backed answer dock', () => {
     expect(transport.mutations.find(request => request.command.command === 'input_submit')!.command.op_id).toBe(refused[0]);
   });
 
+  it('keeps "1 of 2" and the sent question in place on screen during the Sent hold', async () => {
+    const { transport } = await dockUI(transport => {
+      const session = transport.sessions.get(route.session_id)!;
+      session.items['10'] = { ...structuredClone(session.items['2']!), id: '10', question: 'A later waiting question', waiting_since: '2026-10-05T03:00:00.000Z' };
+    });
+    fireEvent.click(within(dock()).getByRole('button', { name: '2 waiting' }));
+    await waitFor(() => expect(option(0)?.disabled).toBe(false));
+    expect(pager()).toBe('1 of 2');
+    const question = dock().querySelector('.dock-question-title')?.textContent;
+    fireEvent.click(option(0));
+    await waitFor(() => expect(send().disabled).toBe(false));
+    fireEvent.click(send());
+    await waitFor(() => expect(transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(1));
+    await within(dock()).findByRole('button', { name: 'Undo' });
+    expect(pager()).toBe('1 of 2');
+    expect(dock().querySelector('.dock-question-title')?.textContent).toBe(question);
+  });
+
   it('puts why a delivery failed and its one Retry in the bar, and leaves the note its other actions', async () => {
     const { transport } = await dockUI(transport => {
       const session = transport.sessions.get(route.session_id)!, failed = answerInput(session, '74'), item = session.items['2']!;
