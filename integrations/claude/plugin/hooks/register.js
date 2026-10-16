@@ -29,14 +29,14 @@ function host($, background = true) {
 // Async calls retain their conversation's writer. Reset retires that writer,
 // so a late result can never repopulate the next conversation's health.
 function healthFor(state) {
-  const health = state.health;
+  const health = state.health, mine = () => state.health === health;
   return {
-    record:($,producer,outcome) => {if (state.health === health) health.record($,producer,outcome);},
-    delete:($,producer) => {if (state.health === health) health.delete($,producer);},
-    begin:($,producer) => state.health === health ? health.begin($,producer) : () => {},
-    during:($,producer,action) => state.health === health ? health.during($,producer,action) : action(),
+    call:($,producer) => mine() ? health.call($,producer) : () => {},
+    record:($,producer,outcome) => {if (mine()) health.record($,producer,outcome);},
+    retire:($,producer) => {if (mine()) health.retire($,producer);},
   };
 }
+const OK = Object.freeze({kind:'ok'});
 function resetHealth(state) {
   state.health.reset();
   state.health = conversationHealth();
@@ -78,37 +78,31 @@ function failureText(state, error, connect = false) {
   if (!connect && failureCode(error) === 'incompatible_adapter') return plainFailure('incompatible_adapter');
   return (error instanceof ModError ? error.plain : undefined) ?? (connect ? TEXT.failure : TEXT.heartbeatRetry);
 }
-function failure(state, $, error, health) {
-  health.record(host($),'helper',backgroundOutcome(error,failureText(state,error)));
+function failure(state, error) {
+  return backgroundOutcome(error,failureText(state,error));
 }
 // Owner commands answer directly and never change background health.
 async function checked(state, $, action, connect = false) {
   try { return await action(); }
   catch (error) { return {text:`That did not complete. ${failureText(state,error,connect)}`}; }
 }
-function notice(health, h, error, text, terminal = false) {
-  health.record(h,'auto',{kind:terminal ? 'terminal' : 'held',code:failureCode(error),text});
+function notice(error, text, terminal = false) {
+  return {kind:terminal ? 'terminal' : 'held',code:failureCode(error),text};
 }
-function announcementGood(health, h) {
-  health.record(h,'announce',{kind:'ok'});
-}
-function announce(state, h) {
-  const health = healthFor(state);
-  return health.during(h,'announce',() => announceOnce(state,h,health));
-}
-async function announceOnce(state, h, health) {
+// One announce call. One skipped because another is in flight has nothing to report.
+async function announce(state, h) {
+  const settle = healthFor(state).call(h,'announce');
   try {
-    if (await state.discovery.announce(h,state.announcementScope)) {
-      announcementGood(health,h);
-    }
+    await state.discovery.announce(h,state.announcementScope);
+    settle(OK);
   } catch (error) {
     let last = error;
     // A scope the app no longer has still leaves this conversation discoverable.
     if (state.announcementScope && STALE_SCOPE.includes(error?.code)) {
-      try { if (await state.discovery.announce(h,null)) announcementGood(health,h); return; }
+      try { await state.discovery.announce(h,null); settle(OK); return; }
       catch (fallback) { last = fallback; }
     }
-    health.record(h,'announce',backgroundOutcome(last,failureText(state,last)));
+    settle(failure(state,last));
   }
 }
 // Startup and an owner command may overlap a heartbeat. Share qualification,
@@ -116,21 +110,24 @@ async function announceOnce(state, h, health) {
 function qualifyConnection(state, $) {
   state.qualifying ??= qualify(host($),state.descriptor).then(() => {
     state.qualified = true;
+    // A qualified connection never qualifies again, whoever asked: the
+    // producer retires. An owner command may be asking, so this prints nothing.
+    healthFor(state).retire(host($,false),'qualification');
     startPolling(state,$);
   }).finally(() => { state.qualifying = null; });
   return state.qualifying;
 }
 // One startup or heartbeat qualification call and its outcome.
-function qualification(state, $) {
-  const health = healthFor(state), h = host($);
-  return health.during(h,'qualification',async () => {
-    try {
-      await qualifyConnection(state,$);
-      health.record(h,'qualification',{kind:'ok'});
-    } catch (error) {
-      health.record(h,'qualification',backgroundOutcome(error,failureText(state,error)));
-    }
-  });
+async function qualification(state, $) {
+  const health = healthFor(state), settle = health.call(host($),'qualification');
+  try {
+    await qualifyConnection(state,$);
+    settle(OK);
+    // The producer retired as it qualified; show what that changed.
+    health.retire(host($),'qualification');
+  } catch (error) {
+    settle(failure(state,error));
+  }
 }
 async function heartbeat(state, $) {
   if (state.sessionEnded) return;
@@ -249,17 +246,25 @@ async function retire(state, h) {
   state.retired.push(...old);
   for (const loop of old) await loop.stop(h,true);
 }
-function drainRetired(state, h) {
-  const health = healthFor(state);
-  return health.during(h,'auto',async () => {
-    const left = [], attempted = state.retired.length > 0;
-    // Retired reports block this background reconnect attempt. Preserve the real
-    // failure and this caller's cadence; their stopped claim loop no longer polls.
-    for (const loop of state.retired) if (!await loop.drain(h,error => health.record(h,'auto',backgroundOutcome(error)))) left.push(loop);
-    state.retired = left;
-    if (attempted && !left.length) health.record(h,'auto',{kind:'ok'});
-    return left.length === 0;
-  });
+// Retries the unsaved reports of retired loops. Returns the last failure, or
+// null once nothing is left. Their stopped claim loops no longer poll.
+async function drainLoops(state, h) {
+  const left = [];
+  let failed = null;
+  for (const loop of state.retired) {
+    const error = await loop.drain(h);
+    if (error) { failed = error; left.push(loop); }
+  }
+  state.retired = left;
+  return failed;
+}
+// One automatic-reconnect call; with nothing to drain it records ok. Retired
+// reports block a background reconnect, so their real failure is kept.
+async function drainRetired(state, h) {
+  const settle = healthFor(state).call(h,'auto');
+  const failed = await drainLoops(state,h);
+  settle(failed ? backgroundOutcome(failed) : OK);
+  return failed === null;
 }
 // A new Claude conversation in this process (/clear, /resume) takes over: the
 // old conversation's loop reports its end, and the new conversation follows the
@@ -323,35 +328,42 @@ async function deliverNote(state, $) {
 // owner command. Failures are retried quietly by the heartbeat.
 async function autoConnect(state, $) {
   if (!state.target || state.loop || state.ownerTransition || state.sessionEnded || !state.qualified) return;
-  const h = host($), health = healthFor(state), conversation = state.health;
+  const h = host($), conversation = state.health;
   state.reconnectSoon = false;
   state.ownerTransition = true;
-  return health.during(h,'auto',() => reconnect(state,$,h,health,conversation));
+  // One automatic-reconnect call with one outcome.
+  const settle = healthFor(state).call(h,'auto');
+  let outcome = OK;
+  try { outcome = await reconnect(state,$,h,conversation); }
+  catch (error) { outcome = failure(state,error); throw error; }
+  finally {
+    settle(outcome);
+    state.ownerTransition = false;
+    reopen(state);
+  }
 }
-async function reconnect(state, $, h, health, conversation) {
+async function reconnect(state, $, h, conversation) {
   try {
     // The app accepts the new conversation once the old one's end is saved.
-    if (!await drainRetired(state,h)) return;
+    const failed = await drainLoops(state,h);
+    if (failed) return backgroundOutcome(failed);
     const result = await bind(state,$,state.target.session_id,{background:true});
-    if (state.health !== conversation || !state.loop || result.text) return;
+    if (state.health !== conversation || !state.loop || result.text) return OK;
     state.note = {binding:result.result.binding,tries:0,sending:false};
     await deliverNote(state,$);
-    if (state.health !== conversation) return;
-    health.record(h,'auto',{kind:'ok'});
-    h.ui.log(TEXT.reconnected);
+    if (state.health === conversation) h.ui.log(TEXT.reconnected);
+    return OK;
   } catch (error) {
-    if (state.health !== conversation) return;
+    if (state.health !== conversation) return OK;
     if (error?.code === 'not_found') {
       state.target = null;
       await forget(h,state.claudeSessionId);
-      notice(health,h,error,TEXT.gone,true);
-    } else if (error?.code === 'invalid_transition') notice(health,h,error,TEXT.closed);
+      return notice(error,TEXT.gone,true);
+    }
+    if (error?.code === 'invalid_transition') return notice(error,TEXT.closed);
     // Still retried quietly: the other conversation may end or disconnect.
-    else if (error?.code === 'binding_conflict') notice(health,h,error,TEXT.elsewhere);
-    else health.record(h,'auto',backgroundOutcome(error,failureText(state,error)));
-  } finally {
-    state.ownerTransition = false;
-    reopen(state);
+    if (error?.code === 'binding_conflict') return notice(error,TEXT.elsewhere);
+    return failure(state,error);
   }
 }
 async function sessionStart(state, $, event, next) {
@@ -465,25 +477,22 @@ async function disconnectAction(state, $) {
   state.announcementScope = null;
   return {text:JSON.stringify(receipt)};
 }
+// Each turn callback is one helper call; with no loop to tell it records ok.
 async function turnStart(state, $, event, next) {
-  const health = healthFor(state), loop = state.loop;
-  if (loop) await health.during(host($),'helper',async () => {
-    try { await loop.start(host($),event); health.record(host($),'helper',{kind:'ok'}); }
-    catch (error) { failure(state,$,error,health); }
-  });
+  const settle = healthFor(state).call(host($),'helper'), loop = state.loop;
+  try { if (loop) await loop.start(host($),event); settle(OK); }
+  catch (error) { settle(failure(state,error)); }
   return next(event);
 }
 async function turnComplete(state, $, event, next) {
-  const health = healthFor(state);
+  const settle = healthFor(state).call(host($),'helper');
   // A retired loop still records the end of a turn it delivered.
   const active = [state.loop,...state.retired].filter(Boolean);
-  if (active.length) await health.during(host($),'helper',async () => {
-    try {
-      for (const loop of active) await loop.complete(host($),event);
-      health.record(host($),'helper',{kind:'ok'});
-    }
-    catch (error) { failure(state,$,error,health); }
-  });
+  try {
+    for (const loop of active) await loop.complete(host($),event);
+    settle(OK);
+  }
+  catch (error) { settle(failure(state,error)); }
   return next(event);
 }
 // /clear and /resume end this conversation but not the process: report the

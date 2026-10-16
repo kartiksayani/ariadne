@@ -88,7 +88,10 @@ const FOLDER_FAILURE = 'The project folder is missing or inaccessible. Restore a
 export function folderFailure(error) {
   return error?.plain === FOLDER_FAILURE;
 }
-const PRODUCER_INTERVALS = Object.freeze({announce:30000,helper:30000,auto:30000,qualification:30000,claim:1000,reports:1000});
+// A helper call is killed after HELPER_TIMEOUT_MS. A call still open two
+// seconds after that is hung: it counts as a temporary timeout until it ends.
+export const HUNG_CALL_MS = HELPER_TIMEOUT_MS + 2000;
+const PRODUCERS = Object.freeze(['announce','helper','auto','qualification','claim','reports']);
 // Held codes whose advice the owner must act on. Other held codes, such as
 // protocol_error, wait out the grace and spacing like retries do.
 const OWNER_HELD = new Set(['invalid_transition','binding_conflict','stale_generation','binding_mismatch','binding_ambiguous',
@@ -112,27 +115,32 @@ export function backgroundOutcome(error, text, {terminal = false} = {}) {
   if (TRANSIENT.has(code)) return {kind:'transient',code,text:retryLine(folderFailure(error) ? FOLDER_FAILURE : text)};
   return {kind:'held',code,text:code === 'invalid_transition' ? plainFailure(code,error?.details) : text ?? plainFailure(code,error?.details)};
 }
-// One conversation record. Selection depends on live producer outcomes and on
-// which producer printed the line showing now. Printing remembers continuous
-// ill health, the last line, its producer and the spacing of non-urgent lines.
-export function conversationHealth(now = () => Date.now(), intervals = PRODUCER_INTERVALS) {
-  const producers = new Map(), order = Object.keys(PRODUCER_INTERVALS);
-  // Calls in flight per producer, and when its last call ended. A helper call
-  // may take far longer than its producer's interval, so an open call keeps its
-  // producer live; the interval counts from when the call ends.
+// One conversation record. Liveness has one rule: every call records exactly
+// one outcome, and a producer counts from its first outcome until it is
+// retired (its loop stopped, its binding ended, it qualified, or reset). A call open longer
+// than HUNG_CALL_MS counts as a temporary timeout for its producer until it
+// ends. Printing remembers continuous ill health, the last line, its producer
+// and the spacing of non-urgent lines.
+export function conversationHealth(now = () => Date.now()) {
+  // The latest recorded outcome of each producer that has not been retired.
+  const producers = new Map();
+  // The calls each producer has open now, by the time each started.
   const calls = new Map();
   let unhealthySince = null, lastLine = null, quietAt = null, shown = null;
-  function live(producer, value) {
-    const call = calls.get(producer);
-    return call?.open > 0 || now() - Math.max(value.lastCall,call?.endedAt ?? -Infinity) <= intervals[producer] * 3;
+  // A producer's outcome as selection sees it: a hung call counts as a timeout.
+  function outcome(producer) {
+    const open = [...calls.get(producer) ?? []].map(call => call.startedAt);
+    const oldest = open.length ? Math.min(...open) : Infinity;
+    if (now() - oldest > HUNG_CALL_MS) return {kind:'transient',code:'timeout',text:BACKGROUND_RETRY,failedAt:oldest + HUNG_CALL_MS};
+    return producers.get(producer);
   }
   function failing() {
-    return [...producers.entries()].filter(([producer,value]) => value.kind !== 'ok' && live(producer,value));
+    return PRODUCERS.map(producer => [producer,outcome(producer)]).filter(([,value]) => value && value.kind !== 'ok');
   }
   function current() {
     const candidates = failing();
     if (!candidates.length) return {kind:'ok'};
-    candidates.sort(([left,a],[right,b]) => rank(b) - rank(a) || b.failedAt - a.failedAt || order.indexOf(left) - order.indexOf(right));
+    candidates.sort(([left,a],[right,b]) => rank(b) - rank(a) || b.failedAt - a.failedAt || PRODUCERS.indexOf(left) - PRODUCERS.indexOf(right));
     // The line showing now stays while its producer still fails and is at least
     // as urgent as every other candidate.
     const kept = candidates.find(([producer,value]) => producer === shown?.producer && rank(value) >= rank(candidates[0][1]));
@@ -156,7 +164,7 @@ export function conversationHealth(now = () => Date.now(), intervals = PRODUCER_
     if (condition.text === lastLine) return condition;
     if (quiet && (now() - unhealthySince < NOTICE_GRACE_MS || (quietAt !== null && now() - quietAt < NOTICE_GRACE_MS))) return condition;
     // A retry line never replaces held, installation or terminal advice while
-    // the producer that printed it has neither recovered nor expired.
+    // the producer that printed it still fails.
     if (condition.kind === 'transient' && shown && shown.kind !== 'transient' && failing().some(([producer]) => producer === shown.producer)) return condition;
     if (lastLine !== null) backgroundDiagnostic($,{step:condition.producer,outcome:'changed',code:condition.code,at:new Date(now()).toISOString()});
     $.ui.log(condition.text);
@@ -165,57 +173,35 @@ export function conversationHealth(now = () => Date.now(), intervals = PRODUCER_
     if (quiet) quietAt = now();
     return condition;
   }
-  // Drops producers idle for three intervals with no call open. A producer
-  // calling now is open, so its own slow call never counts as its recovery.
-  function expire($) {
-    for (const [producer,value] of producers) if (!live(producer,value)) producers.delete(producer);
-    if (current().kind === 'ok') evaluate($);
-  }
-  // Opens one call of a producer and returns the function that closes it. A
-  // producer idle past its lifetime drops out first: a new call starts afresh.
-  function begin($, producer) {
+  // Opens one call of a producer and returns the function that settles it with
+  // its one outcome. A call settled after its producer retired records nothing.
+  function call($, producer) {
     if ($.background === false) return () => {};
-    expire($);
-    const call = calls.get(producer) ?? {open:0,endedAt:-Infinity};
-    calls.set(producer,call);
-    call.open += 1;
-    let open = true;
-    return () => {
-      if (!open) return;
-      open = false;
-      call.open -= 1;
-      call.endedAt = now();
+    const open = {startedAt:now()};
+    if (!calls.has(producer)) calls.set(producer,new Set());
+    calls.get(producer).add(open);
+    evaluate($);
+    return outcome => {
+      if (!calls.get(producer)?.delete(open)) return;
+      const previous = producers.get(producer);
+      if (outcome.kind === 'ok' && previous?.kind === 'transient' && previous.good < 2) producers.set(producer,{...previous,good:previous.good + 1});
+      else producers.set(producer,{...outcome,failedAt:now(),good:0});
+      return evaluate($);
     };
-  }
-  function record($, producer, outcome) {
-    if ($.background === false) return;
-    // A result outside an open call is a call that took no time.
-    let end = () => {};
-    if (calls.get(producer)?.open > 0) expire($);
-    else end = begin($,producer);
-    const previous = producers.get(producer);
-    if (outcome.kind === 'ok' && previous?.kind === 'transient' && previous.good < 2) {
-      producers.set(producer,{...previous,lastCall:now(),good:previous.good + 1});
-    } else producers.set(producer,{...outcome,lastCall:now(),failedAt:now(),good:0});
-    end();
-    return evaluate($);
   }
   return {
     current,
-    begin,
-    record,
-    // Runs one call of a producer; results recorded meanwhile belong to it.
-    async during($, producer, action) {
-      const end = begin($,producer);
-      try { return await action(); } finally { end(); }
-    },
-    delete($, producer) {
-      if ($.background === false) return;
+    call,
+    // One call that took no time.
+    record($, producer, outcome) { return call($,producer)(outcome); },
+    // The producer stops counting, and its open calls record nothing. An owner
+    // command may retire a producer whose loop it stopped, but prints nothing.
+    retire($, producer) {
       producers.delete(producer);
-      expire($);
-      return evaluate($);
+      calls.delete(producer);
+      if ($.background !== false) return evaluate($);
     },
-    reset() {producers.clear();unhealthySince = null;lastLine = null;quietAt = null;shown = null;},
+    reset() {producers.clear();calls.clear();unhealthySince = null;lastLine = null;quietAt = null;shown = null;},
   };
 }
 // Owner-facing sentence per helper error code, each with a next step. Raw helper

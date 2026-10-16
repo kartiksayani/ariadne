@@ -191,7 +191,8 @@ describe('captured Claude claim lifecycle', () => {
     const loop = claimLoop(descriptor.helperPath,binding,{onEnded:() => ended.push(true)});
     await loop.stop(h.$,true);
     expect(h.logs).toEqual([]);expect(ended).toEqual([]);
-    expect(await loop.drain(h.$)).toBe(true);
+    // Nothing is left to drain.
+    expect(await loop.drain(h.$)).toBe(null);
   });
   it('logs a malformed claim once, after the grace, across polls', async () => {
     let time = 0;

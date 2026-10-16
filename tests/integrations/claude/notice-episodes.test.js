@@ -122,14 +122,14 @@ it.each(producers)('%s clears held/install on the first OK and transient on the 
 it.each(['reset','clear'])('retry then %s then urgent new notice has no stale suppression',mode => {
   vi.useFakeTimers();vi.setSystemTime(0);const h = host(), health = conversationHealth();
   for (let at = 0; at <= 120000; at += 30000) {vi.setSystemTime(at);health.record(h.$,'announce',backgroundOutcome(noticeError('store_busy')));}
-  if (mode === 'reset') health.reset();else health.delete(h.$,'announce');
+  if (mode === 'reset') health.reset();else health.retire(h.$,'announce');
   vi.setSystemTime(120001);health.record(h.$,'claim',backgroundOutcome(noticeError('invalid_transition',{reason:'recovery_required'})));
   expect(h.logs).toEqual([BACKGROUND_RETRY,recovery]);
 });
 it('recovery_required/store_busy alternation keeps the urgent advice and never alternates it with retry',() => {
   vi.useFakeTimers();vi.setSystemTime(0);const h = host(), health = conversationHealth();
   health.record(h.$,'claim',backgroundOutcome(noticeError('invalid_transition',{reason:'recovery_required'})));
-  // A retry line never replaces held advice while its producer neither recovers nor expires.
+  // A retry line never replaces held advice while its producer neither recovers nor retires.
   for (let at = 1000; at <= 600000; at += 1000) {
     vi.setSystemTime(at);health.record(h.$,'claim',backgroundOutcome(noticeError(at % 2000 ? 'store_busy' : 'invalid_transition',{reason:'recovery_required'})));
     expect(h.logs).toEqual([recovery]);
@@ -149,7 +149,7 @@ it.each(['announce','helper','auto','claim'])('%s joins and changes a continuous
   expect(h.logs).toEqual([BACKGROUND_RETRY]);
 });
 
-it('one failed report then idle then outage 2.5 hours later gets a fresh full grace',async () => {
+it('one failed report, three good flushes, then idle, then an outage 2.5 hours later gets a fresh full grace',async () => {
   vi.useFakeTimers();vi.setSystemTime(0);let refuse = true;
   const value = await prepared(), health = conversationHealth();
   const h = host({claim:value,handler:argv => argv[2] === 'report' && refuse ? failure('io_error') : undefined});
@@ -161,6 +161,9 @@ it('one failed report then idle then outage 2.5 hours later gets a fresh full gr
   vi.setSystemTime(1000);await loop.drain(h.$);
   expect(h.events.map(event => event.kind)).toEqual(['accepted']);
   expect(loop.status().pending_reports).toBe(0);expect(health.current().kind).toBe('transient');
+  // Each poll flushes, and an empty flush is a good call: the third recovers.
+  for (const at of [2000,3000]) {vi.setSystemTime(at);await loop.drain(h.$);}
+  expect(health.current()).toEqual({kind:'ok'});
   vi.setSystemTime(9000000);health.record(h.$,'announce',backgroundOutcome(noticeError('host_unreachable')));
   expect(visible(h)).toEqual([]);
   for (let at = 9030000; at <= 9090000; at += 30000) {vi.setSystemTime(at);health.record(h.$,'announce',backgroundOutcome(noticeError('store_busy')));expect(visible(h)).toEqual([]);}
@@ -387,9 +390,8 @@ it('retries rejected startup qualification at heartbeat cadence and recovers int
   for (let at = 30000; at <= 120000; at += 30000) {vi.setSystemTime(at);await beat();expect(h.logs).toEqual(at < 120000 ? [] : [BACKGROUND_RETRY]);}
   rejected = false;await beat();expect(h.timer()).not.toBe(null);
   await h.timer().callback();expect(h.calls.filter(call => call.argv[2] === 'claim')).toHaveLength(1);
-  // Qualification stops calling once it succeeds. Its one actual OK therefore
-  // clears sticky transient health through idle expiry, not invented successes.
-  for (let at = 150000; at <= 240000; at += 30000) {vi.setSystemTime(at);await beat();}
+  // Qualification stops calling once it succeeds, so it retires then: its
+  // sticky transient clears without invented successes or idle expiry.
   await vi.waitFor(() => expect(h.store.get('hook-log')).toContainEqual(expect.objectContaining({step:'health',outcome:'recovered',code:'ok'})));
 });
 

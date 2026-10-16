@@ -503,18 +503,60 @@ fn removed_connected_project_requires_project_folder_recovery_on_observe() {
     wait(adapter.connect(connect())).unwrap();
 }
 
+// The fake version child for the termination test. A shell cannot be relied on
+// to die from its own signal: a background job of a non-interactive shell
+// inherits SIGINT ignored, and then `kill -INT $$` lets the script exit 0.
+// This child restores the default action, unblocks the signal, raises it and
+// blocks until it lands.
+#[test]
+fn termination_child_process() {
+    let Some(name) = std::env::var_os("ARIADNE_TERMINATION_SIGNAL") else {
+        return;
+    };
+    let signal = match name.to_str() {
+        Some("TERM") => libc::SIGTERM,
+        Some("INT") => libc::SIGINT,
+        Some("HUP") => libc::SIGHUP,
+        Some("KILL") => libc::SIGKILL,
+        Some("ABRT") => libc::SIGABRT,
+        Some("SEGV") => libc::SIGSEGV,
+        Some("BUS") => libc::SIGBUS,
+        Some("ILL") => libc::SIGILL,
+        _ => panic!("unknown termination signal"),
+    };
+    // SAFETY: plain libc signal calls on this thread's own process; the
+    // process is meant to end here.
+    unsafe {
+        libc::signal(signal, libc::SIG_DFL);
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut set);
+        libc::sigaddset(&mut set, signal);
+        libc::pthread_sigmask(libc::SIG_UNBLOCK, &set, std::ptr::null_mut());
+        libc::raise(signal);
+    }
+    loop {
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}
+
 #[test]
 fn version_child_termination_distinguishes_interruptions_from_installation_failures() {
+    let shell_path =
+        |path: &Path| format!("'{}'", path.display().to_string().replace('\'', "'\\''"));
+    let test = shell_path(&std::env::current_exe().unwrap());
+    let signalled = |signal: &str| {
+        format!("ARIADNE_TERMINATION_SIGNAL={signal} exec {test} --exact termination_child_process >/dev/null 2>&1")
+    };
     for (termination, expected) in [
-        ("kill -TERM $$", AdapterErrorCode::HostUnreachable),
-        ("kill -INT $$", AdapterErrorCode::HostUnreachable),
-        ("kill -HUP $$", AdapterErrorCode::HostUnreachable),
-        ("kill -KILL $$", AdapterErrorCode::HostUnreachable),
-        ("kill -ABRT $$", AdapterErrorCode::IncompatibleAdapter),
-        ("kill -SEGV $$", AdapterErrorCode::IncompatibleAdapter),
-        ("kill -BUS $$", AdapterErrorCode::IncompatibleAdapter),
-        ("kill -ILL $$", AdapterErrorCode::IncompatibleAdapter),
-        ("exit 7", AdapterErrorCode::IncompatibleAdapter),
+        (signalled("TERM"), AdapterErrorCode::HostUnreachable),
+        (signalled("INT"), AdapterErrorCode::HostUnreachable),
+        (signalled("HUP"), AdapterErrorCode::HostUnreachable),
+        (signalled("KILL"), AdapterErrorCode::HostUnreachable),
+        (signalled("ABRT"), AdapterErrorCode::IncompatibleAdapter),
+        (signalled("SEGV"), AdapterErrorCode::IncompatibleAdapter),
+        (signalled("BUS"), AdapterErrorCode::IncompatibleAdapter),
+        (signalled("ILL"), AdapterErrorCode::IncompatibleAdapter),
+        ("exit 7".to_owned(), AdapterErrorCode::IncompatibleAdapter),
     ] {
         let fixture = Fixture::new(SUPPORTED_HOST_VERSION);
         executable_file(
