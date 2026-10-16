@@ -82,81 +82,107 @@ export function backgroundDiagnostic($, record) {
     } finally { backgroundWriting = false; }
   })().catch(() => {});
 }
-// A slot remembers its last visible meaning. Transient error kinds share one
-// meaning; actionable state changes and terminal outcomes must stay visible.
-export function noticeEpisodes(now = () => Date.now(), outages = {current:null}) {
-  const slots = new Map();
-  function leaveOutage(episode) {
-    if (!episode?.outage) return;
-    episode.outage.members.delete(episode);
-    if (!episode.outage.members.size && outages.current === episode.outage) outages.current = null;
-    episode.outage = null;
+// Slots retain their own recovery and stability evidence. Forks share the last
+// visible meaning and rate cap, so one problem cannot multiply across producers.
+export const BACKGROUND_RETRY = 'Ariadne is having trouble keeping this conversation up to date; it will keep trying, and you can open Ariadne to check on it.';
+export function noticeEpisodes(now = () => Date.now(), shared = {active:new Set(),lastKey:null,lastNonUrgentAt:null,retrySince:null}) {
+  const slots = new Map(), ownerSlots = new Map();
+  function refreshRetry() {
+    if (![...shared.active].some(episode => episode.transientSince !== null)) shared.retrySince = null;
+  }
+  function remove(map, slot) {
+    const episode = map.get(slot);
+    map.delete(slot);
+    if (map === slots) {
+      shared.active.delete(episode);
+      refreshRetry();
+      if (!shared.active.size) shared.lastKey = null;
+    }
+  }
+  function changed($, slot, episode, meaning) {
+    if (episode.lastKey !== null) backgroundDiagnostic($,{step:slot,outcome:'changed',code:episode.code,at:new Date(now()).toISOString()});
+    episode.lastKey = meaning;
   }
   return {
     fail($, slot, error, text, retryText = text, {background = true,key,terminal = false} = {}) {
-      const code = failureCode(error);
-      let episode = slots.get(slot);
-      // A different cause ends this slot's app outage, even if it is transient
-      // or silent. Its next retry streak gets its own grace and notice.
-      if (code !== 'host_unreachable' && episode?.outage) {
-        leaveOutage(episode);
-        episode.transientSince = null;
-        if (episode.lastKey === 'retrying') episode.lastKey = null;
-      }
-      // Silent control refusals cannot start or age a transient streak.
+      const code = failureCode(error), map = background ? slots : ownerSlots;
+      let episode = map.get(slot);
+      // Reset removes forked evidence too; a later call starts a fresh episode.
+      if (background && episode && !shared.active.has(episode)) { map.delete(slot); episode = null; }
+      // A silent refusal cannot open or age a visible transient streak.
       if (text === null || code === 'lease_invalid') {
-        if (episode) { episode.transientSince = null; episode.good = 0; leaveOutage(episode); }
+        if (episode) { episode.transientSince = null; episode.good = 0; episode.meaning = null; episode.calls = 0; if (background) refreshRetry(); }
         return;
       }
-      // A broken install needs a repair step even in report/claim retry slots.
-      if (background && code === 'incompatible_adapter') text = plainFailure(code);
-      if (!episode) {
-        episode = {transientSince:null,good:0,lastKey:null,code};
-        slots.set(slot,episode);
-        backgroundDiagnostic($,{step:slot,outcome:'started',code,at:new Date(now()).toISOString()});
-      }
-      episode.good = 0;
-      episode.code = code;
       const transient = TRANSIENT.has(code);
-      const meaning = key ?? (transient ? 'retrying' : code === 'invalid_transition'
+      const display = code === 'incompatible_adapter' ? plainFailure(code) : transient ? retryText : text;
+      // The advice is the meaning: different diagnostic codes must not repeat
+      // identical words or interrupt their stability evidence. Held-state wording
+      // also varies by producer, so use its canonical advice. Never persist it.
+      const backgroundMeaning = code === 'invalid_transition' && key === undefined ? plainFailure(code,error?.details) : display;
+      const meaning = background ? backgroundMeaning : key ?? (transient ? 'retrying' : code === 'invalid_transition'
         ? ['owner_paused','session_closed','recovery_required'].includes(error?.details?.reason) ? error.details.reason : 'blocked'
         : code !== 'incompatible_adapter' && error instanceof ModError && bounded(error.code,64) ? error.code : code);
-      if (transient) episode.transientSince ??= now();
-      else episode.transientSince = null;
-      // Forks share app reachability, but retain their own binding/report states.
-      // Reports can save to disk while the desktop app is closed.
-      if (code === 'host_unreachable' && ['announce','helper','claim','auto'].includes(slot)) {
-        outages.current ??= {members:new Set(),shown:false,since:episode.transientSince};
-        episode.outage = outages.current;
-        episode.outage.members.add(episode);
-        if (episode.lastKey === 'retrying') episode.outage.shown = true;
+      if (!episode) {
+        episode = {transientSince:null,good:0,lastKey:null,meaning:null,calls:0,since:now(),code};
+        map.set(slot,episode);
+        if (background) shared.active.add(episode);
+        backgroundDiagnostic($,{step:slot,outcome:'started',code,at:new Date(now()).toISOString()});
+      }
+      if (episode.meaning === meaning && episode.good === 0) episode.calls += 1;
+      else { episode.calls = 1; episode.since = now(); }
+      episode.meaning = meaning;
+      episode.good = 0;
+      episode.code = code;
+      // Changing transient causes does not restart the grace clock. One or two
+      // good calls also leave it running; a held state or sustained recovery ends it.
+      if (transient) {
+        episode.transientSince ??= now();
+        if (background) shared.retrySince ??= now();
+      } else {
+        episode.transientSince = null;
+        if (background) refreshRetry();
+      }
+      if (!background) {
+        // The command always returns its direct answer. App outages add no
+        // extra log line and owner calls never consume background grace or cap.
+        if (code !== 'host_unreachable' && episode.lastKey !== meaning) { changed($,slot,episode,meaning); $.ui.log(text); }
+        if (terminal) remove(map,slot);
+        return;
+      }
+      const urgent = terminal || code === 'incompatible_adapter';
+      if (terminal || shared.lastKey !== meaning) {
+        if (!urgent) {
+          if (transient && now() - shared.retrySince < NOTICE_GRACE_MS) return;
+          if (shared.lastNonUrgentAt !== null && now() - shared.lastNonUrgentAt < NOTICE_GRACE_MS) return;
+          // First advice can speak at once. Changed advice needs stable evidence
+          // from this producer, never calls from another slot or fork.
+          if (shared.lastKey !== null && (episode.calls < 2 || now() - episode.since < 10000)) return;
+          shared.lastNonUrgentAt = now();
+        }
+        changed($,slot,episode,meaning);
+        shared.lastKey = meaning;
+        $.ui.log(display);
       }
       if (terminal) {
-        $.ui.log(text);
-        leaveOutage(episode);
-        slots.delete(slot);
+        remove(map,slot);
         backgroundDiagnostic($,{step:slot,outcome:'ended',code,at:new Date(now()).toISOString()});
-      } else if (episode.lastKey !== meaning && (!background || !transient || now() - (episode.outage?.since ?? episode.transientSince) >= NOTICE_GRACE_MS)) {
-        // Owner commands already return their direct answer. They must not add
-        // another outage line or consume the background grace period.
-        if (episode.outage && (!background || episode.outage.shown)) return;
-        if (episode.lastKey !== null) backgroundDiagnostic($,{step:slot,outcome:'changed',code,at:new Date(now()).toISOString()});
-        episode.lastKey = meaning;
-        if (episode.outage) episode.outage.shown = true;
-        $.ui.log(background && transient ? retryText : text);
       }
     },
     good($, slot) {
-      const episode = slots.get(slot);
-      if (!episode || ++episode.good < 3) return;
-      leaveOutage(episode);
-      slots.delete(slot);
-      backgroundDiagnostic($,{step:slot,outcome:'recovered',code:episode.code,at:new Date(now()).toISOString()});
+      for (const map of [slots,ownerSlots]) {
+        const episode = map.get(slot);
+        if (!episode) continue;
+        if (map === slots && !shared.active.has(episode)) { map.delete(slot); continue; }
+        if (++episode.good < 3) continue;
+        remove(map,slot);
+        backgroundDiagnostic($,{step:slot,outcome:'recovered',code:episode.code,at:new Date(now()).toISOString()});
+      }
     },
-    // Scope changes end the old conversation's notice authority.
-    delete(slot) { leaveOutage(slots.get(slot)); slots.delete(slot); },
-    fork:() => noticeEpisodes(now,outages),
-    reset() { for (const episode of slots.values()) leaveOutage(episode); slots.clear(); outages.current = null; },
+    // Scope changes retire local evidence. A reset invalidates all shared forks.
+    delete(slot) { remove(slots,slot); remove(ownerSlots,slot); },
+    fork:() => noticeEpisodes(now,shared),
+    reset() { slots.clear(); ownerSlots.clear(); shared.active.clear(); shared.lastKey = null; shared.retrySince = null; },
   };
 }
 // Owner-facing sentence per helper error code, each with a next step. Raw helper text is never shown.
@@ -173,7 +199,7 @@ const HELD_FAILURES = Object.freeze({
 const HELPER_FAILURES = Object.freeze({
   host_unreachable: 'Open the Ariadne app, then run /ariadne-connect again.',
   stale_generation: GONE_FAILURE,
-  binding_mismatch: GONE_FAILURE,
+  binding_mismatch: "Ariadne could not use this conversation's project folder or session link. Check that its project folder is available, then run /ariadne-connect again.",
   binding_ambiguous: GONE_FAILURE,
   binding_conflict: 'Check this session in Ariadne and disconnect its current conversation before trying again. If this conversation already follows the Ariadne session you chose earlier, copy that session in Ariadne and run /ariadne-connect followed by what you copied to reconnect here. To use a different Ariadne session, start another Claude conversation, then run /ariadne-connect there.',
   not_found: "Ariadne can't find that session. Open Ariadne to check it still exists, then run /ariadne-connect.",
@@ -233,7 +259,9 @@ export function envelope(result) {
   try { value = JSON.parse(result.stdout); }
   catch { throw new ModError('Ariadne helper returned malformed JSON; retain pending request/event IDs.',UNREADABLE_FAILURE); }
   if (value?.api_version !== API_VERSION || typeof value.ok !== 'boolean') {
-    throw new ModError('Ariadne helper API version/envelope is incompatible; update the installed app and Mod.',MISMATCH_FAILURE);
+    const failure = new ModError('Ariadne helper API version/envelope is incompatible; update the installed app and Mod.',MISMATCH_FAILURE);
+    if (value?.api_version !== API_VERSION) failure.code = 'incompatible_adapter';
+    throw failure;
   }
   if (!value.ok) {
     const error = value.error;

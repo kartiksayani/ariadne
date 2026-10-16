@@ -2,7 +2,7 @@ import { API_VERSION, HOST_VERSION, HELPER_TIMEOUT_MS, backgroundDiagnostic, con
 
 export async function qualify($, descriptor) {
   if (!descriptorValid(descriptor,$.plugin)) {
-    throw new ModError('Installed helper descriptor is missing or incompatible.','Update Ariadne and its Claude plugin so they match, then run /ariadne-connect again.');
+    throw Object.assign(new ModError('Installed helper descriptor is missing or incompatible.','Update Ariadne and its Claude plugin so they match, then run /ariadne-connect again.'),{code:'incompatible_adapter'});
   }
   if (hostVersionStatus((await $.session.version()).version) === null) {
     throw new ModError(`This Mod requires Claude Code ${HOST_VERSION} or newer; update Claude Code.`,`Update Claude Code to ${HOST_VERSION} or newer, then run /ariadne-connect again.`);
@@ -10,7 +10,7 @@ export async function qualify($, descriptor) {
   const result = await $.process.run([descriptor.helperPath,'--version'],{timeoutMs:HELPER_TIMEOUT_MS});
   if (result.exitCode !== 0 || result.isStdoutTruncated || result.isStderrTruncated
     || result.stdout !== `ariadne ${descriptor.appVersion}\n`) {
-    throw new ModError('Installed Ariadne helper/Mod versions disagree; reinstall matching resources.','Update Ariadne and its Claude plugin so they match, then run /ariadne-connect again.');
+    throw Object.assign(new ModError('Installed Ariadne helper/Mod versions disagree; reinstall matching resources.','Update Ariadne and its Claude plugin so they match, then run /ariadne-connect again.'),{code:'incompatible_adapter'});
   }
 }
 function command(name, params) {

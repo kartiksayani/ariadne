@@ -1,4 +1,4 @@
-import { bounded, claudeSessionEndEventId, clip, envelope, hash, lifecycle, ModError, noticeEpisodes, plainFailure, prepared, reportReceipt, HELPER_TIMEOUT_MS } from './contracts.js';
+import { BACKGROUND_RETRY, bounded, claudeSessionEndEventId, clip, envelope, hash, lifecycle, ModError, noticeEpisodes, plainFailure, prepared, reportReceipt, HELPER_TIMEOUT_MS } from './contracts.js';
 import { bindingStatus, connectionGone } from './setup.js';
 
 // 'exact' when text is the payload, 'framed' when the payload sits intact as whole
@@ -21,8 +21,8 @@ export const NOTICES = Object.freeze({
   session_closed:'Ariadne: this session is closed in the app. Messages will arrive here if you reopen it.',
   recovery_required:'Ariadne: a message to this session needs your attention in the app before more can be sent.',
   blocked:'Ariadne: the app is holding messages for this session for now. They will arrive here when it lets them through.',
-  failure:'Ariadne could not check the app for new messages; it will keep trying, and you can open Ariadne to check this session.',
-  reports:"Ariadne: could not save Claude's progress to the app yet. It will keep trying.",
+  failure:BACKGROUND_RETRY,
+  reports:BACKGROUND_RETRY,
   ended:'Ariadne: could not tell the app that this conversation ended. Open the Ariadne app to see its current state.',
 });
 // What still holds a loop open, in the words /ariadne-connect and /ariadne-disconnect use.
@@ -72,6 +72,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     admissionOpen = false;
     // Evidence for a binding that no longer exists has nowhere to go.
     pending.length = 0;
+    claimNotices.delete('reports');
     if (ended) return;
     ended = true;
     if (!live) return;
@@ -102,7 +103,8 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
       await reporting;
       if (saved) claimNotices.good($,'reports');
     } catch (error) {
-      if (!stopped) claimNotices.fail($,'reports',error,NOTICES.reports);
+      if (!stopped) claimNotices.fail($,'reports',error,
+        (error instanceof ModError ? error.plain : undefined) ?? plainFailure(error?.code,error?.details),NOTICES.reports);
       throw error;
     } finally { reporting = null; }
   }
@@ -330,6 +332,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     stopped = true;
     await quiesce();
     claimNotices.delete('claim');
+    claimNotices.delete('reports');
     const captured = active;
     if (captured && captured.turnId === null && !captured.released && !ended) {
       // A pending fold is confirmed only on evidence that the turn it was folded
@@ -384,6 +387,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     claimUnknown = false;
     stopped = true;
     claimNotices.delete('claim');
+    claimNotices.delete('reports');
     recovered = true;
     admissionOpen = false;
     return true;

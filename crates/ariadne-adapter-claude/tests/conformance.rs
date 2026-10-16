@@ -398,6 +398,152 @@ fn broken_installation_is_incompatible_not_an_unreachable_app() {
     }
 }
 
+fn assert_project_folder_recovery(cause: &AdapterError) {
+    assert_eq!(cause.code, AdapterErrorCode::BindingMismatch);
+    assert!(
+        cause.message.contains("project folder"),
+        "{}",
+        cause.message
+    );
+    assert!(
+        cause.message.contains("missing or inaccessible"),
+        "{}",
+        cause.message
+    );
+    assert!(!cause.message.contains("install"), "{}", cause.message);
+    assert!(!cause.message.contains("update"), "{}", cause.message);
+}
+
+#[test]
+fn selected_and_announced_project_failures_require_project_folder_recovery() {
+    for selected in [true, false] {
+        for case in ["missing", "not a directory", "inaccessible", "symlink loop"] {
+            let mut fixture = Fixture::new(SUPPORTED_HOST_VERSION);
+            let mut identity = fixture.identity();
+            let bad_project = fixture._root.path().join("bad-project");
+            let inaccessible = fixture._root.path().join("inaccessible");
+            let bad_project = match case {
+                "missing" => bad_project,
+                "not a directory" => {
+                    fs::write(&bad_project, "project root is a file").unwrap();
+                    bad_project
+                }
+                "inaccessible" => {
+                    fs::create_dir(&inaccessible).unwrap();
+                    let nested = inaccessible.join("project");
+                    fs::create_dir(&nested).unwrap();
+                    fs::set_permissions(&inaccessible, fs::Permissions::from_mode(0o000)).unwrap();
+                    nested
+                }
+                "symlink loop" => {
+                    std::os::unix::fs::symlink("bad-project", &bad_project).unwrap();
+                    bad_project
+                }
+                _ => unreachable!(),
+            };
+            if selected {
+                fixture.options.project_root = bad_project;
+            } else {
+                identity.project_root = bad_project;
+            }
+            let observed = UtcMillis::new("2026-10-04T00:00:00.456Z").unwrap();
+            let qualified = fixture.options.qualify_identity(
+                identity.clone(),
+                observed.clone(),
+                Instant::now(),
+                Instant::now() + Duration::from_secs(5),
+            );
+            let discovered = fixture.options.qualify_host_identity(
+                identity.clone(),
+                observed.clone(),
+                Instant::now(),
+                Instant::now() + Duration::from_secs(5),
+            );
+            fixture
+                .slot
+                .publish(ModEvidence::received(identity, observed).unwrap())
+                .unwrap();
+            let adapter = fixture.adapter();
+            let connected = wait(adapter.connect(connect()));
+            let probed = wait(adapter.probe(probe_request()));
+            // Restore fixture permissions before assertions so failure cleanup is safe.
+            if case == "inaccessible" {
+                fs::set_permissions(&inaccessible, fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            assert_project_folder_recovery(&qualified.unwrap_err());
+            assert_project_folder_recovery(&discovered.unwrap_err());
+            assert_project_folder_recovery(&connected.unwrap_err());
+            let probed = probed.unwrap();
+            assert_eq!(probed.compatibility, Compatibility::Unknown);
+            assert_eq!(probed.availability, Availability::Unavailable);
+            assert_eq!(probed.setup_steps.len(), 1);
+            assert!(probed.setup_steps[0].contains("project folder"));
+            assert!(probed.setup_steps[0].contains("missing or inaccessible"));
+        }
+    }
+}
+
+#[test]
+fn removed_connected_project_requires_project_folder_recovery_on_observe() {
+    let fixture = Fixture::new(SUPPORTED_HOST_VERSION);
+    fixture.publish();
+    let adapter = fixture.adapter();
+    wait(adapter.connect(connect())).unwrap();
+    fs::remove_dir(&fixture.options.project_root).unwrap();
+    assert_project_folder_recovery(&wait(adapter.observe(observe())).unwrap_err());
+}
+
+#[test]
+fn signalled_version_children_are_temporary_but_nonzero_exits_are_incompatible() {
+    for (termination, expected) in [
+        ("kill -TERM $$", AdapterErrorCode::HostUnreachable),
+        ("exit 7", AdapterErrorCode::IncompatibleAdapter),
+    ] {
+        let fixture = Fixture::new(SUPPORTED_HOST_VERSION);
+        executable_file(
+            &fixture.options.helper,
+            &format!("#!/bin/sh\nprintf 'ariadne 0.1.0\\n'\n{termination}\n"),
+        );
+        let error = fixture
+            .options
+            .qualify_identity(
+                fixture.identity(),
+                UtcMillis::new("2026-10-04T00:00:00.456Z").unwrap(),
+                Instant::now(),
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, expected, "{termination}");
+        fixture.publish();
+        let adapter = fixture.adapter();
+        assert_eq!(
+            wait(adapter.connect(connect())).unwrap_err().code,
+            expected,
+            "{termination}"
+        );
+        let result = wait(adapter.probe(probe_request())).unwrap();
+        if expected == AdapterErrorCode::HostUnreachable {
+            assert_eq!(result.compatibility, Compatibility::Unknown);
+            assert_eq!(result.availability, Availability::Unavailable);
+            assert!(result.setup_steps[0].contains("retry"));
+        } else {
+            assert_eq!(result.compatibility, Compatibility::Incompatible);
+        }
+        let cli = fixture._root.path().join("claude");
+        executable_file(
+            &cli,
+            &format!("#!/bin/sh\nprintf '2.1.287 (Claude Code)\\n'\n{termination}\n"),
+        );
+        assert_eq!(
+            read_cli_version(&cli, Instant::now() + Duration::from_secs(5))
+                .unwrap_err()
+                .code,
+            expected,
+            "{termination}"
+        );
+    }
+}
+
 #[test]
 fn discovery_resource_is_required_and_compared_at_exact_loaded_root() {
     for missing in [true, false] {

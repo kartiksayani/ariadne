@@ -1,7 +1,7 @@
 import installed from './installed.js';
 import { BUSY, claimLoop } from './claims.js';
 import { forget, qualify, recall, remember, setup } from './setup.js';
-import { bounded, descriptorValid, failureCode, ModError, noticeEpisodes, plainFailure, uuid } from './contracts.js';
+import { BACKGROUND_RETRY, bounded, descriptorValid, failureCode, ModError, noticeEpisodes, plainFailure, uuid } from './contracts.js';
 import { announcements } from './discovery.js';
 import { prCommentsPrompt } from './pr-comments.js';
 
@@ -31,14 +31,14 @@ const TEXT = Object.freeze({
   inProgress:'Ariadne is already connecting or disconnecting this conversation. Try again in a moment.',
   notConnected:'This conversation is not connected to Ariadne.',
   reconnected:'Ariadne: this conversation is connected to its Ariadne session again.',
-  retrying:'Ariadne: could not reconnect this conversation to its Ariadne session yet. It will keep trying. Run /ariadne-connect to try again now.',
+  retrying:BACKGROUND_RETRY,
   elsewhere:'This Ariadne session is connected to another conversation.',
   closed:'Ariadne: the Ariadne session for this conversation is closed. It will reconnect if you reopen it in the app.',
   gone:'Ariadne: the Ariadne session for this conversation no longer exists. Run /ariadne-connect to connect again.',
   unreachable:"Ariadne can't be reached, so this session's work isn't being recorded. Open Ariadne and it will reconnect.",
   failure:'Ariadne could not finish connecting this conversation. Run /ariadne-connect again; if it keeps happening, update Ariadne and its Claude plugin.',
   connectAgain:'Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.',
-  heartbeatRetry:'Ariadne could not check in with the app; it will keep trying, and you can open Ariadne to check that it is running.',
+  heartbeatRetry:BACKGROUND_RETRY,
 });
 // Codes with which the app refuses an announcement for a scope it no longer has.
 const STALE_SCOPE = ['stale_generation','binding_mismatch','not_found','invalid_argument'];

@@ -1,6 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
+import { BACKGROUND_RETRY } from '../../../integrations/claude/plugin/hooks/contracts.js';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { createRegister } from '../../../integrations/claude/plugin/hooks/register.js';
 import { capabilities, deferred, descriptor, failure, host, ids, prepared, status, success } from './fixtures.js';
+afterEach(() => vi.useRealTimers());
+
 function callbacks(descriptor) {
   const hooks = new Map();
   // Connect gives up on the first not_found so retained-operation retry stays observable.
@@ -549,7 +552,8 @@ describe('conversation changes, relaunch and removal', () => {
       expect(h.appended.at(-1).message.content[0].text.split('\n')).toContain(`Command: ${printed}`);
     }
   });
-  it('prints the unsupported-host notice again in the new conversation after a conversation change', async () => {
+  it('prints the unsupported-host notice in the new conversation after the shared cap expires', async () => {
+    vi.useFakeTimers();vi.setSystemTime(0);
     const h = rotatingApp({before:argv => argv[2] === 'announce' ? failure('unsupported') : undefined});
     const hooks = callbacks(descriptor);
     const outage = "This version of Claude Code or Ariadne can't do that yet. Update Claude Code and the Ariadne app, then try again.";
@@ -560,6 +564,10 @@ describe('conversation changes, relaunch and removal', () => {
     h.switchSession('new-conversation');
     await hooks.get('session.end')(h.$,{reason:'clear'},next);
     await h.timer().callback();
+    expect(h.logs.filter(log => log === outage)).toHaveLength(1);
+    vi.setSystemTime(119999);await heartbeat.callback();
+    expect(h.logs.filter(log => log === outage)).toHaveLength(1);
+    vi.setSystemTime(120000);await heartbeat.callback();
     await vi.waitFor(() => expect(h.logs.filter(log => log === outage)).toHaveLength(2));
     await heartbeat.callback();
     expect(h.logs.filter(log => log === outage)).toHaveLength(2);
@@ -720,7 +728,7 @@ describe('conversation changes, relaunch and removal', () => {
   });
   it('keeps background outages quiet during grace while owner commands still answer, then rearms after three successes', async () => {
     const closed = "Ariadne can't be reached, so this session's work isn't being recorded. Open Ariadne and it will reconnect.";
-    const retry = 'Ariadne could not check in with the app; it will keep trying, and you can open Ariadne to check that it is running.';
+    const retry = BACKGROUND_RETRY;
     let down = false, time = 0;
     const clock = vi.spyOn(Date,'now').mockImplementation(() => time);
     try {
@@ -741,6 +749,7 @@ describe('conversation changes, relaunch and removal', () => {
       }
       down = true;
       await hooks.get('ariadne-status')(h.$);await hooks.get('ariadne-status')(h.$);
+      await beat.callback();
       expect(h.logs.slice(quiet)).toEqual([retry]);
       time += 120000;await beat.callback();
       expect(h.logs.slice(quiet)).toEqual([retry,retry]);

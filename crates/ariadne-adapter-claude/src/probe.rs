@@ -13,7 +13,10 @@ use std::{
     fs::File,
     io::Read,
     os::fd::{AsRawFd, FromRawFd},
-    os::unix::fs::{MetadataExt, OpenOptionsExt},
+    os::unix::{
+        fs::{MetadataExt, OpenOptionsExt},
+        process::ExitStatusExt,
+    },
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::Arc,
@@ -197,6 +200,9 @@ fn version_output(path: &Path, deadline: Instant) -> Result<String, AdapterError
         if let Some(status) = child.0.try_wait().map_err(|_| io_error())? {
             read_pipe(&mut stdout, Some(&mut output), &mut diagnostic_bytes)?;
             read_pipe(&mut stderr, None, &mut diagnostic_bytes)?;
+            if status.signal().is_some() {
+                return Err(io_error());
+            }
             if !status.success() {
                 return Err(error(
                     AdapterErrorCode::IncompatibleAdapter,
@@ -289,17 +295,8 @@ pub(crate) fn resource_identity(
     if version_output(&helper, deadline)? != format!("ariadne {}", options.app_version) {
         return Err(reload());
     }
-    let project = canonical(&options.project_root)?;
-    if !std::fs::metadata(&project)
-        .map_err(inspection_error)?
-        .is_dir()
-    {
-        return Err(error(
-            AdapterErrorCode::BindingMismatch,
-            "Selected canonical project root must be a directory",
-        ));
-    }
-    if canonical(&identity.project_root)? != project {
+    let project = project_root(&options.project_root)?;
+    if project_root(&identity.project_root)? != project {
         return Err(error(
             AdapterErrorCode::BindingMismatch,
             "Mod announcement differs from the selected canonical project root",
@@ -370,6 +367,8 @@ fn read_resource(root: &File, name: &str, deadline: Instant) -> Result<Vec<u8>, 
         if !metadata.is_file() || metadata.len() > 1024 * 1024 {
             return Err(resource_error());
         }
+        #[cfg(test)]
+        tests::after_resource_metadata();
         let mut bytes = Vec::new();
         let mut buffer = [0; 8192];
         loop {
@@ -387,7 +386,7 @@ fn read_resource(root: &File, name: &str, deadline: Instant) -> Result<Vec<u8>, 
         if metadata_signature(&metadata) != metadata_signature(&after)
             || bytes.len() as u64 != after.len()
         {
-            return Err(resource_error());
+            return Err(io_error());
         }
         return Ok(bytes);
     }
@@ -408,6 +407,19 @@ fn directory(path: &Path) -> Result<File, AdapterError> {
 }
 fn canonical(path: &Path) -> Result<PathBuf, AdapterError> {
     std::fs::canonicalize(path).map_err(inspection_error)
+}
+fn project_root(path: &Path) -> Result<PathBuf, AdapterError> {
+    let project = std::fs::canonicalize(path).map_err(|_| project_error())?;
+    if !std::fs::metadata(&project)
+        .map_err(|_| project_error())?
+        .is_dir()
+    {
+        return Err(project_error());
+    }
+    Ok(project)
+}
+fn project_error() -> AdapterError {
+    error(AdapterErrorCode::BindingMismatch, "The selected project folder is missing or inaccessible; restore access to the project folder or select it again before reconnecting")
 }
 fn metadata_signature(metadata: &std::fs::Metadata) -> FileIdentity {
     (
@@ -447,7 +459,7 @@ pub(crate) fn check_deadline(deadline: Instant) -> Result<(), AdapterError> {
 fn io_error() -> AdapterError {
     error(
         AdapterErrorCode::HostUnreachable,
-        "Claude executable inspection could not finish; retry the bounded read-only check",
+        "Claude integration inspection could not finish; retry the bounded read-only check",
     )
 }
 fn inspection_error(cause: std::io::Error) -> AdapterError {
@@ -479,6 +491,95 @@ fn reload() -> AdapterError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    thread_local! {
+        static AFTER_RESOURCE_METADATA: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    pub(super) fn after_resource_metadata() {
+        AFTER_RESOURCE_METADATA.with(|slot| {
+            if let Some(callback) = slot.borrow_mut().take() {
+                callback();
+            }
+        });
+    }
+
+    #[test]
+    fn resource_metadata_changes_during_read_require_a_bounded_retry() {
+        for bytes in [
+            b"after!".as_slice(),
+            b"longer contents".as_slice(),
+            b"".as_slice(),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("resource.js");
+            std::fs::write(&path, b"before").unwrap();
+            let directory = directory(root.path()).unwrap();
+            AFTER_RESOURCE_METADATA.with(|slot| {
+                *slot.borrow_mut() = Some(Box::new(move || {
+                    std::fs::write(&path, bytes).unwrap();
+                    // Force a distinct signature even on coarse timestamp filesystems
+                    // when the mutation keeps the resource length unchanged.
+                    File::options()
+                        .write(true)
+                        .open(&path)
+                        .unwrap()
+                        .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1))
+                        .unwrap();
+                }));
+            });
+            let cause = read_resource(
+                &directory,
+                "resource.js",
+                Instant::now() + Duration::from_secs(1),
+            )
+            .unwrap_err();
+            assert_eq!(
+                read_resource(
+                    &directory,
+                    "resource.js",
+                    Instant::now() + Duration::from_secs(1)
+                )
+                .unwrap(),
+                bytes,
+                "a stable retry must read the resource after mutation"
+            );
+            assert_eq!(cause.code, AdapterErrorCode::HostUnreachable);
+            assert!(cause.message.contains("retry"));
+        }
+    }
+
+    #[test]
+    fn resource_type_and_size_failures_remain_incompatible() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("directory.js")).unwrap();
+        std::fs::write(root.path().join("oversized.js"), vec![0; 1024 * 1024 + 1]).unwrap();
+        let directory = directory(root.path()).unwrap();
+        for name in ["directory.js", "oversized.js"] {
+            let cause = read_resource(&directory, name, Instant::now() + Duration::from_secs(1))
+                .unwrap_err();
+            assert_eq!(cause.code, AdapterErrorCode::IncompatibleAdapter);
+        }
+        let growing = root.path().join("growing.js");
+        std::fs::write(&growing, b"before").unwrap();
+        AFTER_RESOURCE_METADATA.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move || {
+                std::fs::write(growing, vec![0; 1024 * 1024 + 1]).unwrap();
+            }));
+        });
+        assert_eq!(
+            read_resource(
+                &directory,
+                "growing.js",
+                Instant::now() + Duration::from_secs(1)
+            )
+            .unwrap_err()
+            .code,
+            AdapterErrorCode::IncompatibleAdapter,
+            "growing beyond the size bound remains an installation failure"
+        );
+    }
 
     #[test]
     fn installation_errors_and_temporary_resource_io_keep_distinct_meanings() {

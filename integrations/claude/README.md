@@ -62,8 +62,8 @@ the same IDs on the next poll. A claim the app refused before saving it (paused,
 closed, needs attention, or no desktop lease after only refusals) drops its
 request ID; Core replays a saved claim before it checks those barriers. A new
 claim waits for those saves; the app's own
-refusals (paused, closed, needs attention) decide when dispatch resumes. Each such
-state prints one plain notice when it starts. A removed session or replaced
+refusals (paused, closed, needs attention) decide when dispatch resumes. These
+states produce notices under the shared background rules below. A removed session or replaced
 connection stops the loop with one notice. Session end is reported best effort
 without stopping the external host.
 
@@ -98,22 +98,27 @@ retries keep their original request; live conversations elsewhere stay protected
 The owner gets plain instructions, while exact operation IDs remain in the
 plugin store's bounded `connect-log` diagnostics. See [ADR-0096](../../docs/adr/ADR-0096-recover-stale-claude-connect.md).
 
-Background notices deduplicate by meaning within each slot: transient error kinds
-share one retry notice, while changed actionable states print immediately.
-Terminal notices always print and close the episode; otherwise three consecutive
-successful calls end it. Transient failures wait two minutes from the current
-transient streak; held states and silent lease refusals reset that grace period.
-Report-save failures use the same grace and sustained recovery rules; only completed
-flushes that saved records count as successes. App-unreachable failures across
-announcements, claims, reconnects and helper hooks share one outage
-notice; owner commands return their direct answer without another outage line.
-An already-shown retry counts toward that shared notice. A different failure cause
-leaves the outage; another transient starts a fresh two-minute grace period.
-Successful local report saves cannot reset app reachability.
-Missing or unusable helpers, missing installed resources and version mismatches
-are installation failures: they speak immediately with a repair step, outside the
-shared app outage. Structured spawn errors distinguish these from temporary
-process failures; raw error text is never used to classify or describe them.
+Background slots and claim-loop forks share the last visible meaning. Advice with
+identical words is one meaning even when diagnostic codes differ; held states
+also share a meaning across producer-specific wording. A changed
+nonurgent meaning needs ten seconds and two consecutive calls from that producer;
+all background slots together print at most one nonurgent line per two minutes.
+Returning advice can replace stale advice after those bounds. Initial held states
+speak immediately. Terminal notices always print and close their slot. Missing or
+unusable helpers, missing installed resources and version mismatches share one
+installation repair notice, which speaks immediately outside the rate cap.
+Structured spawn errors distinguish these from temporary process failures; raw
+error text is never used to classify or describe them.
+
+Transient failures share one retry sentence and wait two minutes. Alternating
+causes and overlapping producers retain that grace clock; three consecutive real
+successful calls retire a producer. A held state or silent lease refusal withdraws
+that producer's transient evidence; lease-only refusals cannot open or age grace.
+Report saves use the same rules, with only completed flushes that saved records
+counting as successes. Retiring a claim loop retires its notice evidence too.
+Owner commands return their direct answer and never age or consume background
+grace or the rate cap. Project-folder access failures ask the owner to restore
+access or reconnect, rather than advising an installation update.
 Background diagnostics contain timestamps and fixed codes only, recording episode
 starts, visible meaning changes and endings in a separate 20-record `hook-log`.
 Its pending write queue is also bounded and never holds up polling or owner

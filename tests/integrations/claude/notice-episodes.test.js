@@ -2,12 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRegister } from '../../../integrations/claude/plugin/hooks/register.js';
 import { claimLoop, NOTICES } from '../../../integrations/claude/plugin/hooks/claims.js';
 import { readFileSync } from 'node:fs';
-import { connectDiagnostic, failureCode, ModError, noticeEpisodes } from '../../../integrations/claude/plugin/hooks/contracts.js';
-import { setup } from '../../../integrations/claude/plugin/hooks/setup.js';
+import { BACKGROUND_RETRY, connectDiagnostic, failureCode, ModError, noticeEpisodes, plainFailure } from '../../../integrations/claude/plugin/hooks/contracts.js';
+import { qualify, setup } from '../../../integrations/claude/plugin/hooks/setup.js';
 import { announcements } from '../../../integrations/claude/plugin/hooks/discovery.js';
 import { binding, deferred, descriptor, failure, host, ids, prepared, status, success } from './fixtures.js';
 
-const heartbeatRetry = 'Ariadne could not check in with the app; it will keep trying, and you can open Ariadne to check that it is running.';
+const heartbeatRetry = BACKGROUND_RETRY;
+const permissionDenied = plainFailure('permission_denied');
 const mismatch = "Ariadne and its Claude plugin don't match, so this was not recorded. Update both to the same version.";
 const connectFailure = 'Ariadne could not finish connecting this conversation. Run /ariadne-connect again; if it keeps happening, update Ariadne and its Claude plugin.';
 const steps = (count, value, start = 0, interval = 30000) => Array.from({length:count},(_,i) => [start + i * interval,typeof value === 'function' ? value(i) : value]);
@@ -40,9 +41,19 @@ const reportRows = [
   {name:'transient blip',events:[[0,'start','io_error',0],[30000,'flush',null,0],[60000,'flush',null,0],[90000,'flush',null,0]]},
   {name:'alternating transient codes and rejected process',events:[[0,'start','store_busy',0],[60000,'flush','timeout',0],[119999,'flush','rejection',0],[120000,'flush','io_error',1],[600000,'flush','store_busy',1]]},
   {name:'long failure, real saves recover, second long failure',events:[[0,'start','host_unreachable',0],[120000,'flush','host_unreachable',1],[130000,'flush',null,1],[140000,'finish',null,1],[150000,'finish',null,1],[180000,'finish','io_error',1],[299999,'flush','io_error',1],[300000,'flush','io_error',2]]},
-  {name:'idle drains do not rearm the same meaning',events:[[0,'start','permission_denied',1],[1000,'flush',null,1],[2000,'finish','permission_denied',1],[3000,'flush',null,1],[4000,'flush',null,1],[5000,'flush',null,1],[6000,'finish','permission_denied',1]]},
-  {name:'three nonempty successful flushes rearm the same meaning',events:[[0,'start','permission_denied',1],[1000,'flush',null,1],[2000,'finish',null,1],[3000,'finish',null,1],[4000,'finish','permission_denied',2]]},
-  {name:'changed non-transient meaning prints immediately',events:[[0,'start','permission_denied',1],[1000,'flush','incompatible_adapter',[NOTICES.reports,mismatch]],[2000,'flush','incompatible_adapter',[NOTICES.reports,mismatch]]]},
+  {name:'idle drains do not rearm the same meaning',line:permissionDenied,events:[[0,'start','permission_denied',1],[1000,'flush',null,1],[2000,'finish','permission_denied',1],[3000,'flush',null,1],[4000,'flush',null,1],[5000,'flush',null,1],[6000,'finish','permission_denied',1]]},
+  {name:'three nonempty successful flushes rearm the same meaning after the shared cap',line:permissionDenied,events:[[0,'start','permission_denied',1],[1000,'flush',null,1],[2000,'finish',null,1],[3000,'finish',null,1],[4000,'finish','permission_denied',1],[119999,'flush','permission_denied',1],[124000,'flush','permission_denied',2]]},
+  {name:'held report save gives the actual recovery advice',line:plainFailure('invalid_transition',{reason:'recovery_required'}),events:[[0,'start',['invalid_transition',{reason:'recovery_required'}],1],[1000,'flush',['invalid_transition',{reason:'recovery_required'}],1]]},
+  {name:'changed report advice waits for stability and cap, then may return to the original advice',events:[
+    [0,'start','permission_denied',[permissionDenied]],
+    [1000,'flush',['invalid_transition',{reason:'recovery_required'}],[permissionDenied]],
+    [11000,'flush',['invalid_transition',{reason:'recovery_required'}],[permissionDenied]],
+    [120000,'flush',['invalid_transition',{reason:'recovery_required'}],[permissionDenied,plainFailure('invalid_transition',{reason:'recovery_required'})]],
+    [121000,'flush','permission_denied',[permissionDenied,plainFailure('invalid_transition',{reason:'recovery_required'})]],
+    [131000,'flush','permission_denied',[permissionDenied,plainFailure('invalid_transition',{reason:'recovery_required'})]],
+    [240000,'flush','permission_denied',[permissionDenied,plainFailure('invalid_transition',{reason:'recovery_required'}),permissionDenied]],
+  ]},
+  {name:'changed installation failure prints immediately',line:permissionDenied,events:[[0,'start','permission_denied',1],[1000,'flush','incompatible_adapter',[permissionDenied,mismatch]],[2000,'flush','incompatible_adapter',[permissionDenied,mismatch]]]},
   ...['ENOENT','EACCES'].map(code => ({name:`broken helper ${code} speaks immediately`,line:mismatch,events:[[0,'start',`spawn:${code}`,1],[1000,'flush',`spawn:${code}`,1],[600000,'flush',`spawn:${code}`,1]]})),
 ];
 it.each(reportRows)('report-save episode: $name',async row => {
@@ -50,6 +61,7 @@ it.each(reportRows)('report-save episode: $name',async row => {
   const value = await prepared(), submission = deferred();let code = null;
   const h = host({claim:value,submit:() => submission.promise,handler:argv => {
     if (argv[2] !== 'report' || !code) return;
+    if (Array.isArray(code)) return failure(...code);
     if (code === 'rejection') throw new Error('Private fixture detail');
     if (code.startsWith('spawn:')) throw Object.assign(new Error('Private fixture detail'),{code:code.slice(6)});
     return failure(code);
@@ -77,7 +89,37 @@ it.each([0,1,3])('a partial report flush with %i saved records cannot rearm a fa
   expect(loop.status().pending_reports).toBe(4);
   remaining = saves;await loop.drain(h.$);
   expect(h.events).toHaveLength(saves);expect(loop.status().pending_reports).toBe(4 - saves);
-  expect(h.logs.filter(line => !line.startsWith('Ariadne: turn.start carried'))).toEqual([NOTICES.reports]);
+  expect(h.logs.filter(line => !line.startsWith('Ariadne: turn.start carried'))).toEqual([permissionDenied]);
+});
+
+it('retiring a loop after one real report flush cannot hide the next live claim outage',async () => {
+  vi.useFakeTimers();vi.setSystemTime(0);
+  const value = await prepared(), submission = deferred(), notices = noticeEpisodes();
+  let phase = 'report outage';
+  const h = host({claim:value,submit:() => submission.promise,handler:argv => {
+    if (phase === 'report outage' && argv[2] === 'report') return failure('host_unreachable');
+    if (phase === 'claim outage' && argv[2] === 'claim') return failure('store_busy');
+  }});
+  const old = claimLoop(descriptor.helperPath,binding,{notices:notices.fork()});
+  await old.poll(h.$);await old.start(h.$,{text:value.formatted_payload,turnId:'retired-turn'});
+  expect(old.status().pending_reports).toBe(2);
+  vi.setSystemTime(120000);await old.drain(h.$);
+  const visible = () => h.logs.filter(line => !line.startsWith('Ariadne: turn.start carried'));
+  expect(visible()).toEqual([BACKGROUND_RETRY]);
+  expect(old.status().pending_reports).toBe(2);
+  phase = 'healthy';await old.drain(h.$);
+  expect(old.status().pending_reports).toBe(0);
+  expect(h.events.map(event => event.kind)).toEqual(['accepted','turn_started']);
+  await old.stop(h.$);
+  expect(old.status()).toMatchObject({stopped:true,pending_reports:0});
+  phase = 'claim outage';
+  const live = claimLoop(descriptor.helperPath,binding,{notices:notices.fork()});
+  vi.setSystemTime(121000);await live.poll(h.$);
+  vi.setSystemTime(240999);await live.poll(h.$);
+  expect(visible()).toEqual([BACKGROUND_RETRY]);
+  vi.setSystemTime(241000);await live.poll(h.$);
+  expect(visible()).toEqual([BACKGROUND_RETRY,BACKGROUND_RETRY]);
+  expect(live.status().pending_reports).toBe(0);
 });
 
 const outageSlots = ['announce','helper','claim','auto'];
@@ -89,7 +131,7 @@ const installFailures = [
   {name:'missing installed resource',error:() => noticeError('incompatible_adapter')},
   {name:'helper version mismatch',error:() => noticeError('incompatible_adapter')},
 ];
-it.each(installFailures)('$name speaks immediately outside a shown app outage in every slot',async ({error}) => {
+it.each(installFailures)('$name speaks immediately once across every slot and fork during a shown app outage',async ({error}) => {
   vi.useFakeTimers();vi.setSystemTime(0);
   const h = host(), notices = noticeEpisodes(), unreachable = noticeError('host_unreachable');
   notices.fail(h.$,'announce',unreachable,heartbeatRetry);
@@ -97,18 +139,33 @@ it.each(installFailures)('$name speaks immediately outside a shown app outage in
   expect(h.logs).toEqual([heartbeatRetry]);
   for (const slot of [...outageSlots,'qualification','reports']) {
     const member = notices.fork();
-    member.fail(h.$,slot,unreachable,heartbeatRetry);
-    const before = h.logs.slice();
     const since = Date.now();
     for (const offset of [1000,2000,600000]) {
       vi.setSystemTime(since + offset);member.fail(h.$,slot,error(),mismatch,heartbeatRetry);
-      expect(h.logs).toEqual([...before,mismatch]);
+      expect(h.logs).toEqual([heartbeatRetry,mismatch]);
     }
     expect(failureCode(error())).toBe('incompatible_adapter');
-    notices.fail(h.$,'announce',unreachable,heartbeatRetry);
-    expect(h.logs).toEqual([...before,mismatch]);
+    expect(h.logs).toEqual([heartbeatRetry,mismatch]);
   }
 });
+it.each(['descriptor','version','truncated version'])('local qualification %s failure bypasses a shown retry immediately',async cause => {
+  vi.useFakeTimers();vi.setSystemTime(0);
+  const h = host({handler:argv => argv[1] === '--version' ? {
+    exitCode:0,stdout:cause === 'version' ? 'ariadne 0.0.0\n' : `ariadne ${descriptor.appVersion}\n`,
+    isStdoutTruncated:cause === 'truncated version',
+  } : undefined});
+  const notices = noticeEpisodes();
+  notices.fail(h.$,'announce',noticeError('store_busy'),heartbeatRetry);
+  vi.setSystemTime(120000);notices.fail(h.$,'announce',noticeError('store_busy'),heartbeatRetry);
+  vi.setSystemTime(121000);
+  let caught;
+  try {await qualify(h.$,cause === 'descriptor' ? null : descriptor);} catch (error) {caught = error;}
+  expect(caught).toBeInstanceOf(ModError);
+  expect(failureCode(caught)).toBe('incompatible_adapter');
+  for (const slot of [...outageSlots,'reports']) notices.fail(h.$,slot,caught,caught.plain,heartbeatRetry);
+  expect(h.logs).toEqual([heartbeatRetry,mismatch]);
+});
+
 it.each(['store_busy','timeout','io_error','process_rejected','host_unreachable','EAGAIN','EMFILE','EPIPE'])('genuine transient %s keeps its full grace in every slot',async code => {
   vi.useFakeTimers();
   for (const slot of [...outageSlots,'qualification','reports']) {
@@ -165,14 +222,13 @@ it.each(publicationRows)('$stage preserves $code through the saved-binding wrapp
 });
 const otherTransients = ['io_error','store_busy','timeout','process_rejected'];
 const outageChanges = outageSlots.flatMap(slot => otherTransients.map(code => ({slot,code})));
-const retryFor = slot => slot === 'claim' ? NOTICES.failure : slot === 'auto'
-  ? 'Ariadne: could not reconnect this conversation to its Ariadne session yet. It will keep trying. Run /ariadne-connect to try again now.' : heartbeatRetry;
+const retryFor = () => BACKGROUND_RETRY;
 function noticeError(code) {
   if (code === 'process_rejected') return new Error('Private fixture detail');
   const error = new ModError('Private fixture detail');error.code = code;return error;
 }
 
-it.each(outageChanges)('$slot leaves a shown outage for $code with fresh grace',async ({slot,code}) => {
+it.each(outageChanges)('$slot keeps one truthful retry through a shown outage changing to $code',async ({slot,code}) => {
   vi.useFakeTimers();vi.setSystemTime(0);
   const h = host(), notices = noticeEpisodes(), member = slot === 'claim' ? notices.fork() : notices;
   const reporter = slot === 'announce' ? 'helper' : 'announce', unreachable = noticeError('host_unreachable');
@@ -182,7 +238,7 @@ it.each(outageChanges)('$slot leaves a shown outage for $code with fresh grace',
   for (let i = 0; i < 3; i += 1) notices.good(h.$,reporter);
   for (const time of [121000,240999,241000,3600000]) {
     vi.setSystemTime(time);member.fail(h.$,slot,noticeError(code),retryFor(slot));
-    expect(h.logs).toEqual(time < 241000 ? [heartbeatRetry] : [heartbeatRetry,retryFor(slot)]);
+    expect(h.logs).toEqual([heartbeatRetry]);
   }
 });
 
@@ -199,7 +255,7 @@ it.each(outageChanges)('$slot with a shown $code retry joins an already-shown ou
   }
 });
 
-it.each(outageSlots)('%s leaves a shown outage on a silent lease refusal',async slot => {
+it.each(outageSlots)('%s keeps a shown retry quiet after a silent lease refusal',async slot => {
   vi.useFakeTimers();vi.setSystemTime(0);
   const h = host(), notices = noticeEpisodes(), member = slot === 'claim' ? notices.fork() : notices;
   member.fail(h.$,slot,noticeError('host_unreachable'),retryFor(slot));
@@ -209,7 +265,7 @@ it.each(outageSlots)('%s leaves a shown outage on a silent lease refusal',async 
   vi.setSystemTime(121000);member.fail(h.$,slot,lease,null);
   for (const time of [600000,719999,720000,3600000]) {
     vi.setSystemTime(time);member.fail(h.$,slot,noticeError('store_busy'),retryFor(slot));
-    expect(h.logs).toEqual(Array(time < 720000 ? 1 : 2).fill(retryFor(slot)));
+    expect(h.logs).toEqual([retryFor(slot)]);
   }
 });
 
@@ -399,8 +455,8 @@ describe.each(['heartbeat','claim'])('%s notice episode invariant', source => {
 const autoClosed = 'Ariadne: the Ariadne session for this conversation is closed. It will reconnect if you reopen it in the app.';
 const autoGone = 'Ariadne: the Ariadne session for this conversation no longer exists. Run /ariadne-connect to connect again.';
 const autoConflict = 'This Ariadne session is connected to another conversation.';
-// Every changed meaning is visible; repeating that meaning is quiet. Times and
-// complete transcripts pin grace, terminal authority and recovery together.
+// Stable changed advice waits for debounce and the shared cap; urgent advice
+// remains immediate. Complete transcripts pin the full transition sequence.
 const transitions = [
   ...['stale_generation','binding_mismatch','not_found'].map(code => ({name:`paused then removed (${code})`,source:'claim',events:[
     [0,'invalid_transition','owner_paused',[NOTICES.owner_paused]],
@@ -408,13 +464,16 @@ const transitions = [
     [2000,code,undefined,[NOTICES.owner_paused,NOTICES.removed]],
   ],terminal:true})),
   {name:'retry shown then removed',source:'claim',events:[
-    [0,'host_unreachable',undefined,[]],[120000,'host_unreachable',undefined,[NOTICES.failure]],
+    [0,'host_unreachable',undefined,[]],[120000,'store_busy',undefined,[NOTICES.failure]],
     [121000,'stale_generation',undefined,[NOTICES.failure,NOTICES.removed]],
   ],terminal:true},
   ...['owner_paused','session_closed','recovery_required','unrecognized'].map(reason => ({name:`retry shown then held (${reason})`,source:'claim',events:[
     [0,'host_unreachable',undefined,[]],[120000,'host_unreachable',undefined,[NOTICES.failure]],
-    [121000,'invalid_transition',reason,[NOTICES.failure,NOTICES[reason] ?? NOTICES.blocked]],
-    [122000,'invalid_transition',reason,[NOTICES.failure,NOTICES[reason] ?? NOTICES.blocked]],
+    [121000,'invalid_transition',reason,[NOTICES.failure]],
+    [122000,'invalid_transition',reason,[NOTICES.failure]],
+    [131000,'invalid_transition',reason,[NOTICES.failure]],
+    [239999,'invalid_transition',reason,[NOTICES.failure]],
+    [240000,'invalid_transition',reason,[NOTICES.failure,NOTICES[reason] ?? NOTICES.blocked]],
   ]})),
   ...['claim','heartbeat'].map(source => ({name:`retry shown then version mismatch (${source})`,source,events:[
     [0,'host_unreachable',undefined,[]],[120000,'host_unreachable',undefined,[source === 'claim' ? NOTICES.failure : heartbeatRetry]],
@@ -423,15 +482,19 @@ const transitions = [
   ]})),
   ...[['not_found',autoGone],['binding_conflict',autoConflict]].map(([code,text]) => ({name:`auto closed then ${code}`,source:'auto',events:[
     [0,'invalid_transition','session_closed',[autoClosed]],
-    [30000,code,undefined,[autoClosed,text]],
-    [60000,code,undefined,[autoClosed,text]],
+    ...code === 'not_found' ? [[30000,code,undefined,[autoClosed,text]],[60000,code,undefined,[autoClosed,text]]] : [
+      [30000,code,undefined,[autoClosed]],[40000,code,undefined,[autoClosed]],
+      [119999,code,undefined,[autoClosed]],[120000,code,undefined,[autoClosed,text]],
+    ],
   ],terminal:code === 'not_found'})),
   {name:'transient then paused then transient gets fresh grace',source:'claim',events:[
     [0,'host_unreachable',undefined,[]],[120000,'host_unreachable',undefined,[NOTICES.failure]],
-    [121000,'invalid_transition','owner_paused',[NOTICES.failure,NOTICES.owner_paused]],
-    [122000,'store_busy',undefined,[NOTICES.failure,NOTICES.owner_paused]],
-    [241999,'io_error',undefined,[NOTICES.failure,NOTICES.owner_paused]],
-    [242000,'timeout',undefined,[NOTICES.failure,NOTICES.owner_paused,NOTICES.failure]],
+    [121000,'invalid_transition','owner_paused',[NOTICES.failure]],
+    [131000,'invalid_transition','owner_paused',[NOTICES.failure]],
+    [240000,'invalid_transition','owner_paused',[NOTICES.failure,NOTICES.owner_paused]],
+    [241000,'store_busy',undefined,[NOTICES.failure,NOTICES.owner_paused]],
+    [360999,'io_error',undefined,[NOTICES.failure,NOTICES.owner_paused]],
+    [361000,'timeout',undefined,[NOTICES.failure,NOTICES.owner_paused,NOTICES.failure]],
   ]},
   {name:'long lease refusal cannot age the first busy failure',source:'claim',events:[
     [0,'not_found','lease_invalid',[]],[600000,'not_found','lease_invalid',[]],
@@ -520,15 +583,18 @@ it('bounds queued background records while storage hangs and leaves owner writes
   await vi.waitFor(() => expect(h.store.get('hook-log')?.map(record => record.step)).toEqual(Array.from({length:20},(_,i) => `slot-${i + 30}`)));
 });
 
-it('distinguishes future non-transient codes without recording untrusted code text',async () => {
+it('deduplicates equal future-code advice without recording untrusted code text',async () => {
+  vi.useFakeTimers();vi.setSystemTime(0);
   const h = host(), notices = noticeEpisodes();
-  for (const code of ['future_one','future_one','future_two','future_two']) {
+  for (const [time,code] of [[0,'future_one'],[1000,'future_one'],[2000,'future_two'],[12000,'future_two'],[120000,'future_two']]) {
+    vi.setSystemTime(time);
     const error = new ModError('Private detail');error.code = code;
     notices.fail(h.$,'announce',error,'Update Ariadne.');
+    expect(h.logs).toEqual(['Update Ariadne.']);
   }
-  expect(h.logs).toEqual(['Update Ariadne.','Update Ariadne.']);
-  await vi.waitFor(() => expect(h.store.get('hook-log')).toHaveLength(2));
-  expect(h.store.get('hook-log').map(record => record.code)).toEqual(['protocol_error','protocol_error']);
+  expect(h.logs).toEqual(['Update Ariadne.']);
+  await vi.waitFor(() => expect(h.store.get('hook-log')).toHaveLength(1));
+  expect(h.store.get('hook-log').map(record => record.code)).toEqual(['protocol_error']);
 });
 
 it('separates bounded background diagnostics from owner history and drops untrusted codes',async () => {
@@ -549,7 +615,7 @@ it('separates bounded background diagnostics from owner history and drops untrus
   expect(log.slice(-2)).toEqual(['announce','claim'].map(step => ({step,outcome:'started',code:'protocol_error',at:'1970-01-01T00:00:00.000Z'})));
   h.$.store.get = async () => {throw new Error('storage unavailable');};
   await notices.fail(h.$,'helper',error,'Update Ariadne.');
-  expect(h.logs).toEqual(Array(3).fill('Update Ariadne.'));
+  expect(h.logs).toEqual(['Update Ariadne.']);
 });
 
 it('a real owner connect failure speaks immediately',async () => {

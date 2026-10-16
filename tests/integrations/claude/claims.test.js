@@ -1,7 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { FOLD_GRACE_MS, NOTICES, claimLoop } from '../../../integrations/claude/plugin/hooks/claims.js';
 import { hash, plainFailure } from '../../../integrations/claude/plugin/hooks/contracts.js';
 import { binding, deferred, descriptor, failure, host, ids, prepared, success } from './fixtures.js';
+
+afterEach(() => vi.useRealTimers());
 
 describe('captured Claude claim lifecycle', () => {
   it('detaches submission, matches exact first-line marker+full digest, ignores unrelated/subagent turns', async () => {
@@ -235,12 +237,19 @@ describe('captured Claude claim lifecycle', () => {
     code = 'not_found';await loop.poll(h.$);await loop.poll(h.$);
     expect(h.logs).toEqual([plainFailure('not_found')]);
   });
-  it('prints each changed held meaning, suppressing repeats of the current meaning',async () => {
+  it('prints stable changed held meanings after the shared cap, including a return to the original advice',async () => {
+    vi.useFakeTimers();vi.setSystemTime(0);
     let reason = 'owner_paused';
     const h = host({handler:argv => argv[2] === 'claim' ? failure('invalid_transition',{reason}) : undefined});
     const loop = claimLoop(descriptor.helperPath,binding);
-    for (const next of ['owner_paused','owner_paused','session_closed','session_closed','recovery_required','recovery_required','owner_paused']) {
-      reason = next;await loop.poll(h.$);
+    const transcript = [];
+    for (const [time,next,shown] of [[0,'owner_paused',true],[1000,'owner_paused',false],
+      [2000,'session_closed',false],[12000,'session_closed',false],[119999,'session_closed',false],[120000,'session_closed',true],
+      [121000,'recovery_required',false],[131000,'recovery_required',false],[240000,'recovery_required',true],
+      [241000,'owner_paused',false],[251000,'owner_paused',false],[360000,'owner_paused',true]]) {
+      vi.setSystemTime(time);reason = next;await loop.poll(h.$);
+      if (shown) transcript.push(NOTICES[next]);
+      expect(h.logs).toEqual(transcript);
     }
     expect(h.logs).toEqual([NOTICES.owner_paused,NOTICES.session_closed,NOTICES.recovery_required,NOTICES.owner_paused]);
   });
