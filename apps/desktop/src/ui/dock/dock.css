@@ -1,5 +1,5 @@
-/* The answer dock (board screen 2, §5.2). It floats over the Map and Details; they keep its height as bottom room. */
-/* The shell's .shell-dock layer anchors it (ui/shell/Shell.tsx). The window less the top bar (40) and the Map's
+/* The answer dock (board screen 2, §5.2). It floats over the Map and Details; they keep its height as bottom room.
+   The shell's .shell-dock layer anchors it (ui/shell/Shell.tsx). The window less the top bar (40) and the Map's
    room above the dock (56) is its tallest. */
 .answer-dock {
   container: dock / inline-size;
