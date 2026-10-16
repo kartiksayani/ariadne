@@ -80,6 +80,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
   }
   async function flush($) {
     if (reporting) return reporting;
+    let saved = false;
     reporting = (async () => {
       while (pending.length) {
         const record = pending[0];
@@ -92,13 +93,14 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
           throw error;
         }
         pending.shift();
+        saved = true;
         // A durable terminal or uncertain record hands the attempt to the app.
         if (record.release && active === record.claim) active = null;
       }
     })();
     try {
       await reporting;
-      claimNotices.good($,'reports');
+      if (saved) claimNotices.good($,'reports');
     } catch (error) {
       if (!stopped) claimNotices.fail($,'reports',error,NOTICES.reports);
       throw error;

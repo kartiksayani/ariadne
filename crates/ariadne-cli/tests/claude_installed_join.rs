@@ -662,7 +662,7 @@ fn missing_installed_helper_or_resource_cannot_advertise_a_qualified_connection(
         let sentence = if missing_helper {
             "That did not complete. Ariadne could not finish connecting this conversation. Run /ariadne-connect again; if it keeps happening, update Ariadne and its Claude plugin."
         } else {
-            "That did not complete. Open the Ariadne app, then run /ariadne-connect again."
+            "That did not complete. Ariadne and its Claude plugin don't match, so this was not recorded. Update both to the same version."
         };
         assert_eq!(failed["value"]["text"], sentence);
         assert!(!failed["logs"].as_array().unwrap().is_empty());

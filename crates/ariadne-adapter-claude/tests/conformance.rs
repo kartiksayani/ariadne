@@ -342,6 +342,63 @@ fn pre_id_facts_match_final_provider_connection_without_changing_original_age() 
 }
 
 #[test]
+fn broken_installation_is_incompatible_not_an_unreachable_app() {
+    for cause in [
+        "missing helper",
+        "helper not executable",
+        "helper interpreter missing",
+        "helper version command failed",
+        "helper version mismatch",
+        "missing installed resource",
+        "missing loaded resource",
+    ] {
+        let fixture = Fixture::new(SUPPORTED_HOST_VERSION);
+        match cause {
+            "missing helper" => fs::remove_file(&fixture.options.helper).unwrap(),
+            "helper not executable" => {
+                fs::set_permissions(&fixture.options.helper, fs::Permissions::from_mode(0o600))
+                    .unwrap();
+            }
+            "helper interpreter missing" => {
+                executable_file(&fixture.options.helper, "#!/missing-fixture-interpreter\n");
+            }
+            "helper version command failed" => {
+                executable_file(&fixture.options.helper, "#!/bin/sh\nexit 1\n");
+            }
+            "helper version mismatch" => {
+                executable_file(
+                    &fixture.options.helper,
+                    "#!/bin/sh\nprintf 'ariadne 0.2.0\\n'\n",
+                );
+            }
+            "missing installed resource" => {
+                fs::remove_file(
+                    fixture
+                        .options
+                        .installed_plugin
+                        .join("skills/ariadne/SKILL.md"),
+                )
+                .unwrap();
+            }
+            "missing loaded resource" => {
+                fs::remove_file(fixture.loaded.join("skills/ariadne/SKILL.md")).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let error = fixture
+            .options
+            .qualify_identity(
+                fixture.identity(),
+                UtcMillis::new("2026-10-04T00:00:00.456Z").unwrap(),
+                Instant::now(),
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, AdapterErrorCode::IncompatibleAdapter, "{cause}");
+    }
+}
+
+#[test]
 fn discovery_resource_is_required_and_compared_at_exact_loaded_root() {
     for missing in [true, false] {
         let fixture = Fixture::new(SUPPORTED_HOST_VERSION);

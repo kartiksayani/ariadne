@@ -29,6 +29,9 @@ export class ModError extends Error {
 export const HELPER_TIMEOUT_MS = 8000;
 export const NOTICE_GRACE_MS = 120000;
 const TRANSIENT = new Set(['store_busy','timeout','io_error','process_rejected','host_unreachable']);
+// Spawn failures with these fixed OS codes require repairing the installation.
+// Other rejected SDK calls can still be temporary; never inspect their raw text.
+const INSTALL_FAILURES = new Set(['ENOENT','EACCES','EPERM','ENOEXEC','ENOTDIR','EISDIR','ELOOP','ENAMETOOLONG']);
 const DIAGNOSTIC_CODES = new Set([...TRANSIENT,'stale_generation','binding_mismatch','binding_ambiguous','binding_conflict',
   'not_found','invalid_argument','permission_denied','unsupported','unsupported_host_version','incompatible_adapter',
   'delivery_uncertain','commit_uncertain','protocol_conflict','invalid_transition','protocol_error','lease_invalid',
@@ -38,6 +41,7 @@ const DIAGNOSTIC_CODES = new Set([...TRANSIENT,'stale_generation','binding_misma
 // The integration table checks every generated CoreErrorCode against this set.
 export function failureCode(error) {
   if (error?.details?.reason === 'lease_invalid') return 'lease_invalid';
+  if (INSTALL_FAILURES.has(error?.code) || INSTALL_FAILURES.has(error?.cause?.code)) return 'incompatible_adapter';
   if (DIAGNOSTIC_CODES.has(error?.code)) return error.code;
   return error instanceof ModError ? 'protocol_error' : 'process_rejected';
 }
@@ -92,11 +96,20 @@ export function noticeEpisodes(now = () => Date.now(), outages = {current:null})
     fail($, slot, error, text, retryText = text, {background = true,key,terminal = false} = {}) {
       const code = failureCode(error);
       let episode = slots.get(slot);
+      // A different cause ends this slot's app outage, even if it is transient
+      // or silent. Its next retry streak gets its own grace and notice.
+      if (code !== 'host_unreachable' && episode?.outage) {
+        leaveOutage(episode);
+        episode.transientSince = null;
+        if (episode.lastKey === 'retrying') episode.lastKey = null;
+      }
       // Silent control refusals cannot start or age a transient streak.
       if (text === null || code === 'lease_invalid') {
         if (episode) { episode.transientSince = null; episode.good = 0; leaveOutage(episode); }
         return;
       }
+      // A broken install needs a repair step even in report/claim retry slots.
+      if (background && code === 'incompatible_adapter') text = plainFailure(code);
       if (!episode) {
         episode = {transientSince:null,good:0,lastKey:null,code};
         slots.set(slot,episode);
@@ -107,15 +120,16 @@ export function noticeEpisodes(now = () => Date.now(), outages = {current:null})
       const transient = TRANSIENT.has(code);
       const meaning = key ?? (transient ? 'retrying' : code === 'invalid_transition'
         ? ['owner_paused','session_closed','recovery_required'].includes(error?.details?.reason) ? error.details.reason : 'blocked'
-        : error instanceof ModError && bounded(error.code,64) ? error.code : code);
+        : code !== 'incompatible_adapter' && error instanceof ModError && bounded(error.code,64) ? error.code : code);
       if (transient) episode.transientSince ??= now();
-      else { episode.transientSince = null; leaveOutage(episode); }
+      else episode.transientSince = null;
       // Forks share app reachability, but retain their own binding/report states.
       // Reports can save to disk while the desktop app is closed.
       if (code === 'host_unreachable' && ['announce','helper','claim','auto'].includes(slot)) {
         outages.current ??= {members:new Set(),shown:false,since:episode.transientSince};
         episode.outage = outages.current;
         episode.outage.members.add(episode);
+        if (episode.lastKey === 'retrying') episode.outage.shown = true;
       }
       if (terminal) {
         $.ui.log(text);

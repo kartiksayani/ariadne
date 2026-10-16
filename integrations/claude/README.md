@@ -103,10 +103,17 @@ share one retry notice, while changed actionable states print immediately.
 Terminal notices always print and close the episode; otherwise three consecutive
 successful calls end it. Transient failures wait two minutes from the current
 transient streak; held states and silent lease refusals reset that grace period.
-Report-save failures use the same grace and sustained recovery rules. App-unreachable
-failures across announcements, claims, reconnects and helper hooks share one outage
+Report-save failures use the same grace and sustained recovery rules; only completed
+flushes that saved records count as successes. App-unreachable failures across
+announcements, claims, reconnects and helper hooks share one outage
 notice; owner commands return their direct answer without another outage line.
+An already-shown retry counts toward that shared notice. A different failure cause
+leaves the outage; another transient starts a fresh two-minute grace period.
 Successful local report saves cannot reset app reachability.
+Missing or unusable helpers, missing installed resources and version mismatches
+are installation failures: they speak immediately with a repair step, outside the
+shared app outage. Structured spawn errors distinguish these from temporary
+process failures; raw error text is never used to classify or describe them.
 Background diagnostics contain timestamps and fixed codes only, recording episode
 starts, visible meaning changes and endings in a separate 20-record `hook-log`.
 Its pending write queue is also bounded and never holds up polling or owner

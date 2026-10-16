@@ -1,7 +1,7 @@
 import installed from './installed.js';
 import { BUSY, claimLoop } from './claims.js';
 import { forget, qualify, recall, remember, setup } from './setup.js';
-import { bounded, descriptorValid, ModError, noticeEpisodes, plainFailure, uuid } from './contracts.js';
+import { bounded, descriptorValid, failureCode, ModError, noticeEpisodes, plainFailure, uuid } from './contracts.js';
 import { announcements } from './discovery.js';
 import { prCommentsPrompt } from './pr-comments.js';
 
@@ -59,6 +59,7 @@ export function createRegister(descriptor, publish) {
 // promises, helper stderr and owner payloads are never reflected.
 function failureText(state, error, connect = false) {
   if (state.loopBinding && error instanceof ModError && error.code === 'host_unreachable' && error.plain === plainFailure('host_unreachable')) return TEXT.unreachable;
+  if (!connect && failureCode(error) === 'incompatible_adapter') return plainFailure('incompatible_adapter');
   return (error instanceof ModError ? error.plain : undefined) ?? (connect ? TEXT.failure : TEXT.heartbeatRetry);
 }
 function failure(state, $, error, connect = false, background = true) {
