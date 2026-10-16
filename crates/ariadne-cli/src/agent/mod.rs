@@ -163,6 +163,7 @@ pub fn run(
     crate::output::write(result, args.contains(&"--json"), output, errors)
 }
 
+#[derive(Clone)]
 enum Tool {
     Read(ReadCall),
     Messages(AgentMessagesToolRequest),
@@ -170,11 +171,13 @@ enum Tool {
     Rounds(AgentRoundsToolRequest),
     Apply(ApplyCall),
 }
+#[derive(Clone)]
 struct ReadCall {
     request: AgentReadToolRequest,
     /// `--topic N`: resolved to the topic id once the session is reachable.
     topic_number: Option<u64>,
 }
+#[derive(Clone)]
 struct ApplyCall {
     request: AgentApplyToolRequest,
     dry_run: bool,
@@ -197,6 +200,16 @@ fn execute(
         Tool::Rounds(request) => request.validate_wire()?,
         Tool::Apply(call) => call.request.validate_wire()?,
     }
+    // Reads (and dry runs) change nothing, so a briefly busy store is retried
+    // here instead of failing the agent's read. Real applies return at once.
+    if matches!(&tool, Tool::Apply(call) if !call.dry_run) {
+        run_tool(tool, errors)
+    } else {
+        ariadne_core::native::retry_busy_read(|| run_tool(tool.clone(), errors))
+    }
+}
+
+fn run_tool(tool: Tool, errors: &mut dyn Write) -> Result<serde_json::Value, CoreError> {
     let data = crate::bridge::command::home_from_environment()?;
     let registry = AgentResolver::open_data_directory(&data)?;
     let core = NativeCoreService::new(

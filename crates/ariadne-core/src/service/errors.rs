@@ -122,7 +122,7 @@ impl CoreError {
             code,
             message: message.into(),
             hint: hint.into(),
-            retryable: false,
+            retryable: code.is_transient(),
             field_errors: Vec::new(),
             current_revision: None,
             details: None,
@@ -181,6 +181,18 @@ impl From<AdapterError> for CoreError {
 }
 
 impl CoreErrorCode {
+    /// A transient failure had no effects and clears by itself, so the same
+    /// operation may simply be sent again. This decides `CoreError::retryable`
+    /// for every error built with `CoreError::new`.
+    ///
+    /// Only `store_busy` qualifies: a lock wait ran out before anything was read
+    /// or written. `io_error`, `commit_uncertain` and `host_unreachable` are not
+    /// transient by code: they need a check or a reconnect first, and an adapter
+    /// marks its own retryable host failures explicitly.
+    pub fn is_transient(self) -> bool {
+        matches!(self, Self::StoreBusy)
+    }
+
     pub fn cli_exit(self) -> i32 {
         match self {
             Self::InvalidArgument | Self::InvalidRef => 2,

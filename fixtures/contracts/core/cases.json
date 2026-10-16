@@ -1158,9 +1158,9 @@
             "ok": false,
             "error": {
               "code": "store_busy",
-              "message": "Review the saved evidence before continuing.",
-              "hint": "Reload the saved scope and correct this operation.",
-              "retryable": false,
+              "message": "Another Ariadne task is using this session right now.",
+              "hint": "Ariadne is busy for a moment; try again.",
+              "retryable": true,
               "field_errors": []
             }
           }

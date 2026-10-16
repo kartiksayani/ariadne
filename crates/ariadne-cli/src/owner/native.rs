@@ -4,6 +4,15 @@ use ariadne_domain::models::{UtcMillis, UuidV4};
 use ariadne_store::registry::Registry;
 
 pub(super) fn execute(request: Request) -> Result<serde_json::Value, CoreError> {
+    // Queries and saved-connect lookups change nothing: ride out a busy store.
+    if matches!(request, Request::Mutation(_)) {
+        execute_once(request)
+    } else {
+        ariadne_core::native::retry_busy_read(|| execute_once(request.clone()))
+    }
+}
+
+fn execute_once(request: Request) -> Result<serde_json::Value, CoreError> {
     let home = crate::bridge::command::home_from_environment()?;
     let registry = if matches!(&request, Request::Mutation(wrapper)
         if matches!(wrapper.command, OwnerCommand::ProjectRegister { .. }))
