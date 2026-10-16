@@ -12,6 +12,8 @@ export default defineConfig({
   use: { browserName: 'chromium', deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC', colorScheme: 'dark', reducedMotion: 'reduce', trace: 'retain-on-failure' },
   projects: [
     { name: 'design' },
+    // The final Claude Design board (designs/Ariadne-final-board.zip): own frames (final-frames.ts) and thresholds (final-thresholds.json).
+    { name: 'final', testMatch: 'final.spec.mts' },
     { name: 'graph-2000', testDir: resolve('tests/e2e/graph'), testMatch: '*.spec.mts', use: { viewport: { width: 1000, height: 700 } } },
     { name: 'tree-layout', testDir: resolve('tests/e2e/tree-layout'), testMatch: '*.spec.mts', use: { viewport: { width: 1000, height: 700 } } },
     { name: 'owner-input-layout', testDir: resolve('tests/e2e/owner-input'), testMatch: '*.spec.mts', use: { viewport: { width: 1000, height: 700 } } },

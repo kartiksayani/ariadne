@@ -4,7 +4,7 @@
 // report.json, and fails a frame whose mismatch ratio exceeds thresholds.json.
 import { test as base, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, extname, resolve, sep } from 'node:path';
 import { answerFrameIds, designNow, detailMask, detailMasked, dockFrameIds, frameNow, frameSpec, graphFrame, graphShift, toastFrameIds, variantIds, type FrameSpec } from './frames';
@@ -12,9 +12,8 @@ import { startDesignServer } from './server.mts';
 import { handoffMembers, prefix, repo, sourceRoot } from './source.mts';
 import thresholds from './thresholds.json' with { type: 'json' };
 import { changeNames, interpretation, longDecided, ownerWords } from './changes-fixture';
+import { captureFrame, type Region, type Shift } from './compare.mts';
 
-// Pixels whose channels differ by more than this count as mismatched.
-const tolerance = 16;
 const members = handoffMembers();
 const served = resolve(sourceRoot, prefix);
 const output = resolve(repo, 'coverage/design');
@@ -761,48 +760,6 @@ for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as 
     await expect(copy).toHaveCount(0);
   });
 }
-
-/** Pixel diff in the browser canvas: mismatch ratio and a diff image (mismatches red over the dimmed app). */
-async function compare(page: Page, design: Buffer, app: Buffer, regions: readonly Region[] = [], masks: readonly Region[] = [], shifts: readonly Shift[] = []) {
-  return page.evaluate(async ({ design, app, tolerance, regions, masks, shifts }) => {
-    const load = (base64: string) => new Promise<HTMLImageElement>((done, fail) => {
-      const image = new Image(); image.onload = () => done(image); image.onerror = fail; image.src = `data:image/png;base64,${base64}`;
-    });
-    const [left, right] = await Promise.all([load(design), load(app)]);
-    const width = Math.max(left.width, right.width), height = Math.max(left.height, right.height);
-    const pixels = (image: HTMLImageElement) => {
-      const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
-      const context = canvas.getContext('2d')!; context.drawImage(image, 0, 0); return context.getImageData(0, 0, width, height).data;
-    };
-    const a = pixels(left), b = pixels(right), canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
-    const context = canvas.getContext('2d')!, out = context.createImageData(width, height);
-    let mismatched = 0;
-    const inRegion = regions.map(() => 0);
-    for (let index = 0; index < a.length; index += 4) {
-      const x = (index / 4) % width, y = Math.floor(index / 4 / width);
-      // A masked region is left out of the ratio (the frame's full area still divides it) and shown tinted blue in the diff.
-      if (masks.some(mask => x >= mask.x && x < mask.x + mask.width && y >= mask.y && y < mask.y + mask.height)) {
-        out.data.set([b[index] * 0.3, b[index + 1] * 0.3 + 24, b[index + 2] * 0.3 + 64, 255], index);
-        continue;
-      }
-      // A shifted band is compared with the design's pixel `dy` rows lower: the app's row sits higher by an intended change.
-      const shift = shifts.find(band => x >= band.x && x < band.x + band.width && y >= band.y && y < band.y + band.height);
-      const other = shift && y + shift.dy < height ? index + shift.dy * width * 4 : index;
-      const differs = [0, 1, 2, 3].some(channel => Math.abs(a[other + channel] - b[index + channel]) > tolerance);
-      if (differs) {
-        mismatched++;
-        regions.forEach((region, at) => { if (x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height) inRegion[at]++; });
-        out.data.set([255, 0, 64, 255], index);
-      } else out.data.set([b[index] * 0.3, b[index + 1] * 0.3, b[index + 2] * 0.3, 255], index);
-    }
-    context.putImageData(out, 0, 0);
-    return { ratio: mismatched / (width * height), regions: regions.map((region, at) => inRegion[at] / Math.max(1, region.width * region.height)), width, height,
-      png: canvas.toDataURL('image/png').split(',')[1] };
-  }, { design: design.toString('base64'), app: app.toString('base64'), tolerance, regions, masks, shifts });
-}
-interface Region { readonly name: string; readonly x: number; readonly y: number; readonly width: number; readonly height: number }
-/** App rows [y, y + height) of the columns [x, x + width) are compared with the design's rows `dy` lower. */
-interface Shift extends Region { readonly dy: number }
 
 /**
  * Graph frames (frames.ts graphShift): where the legend and the Graph body sit in the design against the app.
@@ -1717,18 +1674,15 @@ async function capture(page: Page, designPage: Page, spec: FrameSpec, id: string
     }) : null;
     // Graph frames compare the legend and the Graph with the intended move applied (frames.ts graphShift); the rest as is.
     const graph = graphFrame(spec) ? await graphBands(page, designPage, card, columns) : null;
-    const result = await compare(canvas, design, app, columns, [...(mask ? [mask] : []), ...(graph?.masks ?? [])], graph?.shifts ?? []);
-    await canvas.close();
-    writeFileSync(resolve(output, `${id}-design.png`), design);
-    writeFileSync(resolve(output, `${id}-app.png`), app);
-    writeFileSync(resolve(output, `${id}-diff.png`), Buffer.from(result.png, 'base64'));
-    const threshold = (thresholds as Record<string, number>)[id] ?? 0;
-    writeFileSync(resolve(output, 'frames', `${id}.json`), `${JSON.stringify({ ratio: Number(result.ratio.toFixed(4)), threshold, tolerance,
-      masked: mask ? { region: mask, reason: detailMask.reason } : null,
-      shifted: graph ? { reason: graphShift.reason, legend: graph.legend, graph: graph.body, bands: graph.shifts, masks: graph.masks } : null,
-      columns: Object.fromEntries(columns.map((column, at) => [column.name, Number(result.regions[at].toFixed(4))])),
-      size: { width: result.width, height: result.height }, viewport: { width: spec.width, height: spec.height }, shell }, null, 2)}\n`);
-    expect(denied).toEqual([]);
-    expect(result.ratio, `${id} mismatch ratio`).toBeLessThanOrEqual(threshold);
+    try {
+      await captureFrame(canvas, { id, design, app, directory: output, threshold: (thresholds as Record<string, number>)[id] ?? 0,
+        regions: columns, masks: [...(mask ? [mask] : []), ...(graph?.masks ?? [])], shifts: graph?.shifts ?? [],
+        report: result => ({ masked: mask ? { region: mask, reason: detailMask.reason } : null,
+          shifted: graph ? { reason: graphShift.reason, legend: graph.legend, graph: graph.body, bands: graph.shifts, masks: graph.masks } : null,
+          columns: Object.fromEntries(columns.map((column, at) => [column.name, Number(result.regions[at].toFixed(4))])),
+          size: { width: result.width, height: result.height }, viewport: { width: spec.width, height: spec.height }, shell }),
+        // Written into the frame's JSON, then asserted empty after the capture: a blocked request still leaves the frame, its diff and its JSON as evidence.
+        denied });
+    } finally { await canvas.close(); }
   }
 }
