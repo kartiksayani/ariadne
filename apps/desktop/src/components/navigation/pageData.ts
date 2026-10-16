@@ -4,7 +4,7 @@ import type { SessionRef } from '../../generated/core';
 import type { ProjectSummary, SessionSummary } from '../../generated/domain/models';
 import type { ArchiveRowData, PageSession, ProjectCardData, SessionGroupData } from '../../ui/pages/page-types';
 import { isRunning, lastActivity, projectName, relativeDay, routeOf, sessionKey, type ArchivedTopic } from '../../ui/pages/model';
-import { ownerName } from '../../ui/shell/model';
+import { clock, ownerName } from '../../ui/shell/model';
 import { agentProduct } from '../../state/navigation/switcher';
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
@@ -33,7 +33,8 @@ export function projectCardData(project: Immutable<ProjectSummary>, sessions: re
   const own = all.filter(summary => summary.archived_at == null).sort(byRecent);
   // Archived sessions count for last activity only when nothing else is left.
   const latest = Math.max(...(own.length ? own : all).map(summary => Date.parse(summary.updated_at)));
-  const last = Number.isFinite(latest) ? lastActivity(latest, now) : null;
+  // Today reads as the time alone ("last activity 21:25"); other days as on every page ("12 Sep").
+  const last = !Number.isFinite(latest) ? null : relativeDay(latest, now) === 'today' ? clock(latest) : lastActivity(latest, now);
   const archived = own.length === 0 ? lastArchivedOf(all) : undefined;
   return {
     id: project.project_id, name: projectName(project), path: project.canonical_root, current: current?.project_id === project.project_id,
@@ -65,16 +66,17 @@ export function sessionGroups(projects: readonly Immutable<ProjectSummary>[], se
   });
 }
 
-/** An archived session's row: "notes-api · Claude Code · 4 topics", "Archived 3 Oct". */
+/** An archived session's row: "notes-api · Claude Code · 4 topics · 31 items", "Archived 3 Oct". */
 export function archivedSessionRow(summary: Immutable<SessionSummary>, project: Immutable<ProjectSummary> | undefined, now: number): ArchiveRowData {
+  const items = Object.values(summary.counts.items_by_status).reduce((sum, count) => sum + count, 0);
   return { id: sessionKey(summary), kind: 'session', name: sessionName(summary),
-    sub: [projectName(project), agentWord(summary), plural(summary.topic_count, 'topic')].join(' · '),
-    when: `Archived ${relativeDay(Date.parse(summary.archived_at!), now)}` };
+    sub: [projectName(project), agentWord(summary), plural(summary.topic_count, 'topic'), plural(items, 'item')].join(' · '),
+    when: `Archived ${lastActivity(Date.parse(summary.archived_at!), now)}` };
 }
 
-/** An archived topic's row: "From “cache PR review” · 6 items". */
+/** An archived topic's row: "From “cache PR review” · 6 items", "Archived today 19:40". */
 export function archivedTopicRow(topic: ArchivedTopic, source: Immutable<SessionSummary> | undefined, now: number): ArchiveRowData {
   return { id: `${sessionKey(topic.source)}:${topic.topic.id}`, kind: 'topic', name: topic.name,
     sub: `From “${source ? sessionName(source) : 'an earlier session'}” · ${plural(topic.items, 'item')}`,
-    when: `Archived ${relativeDay(Date.parse(topic.topic.archived_at!), now)}` };
+    when: `Archived ${lastActivity(Date.parse(topic.topic.archived_at!), now)}` };
 }

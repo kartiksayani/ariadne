@@ -99,6 +99,36 @@ describe('connection card session actions (were the session bar’s)', { timeout
     expect(copyText).toHaveBeenCalledExactlyOnceWith(route.session_id);
   });
 
+  it('Cancel on the Close review gives focus back to the connection button the card came from', async () => {
+    await setup();
+    dot().focus();
+    const view = await openCard();
+    fireEvent.click(view.getByRole('button', { name: 'Close session' }));
+    const review = await screen.findByRole('dialog', { name: /^Close / });
+    fireEvent.click(within(review).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Close / })).toBeNull());
+    expect(document.activeElement).toBe(dot());
+  });
+
+  it('a closed session opened from its All sessions row offers Reopen on its card, and Reopen works (SPEC 14.2: the row has none)', async () => {
+    const transport = new AppTransport(), closed = session(transport);
+    closed.state = 'closed'; closed.closed_at = closed.updated_at;
+    render(<DesktopApp service={createDesktopService(transport)} />);
+    const list = await screen.findByRole('region', { name: 'All sessions' });
+    fireEvent.click(within(list).getByRole('button', { name: /^Closed/ }));
+    const row = await waitFor(() => list.querySelector<HTMLElement>(`[data-session-id="${route.session_id}"]`)!.closest<HTMLElement>('.sl-row')!);
+    expect(within(row).queryByRole('button', { name: /^Reopen/ })).toBeNull();
+    expect(within(row).getByRole('button', { name: `Close ${row.querySelector('.sl-name')!.textContent}` }).hasAttribute('disabled')).toBe(true);
+    fireEvent.click(row.querySelector<HTMLButtonElement>('.sl-name')!);
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
+    const view = await openCard();
+    fireEvent.click(view.getByRole('button', { name: 'Reopen session' }));
+    const review = await screen.findByRole('dialog', { name: 'Reopen this session?' });
+    await act(async () => { fireEvent.click(within(review).getByRole('button', { name: 'Reopen session' })); });
+    await waitFor(() => expect(commands(transport)).toEqual(['session_reopen']));
+    await waitFor(() => expect(dot().getAttribute('aria-label')).not.toMatch(/^Closed/));
+  });
+
   it('Sending… opens the Sending dialog with Pause and Resume (was the dispatch chip)', async () => {
     const transport = await setup();
     const view = await openCard();

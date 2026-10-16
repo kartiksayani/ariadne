@@ -3,6 +3,7 @@
 // inside while it is open; Esc cancels and Enter confirms (README, Dialogs).
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { dialogControls } from '../../components/accessibility/dialog-focus';
+import { focusReturnTarget } from '../parts/parts';
 import './dialogs.css';
 
 export interface DialogProps {
@@ -20,14 +21,8 @@ const interactive = 'button,a[href],input,select,textarea,[contenteditable="true
 
 export function Dialog({ label, width, role = 'dialog', onCancel, onConfirm, children }: DialogProps) {
   const element = useRef<HTMLDivElement>(null);
-  // Capture before the opening action's menu unmounts; its trigger survives the clicked item.
-  const [previous] = useState(() => {
-    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const menu = focused?.closest('[role="menu"]');
-    const trigger = menu?.id ? [...document.querySelectorAll<HTMLElement>('[aria-haspopup="menu"][aria-controls]')]
-      .find(control => control.getAttribute('aria-controls') === menu.id) : null;
-    return trigger ?? focused;
-  });
+  // Capture before the opening action's menu or popover unmounts; its trigger survives the clicked item.
+  const [previous] = useState(focusReturnTarget);
   const cancel = useRef(onCancel);
   cancel.current = onCancel;
   useEffect(() => {

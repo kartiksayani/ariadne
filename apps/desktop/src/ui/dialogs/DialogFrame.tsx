@@ -2,7 +2,7 @@
 // the bottom right with their keys. Focus stays inside; Esc cancels; Tab wraps. Pure presentation (contract C8).
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { dialogControls } from '../../components/accessibility/dialog-focus';
-import { Keycap } from '../parts/parts';
+import { focusReturnTarget, Keycap } from '../parts/parts';
 import './dialog-frame.css';
 
 export interface DialogFrameProps {
@@ -17,8 +17,9 @@ export interface DialogFrameProps {
 
 export function DialogFrame({ label, width = 520, onCancel, cancelOnScrim = false, children }: DialogFrameProps) {
   const card = useRef<HTMLDivElement>(null);
-  // The control that had focus before the dialog opened gets it back, even if the opener unmounted its menu.
-  const [previous] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  // The control that had focus before the dialog opened gets it back; if the opener unmounted its menu or popover,
+  // the button that opened that menu or popover does.
+  const [previous] = useState(focusReturnTarget);
   const cancel = useRef(onCancel);
   cancel.current = onCancel;
   useEffect(() => {

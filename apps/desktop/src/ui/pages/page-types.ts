@@ -71,10 +71,8 @@ export interface SessionsListProps<R> {
   readonly groups: readonly SessionGroupData<R>[];
   readonly onOpen: (session: PageSession<R>) => void;
   readonly onRename: (session: PageSession<R>) => void;
+  /** Greyed ("Already closed") on a closed row: Reopen is on the opened session's connection card. */
   readonly onClose: (session: PageSession<R>) => void;
-  /** A closed row shows Reopen where Close was. */
-  readonly onReopen: (session: PageSession<R>) => void;
-  readonly onCopyId: (session: PageSession<R>) => void;
   readonly onArchive: (session: PageSession<R>) => void;
 }
 

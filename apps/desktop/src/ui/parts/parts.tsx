@@ -45,6 +45,8 @@ export function usePopover(open: boolean, onClose: (restoreFocus: boolean) => vo
   close.current = onClose;
   useEffect(() => {
     if (!open) return undefined;
+    const node = panel.current;
+    if (node && trigger) openers.set(node, trigger);
     // A press on the trigger is the trigger's own toggle: closing here too would reopen the popover.
     const onTrigger = (target: Node) => typeof trigger === 'string' ? target instanceof Element && !!target.closest(trigger) : !!trigger?.current?.contains(target);
     const press = (event: PointerEvent) => {
@@ -60,8 +62,36 @@ export function usePopover(open: boolean, onClose: (restoreFocus: boolean) => vo
     };
     window.addEventListener('pointerdown', press);
     document.addEventListener('keydown', key, true);
-    return () => { window.removeEventListener('pointerdown', press); document.removeEventListener('keydown', key, true); };
+    return () => {
+      window.removeEventListener('pointerdown', press); document.removeEventListener('keydown', key, true);
+      if (node) openers.delete(node);
+    };
   }, [open, panel, trigger]);
+}
+
+/** Each open popover panel and the button that opened it (usePopover's `trigger`). */
+const openers = new WeakMap<Element, RefObject<HTMLElement | null> | string>();
+const openerOf = (panel: Element): HTMLElement | null => {
+  const trigger = openers.get(panel);
+  return typeof trigger === 'string' ? document.querySelector<HTMLElement>(trigger) : trigger?.current ?? null;
+};
+
+/**
+ * Where a dialog gives focus back when it closes: the control focused as it opened, unless that control sits in a
+ * menu or popover the opening action unmounts (a card's "Close session", a menu's "Remove project…"); then the
+ * button that opened that menu or popover, which outlives it.
+ */
+export function focusReturnTarget(): HTMLElement | null {
+  const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const menu = focused?.closest('[role="menu"]');
+  const menuTrigger = menu?.id ? [...document.querySelectorAll<HTMLElement>('[aria-haspopup="menu"][aria-controls]')]
+    .find(control => control.getAttribute('aria-controls') === menu.id) : null;
+  if (menuTrigger) return menuTrigger;
+  for (let node: Element | null = focused; node; node = node.parentElement) {
+    const opener = openers.has(node) ? openerOf(node) : null;
+    if (opener) return opener;
+  }
+  return focused;
 }
 
 /** A popover that took focus on open gives it back to whatever had it, when it closes and focus is still inside it or lost. */

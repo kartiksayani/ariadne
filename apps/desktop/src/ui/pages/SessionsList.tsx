@@ -22,10 +22,9 @@ function Row<R>({ session, narrow, props }: { readonly session: PageSession<R>; 
     <span className="sl-wait">{session.waiting > 0 && <WaitPill count={session.waiting} label={`${plural(session.waiting, 'question')} waiting on you`} />}</span>
     <span className="sl-acts">
       <button type="button" className="p-iconbtn sl-act" title="Rename" aria-label={`Rename ${session.name}`} onClick={() => props.onRename(session)}><i className="ph ph-pencil-simple" aria-hidden="true" /></button>
-      <button type="button" className="p-iconbtn sl-act" title="Copy session ID" aria-label={`Copy the ID of ${session.name}`} onClick={() => props.onCopyId(session)}><i className="ph ph-copy" aria-hidden="true" /></button>
-      {closed
-        ? <button type="button" className="p-iconbtn sl-act" title="Reopen session" aria-label={`Reopen ${session.name}`} onClick={() => props.onReopen(session)}><i className="ph ph-arrow-u-up-left" aria-hidden="true" /></button>
-        : <button type="button" className="p-iconbtn sl-act" title="Close session" aria-label={`Close ${session.name}`} onClick={() => props.onClose(session)}><i className="ph ph-x-circle" aria-hidden="true" /></button>}
+      {/* SPEC 14.2: a closed row keeps Close, greyed; Reopen and Copy ID live on the connection card of the opened session. */}
+      <button type="button" className="p-iconbtn sl-act" title={closed ? 'Already closed' : 'Close session'} aria-label={`Close ${session.name}`}
+        disabled={closed} onClick={() => props.onClose(session)}><i className="ph ph-x-circle" aria-hidden="true" /></button>
       <button type="button" className="p-iconbtn sl-act" title="Archive session" aria-label={`Archive ${session.name}`} onClick={() => props.onArchive(session)}><i className="ph ph-archive" aria-hidden="true" /></button>
     </span>
   </div>;

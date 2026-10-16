@@ -7,7 +7,6 @@ import type { ProjectSummary, SessionSummary } from '../../generated/domain/mode
 import type { NavigationStore } from '../../state/navigation/store';
 import type { SessionActionControllers } from '../../components/bindings/actions';
 import { ownerDescription, ownerName, sessionPhrase, sessionWhen } from '../shell/model';
-import { copySessionReference } from '../shared/CopySessionId';
 import { plainFailure } from '../../data/plain';
 import '../../components/bindings/controls.css';
 import { agentOf, sessionKey } from './model';
@@ -189,15 +188,16 @@ export function SessionLists({ navigation, actions, projects, sessions, single =
   const shownTab = single ? 'all' : tab;
   const project = single ? projects[0] : undefined;
   const title = project ? project.project?.display_name ?? 'Unavailable project' : 'All sessions';
-  const sub = single ? (open.length ? plural(open.length, 'session') : 'No sessions') : `${plural(open.length, 'session')} in ${plural(projects.length, 'project')}`;
+  // "6 sessions in 3 projects": the projects the listed sessions are in, not every registered one (SPEC 14.2).
+  const sub = single ? (open.length ? plural(open.length, 'session') : 'No sessions')
+    : `${plural(open.length, 'session')} in ${plural(new Set(open.map(summary => summary.project_id)).size, 'project')}`;
   const counts = { open: listed.filter(summary => inTab(summary, 'open')).length, closed: listed.filter(summary => inTab(summary, 'closed')).length, all: open.length };
   const store = acting ? navigation.opened.open({ project_id: acting.summary.project_id, session_id: acting.summary.session_id }) : null;
   return <>
     <SessionsList<SessionRef> narrow={narrow} back={back} title={title} sub={sub}
       tabs={single ? undefined : { value: tab, counts, onChange: setTab }}
       groups={sessionGroups(projects, listed, shownTab, now, currentSession, single, onOpenArchive)}
-      onOpen={row => onOpenSession(row.route)} onRename={act('rename')} onClose={act('close')} onReopen={act('reopen')}
-      onCopyId={row => { void copySessionReference(row.route.session_id); }}
+      onOpen={row => onOpenSession(row.route)} onRename={act('rename')} onClose={act('close')}
       onArchive={row => { const summary = summaryOf(row); if (summary && !acting) void archive.archive(summary); }} />
     {children}
     {acting && store && <SessionRowAction key={`${sessionKey(acting.summary)}:${acting.act}`} actions={actions.forSession(store)} act={acting.act}
