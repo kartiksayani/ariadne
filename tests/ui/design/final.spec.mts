@@ -2,12 +2,12 @@
 // (designs/Ariadne-final-board.zip, offline) and, once its `pending` flag is off, by the real app in the matching fixture,
 // and the two are compared pixel for pixel against final-thresholds.json. See README.md in this folder.
 import { test as base, expect, type BrowserContext, type Page } from '@playwright/test';
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { captureFrame, crop, type Region } from './compare.mts';
+import { captureFrame, crop, type CaptureInput, type CompareResult, type Region } from './compare.mts';
 import { boardContext, boardFrame, labelHeight, openBoard, renderBoard, settle } from './final-board.mts';
-import { finalNow, finalStates, unhonoured, variantNames, variants, type FinalState, type Step, type Variant } from './final-frames';
+import { finalNow, finalStates, notYet, regionsFor, unhonoured, variantNames, variants, type FinalState, type Step, type Variant } from './final-frames';
 import { finalMembers, fontFile, fontPins, runtimeHashes } from './final-source.mts';
 import { startDesignServer } from './server.mts';
 import { repo } from './source.mts';
@@ -66,7 +66,7 @@ async function perform(page: Page, step: Step): Promise<void> {
 }
 
 /** The app in the state's fixture, at the variant's size and the board's clock. */
-async function renderApp(page: Page, origin: string, state: FinalState, variant: Variant, denied: readonly string[]): Promise<Buffer> {
+async function renderApp(page: Page, origin: string, state: FinalState, variant: Variant): Promise<Buffer> {
   const { theme, width, height } = variants[variant];
   await page.clock.setFixedTime(finalNow);
   await page.setViewportSize({ width, height });
@@ -78,16 +78,29 @@ async function renderApp(page: Page, origin: string, state: FinalState, variant:
   await settle(page);
   for (const step of state.app.act ?? []) await perform(page, step);
   await page.mouse.move(0, 0);
-  expect(denied, 'the app asked for nothing outside the dev server').toEqual([]);
   return page.screenshot({ animations: 'disabled' });
+}
+
+/**
+ * How a frame is scored. Without regions: the whole frame against its threshold. With regions (final-frames.ts `regions`): only the
+ * state's regions that apply to this size, each against its own threshold; the whole frame's ratio is written, never asserted.
+ * `recordOnly` (a pending state) asserts nothing and still writes every ratio.
+ */
+function scoring(state: Pick<FinalState, 'id' | 'regions'>, variant: Variant, recordOnly: boolean): Pick<CaptureInput, 'threshold' | 'regions' | 'regionThresholds'> & { report: (result: CompareResult) => object } {
+  const scored = regionsFor(state, variant);
+  if (!scored.length) return { threshold: recordOnly ? null : threshold(state.id, variant), report: () => ({}) };
+  const limits = scored.map(region => recordOnly ? null : region.threshold ?? 0);
+  return {
+    threshold: null, regionThresholds: limits,
+    regions: scored.map(({ name, rect: [x, y, width, height] }) => ({ name, x, y, width, height })),
+    report: result => ({ regions: scored.map((region, at) => ({ name: region.name, rect: region.rect, ratio: Number(result.regions[at]!.toFixed(4)), threshold: limits[at] })) })
+  };
 }
 
 for (const state of finalStates) for (const variant of variantNames) {
   test(`final ${state.id} ${variant}: ${state.title}`, async ({ browser, origin, board, page: canvas }, testInfo) => {
     testInfo.annotations.push({ type: 'pending', description: String(state.pending) });
-    const seen = board.denied.length;
-    const design = await renderBoard(board.context, origin, state, variant, board.denied);
-    expect(board.denied.slice(seen), 'the board asked for nothing outside its own files').toEqual([]);
+    const { png: design, denied: boardDenied } = await renderBoard(board.context, origin, state, variant, board.denied);
     // A frame the board failed to draw is blank or a placeholder; every state draws at least this many bytes of PNG.
     expect(design.length, 'the board frame is drawn').toBeGreaterThan(5_000);
     const id = `${state.id}-${variant}`, { width, height } = variants[variant];
@@ -95,14 +108,18 @@ for (const state of finalStates) for (const variant of variantNames) {
     const notHonoured = unhonoured(state.app);
     if (state.pending && !compareAlways && !canary(state, variant)) {
       writeFileSync(resolve(output, `${id}-design.png`), design);
-      writeFileSync(resolve(output, 'frames', `${id}.json`), `${JSON.stringify({ pending: true, owner: state.owner, size: { width, height }, unhonoured: notHonoured }, null, 2)}\n`);
+      writeFileSync(resolve(output, 'frames', `${id}.json`), `${JSON.stringify({ pending: true, owner: state.owner, size: { width, height }, unhonoured: notHonoured, denied: boardDenied }, null, 2)}\n`);
+      // After the JSON: a frame whose board asked for something outside its files still leaves its evidence.
+      expect(boardDenied, 'the board asked for nothing outside its own files').toEqual([]);
       return;
     }
     const denied: string[] = [], context = await appContext(browser, origin, variant, denied);
     try {
-      const app = await renderApp(await context.newPage(), origin, state, variant, denied);
-      await captureFrame(canvas, { id, design, app, directory: output, threshold: state.pending ? null : threshold(state.id, variant),
-        report: result => ({ pending: state.pending, owner: state.owner, size: { width: result.width, height: result.height }, unhonoured: notHonoured }) });
+      const app = await renderApp(await context.newPage(), origin, state, variant);
+      const { report, ...score } = scoring(state, variant, state.pending);
+      await captureFrame(canvas, { id, design, app, directory: output, ...score,
+        report: result => ({ pending: state.pending, owner: state.owner, size: { width: result.width, height: result.height }, unhonoured: notHonoured, ...report(result) }),
+        denied: [...boardDenied, ...denied] });
     } finally { await context.close(); }
   });
 }
@@ -127,13 +144,136 @@ test('font route: a name outside the six fonts is refused', async ({ origin, boa
   } finally { await page.close(); }
 });
 
+// The board is untrusted and its renders are published, so its context reaches nothing but its own files. Each test builds its own
+// context and record, so what it provokes does not land in the worker's record that the render tests assert on.
+test('board context: a request to the dev server outside /final/ is answered 404 and recorded', async ({ browser, origin }) => {
+  const denied: string[] = [], context = await boardContext(browser, origin, denied);
+  try {
+    const page = await context.newPage();
+    await page.goto(`${origin}/final/ariadne-ds/styles.css`);
+    const status = (url: string) => page.evaluate(async target => (await fetch(target)).status, url);
+    expect(await status(`${origin}/final/ariadne-ds/styles.css`), 'a board file is served').toBe(200);
+    expect(denied, 'a board file is not a denied request').toEqual([]);
+    const outside = ['/package.json', '/apps/desktop/package.json', '/tests/ui/design/server.mts', '/@fs/etc/hosts', '/final'].map(path => `${origin}${path}`);
+    for (const url of outside) expect(await status(url), url).toBe(404);
+    expect(denied).toEqual(outside);
+    // Another origin is refused and recorded as before.
+    expect(await page.evaluate(async url => fetch(url).then(() => 'fetched', () => 'blocked'), 'http://example.invalid/x')).toBe('blocked');
+    expect(denied.at(-1)).toBe('http://example.invalid/x');
+  } finally { await context.close(); }
+});
+test('board context: a WebSocket is closed and recorded, and no service worker can be registered', async ({ browser, origin }) => {
+  const denied: string[] = [], context = await boardContext(browser, origin, denied);
+  try {
+    const page = await context.newPage();
+    await page.goto(`${origin}/final/ariadne-ds/styles.css`);
+    const socket = `${origin.replace('http', 'ws')}/socket`;
+    const ended = await page.evaluate(url => new Promise<string>(done => {
+      const attempt = new WebSocket(url), timer = setTimeout(() => done('still open'), 10_000);
+      attempt.onclose = () => { clearTimeout(timer); done('closed'); };
+    }), socket);
+    expect(ended, 'the socket is closed').toBe('closed');
+    expect(denied, 'the socket is recorded').toEqual([socket]);
+    // Playwright's own block replaces `register` with a no-op that script can undo, so the original is called too.
+    const attempts = await page.evaluate(async () => {
+      if (!('serviceWorker' in navigator)) return { api: false, original: '', registrations: -1 };
+      const original = await ServiceWorkerContainer.prototype.register.call(navigator.serviceWorker, '/final/support.js').then(() => 'registered', (error: Error) => `refused: ${error.name}`);
+      await navigator.serviceWorker.register('/final/support.js');
+      return { api: true, original, registrations: (await navigator.serviceWorker.getRegistrations()).length };
+    });
+    expect(attempts, 'no service worker is registered, by either route').toEqual({ api: true, original: 'refused: SecurityError', registrations: 0 });
+  } finally { await context.close(); }
+});
+
+// A frame whose render asked for something it may not leaves its evidence: the report carries `denied`, and the assertion comes after.
+/** A white PNG with black squares ([x, y, width, height]), drawn in the browser. */
+async function picture(page: Page, width: number, height: number, squares: readonly (readonly [number, number, number, number])[] = []): Promise<Buffer> {
+  const base64 = await page.evaluate(({ width, height, squares }) => {
+    const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
+    const context = canvas.getContext('2d')!; context.fillStyle = '#fff'; context.fillRect(0, 0, width, height);
+    context.fillStyle = '#000'; for (const [x, y, w, h] of squares) context.fillRect(x, y, w, h);
+    return canvas.toDataURL('image/png').split(',')[1]!;
+  }, { width, height, squares });
+  return Buffer.from(base64, 'base64');
+}
+/** A scratch output folder with the `frames` folder captureFrame writes to, outside coverage/ so teardown does not gather it. */
+async function inScratch(run: (directory: string) => Promise<void>): Promise<void> {
+  const directory = mkdtempSync(resolve(tmpdir(), 'final-spec-'));
+  mkdirSync(resolve(directory, 'frames'));
+  try { await run(directory); } finally { rmSync(directory, { recursive: true, force: true }); }
+}
+const frameJson = (directory: string, id: string) => JSON.parse(readFileSync(resolve(directory, 'frames', `${id}.json`), 'utf8')) as Record<string, unknown>;
+
+test('frame report: denied requests are written into the JSON, then the capture fails', async ({ page: canvas }) => {
+  await inScratch(async directory => {
+    const same = await picture(canvas, 20, 20), url = 'http://127.0.0.1:1/package.json';
+    await expect(captureFrame(canvas, { id: 'dirty', design: same, app: same, directory, threshold: 0, denied: [url] })).rejects.toThrow(/nothing outside the allowed files/);
+    expect(frameJson(directory, 'dirty').denied, 'the evidence is in the JSON').toEqual([url]);
+    for (const file of ['dirty-design.png', 'dirty-app.png', 'dirty-diff.png']) expect(existsSync(resolve(directory, file)), file).toBe(true);
+    await captureFrame(canvas, { id: 'clean', design: same, app: same, directory, threshold: 0, denied: [] });
+    expect(frameJson(directory, 'clean').denied).toEqual([]);
+    await captureFrame(canvas, { id: 'unwatched', design: same, app: same, directory, threshold: 0 });
+    expect(frameJson(directory, 'unwatched'), 'a frame that tracks no requests has no key').not.toHaveProperty('denied');
+  });
+});
+
+// Regions: the app is compared only in the named rectangles. The design is a white 100 x 100 frame; the app has a 10 x 10 black square at
+// (5, 5): 1% of the frame, 25% of the 20 x 20 region that holds it, and in no other region below.
+type ScoringCase = { name: string; regions: FinalState['regions']; variant: Variant; recordOnly?: boolean; passes: boolean; ratios?: number[]; whole: number | null };
+const scoringCases: readonly ScoringCase[] = [
+  { name: 'no regions: the whole frame is asserted (1% > 0)', regions: undefined, variant: 'light', passes: false, whole: 0 },
+  { name: 'a region away from the square passes while the whole frame differs', regions: [{ name: 'quiet', rect: [50, 50, 20, 20] }], variant: 'light', passes: true, ratios: [0], whole: null },
+  { name: 'a region on the square must match exactly by default', regions: [{ name: 'busy', rect: [0, 0, 20, 20] }], variant: 'light', passes: false, ratios: [0.25], whole: null },
+  { name: 'a region passes at its own threshold', regions: [{ name: 'busy', rect: [0, 0, 20, 20], threshold: 0.25 }], variant: 'light', passes: true, ratios: [0.25], whole: null },
+  { name: 'a region fails just over its threshold', regions: [{ name: 'busy', rect: [0, 0, 20, 20], threshold: 0.2 }], variant: 'light', passes: false, ratios: [0.25], whole: null },
+  { name: 'one bad region fails the frame', regions: [{ name: 'quiet', rect: [50, 50, 20, 20] }, { name: 'busy', rect: [0, 0, 20, 20] }], variant: 'light', passes: false, ratios: [0, 0.25], whole: null },
+  { name: 'regions of other sizes do not apply: the whole frame is asserted', regions: [{ name: 'quiet', rect: [50, 50, 20, 20], variants: ['dark'] }], variant: 'light', passes: false, whole: 0 },
+  { name: 'a region that applies to this size is the only thing asserted', regions: [{ name: 'quiet', rect: [50, 50, 20, 20], variants: ['dark'] }], variant: 'dark', passes: true, ratios: [0], whole: null },
+  { name: 'record only: nothing is asserted, the ratio is written', regions: [{ name: 'busy', rect: [0, 0, 20, 20] }], variant: 'light', recordOnly: true, passes: true, ratios: [0.25], whole: null }
+];
+for (const { name, regions, variant, recordOnly, passes, ratios, whole } of scoringCases) {
+  test(`frame regions: ${name}`, async ({ page: canvas }) => {
+    await inScratch(async directory => {
+      const design = await picture(canvas, 100, 100), app = await picture(canvas, 100, 100, [[5, 5, 10, 10]]);
+      const score = scoring({ id: 'self-test', regions }, variant, recordOnly ?? false), { report, ...input } = score;
+      const capture = captureFrame(canvas, { id: 'scored', design, app, directory, ...input, report });
+      if (passes) await capture; else await expect(capture).rejects.toThrow(/mismatch ratio/);
+      const saved = frameJson(directory, 'scored');
+      expect(saved.threshold, 'the whole frame threshold').toBe(whole);
+      expect((saved.regions as { ratio: number }[] | undefined)?.map(region => region.ratio)).toEqual(ratios);
+    });
+  });
+}
+test('final-frames: every region is a whole-pixel rectangle inside the frames it applies to', () => {
+  for (const state of finalStates) {
+    const names = (state.regions ?? []).map(region => region.name);
+    expect(new Set(names).size, `${state.id} region names are distinct`).toBe(names.length);
+    for (const region of state.regions ?? []) {
+      const [x, y, width, height] = region.rect;
+      expect([x, y, width, height].every(Number.isInteger) && x >= 0 && y >= 0 && width > 0 && height > 0, `${state.id} ${region.name} is a whole-pixel rectangle`).toBe(true);
+      for (const variant of region.variants ?? variantNames) expect(x + width <= variants[variant].width && y + height <= variants[variant].height, `${state.id} ${region.name} fits ${variant}`).toBe(true);
+    }
+  }
+});
+
+// `unhonoured` reads the values a state sets against a list of values, one entry each: turning one on must not hide the others.
+test('unhonoured: each value is flagged on its own and removing one leaves the rest', () => {
+  for (const overlay of notYet.overlay) expect(unhonoured({ chrome: { overlay } }), overlay).toEqual([`chrome.overlay=${overlay}`]);
+  for (const connection of notYet.connection) expect(unhonoured({ sessions: { connection } }), connection).toEqual([`sessions.connection=${connection}`]);
+  expect(unhonoured({ sessions: { connection: 'live' } }), 'live needs nothing').toEqual([]);
+  const withoutHelpKeys = { ...notYet, overlay: notYet.overlay.filter(overlay => overlay !== 'help-keys') };
+  expect(unhonoured({ chrome: { overlay: 'help-keys' } }, withoutHelpKeys)).toEqual([]);
+  expect(unhonoured({ chrome: { overlay: 'help-marks' } }, withoutHelpKeys)).toEqual(['chrome.overlay=help-marks']);
+  expect(unhonoured({ chrome: { overlay: 'switcher' }, sessions: { connection: 'stale' } }, withoutHelpKeys)).toEqual(['chrome.overlay=switcher', 'sessions.connection=stale']);
+});
+
 // The loader is deterministic: a state rendered twice in one worker matches to the last compared pixel (differences up to the
 // comparison's tolerance of 16 per channel do not count; none is expected). Run with --repeat-each=10 on 2026-10-17: 50 of 50.
 for (const [id, variant] of [['1.2', 'light'], ['2.1', 'dark'], ['3.2', 'narrow'], ['12.2', 'light'], ['14.1', 'narrow']] as const) {
   test(`determinism ${id} ${variant}`, async ({ origin, board, page: canvas }) => {
     const state = finalStates.find(value => value.id === id)!;
     const first = await renderBoard(board.context, origin, state, variant, board.denied), second = await renderBoard(board.context, origin, state, variant, board.denied);
-    const result = await captureFrame(canvas, { id: `determinism-${id}-${variant}`, design: first, app: second, directory: output, threshold: 0 });
+    const result = await captureFrame(canvas, { id: `determinism-${id}-${variant}`, design: first.png, app: second.png, directory: output, threshold: 0, denied: [...first.denied, ...second.denied] });
     expect(result.ratio).toBe(0);
   });
 }
@@ -169,11 +309,12 @@ for (const [id, variant] of selfCheck) {
     const file = shotFor(id, variant);
     test.skip(!file, `no Claude Design screenshot for ${id} ${variant} in ${shots}`);
     const state = finalStates.find(value => value.id === id)!;
+    const seen = board.denied.length;
     const opened = await openBoard(board.context, origin, state.part, state.sid, variant);
     const local = await boardFrame(opened, variant).finally(() => opened.close()), { width, height } = variants[variant];
     const reference = await crop(canvas, readFileSync(resolve(shots, file!)), { x: 0, y: labelHeight, width, height });
     const result = await captureFrame(canvas, { id: `selfcheck-${id}-${variant}`, design: reference, app: local, directory: output,
-      threshold: selfCheckThreshold, masks: staleInShot[`${id} ${variant}`], report: () => ({ shot: file }) });
+      threshold: selfCheckThreshold, masks: staleInShot[`${id} ${variant}`], report: () => ({ shot: file }), denied: board.denied.slice(seen) });
     expect(result.height).toBe(height);
   });
 }

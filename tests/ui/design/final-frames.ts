@@ -60,22 +60,33 @@ export interface AppFixture {
   readonly act?: readonly Step[];
 }
 /**
- * The fields of an AppFixture the fixture builder (final-fixtures.ts) accepts but cannot yet put the current app in: the
- * dock, the "Show more" links, a bigger Details, an overlay, the other-sessions popover, the connection states the app
- * has no data for (`unreadable`, `stale`, `unsaved`), and an open session other than the default. A state that lists any
+ * The values of the AppFixture fields the app cannot yet be put in, one entry per value. `unhonoured` below reads a state's
+ * field values against this list: it knows nothing about what the app really does. A builder who makes the app honour one
+ * value (say `chrome.overlay: 'help-keys'`) deletes that one entry, and every other value stays flagged.
+ */
+export const notYet = {
+  overlay: ['switcher', 'switcher-search', 'help-keys', 'help-marks', 'connection-card', 'projects-menu'] as readonly Overlay[],
+  connection: ['unreadable', 'stale', 'unsaved'] as readonly Connection[]
+};
+
+/**
+ * The values a state's fixture sets that the fixture builder (final-fixtures.ts) accepts but cannot yet put the current app
+ * in: the dock, the "Show more" links, a bigger Details, an overlay, the other-sessions popover, the connection states the app
+ * has no data for, and an open session other than the default. It is derived from the values the state sets: a field is
+ * flagged when its value is on the `notYet` list (the dock fields and `otherPopover`, which take free values, whenever set). A state that lists any
  * of them cannot match the board until the app grows the feature; its frame JSON records them as `unhonoured`, so a builder
  * knows the mismatch is the feature, not a fixture mistake.
  */
-export function unhonoured(app: AppFixture): string[] {
+export function unhonoured(app: AppFixture, list: typeof notYet = notYet): string[] {
   const { view, chrome, sessions } = app, out: string[] = [];
   if (view?.dock) out.push(`view.dock=${view.dock}`);
   if (view?.dockQuestion !== undefined) out.push(`view.dockQuestion=${view.dockQuestion}`);
   if (view?.dockHeight !== undefined) out.push(`view.dockHeight=${view.dockHeight}`);
   if (view?.shown) out.push(`view.shown=${view.shown.join(',')}`);
   if (view?.details === 'bigger') out.push('view.details=bigger');
-  if (chrome?.overlay) out.push(`chrome.overlay=${chrome.overlay}`);
+  if (chrome?.overlay && list.overlay.includes(chrome.overlay)) out.push(`chrome.overlay=${chrome.overlay}`);
   if (chrome?.otherPopover) out.push(`chrome.otherPopover=${chrome.otherPopover}`);
-  if (sessions?.connection && ['unreadable', 'stale', 'unsaved'].includes(sessions.connection)) out.push(`sessions.connection=${sessions.connection}`);
+  if (sessions?.connection && list.connection.includes(sessions.connection)) out.push(`sessions.connection=${sessions.connection}`);
   if (sessions?.current && sessions.current !== 's2') out.push(`sessions.current=${sessions.current}`);
   return out;
 }
@@ -95,7 +106,28 @@ export interface FinalState {
   /** Which release 1 builder turns `pending` off. */
   readonly owner: 'shell' | 'dock' | 'nav-state' | 'topbar' | 'details';
   readonly app: AppFixture;
+  /**
+   * The parts of the frame the app is held to. Absent: the whole frame is compared against the state's threshold. Present: only
+   * these rectangles are compared and asserted (the whole frame's ratio is still written to the JSON, never asserted). A release
+   * that redesigns only some of a screen (the dock, the top bar) names those parts here and leaves the rest to a later release.
+   * Only the regions that apply to a size count; a size none of them applies to is compared whole.
+   */
+  readonly regions?: readonly FrameRegion[];
 }
+
+/** One rectangle of a frame the app is compared in, in frame pixels: `rect` is [x, y, width, height] from the frame's top left. */
+export interface FrameRegion {
+  readonly name: string;
+  readonly rect: readonly [x: number, y: number, width: number, height: number];
+  /** The largest mismatch ratio (mismatched pixels over the rectangle's area) that passes. Default 0: it must match exactly. */
+  readonly threshold?: number;
+  /** The sizes the rectangle applies to (the narrow frame lays out differently). Default: all three. */
+  readonly variants?: readonly Variant[];
+}
+
+/** The regions of a state that apply to one size. */
+export const regionsFor = (state: Pick<FinalState, 'regions'>, variant: Variant): readonly FrameRegion[] =>
+  (state.regions ?? []).filter(region => region.variants?.includes(variant) ?? true);
 
 const d = (item: string, draft: Omit<Draft, 'item'>): Draft => ({ item, ...draft });
 

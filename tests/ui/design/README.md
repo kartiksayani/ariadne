@@ -13,7 +13,7 @@ Both share `compare.mts` (the pixel diff, `captureFrame`). The board is untruste
 
 One test per state, per size: `light` and `dark` at 1280 x 800, `narrow` (light) at 900 x 650. Titles read `final 2.1 light: <title>`.
 
-1. **Board side, always.** `final-board.mts` renders the state by its part and state id (`Window` + `b-wait`) on a fake clock, with fonts loaded and no motion, and checks the frame is the right size and the board asked for nothing outside its files.
+1. **Board side, always.** `final-board.mts` renders the state by its part and state id (`Window` + `b-wait`) on a fake clock, with fonts loaded and no motion, and checks the frame is the right size and (after the frame's files are written) the board asked for nothing outside its files.
 2. **App side, once `pending` is `false`.** `final-gallery.tsx` mounts the real `DesktopApp` in the state's fixture. The two frames are compared; the mismatch ratio must be at most the state's threshold. Pixels differ when a channel differs by more than 16.
 3. Everything lands in `coverage/design/final/`: `<id>-<size>-design.png` (the board), `-app.png`, `-diff.png` (mismatches red), `frames/<id>-<size>.json`, and `report.json`.
 
@@ -71,7 +71,28 @@ CI runs `final` on every push with the rest of `npm run test:design`. A `pending
 
 Data fields are built into the session, preferences and drafts. State that is not data yet (a folded Details, the connection line, the dock's height) is reached with `act` steps, or by extending `final-fixtures.ts`. A field the fixture builder cannot yet honour is a gap for the builder who turns the state on to fill.
 
-**Fields the current app ignores.** The fixture accepts these but cannot put the app in them yet: `view.dock`, `view.dockQuestion`, `view.dockHeight`, `view.shown`, `view.details: 'bigger'`, `chrome.overlay`, `chrome.otherPopover`, `sessions.connection` of `unreadable`, `stale` or `unsaved`, and `sessions.current` other than `s2`. (`live` is the default, so it needs nothing.) Every frame's JSON lists the ones its state sets under `unhonoured`: a mismatch in such a state is the missing feature, not a fixture mistake. The builder who adds the feature makes `final-fixtures.ts` honour the field (or reaches it with `act`) and removes it from `unhonoured` in `final-frames.ts`.
+**Values the fixture cannot yet honour.** The fixture accepts these but cannot put the app in them yet: `view.dock`, `view.dockQuestion`, `view.dockHeight`, `view.shown`, `view.details: 'bigger'`, every `chrome.overlay` value (`switcher`, `switcher-search`, `help-keys`, `help-marks`, `connection-card`, `projects-menu`), `chrome.otherPopover`, `sessions.connection` of `unreadable`, `stale` or `unsaved`, and `sessions.current` other than `s2`. (`live` is the default, so it needs nothing.) Every frame's JSON lists the ones its state sets under `unhonoured`. That list is derived from the field values the state sets, read against the `notYet` list in `final-frames.ts` (`unhonoured()`); it does not look at what the app does. A mismatch in such a state is the missing feature, not a fixture mistake. The builder who adds the feature makes `final-fixtures.ts` honour the value (or reaches it with `act`) and deletes just that value's entry from `notYet`, for example `'help-keys'` from `overlay`, so every other value stays flagged.
+
+## Compare only some regions
+
+A release that redesigns only part of a screen (the dock, the top bar, the Details placement) cannot match the whole board frame yet: the Map is redesigned later. Give the state `regions` in `final-frames.ts` and the app is compared in those rectangles only:
+
+```ts
+{ id: '2.1', part: 'Answering', sid: 'd-opts', owner: 'dock', pending: false, title: 'Three options, one recommended', app: { ... },
+  regions: [
+    { name: 'dock', rect: [320, 560, 640, 240] },                          // [x, y, width, height] in frame pixels; must match exactly
+    { name: 'top bar', rect: [0, 0, 1280, 48], threshold: 0.002 },        // may differ in at most 0.2% of its pixels
+    { name: 'details', rect: [880, 48, 400, 512], variants: ['light', 'dark'] } // only at 1280 x 800; the narrow frame is laid out differently
+  ] },
+```
+
+- A region's ratio is its own: mismatched pixels (a channel off by more than 16) over the rectangle's area. `threshold` defaults to 0.
+- With `regions`, the whole frame is not asserted (`final-thresholds.json` is not consulted); its ratio is still written to the JSON. A size that none of the regions applies to (`variants`) is compared whole, as without `regions`.
+- Each frame's JSON gets `regions: [{ name, rect, ratio, threshold }]`. `-diff.png` still shows the whole frame, so a region's ratio and the red over its rectangle tell you how far it is. A `pending` state records the ratios without asserting them.
+
+## What the board may reach
+
+The board is untrusted, and `coverage/` is uploaded publicly. Its context (`boardContext` in `final-board.mts`) serves `/final/` and the pinned runtime and fonts and nothing else: another origin is blocked, a same-origin request outside `/final/` (the dev server is rooted at the repo) gets a 404, a WebSocket is closed at once, and service workers are blocked. Every one is recorded. Each frame's JSON carries `denied`, the requests that render asked for (`[]` when clean), in both projects; the test asserts it is empty after the frame, its diff and its JSON are written, so a denied request leaves evidence.
 
 ## The loader's self-check
 

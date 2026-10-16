@@ -68,18 +68,32 @@ export interface CaptureInput {
   /** The largest mismatch ratio that passes; null records the ratio without asserting it (a pending state). */
   readonly threshold: number | null;
   readonly regions?: readonly Region[]; readonly masks?: readonly Region[]; readonly shifts?: readonly Shift[];
+  /**
+   * With `regions`: the largest mismatch ratio each region may reach, index for index (null records without asserting). The
+   * ratio is the region's own (mismatched pixels over the region's area). Pass `threshold: null` to assert only the regions.
+   */
+  readonly regionThresholds?: readonly (number | null)[];
   /** The frame's report: the ratio and threshold are added to what this returns. */
   readonly report?: (result: CompareResult) => object;
+  /**
+   * Every request the render asked for outside what it is allowed (from the blocking routes). Written into the frame's JSON as
+   * `denied`, and asserted empty after the files are written, so a frame with a denied request still leaves its evidence.
+   */
+  readonly denied?: readonly string[];
 }
 
-/** Compares the design frame with the app's, writes <id>-design.png, -app.png, -diff.png and the frame's JSON, and asserts the threshold. */
+/** Compares the design frame with the app's, writes <id>-design.png, -app.png, -diff.png and the frame's JSON, then asserts nothing was denied and the thresholds. */
 export async function captureFrame(canvas: Page, input: CaptureInput): Promise<CompareResult> {
   const result = await compare(canvas, input.design, input.app, input.regions, input.masks, input.shifts);
   writeFileSync(resolve(input.directory, `${input.id}-design.png`), input.design);
   writeFileSync(resolve(input.directory, `${input.id}-app.png`), input.app);
   writeFileSync(resolve(input.directory, `${input.id}-diff.png`), Buffer.from(result.png, 'base64'));
-  const report = { ratio: Number(result.ratio.toFixed(4)), threshold: input.threshold, tolerance, ...input.report?.(result) };
+  const report = { ratio: Number(result.ratio.toFixed(4)), threshold: input.threshold, tolerance, ...input.report?.(result), ...input.denied && { denied: [...input.denied] } };
   writeFileSync(resolve(input.directory, 'frames', `${input.id}.json`), `${JSON.stringify(report, null, 2)}\n`);
+  if (input.denied) expect(input.denied, `${input.id}: nothing outside the allowed files was asked for`).toEqual([]);
   if (input.threshold !== null) expect(result.ratio, `${input.id} mismatch ratio`).toBeLessThanOrEqual(input.threshold);
+  input.regionThresholds?.forEach((limit, at) => {
+    if (limit !== null) expect(result.regions[at], `${input.id} ${input.regions?.[at]?.name ?? at} mismatch ratio`).toBeLessThanOrEqual(limit);
+  });
   return result;
 }

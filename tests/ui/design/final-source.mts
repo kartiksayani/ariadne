@@ -121,8 +121,17 @@ export function runtimeHashes(support: string): { url: string; expected: string 
 }
 
 /**
+ * Sent with every served board file. Playwright's `serviceWorkers: 'block'` only replaces `navigator.serviceWorker.register` with a
+ * no-op, which untrusted script can undo (`ServiceWorkerContainer.prototype.register.call(...)`); a response header cannot be removed
+ * by the page, and `worker-src 'none'` refuses service workers (and every other kind of worker) for the document it comes with.
+ */
+const documentHeaders = { 'content-security-policy': "worker-src 'none'" };
+
+/**
  * Serves the unzipped board at /final/ (and the fonts it names) offline; every other origin is blocked and
  * recorded in `denied`. `/final/<file>` is looked up under coverage/design/final-source/ariadne-final-board/.
+ * The dev server behind `origin` is rooted at the repo, so a same-origin request outside /final/ is not forwarded to it:
+ * it gets a 404 and is recorded too. The board needs nothing from the dev server.
  */
 export async function routeFinal(context: BrowserContext, origin: string, denied: string[]): Promise<void> {
   await context.route('**/*', async request => {
@@ -130,10 +139,10 @@ export async function routeFinal(context: BrowserContext, origin: string, denied
     if (runtime[url]) return request.fulfill({ body: runtime[url], contentType: 'application/javascript', headers: { 'access-control-allow-origin': '*' } });
     const parsed = new URL(url);
     if (parsed.origin !== origin) { denied.push(url); return request.abort('blockedbyclient'); }
-    if (!parsed.pathname.startsWith('/final/')) return request.continue();
+    if (!parsed.pathname.startsWith('/final/')) { denied.push(url); return request.fulfill({ status: 404, body: '' }); }
     const path = decodeURIComponent(parsed.pathname.slice('/final/'.length));
     const file = resolve(finalServed, path);
-    if (file.startsWith(finalServed + sep) && existsSync(file)) return request.fulfill({ body: readFileSync(file), contentType: contentTypes[extname(file)] ?? 'application/octet-stream' });
+    if (file.startsWith(finalServed + sep) && existsSync(file)) return request.fulfill({ body: readFileSync(file), contentType: contentTypes[extname(file)] ?? 'application/octet-stream', headers: documentHeaders });
     try {
       const font = path.startsWith('ariadne-ds/fonts/') ? fontFile(path.slice('ariadne-ds/fonts/'.length)) : undefined;
       if (font) return request.fulfill({ body: font, contentType: 'font/woff2' });

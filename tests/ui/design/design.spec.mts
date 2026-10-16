@@ -1680,9 +1680,9 @@ async function capture(page: Page, designPage: Page, spec: FrameSpec, id: string
         report: result => ({ masked: mask ? { region: mask, reason: detailMask.reason } : null,
           shifted: graph ? { reason: graphShift.reason, legend: graph.legend, graph: graph.body, bands: graph.shifts, masks: graph.masks } : null,
           columns: Object.fromEntries(columns.map((column, at) => [column.name, Number(result.regions[at].toFixed(4))])),
-          size: { width: result.width, height: result.height }, viewport: { width: spec.width, height: spec.height }, shell }) });
-      // After the capture: a blocked request still leaves the frame, its diff and its JSON behind as evidence.
-      expect(denied).toEqual([]);
+          size: { width: result.width, height: result.height }, viewport: { width: spec.width, height: spec.height }, shell }),
+        // Written into the frame's JSON, then asserted empty after the capture: a blocked request still leaves the frame, its diff and its JSON as evidence.
+        denied });
     } finally { await canvas.close(); }
   }
 }

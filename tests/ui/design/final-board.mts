@@ -17,10 +17,15 @@ import { hostName, routeFinal } from './final-source.mts';
  */
 export const labelHeight = 27;
 
-/** A context for board pages: UTC, no motion, every request outside the served files recorded in `denied` and blocked. */
+/**
+ * A context for board pages: UTC, no motion, every request outside the served files recorded in `denied` and blocked.
+ * Routes do not see WebSockets or service-worker traffic, so those are shut separately: a socket is closed at once and
+ * recorded, and service workers cannot be registered.
+ */
 export async function boardContext(browser: { newContext: (options: object) => Promise<BrowserContext> }, origin: string, denied: string[]): Promise<BrowserContext> {
-  const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light', reducedMotion: 'reduce' });
+  const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC', colorScheme: 'light', reducedMotion: 'reduce', serviceWorkers: 'block' });
   await routeFinal(context, origin, denied);
+  await context.routeWebSocket(/.*/, socket => { denied.push(socket.url()); void socket.close(); });
   return context;
 }
 
@@ -84,16 +89,17 @@ export async function boardFrame(page: Page, variant: Variant): Promise<Buffer> 
 }
 
 /**
- * Renders one state of the board: open, check nothing outside the served files was asked for while this render ran
- * (`denied` is the worker's whole record; only what it gained since this call started counts), return the frame.
+ * Renders one state of the board and returns the frame with what the board asked for outside the served files while
+ * this render ran (`denied` is the worker's whole record; only what it gained since this call started counts). The
+ * caller writes that into the frame's report and asserts it is empty after the capture, so a frame whose board asked
+ * for something leaves its evidence behind.
  */
-export async function renderBoard(context: BrowserContext, origin: string, state: Pick<FinalState, 'part' | 'sid'>, variant: Variant, denied: readonly string[]): Promise<Buffer> {
+export async function renderBoard(context: BrowserContext, origin: string, state: Pick<FinalState, 'part' | 'sid'>, variant: Variant, denied: readonly string[]): Promise<{ png: Buffer; denied: string[] }> {
   const seen = denied.length;
   const page = await openBoard(context, origin, state.part, state.sid, variant);
   try {
     const png = await boardFrame(page, variant);
-    expect(denied.slice(seen), 'the board asked for nothing outside its own files').toEqual([]);
-    return png;
+    return { png, denied: denied.slice(seen) };
   } finally { await page.close(); }
 }
 
