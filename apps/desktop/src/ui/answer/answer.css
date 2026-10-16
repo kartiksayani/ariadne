@@ -59,6 +59,7 @@
 }
 
 .answer-full .answer-option { padding: 10px 12px 11px; }
+.answer-own { grid-column: 1 / -1; }
 
 .answer-option-on,
 .answer-option-on:hover {
@@ -185,17 +186,6 @@ textarea.answer-text {
   resize: vertical;
 }
 
-.answer-reply-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.answer-reply-send {
-  height: 30px;
-  font-size: calc(13px * var(--text-scale));
-}
-
 .answer-blocked {
   display: flex;
   align-items: flex-start;
@@ -283,9 +273,4 @@ textarea.answer-text {
   min-height: 34px;
   resize: none;
   overflow-y: hidden;
-}
-
-.answer-composer-row > .answer-reply-send {
-  flex: none;
-  height: 34px;
 }

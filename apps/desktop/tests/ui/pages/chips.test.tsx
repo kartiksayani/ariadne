@@ -35,14 +35,20 @@ describe('session card topic chips', () => {
     } } as unknown as Immutable<Session>;
     expect(topicChips(session, new Set()).map(chip => chip.full)).toEqual(["Reviewer's comments on the SDK cache PR (#226)"]);
   });
-  it('count a question the owner already replied to as open, not as waiting on them', () => {
-    const item = (id: string) => ({ id, topic_id: 'a', status: 'waiting_on_me', question_revision: 1 });
-    const queued = { id: 'i1', state: 'queued', answer_id: null, target: { item_id: 'one' }, payload: { target_snapshot: { question_revision: 1 } } };
-    const session = { id: 's', topics: { a: topic('a', 1, 'Cache', null) }, items: { one: item('one'), two: item('two') },
-      inputs: { i1: queued }, answers: [] } as unknown as Immutable<Session>;
-    expect(topicChips(session, new Set())[0]!.counts).toBe('1 waiting · 1 open');
+  it('counts Queued and Sent replies separately while cancelled replies need the owner again', () => {
+    const session = structuredClone(demo) as Session, item = session.items['2']!;
+    const queued = session.inputs['00000000-0000-4000-8000-000000000076']!;
+    const attempt = structuredClone(session.inputs['00000000-0000-4000-8000-000000000072']!.attempts[0]!);
+    session.topics = { [item.topic_id]: session.topics[item.topic_id]! };
+    session.items = { 2: item, 3: { ...structuredClone(item), id: '3' } };
+    session.inputs = { [queued.id]: queued }; session.answers = [];
+    queued.target.item_id = item.id; queued.kind = 'reply';
+    queued.payload.target_snapshot.question_revision = item.question_revision;
+    expect(topicChips(session, new Set())[0]!.counts).toBe('1 waiting · 1 queued');
+    queued.state = 'in_flight'; queued.active_attempt_id = attempt.id; queued.attempts = [attempt];
+    expect(topicChips(session, new Set())[0]!.counts).toBe('1 waiting · 1 sent');
     // A cancelled reply needs the owner again.
-    (session.inputs as Record<string, { state: string }>).i1!.state = 'cancelled';
+    queued.state = 'cancelled';
     expect(topicChips(session, new Set())[0]!.counts).toBe('2 waiting');
   });
   it('show the full name as the chip tooltip on the session cards', () => {

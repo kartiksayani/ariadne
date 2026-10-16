@@ -843,15 +843,6 @@
   font-size: calc(14px * var(--text-scale));
 }
 
-.tree-answer {
-  margin-top: 8px;
-  padding: 12px;
-  border-radius: var(--radius-md);
-  cursor: default;
-  background: var(--a-card);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 50%, transparent), 0 0 28px color-mix(in srgb, var(--color-accent) 14%, transparent);
-}
-
 .tree-end {
   flex: none;
   display: flex;

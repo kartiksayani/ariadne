@@ -21,7 +21,7 @@ const noticeHosts = ['standalone', 'conversation'] as const;
 type NoticeHost = typeof noticeHosts[number];
 
 function noticeHost(host: NoticeHost) {
-  return host === 'conversation' ? <Body waiting={<p>Waiting on me</p>} main={<button>Topic tree</button>}
+  return host === 'conversation' ? <Body dock={<p>Answer dock</p>} main={<button>Topic tree</button>}
     side={<DetailsColumn><button>Item details</button></DetailsColumn>} conversation={<section aria-label="Item conversation"><button>Close conversation</button></section>} /> : <Notices />;
 }
 

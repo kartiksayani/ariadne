@@ -7,7 +7,7 @@ import { useCallback, useRef, type KeyboardEvent } from 'react';
 export type IntentKind =
   | 'move-down' | 'move-up' | 'first' | 'last' | 'unfold' | 'fold' | 'enter' | 'send'
   | 'answer' | 'choose' | 'choose-send' | 'answer-words' | 'bring' | 'respond' | 'drop' | 'later' | 'hide' | 'reopen' | 'archive'
-  | 'search' | 'graph' | 'waiting' | 'escape' | 'remove' | 'history-back' | 'history-forward'
+  | 'search' | 'graph' | 'escape' | 'remove' | 'history-back' | 'history-forward'
   | 'text-smaller' | 'text-larger' | 'text-default' | 'peek' | 'recent';
 
 export type WorkspaceIntent =
@@ -28,7 +28,7 @@ const plain: Readonly<Record<string, Exclude<IntentKind, 'choose' | 'choose-send
   ArrowDown: 'move-down', j: 'move-down', ArrowUp: 'move-up', k: 'move-up', Home: 'first', End: 'last',
   ArrowRight: 'unfold', l: 'unfold', ArrowLeft: 'fold', h: 'fold', Enter: 'enter',
   a: 'answer', b: 'bring', r: 'respond', d: 'drop', z: 'later', x: 'hide', o: 'reopen', e: 'archive',
-  '/': 'search', g: 'graph', w: 'waiting', Escape: 'escape', Backspace: 'remove', Delete: 'remove', ' ': 'peek',
+  '/': 'search', g: 'graph', Escape: 'escape', Backspace: 'remove', Delete: 'remove', ' ': 'peek',
 };
 
 /** The intent a key press means, or null when it is not a workspace key. */

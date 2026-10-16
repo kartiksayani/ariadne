@@ -2,9 +2,8 @@
 // the askRun copy at 1691-1705. Whoever sends an answer to a session whose agent
 // is not running calls openAgentNotRunning() and acts on the owner's choice.
 import { useSyncExternalStore } from 'react';
-import { useSession, type Immutable } from '../../data/session-store';
-import type { ItemRoute, SessionRef } from '../../generated/core';
-import type { SessionSummary } from '../../generated/domain/models';
+import { useSession } from '../../data/session-store';
+import type { ItemRoute } from '../../generated/core';
 import { useNavigation, type NavigationStore } from '../../state/navigation/store';
 import { agentName, sessionPhrase, sessionWhen } from '../shell/model';
 import { Dialog } from './Dialog';
@@ -16,7 +15,6 @@ export interface NotRunningSubmission {
   readonly question: string;
 }
 export type NotRunningChoice =
-  | { readonly kind: 'send_live'; readonly session: SessionRef }
   | { readonly kind: 'queue' }
   | { readonly kind: 'cancel' };
 
@@ -38,8 +36,6 @@ function settle(request: Request, choice: NotRunningChoice) {
   request.resolve(choice);
 }
 
-const running = (session: Immutable<SessionSummary>) => session.archived_at == null && session.state === 'active' && session.active_binding?.connection_state === 'connected';
-
 function NotRunningDialog({ request, navigation, now }: { readonly request: Request; readonly navigation: NavigationStore; readonly now: () => number }) {
   const state = useNavigation(navigation);
   const route = request.submission.item;
@@ -51,15 +47,9 @@ function NotRunningDialog({ request, navigation, now }: { readonly request: Requ
   const agent = summary?.active_binding ? agentName(summary.active_binding.adapter_id) : binding ? agentName(binding.adapter_id) : 'The agent';
   const created = summary?.created_at ?? session?.created_at;
   const when = created ? sessionWhen(Date.parse(created), now()).toLowerCase() : 'earlier';
-  const project = state.projects?.projects.items.find(value => value.project_id === route.project_id)?.project?.display_name ?? 'this project';
-  const live = sessions.find(value => value.project_id === route.project_id && value.session_id !== route.session_id && running(value));
-  const liveAgent = live?.active_binding ? agentName(live.active_binding.adapter_id) : null;
   const cancel = () => settle(request, { kind: 'cancel' });
   const options = [
-    live && liveAgent ? { key: 'live', label: `Send it to ${liveAgent} now`, icon: 'ph ph-paper-plane-right', className: 'btn btn-primary', color: 'var(--a-acc-text)',
-      desc: `The running ${liveAgent} session in ${project} picks up this topic with its context, then gets your answer.`,
-      choose: () => settle(request, { kind: 'send_live', session: { project_id: live.project_id, session_id: live.session_id } }) } : null,
-    { key: 'queue', label: `Queue it for ${agent}`, icon: 'ph ph-hourglass-medium', className: 'btn btn-secondary', color: 'var(--color-text)',
+    { key: 'queue', label: 'Queue it', icon: 'ph ph-hourglass-medium', className: 'btn btn-secondary', color: 'var(--color-text)',
       desc: 'Delivered when that session’s agent is running again. It shows as Queued until then.', choose: () => settle(request, { kind: 'queue' }) },
   ].filter((option): option is NonNullable<typeof option> => !!option);
   const title = `${agent} isn’t running for this session`;

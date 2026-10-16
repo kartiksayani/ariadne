@@ -6,6 +6,7 @@ import { immutable, type Immutable } from '../../data/session-store';
 import { CoreFailure, ServiceFailure, type RendererService } from '../../data/service';
 import { OwnFailure } from '../../data/plain';
 import type { PreferencesWriteCoordination } from '../navigation/store';
+import { ownerReplied } from '../../selectors/waiting/replied';
 
 /** A reply to a whole topic (target item_id null). */
 export const TOPIC_REPLY: InputKind = 'topic_reply';
@@ -19,6 +20,8 @@ export interface DraftEntry {
   readonly error: Failure | null;
   readonly receipt: Immutable<SavedReceipt> | null;
   readonly rejected: boolean;
+  /** An owner send is awaiting the stopped-agent choice. Shared across every view. */
+  readonly holding?: boolean;
   /** What a saved input carried; the draft itself is cleared once the receipt arrives. */
   readonly sent?: { readonly text: string; readonly selected_option_id: string | null } | null;
 }
@@ -92,6 +95,7 @@ export function blockedDraft(draft: Immutable<OwnerDraft>, session: Immutable<Se
   if (item.revision !== draft.target_revision || item.question_revision !== draft.question_revision) return 'This question changed. Read it again before sending.';
   if (!ownerActions(item).includes(draft.intent as OwnerIntent)) return "You can't do that on this item right now.";
   if (draft.intent === 'answer') {
+    if (!draft.submission_attempted && ownerReplied(session, item)) return 'This question already has an answer on its way.';
     if (item.recipient_binding_id !== draft.binding_id) return 'This question was asked by a different agent connection.';
     const round = item.current_round_id ? session.rounds[item.current_round_id] : null;
     if (!round || round.closed_at !== null || round.question_revision !== item.question_revision) return "The agent isn't waiting for an answer to this any more.";
@@ -111,6 +115,7 @@ export class OwnerDraftStore {
   private readonly deferredPreferences: PreferencesPatchEntry[][] = [];
   private readonly pendingInputs = new Map<string, OwnerMutationRequest>();
   private readonly flights = new Map<string, Promise<boolean>>();
+  private readonly holds = new Map<string, symbol>();
   private loadFlight: Promise<void> | null = null;
   /** `service` is public so owner controls reach the session's write barrier (sessionActionsFor). */
   constructor(readonly service: RendererService, private readonly operationId: () => string = () => crypto.randomUUID(),
@@ -227,12 +232,13 @@ export class OwnerDraftStore {
   /** Like edit; resolves true once the change is saved, false when the draft is locked or the save failed. */
   editSaved(id: string, change: Pick<Partial<OwnerDraft>, 'text' | 'selected_option_id'>): Promise<boolean> {
     const entry = this.state.entries[id];
-    if (!entry || entry.saving || entry.uncertain || entry.receipt || this.state.preferenceUncertain) return Promise.resolve(false);
+    if (!entry || entry.holding || entry.saving || entry.uncertain || entry.receipt || this.state.preferenceUncertain) return Promise.resolve(false);
     const draft = { ...structuredClone(entry.draft), ...change } as OwnerDraft;
     this.entry(id, { draft: immutable(draft), error: null }); return this.save([{ kind: 'upsert_draft', draft }]);
   }
   review(id: string, session: Immutable<Session>): void {
     const entry = this.state.entries[id], itemId = entry?.draft.target.item_id, item = itemId ? session.items[itemId] : null;
+    if (entry?.holding) return;
     // A topic reply follows the current binding; it has no question to re-base on.
     const topic = entry && itemId === null ? session.topics[entry.draft.target.topic_id] : null;
     if (entry && topic && sameSession(entry.draft.session, { project_id: session.project_id, session_id: session.id }) && !entry.saving && !entry.uncertain
@@ -252,13 +258,18 @@ export class OwnerDraftStore {
     const entry = this.state.entries[id], itemId = entry?.draft.target.item_id, item = itemId ? session.items[itemId] : null;
     if (!entry || !item || !session.active_binding_id || session.active_binding_id === entry.draft.binding_id
       || !sameSession(entry.draft.session, { project_id: session.project_id, session_id: session.id })
-      || entry.saving || entry.uncertain || entry.receipt || this.state.preferenceUncertain
+      || entry.holding || entry.saving || entry.uncertain || entry.receipt || this.state.preferenceUncertain
       || item.revision !== entry.draft.target_revision || item.question_revision !== entry.draft.question_revision) return;
     const draft: OwnerDraft = { ...structuredClone(entry.draft), binding_id: session.active_binding_id };
     this.entry(id, { draft: immutable(draft), error: null }); void this.save([{ kind: 'upsert_draft', draft }]);
   }
   another(id: string, session: Immutable<Session>): void {
     const entry = this.state.entries[id]; if (!entry?.receipt) return;
+    if (entry.draft.intent === 'answer' && entry.draft.target.item_id) {
+      const input = entry.receipt.data.kind === 'input_submit' ? session.inputs[entry.receipt.data.input_id] : null;
+      if (session.items[entry.draft.target.item_id]?.question_revision === entry.draft.question_revision
+        && input?.state !== 'cancelled') return;
+    }
     const entries = { ...this.state.entries }; delete entries[id]; this.publish({ entries: Object.freeze(entries) });
     if (entry.draft.target.item_id) this.begin(session, entry.draft.target.item_id, entry.draft.intent as OwnerIntent, true);
     else if (entry.draft.intent === TOPIC_REPLY) this.beginTopic(session, entry.draft.target.topic_id, true);
@@ -378,10 +389,36 @@ export class OwnerDraftStore {
    */
   submit(id: string, as?: OwnerIntent): Promise<boolean> {
     const flight = this.flights.get(id); if (flight) return flight;
-    const entry = this.state.entries[id]; if (!entry || entry.saving || entry.receipt || this.state.preferenceUncertain) return Promise.resolve(false);
+    const entry = this.state.entries[id]; if (!entry || entry.holding || entry.saving || entry.receipt || this.state.preferenceUncertain) return Promise.resolve(false);
+    // Recovered/revised copies cannot bypass the question lock with another operation ID.
+    if (entry.draft.intent === 'answer' && Object.values(this.state.entries).some(other => other !== entry
+      && other.draft.intent === 'answer' && sameSession(other.draft.session, entry.draft.session)
+      && other.draft.target.item_id === entry.draft.target.item_id && other.draft.question_revision === entry.draft.question_revision
+      && (other.holding || other.saving || other.uncertain && !other.rejected || !!other.receipt))) return Promise.resolve(false);
     this.entry(id, { saving: true, error: null });
     const next = this.send(id, as).finally(() => { this.flights.delete(id); this.entry(id, { saving: false }); });
     this.flights.set(id, next); return next;
+  }
+  /** Reserve the first Send while its Queue/Cancel dialog is open. Tokens fence stale dialog callbacks. */
+  reserve(id: string): symbol | null {
+    const entry = this.state.entries[id];
+    if (!entry || entry.holding || entry.saving || entry.uncertain || entry.receipt || this.state.preferenceUncertain) return null;
+    const token = Symbol(); this.holds.set(id, token); this.entry(id, { holding: true }); return token;
+  }
+  release(id: string, token: symbol): boolean {
+    if (this.holds.get(id) !== token) return false;
+    this.holds.delete(id); this.entry(id, { holding: false }); return true;
+  }
+  /** Read-only reconciliation for an unknown result. It never issues input_submit. */
+  async check(id: string): Promise<boolean> {
+    const entry = this.state.entries[id];
+    if (!entry || entry.saving || !entry.uncertain) return false;
+    try {
+      const snapshot = await this.service.query({ session: entry.draft.session, request: { command: 'session_get', params: {} } });
+      if (snapshot.freshness !== 'fresh') return false;
+      await this.reconcile(snapshot.session);
+      return !!this.state.entries[id]?.receipt;
+    } catch { return false; }
   }
   private async send(id: string, as?: OwnerIntent): Promise<boolean> {
     try {

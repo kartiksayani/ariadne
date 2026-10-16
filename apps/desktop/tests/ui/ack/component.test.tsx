@@ -370,7 +370,9 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
   it('keeps a as answer on a waiting question and leaves typing alone', async () => {
     const transport = await mount();
     row('2').focus(); fireEvent.keyDown(row('2'), { key: 'a' });
-    await waitFor(() => expect(row('2').querySelector('.tree-answer')).not.toBeNull());
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
+    expect(within(detail()).getByRole('group', { name: 'Answer this question' })).toBeDefined();
+    expect(row('2').querySelector('.tree-answer')).toBeNull();
     expect(acks(transport)).toHaveLength(0);
     fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     const words = within(detail()).getByRole('textbox');

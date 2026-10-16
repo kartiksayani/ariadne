@@ -11,7 +11,9 @@ describe('delivery explanation text', () => {
     const store = sessions.open(route);
     try {
       await store.refresh();
-      const input = Object.values(store.getSnapshot().snapshot!.session.inputs).find(value => value)!;
+      const input = structuredClone(Object.values(store.getSnapshot().snapshot!.session.inputs).find(value => value?.state === 'needs_attention')!);
+      const attempt = input.attempts.find(value => value.id === input.active_attempt_id)!;
+      Object.assign(attempt, { acceptance: 'rejected', turn_state: 'failed' });
       const text = 'Couldn’t deliver “Approve”.  Ariadne isn’t sure it reached claude-code.\nReview it.';
       render(<StuckNote actions={new SessionActions(service, store)} input={immutable(input)}
         stuck={{ kind: 'decision', text, retry: true, settle: 'skip', resume: false }} />);

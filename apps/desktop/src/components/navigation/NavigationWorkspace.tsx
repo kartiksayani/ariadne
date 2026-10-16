@@ -5,7 +5,6 @@ import { plainFailure } from '../../data/plain';
 import { CoreFailure } from '../../data/service';
 import { useSession, type Immutable, type SessionStore } from '../../data/session-store';
 import { NavigationStore, useNavigation, type LayoutChange, type NavigationState } from '../../state/navigation/store';
-import { WaitingFrame } from '../../ui/waiting/WaitingColumn';
 import { SessionActionControllers } from '../bindings/actions';
 import { RegisterProject, BindSession } from './Registration';
 import type { DiscoveryController } from '../../data/discovery';
@@ -38,7 +37,8 @@ export interface OpenedSessionView {
 export interface NavigationWorkspaceProps {
   readonly store: NavigationStore;
   readonly discovery?: DiscoveryController;
-  readonly waitingContent?: ReactNode;
+  /** The answer dock; it floats over the Map and Details. Absent on pages. */
+  readonly dockContent?: ReactNode;
   readonly conversation?: ReactNode;
   readonly conversationFooter?: ConversationFooterState;
   readonly detail?: ReactNode;
@@ -129,7 +129,7 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   </>;
 }
 
-export function NavigationWorkspace({ store, discovery, waitingContent, conversation, conversationFooter, detail, detailPath, chrome, session, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
+export function NavigationWorkspace({ store, discovery, dockContent, conversation, conversationFooter, detail, detailPath, chrome, session, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
   actions: injectedActions, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
   const transientError = !state.pendingOperationId && state.error === store.getMutationFailure() ? state.error : null;
@@ -188,7 +188,7 @@ export function NavigationWorkspace({ store, discovery, waitingContent, conversa
   const select = (next: NavigationSelection) => { void store.navigate(next); };
   // Layout choices apply at once; the saved preferences catch up when the write lands.
   const [layout, setLayout] = useState<LayoutChange>({});
-  const shown: LayoutChange = { detail_width: state.preferences?.global.detail_width, waiting_collapsed: state.preferences?.global.waiting_collapsed, ...layout };
+  const shown: LayoutChange = { detail_width: state.preferences?.global.detail_width, ...layout };
   const saveLayout = (change: LayoutChange) => {
     setLayout(current => ({ ...current, ...change }));
     if (state.preferences) void store.saveLayout(change, state.preferences.revision);
@@ -285,8 +285,8 @@ export function NavigationWorkspace({ store, discovery, waitingContent, conversa
     side={detail ? <DetailsColumn path={detailPath} onClose={onCloseDetail} onRemove={onRemove} hidden={hiddenItem} hiddenNotice={hiddenNotice} onHide={onHide}
       onResize={width => saveLayout({ detail_width: width })}>{detail}</DetailsColumn> : undefined}
     footer={<Footer summary={summary} conversation={conversation ? conversationFooter ?? { question: false } : undefined} />}
-    legacy={{ waiting: waitingContent ?? <WaitingFrame count="–" loading />, conversation,
-      sideWidth: shown.detail_width ?? null, waitingFolded: shown.waiting_collapsed ?? false, onFoldWaiting: folded => saveLayout({ waiting_collapsed: folded }) }}
+    dock={dockContent}
+    legacy={{ conversation, sideWidth: shown.detail_width ?? null }}
     overlay={registering
       ? <RegisterProject store={store} initialRoot={registrationRoot} disabled={mutationDisabled} close={() => setRegistering(false)} />
       : binding ? <BindSession store={store} project={binding} sessions={sessions.filter(session => session.project_id === binding.project_id)}

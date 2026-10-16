@@ -6,6 +6,7 @@ import { createDesktopService } from '../../../src/data/service';
 import { SessionStore } from '../../../src/data/session-store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { PeekProvider, usePeek, type PeekProviderProps } from '../../../src/ui/peek/Peek';
+import { AnswerSlot } from '../../../src/ui/detail/AnswerSlot';
 import { ItemRefSession } from '../../../src/ui/peek/context';
 import { ItemReference, ItemRefs, Markdown } from '../../../src/ui/shared/MarkdownText';
 import { peekPosition } from '../../../src/ui/peek/position';
@@ -81,7 +82,7 @@ describe('name chips and item peek', () => {
     const { chip } = mount(value); fireEvent.click(chip());
     const peek = screen.getByRole('dialog', { name: `Peek: ${value.source.items['2']!.question}` });
     expect(within(peek).getByText('task')).toBeTruthy();
-    fireEvent.change(within(peek).getByRole('textbox', { name: 'One-line answer' }), { target: { value: 'Proceed with the task.' } });
+    fireEvent.change(within(peek).getByRole('textbox', { name: 'Reply in your own words' }), { target: { value: 'Proceed with the task.' } });
     fireEvent.click(within(peek).getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(value.transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(1));
     expect(value.transport.mutations.find(request => request.command.command === 'input_submit')).toMatchObject({
@@ -261,13 +262,35 @@ describe('name chips and item peek', () => {
 });
 
 describe('simple question answers in peek', () => {
+  it('shares the option and exact words with Details in both directions', async () => {
+    const value = await setup();
+    const detail = render(<AnswerSlot drafts={value.drafts} store={value.store} itemId="2" onEscape={vi.fn()} />);
+    const words = ' Keep these words\nand this line. ';
+    fireEvent.change(screen.getByRole('textbox', { name: 'Reply in your own words' }), { target: { value: words } });
+    fireEvent.click(screen.getByRole('button', { name: /1Keep the design/ }));
+    detail.unmount();
+    const { chip } = mount(value); fireEvent.click(chip());
+    const pick = screen.getByRole('button', { name: /1Keep the design/ });
+    expect(pick.getAttribute('aria-pressed')).toBe('true');
+    expect((screen.getByRole('textbox', { name: 'Reply in your own words' }) as HTMLTextAreaElement).value).toBe(words);
+    fireEvent.click(screen.getByRole('button', { name: 'Write my own answer' }));
+    const changed = `${words}\nOne more line.`;
+    fireEvent.change(screen.getByRole('textbox', { name: 'Reply in your own words' }), { target: { value: changed } });
+    fireEvent.click(screen.getByRole('button', { name: 'Close peek' }));
+    render(<AnswerSlot drafts={value.drafts} store={value.store} itemId="2" onEscape={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /1Keep the design/ }).getAttribute('aria-pressed')).toBe('false');
+    expect((screen.getByRole('textbox', { name: 'Reply in your own words' }) as HTMLTextAreaElement).value).toBe(changed);
+    expect(value.drafts.find(route, '2', 'answer')?.draft.selected_option_id).toBeNull();
+    expect(value.transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(0);
+  });
+
   it('retains the durable one-line draft after closing and sends one input despite repeated sends and reopening', async () => {
     const value = await setup(), { chip, visit } = mount(value);
     fireEvent.click(chip());
-    const input = screen.getByRole('textbox', { name: 'One-line answer' });
+    const input = screen.getByRole('textbox', { name: 'Reply in your own words' });
     fireEvent.change(input, { target: { value: 'Keep the current design.' } });
     fireEvent.keyDown(document, { key: 'Escape' }); fireEvent.click(chip());
-    expect((screen.getByRole('textbox', { name: 'One-line answer' }) as HTMLInputElement).value).toBe('Keep the current design.');
+    expect((screen.getByRole('textbox', { name: 'Reply in your own words' }) as HTMLInputElement).value).toBe('Keep the current design.');
     const send = screen.getByRole('button', { name: 'Send' }); fireEvent.click(send); fireEvent.click(send);
     await waitFor(() => expect(value.transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(1));
     await waitFor(() => expect(visit).toHaveBeenCalledWith({ ...route, item_id: '2' }, 'answered'));
@@ -281,20 +304,24 @@ describe('simple question answers in peek', () => {
 
   it('sends an option pick through the same durable answer path', async () => {
     const value = await setup(), { chip } = mount(value); fireEvent.click(chip());
-    const pick = screen.getByRole('button', { name: 'Keep the design Recommended' });
+    const pick = screen.getByRole('button', { name: /1Keep the design/ });
     expect(screen.getByText('Retain the current contract.')).toBeTruthy();
+    expect(pick.getAttribute('aria-pressed')).toBe('false');
     fireEvent.click(pick); fireEvent.click(pick);
+    expect(value.transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(0);
+    const send = screen.getByRole('button', { name: 'Send “Keep the design”' });
+    fireEvent.click(send); fireEvent.click(send);
     await waitFor(() => expect(value.transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(1));
     expect(value.transport.mutations.find(request => request.command.command === 'input_submit')!.command).toMatchObject({ params: { selected_option_id: 'yes', kind: 'answer' } });
   });
 
-  it('preserves a multiline draft for details, and blocks answering a changed question until reviewed', async () => {
+  it('edits a multiline draft in peek, and blocks answering a changed question until reviewed', async () => {
     const value = await setup();
     const id = value.drafts.begin(value.source, '2', 'answer')!;
     value.drafts.edit(id, { text: 'Long first line\nKeep the full second line.' });
     const { chip, go } = mount(value); fireEvent.click(chip());
-    expect(screen.queryByRole('textbox', { name: 'One-line answer' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Keep the design Recommended' }).hasAttribute('disabled')).toBe(true);
+    expect((screen.getByRole('textbox', { name: 'Reply in your own words' }) as HTMLTextAreaElement).value).toBe('Long first line\nKeep the full second line.');
+    expect(screen.getByRole('button', { name: /1Keep the design/ }).hasAttribute('disabled')).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Open details' }));
     expect(go).toHaveBeenCalledWith({ ...route, item_id: '2' });
     expect(value.drafts.find(route, '2', 'answer')?.draft.text).toBe('Long first line\nKeep the full second line.');
@@ -302,21 +329,23 @@ describe('simple question answers in peek', () => {
     ++value.source.items['2']!.question_revision; ++value.source.items['2']!.revision; ++value.source.revision;
     await act(async () => { await value.store.refresh(); });
     fireEvent.click(chip());
-    expect(screen.getByText('This question changed. Review it in details; your draft is kept.')).toBeTruthy();
+    expect(screen.getByText('This item changed. Review the current question and options; your text is retained.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true);
     expect(value.transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(0);
   });
 
-  it('keeps multiline pasted text and the rest of the selected one-line draft intact', async () => {
+  it('keeps multiline words as a note when picking an option and restores own-answer mode without discarding them', async () => {
     const value = await setup(), { chip, go } = mount(value); fireEvent.click(chip());
-    const input = screen.getByRole('textbox', { name: 'One-line answer' }) as HTMLInputElement;
-    fireEvent.change(input, { target: { value: 'Before old after' } });
-    input.setSelectionRange(7, 10);
-    const getData = vi.fn().mockReturnValue('first line\nsecond line');
-    fireEvent.paste(input, { clipboardData: { getData } });
-    expect(getData).toHaveBeenCalledWith('text');
-    expect(value.drafts.find(route, '2', 'answer')?.draft.text).toBe('Before first line\nsecond line after');
-    expect(screen.queryByRole('textbox', { name: 'One-line answer' })).toBeNull();
+    const input = screen.getByRole('textbox', { name: 'Reply in your own words' }) as HTMLTextAreaElement;
+    const text = 'Before first line\nsecond line after';
+    fireEvent.change(input, { target: { value: text } });
+    fireEvent.click(screen.getByRole('button', { name: /1Keep the design/ }));
+    expect(value.drafts.find(route, '2', 'answer')?.draft).toMatchObject({ text, selected_option_id: 'yes' });
+    expect(input.value).toBe(text);
+    expect(screen.getByRole('button', { name: 'Send “Keep the design” with your note' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Write my own answer' }));
+    expect(value.drafts.find(route, '2', 'answer')?.draft).toMatchObject({ text, selected_option_id: null });
+    expect(input.value).toBe(text);
     fireEvent.click(screen.getByRole('button', { name: 'Open details' }));
     expect(go).toHaveBeenCalledWith({ ...route, item_id: '2' });
     expect(value.transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(0);
@@ -337,9 +366,9 @@ describe('simple question answers in peek', () => {
       owner_message_ids: [], agent_message_ids: [], result_input_ids: [], fork_item_ids: [] };
     await value.store.refresh();
     const { chip } = mount(value); fireEvent.click(chip());
-    await waitFor(() => expect((screen.getByRole('textbox', { name: 'One-line answer' }) as HTMLInputElement).disabled).toBe(false));
+    await waitFor(() => expect((screen.getByRole('textbox', { name: 'Reply in your own words' }) as HTMLInputElement).disabled).toBe(false));
     expect(value.drafts.find(route, '2', 'answer')?.draft.op_id).not.toBe(oldId);
-    fireEvent.change(screen.getByRole('textbox', { name: 'One-line answer' }), { target: { value: 'New round answer' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Reply in your own words' }), { target: { value: 'New round answer' } });
     const send = screen.getByRole('button', { name: 'Send' }); fireEvent.click(send); fireEvent.click(send);
     await waitFor(() => expect(value.transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(2));
     const latest = value.transport.mutations.filter(request => request.command.command === 'input_submit')[1]!;
@@ -349,10 +378,10 @@ describe('simple question answers in peek', () => {
 
   it('subscribes to session changes and removes answer controls when the session closes', async () => {
     const value = await setup(), { chip } = mount(value); fireEvent.click(chip());
-    expect(screen.getByRole('textbox', { name: 'One-line answer' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Reply in your own words' })).toBeTruthy();
     value.source.state = 'closed'; ++value.source.revision;
     await act(async () => { await value.store.refresh(); });
-    expect(screen.queryByRole('textbox', { name: 'One-line answer' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Reply in your own words' })).toBeNull();
     expect(screen.getByText(/This session is closed/)).toBeTruthy();
     expect(value.transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(0);
   });

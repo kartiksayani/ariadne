@@ -25,6 +25,28 @@ async function setup() {
 }
 
 describe('detail actions while the owner view is stale', () => {
+  it('opens own-answer mode once for a focus request without losing the saved option note', async () => {
+    const { transport, store, drafts } = await setup();
+    const source = transport.sessions.get(route.session_id)!;
+    source.items['2']!.options = [{ id: 'keep', label: 'Keep it', consequence: 'Keep the design.', recommended: true }];
+    ++source.revision; await store.refresh();
+    const id = drafts.begin(store.getSnapshot().snapshot!.session, '2', 'answer')!;
+    drafts.edit(id, { selected_option_id: 'keep', text: ' My saved note\non two lines. ' });
+    const consume = vi.fn();
+    const props = { drafts, store, itemId: '2', onEscape: vi.fn(), onFocusRequestConsumed: consume,
+      focusRequest: { token: 1, intent: 'answer' as const, ownWords: true } };
+    const view = render(<AnswerSlot {...props} />);
+    const box = screen.getByLabelText<HTMLTextAreaElement>('Reply in your own words');
+    expect(document.activeElement).toBe(box);
+    expect(box.value).toBe(' My saved note\non two lines. ');
+    expect(drafts.find(route, '2', 'answer')?.draft.selected_option_id).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /1Keep it/ }));
+    view.rerender(<AnswerSlot {...props} />);
+    expect(drafts.find(route, '2', 'answer')?.draft.selected_option_id).toBe('keep');
+    expect(consume).toHaveBeenCalledExactlyOnceWith(1);
+    expect(sends(transport)).toHaveLength(0);
+  });
+
   it.each(['closed', 'archived'] as const)('keeps a %s waiting question and draft visible with the right disabled reason', async state => {
     const { transport, store, drafts } = await setup();
     const source = transport.sessions.get(route.session_id)!;
@@ -42,7 +64,7 @@ describe('detail actions while the owner view is stale', () => {
     const answer = await screen.findByRole('group', { name: 'Answer' });
     const textarea = within(answer).getByRole('textbox') as HTMLTextAreaElement;
     expect(textarea.value).toBe('My unsent answer'); expect(textarea.disabled).toBe(true);
-    expect(within(answer).getByRole('button', { name: 'Send as a reply only' }).hasAttribute('disabled')).toBe(true);
+    expect(within(answer).getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true);
     expect(within(answer).getByText(reason)).toBeTruthy();
     expect(sends(transport)).toEqual([]);
     expect(drafts.find(route, '2', 'answer')?.draft.text).toBe('My unsent answer');
@@ -70,17 +92,17 @@ describe('detail actions while the owner view is stale', () => {
     ++source.revision;
     await store.refresh();
     render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
-    expect(screen.getByText('Waiting on agent')).toBeTruthy();
+    expect(document.querySelector('.detail-status .status-badge')?.textContent).toBe('Sent');
     if (state === 'handled') {
-      expect(await screen.findByText(/Saved · Queue position #/)).toBeTruthy();
-      expect(screen.getByRole('button', { name: 'Write another input' })).toHaveProperty('disabled', false);
+      expect(await screen.findByText('Picked up by the agent.')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Write another input' })).toBeNull();
     }
     await act(async () => {
       await drafts.service.executeOwner({ session: route, command: { command: 'session_close', api_version: 1, op_id: crypto.randomUUID(),
         params: { expected_revision: source.revision } } });
       await store.refresh();
     });
-    expect(screen.getByText('Waiting on agent')).toBeTruthy();
+    expect(document.querySelector('.detail-status .status-badge')?.textContent).toBe('Sent');
     expect(screen.queryByText('Waiting on me')).toBeNull();
     expect(screen.queryByText('Session closed')).toBeNull();
     expect(screen.queryByRole('region', { name: 'Your answer' })).toBeNull();
@@ -412,7 +434,7 @@ describe('detail actions while the owner view is stale', () => {
     await waitFor(() => expect((box as HTMLTextAreaElement).disabled).toBe(false));
     fireEvent.change(box, { target: { value: 'Keep my exact answer.' } });
     transport.failNext = 'input_submit';
-    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(drafts.find(route, '2', 'answer')?.uncertain).toBe(true));
     expect(screen.getAllByRole('alert')).toHaveLength(1);
     expect((box as HTMLTextAreaElement).value).toBe('Keep my exact answer.');
@@ -440,11 +462,15 @@ describe('detail actions while the owner view is stale', () => {
     await store.refresh();
     render(<ItemDetail store={store} drafts={drafts} itemId="2" later={false} onOpenItem={vi.fn()} />);
     expect(await screen.findByRole('region', { name: 'Your answer' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Try sending again' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Check delivery' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Try sending again' })).toBeNull();
     expect(screen.getByLabelText<HTMLTextAreaElement>('Reply in your own words').value).toBe('Keep this unconfirmed answer.');
     expect(screen.queryByRole('region', { name: 'Saved message' })).toBeNull();
     expect(drafts.getSnapshot().entries[id]!.uncertain).toBe(true);
     expect(sends(transport)).toHaveLength(2);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Check delivery' })); });
+    expect(sends(transport)).toHaveLength(2);
+    expect(drafts.getSnapshot().entries[id]!.uncertain).toBe(true);
   });
 
   it.each(['decided', 'done', 'dropped'] as const)('keeps an undelivered answer visible beside the %s outcome and actions', async status => {

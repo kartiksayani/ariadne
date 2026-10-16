@@ -51,25 +51,25 @@ describe('an archived topic in the tree counts', () => {
   });
 });
 
-describe('Waiting on agent in the tree and graph', () => {
-  it('badges a replied item Waiting on agent and moves it out of the Waiting on me counts', () => {
+describe('reply delivery in the tree and graph', () => {
+  it('badges an unattempted reply Queued and moves it out of the Waiting on me counts', () => {
     const before = model(structuredClone(demo) as Session), after = model(replied());
     expect(row(before, '2')!.badge).toBe('Waiting on me');
-    expect(row(after, '2')).toMatchObject({ status: 'waiting_on_agent', badge: 'Waiting on agent' });
+    expect(row(after, '2')).toMatchObject({ status: 'queued', badge: 'Queued' });
     expect(after.counts.waiting).toBe(before.counts.waiting - 1);
     expect(topic(before).counts.map(count => count.text)).toContain('1 waiting on you');
     const texts = topic(after).counts.map(count => count.text);
-    expect(texts).toContain('1 waiting on agent'); expect(texts.some(text => text.includes('waiting on you'))).toBe(false);
+    expect(texts).toContain('1 queued'); expect(texts.some(text => text.includes('waiting on you'))).toBe(false);
   });
   it('filters a replied item with In progress, never with Waiting on me', () => {
     expect(row(model(replied(), ['waiting_on_me']), '2')).toBeUndefined();
-    expect(row(model(replied(), ['in_progress']), '2')?.status).toBe('waiting_on_agent');
+    expect(row(model(replied(), ['in_progress']), '2')?.status).toBe('queued');
   });
-  it('shows the graph node as Waiting on agent with its topic count', () => {
+  it('shows the graph node as Queued with its topic count', () => {
     const session = graphSession(), input = session.inputs[id('76')]!;
     input.target = { ...input.target, item_id: '1.1.1' }; input.kind = 'reply';
     const graph = sessionGraph({ session: immutable(session), view: preferences({ expanded_item_ids: ['1', '1.1'] }), later: new Set(), selectedId: null, tight: false });
-    expect(graph.nodes.get('1.1.1')!.status).toBe('agent');
-    expect(graph.topics[0].counts).toBe('1 waiting on agent · 2 open · 1 in progress · 2 closed');
+    expect(graph.nodes.get('1.1.1')!.status).toBe('queued');
+    expect(graph.topics[0].counts).toBe('1 queued · 2 open · 1 in progress · 2 closed');
   });
 });

@@ -72,8 +72,8 @@ describe('related item navigation', () => {
     render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={open} hiddenItemIds={['1']} />);
     const related = screen.getByRole('region', { name: 'Related items' });
     expect(within(related).getAllByRole('button')).toHaveLength(3);
-    const window = within(related).getByRole('button', { name: `${session.items['2']!.question} · Waiting on agent` });
-    expect(window.textContent).toContain('Waiting on agent');
+    const window = within(related).getByRole('button', { name: `${session.items['2']!.question} · Queued` });
+    expect(window.textContent).toContain('Queued');
     const child = within(related).getByRole('button', { name: `${session.items['1.1']!.question} (hidden) · Open` });
     expect(child.textContent).toContain('Hidden');
     expect(child.classList.contains('is-hidden')).toBe(true);

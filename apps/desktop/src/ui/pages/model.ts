@@ -123,13 +123,14 @@ export interface TopicChip { readonly id: string; readonly name: string; readonl
 export function topicChips(session: Immutable<Session>, movedOn: ReadonlySet<string>): TopicChip[] {
   return sortedTopics(session).map(topic => {
     const items = topicItems(session, topic.id), moved = movedOn.has(`${session.id}:${topic.id}`);
-    // A question the owner already replied to waits on the agent, not on them: it counts as open, like everywhere else.
+    // Local delivery projections retain their own counts alongside domain statuses.
     const shown = items.map(item => ({ item, status: displayStatus(session, item) }));
     const waiting = items.filter(item => waitingOnOwner(session, item)).length;
-    const open = shown.filter(({ status }) => status === 'open' || status === 'in_progress' || status === 'waiting_on_agent').length;
+    const sent = shown.filter(({ status }) => status === 'sent').length, queued = shown.filter(({ status }) => status === 'queued').length;
+    const open = shown.filter(({ status }) => status === 'open' || status === 'in_progress').length;
     const closed = items.filter(item => closedStatuses.has(item.status)).length;
     const counts = topic.archived_at !== null ? 'archived' : moved ? 'continued later'
-      : [waiting && `${waiting} waiting`, open && `${open} open`, closed && `${closed} closed`].filter(Boolean).join(' · ');
+      : [waiting && `${waiting} waiting`, sent && `${sent} sent`, queued && `${queued} queued`, open && `${open} open`, closed && `${closed} closed`].filter(Boolean).join(' · ');
     return { id: topic.id, name: shortLabel(topic), full: topic.name, counts, icon: topic.archived_at !== null ? 'ph ph-archive' : moved ? 'ph ph-arrow-bend-down-right' : 'ph ph-folder-simple',
       color: topic.archived_at !== null ? neutral(64) : 'var(--color-text)' };
   });

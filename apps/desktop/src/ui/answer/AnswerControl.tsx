@@ -22,15 +22,15 @@ export interface AnswerOption {
  *   `full`, with the options as quick replies above a one-line reply box that
  *   grows as you type).
  * - `selected`: index of the selected option, or -1. Callers pass the draft's
- *   choice, else the recommended option (`defaultSelection`).
+ *   choice, else no option (`defaultSelection`).
  * - `draft`: the reply text, shown in the full variant unless `noText`.
  * - `warn`: a warn-coloured line above the options, with an optional action.
  * - `blocked`: why sending is impossible now (closed, reconnecting, stale…).
- *   Selection still works; both Send buttons are aria-disabled (they keep focus) and the hint hides.
+ *   Selection still works; Send is aria-disabled (it keeps focus) and the hint hides.
  * - `locked`: a send or save is in progress or must be reconciled first; the
- *   options, the reply box and both Send buttons are disabled.
- * - `frozen`: the view behind the control is refreshing; the options and both
- *   Send buttons are `aria-disabled` (their clicks and keys do nothing), but
+ *   options, the reply box and Send are disabled.
+ * - `frozen`: the view behind the control is refreshing; the options and
+ *   Send are `aria-disabled` (their clicks and keys do nothing), but
  *   the reply box stays typeable. A truly disabled button or box drops the
  *   focus it holds to <body>, where keys become tree shortcuts.
  * - `onSendOption(index, note)` sends the option with the text box's note;
@@ -39,7 +39,7 @@ export interface AnswerOption {
  * - `onEscape`: Esc closes the control; the draft is kept by the caller.
  *
  * Keys (through `ui/keys.ts`, editor scope): 1–9 select and never send, Enter
- * sends the selected option, ⌘↵ in the reply box sends the reply, Esc closes.
+ * sends the selected option, ⌘↵ sends the chosen answer and note, Esc closes.
  */
 export interface AnswerControlProps {
   readonly options: readonly AnswerOption[];
@@ -54,7 +54,7 @@ export interface AnswerControlProps {
   readonly warnAction?: { readonly label: string; readonly onAction: () => void };
   readonly blocked?: string;
   readonly locked?: boolean;
-  /** The view behind the control is refreshing: options and both Send buttons are disabled, but the reply box keeps taking words. */
+  /** The view behind the control is refreshing: options and Send are disabled, but the reply box keeps taking words. */
   readonly frozen?: boolean;
   readonly noText?: boolean;
   /** Accessible name of the control's group. */
@@ -66,10 +66,9 @@ export interface AnswerControlProps {
   readonly onEscape?: () => void;
 }
 
-/** The option selected when the draft has no choice: the recommended one, else none. */
+/** Recommendations are hints; only an explicit owner choice selects an option. */
 export function defaultSelection(options: readonly Pick<AnswerOption, 'id' | 'recommended'>[], chosen: string | null | undefined): number {
-  const index = chosen ? options.findIndex(option => option.id === chosen) : -1;
-  return index >= 0 ? index : options.findIndex(option => option.recommended);
+  return chosen ? options.findIndex(option => option.id === chosen) : -1;
 }
 
 export function AnswerControl({ options, variant, compactOptions = false, prompt, selected, draft, warn, warnAction, blocked, locked = false, frozen = false, noText = false, label,
@@ -82,13 +81,13 @@ export function AnswerControl({ options, variant, compactOptions = false, prompt
   useGrow(text, draft, chat && !collapsed);
   // `off` stops choosing and sending; only `locked` stops the owner typing.
   const off = locked || frozen;
-  const canSend = !!picked && !blocked && !off;
   // A button held back only because the view is refreshing or sending is blocked (`soft`) is marked aria-disabled, not disabled: a
   // disabled one drops the focus it holds to <body>, where the next digit becomes a tree shortcut. Its click and keys do nothing
   // (`off` and `blocked` are checked where they act). A `hard` one (a send in progress, no words) is disabled.
   const gate = (hard: boolean, soft: boolean) => ({ disabled: hard || undefined, 'aria-disabled': soft && !hard ? true : undefined });
   const hasText = full && !noText;
   const withNote = hasText && !!draft.trim();
+  const canSend = (!!picked || hasText && !!draft.trim()) && !blocked && !off;
   // The cue follows actual overflow, including wrapping, More and composer growth.
   useLayoutEffect(() => {
     const region = choices.current;
@@ -104,6 +103,7 @@ export function AnswerControl({ options, variant, compactOptions = false, prompt
   }, [chat, compactOptions, options, draft, expanded]);
   const sendOption = (index: number) => { if (options[index] && !blocked && !off) onSendOption(index, hasText ? draft : undefined); };
   const sendText = () => { if (draft.trim() && !blocked && !off) onSendText(draft); };
+  const sendAnswer = () => { if (picked) sendOption(selected); else if (hasText) sendText(); };
   const optionIndex = (target: EventTarget) => target instanceof HTMLElement && root.current?.contains(target)
     ? Number(target.closest<HTMLElement>('[data-answer-option]')?.dataset.answerOption ?? -1) : -1;
   const keys = useWorkspaceKeys<HTMLDivElement>({
@@ -121,12 +121,12 @@ export function AnswerControl({ options, variant, compactOptions = false, prompt
       event.stopPropagation();
       const index = focused >= 0 ? focused : selected;
       if (focused >= 0 && focused !== selected && !off) onSelect(focused);
-      sendOption(index);
+      if (index >= 0) sendOption(index); else sendAnswer();
       return true;
     },
     send: (_intent, event) => {
       event.stopPropagation();
-      if (event.target instanceof HTMLTextAreaElement) sendText(); else if (canSend) sendOption(selected);
+      if (canSend) sendAnswer();
       return true;
     },
     escape: (_intent, event) => {
@@ -139,7 +139,7 @@ export function AnswerControl({ options, variant, compactOptions = false, prompt
   }, { scope: 'editor' });
   const hint = blocked ? '' : full && options.length > 1 ? `1–${Math.min(options.length, 9)} to select · Enter sends${withNote ? ' with your note' : ''} · Esc closes, keeps your draft` : `Enter sends${withNote ? ' with your note' : ''}`;
   const chatHint = [!blocked && options.length > 1 ? `1–${Math.min(options.length, 9)} select` : '', !blocked && picked ? 'Enter sends' : '',
-    hasText ? '⌘↵ reply only' : '', 'Esc keeps draft'].filter(Boolean).join(' · ');
+    hasText ? '⌘↵ sends' : '', 'Esc keeps draft'].filter(Boolean).join(' · ');
   const optionCards = (
     <div className="answer-options">
       {options.map((option, index) => {
@@ -169,23 +169,25 @@ export function AnswerControl({ options, variant, compactOptions = false, prompt
             }}>{open ? 'Less' : 'More'}</button>}
         </div> : button;
       })}
+      {hasText && options.length > 0 && <button type="button" className={`btn btn-secondary answer-option answer-own${!picked ? ' answer-option-on' : ''}`}
+        data-answer-own aria-pressed={!picked} {...gate(locked, frozen)} onClick={event => { event.stopPropagation(); if (!off) onSelect(-1); }}>
+        <span className="answer-option-head"><span className="answer-key"><i className="ph ph-pencil-simple" aria-hidden="true" /></span><span className="answer-label">Write my own answer</span></span>
+      </button>}
     </div>
   );
-  const sendButton = (picked || compactOptions && options.length > 0) && <div className="answer-send-row">
-      <button type="button" className="btn btn-primary answer-send" {...gate(locked || !picked, frozen || !!blocked)} onClick={event => { event.stopPropagation(); sendOption(selected); }}>
+  const sendButton = (hasText || picked || compactOptions && options.length > 0) && <div className="answer-send-row">
+      <button type="button" data-answer-send className="btn btn-primary answer-send" {...gate(locked || !picked && !(hasText && draft.trim()), frozen || !!blocked)} onClick={event => { event.stopPropagation(); sendAnswer(); }}>
         <i className="ph ph-paper-plane-right" aria-hidden="true" />
-        <span className="answer-send-label">{full && picked ? `Send “${picked.label}”${withNote ? ' with your note' : ''}` : 'Send answer'}</span>
+        <span className="answer-send-label">{full && picked ? `Send “${picked.label}”${withNote ? ' with your note' : ''}` : full ? 'Send' : 'Send answer'}</span>
         <span className="answer-enter" aria-hidden="true">↵</span>
       </button>
       {!chat && <span className="answer-hint">{hint}</span>}
     </div>;
   const chatComposer = !noText && <div className="answer-reply answer-composer">
     <div className={`answer-composer-row${compactOptions ? ` answer-conversation-row${!draft.trim() ? ' answer-conversation-row-empty' : ''}` : ''}`}>
-      <textarea ref={text} className="input answer-text" aria-label="Reply in your own words" placeholder="Add a note to your choice, or reply on its own…" rows={1}
+      <textarea ref={text} className="input answer-text" aria-label="Reply in your own words" placeholder={picked ? 'Add a note for the agent…' : 'Answer in your own words…'} rows={1}
         value={draft} disabled={locked} onFocus={() => setCollapsed(false)} onClick={event => event.stopPropagation()} onChange={event => { setCollapsed(false); onDraft(event.target.value); }} />
       {compactOptions && sendButton}
-      {(!compactOptions || draft.trim()) && <button type="button" className="btn btn-secondary answer-reply-send" {...gate(!draft.trim() || locked, frozen || !!blocked)}
-        onClick={event => { event.stopPropagation(); sendText(); }}>Send as a reply only</button>}
     </div>
   </div>;
   const chatControls = <>{(!compactOptions || noText) && sendButton}{chatComposer}<span className="answer-hint">{chatHint}</span></>;
@@ -198,13 +200,9 @@ export function AnswerControl({ options, variant, compactOptions = false, prompt
       {compactOptions ? <div className="answer-fixed-controls">{chatControls}</div> : chatControls}
     </> : <>{optionCards}{sendButton}</>}
     {full && !chat && !noText && <div className="answer-reply">
-      <textarea className="input answer-text" aria-label="Reply in your own words" placeholder="Add a note to your choice, or reply on its own…" rows={2}
+      <textarea className="input answer-text" aria-label="Reply in your own words" placeholder={picked ? 'Add a note for the agent…' : 'Answer in your own words…'} rows={2}
         value={draft} disabled={locked} onClick={event => event.stopPropagation()} onChange={event => onDraft(event.target.value)} />
-      <div className="answer-reply-row">
-        <button type="button" className="btn btn-secondary answer-reply-send" {...gate(!draft.trim() || locked, frozen || !!blocked)}
-          onClick={event => { event.stopPropagation(); sendText(); }}>Send as a reply only</button>
-        <span className="answer-hint">⌘↵ sends as a reply only</span>
-      </div>
+      <span className="answer-hint">⌘↵ sends</span>
     </div>}
     {blocked && <div className="answer-blocked" role="status"><i className="ph ph-wifi-slash" aria-hidden="true" /><span>{blocked}</span></div>}
   </div>;

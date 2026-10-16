@@ -19,7 +19,8 @@ import { StuckNote } from '../../../src/ui/answer/StuckNote';
 import { sessionActionsFor, type SessionActions } from '../../../src/components/bindings/actions';
 import { AnswerSlot, changedText, type AnswerSlotProps } from '../../../src/ui/detail/AnswerSlot';
 import { useSubmit, type PendingSubmission } from '../../../src/ui/answer/useSubmit';
-import { WaitingColumn } from '../../../src/ui/waiting/WaitingColumn';
+import { PeekProvider, usePeek } from '../../../src/ui/peek/Peek';
+import { AnswerDock, OtherSessionQuestions } from '../../../src/ui/dock/AnswerDock';
 import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { sentAs } from '../../../src/ui/detail/model';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
@@ -189,7 +190,8 @@ function recordSubmitted(session: Session, draft: OwnerDraft, state: 'queued' | 
   input.target = structuredClone(draft.target); input.message_id = uuid(71); input.answer_id = null;
   input.expected_question_revision = draft.question_revision; input.payload.text = draft.text;
   input.payload.intent = draft.intent; input.payload.selected_option_id = draft.selected_option_id; input.state = state;
-  session.inputs[input.id] = input;
+  input.attempts = []; input.active_attempt_id = null;
+  session.inputs[input.id] = input; session.revision++;
   message.id = input.message_id; message.number = 40; message.body = draft.text; message.input_id = input.id;
   message.item_id = draft.target.item_id; message.topic_id = draft.target.topic_id; message.binding_id = draft.binding_id;
   message.items_touched = draft.target.item_id === null ? [] : [draft.target.item_id];
@@ -278,30 +280,27 @@ describe('attempted drafts reconcile from durable owner receipts', () => {
   });
   it('confirms an unknown answer when the open answer slot refresh finds its owner receipt', async () => {
     const saved = attemptedDraft(), value = await setup([saved]); value.render();
-    await screen.findByRole('button', { name: 'Try sending again' });
+    await screen.findByRole('button', { name: 'Check delivery' });
     recordSubmitted(value.session, saved, 'handled'); value.session.items['2']!.status = 'in_progress'; value.session.revision++;
     await act(async () => { await value.store.refresh(); });
     await waitFor(() => expect(value.drafts.getSnapshot().entries[saved.op_id]?.receipt).toBeTruthy());
     expect(screen.queryByRole('button', { name: 'Try sending again' })).toBeNull();
-    expect(screen.getByText('Saved · Queue position #20')).toBeTruthy();
+    expect(screen.getByText('Picked up by the agent.')).toBeTruthy();
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(value.drafts.getSnapshot().entries[saved.op_id]?.draft.text).toBe('');
     await waitFor(() => expect(value.prefs.drafts).toEqual([])); expect(value.calls).toEqual([]);
   });
-  it('reconciles an unknown Waiting answer when the session behind its row refreshes', async () => {
+  it('reconciles an unknown dock answer from the shared session receipt', async () => {
     const saved = attemptedDraft(), value = await setup([saved]), queue = new WaitingStore(value.service, value.sessions);
     waitingStores.push(queue); await queue.start();
-    render(<WaitingColumn drafts={value.drafts} store={queue} revealItem={() => {}} openSession={() => {}} />);
-    await screen.findByText(/Checking whether/);
+    render(<AnswerDock drafts={value.drafts} store={value.store} waiting={queue} onHeight={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: /waiting on you/ }));
+    await screen.findByRole('button', { name: 'Check delivery' });
     recordSubmitted(value.session, saved, 'queued'); value.session.revision++;
     await act(async () => { await value.store.refresh(); });
     await waitFor(() => expect(value.drafts.getSnapshot().entries[saved.op_id]?.receipt).toBeTruthy());
-    await waitFor(() => expect(value.prefs.drafts).toEqual([]));
-    expect(screen.queryByText(/Checking whether/)).toBeNull(); expect(value.calls).toEqual([]);
+    expect(value.calls).toEqual([]);
   });
-});
-
-describe('owner draft guard messages', () => {
   it.each(['item', 'topic'] as const)('explains an unavailable %s target and a changed agent connection', target => {
     const draft = { ...attemptedDraft(target), submission_attempted: false, selected_option_id: null };
     const session = structuredClone(demo) as Session;
@@ -392,11 +391,11 @@ describe('owner input component and durable draft controller', () => {
       const value = await setup(); show(value, '2');
       const user = userEvent.setup();
       const text = await screen.findByRole('textbox', { name: 'Reply in your own words' });
-      expect(screen.getByRole('button', { name: 'Send “Keep the design”' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true);
       expect(replyControlState('2')).toMatchObject({ editorPresent: true, sendPresent: true, sendEnabled: false });
       await user.type(text, 'My own answer');
       await waitFor(() => expect(replyControlState('2')).toMatchObject({ value: 'My own answer', editorEnabled: true, sendPresent: true, sendEnabled: true }));
-      await user.click(screen.getByRole('button', { name: 'Send as a reply only' }));
+      await user.click(screen.getByRole('button', { name: 'Send' }));
       await waitFor(() => expect(value.calls.map(call => call.command)).toMatchObject([{ command: 'input_submit', params: { kind: 'answer', text: 'My own answer', selected_option_id: null } }]));
     });
     it.each([['8', 'open', 'Reply message'], ['3', 'in_progress', 'Note message']])('keeps the composer visible outside the scrolling detail for %s (%s), without waiting on the owner', async (itemId, status, label) => {
@@ -781,22 +780,22 @@ describe('owner input component and durable draft controller', () => {
     const sent = value.calls[0]!.command;
     expect(sent.command === 'input_submit' && [sent.params.kind, sent.params.text]).toEqual(['drop', `Let’s drop this (covered elsewhere): ${item.question}`]);
   });
-  it('pre-selects the recommendation; numbers select only; focused Cmd+Enter and duplicate clicks send the reply once after durable draft save', async () => {
+  it('starts without a selection; numbers select only; focused Cmd+Enter and duplicate clicks send the choice and note once after durable draft save', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox');
-    expect(screen.getByRole('button', { name: 'Send as a reply only' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true);
     const [first, second] = screen.getAllByRole('button').filter(button => button.hasAttribute('data-answer-option'));
-    expect(first!.getAttribute('aria-pressed')).toBe('true'); expect(screen.getByRole('button', { name: 'Send “Keep the design”' })).toBeTruthy();
+    expect(first!.getAttribute('aria-pressed')).toBe('false'); expect(second!.getAttribute('aria-pressed')).toBe('false');
     second!.focus(); fireEvent.keyDown(second!, { key: '2' });
     await waitFor(() => expect(second!.getAttribute('aria-pressed')).toBe('true'));
     expect(value.calls).toHaveLength(0);
     fireEvent.change(editor(), { target: { value: ' Exact owner bytes \n' } });
     const finish = value.gate(); editor().focus(); fireEvent.keyDown(editor(), { key: 'Enter', metaKey: true });
-    const send = screen.getByRole('button', { name: 'Send as a reply only' }); fireEvent.click(send); fireEvent.keyDown(editor(), { key: 'Enter', metaKey: true });
+    const send = screen.getByRole('button', { name: 'Send “Change the design” with your note' }); fireEvent.click(send); fireEvent.keyDown(editor(), { key: 'Enter', metaKey: true });
     await waitFor(() => expect(value.calls).toHaveLength(1));
     expect(value.prefs.drafts[0]?.submission_attempted).toBe(true);
-    expect(value.calls[0]?.command.command === 'input_submit' && value.calls[0].command.params).toMatchObject({ text: ' Exact owner bytes \n', selected_option_id: null });
+    expect(value.calls[0]?.command.command === 'input_submit' && value.calls[0].command.params).toMatchObject({ text: ' Exact owner bytes \n', selected_option_id: 'no' });
     await act(async () => { finish(); });
-    await screen.findByText('Saved · Queue position #4'); expect(value.calls).toHaveLength(1); expect(value.prefs.drafts).toEqual([]);
+    await screen.findByText('Sent · waiting for the agent to pick it up.'); expect(value.calls).toHaveLength(1); expect(value.prefs.drafts).toEqual([]);
     expect(value.session.items['2']!.status).toBe('waiting_on_me');
   });
   it('sends a selected option with the exact note once, after saving both in the durable draft', async () => {
@@ -810,7 +809,7 @@ describe('owner input component and durable draft controller', () => {
     expect(value.prefs.drafts[0]).toMatchObject({ selected_option_id: 'no', text: ' Keep these exact note bytes \n', submission_attempted: true });
     expect(value.calls[0]?.command).toMatchObject({ command: 'input_submit', params: { selected_option_id: 'no', text: ' Keep these exact note bytes \n' } });
     await act(async () => { finish(); });
-    await screen.findByText('Saved · Queue position #4'); expect(value.calls).toHaveLength(1);
+    await screen.findByText('Sent · waiting for the agent to pick it up.'); expect(value.calls).toHaveLength(1);
   });
   it('retains editable unsent option and note over detail changes, unrelated preferences, refresh and restart without auto-send', async () => {
     const value = await setup(), view = value.render(); await screen.findByRole('textbox');
@@ -842,28 +841,32 @@ describe('owner input component and durable draft controller', () => {
     expect(value.writes[2]?.command.command === 'preferences_patch' && value.writes[2].command.params.expected_preferences_revision).toBe(2);
     expect(value.calls).toHaveLength(0);
   });
-  it.each(['in_progress', 'replaced'] as const)('keeps a restored attempted answer reachable and exactly retryable after the item becomes %s', async status => {
+  it.each(['in_progress', 'replaced'] as const)('keeps a restored attempted answer reachable and reconcilable without another send after the item becomes %s', async status => {
     const value = await setup(), view = value.render(); await screen.findByRole('textbox'); value.outcome('uncertain');
     fireEvent.change(editor(), { target: { value: 'Frozen original answer' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' })); await screen.findByRole('button', { name: 'Try sending again' });
-    const original = structuredClone(value.calls[0]), restored = await value.restart();
+    fireEvent.click(screen.getByRole('button', { name: 'Send' })); await screen.findByRole('button', { name: 'Check delivery' });
+    const original = structuredClone(value.calls[0]), frozen = structuredClone(value.prefs.drafts[0]!), restored = await value.restart();
     value.session.items['2']!.status = status; value.session.items['2']!.revision++; value.session.revision++;
     await act(async () => { await value.store.refresh(); });
     view.rerender(<AnswerSlot drafts={restored} store={value.store} itemId="2" onEscape={() => {}} />);
-    expect(screen.getByRole('button', { name: 'Try sending again' }).hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('button', { name: 'Check delivery' }).hasAttribute('disabled')).toBe(false);
     expect(editor().value).toBe('Frozen original answer'); expect(editor().disabled).toBe(true); expect(value.calls).toHaveLength(1);
-    value.outcome('ok'); fireEvent.click(screen.getByRole('button', { name: 'Try sending again' }));
-    await waitFor(() => expect(value.prefs.drafts).toEqual([])); expect(value.calls[1]).toEqual(original);
+    recordSubmitted(value.session, frozen, 'handled');
+    fireEvent.click(screen.getByRole('button', { name: 'Check delivery' }));
+    await waitFor(() => expect(value.prefs.drafts).toEqual([])); expect(value.calls).toEqual([original]);
   });
-  it.each(['uncertain', 'malformed'] as const)('freezes exact op/body after %s receipt and explicitly replays it across restart and a changed target', async outcome => {
+  it.each(['uncertain', 'malformed'] as const)('freezes exact op/body after %s receipt and reconciles it across restart and a changed target', async outcome => {
     const value = await setup(), view = value.render(); await screen.findByRole('textbox'); value.outcome(outcome);
-    fireEvent.change(editor(), { target: { value: 'Exact untrimmed bytes  ' } }); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
-    await screen.findByRole('button', { name: 'Try sending again' }); expect(value.prefs.drafts[0]?.submission_attempted).toBe(true);
-    const original = structuredClone(value.calls[0]); expect(editor().disabled).toBe(true);
+    fireEvent.change(editor(), { target: { value: 'Exact untrimmed bytes  ' } }); fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByRole('button', { name: 'Check delivery' }); expect(value.prefs.drafts[0]?.submission_attempted).toBe(true);
+    const original = structuredClone(value.calls[0]), frozen = structuredClone(value.prefs.drafts[0]!); expect(editor().disabled).toBe(true);
     const restored = await value.restart(); value.session.items['2']!.question_revision++; value.session.items['2']!.revision++; value.session.revision++;
     await act(async () => { await value.store.refresh(); }); view.rerender(<AnswerSlot drafts={restored} store={value.store} itemId="2" onEscape={() => {}} />);
-    expect(value.calls).toHaveLength(1); value.outcome('ok'); fireEvent.click(screen.getByRole('button', { name: 'Try sending again' }));
-    await screen.findByText('Saved · Queue position #4'); expect(value.calls[1]).toEqual(original); expect(value.prefs.drafts).toEqual([]);
+    expect(value.calls).toHaveLength(1); recordSubmitted(value.session, frozen, 'handled');
+    fireEvent.click(screen.getByRole('button', { name: 'Check delivery' }));
+    await waitFor(() => expect(value.prefs.drafts).toEqual([])); expect(value.calls).toEqual([original]);
+    expect(value.session.inputs[uuid(70)]!.payload).toMatchObject({ text: frozen.text, selected_option_id: frozen.selected_option_id });
+    expect(value.session.operation_receipts[frozen.op_id]![0]!.result.operation_id).toBe(frozen.op_id);
   });
   it('keeps the typed text and chosen option when the agent-not-running dialog is cancelled; Queue saves the send', async () => {
     const value = await setup(), held: PendingSubmission[] = [];
@@ -876,11 +879,12 @@ describe('owner input component and durable draft controller', () => {
     fireEvent.change(editor(), { target: { value: 'Keep my words' } });
     const saved = () => Object.values(value.drafts.getSnapshot().entries).find(entry => entry.draft.target.item_id === '2')!.draft;
     await waitFor(() => expect(saved().text).toBe('Keep my words'));
-    const reply = screen.getByRole('button', { name: 'Send as a reply only' });
+    const reply = screen.getByRole('button', { name: 'Send “Change the design” with your note' });
     await waitFor(() => expect(reply.hasAttribute('disabled')).toBe(false));
     fireEvent.click(reply);
-    expect(held).toHaveLength(1); expect(held[0]!.change).toEqual({ selected_option_id: null, text: 'Keep my words' });
-    // Cancel: the dialog never queues, so the draft is unchanged.
+    expect(held).toHaveLength(1); expect(held[0]!.change).toEqual({ selected_option_id: 'no', text: 'Keep my words' });
+    // Cancel releases the send reservation and keeps the original draft.
+    act(() => { held[0]!.cancel?.(); });
     expect([saved().text, saved().selected_option_id]).toEqual(['Keep my words', 'no']);
     fireEvent.click(screen.getByRole('button', { name: 'Send “Change the design” with your note' }));
     expect(held).toHaveLength(2); expect(held[1]!.change).toEqual({ selected_option_id: 'no', text: 'Keep my words' });
@@ -918,9 +922,9 @@ describe('owner input component and durable draft controller', () => {
     value.session.items['2']!.revision++; value.session.items['2']!.question_revision++; value.session.revision++;
     value.session.rounds[value.session.items['2']!.current_round_id!]!.question_revision++;
     await act(async () => { await value.store.refresh(); });
-    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' })); expect(value.calls).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Send' })); expect(value.calls).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Review this question' })); expect(editor().value).toBe('Retain explanation');
-    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' })); await screen.findByText('Saved · Queue position #4');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' })); await screen.findByText('Sent · waiting for the agent to pick it up.');
     expect(value.calls[0]?.command.command === 'input_submit' && value.calls[0].command.params.expected_question_revision).toBe(value.session.items['2']!.question_revision);
   });
   it('never sends before an uncertain preference save is explicitly reconciled', async () => {
@@ -933,11 +937,11 @@ describe('owner input component and durable draft controller', () => {
   it('preserves content and disables mutation after session read failure', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); fireEvent.change(editor(), { target: { value: 'Survives failure' } });
     value.unavailable(); await act(async () => { await value.store.refresh(); });
-    expect(editor().value).toBe('Survives failure'); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' })); expect(value.calls).toHaveLength(0);
+    expect(editor().value).toBe('Survives failure'); fireEvent.click(screen.getByRole('button', { name: 'Send' })); expect(value.calls).toHaveLength(0);
   });
   it('replaces a definitively rejected draft with one reviewed copy in the same save', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); value.outcome('question_changed');
-    fireEvent.change(editor(), { target: { value: 'Owner explanation remains exact' } }); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
+    fireEvent.change(editor(), { target: { value: 'Owner explanation remains exact' } }); fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await screen.findByRole('button', { name: 'Edit and send again' }); const original = structuredClone(value.prefs.drafts[0]);
     fireEvent.click(screen.getByRole('button', { name: 'Edit and send again' }));
     await screen.findByRole('button', { name: 'Review this question' }); expect(value.calls).toHaveLength(1); expect(editor().value).toBe('Owner explanation remains exact');
@@ -949,7 +953,7 @@ describe('owner input component and durable draft controller', () => {
       { kind: 'delete_draft', operation_id: original!.op_id }, { kind: 'upsert_draft', draft: { text: original!.text } },
     ] } } });
     fireEvent.click(screen.getByRole('button', { name: 'Review this question' })); value.outcome('ok');
-    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' })); await screen.findByText('Saved · Queue position #4');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' })); await screen.findByText('Sent · waiting for the agent to pick it up.');
     expect(value.calls[1]?.command.op_id).not.toBe(value.calls[0]?.command.op_id); expect(value.prefs.drafts).toEqual([]);
   });
   it('keeps both copies when replacing a rejected draft is unconfirmed, then removes the old copy on retry', async () => {
@@ -1038,8 +1042,8 @@ describe('owner input component and durable draft controller', () => {
   });
   it('never permits changed-payload recovery for operation reuse or restored unknown attempts', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); value.outcome('operation_reused');
-    fireEvent.change(editor(), { target: { value: 'Keep operation identity' } }); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
-    await screen.findByRole('button', { name: 'Try sending again' }); expect(screen.queryByRole('button', { name: 'Edit and send again' })).toBeNull();
+    fireEvent.change(editor(), { target: { value: 'Keep operation identity' } }); fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByRole('button', { name: 'Check delivery' }); expect(screen.queryByRole('button', { name: 'Edit and send again' })).toBeNull();
     expect(editor().disabled).toBe(true); const restored = await value.restart();
     expect(Object.values(restored.getSnapshot().entries)[0]?.rejected).toBe(false); expect(value.calls).toHaveLength(1);
   });
@@ -1098,68 +1102,49 @@ describe('owner input component and durable draft controller', () => {
     expect(consumed).toHaveBeenCalledTimes(1);
     if (guard !== 'saving') expect(value.drafts.getSnapshot().entries[id]!.draft).toEqual(before);
   });
-  it('connects the Waiting card to the same durable draft store and registered reveal callback', async () => {
-    const value = await setup(), queue = new WaitingStore(value.service, value.sessions); waitingStores.push(queue);
-    await queue.start(); let revealed: string | undefined;
-    render(<WaitingColumn drafts={value.drafts} store={queue} revealItem={target => { revealed = target.item_id; }} openSession={() => {}} />);
-    const send = await screen.findByRole('button', { name: 'Send answer' });
-    expect(screen.queryByRole('textbox')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Details' })); expect(revealed).toBe('2'); revealed = undefined;
-    await waitFor(() => expect(send.hasAttribute('disabled')).toBe(false));
-    fireEvent.click(send);
+  it('connects the dock and Details to one durable draft and send lock', async () => {
+    const value = await setup(), queue = new WaitingStore(value.service, value.sessions); waitingStores.push(queue); await queue.start();
+    render(<><AnswerDock drafts={value.drafts} store={value.store} waiting={queue} onHeight={() => {}} />
+      <AnswerSlot drafts={value.drafts} store={value.store} itemId="2" onEscape={() => {}} /></>);
+    fireEvent.click(screen.getByRole('button', { name: /waiting on you/ }));
+    const boxes = await screen.findAllByRole('textbox');
+    fireEvent.change(boxes[0]!, { target: { value: 'Shared between both surfaces' } });
+    await waitFor(() => expect((boxes[1] as HTMLTextAreaElement).value).toBe('Shared between both surfaces'));
+    const sends = screen.getAllByRole('button', { name: 'Send' });
+    fireEvent.click(sends[0]!); fireEvent.click(sends[1]!);
     await waitFor(() => expect(value.calls).toHaveLength(1));
-    expect(value.calls[0]?.command.command === 'input_submit' && value.calls[0].command.params).toMatchObject({ selected_option_id: 'yes', text: '' });
-    fireEvent.click(await screen.findByText('Sending “Keep the design”…')); expect(revealed).toBe('2');
-    expect(screen.getByText('Nothing waiting on you')).toBeTruthy();
+    expect(value.calls[0]!.command).toMatchObject({ command: 'input_submit', params: { text: 'Shared between both surfaces' } });
   });
-  it('uses a labelled pencil icon to take a queued Sent message back into its durable reply draft', async () => {
-    const text = 'Complete queued message\nKeep the final spaces  ';
-    const value = await setup([], session => {
-      const queued = session.inputs['00000000-0000-4000-8000-000000000076']!;
-      queued.kind = 'reply'; queued.payload.text = text;
-      session.messages.find(message => message.id === queued.message_id)!.body = text;
-    }), input = value.session.inputs['00000000-0000-4000-8000-000000000076']!;
-    const queue = new WaitingStore(value.service, value.sessions); waitingStores.push(queue); await queue.start();
-    const reveal = vi.fn();
-    render(<WaitingColumn drafts={value.drafts} store={queue} revealItem={reveal} openSession={() => {}} />);
-    const edit = await screen.findByRole('button', { name: 'Edit message' });
-    expect(edit.getAttribute('title')).toBe('Edit message');
-    expect(edit.querySelector('i.ph-pencil-simple')).not.toBeNull();
-    expect(edit.textContent).toBe('');
-    await waitFor(() => expect(edit.hasAttribute('disabled')).toBe(false));
-    fireEvent.click(edit);
-    await waitFor(() => expect(value.calls.map(call => call.command)).toMatchObject([{ command: 'input_cancel', params: { input_id: input.id, purpose: 'edit' } }]));
-    await waitFor(() => expect(value.prefs.drafts).toMatchObject([{ text, intent: 'reply', target: { item_id: '4' } }]));
-    expect(value.drafts.find(route, '4', 'reply')?.draft.text).toBe(text);
-    expect(reveal).toHaveBeenCalledWith({ ...route, item_id: '4' });
-    expect(value.events.indexOf(`draft:${text}`)).toBeGreaterThan(value.events.indexOf('cancelled'));
-    expect(value.calls.some(call => call.command.command === 'input_submit')).toBe(false);
+  it('takes a queued answer back atomically before restoring its exact text', async () => {
+    const saved = attemptedDraft(), value = await setup([saved]); recordSubmitted(value.session, saved, 'queued');
+    await value.store.refresh(); await value.drafts.reconcile(immutable(value.session)); value.render();
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(value.drafts.find(route, '2', 'answer')?.draft.text).toBe(saved.text));
+    expect(value.calls.map(call => call.command.command)).toEqual(['input_cancel']);
+    expect(value.events.indexOf(`draft:${saved.text}`)).toBeGreaterThan(value.events.indexOf('cancelled'));
   });
-  it('moves an unknown Waiting answer to Sent as Checking and retries the exact operation from detail', async () => {
-    const value = await setup(), queue = new WaitingStore(value.service, value.sessions); waitingStores.push(queue); await queue.start(); value.outcome('uncertain');
-    let revealed: string | undefined;
-    render(<WaitingColumn drafts={value.drafts} store={queue} revealItem={target => { revealed = target.item_id; }} openSession={() => {}} />);
-    const send = await screen.findByRole('button', { name: 'Send answer' });
-    await waitFor(() => expect(send.hasAttribute('disabled')).toBe(false));
-    fireEvent.click(send); fireEvent.click(await screen.findByText('Checking whether “Keep the design” was delivered…')); expect(revealed).toBe('2');
-    expect(screen.queryByRole('button', { name: 'Send answer' })).toBeNull(); const original = structuredClone(value.calls[0]);
-    cleanup(); value.render(); value.outcome('ok'); fireEvent.click(await screen.findByRole('button', { name: 'Try sending again' }));
-    await waitFor(() => expect(value.prefs.drafts).toEqual([])); expect(value.calls[1]).toEqual(original);
+  it('checks an unknown dock answer without sending it again', async () => {
+    const value = await setup(); value.render(); await screen.findByRole('textbox'); value.outcome('uncertain');
+    fireEvent.change(editor(), { target: { value: 'Keep the uncertain answer' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Check delivery' }));
+    expect(value.calls).toHaveLength(1);
+    expect(value.drafts.find(route, '2', 'answer')?.draft.text).toBe('Keep the uncertain answer');
   });
   it('reconciles uncertain cleanup after a validated input receipt without re-submitting or losing durable draft recovery', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); const finish = value.gate();
-    fireEvent.change(editor(), { target: { value: 'Already durably submitted' } }); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
+    fireEvent.change(editor(), { target: { value: 'Already durably submitted' } }); fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(value.calls).toHaveLength(1)); value.preferenceOutcome('uncertain'); await act(async () => { finish(); });
-    await screen.findByText('Saved · Queue position #4'); await screen.findByRole('button', { name: 'Try saving your draft again' });
+    await screen.findByText('Sent · waiting for the agent to pick it up.'); await screen.findByRole('button', { name: 'Try saving your draft again' });
     expect(value.prefs.drafts[0]?.submission_attempted).toBe(true); expect(value.calls).toHaveLength(1);
     value.preferenceOutcome('ok'); fireEvent.click(screen.getByRole('button', { name: 'Try saving your draft again' }));
     await waitFor(() => expect(value.prefs.drafts).toEqual([])); expect(value.calls).toHaveLength(1);
   });
   it('retries draft cleanup after a saved input when an interleaved navigation patch bumped the revision', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); const finish = value.gate();
-    fireEvent.change(editor(), { target: { value: 'Saved then conflicted' } }); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
+    fireEvent.change(editor(), { target: { value: 'Saved then conflicted' } }); fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(value.calls).toHaveLength(1)); value.conflictDeletes(1); await act(async () => { finish(); });
-    await screen.findByText('Saved · Queue position #4');
+    await screen.findByText('Sent · waiting for the agent to pick it up.');
     await waitFor(() => expect(value.prefs.drafts).toEqual([]));
     expect(value.calls).toHaveLength(1); expect(value.drafts.getSnapshot().preferenceUncertain).toBe(false); expect(value.drafts.getSnapshot().error).toBeNull();
     expect(value.writes.filter(write => write.command.command === 'preferences_patch' && write.command.params.entries.some(entry => entry.kind === 'delete_draft'))).toHaveLength(2);
@@ -1167,16 +1152,16 @@ describe('owner input component and durable draft controller', () => {
   });
   it('surfaces draft cleanup failure after three revision conflicts without further retries', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); const finish = value.gate();
-    fireEvent.change(editor(), { target: { value: 'Conflicted thrice' } }); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
+    fireEvent.change(editor(), { target: { value: 'Conflicted thrice' } }); fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(value.calls).toHaveLength(1)); value.conflictDeletes(5); await act(async () => { finish(); });
-    await screen.findByText('Saved · Queue position #4');
+    await screen.findByText('Sent · waiting for the agent to pick it up.');
     await waitFor(() => expect(value.drafts.getSnapshot().error).not.toBeNull());
     expect(value.writes.filter(write => write.command.command === 'preferences_patch' && write.command.params.entries.some(entry => entry.kind === 'delete_draft'))).toHaveLength(3);
     expect(value.prefs.drafts[0]?.submission_attempted).toBe(true); expect(value.calls).toHaveLength(1);
   });
   it('never retries cleanup on commit_uncertain and keeps the draft recoverable as uncertain', async () => {
     const value = await setup(); value.render(); await screen.findByRole('textbox'); const finish = value.gate();
-    fireEvent.change(editor(), { target: { value: 'Uncertain cleanup' } }); fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
+    fireEvent.change(editor(), { target: { value: 'Uncertain cleanup' } }); fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(value.calls).toHaveLength(1)); value.preferenceOutcome('uncertain'); await act(async () => { finish(); });
     await screen.findByRole('button', { name: 'Try saving your draft again' });
     expect(value.writes.filter(write => write.command.command === 'preferences_patch' && write.command.params.entries.some(entry => entry.kind === 'delete_draft'))).toHaveLength(1);
@@ -1209,9 +1194,10 @@ describe('owner input component and durable draft controller', () => {
   it('keeps one owner input while the follow-up box is open beside a retained answer', async () => {
     const value = await setup(), user = userEvent.setup(); value.outcome('uncertain');
     render(<ItemDetail drafts={value.drafts} store={value.store} itemId="2" later={false} onOpenItem={() => {}} />);
-    const send = await screen.findByRole('button', { name: 'Send “Keep the design”' });
+    fireEvent.click(await screen.findByRole('button', { name: /1Keep the design/ }));
+    const send = screen.getByRole('button', { name: 'Send “Keep the design”' });
     await waitFor(() => expect(send.hasAttribute('disabled')).toBe(false)); fireEvent.click(send);
-    await screen.findByRole('button', { name: 'Try sending again' });
+    await screen.findByRole('button', { name: 'Check delivery' });
     // Another answer to item 2 is queued: the follow-up box appears beside the retained (unconfirmed) answer.
     const item = value.session.items['2']!, queued = structuredClone(value.session.inputs['00000000-0000-4000-8000-000000000076']!);
     value.session.inputs[uuid(90)] = { ...queued, id: uuid(90), kind: 'answer', target: { topic_id: item.topic_id, item_id: '2' } };
@@ -1275,13 +1261,13 @@ describe('owner input component and durable draft controller', () => {
     expect(document.activeElement).toBe(editor());
     expect(shortcuts).toEqual([]);
     // Nothing goes out against a view that may be behind: neither the reply nor the option.
-    expect(screen.getByRole('button', { name: 'Send as a reply only' }).getAttribute('aria-disabled')).toBe('true');
-    expect(screen.getByRole('button', { name: 'Send “Keep the design” with your note' }).getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Send' }).getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('button', { name: /1Keep the design/ }).getAttribute('aria-disabled')).toBe('true');
     await user.keyboard('{Meta>}{Enter}{/Meta}');
-    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(value.calls).toHaveLength(0);
     await act(async () => { await value.store.refresh(); });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Send as a reply only' }).hasAttribute('aria-disabled')).toBe(false));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('aria-disabled')).toBe(false));
     expect(editor().value).toBe('de1');
   });
   it('keeps a focused option focusable while the view refreshes: aria-disabled, so a click, Enter or digit changes and sends nothing', async () => {
@@ -1289,6 +1275,7 @@ describe('owner input component and durable draft controller', () => {
     render(<KeyedRoot shortcuts={shortcuts}><AnswerSlot drafts={value.drafts} store={value.store} itemId="2" onEscape={() => {}} /></KeyedRoot>);
     await waitFor(() => expect(editor().disabled).toBe(false));
     const other = screen.getByRole('button', { name: /2Change the design/ }), recommended = screen.getByRole('button', { name: /1Keep the design/ });
+    await user.click(recommended);
     act(() => { other.focus(); });
     staleView(value.store);
     // A disabled button drops the focus it holds to <body>, where the next digit is a tree shortcut; an aria-disabled one keeps it.
@@ -1318,8 +1305,8 @@ describe('owner input component and durable draft controller', () => {
     await act(async () => { await value.store.refresh(); });
     await screen.findByRole('button', { name: 'Review this question' });
     expect(screen.getByText(changedText)).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Send as a reply only' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByRole('button', { name: 'Send “Keep the design” with your note' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: /1Keep the design/ }).hasAttribute('disabled')).toBe(true);
     expect(editor().value).toBe('Keep it');
     expect(value.calls).toHaveLength(0);
     // The box locks for the review, which drops focus to <body>: further keys stay the owner's, never tree shortcuts. A browser
@@ -1382,7 +1369,7 @@ describe('owner input component and durable draft controller', () => {
     expect(Object.values(value.drafts.getSnapshot().entries)[0]!.draft.text).toBe('Typed before clear');
     expect(screen.queryByText(changedText)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Review this question' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(value.calls).toHaveLength(1));
   });
   it('does not move a saving or uncertain entry to the new binding', async () => {
@@ -1390,7 +1377,7 @@ describe('owner input component and durable draft controller', () => {
     fireEvent.change(editor(), { target: { value: 'In flight' } });
     await waitFor(() => expect(value.prefs.drafts[0]?.text).toBe('In flight'));
     const release = value.gate(); value.outcome('uncertain');
-    fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(Object.values(value.drafts.getSnapshot().entries)[0]!.saving).toBe(true));
     const original = await rebindTo(value);
     expect(Object.values(value.drafts.getSnapshot().entries)[0]!.draft.binding_id).toBe(original);
@@ -1426,12 +1413,12 @@ describe('the detail explains messages that have not reached the agent', () => {
   const demoInput = (suffix: string) => `00000000-0000-4000-8000-0000000000${suffix}`;
   const cancels = (calls: OwnerMutationRequest[]) => calls.filter(call => call.command.command === 'input_cancel').map(call => call.command.params);
 
-  it('reads Waiting on agent in the header once the owner replied', async () => {
+  it('reads Queued in the header while the owner answer waits for the agent', async () => {
     const value = await setup(), reply = value.session.inputs[demoInput('76')]!;
     reply.target = { ...reply.target, item_id: '2' }; reply.kind = 'reply'; value.session.revision++;
     await act(async () => { await value.store.refresh(); });
     render(<ItemDetail drafts={value.drafts} store={value.store} itemId="2" later={false} onOpenItem={() => {}} />);
-    await waitFor(() => expect(document.querySelector('.detail-badge')?.textContent).toContain('Waiting on agent'));
+    await waitFor(() => expect(document.querySelector('.detail-badge')?.textContent).toContain('Queued'));
   });
   // Input 76 is item 4's queued "drop" request; item 4 is open.
   const queuedText = 'Drop request for item 4.\nPreserve this complete owner text.';
@@ -2119,6 +2106,8 @@ describe('the item detail reads like a chat', () => {
     const group = dock!.querySelector('.answer')!;
     const choices = group.querySelector<HTMLElement>('.answer-choices')!;
     expect(choices.closest('details')).toBeNull();
+    expect(options.every(option => option.getAttribute('aria-pressed') === 'false')).toBe(true);
+    fireEvent.click(options[0]!);
     const send = within(dock!).getByRole('button', { name: 'Send “Keep the design”' });
     expect(choices.contains(send)).toBe(false);
     expect(order(choices, send)).toBe(true);
@@ -2276,7 +2265,7 @@ describe('the item detail reads like a chat', () => {
       // Scrolled up to read: arrivals leave the view alone, a send does not.
       body.scrollTop = 100; fireEvent.scroll(body);
       fireEvent.change(screen.getByRole('textbox', { name: 'Reply in your own words' }), { target: { value: 'Next week' } });
-      fireEvent.click(screen.getByRole('button', { name: 'Send as a reply only' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
       await waitFor(() => expect(value.calls).toHaveLength(1));
       await waitFor(() => expect(body.scrollTop).toBe(900));
     } finally { height.mockRestore(); }
@@ -2344,5 +2333,142 @@ describe('the item detail reads like a chat', () => {
       expect(answer.classList.contains('answer-collapsed')).toBe(false);
       expect(box.style.height).toBe('40px');
     } finally { height.mockRestore(); client.mockRestore(); }
+  });
+});
+
+
+function OpenAnswerPeek() {
+  const peek = usePeek()!;
+  return <button type="button" onClick={event => peek.open({ ...route, item_id: '2' }, event.currentTarget)}>Open answer peek</button>;
+}
+
+const activeAnswers = (session: Session) => Object.values(session.inputs).filter(input => input?.kind === 'answer'
+  && input.target.item_id === '2' && !['cancelled', 'skipped'].includes(input.state));
+
+describe('J1 answer invariants', () => {
+  it.each(['dock Send', 'Details Send', 'peek Send', 'other-sessions Send', 'double press', 'Enter + click', 'command Enter', 'reconnect mid-send', 'session closing mid-send'])('never sends twice: %s', async trigger => {
+    const env = await setup();
+    if (trigger === 'dock Send' || trigger === 'other-sessions Send') {
+      const waiting = new WaitingStore(env.service, env.sessions); waitingStores.push(waiting); await waiting.start();
+      if (trigger === 'dock Send') {
+        render(<AnswerDock drafts={env.drafts} store={env.store} waiting={waiting} onHeight={() => {}} />);
+        fireEvent.click(await screen.findByRole('button', { name: /waiting on you/ }));
+      } else render(<OtherSessionQuestions drafts={env.drafts} waiting={waiting} currentSession="another session" onClose={() => {}} />);
+    } else if (trigger === 'peek Send') {
+      render(<PeekProvider lookup={() => env.store} drafts={env.drafts} onGoTo={() => {}}><OpenAnswerPeek /></PeekProvider>);
+      fireEvent.click(screen.getByRole('button', { name: 'Open answer peek' }));
+      await screen.findByRole('dialog', { name: /Peek:/ });
+    } else if (trigger === 'Details Send') {
+      render(<ItemDetail drafts={env.drafts} store={env.store} itemId="2" later={false} onOpenItem={() => {}} />);
+    } else env.render();
+    const box = await screen.findByRole('textbox', { name: 'Reply in your own words' });
+    fireEvent.change(box, { target: { value: 'Keep these exact words' } });
+    const send = await screen.findByRole('button', { name: 'Send' });
+    await waitFor(() => expect(send.hasAttribute('disabled')).toBe(false));
+    const release = env.gate();
+    if (trigger === 'command Enter' || trigger === 'Enter + click') {
+      box.focus(); fireEvent.keyDown(box, { key: 'Enter', metaKey: true });
+    } else fireEvent.click(send);
+    fireEvent.click(send); fireEvent.keyDown(box, { key: 'Enter', metaKey: true });
+    await waitFor(() => expect(env.calls).toHaveLength(1));
+    const saved = structuredClone(env.prefs.drafts[0]!);
+    if (trigger === 'reconnect mid-send') { env.unavailable(); await act(async () => { await env.store.refresh(); }); }
+    if (trigger === 'session closing mid-send') { env.session.state = 'closed'; env.session.revision++; await act(async () => { await env.store.refresh(); }); }
+    // A second mounted view shares the lock, even when its old button is pressed.
+    const other = render(<AnswerSlot drafts={env.drafts} store={env.store} itemId="2" onEscape={() => {}} />);
+    const secondBox = other.container.querySelector('textarea')!;
+    fireEvent.keyDown(secondBox, { key: 'Enter', metaKey: true });
+    other.container.querySelectorAll('[data-answer-send]').forEach(button => fireEvent.click(button));
+    await act(async () => { release(); });
+    await waitFor(() => expect(env.drafts.find(route, '2', 'answer')?.receipt).not.toBeNull());
+    expect(env.calls).toHaveLength(1); expect(new Set(env.calls.map(call => call.command.op_id)).size).toBe(1);
+    expect(env.calls[0]!.command).toMatchObject({ command: 'input_submit', params: { text: 'Keep these exact words', selected_option_id: null } });
+    recordSubmitted(env.session, saved, 'queued');
+    expect(activeAnswers(env.session)).toHaveLength(1);
+  });
+
+  it.each(['confirmed failure', 'unknown result'])('recovers a %s without creating a second answer', async result => {
+    const env = await setup(); env.render();
+    fireEvent.change(await screen.findByRole('textbox'), { target: { value: 'Exact recovery words' } });
+    env.outcome(result === 'confirmed failure' ? 'error' : 'uncertain');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    const label = result === 'confirmed failure' ? 'Try sending again' : 'Check delivery';
+    const retry = await screen.findByRole('button', { name: label });
+    const saved = structuredClone(env.prefs.drafts[0]!), original = structuredClone(env.calls[0]);
+    env.outcome('ok');
+    if (result === 'unknown result') recordSubmitted(env.session, saved, 'queued');
+    fireEvent.click(retry); fireEvent.click(retry);
+    await waitFor(() => expect(env.prefs.drafts).toEqual([]));
+    expect(env.calls).toHaveLength(result === 'confirmed failure' ? 2 : 1);
+    expect(new Set(env.calls.map(call => call.command.op_id)).size).toBe(1);
+    expect(env.calls.every(call => JSON.stringify(call) === JSON.stringify(original))).toBe(true);
+    if (result === 'confirmed failure') recordSubmitted(env.session, saved, 'queued');
+    expect(activeAnswers(env.session)).toHaveLength(1);
+    expect(env.drafts.find(route, '2', 'answer')?.sent?.text).toBe('Exact recovery words');
+  });
+
+  it('Undo then Send cancels the old answer before creating one new active answer', async () => {
+    const saved = attemptedDraft(), env = await setup([saved]); recordSubmitted(env.session, saved, 'queued');
+    await env.store.refresh(); await env.drafts.reconcile(immutable(env.session)); env.render();
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
+    const box = await screen.findByRole('textbox'); expect((box as HTMLTextAreaElement).value).toBe(saved.text);
+    const send = screen.getByRole('button', { name: 'Send “Change the design” with your note' });
+    await waitFor(() => expect(send.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(send); fireEvent.click(send);
+    await waitFor(() => expect(env.calls.map(call => call.command.command)).toEqual(['input_cancel', 'input_submit']));
+    const command = env.calls[1]!.command;
+    expect(command.op_id).not.toBe(saved.op_id);
+    expect(command).toMatchObject({ command: 'input_submit', params: { text: saved.text, selected_option_id: 'no' } });
+    const replacement = { ...saved, op_id: command.op_id };
+    recordSubmitted(env.session, replacement, 'queued');
+    expect(activeAnswers(env.session)).toHaveLength(1);
+    expect(env.events.indexOf('cancelled')).toBeLessThan(env.events.indexOf(`draft:${saved.text}`));
+  });
+
+  it.each(['auto-advance', '[', ']', 'folding', 'dock to Details', 'withdrawn question', 'session closing', 'restart', 'own words to option'])('never loses text: %s', async trigger => {
+    const env = await setup([], session => {
+      session.items['4']!.status = 'waiting_on_me';
+      session.items['4']!.waiting_since = session.items['2']!.waiting_since;
+    });
+    const waiting = new WaitingStore(env.service, env.sessions); waitingStores.push(waiting); await waiting.start();
+    const view = render(<AnswerDock drafts={env.drafts} store={env.store} waiting={waiting} onHeight={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: /waiting on you/ }));
+    const box = await screen.findByRole('textbox', { name: 'Reply in your own words' });
+    fireEvent.change(box, { target: { value: 'Words survive every transition\nExactly as written  ' } });
+    await waitFor(() => expect(env.prefs.drafts.some(draft => draft.text === 'Words survive every transition\nExactly as written  ')).toBe(true));
+    if (trigger === 'auto-advance') {
+      fireEvent.change(screen.getByRole('combobox', { name: 'Question pager' }), { target: { value: '4:1' } });
+      await waitFor(() => expect(document.querySelector('[data-owner-input="4"] textarea')).not.toBeNull());
+      fireEvent.change(await screen.findByRole('textbox', { name: 'Reply in your own words' }), { target: { value: 'Answer the other question' } });
+      await waitFor(() => expect(env.drafts.find(route, '4', 'answer')?.draft.text).toBe('Answer the other question'));
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(env.calls).toHaveLength(1));
+      await waitFor(() => expect((screen.getByRole('combobox', { name: 'Question pager' }) as HTMLSelectElement).value).toBe('2:1'));
+    } else if (trigger === '[' || trigger === ']') {
+      if (trigger === '[') fireEvent.change(screen.getByRole('combobox', { name: 'Question pager' }), { target: { value: '4:1' } });
+      fireEvent.keyDown(document.body, { key: trigger });
+      if (trigger === ']') fireEvent.keyDown(document.body, { key: '[' });
+    } else if (trigger === 'folding') {
+      fireEvent.click(screen.getByRole('button', { name: 'Fold the dock' }));
+      expect(screen.queryByRole('textbox')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: /waiting on you/ }));
+    } else if (trigger === 'dock to Details') {
+      view.rerender(<ItemDetail drafts={env.drafts} store={env.store} itemId="2" later={false} onOpenItem={() => {}} />);
+    } else if (trigger === 'withdrawn question' || trigger === 'session closing') {
+      if (trigger === 'withdrawn question') env.session.items['2']!.status = 'open';
+      else env.session.state = 'closed';
+      env.session.revision++; await act(async () => { await env.store.refresh(); });
+      fireEvent.click(screen.getByRole('button', { name: /Draft kept on/ }));
+      expect((screen.getByRole('textbox', { name: 'Kept words' }) as HTMLTextAreaElement).value).toBe('Words survive every transition\nExactly as written  ');
+    } else if (trigger === 'restart') {
+      const restored = await env.restart(); view.rerender(<AnswerSlot drafts={restored} store={env.store} itemId="2" onEscape={() => {}} />);
+    } else if (trigger === 'own words to option') {
+      fireEvent.click(screen.getByRole('button', { name: /1Keep the design/ }));
+      expect(screen.getByRole('button', { name: /1Keep the design/ }).getAttribute('aria-pressed')).toBe('true');
+      expect(screen.getByRole('button', { name: 'Send “Keep the design” with your note' })).toBeTruthy();
+    }
+    expect(env.drafts.find(route, '2', 'answer')?.draft.text).toBe('Words survive every transition\nExactly as written  ');
+    if (trigger !== 'withdrawn question' && trigger !== 'session closing') expect((screen.getByRole('textbox', { name: 'Reply in your own words' }) as HTMLTextAreaElement).value).toBe('Words survive every transition\nExactly as written  ');
+    if (trigger !== 'auto-advance') expect(env.calls).toHaveLength(0);
   });
 });
