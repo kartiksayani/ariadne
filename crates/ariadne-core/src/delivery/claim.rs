@@ -35,128 +35,51 @@ impl DeliveryService<'_> {
             "claim",
             &serde_json::json!({"binding_id":request.binding_id,"generation":request.generation}),
         )?;
+        let actor = ReceiptActorScope::Adapter {
+            binding_id: request.binding_id.clone(),
+        };
+        // Lock-free pre-check. Every connected conversation polls claim about
+        // once a second, and most polls find nothing to send. Taking the session
+        // lock for each of them starved agent reads into `store_busy`.
+        //
+        // - `Store::peek` returns the latest committed session without the lock:
+        //   commits are atomic renames, so its open sees exactly one committed
+        //   version, the newest at that instant (see store `session/peek.rs`).
+        // - The same `select` the locked path runs decides on that snapshot.
+        //   "Nothing to send" and every refusal are pure functions of the
+        //   snapshot, so they are answered at once, ordered at the open: a
+        //   write that lands after it is seen by the very next poll. Nothing is
+        //   lost, and no input waits longer than one poll.
+        // - A claim writes only under the lock. When the snapshot may hold work
+        //   (an input to send, or a saved receipt for this request id to
+        //   replay), the locked transaction below rereads and decides again;
+        //   the snapshot never authorizes a write. So each input is still
+        //   claimed exactly once.
+        // - Any peek failure falls through to the locked path, which reports it
+        //   exactly as before.
+        if let Ok(snapshot) = store.peek(context.session().session_id()) {
+            let replay = snapshot
+                .operation_receipts
+                .0
+                .get(&request.request_id)
+                .is_some_and(|bucket| bucket.iter().any(|entry| entry.actor_scope == actor));
+            if !replay {
+                match select(&snapshot, context, request) {
+                    Err(ClaimFailure::Empty) => return Ok(None),
+                    Err(ClaimFailure::Core(error)) => return Err(error.into()),
+                    Ok(_) => {}
+                }
+            }
+        }
+        #[cfg(test)]
+        tests::before_lock();
         let saved = store.transact(
             context.session().session_id(),
-            &ReceiptActorScope::Adapter {
-                binding_id: request.binding_id.clone(),
-            },
+            &actor,
             &request.request_id,
             &normalized,
             |session| {
-                let binding = session.bindings.0.get(&request.binding_id).ok_or_else(|| {
-                    core(CoreErrorCode::BindingMismatch, "Claim binding is missing")
-                })?;
-                if session.active_binding_id.as_ref() != Some(&request.binding_id) {
-                    return Err(core(
-                        CoreErrorCode::BindingMismatch,
-                        "Claim binding is not selected",
-                    )
-                    .into());
-                }
-                if &binding.generation != context.generation()
-                    || binding.generation != request.generation
-                {
-                    return Err(
-                        core(CoreErrorCode::StaleGeneration, "Claim generation changed").into(),
-                    );
-                }
-                if session.state != SessionState::Active || session.archived_at.is_some() {
-                    return Err(barrier(
-                        session,
-                        &request.binding_id,
-                        CoreErrorCode::InvalidTransition,
-                        if session.archived_at.is_some() {
-                            "The owner archived this session; restore it, then reopen it to resume sending"
-                        } else {
-                            "The owner closed this session; reopening it resumes dispatch"
-                        },
-                        BarrierReason::SessionClosed,
-                    )
-                    .into());
-                }
-                if binding.connection_state != ConnectionState::Connected {
-                    return Err(barrier(
-                        session,
-                        &request.binding_id,
-                        CoreErrorCode::HostUnreachable,
-                        "Claim requires a verified connected binding",
-                        BarrierReason::Disconnected,
-                    )
-                    .into());
-                }
-                if binding.dispatch_state != DispatchState::Enabled
-                    || binding.owner_paused
-                    || binding.pause_reason.is_some()
-                {
-                    return Err(barrier(
-                        session,
-                        &request.binding_id,
-                        CoreErrorCode::InvalidTransition,
-                        "Claim is blocked by owner pause or recovery",
-                        if binding.owner_paused {
-                            BarrierReason::OwnerPaused
-                        } else {
-                            BarrierReason::RecoveryRequired
-                        },
-                    )
-                    .into());
-                }
-                if session.inputs.0.values().any(|i| {
-                    i.binding_id == request.binding_id && i.state == InputState::NeedsAttention
-                }) {
-                    return Err(barrier(
-                        session,
-                        &request.binding_id,
-                        CoreErrorCode::InvalidTransition,
-                        "An earlier input requires recovery",
-                        BarrierReason::RecoveryRequired,
-                    )
-                    .into());
-                }
-                if binding.active_input_id.is_some()
-                    || session.inputs.0.values().any(|i| {
-                        i.binding_id == request.binding_id && i.state == InputState::InFlight
-                    })
-                {
-                    return Err(ClaimFailure::Empty);
-                }
-                let Some(input) = session
-                    .inputs
-                    .0
-                    .values()
-                    .filter(|i| {
-                        i.binding_id == request.binding_id
-                            && i.state == InputState::Queued
-                            && !super::held_for_review(session, i)
-                            // Archive cancels its topic's inputs; never deliver
-                            // one for an archived topic regardless.
-                            && session
-                                .topics
-                                .0
-                                .get(&i.target.topic_id)
-                                .is_none_or(|topic| topic.archived_at.is_none())
-                            // A result repair settles already completed work;
-                            // it does not send the removed work to execute again.
-                            && (i.kind == InputKind::Removed || queued_result_repair(i) || (
-                                session.topics.0.get(&i.target.topic_id).is_none_or(|topic|
-                                    !ariadne_domain::visibility::topic_is_removed(session, topic))
-                                && i.target.item_id.as_ref().and_then(|id| session.items.0.get(id)).is_none_or(|item|
-                                    !ariadne_domain::visibility::item_is_removed(session, item))))
-                    })
-                    .min_by_key(|i| i.seq)
-                    .cloned()
-                else {
-                    return Err(ClaimFailure::Empty);
-                };
-                if input.active_attempt_id.is_some()
-                    || input.attempts.iter().any(|a| a.sealed_at.is_none())
-                {
-                    return Err(core(
-                        CoreErrorCode::InvalidTransition,
-                        "Queued input retains an unresolved prepared attempt",
-                    )
-                    .into());
-                }
+                let input = select(session, context, request)?;
                 let repair = queue_resolution(&input)
                     .map(|entry| {
                         let selected = input.attempts.last().expect("matched retained attempt");
@@ -302,6 +225,132 @@ impl DeliveryService<'_> {
     }
 }
 
+/// The claim decision on one snapshot: a guard refusal, nothing to send, or
+/// the next input to send. Pure, so the lock-free pre-check and the locked
+/// transaction decide identically.
+fn select(
+    session: &Session,
+    context: &ValidatedDispatchContext,
+    request: &ClaimRequest,
+) -> Result<Input, ClaimFailure> {
+    let binding = session
+        .bindings
+        .0
+        .get(&request.binding_id)
+        .ok_or_else(|| core(CoreErrorCode::BindingMismatch, "Claim binding is missing"))?;
+    if session.active_binding_id.as_ref() != Some(&request.binding_id) {
+        return Err(core(
+            CoreErrorCode::BindingMismatch,
+            "Claim binding is not selected",
+        )
+        .into());
+    }
+    if &binding.generation != context.generation() || binding.generation != request.generation {
+        return Err(core(CoreErrorCode::StaleGeneration, "Claim generation changed").into());
+    }
+    if session.state != SessionState::Active || session.archived_at.is_some() {
+        return Err(barrier(
+            session,
+            &request.binding_id,
+            CoreErrorCode::InvalidTransition,
+            if session.archived_at.is_some() {
+                "The owner archived this session; restore it, then reopen it to resume sending"
+            } else {
+                "The owner closed this session; reopening it resumes dispatch"
+            },
+            BarrierReason::SessionClosed,
+        )
+        .into());
+    }
+    if binding.connection_state != ConnectionState::Connected {
+        return Err(barrier(
+            session,
+            &request.binding_id,
+            CoreErrorCode::HostUnreachable,
+            "Claim requires a verified connected binding",
+            BarrierReason::Disconnected,
+        )
+        .into());
+    }
+    if binding.dispatch_state != DispatchState::Enabled
+        || binding.owner_paused
+        || binding.pause_reason.is_some()
+    {
+        return Err(barrier(
+            session,
+            &request.binding_id,
+            CoreErrorCode::InvalidTransition,
+            "Claim is blocked by owner pause or recovery",
+            if binding.owner_paused {
+                BarrierReason::OwnerPaused
+            } else {
+                BarrierReason::RecoveryRequired
+            },
+        )
+        .into());
+    }
+    if session
+        .inputs
+        .0
+        .values()
+        .any(|i| i.binding_id == request.binding_id && i.state == InputState::NeedsAttention)
+    {
+        return Err(barrier(
+            session,
+            &request.binding_id,
+            CoreErrorCode::InvalidTransition,
+            "An earlier input requires recovery",
+            BarrierReason::RecoveryRequired,
+        )
+        .into());
+    }
+    if binding.active_input_id.is_some()
+        || session
+            .inputs
+            .0
+            .values()
+            .any(|i| i.binding_id == request.binding_id && i.state == InputState::InFlight)
+    {
+        return Err(ClaimFailure::Empty);
+    }
+    let Some(input) = session
+        .inputs
+        .0
+        .values()
+        .filter(|i| {
+            i.binding_id == request.binding_id
+                && i.state == InputState::Queued
+                && !super::held_for_review(session, i)
+                // Archive cancels its topic's inputs; never deliver
+                // one for an archived topic regardless.
+                && session
+                    .topics
+                    .0
+                    .get(&i.target.topic_id)
+                    .is_none_or(|topic| topic.archived_at.is_none())
+                // A result repair settles already completed work;
+                // it does not send the removed work to execute again.
+                && (i.kind == InputKind::Removed || queued_result_repair(i) || (
+                    session.topics.0.get(&i.target.topic_id).is_none_or(|topic|
+                        !ariadne_domain::visibility::topic_is_removed(session, topic))
+                    && i.target.item_id.as_ref().and_then(|id| session.items.0.get(id)).is_none_or(|item|
+                        !ariadne_domain::visibility::item_is_removed(session, item))))
+        })
+        .min_by_key(|i| i.seq)
+        .cloned()
+    else {
+        return Err(ClaimFailure::Empty);
+    };
+    if input.active_attempt_id.is_some() || input.attempts.iter().any(|a| a.sealed_at.is_none()) {
+        return Err(core(
+            CoreErrorCode::InvalidTransition,
+            "Queued input retains an unresolved prepared attempt",
+        )
+        .into());
+    }
+    Ok(input)
+}
+
 fn queue_resolution(input: &Input) -> Option<&ResolutionHistoryEntry> {
     input.resolution_history.iter().rev().find(|entry| {
         input
@@ -370,3 +419,7 @@ fn barrier(
     }));
     e
 }
+
+#[cfg(test)]
+#[path = "tests/claim_precheck.rs"]
+mod tests;

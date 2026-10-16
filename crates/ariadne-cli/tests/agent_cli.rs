@@ -484,6 +484,67 @@ fn topic_delete_uses_topic_guard_and_read_reports_removed_topics_and_items() {
         .unwrap()
         .contains("Wrong topic contents"));
 }
+/// Holds the session lock (as a long write would) for `hold`, then releases it
+/// without writing.
+fn hold_session_lock(setup: &Setup, hold: std::time::Duration) -> std::thread::JoinHandle<()> {
+    let store = setup.store();
+    let (locked_tx, locked_rx) = std::sync::mpsc::channel();
+    let holder = std::thread::spawn(move || {
+        let _ = store.transact(
+            &id(2),
+            &ReceiptActorScope::Owner {},
+            &id(88_888),
+            &json!({"hold": true}),
+            |_| {
+                locked_tx.send(()).unwrap();
+                std::thread::sleep(hold);
+                Err::<SavedReceiptData, _>(())
+            },
+        );
+    });
+    locked_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    holder
+}
+
+#[test]
+fn reads_ride_out_a_busy_session_but_writes_report_busy_at_once() {
+    let setup = Setup::new(&seed());
+    let reads: [(&[&str], Vec<&str>); 3] = [
+        (&["read"], vec!["--view", "topics", "--json"]),
+        (&["read"], vec!["--view", "items", "--json"]),
+        (&["item", "messages"], vec!["--item", "1", "--json"]),
+    ];
+    for (method, flags) in reads {
+        // Longer than the store's 2 s lock deadline, inside the read retry.
+        let holder = hold_session_lock(&setup, std::time::Duration::from_millis(2_600));
+        let output = setup.agent(method, &flags, None);
+        holder.join().unwrap();
+        envelope(&output, 0);
+    }
+    let holder = hold_session_lock(&setup, std::time::Duration::from_millis(2_600));
+    let dry_run = setup.agent(
+        &["apply"],
+        &["--json-stdin", "--dry-run", "--json"],
+        Some(&serde_json::to_vec(&request(901)).unwrap()),
+    );
+    holder.join().unwrap();
+    assert_eq!(envelope(&dry_run, 0)["data"]["dry_run"], true);
+
+    let before = setup.bytes();
+    let holder = hold_session_lock(&setup, std::time::Duration::from_millis(3_000));
+    let apply = setup.apply(&request(902));
+    holder.join().unwrap();
+    let error = &envelope(&apply, 4)["error"];
+    assert_eq!(error["code"], "store_busy");
+    assert_eq!(error["retryable"], true);
+    assert_eq!(error["hint"], "Ariadne is busy for a moment; try again.");
+    assert_eq!(setup.bytes(), before, "a busy apply saved nothing");
+    // The identical request goes through once the store is free.
+    envelope(&setup.apply(&request(902)), 0);
+}
+
 #[test]
 fn query_text_and_single_json_envelope_keep_complete_content_and_do_not_write_snapshots() {
     let setup = Setup::new(&seed());
@@ -1187,16 +1248,17 @@ fn real_process_bounds_long_native_errors_in_json_and_text_without_claiming_no_e
             assert_eq!(error.code, CoreErrorCode::IoError);
             assert!(!error.retryable);
             assert!(error.message.len() <= 4096);
-            assert!(error.hint.contains("original operation/event IDs"));
-            assert!(error.hint.contains("no data was repaired"));
+            assert!(error
+                .hint
+                .contains("couldn't read or write its data folder"));
+            assert!(!error.hint.contains("saved nothing"));
             assert!(output.stdout.len() < 8192);
         } else {
             assert_eq!(output.status.code(), Some(4));
             assert!(output.stdout.is_empty());
             let text = String::from_utf8(output.stderr).unwrap();
             assert!(text.contains("IoError"));
-            assert!(text.contains("original operation/event IDs"));
-            assert!(text.contains("no data was repaired"));
+            assert!(text.contains("couldn't read or write its data folder"));
             assert!(text.len() < 8192);
         }
     }

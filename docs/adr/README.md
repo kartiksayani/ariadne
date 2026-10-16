@@ -128,3 +128,7 @@ the newest preference receipts.
 
 [ADR-0100](ADR-0100-downgrade-compatible-recovery-preferences.md) keeps alpha.14
 preference files readable while persisting unsent-message recovery completion.
+
+[ADR-0101](ADR-0101-lock-free-claim-check-and-busy-read-retry.md) answers idle
+claim polls from a lock-free committed snapshot, retries busy reads for about 3 s,
+and gives each local error code one plain hint with `store_busy` retryable.
