@@ -13,6 +13,12 @@ const failure = (code: CoreErrorCode, message = 'The session revision changed be
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('what a failure says to the owner', () => {
+  it('keeps retryable project folder failures distinct from an agent outage', () => {
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const folder = failure('host_unreachable', 'The selected project folder is missing or inaccessible; restore access to the project folder or select it again before reconnecting');
+    expect(plainFailure(folder)).toBe('The project folder is missing or inaccessible. Restore access or select it again, then try again.');
+    expect(plainFailure(failure('host_unreachable'))).toBe('Ariadne couldn’t reach the agent. Check that it is running, then try again.');
+  });
   it.each(codes)('says %s in one plain sentence, never in core’s own words', code => {
     vi.spyOn(console, 'debug').mockImplementation(() => {});
     const text = plainFailure(failure(code));

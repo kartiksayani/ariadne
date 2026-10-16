@@ -22,7 +22,7 @@ describe('private read-only SDK announcement producer', () => {
     expect(call.argv.slice(0,4)).toEqual([descriptor.helperPath,'bridge','announce','--request-id']);
     expect(call.argv[4]).toMatch(/^[0-9a-f-]{36}$/);
     expect(call.argv[5]).toBe('--json-stdin');
-    expect(call.options.timeoutMs).toBe(5000);
+    expect(call.options.timeoutMs).toBe(8000);
     expect(JSON.parse(call.options.stdin)).toEqual({adapter_id:'claude_code_mod',external_session_id:binding.external_session_id,
       cwd:'/project/original',host_version:'2.1.289',plugin:h.$.plugin,descriptor,binding_scope:null});
     expect(h.prompts).toEqual([]);

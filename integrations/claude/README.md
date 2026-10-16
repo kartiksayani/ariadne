@@ -62,8 +62,8 @@ the same IDs on the next poll. A claim the app refused before saving it (paused,
 closed, needs attention, or no desktop lease after only refusals) drops its
 request ID; Core replays a saved claim before it checks those barriers. A new
 claim waits for those saves; the app's own
-refusals (paused, closed, needs attention) decide when dispatch resumes. Each such
-state prints one plain notice when it starts. A removed session or replaced
+refusals (paused, closed, needs attention) decide when dispatch resumes. These
+states produce notices under the shared background rules below. A removed session or replaced
 connection stops the loop with one notice. Session end is reported best effort
 without stopping the external host.
 
@@ -97,6 +97,39 @@ state against saved receipts and the app before starting again. Unchanged timeou
 retries keep their original request; live conversations elsewhere stay protected.
 The owner gets plain instructions, while exact operation IDs remain in the
 plugin store's bounded `connect-log` diagnostics. See [ADR-0096](../../docs/adr/ADR-0096-recover-stale-claude-connect.md).
+
+One conversation health record collects announce, helper, claim, report, automatic
+reconnect and qualification outcomes. Producers drop out after three of their own
+call intervals without a call. The current condition is the most important live
+outcome: terminal, installation failure, held state, transient failure, then healthy.
+Among equal priorities the line already showing stays while its producer still
+fails; otherwise the most recent failed call wins, with a fixed producer order for ties.
+Terminal, installation and owner-needed held advice (paused, closed, recovery,
+conflicting or removed sessions, uncertain saves) speaks immediately when it becomes
+current; identical consecutive lines are suppressed. Generic held codes, such as an
+unreadable reply, wait like retries. Missing or unusable helpers, installed
+resources and version mismatches share one installation repair sentence. Structured
+spawn codes distinguish these from temporary process failures; raw text is never shown.
+A helper stopped before it wrote anything counts as a temporary timeout.
+
+Transient failures share one retry sentence. They and generic held advice speak after
+two minutes of continuous unhealthy outcomes, even when codes change or urgent advice
+intervenes, and are spaced at least two minutes apart. A retry line never replaces
+held, installation or terminal advice until the producer that printed it recovers or
+expires. Kinds come from error codes only, never from `retryable` or the hint. Transient producers need three
+consecutive successful calls to recover; other conditions clear on their next success.
+An empty report flush is successful. Only every live producer being healthy resets
+the continuous failure clock and last line. New conversations and `/clear` reset
+all evidence and spacing. Owner commands answer directly without changing health.
+Project-folder access failures retain retry authority and ask the owner to restore access.
+Background diagnostics contain timestamps and fixed codes only, recording health
+starts, visible meaning changes and recovery in a separate 20-record `hook-log`.
+Its pending write queue is also bounded and never holds up polling or owner
+`connect-log` receipts. Automatic reconnects record only their first and final
+outcomes in `hook-log`; only owner-started operations write `connect-log` receipts.
+The diagnostic-code table is checked against the generated Core error enum.
+Helper calls allow eight seconds for the helper's five-second
+control timeout to return its typed error. Owner commands still answer immediately.
 
 Real installer rendering, owner CLI commands, durable core/report composition,
 trusted native Claude qualification, discovery announcements, and live host

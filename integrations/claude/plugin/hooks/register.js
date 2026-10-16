@@ -1,7 +1,7 @@
 import installed from './installed.js';
 import { BUSY, claimLoop } from './claims.js';
 import { forget, qualify, recall, remember, setup } from './setup.js';
-import { bounded, descriptorValid, ModError, plainFailure, uuid } from './contracts.js';
+import { BACKGROUND_RETRY, bounded, descriptorValid, failureCode, ModError, conversationHealth, backgroundOutcome, plainFailure, uuid } from './contracts.js';
 import { announcements } from './discovery.js';
 import { prCommentsPrompt } from './pr-comments.js';
 
@@ -14,8 +14,9 @@ function pluginName($) {
 function pluginRoot($) {
   try { return $.plugin.root; } catch { return undefined; }
 }
-function host($) {
+function host($, background = true) {
   return {
+    background,
     get plugin() { return {name:pluginName($),root:pluginRoot($)}; },
     session:{id:() => $.session.id(),cwd:() => $.session.cwd(),version:() => $.session.version()},
     process:{run:(argv,options) => $.process.run(argv,options)},
@@ -25,19 +26,33 @@ function host($) {
   };
 }
 
+// Async calls retain their conversation's writer. Reset retires that writer,
+// so a late result can never repopulate the next conversation's health.
+function healthFor(state) {
+  const health = state.health;
+  return {
+    record:($,producer,outcome) => {if (state.health === health) health.record($,producer,outcome);},
+    delete:($,producer) => {if (state.health === health) health.delete($,producer);},
+  };
+}
+function resetHealth(state) {
+  state.health.reset();
+  state.health = conversationHealth();
+}
+
 // Owner-facing text: plain words, no IDs or internal state names.
 const TEXT = Object.freeze({
   ended:'This Claude conversation has ended; Ariadne did not change its connection.',
   inProgress:'Ariadne is already connecting or disconnecting this conversation. Try again in a moment.',
   notConnected:'This conversation is not connected to Ariadne.',
   reconnected:'Ariadne: this conversation is connected to its Ariadne session again.',
-  retrying:'Ariadne: could not reconnect this conversation to its Ariadne session yet. It will keep trying. Run /ariadne-connect to try again now.',
   elsewhere:'This Ariadne session is connected to another conversation.',
   closed:'Ariadne: the Ariadne session for this conversation is closed. It will reconnect if you reopen it in the app.',
   gone:'Ariadne: the Ariadne session for this conversation no longer exists. Run /ariadne-connect to connect again.',
   unreachable:"Ariadne can't be reached, so this session's work isn't being recorded. Open Ariadne and it will reconnect.",
   failure:'Ariadne could not finish connecting this conversation. Run /ariadne-connect again; if it keeps happening, update Ariadne and its Claude plugin.',
   connectAgain:'Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.',
+  heartbeatRetry:BACKGROUND_RETRY,
 });
 // Codes with which the app refuses an announcement for a scope it no longer has.
 const STALE_SCOPE = ['stale_generation','binding_mismatch','not_found','invalid_argument'];
@@ -56,50 +71,64 @@ export function createRegister(descriptor, publish) {
 
 // Only our bounded plain sentences are displayed; raw rejected host
 // promises, helper stderr and owner payloads are never reflected.
-function failureText(state, error) {
+function failureText(state, error, connect = false) {
   if (state.loopBinding && error instanceof ModError && error.code === 'host_unreachable' && error.plain === plainFailure('host_unreachable')) return TEXT.unreachable;
-  return (error instanceof ModError ? error.plain : undefined) ?? TEXT.failure;
+  if (!connect && failureCode(error) === 'incompatible_adapter') return plainFailure('incompatible_adapter');
+  return (error instanceof ModError ? error.plain : undefined) ?? (connect ? TEXT.failure : TEXT.heartbeatRetry);
 }
-// Printed once per outage: the 'helper' slot clears when a helper call works again.
-function failure(state, $, error) {
-  notice(state,host($),'helper',failureText(state,error));
+function failure(state, $, error, health) {
+  health.record(host($),'helper',backgroundOutcome(error,failureText(state,error)));
 }
-// A command always answers the owner, even when its log line was already shown.
-async function checked(state, $, action) {
-  try {
-    const result = await action();
-    state.notices.delete('helper');
-    return result;
-  } catch (error) { failure(state,$,error); return {text:`That did not complete. ${failureText(state,error)}`}; }
+// Owner commands answer directly and never change background health.
+async function checked(state, $, action, connect = false) {
+  try { return await action(); }
+  catch (error) { return {text:`That did not complete. ${failureText(state,error,connect)}`}; }
 }
-// One owner notice per state: a slot prints again only after its text changes
-// or the state clears.
-function notice(state, h, slot, text) {
-  if (state.notices.get(slot) === text) return;
-  state.notices.set(slot,text);
-  h.ui.log(text);
+function notice(health, h, error, text, terminal = false) {
+  health.record(h,'auto',{kind:terminal ? 'terminal' : 'held',code:failureCode(error),text});
+}
+function announcementGood(health, h) {
+  health.record(h,'announce',{kind:'ok'});
 }
 async function announce(state, h) {
+  const health = healthFor(state);
   try {
-    await state.discovery.announce(h,state.announcementScope);
-    for (const slot of ['heartbeat','helper']) state.notices.delete(slot);
+    if (await state.discovery.announce(h,state.announcementScope)) {
+      announcementGood(health,h);
+    }
   } catch (error) {
     let last = error;
     // A scope the app no longer has still leaves this conversation discoverable.
     if (state.announcementScope && STALE_SCOPE.includes(error?.code)) {
-      try { await state.discovery.announce(h,null); for (const slot of ['heartbeat','helper']) state.notices.delete(slot); return; }
+      try { if (await state.discovery.announce(h,null)) announcementGood(health,h); return; }
       catch (fallback) { last = fallback; }
     }
-    // The closed-app outage shares one slot with hook failures, so it is told once.
-    if (last instanceof ModError && last.code === 'host_unreachable') notice(state,h,'helper',failureText(state,last));
-    else notice(state,h,'heartbeat',failureText(state,last));
+    health.record(h,'announce',backgroundOutcome(last,failureText(state,last)));
   }
+}
+// Startup and an owner command may overlap a heartbeat. Share qualification,
+// and retry a rejected startup check instead of leaving intake silently off.
+function qualifyConnection(state, $) {
+  state.qualifying ??= qualify(host($),state.descriptor).then(() => {
+    state.qualified = true;
+    startPolling(state,$);
+  }).finally(() => { state.qualifying = null; });
+  return state.qualifying;
 }
 async function heartbeat(state, $) {
   if (state.sessionEnded) return;
   await follow(state,$);
   if (state.sessionEnded || state.ownerTransition) return;
+  const health = healthFor(state);
   await announce(state,host($));
+  if (!state.qualified) {
+    try {
+      await qualifyConnection(state,$);
+      health.record(host($),'qualification',{kind:'ok'});
+    } catch (error) {
+      health.record(host($),'qualification',backgroundOutcome(error,failureText(state,error)));
+    }
+  }
   if (state.target && !state.loop) await autoConnect(state,$);
   else await drainRetired(state,host($));
 }
@@ -112,7 +141,7 @@ async function tick(state, $) {
   if (state.note) await deliverNote(state,$);
 }
 function pollLoop(state, $) {
-  void tick(state,$);
+  return tick(state,$);
 }
 function startPolling(state, $) {
   if (!state.sessionEnded) state.timer ??= $.clock.every(1000,() => pollLoop(state,$));
@@ -139,7 +168,7 @@ async function transition(state, $, action, recover = false) {
   let reachable = false;
   try {
     if (state.following) await state.following;
-    const h = host($);
+    const h = host($,false);
     // Finish what is in flight first: save pending reports and retry an
     // unconfirmed claim with its original ID. Refuse only if that fails.
     for (const loop of loops(state)) await loop.settle(h);
@@ -189,12 +218,12 @@ function bindingGone(state, h, loop) {
   state.announcementScope = null;
   state.target = null;
   state.note = null;
-  state.owner?.forget();
+  state.owner?.forget(h);
   void forget(h,state.claudeSessionId);
   if (!state.ownerTransition) void announce(state,h);
 }
 function createLoop(state, binding) {
-  const loop = claimLoop(state.descriptor.helperPath,binding,{onEnded:h => bindingGone(state,h,loop)});
+  const loop = claimLoop(state.descriptor.helperPath,binding,{onEnded:h => bindingGone(state,h,loop),health:healthFor(state)});
   return loop;
 }
 // Stops the loops of a conversation that is no longer current. Each reports
@@ -206,14 +235,17 @@ async function retire(state, h) {
   state.pending = null;
   state.announcementScope = null;
   state.note = null;
-  state.owner?.forget();
+  state.owner?.forget(h);
   state.retired.push(...old);
   for (const loop of old) await loop.stop(h,true);
 }
 async function drainRetired(state, h) {
-  const left = [];
-  for (const loop of state.retired) if (!await loop.drain(h)) left.push(loop);
+  const left = [], attempted = state.retired.length > 0, health = healthFor(state);
+  // Retired reports block this background reconnect attempt. Preserve the real
+  // failure and this caller's cadence; their stopped claim loop no longer polls.
+  for (const loop of state.retired) if (!await loop.drain(h,error => health.record(h,'auto',backgroundOutcome(error)))) left.push(loop);
   state.retired = left;
+  if (attempted && !left.length) health.record(h,'auto',{kind:'ok'});
   return left.length === 0;
 }
 // A new Claude conversation in this process (/clear, /resume) takes over: the
@@ -238,8 +270,8 @@ async function followChange(state, $) {
   // later follows whatever this conversation is connected to then.
   if (followed) await forget(h,previous);
   state.target = await recall(h,id) ?? followed ?? null;
-  // The new conversation has seen none of these, so each may print again (a closed app included).
-  for (const slot of ['auto','heartbeat','helper']) state.notices.delete(slot);
+  // A new conversation starts with no health evidence or retry spacing.
+  resetHealth(state);
   await announce(state,h);
   if (state.target) await autoConnect(state,$);
 }
@@ -278,26 +310,29 @@ async function deliverNote(state, $) {
 // owner command. Failures are retried quietly by the heartbeat.
 async function autoConnect(state, $) {
   if (!state.target || state.loop || state.ownerTransition || state.sessionEnded || !state.qualified) return;
-  const h = host($);
+  const h = host($), health = healthFor(state), conversation = state.health;
   state.reconnectSoon = false;
   state.ownerTransition = true;
   try {
     // The app accepts the new conversation once the old one's end is saved.
     if (!await drainRetired(state,h)) return;
-    const result = await bind(state,$,state.target.session_id);
-    if (!state.loop || result.text) return;
+    const result = await bind(state,$,state.target.session_id,{background:true});
+    if (state.health !== conversation || !state.loop || result.text) return;
     state.note = {binding:result.result.binding,tries:0,sending:false};
     await deliverNote(state,$);
-    notice(state,h,'auto',TEXT.reconnected);
+    if (state.health !== conversation) return;
+    health.record(h,'auto',{kind:'ok'});
+    h.ui.log(TEXT.reconnected);
   } catch (error) {
+    if (state.health !== conversation) return;
     if (error?.code === 'not_found') {
       state.target = null;
       await forget(h,state.claudeSessionId);
-      notice(state,h,'auto',TEXT.gone);
-    } else if (error?.code === 'invalid_transition') notice(state,h,'auto',TEXT.closed);
+      notice(health,h,error,TEXT.gone,true);
+    } else if (error?.code === 'invalid_transition') notice(health,h,error,TEXT.closed);
     // Still retried quietly: the other conversation may end or disconnect.
-    else if (error?.code === 'binding_conflict') notice(state,h,'auto',TEXT.elsewhere);
-    else notice(state,h,'auto',TEXT.retrying);
+    else if (error?.code === 'binding_conflict') notice(health,h,error,TEXT.elsewhere);
+    else health.record(h,'auto',backgroundOutcome(error,failureText(state,error)));
   } finally {
     state.ownerTransition = false;
     reopen(state);
@@ -316,6 +351,7 @@ async function sessionStart(state, $, event, next) {
   }
   await $.command.register({name:'ariadne-pr-comments',description:'Choose what to do with open PR review comments',argumentHint:'<PR>'});
   try { state.claudeSessionId = await $.session.id(); } catch { state.claudeSessionId = null; }
+  const health = healthFor(state);
   // Discovery may describe an unqualified engine; only native inspection can
   // qualify it. Its heartbeat never enables the independent claim loop.
   if (descriptorValid(state.descriptor,{name:pluginName($),root:pluginRoot($)})) {
@@ -324,27 +360,24 @@ async function sessionStart(state, $, event, next) {
   }
   if (state.sessionEnded) return next(event);
   try {
-    await qualify(host($),state.descriptor);
-    state.qualified = true;
-    startPolling(state,$);
-  } catch (error) { failure(state,$,error); }
+    await qualifyConnection(state,$);
+    health.record(host($),'qualification',{kind:'ok'});
+  } catch (error) { health.record(host($),'qualification',backgroundOutcome(error,failureText(state,error))); }
   // `claude --resume` of a connected conversation reconnects it; a new
   // conversation has no remembered session and only announces itself.
-  if (state.qualified && !state.sessionEnded) {
+  if (!state.sessionEnded) {
     state.target = await recall(host($),state.claudeSessionId);
-    if (state.target) void autoConnect(state,$);
+    if (state.qualified && state.target) void autoConnect(state,$);
   }
   return next(event);
 }
-async function bind(state, $, requestedSessionId) {
+async function bind(state, $, requestedSessionId, options) {
   if (!state.qualified) {
-    await qualify(host($),state.descriptor);
-    state.qualified = true;
-    startPolling(state,$);
+    await qualifyConnection(state,$);
   }
   if (state.sessionEnded) return {text:TEXT.ended};
-  const h = host($);
-  const result = await state.owner.connect(h,requestedSessionId);
+  const h = host($,options?.background === true);
+  const result = await state.owner.connect(h,requestedSessionId,options);
   const reason = busy(state);
   if (reason) return {text:BUSY[reason]};
   const replaced = state.loop;
@@ -365,7 +398,6 @@ async function connectTransition(state, $, requestedSessionId) {
   const chosen = requestedSessionId ?? state.target?.session_id ?? null;
   const bound = await bind(state,$,chosen);
   if (!bound.result) return bound;
-  state.notices.delete('auto');
   // Give Claude its routing through the existing note; keep owner output plain.
   const {binding} = bound.result;
   const guidance = chosen === null ? '' : '\nThis resumes an earlier session: read reconnect.md in the ariadne skill first.';
@@ -378,7 +410,7 @@ function connectRun(state, $, event) {
   return checked(state,$,() => {
     const requestedSessionId = selectedSession(event);
     return transition(state,$,() => connectTransition(state,$,requestedSessionId),true);
-  });
+  },true);
 }
 async function prCommentsRun(state, $, event) {
   let text;
@@ -398,17 +430,17 @@ async function prCommentsRun(state, $, event) {
   return {text:'The agent will file the review choices in Ariadne. Pick Fix, Reply or Skip there.'};
 }
 async function statusAction(state, $) {
-  if (!state.qualified) await qualify(host($),state.descriptor);
-  return {text:JSON.stringify({binding:await state.owner.status(host($)),local:state.loop?.status() ?? null})};
+  if (!state.qualified) await qualifyConnection(state,$);
+  return {text:JSON.stringify({binding:await state.owner.status(host($,false)),local:state.loop?.status() ?? null})};
 }
 async function disconnectAction(state, $) {
-  if (!state.qualified) await qualify(host($),state.descriptor);
+  if (!state.qualified) await qualifyConnection(state,$);
   if (state.sessionEnded) return {text:TEXT.ended};
-  const h = host($);
+  const h = host($,false);
   // An explicit disconnect also cancels any automatic reconnect.
   state.target = null;
   state.note = null;
-  state.notices.delete('auto');
+  state.owner?.endBackground(h);
   await forget(h,state.claudeSessionId);
   if (!state.owner.current()) return {text:TEXT.notConnected};
   if (state.loop) await state.loop.stop(h);
@@ -422,14 +454,20 @@ async function disconnectAction(state, $) {
   return {text:JSON.stringify(receipt)};
 }
 async function turnStart(state, $, event, next) {
-  try { if (state.loop) await state.loop.start(host($),event); }
-  catch (error) { failure(state,$,error); }
+  const health = healthFor(state);
+  try { if (state.loop) { await state.loop.start(host($),event); health.record(host($),'helper',{kind:'ok'}); } }
+  catch (error) { failure(state,$,error,health); }
   return next(event);
 }
 async function turnComplete(state, $, event, next) {
+  const health = healthFor(state);
   // A retired loop still records the end of a turn it delivered.
-  try { for (const loop of [state.loop,...state.retired]) if (loop) await loop.complete(host($),event); }
-  catch (error) { failure(state,$,error); }
+  try {
+    const active = [state.loop,...state.retired].filter(Boolean);
+    for (const loop of active) await loop.complete(host($),event);
+    if (active.length) health.record(host($),'helper',{kind:'ok'});
+  }
+  catch (error) { failure(state,$,error,health); }
   return next(event);
 }
 // /clear and /resume end this conversation but not the process: report the
@@ -441,6 +479,7 @@ async function conversationEnded(state, $) {
   state.target = state.cleared;
   state.reconnectSoon = state.target !== null;
   await retire(state,host($));
+  resetHealth(state);
   await follow(state,$);
 }
 async function sessionEnd(state, $, event, next) {
@@ -449,6 +488,7 @@ async function sessionEnd(state, $, event, next) {
     return next(event);
   }
   state.sessionEnded = true;
+  state.owner?.endBackground(host($));
   state.timer?.cancel();
   state.announcementTimer?.cancel();
   state.discovery.stop();
@@ -468,6 +508,7 @@ function registerModule(descriptor, on, publish) {
     loopBinding: null,
     pending: null,
     qualified: false,
+    qualifying: null,
     ownerTransition: false,
     sessionEnded: false,
     started: false,
@@ -482,7 +523,7 @@ function registerModule(descriptor, on, publish) {
     note: null,
     retired: [],
     following: null,
-    notices: new Map(),
+    health: conversationHealth(),
     discovery: announcements(descriptor),
     owner: null,
   };

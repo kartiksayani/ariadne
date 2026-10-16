@@ -13,7 +13,10 @@ use std::{
     fs::File,
     io::Read,
     os::fd::{AsRawFd, FromRawFd},
-    os::unix::fs::{MetadataExt, OpenOptionsExt},
+    os::unix::{
+        fs::{MetadataExt, OpenOptionsExt},
+        process::ExitStatusExt,
+    },
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::Arc,
@@ -182,12 +185,7 @@ fn version_output(path: &Path, deadline: Instant) -> Result<String, AdapterError
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|_| {
-            error(
-                AdapterErrorCode::HostUnreachable,
-                "Cannot inspect selected executable version",
-            )
-        })?;
+        .map_err(inspection_error)?;
     let mut child = OwnedChild(child);
     let mut stdout = child.0.stdout.take().ok_or_else(io_error)?;
     let mut stderr = child.0.stderr.take().ok_or_else(io_error)?;
@@ -202,9 +200,18 @@ fn version_output(path: &Path, deadline: Instant) -> Result<String, AdapterError
         if let Some(status) = child.0.try_wait().map_err(|_| io_error())? {
             read_pipe(&mut stdout, Some(&mut output), &mut diagnostic_bytes)?;
             read_pipe(&mut stderr, None, &mut diagnostic_bytes)?;
+            if let Some(signal) = status.signal() {
+                return Err(
+                    if matches!(signal, libc::SIGTERM | libc::SIGINT | libc::SIGHUP) {
+                        io_error()
+                    } else {
+                        resource_error()
+                    },
+                );
+            }
             if !status.success() {
                 return Err(error(
-                    AdapterErrorCode::HostUnreachable,
+                    AdapterErrorCode::IncompatibleAdapter,
                     "Selected version command failed",
                 ));
             }
@@ -294,17 +301,8 @@ pub(crate) fn resource_identity(
     if version_output(&helper, deadline)? != format!("ariadne {}", options.app_version) {
         return Err(reload());
     }
-    let project = canonical(&options.project_root)?;
-    if !std::fs::metadata(&project)
-        .map_err(|_| io_error())?
-        .is_dir()
-    {
-        return Err(error(
-            AdapterErrorCode::BindingMismatch,
-            "Selected canonical project root must be a directory",
-        ));
-    }
-    if canonical(&identity.project_root)? != project {
+    let project = project_root(&options.project_root)?;
+    if project_root(&identity.project_root)? != project {
         return Err(error(
             AdapterErrorCode::BindingMismatch,
             "Mod announcement differs from the selected canonical project root",
@@ -351,7 +349,7 @@ fn read_resource(root: &File, name: &str, deadline: Instant) -> Result<Vec<u8>, 
     let mut directory = root.try_clone().map_err(|_| io_error())?;
     for (offset, part) in components.iter().enumerate() {
         check_deadline(deadline)?;
-        let name = std::ffi::CString::new(*part).map_err(|_| io_error())?;
+        let name = std::ffi::CString::new(*part).map_err(|_| resource_error())?;
         let last = offset + 1 == components.len();
         let flags = libc::O_RDONLY
             | libc::O_CLOEXEC
@@ -360,35 +358,37 @@ fn read_resource(root: &File, name: &str, deadline: Instant) -> Result<Vec<u8>, 
             | if last { 0 } else { libc::O_DIRECTORY };
         let fd = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), flags) };
         if fd < 0 {
-            return Err(io_error());
+            return Err(inspection_error(std::io::Error::last_os_error()));
         }
         let mut file = unsafe { File::from_raw_fd(fd) };
-        let metadata = file.metadata().map_err(|_| io_error())?;
+        let metadata = file.metadata().map_err(inspection_error)?;
         trusted(&metadata)?;
         if !last {
             if !metadata.is_dir() {
-                return Err(io_error());
+                return Err(resource_error());
             }
             directory = file;
             continue;
         }
         if !metadata.is_file() || metadata.len() > 1024 * 1024 {
-            return Err(io_error());
+            return Err(resource_error());
         }
+        #[cfg(test)]
+        tests::after_resource_metadata();
         let mut bytes = Vec::new();
         let mut buffer = [0; 8192];
         loop {
             check_deadline(deadline)?;
-            let size = file.read(&mut buffer).map_err(|_| io_error())?;
+            let size = file.read(&mut buffer).map_err(inspection_error)?;
             if size == 0 {
                 break;
             }
             if bytes.len() + size > 1024 * 1024 {
-                return Err(io_error());
+                return Err(resource_error());
             }
             bytes.extend_from_slice(&buffer[..size]);
         }
-        let after = file.metadata().map_err(|_| io_error())?;
+        let after = file.metadata().map_err(inspection_error)?;
         if metadata_signature(&metadata) != metadata_signature(&after)
             || bytes.len() as u64 != after.len()
         {
@@ -396,23 +396,53 @@ fn read_resource(root: &File, name: &str, deadline: Instant) -> Result<Vec<u8>, 
         }
         return Ok(bytes);
     }
-    Err(io_error())
+    Err(resource_error())
 }
 fn directory(path: &Path) -> Result<File, AdapterError> {
     let file = std::fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
         .open(path)
-        .map_err(|_| io_error())?;
-    let metadata = file.metadata().map_err(|_| io_error())?;
+        .map_err(inspection_error)?;
+    let metadata = file.metadata().map_err(inspection_error)?;
     trusted(&metadata)?;
     if !metadata.is_dir() {
-        return Err(io_error());
+        return Err(resource_error());
     }
     Ok(file)
 }
 fn canonical(path: &Path) -> Result<PathBuf, AdapterError> {
-    std::fs::canonicalize(path).map_err(|_| io_error())
+    std::fs::canonicalize(path).map_err(inspection_error)
+}
+fn project_root(path: &Path) -> Result<PathBuf, AdapterError> {
+    let project = std::fs::canonicalize(path).map_err(project_inspection_error)?;
+    if !std::fs::metadata(&project)
+        .map_err(project_inspection_error)?
+        .is_dir()
+    {
+        return Err(project_error());
+    }
+    Ok(project)
+}
+fn project_error() -> AdapterError {
+    error(AdapterErrorCode::HostUnreachable, "The selected project folder is missing or inaccessible; restore access to the project folder or select it again before reconnecting")
+}
+fn project_inspection_error(cause: std::io::Error) -> AdapterError {
+    if matches!(
+        cause.raw_os_error(),
+        Some(
+            libc::ENOENT
+                | libc::ENOTDIR
+                | libc::EACCES
+                | libc::EPERM
+                | libc::ELOOP
+                | libc::ENAMETOOLONG
+        )
+    ) {
+        project_error()
+    } else {
+        io_error()
+    }
 }
 fn metadata_signature(metadata: &std::fs::Metadata) -> FileIdentity {
     (
@@ -432,10 +462,10 @@ fn trusted(metadata: &std::fs::Metadata) -> Result<(), AdapterError> {
     Ok(())
 }
 fn file_identity(path: &Path, executable: bool) -> Result<FileIdentity, AdapterError> {
-    let metadata = std::fs::symlink_metadata(path).map_err(|_| io_error())?;
+    let metadata = std::fs::symlink_metadata(path).map_err(inspection_error)?;
     trusted(&metadata)?;
     if !metadata.is_file() || executable && metadata.mode() & 0o111 == 0 {
-        return Err(io_error());
+        return Err(resource_error());
     }
     Ok(metadata_signature(&metadata))
 }
@@ -450,8 +480,192 @@ pub(crate) fn check_deadline(deadline: Instant) -> Result<(), AdapterError> {
     }
 }
 fn io_error() -> AdapterError {
-    error(AdapterErrorCode::HostUnreachable, "Claude executable or exact loaded/installed resources could not be verified; check paths, install and reload the Mod")
+    error(
+        AdapterErrorCode::HostUnreachable,
+        "Claude integration inspection could not finish; retry the bounded read-only check",
+    )
+}
+fn inspection_error(cause: std::io::Error) -> AdapterError {
+    if matches!(
+        cause.raw_os_error(),
+        Some(
+            libc::ENOENT
+                | libc::EACCES
+                | libc::EPERM
+                | libc::ENOEXEC
+                | libc::ENOTDIR
+                | libc::EISDIR
+                | libc::ELOOP
+                | libc::ENAMETOOLONG
+        )
+    ) {
+        resource_error()
+    } else {
+        io_error()
+    }
+}
+fn resource_error() -> AdapterError {
+    error(AdapterErrorCode::IncompatibleAdapter, "Claude executable or exact loaded/installed resources could not be verified; check paths, install and reload the Mod")
 }
 fn reload() -> AdapterError {
     error(AdapterErrorCode::IncompatibleAdapter, "Claude loaded Mod/descriptor/resources differ from the installed version; update matching resources and reload plugins")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    thread_local! {
+        static AFTER_RESOURCE_METADATA: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    pub(super) fn after_resource_metadata() {
+        AFTER_RESOURCE_METADATA.with(|slot| {
+            if let Some(callback) = slot.borrow_mut().take() {
+                callback();
+            }
+        });
+    }
+
+    #[test]
+    fn resource_metadata_changes_during_read_require_a_bounded_retry() {
+        for bytes in [
+            b"after!".as_slice(),
+            b"longer contents".as_slice(),
+            b"".as_slice(),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("resource.js");
+            std::fs::write(&path, b"before").unwrap();
+            let directory = directory(root.path()).unwrap();
+            AFTER_RESOURCE_METADATA.with(|slot| {
+                *slot.borrow_mut() = Some(Box::new(move || {
+                    std::fs::write(&path, bytes).unwrap();
+                    // Force a distinct signature even on coarse timestamp filesystems
+                    // when the mutation keeps the resource length unchanged.
+                    File::options()
+                        .write(true)
+                        .open(&path)
+                        .unwrap()
+                        .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1))
+                        .unwrap();
+                }));
+            });
+            let cause = read_resource(
+                &directory,
+                "resource.js",
+                Instant::now() + Duration::from_secs(1),
+            )
+            .unwrap_err();
+            assert_eq!(
+                read_resource(
+                    &directory,
+                    "resource.js",
+                    Instant::now() + Duration::from_secs(1)
+                )
+                .unwrap(),
+                bytes,
+                "a stable retry must read the resource after mutation"
+            );
+            assert_eq!(cause.code, AdapterErrorCode::HostUnreachable);
+            assert!(cause.message.contains("retry"));
+        }
+    }
+
+    #[test]
+    fn resource_type_and_size_failures_remain_incompatible() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("directory.js")).unwrap();
+        std::fs::write(root.path().join("oversized.js"), vec![0; 1024 * 1024 + 1]).unwrap();
+        let directory = directory(root.path()).unwrap();
+        for name in ["directory.js", "oversized.js"] {
+            let cause = read_resource(&directory, name, Instant::now() + Duration::from_secs(1))
+                .unwrap_err();
+            assert_eq!(cause.code, AdapterErrorCode::IncompatibleAdapter);
+        }
+        let growing = root.path().join("growing.js");
+        std::fs::write(&growing, b"before").unwrap();
+        AFTER_RESOURCE_METADATA.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move || {
+                std::fs::write(growing, vec![0; 1024 * 1024 + 1]).unwrap();
+            }));
+        });
+        assert_eq!(
+            read_resource(
+                &directory,
+                "growing.js",
+                Instant::now() + Duration::from_secs(1)
+            )
+            .unwrap_err()
+            .code,
+            AdapterErrorCode::IncompatibleAdapter,
+            "growing beyond the size bound remains an installation failure"
+        );
+    }
+
+    #[test]
+    fn installation_errors_and_temporary_resource_io_keep_distinct_meanings() {
+        for (code, expected) in [
+            (libc::ENOENT, AdapterErrorCode::IncompatibleAdapter),
+            (libc::EACCES, AdapterErrorCode::IncompatibleAdapter),
+            (libc::EPERM, AdapterErrorCode::IncompatibleAdapter),
+            (libc::ENOEXEC, AdapterErrorCode::IncompatibleAdapter),
+            (libc::ENOTDIR, AdapterErrorCode::IncompatibleAdapter),
+            (libc::EISDIR, AdapterErrorCode::IncompatibleAdapter),
+            (libc::ELOOP, AdapterErrorCode::IncompatibleAdapter),
+            (libc::ENAMETOOLONG, AdapterErrorCode::IncompatibleAdapter),
+            (libc::EAGAIN, AdapterErrorCode::HostUnreachable),
+            (libc::EMFILE, AdapterErrorCode::HostUnreachable),
+            (libc::ENFILE, AdapterErrorCode::HostUnreachable),
+            (libc::EIO, AdapterErrorCode::HostUnreachable),
+            (libc::EINTR, AdapterErrorCode::HostUnreachable),
+        ] {
+            assert_eq!(
+                inspection_error(std::io::Error::from_raw_os_error(code)).code,
+                expected,
+                "{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn project_canonicalize_and_metadata_errors_never_end_binding_scope() {
+        for errno in [
+            libc::ENOENT,
+            libc::ENOTDIR,
+            libc::EACCES,
+            libc::EPERM,
+            libc::ELOOP,
+            libc::ENAMETOOLONG,
+        ] {
+            let cause = project_inspection_error(std::io::Error::from_raw_os_error(errno));
+            assert_eq!(cause, project_error(), "{errno}");
+            assert_eq!(cause.code, AdapterErrorCode::HostUnreachable);
+            assert!(cause
+                .message
+                .contains("project folder is missing or inaccessible"));
+        }
+        for errno in [
+            libc::EAGAIN,
+            libc::EMFILE,
+            libc::ENFILE,
+            libc::EIO,
+            libc::EINTR,
+            libc::ENOSPC,
+            libc::ENOEXEC,
+            libc::EISDIR,
+            libc::ENOTSUP,
+        ] {
+            assert_eq!(
+                project_inspection_error(std::io::Error::from_raw_os_error(errno)),
+                io_error(),
+                "{errno}"
+            );
+        }
+        assert_eq!(
+            project_inspection_error(std::io::Error::other("unknown")),
+            io_error()
+        );
+    }
 }

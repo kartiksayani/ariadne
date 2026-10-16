@@ -76,6 +76,9 @@ export function plainFailure(failure: unknown, fallback: string = COULDNT_DO_THA
   if (failure instanceof OwnFailure) return failure.message;
   if (failure instanceof CoreFailure) {
     console.debug('Ariadne core error', failure.error.code, failure.error.message, failure.error.hint);
+    if (failure.error.code === 'host_unreachable' && failure.error.message.toLowerCase().includes('project folder is missing or inaccessible')) {
+      return 'The project folder is missing or inaccessible. Restore access or select it again, then try again.';
+    }
     return WORDS[failure.error.code] ?? fallback;
   }
   if (failure instanceof ServiceFailure) {
