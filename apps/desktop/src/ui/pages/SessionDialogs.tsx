@@ -123,46 +123,6 @@ export function announceClosed(actions: SessionActions, agent: string, name: str
     text: `Closed ${sessionPhrase({ name }, agent, when)}. ${cancelled} unsent message${cancelled === 1 ? ' was' : 's were'} cancelled.` }, 8000);
 }
 
-/** Close session: one confirmation in plain words, then close. Nothing has to be paused or settled first. */
-export function CloseSessionDialog({ store, actions, agent, when, name = null, onClose }: {
-  readonly store: SessionStore; readonly actions: SessionActions; readonly agent: string; readonly when: string;
-  /** The owner's name for the session, when set; it stands in for the agent and day. */
-  readonly name?: string | null; readonly onClose: () => void;
-}) {
-  const state = useSession(store), operation = useSessionActions(actions);
-  const session = state.snapshot?.session;
-  const confirmation = useLifecycleConfirmation(actions);
-  const disabled = !session || session.state === 'closed' || confirmation.busy;
-  const warning = session ? closeWarning(closeImpact(session), agent) : null;
-  const close = async () => {
-    if (!session || disabled) return;
-    await confirmation.run(async refreshed => {
-      if (refreshed.state === 'closed') { confirmation.setError('This session is already closed.'); return; }
-      if (changedImpact(session, refreshed)) { confirmation.setError(confirmationChanged); return; }
-      if (!await actions.execute({ command: 'session_close', api_version: 1, op_id: '', params: { expected_revision: refreshed.revision } }, refreshed.revision)) {
-        confirmation.setError(plainFailure(actions.getSnapshot().error, 'The session could not be closed. Try again.')); return;
-      }
-      announceClosed(actions, agent, name);
-      onClose();
-    });
-  };
-  const closing = operation.writing && operation.pending?.command.command === 'session_close';
-  const cancel = () => { if (!closing && confirmation.cancel()) onClose(); };
-  const title = `Close ${sessionPhrase({ name }, agent, when)}?`;
-  return <Dialog label={title} width={520} onCancel={cancel} onConfirm={() => { void close(); }}>
-    <div className="dialog-title">{title}</div>
-    <div className="pw-dialog-body">Ariadne marks the session Closed and keeps it read-only. The agent process isn’t touched.</div>
-    {warning && <div className="pw-dialog-body" data-close-warning>{warning}</div>}
-    <Failure actions={actions} />
-    {confirmation.error && <div className="pw-dialog-error" role="alert">{confirmation.error}</div>}
-    <div className="dialog-actions">
-      {operation.pending && <button type="button" className="btn btn-secondary" disabled={operation.writing || confirmation.busy} onClick={() => { void actions.retry(); }}>Check again</button>}
-      <button type="button" className="btn btn-ghost" disabled={confirmation.saving || closing} onClick={cancel}>Cancel</button>
-      <button type="button" className="btn btn-primary" disabled={disabled} onClick={() => { void close(); }}>
-        <i className="ph ph-x-circle" aria-hidden="true" />Close session</button>
-    </div>
-  </Dialog>;
-}
 
 /** Archive explains closing, waiting questions and message cancellation. */
 export function ArchiveSessionDialog({ store, actions, agent, onClose, onSaved }: {

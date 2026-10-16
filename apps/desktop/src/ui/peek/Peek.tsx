@@ -76,13 +76,11 @@ export function PeekProvider({ lookup, drafts, answerTarget, onGoTo, onAgentNotR
       if (document.querySelector('[aria-modal="true"]')) { cancelHover(); return; }
       if (event.key === 'Escape' && card.current) {
         if (event.target instanceof Element && event.target.closest('.pw-note')) return;
-        // These controls own Escape before the peek, including when the Map
-        // holding a session rename is covered. Peek lives in a portal, so route
-        // Escape here even when its target is outside the app root.
-        const control = document.querySelector<HTMLElement>('.shell-text-size-menu')
-          ?? document.querySelector<HTMLElement>('.pw-rename');
+        // An open top-bar menu owns Escape before the peek. Peek lives in a portal,
+        // so route Escape here even when its target is outside the app root.
+        const control = document.querySelector<HTMLElement>('.tb-pop');
         if (control) {
-          const owner = control.closest('.shell-text-size') ?? control;
+          const owner = control.closest('.tb-anchor') ?? control;
           if (!(event.target instanceof Node) || !owner.contains(event.target)) {
             event.preventDefault(); event.stopPropagation();
             control.dispatchEvent(new globalThis.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
@@ -153,7 +151,7 @@ function PeekCard({ shown, drafts, card, allowAnswer, onClose, onGoTo, onAgentNo
     const element = card.current;
     if (!element) return;
     const measure = () => {
-      const chromeBottom = Math.max(0, ...Array.from(document.querySelectorAll('.shell-header, .shell-tabs, .tree-breadcrumb'),
+      const chromeBottom = Math.max(0, ...Array.from(document.querySelectorAll('.shell-top, .tree-breadcrumb'),
         chrome => chrome.getBoundingClientRect().bottom));
       const style = getComputedStyle(element);
       // scrollHeight includes padding, but the fixed card's border also needs room.

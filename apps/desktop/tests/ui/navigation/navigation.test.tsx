@@ -11,7 +11,6 @@ import { CoreFailure, createDesktopService, type DesktopTransport, type HintPayl
 import { NavigationStore } from '../../../src/state/navigation/store';
 import * as catalogue from '../../../src/state/navigation/catalogue';
 import { NavigationWorkspace, type AdapterChoice } from '../../../src/components/navigation/NavigationWorkspace';
-import { sessionCardText } from '../../../src/ui/pages/model';
 import { BindSession, RegisterProject } from '../../../src/components/navigation/Registration';
 import { notices } from '../../../src/ui/pages/notices';
 
@@ -319,23 +318,6 @@ describe('canonical preference mutations', () => {
     expect(await store.navigate({ kind: 'projects' })).toBe(false);
     expect(transport.calls.filter(call => call.name === 'preferences_patch')).toHaveLength(2);
   });
-  it('closing a tab preserves all view settings and drafts and sends only preference entries', async () => {
-    const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'session', session: route };
-    read(transport, prefs); await store.start();
-    const next = structuredClone(prefs); next.revision = 2; next.sessions[0].tab_open = false; next.global.selected_navigation = { kind: 'projects' };
-    transport.enqueue('preferences_patch', patchReceipt()); read(transport, next);
-    const intent = store.getNavigationRequest();
-    expect(await store.closeTab(route)).toBe(true);
-    expect(store.getNavigationRequest()).toBe(intent + 1);
-    const command = transport.calls.find(call => call.name === 'preferences_patch')!.request as OwnerMutationRequest;
-    expect(command).toEqual({ session: null, command: { api_version: 1, op_id: operationId, command: 'preferences_patch',
-      params: { expected_preferences_revision: 1, entries: [
-        { kind: 'set_session_view', preferences: { ...prefs.sessions[0], tab_open: false } },
-        { kind: 'set_global', preferences: { ...prefs.global, selected_navigation: { kind: 'projects' } } },
-      ] } } });
-    expect(store.getSnapshot().preferences?.drafts).toEqual(prefs.drafts);
-    expect(transport.calls.every(call => !['session_close', 'binding_pause', 'input_cancel'].includes(call.name))).toBe(true);
-  });
   it('reopening a tab keeps filters, selection and draft bytes without resuming dispatch', async () => {
     const { transport, store } = setup(); const prefs = preferences(); prefs.sessions[0].tab_open = false;
     read(transport, prefs); await store.start(); transport.enqueue('session_get', loaded(), loaded());
@@ -397,18 +379,6 @@ describe('canonical preference mutations', () => {
     const calls = transport.calls.filter(call => call.name === 'preferences_patch'); expect(calls).toHaveLength(3); expect(calls[0]).toEqual(calls[1]);
     expect(store.getSnapshot().pendingOperationId).toBeNull();
     expect(store.getSnapshot().preferences?.global.selected_navigation).toEqual({ kind: 'projects' });
-  });
-  it('a confirmed tab close stays visible when the follow-up read fails or returns an older revision', async () => {
-    const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'session', session: route };
-    read(transport, prefs); await store.start(); transport.enqueue('preferences_patch', patchReceipt());
-    transport.enqueue('preferences_get', success('preferences_get', prefs));
-    expect(await store.closeTab(route)).toBe(true);
-    expect(store.getSnapshot().preferences?.revision).toBe(2);
-    expect(store.getSnapshot().preferences?.sessions[0].tab_open).toBe(false);
-    expect(store.getSnapshot().preferences?.global.selected_navigation.kind).toBe('projects');
-    expect(store.getSnapshot().status).toBe('stale');
-    expect(store.getSnapshot().error).toMatchObject({ reason: 'invalid_response' });
-    expect(store.selectedSession()).toBeNull();
   });
   it('reconciliation of an old saved receipt cannot regress a newer preferences snapshot', async () => {
     const { transport, store } = setup(); read(transport); await store.start();
@@ -786,8 +756,8 @@ describe('source-backed navigation views and explicit registration', () => {
     transport.enqueue('preferences_patch', patchReceipt());
     const registered = preferences(2); registered.global.selected_navigation = { kind: 'project', project_id: projectId }; read(transport, registered);
     const close = vi.fn(); render(<RegisterProject store={store} disabled={false} close={close} />);
-    fireEvent.change(screen.getByLabelText('Project root'), { target: { value: '/registered/café project' } });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Register project' })); });
+    fireEvent.change(screen.getByLabelText('Folder'), { target: { value: '/registered/café project' } });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Register project/ })); });
     expect(transport.calls.find(call => call.name === 'project_register')?.request).toEqual({ session: null, command: {
       api_version: 1, command: 'project_register', op_id: operationId, params: { canonical_root: '/registered/café project' },
     } }); await waitFor(() => expect(close).toHaveBeenCalledOnce());
@@ -798,9 +768,9 @@ describe('source-backed navigation views and explicit registration', () => {
     transport.enqueue('project_register', { api_version: 1, ok: false, error: { code: 'not_found', message: 'Folder not found: /home/owner/missing',
       hint: 'Check the folder path, then register again.', retryable: false, field_errors: [] } });
     const close = vi.fn(); render(<RegisterProject store={store} disabled={false} close={close} />);
-    expect(screen.getByLabelText('Project root').getAttribute('placeholder')).toBe('~/path/to/project');
-    fireEvent.change(screen.getByLabelText('Project root'), { target: { value: '~/missing' } });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Register project' })); });
+    expect(screen.getByLabelText('Folder').getAttribute('placeholder')).toBe('~/code/my-project');
+    fireEvent.change(screen.getByLabelText('Folder'), { target: { value: '~/missing' } });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Register project/ })); });
     expect(transport.calls.find(call => call.name === 'project_register')?.request).toMatchObject({ command: { params: { canonical_root: '~/missing' } } });
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe('Folder not found: /home/owner/missing Check the folder path, then register again.');
@@ -982,27 +952,6 @@ describe('source-backed navigation views and explicit registration', () => {
     expect(store.getSnapshot().sessions?.sessions.items[0].counts.items_by_status).toEqual(counts.items_by_status);
     render(<BindSession store={store} project={projectsFixture.items[0] as ProjectSummary} sessions={sessionsFixture.items as SessionSummary[]} adapters={[adapter]} disabled={false} close={() => {}} />);
     expect(screen.getByRole('alert').textContent).toContain('Resolve its queued inputs before rebinding.');
-  });
-  it('words the card like the session bar: sending, paused, not sending with a reason, disconnected', () => {
-    const session = structuredClone(sessionsFixture.items[0]) as SessionSummary;
-    const binding = session.active_binding!, text = () => sessionCardText(session, null, Date.now());
-    binding.connection_state = 'connected'; binding.dispatch_state = 'enabled'; binding.owner_paused = false; binding.pause_reason = null;
-    binding.presence = null; session.counts.sent_inputs.needs_attention = 0;
-    expect(text()).toMatchObject({ run: 'Sending', runColor: 'var(--st-done)', runDot: 'var(--st-done)' });
-    // Paused or blocked is never the green "running" state, and its dot is a ring.
-    binding.owner_paused = true; binding.dispatch_state = 'paused';
-    expect(text()).toMatchObject({ run: 'Paused (by you)', runDot: 'transparent' }); expect(text().dispatch.action).toBe('resume');
-    binding.owner_paused = false; binding.dispatch_state = 'enabled'; session.counts.sent_inputs.needs_attention = 1;
-    expect(text()).toMatchObject({ run: 'Not sending: a message needs your decision', runDot: 'transparent' });
-    session.counts.sent_inputs.needs_attention = 0; binding.pause_reason = 'result_missing'; binding.dispatch_state = 'recovery_required';
-    expect(text().run).toBe('Not sending: the agent hasn’t saved its answer yet');
-    binding.pause_reason = null; binding.dispatch_state = 'enabled';
-    expect(sessionCardText(session, null, Date.now(), null, { binding_id: binding.id, generation: binding.generation, state: 'backing_off',
-      reason: 'codex exited', retry_in_seconds: 4.2, updated_at: new Date().toISOString() }).run).toBe('Not sending: codex exited · retrying in 5s');
-    binding.connection_state = 'disconnected'; expect(text().run).toBe('Disconnected');
-    binding.connection_state = 'connected'; session.state = 'closed';
-    expect(text()).toMatchObject({ run: 'Session closed', closed: true });
-    session.state = 'active'; session.active_binding = null; expect(text()).toMatchObject({ agent: 'No agent', run: 'No agent connected' });
   });
   it('offers tab close separately from session lifecycle controls', async () => {
     const { transport, store } = setup(); read(transport);

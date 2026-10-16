@@ -10,6 +10,8 @@ import { CoreFailure, ServiceFailure, type RendererService, type Unsubscribe } f
 import { navigationFailure, OwnFailure } from '../../data/plain';
 import { initialExpansion } from '../../selectors/tree/rows';
 import * as catalogue from './catalogue';
+import { lastSessionFrom } from './switcher';
+import type { PageView } from './view';
 import { applySeen, queueSeen, sessionSeen, type SeenPatch } from '../preferences/seen';
 
 type Failure = CoreFailure | ServiceFailure;
@@ -37,6 +39,10 @@ export interface PreferencesWriteCoordination {
   seenOnlySince(revision: number, preferences: PreferencesSnapshot): boolean;
 }
 export interface NavigationState {
+  /** The session pages return to while the saved selection is not a session (an older release saved a page). */
+  readonly lastSession: SessionRef | null;
+  /** The page shown in place of the Map. In memory only: pages are never saved (C7). */
+  readonly page: PageView | null;
   readonly preferences: Immutable<PreferencesSnapshot> | null;
   readonly projects: Immutable<ProjectListResult> | null;
   readonly sessions: Immutable<SessionListResult> | null;
@@ -92,7 +98,7 @@ export class NavigationStore {
   readonly reading = new ReadingLane(entry => this.enqueueSeen(entry));
   readonly opened: OpenSessions;
   readonly routes: RegisteredRoutes;
-  private state: NavigationState = Object.freeze({ preferences: null, projects: null, sessions: null,
+  private state: NavigationState = Object.freeze({ lastSession: null, page: null, preferences: null, projects: null, sessions: null,
     sessionProjectId: null, status: 'loading', error: null, writing: false, pendingOperationId: null, pendingNavigation: null, reveal: null, setup: null, setupAdapterId: null, setupProjectId: null });
   private readonly listeners = new Set<() => void>();
   private subscriptions: Unsubscribe[] = [];
@@ -225,7 +231,9 @@ export class NavigationStore {
           throw new ServiceFailure('invalid_response');
         }
         const selection = preferences.global.selected_navigation;
-        const projectId = selection.kind === 'project' ? selection.project_id : null;
+        // A single project's page reads only that project's sessions; every other view reads them all.
+        const page = this.state.page;
+        const projectId = page ? page.projectId ?? null : selection.kind === 'project' ? selection.project_id : null;
         const [projects, sessions] = await Promise.all([catalogue.projects(this.service), catalogue.sessions(this.service, projectId)]);
         if (this.stopped || epoch !== this.epoch) continue;
         // A receipt can advance preferences while these catalogue reads wait.
@@ -251,7 +259,7 @@ export class NavigationStore {
           global: equal(previous.global, captured.global) ? previous.global : captured.global,
           sessions: equal(previous.sessions, captured.sessions) ? previous.sessions : captured.sessions,
           later: equal(previous.later, captured.later) ? previous.later : captured.later }) : captured;
-        this.publish({ preferences: stable, projects: immutable(projects), sessions: immutable(sessions),
+        this.publish({ lastSession: selection.kind === 'session' ? selection.session : this.state.lastSession ?? lastSessionFrom(selection, stable.sessions), preferences: stable, projects: immutable(projects), sessions: immutable(sessions),
           sessionProjectId: projectId, status: 'ready', error: this.mutationFailure, ...this.setupAfter(sessions, projectId) });
         if (selection.kind === 'session') this.initializeSeen(selection.session);
         this.flushStartupRoute();
@@ -789,6 +797,7 @@ export class NavigationStore {
       this.queuedNavigation = { selection: structuredClone(selection), reveal, resolveReveal, failed, isCurrent, request, started: Date.now(),
         running: false, confirmed: false, fresh: !!this.pending, resolve, completion, confirm, timer };
     });
+    // A page stays on screen until the destination is confirmed, so the old session never flashes back.
     this.publish({ pendingNavigation: immutable(selection) });
     this.flushNavigation();
     return result;
@@ -854,10 +863,12 @@ export class NavigationStore {
           filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, scroll: null };
         entries.push({ kind: 'set_session_view', preferences: { ...view, tab_open: true,
           selected_item_id: reveal?.kind === 'item' ? reveal.route.item_id : view.selected_item_id } });
-        if (equal(preferences.global.selected_navigation, selection) && existing?.tab_open && !reveal) {
+        if (equal(preferences.global.selected_navigation, selection) && existing && !reveal) {
           await this.opened.open(selection.session).refresh();
-          if (current()) this.initializeSeen(selection.session);
-          return current();
+          if (!current()) return false;
+          if (this.state.page) this.publish({ page: null });
+          this.initializeSeen(selection.session);
+          return true;
         }
       } else if (selection.kind === 'project' && !this.state.projects?.projects.items.some(project => project.project_id === selection.project_id)) {
         throw new ServiceFailure('invalid_response');
@@ -875,7 +886,8 @@ export class NavigationStore {
       const saved = await this.patch(preferences, entries, () => {
         queued.confirmed = true;
         if (!current()) return;
-        this.publish({ reveal });
+        // Only a removal saves a page selection now; it leaves no session to return to.
+        this.publish({ reveal, page: null, lastSession: selection.kind === 'session' ? selection.session : null });
         if (selection.kind === 'session') { this.opened.open(selection.session); this.initializeSeen(selection.session); }
       }, replay, seenWaited, current);
       return saved && current();
@@ -890,29 +902,21 @@ export class NavigationStore {
     }
     finally { --this.ownerPreparing; if (this.seenDue) void this.flushSeen(); }
   }
-  async closeTab(route: SessionRef): Promise<boolean> {
-    if (this.stopped || this.pending) return false;
+  /**
+   * Shows a page in place of the Map. Nothing is saved: the selection stays the last session, so a restart (or an
+   * older release) opens that session. A queued session navigation is the older intent and is cancelled.
+   */
+  openPage(page: PageView): boolean {
+    if (this.stopped) return false;
+    ++this.navigationIntent;
+    ++this.navigationRequest;
+    this.startupRoute = null;
     const queued = this.queuedNavigation;
-    if (queued?.selection.kind === 'session' && sameRoute(queued.selection.session, route)) {
-      ++this.navigationRequest;
-      ++this.navigationIntent;
-      this.finishNavigation(queued, false);
-    }
-    try {
-      if (this.stopped || this.pending) return false;
-      const preferences = this.preferences();
-      const view = preferences.sessions.find(session => sameRoute(session.session, route));
-      if (!view?.tab_open) return true;
-      const entries: NavigationPatch[] = [{ kind: 'set_session_view', preferences: { ...view, tab_open: false } }];
-      const selected = preferences.global.selected_navigation;
-      if (selected.kind === 'session' && sameRoute(selected.session, route)) {
-        // Closing the displayed destination ends its continuations, but cannot
-        // replace a different destination the owner has already queued.
-        if (!queued) ++this.navigationRequest;
-        entries.push({ kind: 'set_global', preferences: { ...preferences.global, selected_navigation: { kind: 'projects' } } });
-      }
-      return await this.patch(preferences, entries, () => { this.opened.close(route); this.publish({ reveal: null }); });
-    } catch (error: unknown) { this.publish({ error: fail(error) }); return false; }
+    if (queued) this.finishNavigation(queued, false);
+    this.publish({ page: Object.freeze({ kind: 'page', page: page.page, ...(page.projectId ? { projectId: page.projectId } : {}) }), reveal: null });
+    // Pages list what the catalogue holds now, as navigating to them always did.
+    void this.refresh();
+    return true;
   }
   async register(canonicalRoot: string): Promise<boolean> {
     return this.execute({ request: { session: null, command: { api_version: 1, command: 'project_register',
@@ -986,7 +990,7 @@ export class NavigationStore {
         entry.kind === 'set_session_view' || entry.kind === 'set_later' || entry.kind === 'resolve_unsent_input');
       if (!viewOnly) await this.refresh();
       if ('project_id' in receipt && pending.followupIntent === this.navigationIntent) {
-        void this.navigate({ kind: 'project', project_id: receipt.project_id });
+        this.openPage({ kind: 'page', page: 'sessions', projectId: receipt.project_id });
       }
       return true;
     } catch (error: unknown) {

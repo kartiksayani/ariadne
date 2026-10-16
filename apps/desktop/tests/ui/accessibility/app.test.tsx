@@ -14,7 +14,7 @@ async function setup(configure?: (transport: AppTransport) => void) {
   expect(within(screen.getByLabelText('Session')).getByRole('button', { name: 'Session actions' })).toBeTruthy();
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
     });
   return transport;
 }

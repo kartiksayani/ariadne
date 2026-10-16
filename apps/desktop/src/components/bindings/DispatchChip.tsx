@@ -1,5 +1,5 @@
-// The session bar's dispatch chip and the editors' paused warning: whether
-// Ariadne is sending to the agent, with Pause / Resume one click away.
+// Whether Ariadne is sending to the agent (useDispatch, behind the connection card's Sending dialog)
+// and the editors' paused warning, with Resume one click away.
 import { useEffect, useRef, useState } from 'react';
 import { useSession } from '../../data/session-store';
 import type { OwnerCommand } from '../../generated/core';
@@ -89,36 +89,6 @@ export function useDispatch(actions: SessionActions): DispatchControl {
   const unconfirmed = !!operation.pending && !operation.writing;
   return { status, connection, agent, busy, error: error ?? (unconfirmed ? 'Your last change wasn’t confirmed.' : null), unconfirmed,
     retry: () => actions.retry(), pause: () => run('binding_pause'), resume: () => run('binding_resume') };
-}
-
-/** Pause and play drawn inline: the bundled icon font maps only the handoff's glyphs, and these are not among them. */
-function Glyph({ kind }: { readonly kind: 'pause' | 'play' }) {
-  return <svg className="dispatch-glyph" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false">
-    {kind === 'pause'
-      ? <><rect x="2.5" y="2" width="2.5" height="8" rx=".6" fill="currentColor" /><rect x="7" y="2" width="2.5" height="8" rx=".6" fill="currentColor" /></>
-      : <path d="M3.5 2.2v7.6a.5.5 0 0 0 .76.43l6.1-3.8a.5.5 0 0 0 0-.86l-6.1-3.8a.5.5 0 0 0-.76.43z" fill="currentColor" />}
-  </svg>;
-}
-
-/** "Sending" with a Pause icon, "Paused (by you)" with a Resume icon, "Not sending: …", "Disconnected". */
-export function DispatchChip({ actions, onDetails }: { readonly actions: SessionActions; readonly onDetails?: () => void }) {
-  const control = useDispatch(actions), { status } = control;
-  return <span className="tree-run dispatch-chip" data-dispatch={status.kind} data-running={status.live || undefined} data-connection={control.connection}
-    role="group" aria-label="Sending to the agent">
-    <span className="dispatch-dot" style={{ background: status.live ? status.color : 'transparent', boxShadow: status.live ? 'none' : `inset 0 0 0 1.5px ${status.color}` }} />
-    {onDetails
-      ? <button type="button" className="dispatch-label dispatch-details" style={{ color: status.color }} title="Sending and connection" onClick={onDetails}>{status.label}</button>
-      : <span className="dispatch-label" style={{ color: status.color }}>{status.label}</span>}
-    {/* Icon buttons, so the chip fits the bar's text line; the name and tooltip say what they do. */}
-    {status.action === 'pause' && <button type="button" className="btn btn-ghost dispatch-action dispatch-icon" disabled={control.busy}
-      aria-label="Pause" title={`Pause: stop sending to ${control.agent}`}
-      onClick={() => { void control.pause(); }}><Glyph kind="pause" /></button>}
-    {status.action === 'resume' && <button type="button" className="btn btn-secondary dispatch-action dispatch-icon" disabled={control.busy}
-      aria-label="Resume" title={`Resume: send to ${control.agent} again`}
-      onClick={() => { void control.resume(); }}><Glyph kind="play" /></button>}
-    {control.unconfirmed && <span className="dispatch-error" role="alert">{control.error}</span>}
-    {control.unconfirmed && <button type="button" className="btn btn-ghost dispatch-action" onClick={() => { void control.retry(); }}>Try again</button>}
-  </span>;
 }
 
 /** The editors' inline "Sending is paused — Resume" while the session's sending is paused or blocked. */

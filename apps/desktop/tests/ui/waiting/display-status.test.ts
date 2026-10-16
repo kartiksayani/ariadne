@@ -3,7 +3,6 @@ import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { Input, ItemStatus, Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
 import { displayStatus, ownerReplied } from '../../../src/selectors/waiting/replied';
-import { topicChips } from '../../../src/ui/pages/model';
 import { topicCounts as graphCounts } from '../../../src/ui/graph/model';
 
 const id = (suffix: string) => `00000000-0000-4000-8000-0000000000${suffix}`;
@@ -61,14 +60,11 @@ describe('sent and queued item status', () => {
     item.status = 'in_progress';
     expect(shown(session)).toBe('in_progress');
   });
-  it('uses delivery status words consistently in page topic chips and graph counts', () => {
+  // The pages' topic chips are gone (SPEC §6.16 session rows carry no topics); the graph counts keep the words.
+  it('uses delivery status words in graph counts', () => {
     const { session, input, item } = replied();
-    const counts = () => topicChips(immutable(session), new Set()).find(topic => topic.id === item.topic_id)!.counts;
-    expect(counts()).toContain('1 queued');
     expect(graphCounts([item], session)).toBe('1 queued');
     attempted(session, input);
-    expect(counts()).toContain('1 sent');
-    expect(counts()).not.toContain('queued');
     expect(graphCounts([item], session)).toBe('1 sent');
   });
   it.each(['open', 'in_progress', 'decided', 'done', 'dropped', 'replaced'] satisfies ItemStatus[])(

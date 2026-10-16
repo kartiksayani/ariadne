@@ -17,7 +17,7 @@ import { relatedItems } from '../../../src/selectors/related';
 import { sentRows, waitingRows } from '../../../src/selectors/waiting/rows';
 import { sessionGraph } from '../../../src/ui/graph/model';
 import { treeModel } from '../../../src/ui/tree/model';
-import { projectRemoval, sessionRemoval, topicChips } from '../../../src/ui/pages/model';
+import { projectRemoval, sessionRemoval } from '../../../src/ui/pages/model';
 import { Notices, notices } from '../../../src/ui/pages/notices';
 import { AgentBin, binView, removalNotice, restoreRemoved } from '../../../src/ui/remove/AgentBin';
 import type { RemoveTarget } from '../../../src/ui/dialogs/remove';
@@ -77,7 +77,7 @@ async function openApp(transport: BinTransport) {
   await goToSession(route);
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
     });
 }
 async function refreshApp(transport: BinTransport) {
@@ -87,7 +87,7 @@ async function refreshApp(transport: BinTransport) {
   await waitFor(() => expect(transport.queries.filter(request => request.request.command === 'session_get').length).toBeGreaterThan(queries));
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
     });
 }
 
@@ -261,9 +261,8 @@ describe('removed work projections', () => {
     expect(sentRows(sources).map(row => row.route?.item_id)).toEqual(['2']);
   });
 
-  it('excludes removed work from active chips while permanent session/project removal counts its full destructive scope', () => {
+  it('permanent session/project removal counts its full destructive scope, removed work included', () => {
     const session = removedSession(); session.inputs = {};
-    expect(topicChips(session, new Set()).map(chip => [chip.id, chip.counts])).toEqual([[topicA, '1 open · 1 closed']]);
     expect(sessionRemoval(session, new Set())).toMatchObject({ topics: 2, items: 7, shared: 0, waiting: 0 });
     expect(projectRemoval([session])).toMatchObject({ topics: 2, items: 7, waiting: 0 });
   });
@@ -554,7 +553,7 @@ describe('agent removal bin', () => {
     await goToSession(route); await screen.findByRole('tree', { name: 'Session items' });
     await waitFor(() => {
         expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-        expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+        expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
       });
     fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete forever' }));
@@ -602,7 +601,7 @@ describe('agent removal bin', () => {
     await waitFor(() => expect(transport.source.items['1']!.removed_at).toBeUndefined());
     await waitFor(() => {
         expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-        expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+        expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
       });
     await act(async () => { window.dispatchEvent(new Event('pagehide')); });
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull());

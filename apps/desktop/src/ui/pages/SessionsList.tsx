@@ -14,7 +14,7 @@ function Row<R>({ session, narrow, props }: { readonly session: PageSession<R>; 
   return <div className={session.current ? 'sl-row sl-current' : 'sl-row'}>
     <span className="sl-who">
       <RunDot run={session.run} />
-      <button type="button" className={closed ? 'sl-name sl-name-closed' : 'sl-name'} onClick={() => props.onOpen(session)}>{session.name}</button>
+      <button type="button" className={closed ? 'sl-name sl-name-closed' : 'sl-name'} data-session-id={session.id} onClick={() => props.onOpen(session)}>{session.name}</button>
       {session.current && <span className="pp-tag">Current</span>}
     </span>
     {!narrow && <span className="sl-agent">{session.agent}</span>}

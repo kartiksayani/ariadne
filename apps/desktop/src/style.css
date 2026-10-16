@@ -35,6 +35,11 @@ body {
   overflow: auto;
 }
 
+/* The connection line's slot above the Map: the line itself is the column's flex item. */
+.product-app .nav-connection-line {
+  display: contents;
+}
+
 /* RootBoundary: a render error names itself instead of leaving the window blank. */
 .root-failure {
   padding: 32px;

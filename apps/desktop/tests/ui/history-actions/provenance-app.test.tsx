@@ -35,7 +35,7 @@ it.each(['registered lookup', 'source capture', 'navigation capture'] as const)(
     });
     render(<DesktopApp service={createDesktopService(transport)} />);
     const sourceButton = await screen.findByRole<HTMLButtonElement>('button', { name: 'Source item' });
-    await waitFor(() => expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false'));
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false'));
     const detail = sourceButton.closest<HTMLElement>('.copied-provenance')!;
     fireEvent.click(sourceButton);
     const fallback = await within(detail).findByRole('status');
@@ -61,7 +61,7 @@ it.each(['dock path', 'Back history'] as const)('reports an unavailable %s link 
   transport.preferences.sessions = [{ ...transport.view(), selected_item_id: '1' }];
   await act(async () => { render(<DesktopApp service={createDesktopService(transport)} />); });
   await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
-  await waitFor(() => expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false'));
+  await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false'));
   if (caller === 'Back history') {
     await act(async () => { fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1.1"]')!); });
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
@@ -99,7 +99,7 @@ it('discards a delayed unavailable-source failure after Projects supersedes its 
   transport.preferences.sessions = [{ ...transport.view(), selected_item_id: '1' }];
   await act(async () => { render(<DesktopApp service={createDesktopService(transport)} />); });
   const source = await screen.findByRole('button', { name: 'Source item' });
-  await waitFor(() => expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false'));
+  await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false'));
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
   const invoke = transport.invoke.bind(transport);

@@ -23,7 +23,7 @@ it('an older editor acknowledgment cannot clear the newer owner request', async 
   await goToSession(route); await screen.findByRole('tree', { name: 'Session items' });
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
     });
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
   row.focus(); fireEvent.keyDown(row, { key: 'r' });

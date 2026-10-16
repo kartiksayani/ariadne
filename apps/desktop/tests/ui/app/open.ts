@@ -1,21 +1,15 @@
-import { fireEvent, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { expect } from 'vitest';
-
 const enabled = (selector: string) => waitFor(() => {
   const button = document.querySelector<HTMLButtonElement>(selector);
   expect(button).not.toBeNull(); expect(button?.disabled).toBe(false); return button!;
 });
-
-/**
- * Finds a session's "Open in a tab" button. All sessions lists only projects
- * with open tabs (frame 1z), so the session is reached from its project page
- * when it is not listed where the app currently is.
- */
+/** Every registered session is available from All sessions (the switcher's footer), without opening it first. */
 export async function sessionButton(route: { readonly project_id: string; readonly session_id: string }) {
   const selector = `button[data-session-id="${route.session_id}"]`;
   if (!document.querySelector(selector)) {
-    fireEvent.click(await enabled('[data-shell-tab="projects"]'));
-    fireEvent.click(await enabled(`[data-project-id="${route.project_id}"] .pw-project-open`));
+    fireEvent.click(await enabled('[data-popover-trigger="switcher"]'));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Switch session or project' })).getByRole('button', { name: 'All sessions' }));
   }
   return enabled(selector);
 }

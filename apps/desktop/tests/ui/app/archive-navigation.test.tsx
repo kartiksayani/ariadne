@@ -21,7 +21,7 @@ it('keeps the sole topic archive notice actionable through queued navigation and
   await goToSession(route);
   await waitFor(() => {
     expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-    expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
   });
   fireEvent.click(document.querySelector(`[role="treeitem"][data-item-id="${item.id}"]`)!);
   await screen.findByRole('article', { name: `Detail of ${item.question}` });

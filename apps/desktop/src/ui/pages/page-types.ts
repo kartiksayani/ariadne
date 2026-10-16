@@ -4,6 +4,8 @@ import type { RunState } from '../topbar/model';
 
 export interface PageSession<R> {
   readonly route: R;
+  /** The session's id, set on its name button as data-session-id: the stable handle tests and the e2e driver use. */
+  readonly id?: string;
   readonly name: string;
   /** "Claude Code", "Codex" */
   readonly agent: string;

@@ -4,7 +4,7 @@ import { useRef } from 'react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DEFAULT_TEXT_SIZE, TEXT_SIZES, nextTextSize, textSize, useAppliedTextSize } from '../../../src/ui/shell/textScale';
-import { TextSizeControl } from '../../../src/ui/shell/TextSizeControl';
+import { TopBar } from '../../../src/ui/topbar/TopBar';
 import { useWindowKeys } from '../../../src/ui/shell/windowKeys';
 import { workspaceIntent } from '../../../src/ui/keys';
 import { designFixture, prototypeData } from '../../../../../tests/ui/design/fixtures';
@@ -37,20 +37,24 @@ describe('text size', () => {
 
   it('offers each size next to Aa with shortcut hints and selected feedback', () => {
     const change = vi.fn();
-    render(<TextSizeControl size={80} onChange={change} />);
+    const none = () => {};
+    render(<TopBar narrow={false} variant="first-run" sessionName="" otherWaiting={0} switcherOpen={false} onSwitcherToggle={none}
+      search={{ active: false, query: '', onOpen: none, onQuery: none, onClear: none }} view="tree" onView={none} filter={{ active: false, count: 0, onToggle: none }}
+      recent={{ active: false, onToggle: none }} archive={{ active: false, onOpen: none }} textSize={80} onTextSizeChange={change} theme="dark" onToggleTheme={none}
+      help={{ open: false, onToggle: none }} />);
     const button = screen.getByRole('button', { name: 'Text size' });
     expect(button.title).toContain('⌘−'); expect(button.title).toContain('⌘+');
     expect(button.title).toContain('⌘='); expect(button.title).toContain('⌘0');
     for (const size of TEXT_SIZES) {
       fireEvent.click(button);
-      const menu = screen.getByRole('group', { name: 'Text size' });
-      const option = within(menu).getByRole('button', { name: `${size}%${size === 80 ? ' (default)' : ''}` });
-      expect(option.getAttribute('aria-pressed')).toBe(String(size === 80));
+      const menu = screen.getByRole('menu', { name: 'Text size' });
+      const option = within(menu).getByRole('menuitemradio', { name: `${size}%${size === 80 ? ' (default)' : ''}` });
+      expect(option.getAttribute('aria-checked')).toBe(String(size === 80));
       fireEvent.click(option); expect(change).toHaveBeenLastCalledWith(size);
       expect(button.getAttribute('aria-expanded')).toBe('false');
     }
     fireEvent.click(button); fireEvent.keyDown(button, { key: 'Escape' });
-    expect(screen.queryByRole('group', { name: 'Text size' })).toBeNull();
+    expect(screen.queryByRole('menu', { name: 'Text size' })).toBeNull();
     expect(document.activeElement).toBe(button);
   });
 

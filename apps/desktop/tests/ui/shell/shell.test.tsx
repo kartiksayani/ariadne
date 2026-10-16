@@ -4,49 +4,41 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { Shell as SlotShell } from '../../../src/ui/shell/Shell';
-import { Header, type HeaderProps } from '../../../src/ui/shell/Header';
-import { TabBar, type TabBarProps } from '../../../src/ui/shell/TabBar';
-import { Footer } from '../../../src/ui/shell/Footer';
+import { TopBar } from '../../../src/ui/topbar/TopBar';
+import type { TopBarProps } from '../../../src/ui/topbar/model';
 import { DetailsColumn } from '../../../src/ui/shell/DetailsColumn';
 import { resolveTheme, useAppliedTheme } from '../../../src/ui/shell/theme';
-import { tabModels, type ConversationFooterState } from '../../../src/ui/shell/model';
 import { DockInsetProvider } from '../../../src/ui/shell/dockInset';
 import { ItemHistoryContext } from '../../../src/ui/shell/itemHistory';
 import { notices } from '../../../src/ui/pages/notices';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); delete document.documentElement.dataset.theme; });
 
-/** Today's chrome (header, tabs, detail, footer) and the floating dock through the shell's slots, as NavigationWorkspace builds it. */
+/** The chrome (top bar, detail) and the floating dock through the shell's slots, as NavigationWorkspace builds it. */
 interface ShellProps {
-  readonly header: HeaderProps;
-  readonly tabs: TabBarProps;
+  readonly header: TopBarProps;
   readonly body: {
     readonly dock?: ReactNode; readonly dockHeight?: number; readonly center: ReactNode; readonly conversation?: ReactNode; readonly detail?: ReactNode; readonly detailPath?: ReactNode;
     readonly onCloseDetail?: () => void; readonly onRemove?: () => void; readonly hidden?: boolean; readonly hiddenNotice?: string; readonly onHide?: () => void;
     readonly detailWidth?: number | null; readonly onResizeDetail?: (width: number) => void;
   };
-  readonly summary: string;
-  readonly conversationFooter?: ConversationFooterState;
   readonly overlay?: ReactNode;
 }
-function Shell({ header, tabs, body, summary, conversationFooter, overlay }: ShellProps) {
-  return <DockInsetProvider height={body.dockHeight ?? 0}><SlotShell topBar={<><Header {...header} /><TabBar {...tabs} /></>} main={body.center}
+function Shell({ header, body, overlay }: ShellProps) {
+  return <DockInsetProvider height={body.dockHeight ?? 0}><SlotShell topBar={<TopBar {...header} />} main={body.center}
     side={body.detail ? <DetailsColumn path={body.detailPath} onClose={body.onCloseDetail} onRemove={body.onRemove} hidden={body.hidden} hiddenNotice={body.hiddenNotice}
       onHide={body.onHide} onResize={body.onResizeDetail}>{body.detail}</DetailsColumn> : undefined}
-    footer={<Footer summary={summary} conversation={body.conversation ? conversationFooter ?? { question: false } : undefined} />}
     dock={body.dock} legacy={{ conversation: body.conversation, sideWidth: body.detailWidth }}
     overlay={overlay} /></DockInsetProvider>;
 }
-
-const now = new Date(2026, 9, 7, 15, 30).getTime();
 function props(patch: Partial<ShellProps> = {}): ShellProps {
-  const sessions = [{ id: 's1', project: 'search', agent: 'claude-code', createdAt: new Date(2026, 9, 7, 14, 2).getTime(), endedAt: null, running: true, on: true }];
   return {
-    header: { text: { sessionText: 'search · started 14:02', connText: 'Connected · claude-code', connColor: 'var(--st-done)' }, query: '', views: null,
-      theme: 'dark' },
-    tabs: { tabs: tabModels({ selection: 'session', sessions, projectCount: 1 }, now), onSelect: vi.fn(), onClose: vi.fn() },
+    header: { narrow: false, project: 'search', sessionName: 'Cache review', otherWaiting: 0, switcherOpen: false, onSwitcherToggle: vi.fn(),
+      connection: { kind: 'live', agent: 'Claude Code' }, connectionOpen: false, onConnectionToggle: vi.fn(), connectionCard: <p>Agent connected</p>,
+      search: { active: false, query: '', onOpen: vi.fn(), onQuery: vi.fn(), onClear: vi.fn() }, view: 'tree', onView: vi.fn(),
+      filter: { active: false, count: 0, onToggle: vi.fn() }, recent: { active: false, onToggle: vi.fn() }, archive: { active: false, onOpen: vi.fn() },
+      textSize: 100, onTextSizeChange: vi.fn(), theme: 'dark', onToggleTheme: vi.fn(), help: { open: false, onToggle: vi.fn() } },
     body: { dock: <p>Answer dock</p>, center: <p>Centre column</p> },
-    summary: '10 items · 3 waiting on you · 2 in progress · 4 open',
     ...patch,
   };
 }
@@ -121,29 +113,12 @@ describe('Paperwhite shell', () => {
     expect(overlay.style.left).toBe('0px');
   });
 
-  it('shows only Conversation shortcuts and hides pinned question keys when no question is pinned', () => {
-    const value = props({ body: { center: <p>Map</p>, conversation: <p>Conversation</p> },
-      conversationFooter: { question: true } });
-    const { rerender } = render(<Shell {...value} />);
-    const footer = document.querySelector('.shell-footer')!;
-    const keys = () => [...footer.querySelectorAll('.pw-keycap')].map(key => key.textContent);
-    expect(keys()).toEqual(['esc', '↑↓', 'a', 'r', '1–9', '⌥1–9', '⌥0', '⌘↵', 'b d o', 'Space']);
-    expect(footer.textContent).toContain('escBack to Map');
-    expect(footer.textContent).toContain('↑↓messages');
-    expect(footer.textContent).toContain('⌘↵send');
-    expect(footer.textContent).toContain('aack / answer');
-    expect(footer.textContent).toContain('rreply');
-    expect(footer.textContent).toContain('b d oitem actions');
-    rerender(<Shell {...value} conversationFooter={{ question: false }} />);
-    expect(keys()).toEqual(['esc', '↑↓', 'a', 'r', '⌘↵', 'b d o', 'Space']);
-    rerender(<Shell {...value} conversationFooter={undefined} />);
-    expect(keys()).toEqual(['esc', '↑↓', 'a', 'r', '⌘↵', 'b d o', 'Space']);
-    rerender(<Shell {...value} body={{ ...value.body, conversation: undefined }} />);
-    expect(keys()).toContain('g');
-    expect(keys()).toContain('←→');
-    expect(keys()).toContain('b r d z o');
-    expect(keys()).not.toContain('r');
-    expect(footer.textContent).toContain('⌘↵reply only');
+  it('keeps the switcher and Help available while a conversation is open', () => {
+    const switcher = vi.fn(), help = vi.fn(), value = props();
+    render(<Shell {...value} header={{ ...value.header, onSwitcherToggle: switcher, help: { open: false, onToggle: help } }} body={{ ...value.body, conversation: <p>Conversation</p> }} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Switch session or project/ })); expect(switcher).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Help: keys and markers' })); expect(help).toHaveBeenCalledOnce();
+    expect(screen.getByText('Conversation')).toBeTruthy();
   });
 
   it('bounds the overlay in a named centre container while its content owns scrolling', () => {
@@ -228,7 +203,7 @@ describe('Paperwhite shell', () => {
     } finally { notices.clear(); vi.useRealTimers(); }
   });
 
-  it('hides and unhides from the detail header next to Remove, and explains the key in the footer', () => {
+  it('hides and unhides from the detail header next to Remove', () => {
     const hide = vi.fn();
     const value = props({ body: { center: null, detail: <p>Detail</p>, onHide: hide } });
     const { rerender } = render(<Shell {...value} />);
@@ -237,7 +212,6 @@ describe('Paperwhite shell', () => {
     expect(button.querySelector('svg path[d="m3 3 18 18"]')).not.toBeNull();
     expect(button.nextElementSibling?.getAttribute('aria-label')).toBe('Remove item');
     fireEvent.click(button); expect(hide).toHaveBeenCalledOnce();
-    expect(document.querySelector('.shell-footer')?.textContent).toContain('xhide / unhide');
     rerender(<Shell {...value} body={{ ...value.body, hidden: true }} />);
     const unhide = screen.getByRole('button', { name: 'Unhide item' });
     expect(unhide.title).toBe('Unhide');
@@ -263,47 +237,44 @@ describe('Paperwhite shell', () => {
     fireEvent.click(next); expect(forward).toHaveBeenCalledOnce();
   });
 
-  it('renders header, tabs, body and footer from props', () => {
-    const value = props(); render(<Shell {...value} />);
-    expect(document.querySelector('.shell-session-text')?.textContent).toBe('search · started 14:02');
-    expect(document.querySelector('.shell-connection-text')?.textContent).toBe('Connected · claude-code');
-    const search = screen.getByRole<HTMLInputElement>('textbox', { name: 'Search questions and outcomes' });
-    expect(search.readOnly).toBe(true); expect(search.dataset.shellSearch).toBe('');
-    expect(screen.queryByRole('group', { name: 'View' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Switch to light' }).querySelector('.ph-sun')).not.toBeNull();
-    expect(screen.queryByRole('button', { name: 'Messages (m)' })).toBeNull();
-    const tabs = screen.getByRole('navigation', { name: 'Projects and sessions' });
-    expect(within(tabs).getByRole('button', { name: 'Projects' }).dataset.shellTab).toBe('projects');
-    const session = within(tabs).getByRole('button', { name: 'claude-code Today 14:02' });
-    expect(session.getAttribute('aria-current')).toBe('page'); expect(session.dataset.sessionTab).toBe('s1');
-    fireEvent.click(session); expect(value.tabs.onSelect).toHaveBeenCalledWith('s1');
-    fireEvent.click(within(tabs).getByRole('button', { name: 'Close claude-code Today 14:02 tab' })); expect(value.tabs.onClose).toHaveBeenCalledWith('s1');
+  it('renders the current session, connection card and body from props', () => {
+    const toggle = vi.fn(), value = props();
+    const { rerender } = render(<Shell {...value} header={{ ...value.header, onConnectionToggle: toggle }} />);
+    expect(screen.getByRole('button', { name: /^Switch session or project/ }).textContent).toContain('Cache review');
+    expect(screen.queryByText('Agent connected')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^Live\. Connected/ })); expect(toggle).toHaveBeenCalledOnce();
+    rerender(<Shell {...value} header={{ ...value.header, connectionOpen: true }} />);
+    expect(screen.getByText('Agent connected')).toBeTruthy();
     expect(screen.getByText('Answer dock')).toBeTruthy();
     expect(screen.getByRole('main').textContent).toBe('Centre column');
-    expect((document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns).toBe('minmax(0px,1fr)');
+    expect(document.querySelector<HTMLElement>('.shell-body')!.style.gridTemplateColumns).toBe('minmax(0px,1fr)');
     expect(screen.queryByRole('complementary', { name: 'Item detail' })).toBeNull();
-    expect(document.querySelector('.shell-summary')?.textContent).toBe('10 items · 3 waiting on you · 2 in progress · 4 open');
-    expect([...document.querySelectorAll('.shell-footer .pw-keycap')].map(key => key.textContent)).toContain('esc');
-    const footer = document.querySelector('.shell-footer')!;
-    expect(footer.textContent).toContain('⌥1–9send choice + note');
-    expect(footer.textContent).toContain('⌥0focus own words');
-    expect(footer.textContent).toContain('⌘↵reply only');
-    expect([...document.querySelectorAll('.shell-footer .pw-keycap')].map(key => key.textContent)).not.toContain('m');
+  });
+
+  it('wires filter, Recent, Archive and waiting-page controls', () => {
+    const filter = vi.fn(), recent = vi.fn(), archive = vi.fn(), waiting = vi.fn(), value = props();
+    render(<Shell {...value} header={{ ...value.header, variant: 'page', filter: { active: true, count: 1, onToggle: filter }, recent: { active: false, onToggle: recent },
+      archive: { active: false, onOpen: archive }, waitingHere: 3, onWaitingHere: waiting, otherWaiting: 2 }} />);
+    const filterButton = screen.getByRole('button', { name: 'Filter by status, 1 status picked' });
+    expect(filterButton.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(filterButton); expect(filter).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Recent' })); expect(recent).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Archive' })); expect(archive).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: '3 waiting in this session' })); expect(waiting).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: /^Switch session or project/ }).getAttribute('aria-label')).toContain('2 questions waiting in other sessions');
   });
 
   it('wires views, search, theme and the detail column', () => {
     const select = vi.fn(), query = vi.fn(), theme = vi.fn(), close = vi.fn(), remove = vi.fn();
     render(<Shell {...props({
-      header: { text: { sessionText: 's', connText: 'c', connColor: 'var(--st-open)' }, demo: true, query: 'needle', onQueryChange: query,
-        views: [{ label: 'Tree', icon: 'ph ph-tree-view', title: 'Tree (g)', on: true, onSelect: select }, { label: 'Graph', icon: 'ph ph-graph', title: 'Graph (g)', on: false }],
-        theme: 'light', onToggleTheme: theme },
+      header: { ...props().header, sessionName: 's', search: { active: true, query: 'needle', onOpen: vi.fn(), onQuery: query, onClear: vi.fn() },
+        onView: select, theme: 'light', onToggleTheme: theme },
       body: { center: null, detail: <section><p>Detail body</p></section>, onCloseDetail: close, onRemove: remove },
     })} />);
-    expect(screen.getByText('Demo')).toBeTruthy();
     const views = screen.getByRole('group', { name: 'View' });
     expect(within(views).getByRole('button', { name: 'Tree' }).getAttribute('aria-pressed')).toBe('true');
-    fireEvent.click(within(views).getByRole('button', { name: 'Tree' })); expect(select).toHaveBeenCalled();
-    fireEvent.change(screen.getByRole('textbox', { name: 'Search questions and outcomes' }), { target: { value: 'next' } }); expect(query).toHaveBeenCalledWith('next');
+    fireEvent.click(within(views).getByRole('button', { name: 'Graph' })); expect(select).toHaveBeenCalledWith('graph');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search the Map' }), { target: { value: 'next' } }); expect(query).toHaveBeenCalledWith('next');
     fireEvent.click(screen.getByRole('button', { name: 'Switch to dark' })); expect(theme).toHaveBeenCalled();
     const detail = screen.getByRole('complementary', { name: 'Item detail' });
     expect(detail.querySelector('.shell-detail-scroll')?.textContent).toBe('Detail body');
@@ -417,10 +388,10 @@ describe('Paperwhite shell', () => {
   });
 
   it('disables chrome controls while navigation writes', () => {
-    render(<Shell {...props({ header: { ...props().header, onQueryChange: vi.fn(), onToggleTheme: vi.fn(), disabled: true },
-      tabs: { ...props().tabs, disabled: true } })} />);
-    expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Search questions and outcomes' }).disabled).toBe(true);
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Projects' }).disabled).toBe(true);
+    render(<Shell {...props({ header: { ...props().header, disabled: true } })} />);
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Search the Map' }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: /^Switch session or project/ }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Switch to light' }).disabled).toBe(true);
   });
 });
 

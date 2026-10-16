@@ -4,7 +4,8 @@ import { createDesktopService, validHealth, type SupervisorHealth } from '../../
 import { OpenSessions } from '../../../src/data/session-store';
 import { SessionActionControllers, sessionActionsFor } from '../../../src/components/bindings/actions';
 import { dispatchStatus, healthReason, pausedNote } from '../../../src/components/bindings/dispatch';
-import { DispatchChip, PausedNote } from '../../../src/components/bindings/DispatchChip';
+import { PausedNote } from '../../../src/components/bindings/DispatchChip';
+import { DispatchDialog } from '../../../src/ui/pages/SessionDialogs';
 import { SupervisorHealthStore } from '../../../src/components/bindings/health';
 import { AppTransport, route } from '../app/transport';
 
@@ -118,46 +119,46 @@ async function mount() {
   const actions = new SessionActionControllers(service).forSession(store);
   return { transport, service, store, actions };
 }
-const chip = () => within(screen.getByRole('group', { name: 'Sending to the agent' }));
+// The session bar's chip is gone: its Sending state and Pause / Resume live in the dialog the connection card's "Sending" opens.
+const dialog = () => within(screen.getByRole('dialog', { name: 'Sending to claude-code' }));
+const sending = () => document.querySelector<HTMLElement>('dd[data-dispatch]')!;
 
-describe('dispatch chip', () => {
+describe('Sending dialog (was the session bar’s dispatch chip)', () => {
   it('pauses in one click, then offers Resume in one click', async () => {
-    const { transport, actions } = await mount();
-    render(<><DispatchChip actions={actions} /><PausedNote actions={actions} /></>);
-    expect(chip().getByText('Sending')).toBeTruthy(); expect(document.querySelector('[data-dispatch-note]')).toBeNull();
-    // An icon button, so the session bar stays one text line high: named, with a tooltip.
-    const pause = chip().getByRole('button', { name: 'Pause' });
-    expect(pause.textContent).toBe(''); expect(pause.getAttribute('title')).toMatch(/^Pause: stop sending to /);
-    await act(async () => { fireEvent.click(pause); });
+    const { transport, store, actions } = await mount();
+    render(<><DispatchDialog store={store} actions={actions} agent="claude-code" onClose={() => {}} /><PausedNote actions={actions} /></>);
+    expect(sending().textContent).toBe('Sending'); expect(document.querySelector('[data-dispatch-note]')).toBeNull();
+    expect(dialog().getByRole<HTMLButtonElement>('button', { name: 'Resume sending' }).disabled).toBe(true);
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Pause sending' })); });
     expect(transport.mutations.map(value => value.command.command)).toEqual(['binding_pause']);
-    await waitFor(() => expect(chip().getByText('Paused (by you)')).toBeTruthy());
-    expect(chip().getByRole('button', { name: 'Resume' }).getAttribute('title')).toMatch(/^Resume: send to /);
+    await waitFor(() => expect(sending().textContent).toBe('Paused (by you)'));
+    expect(dialog().getByRole<HTMLButtonElement>('button', { name: 'Pause sending' }).disabled).toBe(true);
     // The editors' warning offers the same Resume.
     const note = document.querySelector('[data-dispatch-note]') as HTMLElement;
     expect(note.textContent).toContain('Sending is paused');
     await act(async () => { fireEvent.click(within(note).getByRole('button', { name: 'Resume' })); });
     expect(transport.mutations.map(value => value.command.command)).toEqual(['binding_pause', 'binding_resume']);
-    await waitFor(() => expect(chip().getByText('Sending')).toBeTruthy());
+    await waitFor(() => expect(sending().textContent).toBe('Sending'));
   });
   it('shows the supervisor’s reason while it backs off, and nothing for a binding without an entry', async () => {
-    const { transport, actions } = await mount();
+    const { transport, store, actions } = await mount();
     transport.health = [health({ state: 'backing_off', reason: 'codex app-server exited', retry_in_seconds: 4, updated_at: new Date().toISOString() })];
-    render(<DispatchChip actions={actions} />);
-    await waitFor(() => expect(chip().getByText('Not sending: codex app-server exited · retrying in 4s')).toBeTruthy());
+    render(<DispatchDialog store={store} actions={actions} agent="claude-code" onClose={() => {}} />);
+    await waitFor(() => expect(sending().textContent).toBe('Not sending: codex app-server exited · retrying in 4s'));
     // It counts down by itself.
-    await waitFor(() => expect(chip().getByText('Not sending: codex app-server exited · retrying in 3s')).toBeTruthy(), { timeout: 3_000 });
+    await waitFor(() => expect(sending().textContent).toBe('Not sending: codex app-server exited · retrying in 3s'), { timeout: 3_000 });
     act(() => { transport.emit('ariadne://supervisor_health', health({ updated_at: new Date(Date.now() + 1_000).toISOString() })); });
-    expect(chip().getByText('Sending')).toBeTruthy();
+    expect(sending().textContent).toBe('Sending');
   });
-  it('says an unconfirmed pause was not confirmed and replays it exactly on Try again', async () => {
-    const { transport, actions } = await mount(); transport.failNext = 'binding_pause';
-    render(<DispatchChip actions={actions} />);
-    await act(async () => { fireEvent.click(chip().getByRole('button', { name: 'Pause' })); });
-    expect(chip().getByRole('alert').textContent).toBe('Your last change wasn’t confirmed.');
-    await act(async () => { fireEvent.click(chip().getByRole('button', { name: 'Try again' })); });
+  it('says an unconfirmed pause may not be saved and replays it exactly on Check again', async () => {
+    const { transport, store, actions } = await mount(); transport.failNext = 'binding_pause';
+    render(<DispatchDialog store={store} actions={actions} agent="claude-code" onClose={() => {}} />);
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Pause sending' })); });
+    expect(dialog().getByRole('alert').textContent).toContain('Ariadne isn’t sure the change was saved.');
+    await act(async () => { fireEvent.click(dialog().getByRole('button', { name: 'Check again' })); });
     const pauses = transport.mutations.filter(value => value.command.command === 'binding_pause');
     expect(pauses).toHaveLength(2); expect(pauses[1]).toEqual(pauses[0]);
-    expect(chip().queryByRole('alert')).toBeNull();
+    expect(dialog().queryByRole('alert')).toBeNull();
   });
   it('reaches the application’s controller for a session from anywhere in the view', async () => {
     const { service, store, actions } = await mount();
