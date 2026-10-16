@@ -1,4 +1,4 @@
-import { API_VERSION, HOST_VERSION, HELPER_TIMEOUT_MS, backgroundDiagnostic, connectDiagnostic, failureCode, ModError, bounded, descriptorValid, envelope, fields, hostVersionStatus, plainFailure, uuid } from './contracts.js';
+import { API_VERSION, HOST_VERSION, HELPER_TIMEOUT_MS, backgroundDiagnostic, connectDiagnostic, failureCode, folderFailure, ModError, bounded, descriptorValid, envelope, fields, hostVersionStatus, plainFailure, uuid } from './contracts.js';
 
 export async function qualify($, descriptor) {
   if (!descriptorValid(descriptor,$.plugin)) {
@@ -219,7 +219,8 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
     } catch (error) {
       const code = failureCode(error);
       const failure = new ModError(`Ariadne binding ${selected.binding_id} was saved; connection status remains pending. Original operation ${connectRequest.command.op_id}. ${code}`,
-        code === 'incompatible_adapter' ? plainFailure(code) : 'Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.');
+        code === 'incompatible_adapter' ? plainFailure(code) : folderFailure(error) ? error.plain
+          : 'Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.');
       // A route not published yet is not a removed automatic-reconnect target.
       // Other causes retain their notice meaning, grace and repair advice.
       if (code !== 'not_found') failure.code = code;

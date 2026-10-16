@@ -509,7 +509,7 @@ fn version_child_termination_distinguishes_interruptions_from_installation_failu
         ("kill -TERM $$", AdapterErrorCode::HostUnreachable),
         ("kill -INT $$", AdapterErrorCode::HostUnreachable),
         ("kill -HUP $$", AdapterErrorCode::HostUnreachable),
-        ("kill -KILL $$", AdapterErrorCode::IncompatibleAdapter),
+        ("kill -KILL $$", AdapterErrorCode::HostUnreachable),
         ("kill -ABRT $$", AdapterErrorCode::IncompatibleAdapter),
         ("kill -SEGV $$", AdapterErrorCode::IncompatibleAdapter),
         ("kill -BUS $$", AdapterErrorCode::IncompatibleAdapter),

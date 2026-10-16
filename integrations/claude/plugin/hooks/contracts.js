@@ -83,15 +83,24 @@ export function backgroundDiagnostic($, record) {
   })().catch(() => {});
 }
 export const BACKGROUND_RETRY = 'Ariadne is having trouble keeping this conversation up to date; it will keep trying, and you can open Ariadne to check on it.';
+// The one fixed helper message recognised by plainFailure: its retry keeps these words.
+const FOLDER_FAILURE = 'The project folder is missing or inaccessible. Restore access or select it again; Ariadne will keep trying.';
+export function folderFailure(error) {
+  return error?.plain === FOLDER_FAILURE;
+}
 const PRODUCER_INTERVALS = Object.freeze({announce:30000,helper:30000,auto:30000,qualification:30000,claim:1000,reports:1000});
-const HEALTH_PRIORITY = Object.freeze({ok:0,transient:1,held:2,install:3,terminal:4});
 // Held codes whose advice the owner must act on. Other held codes, such as
 // protocol_error, wait out the grace and spacing like retries do.
 const OWNER_HELD = new Set(['invalid_transition','binding_conflict','stale_generation','binding_mismatch','binding_ambiguous',
   'not_found','permission_denied','unsupported','unsupported_host_version','delivery_uncertain','commit_uncertain','protocol_conflict']);
-function urgent(condition) {
-  return condition.kind === 'terminal' || condition.kind === 'install' || (condition.kind === 'held' && OWNER_HELD.has(condition.code));
+// Owner-needed held advice outranks generic held advice; urgent meanings rank 3 and up.
+function rank(condition) {
+  if (condition.kind === 'held') return OWNER_HELD.has(condition.code) ? 3 : 2;
+  return {ok:0,transient:1,install:4,terminal:5}[condition.kind];
 }
+const urgent = condition => rank(condition) >= 3;
+// Transient lines are the shared retry sentence, or the project-folder sentence.
+const retryLine = text => text === FOLDER_FAILURE ? FOLDER_FAILURE : BACKGROUND_RETRY;
 // The kind comes from the error code alone, never from `retryable` or the hint.
 // The text is a fixed sentence: plainFailure may pick one from a fixed helper
 // message, but never echoes it. Background retries never inherit connect advice.
@@ -100,7 +109,7 @@ export function backgroundOutcome(error, text, {terminal = false} = {}) {
   if (text === null || code === 'lease_invalid') return {kind:'ok'};
   if (terminal) return {kind:'terminal',code,text:text ?? plainFailure(code,error?.details)};
   if (code === 'incompatible_adapter') return {kind:'install',code,text:plainFailure(code)};
-  if (TRANSIENT.has(code)) return {kind:'transient',code,text:BACKGROUND_RETRY};
+  if (TRANSIENT.has(code)) return {kind:'transient',code,text:retryLine(folderFailure(error) ? FOLDER_FAILURE : text)};
   return {kind:'held',code,text:code === 'invalid_transition' ? plainFailure(code,error?.details) : text ?? plainFailure(code,error?.details)};
 }
 // One conversation record. Selection depends on live producer outcomes and on
@@ -108,18 +117,27 @@ export function backgroundOutcome(error, text, {terminal = false} = {}) {
 // ill health, the last line, its producer and the spacing of non-urgent lines.
 export function conversationHealth(now = () => Date.now(), intervals = PRODUCER_INTERVALS) {
   const producers = new Map(), order = Object.keys(PRODUCER_INTERVALS);
+  // Calls in flight per producer, and when its last call ended. A helper call
+  // may take far longer than its producer's interval, so an open call keeps its
+  // producer live; the interval counts from when the call ends.
+  const calls = new Map();
   let unhealthySince = null, lastLine = null, quietAt = null, shown = null;
+  function live(producer, value) {
+    const call = calls.get(producer);
+    return call?.open > 0 || now() - Math.max(value.lastCall,call?.endedAt ?? -Infinity) <= intervals[producer] * 3;
+  }
   function failing() {
-    return [...producers.entries()].filter(([producer,value]) => now() - value.lastCall <= intervals[producer] * 3 && value.kind !== 'ok');
+    return [...producers.entries()].filter(([producer,value]) => value.kind !== 'ok' && live(producer,value));
   }
   function current() {
-    const live = failing();
-    if (!live.length) return {kind:'ok'};
-    live.sort(([left,a],[right,b]) => HEALTH_PRIORITY[b.kind] - HEALTH_PRIORITY[a.kind] || b.failedAt - a.failedAt || order.indexOf(left) - order.indexOf(right));
-    // The line showing now stays while its producer still fails at the top priority.
-    const kept = live.find(([producer,value]) => producer === shown?.producer && HEALTH_PRIORITY[value.kind] === HEALTH_PRIORITY[live[0][1].kind]);
-    const [producer,value] = kept ?? live[0];
-    return {kind:value.kind,code:value.code,text:value.kind === 'transient' ? BACKGROUND_RETRY : value.text,producer};
+    const candidates = failing();
+    if (!candidates.length) return {kind:'ok'};
+    candidates.sort(([left,a],[right,b]) => rank(b) - rank(a) || b.failedAt - a.failedAt || order.indexOf(left) - order.indexOf(right));
+    // The line showing now stays while its producer still fails and is at least
+    // as urgent as every other candidate.
+    const kept = candidates.find(([producer,value]) => producer === shown?.producer && rank(value) >= rank(candidates[0][1]));
+    const [producer,value] = kept ?? candidates[0];
+    return {kind:value.kind,code:value.code,text:value.kind === 'transient' ? retryLine(value.text) : value.text,producer};
   }
   function evaluate($) {
     const condition = current();
@@ -147,20 +165,49 @@ export function conversationHealth(now = () => Date.now(), intervals = PRODUCER_
     if (quiet) quietAt = now();
     return condition;
   }
+  // Drops producers idle for three intervals with no call open. A producer
+  // calling now is open, so its own slow call never counts as its recovery.
   function expire($) {
-    for (const [producer,value] of producers) if (now() - value.lastCall > intervals[producer] * 3) producers.delete(producer);
+    for (const [producer,value] of producers) if (!live(producer,value)) producers.delete(producer);
     if (current().kind === 'ok') evaluate($);
+  }
+  // Opens one call of a producer and returns the function that closes it. A
+  // producer idle past its lifetime drops out first: a new call starts afresh.
+  function begin($, producer) {
+    if ($.background === false) return () => {};
+    expire($);
+    const call = calls.get(producer) ?? {open:0,endedAt:-Infinity};
+    calls.set(producer,call);
+    call.open += 1;
+    let open = true;
+    return () => {
+      if (!open) return;
+      open = false;
+      call.open -= 1;
+      call.endedAt = now();
+    };
+  }
+  function record($, producer, outcome) {
+    if ($.background === false) return;
+    // A result outside an open call is a call that took no time.
+    let end = () => {};
+    if (calls.get(producer)?.open > 0) expire($);
+    else end = begin($,producer);
+    const previous = producers.get(producer);
+    if (outcome.kind === 'ok' && previous?.kind === 'transient' && previous.good < 2) {
+      producers.set(producer,{...previous,lastCall:now(),good:previous.good + 1});
+    } else producers.set(producer,{...outcome,lastCall:now(),failedAt:now(),good:0});
+    end();
+    return evaluate($);
   }
   return {
     current,
-    record($, producer, outcome) {
-      if ($.background === false) return;
-      expire($);
-      const previous = producers.get(producer);
-      if (outcome.kind === 'ok' && previous?.kind === 'transient' && previous.good < 2) {
-        producers.set(producer,{...previous,lastCall:now(),good:previous.good + 1});
-      } else producers.set(producer,{...outcome,lastCall:now(),failedAt:now(),good:0});
-      return evaluate($);
+    begin,
+    record,
+    // Runs one call of a producer; results recorded meanwhile belong to it.
+    async during($, producer, action) {
+      const end = begin($,producer);
+      try { return await action(); } finally { end(); }
     },
     delete($, producer) {
       if ($.background === false) return;
@@ -205,7 +252,7 @@ const HELPER_FAILURES = Object.freeze({
 // A refusal of the app to take more work: the reason says what to do, not the code.
 export function plainFailure(code, details, message) {
   if (code === 'host_unreachable' && typeof message === 'string' && message.toLowerCase().includes('project folder is missing or inaccessible')) {
-    return 'The project folder is missing or inaccessible. Restore access or select it again; Ariadne will keep trying.';
+    return FOLDER_FAILURE;
   }
   const own = (table, key) => typeof key === 'string' && Object.hasOwn(table,key) ? table[key] : undefined;
   if (code === 'binding_conflict' && bounded(details?.connected_session_name,4096)
