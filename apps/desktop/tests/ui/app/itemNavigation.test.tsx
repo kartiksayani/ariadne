@@ -5,7 +5,7 @@ import { createDesktopService } from '../../../src/data/service';
 import { immutable } from '../../../src/data/session-store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { AppTransport, route, secondId } from './transport';
-import { sessionButton } from './open';
+import { goToSession } from './open';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { changesFixture } from '../changes/fixture';
@@ -32,7 +32,7 @@ function ready() {
   expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
 }
 async function openSession(id = route.session_id) {
-  await click(await sessionButton({ ...route, session_id: id }));
+  await goToSession({ ...route, session_id: id }, click);
   screen.getByLabelText('Session tree', { selector: 'section' }); ready();
 }
 function selected(id: string) {

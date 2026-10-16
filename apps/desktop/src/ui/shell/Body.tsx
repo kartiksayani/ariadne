@@ -1,33 +1,31 @@
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from 'react';
-import { bodyLayout, DETAIL_DEFAULT, DETAIL_MAX, DETAIL_MIN, WAITING_FOLDED, WAITING_WIDTH } from './model';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { bodyLayout, DETAIL_MAX, WAITING_FOLDED, WAITING_WIDTH } from './model';
 import { WaitingFold } from './fold';
-import { ItemHistoryContext } from './itemHistory';
-import { HideIcon } from '../shared/HideIcon';
+import { useDockInset } from './dockInset';
+import { SideLayoutContext, type SideLayout } from './sideLayout';
 import { Notices } from '../pages/notices';
 
-export interface BodyProps {
+/** Body state the dock and the Details column replace; until then the shell keeps today's layout. */
+export interface LegacyBody {
   readonly conversation?: ReactNode;
-  readonly waiting: ReactNode;
-  readonly center: ReactNode;
-  readonly detail?: ReactNode;
-  /** The detail header's breadcrumb. */
-  readonly detailPath?: ReactNode;
-  readonly onCloseDetail?: () => void;
-  readonly onRemove?: () => void;
-  readonly hidden?: boolean;
-  readonly hiddenNotice?: string;
-  readonly onHide?: () => void;
-  /** The owner's saved detail width; null or absent for the default. */
-  readonly detailWidth?: number | null;
-  /** Saves the width the owner dragged the detail panel to. */
-  readonly onResizeDetail?: (width: number) => void;
+  readonly waiting?: ReactNode;
+  /** The owner's saved side column width; null or absent for the default. */
+  readonly sideWidth?: number | null;
   /** The owner's saved fold of the Waiting column. */
   readonly waitingFolded?: boolean;
   /** Saves the owner's fold of the Waiting column; without it the column cannot fold. */
   readonly onFoldWaiting?: (folded: boolean) => void;
 }
 
-const STEP = 16, SETTLE_MS = 500;
+export interface BodyProps extends LegacyBody {
+  readonly main: ReactNode;
+  /** The side column (`DetailsColumn`); absent, the Map takes the full width. */
+  readonly side?: ReactNode;
+  /** Floats over the main and side areas, anchored to the bottom. */
+  readonly dock?: ReactNode;
+}
+
+const SETTLE_MS = 500;
 
 /** The body's visible width, following window resizes; null where it cannot be measured. */
 function useWidth(ref: RefObject<HTMLDivElement | null>): number | null {
@@ -80,20 +78,23 @@ function useNoticeBand(view: RefObject<HTMLElement | null>, layer: RefObject<HTM
   }, [view, layer, open]);
 }
 
-export function Body({ conversation, waiting, center, detail, detailPath, onCloseDetail, onRemove, hidden = false, hiddenNotice, onHide, detailWidth = null, onResizeDetail,
-  waitingFolded = false, onFoldWaiting }: BodyProps) {
+/**
+ * The shell body: the main area and the side column, with the dock floating over both at the bottom. It publishes the
+ * dock's height as `--dock-inset` and lays out the side column through `SideLayoutContext`.
+ */
+export function Body({ main, side, dock, conversation, waiting, sideWidth = null, waitingFolded = false, onFoldWaiting }: BodyProps) {
   const ref = useRef<HTMLDivElement>(null), view = useRef<HTMLDivElement>(null), layer = useRef<HTMLDivElement>(null);
   useNoticeBand(view, layer, !!conversation);
-  const history = useContext(ItemHistoryContext);
   const width = useWidth(ref);
+  const inset = useDockInset();
   const [peek, setPeek] = useState(false);
   // The width being dragged or stepped, until it is saved.
   const [drag, setDrag] = useState<number | null>(null);
-  const start = useRef<{ x: number; width: number } | null>(null);
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const layout = bodyLayout({ width, detail: !!detail, detailWidth: drag ?? detailWidth, folded: waitingFolded, peek });
+  const detail = !!side;
+  const layout = bodyLayout({ width, detail, detailWidth: drag ?? sideWidth, folded: waitingFolded, peek });
   // Resizing can fold Waiting; the current open-column maximum must not stop that transition.
-  const resizeMax = bodyLayout({ width, detail: !!detail, detailWidth: DETAIL_MAX, folded: waitingFolded, peek }).detailMax;
+  const resizeMax = bodyLayout({ width, detail, detailWidth: DETAIL_MAX, folded: waitingFolded, peek }).detailMax;
   // Peeking ends once the window is wide enough again.
   useEffect(() => { if (!layout.narrow) setPeek(false); }, [layout.narrow]);
   useEffect(() => () => { if (settle.current) clearTimeout(settle.current); }, []);
@@ -102,74 +103,29 @@ export function Body({ conversation, waiting, center, detail, detailPath, onClos
     if (waitingFolded) onFoldWaiting(false);
     if (layout.narrow) setPeek(true);
   }) }), [layout.folded, layout.narrow, waitingFolded, onFoldWaiting]);
-  const commit = (value: number) => {
+  const commit = (value: number, save: (width: number) => void) => {
     if (settle.current) { clearTimeout(settle.current); settle.current = null; }
     setDrag(null);
-    onResizeDetail?.(value);
+    save(value);
   };
-  const clampWidth = (value: number) => Math.min(resizeMax, Math.max(DETAIL_MIN, Math.round(value)));
-  const pointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    start.current = { x: event.clientX, width: layout.detailWidth };
-  };
-  const pointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    if (start.current) setDrag(clampWidth(start.current.width + start.current.x - event.clientX));
-  };
-  const pointerUp = (event: PointerEvent<HTMLDivElement>) => {
-    if (!start.current) return;
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
-    start.current = null;
-    if (drag !== null) commit(drag);
-  };
-  const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const next = event.key === 'ArrowLeft' ? layout.detailWidth + STEP : event.key === 'ArrowRight' ? layout.detailWidth - STEP
-      : event.key === 'Home' ? DETAIL_MIN : event.key === 'End' ? resizeMax : null;
-    if (next === null) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const value = clampWidth(next);
-    setDrag(value);
-    if (settle.current) clearTimeout(settle.current);
-    settle.current = setTimeout(() => commit(value), SETTLE_MS);
-  };
+  // The body keeps a stepped width's pending save, so closing the column does not lose it.
+  const sideLayout: SideLayout = { width: layout.detailWidth, max: resizeMax, drag, preview: setDrag, commit, covered: !!conversation,
+    step: (value, save) => {
+      setDrag(value);
+      if (settle.current) clearTimeout(settle.current);
+      settle.current = setTimeout(() => commit(value, save), SETTLE_MS);
+    },
+    flush: save => { if (settle.current && drag !== null) commit(drag, save); } };
   // The retained grid can exceed a narrow viewport; Conversation follows the viewport instead.
-  return <div ref={ref} className="shell-body-viewport">
+  return <div ref={ref} className="shell-body-viewport" style={{ '--dock-inset': `${inset}px` } as CSSProperties}>
     <div className="shell-body" style={{ gridTemplateColumns: layout.columns }}>
     <div className={`shell-waiting${layout.folded ? ' shell-waiting-folded' : ''}`}>
       <WaitingFold.Provider value={fold}>{waiting}</WaitingFold.Provider></div>
-    <main className="shell-center" inert={!!conversation || undefined} aria-hidden={!!conversation || undefined}><div className="shell-center-content">{center}</div></main>
-    {detail && <aside className={`shell-detail${hidden ? ' shell-detail-hidden' : ''}`} aria-label="Item detail" inert={!!conversation || undefined} aria-hidden={!!conversation || undefined}>
-      {onResizeDetail && <div className="shell-detail-resize" role="separator" aria-orientation="vertical" aria-label="Resize detail panel"
-        aria-valuemin={DETAIL_MIN} aria-valuemax={resizeMax} aria-valuenow={layout.detailWidth} tabIndex={0} title="Drag to resize; double-click for the default width"
-        onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onKeyDown={keyDown}
-        onBlur={() => { if (settle.current && drag !== null) commit(drag); }} onDoubleClick={() => commit(DETAIL_DEFAULT)} />}
-      <div className="shell-detail-head">
-        {history && <div className="shell-detail-history" role="group" aria-label="Item navigation">
-          <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Back (⌘[)" aria-label="Back"
-            disabled={!history.canBack} onClick={history.back}><i className="ph ph-arrow-left" aria-hidden="true" /></button>
-          <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Forward (⌘])" aria-label="Forward"
-            disabled={!history.canForward} onClick={history.forward}><i className="ph ph-arrow-right" aria-hidden="true" /></button>
-        </div>}
-        <div className="shell-detail-path">
-          <div className="shell-detail-path-content" aria-hidden={hidden || undefined} inert={hidden || undefined}>{detailPath}</div>
-          {hidden && <div className="shell-detail-hidden-notice" role="status">
-            <span title={hiddenNotice ?? 'Hidden — this item is hidden from the list.'}>{hiddenNotice ?? 'Hidden — this item is hidden from the list.'}</span>
-            {onHide && <button type="button" className="btn btn-ghost" title={hiddenNotice ? 'Unhide this item and its hidden parents' : 'Unhide'} onClick={onHide}>Unhide</button>}
-          </div>}
-        </div>
-        {onHide && <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title={hidden ? hiddenNotice ? 'Unhide this item and its hidden parents' : 'Unhide' : 'Hide (x)'}
-          aria-label={hidden ? 'Unhide item' : 'Hide item'} aria-pressed={hidden} onClick={onHide}><HideIcon /></button>}
-        <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Remove (⌫)" aria-label="Remove item" onClick={onRemove}>
-          <i className="ph ph-trash" aria-hidden="true" /></button>
-        <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Close (Esc)" aria-label="Close detail" onClick={onCloseDetail}>
-          <i className="ph ph-x" aria-hidden="true" /></button>
-      </div>
-      <div className="shell-detail-scroll">{detail}</div>
-    </aside>}
+    <main className="shell-center" inert={!!conversation || undefined} aria-hidden={!!conversation || undefined}><div className="shell-center-content">{main}</div></main>
+    {side && <SideLayoutContext.Provider value={sideLayout}>{side}</SideLayoutContext.Provider>}
     </div>
     {conversation && <div ref={view} className="shell-conversation" style={{ left: layout.folded ? WAITING_FOLDED : WAITING_WIDTH }}>{conversation}</div>}
+    {dock && <div className="shell-dock">{dock}</div>}
     <div ref={layer} className="shell-notices" data-conversation={conversation ? '' : undefined} style={{ left: layout.folded ? WAITING_FOLDED : WAITING_WIDTH, right: !conversation && detail ? layout.detailWidth : 0 }}><Notices /></div>
   </div>;
 }

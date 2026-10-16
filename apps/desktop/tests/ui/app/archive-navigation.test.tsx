@@ -4,7 +4,7 @@ import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { notices } from '../../../src/ui/pages/notices';
 import { HistoryTransport } from '../history-actions/fixture';
-import { sessionButton } from './open';
+import { goToSession } from './open';
 import { route } from './transport';
 
 afterEach(() => { cleanup(); notices.clear(); vi.restoreAllMocks(); });
@@ -18,7 +18,7 @@ it('keeps the sole topic archive notice actionable through queued navigation and
   binding.active_input_id = null; binding.owner_paused = true; binding.dispatch_state = 'paused';
   const service = createDesktopService(transport);
   render(<DesktopApp service={service} />);
-  fireEvent.click(await sessionButton(route));
+  await goToSession(route);
   await waitFor(() => {
     expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
     expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');

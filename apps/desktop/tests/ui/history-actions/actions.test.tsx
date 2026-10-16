@@ -6,7 +6,7 @@ import { OpenSessions } from '../../../src/data/session-store';
 import { useSession } from '../../../src/data';
 import type { SessionRef } from '../../../src/generated/core';
 import { SessionActionControllers, type SessionActions } from '../../../src/components/bindings/actions';
-import { useLifecycle } from '../../../src/ui/tree/Lifecycle';
+import { useSessionLifecycle as useLifecycle } from '../../../src/ui/shared/useSessionLifecycle';
 import { ContinuePicker, ContinueTopicHost, continueTargets, openContinueTopic } from '../../../src/ui/dialogs/ContinueTopicDialog';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import type { SessionSummary } from '../../../src/generated/domain/models';

@@ -12,6 +12,7 @@ import { UnsentMessageNotices } from '../../../src/ui/answer/UnsentMessageNotice
 import { inItemConversation } from '../../../src/selectors/history';
 import { Notices, notices } from '../../../src/ui/pages/notices';
 import { Body } from '../../../src/ui/shell/Body';
+import { DetailsColumn } from '../../../src/ui/shell/DetailsColumn';
 import { AppTransport, route } from '../app/transport';
 
 const openedStores: OpenSessions[] = [];
@@ -20,8 +21,8 @@ const noticeHosts = ['standalone', 'conversation'] as const;
 type NoticeHost = typeof noticeHosts[number];
 
 function noticeHost(host: NoticeHost) {
-  return host === 'conversation' ? <Body waiting={<p>Waiting on me</p>} center={<button>Topic tree</button>}
-    detail={<button>Item details</button>} conversation={<section aria-label="Item conversation"><button>Close conversation</button></section>} /> : <Notices />;
+  return host === 'conversation' ? <Body waiting={<p>Waiting on me</p>} main={<button>Topic tree</button>}
+    side={<DetailsColumn><button>Item details</button></DetailsColumn>} conversation={<section aria-label="Item conversation"><button>Close conversation</button></section>} /> : <Notices />;
 }
 
 function accessibleNotices(host: NoticeHost) {

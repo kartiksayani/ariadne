@@ -2,14 +2,41 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
-import { Shell, type ShellProps } from '../../../src/ui/shell/Shell';
+import type { ReactNode } from 'react';
+import { Shell as SlotShell } from '../../../src/ui/shell/Shell';
+import { Header, type HeaderProps } from '../../../src/ui/shell/Header';
+import { TabBar, type TabBarProps } from '../../../src/ui/shell/TabBar';
+import { Footer } from '../../../src/ui/shell/Footer';
+import { DetailsColumn } from '../../../src/ui/shell/DetailsColumn';
 import { resolveTheme, useAppliedTheme } from '../../../src/ui/shell/theme';
-import { tabModels } from '../../../src/ui/shell/model';
+import { tabModels, type ConversationFooterState } from '../../../src/ui/shell/model';
 import { WaitingFrame } from '../../../src/ui/waiting/WaitingColumn';
 import { ItemHistoryContext } from '../../../src/ui/shell/itemHistory';
 import { notices } from '../../../src/ui/pages/notices';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); delete document.documentElement.dataset.theme; });
+
+/** Today's chrome (header, tabs, Waiting, detail, footer) through the shell's slots, as NavigationWorkspace builds it. */
+interface ShellProps {
+  readonly header: HeaderProps;
+  readonly tabs: TabBarProps;
+  readonly body: {
+    readonly waiting: ReactNode; readonly center: ReactNode; readonly conversation?: ReactNode; readonly detail?: ReactNode; readonly detailPath?: ReactNode;
+    readonly onCloseDetail?: () => void; readonly onRemove?: () => void; readonly hidden?: boolean; readonly hiddenNotice?: string; readonly onHide?: () => void;
+    readonly detailWidth?: number | null; readonly onResizeDetail?: (width: number) => void; readonly waitingFolded?: boolean; readonly onFoldWaiting?: (folded: boolean) => void;
+  };
+  readonly summary: string;
+  readonly conversationFooter?: ConversationFooterState;
+  readonly overlay?: ReactNode;
+}
+function Shell({ header, tabs, body, summary, conversationFooter, overlay }: ShellProps) {
+  return <SlotShell topBar={<><Header {...header} /><TabBar {...tabs} /></>} main={body.center}
+    side={body.detail ? <DetailsColumn path={body.detailPath} onClose={body.onCloseDetail} onRemove={body.onRemove} hidden={body.hidden} hiddenNotice={body.hiddenNotice}
+      onHide={body.onHide} onResize={body.onResizeDetail}>{body.detail}</DetailsColumn> : undefined}
+    footer={<Footer summary={summary} conversation={body.conversation ? conversationFooter ?? { question: false } : undefined} />}
+    legacy={{ waiting: body.waiting, conversation: body.conversation, sideWidth: body.detailWidth, waitingFolded: body.waitingFolded, onFoldWaiting: body.onFoldWaiting }}
+    overlay={overlay} />;
+}
 
 const now = new Date(2026, 9, 7, 15, 30).getTime();
 function props(patch: Partial<ShellProps> = {}): ShellProps {

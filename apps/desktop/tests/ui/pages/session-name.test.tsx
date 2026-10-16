@@ -22,7 +22,7 @@ import { SESSION_DESCRIPTION_MAX, SESSION_NAME_MAX, ownerDescription, ownerName,
 import { SessionBar as SessionBarView } from '../../../src/ui/tree/SessionBar';
 import { sessionBar } from '../../../src/ui/tree/model';
 import { AppTransport, route, secondId } from '../app/transport';
-import { sessionButton } from '../app/open';
+import { goToSession, sessionButton } from '../app/open';
 import { HistoryTransport } from '../history-actions/fixture';
 
 const now = Date.parse('2026-10-03T15:00:00.000Z');
@@ -321,7 +321,7 @@ describe('renaming from the project page and the session bar', () => {
     expect(card().querySelector('.pw-session-secondary')!.textContent).toBe('demo.local · iTerm window 1');
     expect(within(card()).queryByPlaceholderText('Name this session')).toBeNull();
 
-    fireEvent.click(await sessionButton(route));
+    await goToSession(route);
     await screen.findByRole('region', { name: 'Session tree' });
     await waitFor(() => expect(document.querySelector('.tree-session-title')!.textContent).toBe('Sync fixes'));
     // The loaded session's binding reports no host location, so the agent line is the agent alone.
@@ -343,7 +343,7 @@ describe('renaming from the project page and the session bar', () => {
 
   it('renames from the session bar and clears the name by saving it blank', async () => {
     const transport = setup();
-    fireEvent.click(await sessionButton(route));
+    await goToSession(route);
     await screen.findByRole('region', { name: 'Session tree' });
     await waitFor(() => {
         expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');

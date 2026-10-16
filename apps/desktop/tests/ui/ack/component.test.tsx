@@ -10,7 +10,7 @@ import { ackTarget } from '../../../src/ui/shared/ack';
 import { currentQuestionReplied, ownerReplied } from '../../../src/selectors/waiting/replied';
 import { continueGroups } from '../../../src/ui/pages/model';
 import { AppTransport, route } from '../app/transport';
-import { sessionButton } from '../app/open';
+import { goToSession } from '../app/open';
 import { notices } from '../../../src/ui/pages/notices';
 
 afterEach(() => { cleanup(); notices.clear(); vi.restoreAllMocks(); });
@@ -58,7 +58,7 @@ const acks = (transport: AppTransport) => transport.mutations.filter(value => va
 const refusal = 'This item can’t be acknowledged now. Check its current status and any question waiting for you.';
 async function mount(transport = new AckTransport()) {
   render(<DesktopApp service={createDesktopService(transport)} />);
-  fireEvent.click(await sessionButton(route));
+  await goToSession(route);
   await screen.findByRole('region', { name: 'Session tree' });
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');

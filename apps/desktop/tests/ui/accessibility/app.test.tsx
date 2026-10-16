@@ -3,13 +3,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { AppTransport, route, secondId } from '../app/transport';
-import { sessionButton } from '../app/open';
+import { goToSession } from '../app/open';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 async function setup(configure?: (transport: AppTransport) => void) {
   const transport = new AppTransport(); configure?.(transport); render(<DesktopApp service={createDesktopService(transport)} />);
-  const open = await sessionButton(route);
-  await act(async () => { fireEvent.click(open); });
+  await goToSession(route, open => act(async () => { fireEvent.click(open); }));
   await screen.findByRole('tree', { name: 'Session items' });
   // Check the bar trigger and session readiness without leaving a menu open.
   expect(within(screen.getByLabelText('Session')).getByRole('button', { name: 'Session actions' })).toBeTruthy();

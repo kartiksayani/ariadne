@@ -1,27 +1,30 @@
 import type { ReactNode } from 'react';
-import { Header, type HeaderProps } from './Header';
-import { TabBar, type TabBarProps } from './TabBar';
-import { Body, type BodyProps } from './Body';
-import { Footer } from './Footer';
-import type { ConversationFooterState } from './model';
+import { Body, type LegacyBody } from './Body';
 import './shell.css';
 
 export interface ShellProps {
-  readonly header: HeaderProps;
-  readonly tabs: TabBarProps;
-  readonly body: BodyProps;
-  readonly summary: string;
-  readonly conversationFooter?: ConversationFooterState;
+  /** The bar across the top. Until the new top bar lands it holds the old 48px header and 38px tab bar. */
+  readonly topBar: ReactNode;
+  /** The Map (Tree or Graph) or a page. */
+  readonly main: ReactNode;
+  /** The Details column (`DetailsColumn`); absent, the Map takes the full width. */
+  readonly side?: ReactNode;
+  /** Floats over the main and side areas, anchored to the bottom of the body. */
+  readonly dock?: ReactNode;
+  /** Dialogs and popovers. */
   readonly overlay?: ReactNode;
+  /** The old 30px footer row under the body, until the new top bar replaces it. */
+  readonly footer?: ReactNode;
+  /** Body state the dock and the Details column replace: Waiting, the conversation view and the saved layout. */
+  readonly legacy?: LegacyBody;
 }
 
-/** The Paperwhite chrome: 48px header, 38px tab bar, body grid, 30px footer. */
-export function Shell({ header, tabs, body, summary, conversationFooter, overlay }: ShellProps) {
+/** The Paperwhite chrome: the top bar, then the body (main, side and the floating dock). */
+export function Shell({ topBar, main, side, dock, overlay, footer, legacy }: ShellProps) {
   return <div className="shell">
-    <Header {...header} />
-    <TabBar {...tabs} />
-    <Body {...body} />
-    <Footer summary={summary} conversation={body.conversation ? conversationFooter ?? { question: false } : undefined} />
+    <div className="shell-top">{topBar}</div>
+    <Body {...legacy} main={main} side={side} dock={dock} />
+    {footer}
     {overlay}
   </div>;
 }
