@@ -6,8 +6,10 @@ mod catalogue;
 mod events;
 pub(crate) mod fs;
 pub(crate) mod lock;
+mod peek;
 pub use catalogue::{ProjectCatalogue, SessionReadOutcome};
 pub use events::{EventIdentity, EventMutation, EventTransaction};
+pub use lock::LOCK_WAIT;
 
 use ariadne_domain::history::{validate_session_history, HistoryError};
 use ariadne_domain::models::*;
@@ -817,6 +819,10 @@ mod decode_tests;
 #[cfg(test)]
 #[path = "tests/read_capture.rs"]
 mod read_capture_tests;
+
+#[cfg(test)]
+#[path = "tests/peek.rs"]
+mod peek_tests;
 
 #[cfg(test)]
 mod removal_name_tests {

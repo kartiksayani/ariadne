@@ -133,7 +133,12 @@ impl State {
                 availability: Availability::Unknown,
                 setup_steps: vec![cause.message],
             }),
-            Err(cause) if cause.code == AdapterErrorCode::HostUnreachable => {
+            Err(cause)
+                if matches!(
+                    cause.code,
+                    AdapterErrorCode::HostUnreachable | AdapterErrorCode::BindingMismatch
+                ) =>
+            {
                 Ok(unknown(version, &cause.message))
             }
             Err(cause) => Err(cause),

@@ -128,11 +128,19 @@ fn execute(args: &[&str], input: &mut dyn Read) -> Result<serde_json::Value, Cor
             let request_id = request_id.ok_or_else(|| {
                 invalid("Explicit --request-id is required for status correlation.")
             })?;
-            serde_json::to_value(connection_status(
-                home_from_environment()?,
-                binding_id,
-                generation,
-                request_id,
+            let home = home_from_environment()?;
+            // A status read changes nothing: ride out a briefly busy store,
+            // within the plugin's helper timeout.
+            serde_json::to_value(ariadne_core::native::retry_busy_within(
+                ariadne_core::native::PLUGIN_READ_BUDGET,
+                || {
+                    connection_status(
+                        home.clone(),
+                        binding_id.clone(),
+                        generation.clone(),
+                        request_id.clone(),
+                    )
+                },
             )?)
             .map_err(|_| invalid("Cannot serialize canonical binding summary."))
         }

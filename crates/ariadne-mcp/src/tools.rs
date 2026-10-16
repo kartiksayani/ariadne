@@ -93,6 +93,15 @@ impl AgentMcpService {
         Ok(response)
     }
     fn execute(&self, call: Call) -> Result<(Value, Vec<String>), CoreError> {
+        // A query changes nothing: ride out a briefly busy store. Applies
+        // return at once so the agent resends the same operation itself.
+        if matches!(call.operation, Operation::Query(_)) {
+            ariadne_core::native::retry_busy_read(|| self.execute_once(call.clone()))
+        } else {
+            self.execute_once(call)
+        }
+    }
+    fn execute_once(&self, call: Call) -> Result<(Value, Vec<String>), CoreError> {
         let context = (self.resolve)(
             call.binding_id.clone(),
             call.generation.clone(),
@@ -185,6 +194,7 @@ impl ServerHandler for AgentMcpService {
     // and validation below return actionable domain failures with isError=true.
 }
 
+#[derive(Clone)]
 struct Call {
     binding_id: UuidV4,
     generation: UuidV4,
@@ -192,6 +202,7 @@ struct Call {
     attempt: Option<UuidV4>,
     operation: Operation,
 }
+#[derive(Clone)]
 enum Operation {
     Query(QueryRequest),
     Apply(ApplyRequest),

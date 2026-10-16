@@ -1,8 +1,8 @@
 # ADR-0065: Validate captured reads outside storage locks
 
-Status: accepted
+Status: accepted; "no cache, new retry" partially superseded by ADR-0101
 Supersedes: ADR-0043 only for the read-side validation lock scope
-Superseded by: none
+Superseded by: [ADR-0101](ADR-0101-lock-free-claim-check-and-busy-read-retry.md) (only the "no cache ... new retry" line, for claim polls and read-only entrypoints; locked byte capture for ordinary reads is retained)
 
 ## Context
 

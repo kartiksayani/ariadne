@@ -693,6 +693,16 @@ Catalogue captures preserve per-session errors and diagnostic no-write behavior.
 This does not change the mutation algorithm below; see
 [ADR-0065](../../adr/ADR-0065-validate-captured-reads-outside-storage-locks.md).
 
+Claim polls first `peek` the committed session file without the session lock:
+commits are atomic renames, so one open sees exactly one committed version. Claim
+answers "nothing to send" and guard refusals from that validated snapshot, and
+takes the lock, rereads and decides again whenever it may send an input or replay a
+saved claim receipt. The parsed snapshot is cached by file identity (device,
+inode, size, mtime and ctime) and reparsed when a commit replaced the file or
+something rewrote it in place. Read-only entrypoints retry `store_busy` within a
+budget (5 s, or 2.5 s for reads the plugin runs) before returning it; see
+[ADR-0101](../../adr/ADR-0101-lock-free-claim-check-and-busy-read-retry.md).
+
 The transaction follows this algorithm:
 
 1. Resolve project/session from registered IDs, not arbitrary renderer paths. Open the data root and the project's `projects/<id>` descendants with no-follow checks; the registered canonical root must still exist as a real directory. Reject symlinked store/lock targets and unsafe filesystem types; account for path-to-use races using directory-relative opens in the OS module.

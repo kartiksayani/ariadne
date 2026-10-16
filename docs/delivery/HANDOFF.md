@@ -1,8 +1,10 @@
-# Ariadne handoff — 2026-10-15
+# Ariadne handoff — 2026-10-17
 
-Claude Code on **Opus 5.5** maintains delivery. At most **3 Codex companion jobs**
-(**gpt-6.1-sol, high effort**) implement bounded work in isolated worktrees with
-declared, disjoint paths. Independent review uses a separate **Opus 5.5** context
+Claude Code on **Opus 5.5** maintains delivery. Team mode (ORCHESTRATOR): **Sonnet 5.5
+(high effort)** does most implementation, including browser work; **Codex
+(gpt-6.1-sol, high effort)** does pure-logic pieces its sandbox can test, in isolated
+worktrees with declared, disjoint paths. The maintainer integrates the pieces and runs
+one full gate on the combined head. Independent review uses a separate **Opus 5.5** context
 at the exact head; one targeted re-review follows fixes. The owner authorized
 pushes and squash merges with green `quality` and exact-head review. The maintainer
 uses `gh pr merge --squash --match-head-commit <head>` and verifies main's tree
@@ -10,18 +12,40 @@ matches the PR head (`git diff --quiet <head> origin/main`). Test Ariadne behavi
 is not a gate (ADR-0068). Keep the process budget in ORCHESTRATOR. Preserve worktrees,
 branches and history; no force-push or open-source licence.
 
-Codex jobs cannot run browsers, sockets, the app, native e2e or `git add`/commits.
-The maintainer runs Playwright, design frames and the local native journey before
-push, stages and commits, and plans time for it. Before UI implementation, share a
+Codex jobs cannot run browsers, sockets, the app, native e2e or `git add`/commits, so
+that work goes to Sonnet. Implementers run `npm run check` and targeted tests, then
+hand back. The maintainer runs the full gate (Playwright, design frames and the local
+native journey) once on the integrated head before push, and plans time for it. Before UI implementation, share a
 clickable HTML mock under `designs/mocks/`; the owner signs off and implementation
 follows it.
 
-**Main: `925c9645` (#162). Alpha.17 released as
-[`v0.1.0-alpha.17`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.17)**
-(tag at `925c9645`). Alpha.16 is `v0.1.0-alpha.16` (tag at `44158cbf`, #160), alpha.15 is
-`v0.1.0-alpha.15` (tag at `10b6013a`, #159) and alpha.14 is `v0.1.0-alpha.14` (tag at
-`1135693c`, #155): a Map you can follow, from #150 (`395736a2`), #151 (`bc7fa712`), #152
-(`63295ec5`), #153 (`2bd09408`), #154 (`8a58f93c`) and #155 (`1135693c`).
+**Main: `0336a903` (#164). Alpha.18 released as
+[`v0.1.0-alpha.18`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.18)**
+(tag at `0336a903`). Alpha.17 is `v0.1.0-alpha.17` (tag at `925c9645`, #162), alpha.16 is
+`v0.1.0-alpha.16` (tag at `44158cbf`, #160), alpha.15 is `v0.1.0-alpha.15` (tag at
+`10b6013a`, #159) and alpha.14 is `v0.1.0-alpha.14` (tag at `1135693c`, #155): a Map you
+can follow, from #150 (`395736a2`), #151 (`bc7fa712`), #152 (`63295ec5`), #153
+(`2bd09408`), #154 (`8a58f93c`) and #155 (`1135693c`).
+
+## Alpha.18 released
+
+[#164](https://github.com/kartiksayani/ariadne/pull/164), `0336a903`: a hotfix. Tasks
+P11.15 and P11.16. It was installed and verified on the owner's Mac. What changed for the
+owner:
+
+- The same release also carries [#165](https://github.com/kartiksayani/ariadne/pull/165) (harness: team mode) and [#166](https://github.com/kartiksayani/ariadne/pull/166) (shell seams: groundwork for the redesign; nothing visible changes).
+- An idle session no longer fills up with repeated background hook notices.
+- Each conversation keeps one health record, and every hook call records exactly one outcome. A producer counts from its first outcome until it is explicitly retired (loop stop, binding end, qualify, reset).
+- A call open more than 10 s counts as a transient timeout.
+- Ranks: terminal > install > owner-needed held > generic held > transient. Urgent conditions print at once. Transient and generic held conditions get a 2-minute grace. Recovery takes 3 successes.
+- A broken install (SIGABRT, SEGV, BUS, ILL) speaks at once. SIGKILL is transient.
+- Each error code has a plain hint. `store_busy` is retryable, and only it.
+- Reads ride out a busy store: 5 s for the agent CLI, owner queries and MCP; 2.5 s for plugin reads. An attempt starts only if it still fits the budget.
+- The claim check reads the committed file without the lock (`Store::peek`, a small cache), then decides again under the lock. Decision: [ADR-0101](../adr/ADR-0101-lock-free-claim-check-and-busy-read-retry.md).
+
+Install check: the app and CLI were identical to the package (`cmp`), and the running
+alpha.17 app was left untouched. The follow-ups it left are tasks P11.17–P11.27 (see Next
+steps).
 
 ## Alpha.17 released
 
@@ -69,22 +93,35 @@ The remaining rounds are:
 
 ## Next steps
 
-These wait until the redesign rounds above are done, unless the owner asks for one earlier.
+Items 1 and 2 are for alpha.19 (they do not touch the redesign). Items 3 onward wait until the redesign rounds above are done, unless the owner asks for one earlier.
 
-1. Follow-ups from #162, each a small task:
+1. Hook notice follow-ups from the alpha.18 final re-review (non-blocking), each a small task:
+   - P11.17 `claim` is not retired after binding removal (`claims.js` `end()`), so the terminal "removed" line stays current and hides later advice until reconnect. Retire it after the removal is recorded.
+   - P11.18 Pre-existing dead end: `autoConnect` holds `ownerTransition` while awaiting `deliverNote` (`register.js`). If `$.session.append` hangs, `/ariadne-connect` and `/ariadne-disconnect` answer "already connecting" forever. Don't await the note inside the transition window, or time-box it.
+   - P11.19 The oracle's one-outcome check is circular (`notice-invariants.test.js`). Turn on the `balanced()` ledger in `register.test.js` and `connect-recovery.test.mjs`.
+   - P11.20 A transient turn-callback failure stays current while idle, and "it will keep trying" is false there.
+   - P11.21 `HUNG_CALL_MS` (10 s) assumes one helper run per call, but auto and reports do several. Use per-producer thresholds and fix the README wording.
+2. Store and install follow-ups from the alpha.18 head review and install check:
+   - P11.22 The store lock is unfair (`crates/ariadne-store/src/session/lock.rs`): `try_lock` with a backoff growing to 50 ms lets newcomers polling at 10 ms beat the longest waiter. Use a flat 10 ms poll or a FIFO handoff.
+   - P11.23 `claim_contention.rs` readers should resolve like the CLI (`AgentResolver::resolve`), so a busy catalogue fails the try instead of hiding a 2 s wait. Place queue inputs outside the 2.3 s holds (space them 150–200 ms). Keep every assertion. It fails 2 to 4 of 5 local runs on a shared machine.
+   - P11.24 Later: the owner's `session_read` takes the session lock (`queries/mod.rs` to `catalogue.rs`). Peek-based reads are possible.
+   - P11.25 While the alpha.17 app ran, `install.sh`'s doctor printed "some data was busy or unreadable" and "Saved data couldn't be read safely". A rerun right after said "No problems found". The install-time doctor should ride out busy like other reads, or word it as busy, try again.
+   - P11.26 Deflake the load-sensitive tests (see Known flakes).
+   - P11.27 Every alpha ships as plugin version 0.1.0, so the Claude plugin cache cannot tell alphas apart.
+3. Follow-ups from #162, each a small task:
    - P11.10 Graph selection reply race: a Graph click's `revealItem` reply is dropped when a reveal is dismissed mid-flight, because the `external` guard in `GraphView.tsx` compares App's `treeReveal`. Fix with a counter that changes only on a non-own, non-null outside reveal.
    - P11.11 Stale "outside your filters" banner: it stays after a Graph fold or stub toggle; the Tree dismisses it through `onDismissReveal`.
    - P11.12 Reveal selected detail parity: the Graph keeps detail closed and the Tree opens it. The owner decides, then both align.
    - P11.13 Missing composed tests: a plain Graph click keeps scroll and focus through App, and the selection is asserted after Resume.
    - P11.14 Flake watch for `tests/integrations/claude/register.test.js` (see Known flakes).
-2. Recovery edge cases from a failure table. Three rare cases from the #159 review:
+4. Recovery edge cases from a failure table. Three rare cases from the #159 review:
    a rollback that could remove the only copy of the recovery file on network
    filesystems, transient read errors that set a good recovery file aside, and a
    needless sync on reads. Brief it as a full failure table (ORCHESTRATOR, "Delivery
    feedback rules"). Task P11.7.
-3. Previous-release read test: an automatic check that the previous release accepts
+5. Previous-release read test: an automatic check that the previous release accepts
    the files the new build writes. Task P11.8.
-4. Watch the Known flakes list below; a second occurrence gets fixed before the next merge.
+6. Watch the Known flakes list below; a second occurrence gets fixed before the next merge.
 
 ## Process lessons
 
@@ -118,6 +155,18 @@ One entry per flake: the test and its first failure, the evidence, and the suspe
   - First failed: local #162 full coverage run, 2026-10-15. Line 780 waited for 2 matching calls and saw 1. Task P11.14.
   - Evidence: the file passed 3 times in a row on its own. #162 does not touch the Claude integration.
   - Suspected cause: timing under coverage load, where the `vi.waitFor` default timeout is too short after `h.timer().callback()`. Not confirmed.
+
+- **`tests/e2e/tree-layout/tree-layout.spec.mts:442`, "Map look: continuous rails, clamp threshold, reserved selection tags and clear reveals" (light theme only).** First occurrence; not fixed yet.
+  - First failed: #164 CI run 38894984785, 2026-10-16. `.tree-path > .tree-selected-slot .tree-selected-edge` was not found within 5 s after `expectRevealedRow` (about line 577). The dark run passed. #164 does not touch the Map.
+  - Suspected cause: a reveal still settling, as in the :585 entry below. Not confirmed.
+
+- **Load flakes in the alpha.18 integration gate (2026-10-17), first occurrence each.** All passed alone, so they are load-sensitive, not broken. Task P11.26.
+  - `crates/ariadne-cli/tests/doctor.rs`: `doctor_warns_in_plain_words_when_codex_has_not_loaded_the_selected_thread` and `executable_doctor_qualifies_only_the_existing_codex_daemon_and_exact_thread` failed in `cargo test --workspace` and passed alone (28 of 28). Same family as the `ariadne-adapter-codex` `queue.rs` "Codex version probe timed out" load flakes.
+  - `crates/ariadne-cli/tests/claude_installed_join.rs` fails when 3 copies run at once (load-sensitive deadline asserts around lines 278, 667, 693 and 741) and passes alone.
+  - `apps/desktop/tests/ui/inputs/owner-input.test.tsx` (two tests), the `App.test.tsx` reveal test and `crates/ariadne-adapter-codex/tests/queue.rs` also fail under load.
+  - `itemNavigation` "keeps Waiting, linked and history reveals…" and "reveals native item routes again…", and the tree component test "never scrolls when status chip dismisses…", failed in the gate and passed alone (236 of 236).
+  - Not a flake: `conformance.rs:532` failed because a non-interactive shell's background job inherits SIGINT as ignored, so the fake child exited 0. Fixed in `fc090d91`: the test binary is the child, and it resets and raises the signal.
+  - `claim_contention::pollers_and_readers_together…` fails at load 15–45 on a shared machine (task P11.23). CI on a quiet runner passed.
 
 - **Design harness first load: `tests/ui/design/design.spec.mts` `openApp`'s 60 s `waitForFunction` for the app to render.** Fixed in #160.
   - First failed: #155 CI. Failed again: #160 CI, "M2 chosen answer and attributed topic lists (dark)" (line 271), one of the first tests a fresh worker runs. Both times a first-load timeout.

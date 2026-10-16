@@ -2,20 +2,23 @@
 
 The maintainer is Claude Code on **Opus 5.5**. It plans, sets the contracts
 between pieces of work, integrates them and talks to the owner. Implementers are
-Claude sub-agents working as a team. Owner ruling, 2026-10-16: the team model
-below replaces Codex implementers. Codex is used only when the owner asks for it.
+Claude sub-agents working as a team, plus Codex for pure-logic pieces. Owner
+rulings, 2026-10-16 and 2026-10-17: the team model below sets who implements what.
 Independent review uses a separate **Opus 5.5** context at the exact head, with one
 targeted re-review after fixes.
 
 ### Team mode
 
-- **Model by risk.** **Opus 5.5 (high effort)** takes anything critical or large:
-  delivery and send-once, drafts and typed text, storage and saved formats,
-  concurrency and locks, scroll and focus side effects, and shell refactors that
-  others build on. **Sonnet 5.5 (high effort)** takes well-specified, bounded
-  pieces: a component built to a drawn state, a test rewrite, harness tooling.
-  **Haiku 5.5** takes mechanical work: renames, deleting dead code, records,
-  release-notes formatting.
+- **Model mix.**
+  - **Sonnet 5.5 (high effort)** takes most implementation, and anything that needs
+    a browser, sockets or the app: a component built to a drawn state, a test
+    rewrite, harness tooling.
+  - **Codex gpt-6.1-sol (high effort)** takes pure-logic pieces its sandbox can
+    test.
+  - **Opus 5.5 (high effort)** takes only the critical pieces (send-once, typed
+    text, storage and locks, saved formats) and all reviews.
+  - **Haiku 5.5** takes mechanical work: renames, deleting dead code, records,
+    release-notes formatting.
 - **Plan first.** No implementer starts before the owner approves a written plan.
 - **Break the work down.** Split each feature into mini and micro features that can
   run in parallel, each with declared, disjoint owned paths. Before launch, the
@@ -30,15 +33,32 @@ targeted re-review after fixes.
   - A teammate asks the maintainer before changing a decision in the plan.
   - Messages to a running agent are cheap. Message a finished agent only when its
     context is worth the replay cost.
-- **Local first, and one full run at a time.**
-  - Implementers have no sandbox limits. They run targeted tests while working,
-    and the full local gate set before handing back.
-  - Full suites run one at a time, behind `/tmp/ariadne-gates.lock`. Machine load
-    above about 30 makes timeout flakes, so concurrent full runs waste time.
-  - A failure is rerun alone, on a quiet machine, before anyone judges it.
-- **Integration.** The maintainer, or a designated integrator, merges a feature's
-  pieces in contract order. It runs the full gate set once on the combined head,
-  then pushes, so CI runs once per head.
+- **Wake or fresh.** The maintainer decides. A small targeted fix goes to a fresh
+  helper with a tight brief (file:line and the failing test). Wake the author only
+  when the fix needs its deep context.
+- **Integrate, then one full run.**
+  - Implementers run `npm run check` plus the targeted tests for every file they
+    touched or whose behaviour they changed, then hand back. They do not run the
+    full gate set.
+  - The maintainer merges a release's pieces in contract order on one integration
+    branch and runs ONE full gate on the combined head.
+  - A failure is attributed by running it on each piece alone, and goes back to
+    that piece's author.
+  - Failures caused by two pieces interacting go to an integration fixer.
+  - Push once, so CI runs once per head.
+- **Machine load.**
+  - Heavy commands (cargo build or test, any Playwright run, vitest over more than
+    one file, `npm run build`) go through a machine-wide wrapper that allows 2 at
+    a time and pauses while a full gate runs. Light commands (tsc, eslint, a single
+    vitest file) run directly.
+  - The full gate waits for the 1-minute load to drop below 20 before it starts.
+  - A failure under load proves nothing. Rerun it alone before judging it.
+  - Never edit a running shell script in place. Write a new file and `mv` it over.
+- **Disk.**
+  - Delete a piece's `target/` once it is integrated, and remove a worktree once
+    its branch is merged.
+  - Check free space at each integration step, and clean up below 30 GB.
+  - Keep the pinned reference browser linked into every worktree's `target/`.
 
 Before UI implementation, the maintainer shares a clickable HTML mock under
 `designs/mocks/` and gets owner sign-off. Implementation follows the approved mock.

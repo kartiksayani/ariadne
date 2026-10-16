@@ -45,7 +45,7 @@ describe('installed owner helper setup', () => {
   });
   it('qualifies exact supported host and helper version before owner mutation/polling', async () => {
     const h = host();await qualify(h.$,descriptor);
-    expect(h.calls[0]).toEqual({argv:[descriptor.helperPath,'--version'],options:{timeoutMs:5000}});
+    expect(h.calls[0]).toEqual({argv:[descriptor.helperPath,'--version'],options:{timeoutMs:8000}});
     for (const version of ['2.1.288','2.1.289','2.1.1000','2.2.0','2.2.287','3.0.0','3.1.287','10.0.0']) await qualify(host({version}).$,descriptor);
     for (const version of ['2.1.286','2.0.999','1.99.999','1.1.287','2.1','2.1.287.1','2.1.x','','garbage',null,2.1,'2.1.0','1.1.287','2.1.-1','2.1.+300','2.1.287-beta','2..300',' 2.1.300','2.1.300 ','2.1.300\n','2.1.99999999999999999999','02.1.287','2.01.287','2.1.0288','2.1.00']) {
       await expect(qualify(host({version}).$,descriptor)).rejects.toThrow('requires Claude Code 2.1.287 or newer');
@@ -75,6 +75,14 @@ describe('installed owner helper setup', () => {
     await expect(setup(descriptor.helperPath,undefined,{waitMs:2000,pollMs:1}).connect(h.$))
       .rejects.toMatchObject({code:'host_unreachable',plain:'Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.'});
     expect(h.calls.filter(call => call.argv[2] === 'connection-status')).toHaveLength(1);
+  });
+  it('keeps the project folder words when connection status cannot reach the folder', async () => {
+    const folder = {exitCode:4,stdout:JSON.stringify({api_version:1,ok:false,error:{code:'host_unreachable',
+      message:'The selected project folder is missing or inaccessible; restore access to the project folder or select it again before reconnecting',
+      hint:'Restore access.',retryable:true,field_errors:[]}}),stderr:''};
+    const h = host({handler:argv => argv[2] === 'connection-status' ? folder : undefined});
+    await expect(setup(descriptor.helperPath,undefined,{waitMs:2000,pollMs:1}).connect(h.$))
+      .rejects.toMatchObject({code:'host_unreachable',plain:'The project folder is missing or inaccessible. Restore access or select it again; Ariadne will keep trying.'});
   });
   it('uses canonical bootstrap wrappers and installed fixed provider facts, then validates scoped status', async () => {
     const h = host();const owner = setup(descriptor.helperPath);

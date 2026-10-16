@@ -1,5 +1,5 @@
 // Read-only heartbeats over the existing private bridge; no binding or queue authority.
-import { API_VERSION, ModError, bounded, envelope, fields, uuid } from './contracts.js';
+import { API_VERSION, HELPER_TIMEOUT_MS, ModError, bounded, envelope, fields, uuid } from './contracts.js';
 
 function absolute(value) {
   return bounded(value) && !value.includes('\0') && value.startsWith('/')
@@ -52,7 +52,7 @@ export function announcements(descriptor) {
           plugin,descriptor:{...descriptor},binding_scope};
         const ack = envelope(await $.process.run([descriptor.helperPath,'bridge','announce',
           '--request-id',globalThis.crypto.randomUUID(),'--json-stdin'],
-        {stdin:JSON.stringify(announcement),timeoutMs:5000}));
+        {stdin:JSON.stringify(announcement),timeoutMs:HELPER_TIMEOUT_MS}));
         if (!fields(ack,['adapter_id','external_session_id']) || ack.adapter_id !== announcement.adapter_id
           || ack.external_session_id !== external_session_id) {
           throw new ModError('Discovery acknowledgement differs from the original provider/session identity; check matching app/helper versions.');
