@@ -1,15 +1,15 @@
 // The final-board project (playwright.config.ts `final`): every registered state (final-frames.ts) is drawn by the board
 // (designs/Ariadne-final-board.zip, offline) and, once its `pending` flag is off, by the real app in the matching fixture,
 // and the two are compared pixel for pixel against final-thresholds.json. See README.md in this folder.
-import { test as base, expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { test as base, chromium, expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createSocket } from 'node:dgram';
 import { createServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import { createServer as createNetServer, type AddressInfo } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { captureFrame, crop, type CaptureInput, type CompareResult, type Region } from './compare.mts';
-import { boardContext, boardFrame, labelHeight, launchBoardBrowser, openBoard, renderBoard, settle } from './final-board.mts';
+import { boardBrowserArgs, boardContext, boardFrame, labelHeight, launchBoardBrowser, openBoard, renderBoard, settle } from './final-board.mts';
 import { finalNow, finalStates, notYet, regionsFor, unhonoured, variantNames, variants, type FinalState, type Step, type Variant } from './final-frames';
 import { cspReportPath, finalMembers, fontFile, fontPins, runtimeHashes } from './final-source.mts';
 import { startDesignServer } from './server.mts';
@@ -30,7 +30,7 @@ const threshold = (id: string, variant: Variant): number => (thresholds as Recor
 
 /** The worker's board context: every board page is opened in it and closed after its shot. */
 interface Board { readonly context: BrowserContext; readonly denied: string[] }
-const test = base.extend<Record<never, never>, { origin: string; boardBrowser: Browser; board: Board }>({
+const test = base.extend<Record<never, never>, { origin: string; boardBrowser: Browser; cspOnlyBrowser: Browser; board: Board }>({
   origin: [async ({ browserName }, use) => {
     expect(browserName).toBe('chromium');
     // The board's support.js checks SRI on its CDN scripts; the same pinned bytes are served offline.
@@ -40,9 +40,14 @@ const test = base.extend<Record<never, never>, { origin: string; boardBrowser: B
     try { await use(origin); } finally { await server.close(); }
   }, { scope: 'worker', timeout: 240_000 }],
   // The board's own browser, launched with the resolver and WebRTC rules (boardBrowserArgs): the app's contexts stay in the default one.
-  boardBrowser: [async ({ browserName }, use) => {
+  boardBrowser: [async ({ browserName, origin }, use) => {
     expect(browserName).toBe('chromium');
-    const browser = await launchBoardBrowser();
+    const browser = await launchBoardBrowser(origin);
+    try { await use(browser); } finally { await browser.close(); }
+  }, { scope: 'worker' }],
+  // The same browser without the proxy (and so without the layer that would hide a missing CSP): what the CSP alone holds is tested in it.
+  cspOnlyBrowser: [async ({ origin }, use) => {
+    const browser = await chromium.launch({ args: boardBrowserArgs(origin).filter(arg => !arg.startsWith('--proxy-')) });
     try { await use(browser); } finally { await browser.close(); }
   }, { scope: 'worker' }],
   board: [async ({ boardBrowser, origin }, use) => {
@@ -229,8 +234,8 @@ const reachPast = (page: Page, url: string) => page.evaluate(target => new Promi
   setTimeout(() => { clearInterval(timer); done('still open'); }, 10_000);
 }), url);
 
-test('board context: board script cannot open a real WebSocket past the replacement (CSP)', async ({ boardBrowser, origin }) => {
-  const denied: string[] = [], context = await boardContext(boardBrowser, origin, denied);
+test('board context: board script cannot open a real WebSocket past the replacement (CSP alone)', async ({ cspOnlyBrowser, origin }) => {
+  const denied: string[] = [], context = await boardContext(cspOnlyBrowser, origin, denied);
   try {
     await listening(async (port, connections) => {
       const page = await context.newPage();
@@ -242,41 +247,92 @@ test('board context: board script cannot open a real WebSocket past the replacem
     });
   } finally { await context.close(); }
 });
-test('board context: a page without the CSP still reaches no host but the loopback (resolver rules)', async ({ boardBrowser, origin }) => {
-  const context = await boardContext(boardBrowser, origin, []);
+test('board context: a page without the CSP still reaches nothing but the dev server (proxy and resolver rules)', async ({ boardBrowser, origin }) => {
+  const context = await boardContext(boardBrowser, origin, []), plain = await chromium.launch(), control = await plain.newContext();
   try {
     await listening(async (port, connections) => {
-      // about:blank carries no CSP. The loopback address is excluded from the rules (the board is served from it), so the control reaches
-      // the server: the attempts work, and only the CSP stands between a board file and the loopback.
-      const page = await context.newPage();
-      await reachPast(page, `ws://127.0.0.1:${port}/`);
+      // The control: a browser without the board's launch rules reaches the server from a page with no CSP (about:blank), so the
+      // attempts work, and a count of 0 below is the launch rules and not the attempt.
+      await (await control.newPage()).evaluate(target => { new WebSocket(target); }, `ws://127.0.0.1:${port}/`);
       await expect.poll(connections, 'the control reaches the server').toBeGreaterThan(0);
       const before = connections();
-      // Every other name does not resolve, though it would lead to the same server (localhost is 127.0.0.1).
-      expect(await reachPast(page, `ws://localhost:${port}/`), 'both attempts end').toBe('closed');
+      // about:blank carries no CSP. The loopback's other ports go to a proxy nothing listens on, and any other name does not resolve.
+      const page = await context.newPage();
+      for (const host of ['127.0.0.1', 'localhost']) expect(await reachPast(page, `ws://${host}:${port}/`), `${host}: both attempts end`).toBe('closed');
       await page.waitForTimeout(500);
-      expect(connections(), 'a name other than 127.0.0.1 reaches nothing').toBe(before);
+      expect(connections(), 'the server was not reached').toBe(before);
+    });
+  } finally { await plain.close(); await context.close(); }
+});
+test('board context: a document the route answered with a 404 or an error carries the CSP too (iframe realm, CSP alone)', async ({ cspOnlyBrowser, origin }) => {
+  const context = await boardContext(cspOnlyBrowser, origin, []);
+  try {
+    await listening(async (port, connections) => {
+      const page = await context.newPage();
+      await page.goto(`${origin}/final/ariadne-ds/styles.css`);
+      // Board script can open any URL of its origin in an iframe. Each answer is a same-origin document with a realm of its own, whose
+      // WebSocket replacement is reached past exactly as in the page: none may reach the server.
+      const sources = [`${origin}/nowhere`, `${origin}/final/nowhere`, `${origin}/final/ariadne-ds/`, `${origin}/final/%zz`, `${origin}${cspReportPath}`, 'about:blank'];
+      for (const src of [...sources, 'srcdoc', 'blob']) {
+        const attempt = page.evaluate(({ src, target }) => new Promise<string>(done => {
+          const frame = document.createElement('iframe');
+          frame.onload = () => {
+            try {
+              const realm = frame.contentWindow as unknown as { WebSocket: typeof WebSocket };
+              const mock = new realm.WebSocket(target) as unknown as WebSocketMock;
+              mock._apiConnect();
+              const direct = new (mock._ws.constructor as typeof WebSocket)(target);
+              setTimeout(() => done(`${mock._ws.readyState}${direct.readyState}`), 1500);
+            } catch (error) { done(`threw: ${String(error)}`); }
+          };
+          if (src === 'srcdoc') frame.srcdoc = '<!DOCTYPE html><p>x</p>';
+          else if (src === 'blob') frame.src = URL.createObjectURL(new Blob(['<!DOCTYPE html><p>x</p>'], { type: 'text/html' }));
+          else frame.src = src;
+          document.body.append(frame);
+        }), { src, target: `ws://127.0.0.1:${port}/` });
+        attempt.catch(() => undefined);
+        // Bounded, so a frame that never answers fails this test instead of waiting for the test's timeout; the count is read before the outcome.
+        const outcome = await Promise.race([attempt, page.waitForTimeout(8000).then(() => 'no answer')]);
+        expect(connections(), `${src}: the server was never reached`).toBe(0);
+        expect(outcome, `${src}: the attempts ran and ended`).toBe('33');
+      }
     });
   } finally { await context.close(); }
 });
-test('board context: WebRTC sends no UDP of its own (STUN)', async ({ boardBrowser, origin }) => {
-  const context = await boardContext(boardBrowser, origin, []), packets: number[] = [];
-  const udp = createSocket('udp4').on('message', message => packets.push(message.length));
-  await new Promise<void>(done => udp.bind(0, '127.0.0.1', done));
+
+/**
+ * How many connections a page's RTCPeerConnection makes to a server on the loopback: ICE gathering against a STUN server (UDP datagrams)
+ * or a TURN server over TCP (TCP connections). Neither is a request a route sees.
+ */
+async function webrtcReach(context: BrowserContext, origin: string, transport: 'udp' | 'tcp'): Promise<number> {
+  let count = 0;
+  const udp = transport === 'udp' ? createSocket('udp4').on('message', () => { count++; }) : undefined;
+  const tcp = transport === 'tcp' ? createNetServer(socket => { count++; socket.destroy(); }) : undefined;
+  await new Promise<void>(done => udp ? udp.bind(0, '127.0.0.1', done) : tcp!.listen(0, '127.0.0.1', done));
   try {
     const page = await context.newPage();
     await page.goto(`${origin}/final/ariadne-ds/styles.css`);
-    // The offer is gathered against a STUN server on the loopback: with the browser's default policy it is sent a binding request.
-    await page.evaluate(async port => {
-      const peer = new RTCPeerConnection({ iceServers: [{ urls: `stun:127.0.0.1:${port}` }] });
+    const port = udp ? udp.address().port : (tcp!.address() as AddressInfo).port;
+    await page.evaluate(async ({ port, transport }) => {
+      const iceServers = transport === 'udp' ? [{ urls: `stun:127.0.0.1:${port}` }] : [{ urls: `turn:127.0.0.1:${port}?transport=tcp`, username: 'probe', credential: 'probe' }];
+      const peer = new RTCPeerConnection({ iceServers });
       peer.createDataChannel('probe');
       await peer.setLocalDescription(await peer.createOffer());
       await new Promise(done => setTimeout(done, 3000));
       peer.close();
-    }, udp.address().port);
-    expect(packets, 'no STUN request reached the server').toEqual([]);
-  } finally { udp.close(); await context.close(); }
-});
+    }, { port, transport });
+    return count;
+  } finally { udp?.close(); tcp?.close(); }
+}
+for (const [transport, name] of [['udp', 'STUN over UDP'], ['tcp', 'TURN over TCP']] as const) {
+  test(`board context: WebRTC reaches nothing of its own (${name})`, async ({ boardBrowser, origin }) => {
+    // The control: a browser launched without the board's rules does reach the server, so a count of 0 below means the rules held.
+    const plain = await chromium.launch(), control = await plain.newContext();
+    try { expect(await webrtcReach(control, origin, transport), `${name}: the control reaches the server`).toBeGreaterThan(0); } finally { await plain.close(); }
+    const context = await boardContext(boardBrowser, origin, []);
+    try { expect(await webrtcReach(context, origin, transport), `${name}: the board browser reaches nothing`).toBe(0); } finally { await context.close(); }
+  });
+}
 
 // A frame whose render asked for something it may not leaves its evidence: the report carries `denied`, and the assertion comes after.
 /** A white PNG with black squares ([x, y, width, height]), drawn in the browser. */

@@ -147,21 +147,25 @@ export async function routeFinal(context: BrowserContext, origin: string, denied
     if (runtime[url]) return request.fulfill({ body: runtime[url], contentType: 'application/javascript', headers: { 'access-control-allow-origin': '*' } });
     const parsed = new URL(url);
     if (parsed.origin !== origin) { denied.push(url); return request.abort('blockedbyclient'); }
-    if (!parsed.pathname.startsWith('/final/')) { denied.push(url); return request.fulfill({ status: 404, body: '' }); }
+    // Every same-origin answer carries the CSP, the 404s and the 500 too: board script can open any URL of the origin in an iframe, and
+    // an answer without the header is a same-origin document with a realm of its own and no `connect-src` (its `WebSocket` is the replacement,
+    // and `_apiConnect()` opens a real socket). A document without the header is not served.
+    const answer = (options: { status?: number; body: Buffer | string; contentType?: string; headers?: Record<string, string> }) => request.fulfill({ ...options, headers: { ...options.headers, ...documentHeaders } });
+    if (!parsed.pathname.startsWith('/final/')) { denied.push(url); return answer({ status: 404, body: '' }); }
     // A malformed escape (`%zz`) cannot name a file: answered 404 and recorded, never left to throw with the request unanswered.
     let path: string;
-    try { path = decodeURIComponent(parsed.pathname.slice('/final/'.length)); } catch { denied.push(url); return request.fulfill({ status: 404, body: '' }); }
+    try { path = decodeURIComponent(parsed.pathname.slice('/final/'.length)); } catch { denied.push(url); return answer({ status: 404, body: '' }); }
     const file = resolve(finalServed, path);
     // A directory is not a file (`/final/ariadne-ds/`): answered 404 and recorded, instead of throwing on the read.
-    if (file.startsWith(finalServed + sep) && existsSync(file) && statSync(file).isDirectory()) { denied.push(url); return request.fulfill({ status: 404, body: '' }); }
-    if (file.startsWith(finalServed + sep) && existsSync(file)) return request.fulfill({ body: readFileSync(file), contentType: contentTypes[extname(file)] ?? 'application/octet-stream', headers: documentHeaders });
+    if (file.startsWith(finalServed + sep) && existsSync(file) && statSync(file).isDirectory()) { denied.push(url); return answer({ status: 404, body: '' }); }
+    if (file.startsWith(finalServed + sep) && existsSync(file)) return answer({ body: readFileSync(file), contentType: contentTypes[extname(file)] ?? 'application/octet-stream' });
     try {
       const font = path.startsWith('ariadne-ds/fonts/') ? fontFile(path.slice('ariadne-ds/fonts/'.length)) : undefined;
-      if (font) return request.fulfill({ body: font, contentType: 'font/woff2' });
+      if (font) return answer({ body: font, contentType: 'font/woff2' });
     } catch (error) {
       denied.push(`${url}: ${error instanceof Error ? error.message : String(error)}`);
-      return request.fulfill({ status: 500, body: '' });
+      return answer({ status: 500, body: '' });
     }
-    return request.fulfill({ status: 404, body: '' });
+    return answer({ status: 404, body: '' });
   });
 }

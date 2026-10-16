@@ -21,12 +21,16 @@ export const labelHeight = 27;
  * What the board's browser is launched with, so that the network is shut below the page and not only by what the page's script
  * is given. Name resolution answers "not found" for every host but the dev server's loopback address (the board is served from
  * 127.0.0.1), and WebRTC may not use UDP outside a proxy (a STUN request would reach the network without being a request a route sees).
+ * WebRTC's TCP (a TURN server on the loopback, which the resolver rules leave alone) is shut by a proxy that nothing listens on: the
+ * browser sends everything to it, loopback included (`<-loopback>`), except the dev server's own address and port (the bypass list),
+ * so a connection to any other port fails to connect. None of this can be reached from page script.
  */
-export const boardBrowserArgs = ['--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'];
+export const boardBrowserArgs = (origin: string): string[] => ['--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
+  '--proxy-server=http://127.0.0.1:1', `--proxy-bypass-list=<-loopback>;${new URL(origin).host}`];
 
 /** The browser the board's contexts are created in: Chromium launched with `boardBrowserArgs`. The caller closes it. */
-export function launchBoardBrowser(): Promise<Browser> {
-  return chromium.launch({ args: boardBrowserArgs });
+export function launchBoardBrowser(origin: string): Promise<Browser> {
+  return chromium.launch({ args: boardBrowserArgs(origin) });
 }
 
 /**
