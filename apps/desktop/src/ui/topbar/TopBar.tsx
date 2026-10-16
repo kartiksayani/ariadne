@@ -38,11 +38,11 @@ function Search({ search, narrow, disabled }: { readonly search: SearchView; rea
   return <div className={narrow ? 'tb-search tb-search-on tb-search-narrow' : 'tb-search tb-search-on'} role="search">
     <i className="ph ph-magnifying-glass tb-search-icon" aria-hidden="true" />
     <input ref={input} className="tb-search-input" value={search.query} aria-label="Search the Map" placeholder="Search the Map" spellCheck={false}
-      onChange={event => search.onQuery(event.target.value)} onKeyDown={keys} />
+      disabled={disabled} onChange={event => search.onQuery(event.target.value)} onKeyDown={keys} />
     {search.count && <span className="tb-search-count" role="status">{search.count}</span>}
     {search.onPrev && <button type="button" className="tb-search-btn" title="Previous match ( ⇧↵ )" aria-label="Previous match" onClick={search.onPrev}><i className="ph ph-arrow-up" aria-hidden="true" /></button>}
     {search.onNext && <button type="button" className="tb-search-btn" title="Next match ( ↵ )" aria-label="Next match" onClick={search.onNext}><i className="ph ph-arrow-down" aria-hidden="true" /></button>}
-    <button type="button" className="tb-search-btn tb-search-x" title="Clear the search ( esc )" aria-label="Clear the search" onClick={search.onClear}><i className="ph ph-x" aria-hidden="true" /></button>
+    <button type="button" className="tb-search-btn tb-search-x" title="Clear the search ( esc )" aria-label="Clear the search" disabled={disabled} onClick={search.onClear}><i className="ph ph-x" aria-hidden="true" /></button>
     {search.note && <div className="tb-search-note" role="status">
       <i className="ph ph-dots-three" aria-hidden="true" /><span className="tb-note-text">{search.note.text}</span>
       <button type="button" className="tb-note-action" onClick={search.note.onAction}>{search.note.action}</button>
