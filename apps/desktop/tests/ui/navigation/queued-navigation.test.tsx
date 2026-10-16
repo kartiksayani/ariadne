@@ -49,7 +49,7 @@ async function setup() {
   transport.preferences.global.selected_navigation = { kind: 'session', session: route };
   transport.preferences.sessions = [transport.view(), { ...transport.view(secondId), tab_order: 1 }];
   const store = new NavigationStore(createDesktopService(transport));
-  stores.push(store);
+  stores.push(store); shownStore = store;
   await store.start();
   await store.opened.open(route).refresh();
   await act(async () => {
@@ -58,16 +58,16 @@ async function setup() {
   });
   return { store, transport };
 }
-function tab(selection: NavigationSelection): HTMLButtonElement {
-  const buttons = screen.getByRole('navigation', { name: 'Projects and sessions' }).querySelectorAll<HTMLButtonElement>('.shell-tab-open');
-  const button = [...buttons].find(button => selection.kind === 'session'
-    ? button.dataset.sessionTab === JSON.stringify([selection.session.project_id, selection.session.session_id])
-    : button.dataset.shellTab === selection.kind);
-  expect(button).toBeDefined();
-  return button!;
-}
+// The tab row is gone (SPEC §2), so nothing in the window asks for a saved Projects or All sessions selection any more.
+// The queue behind navigation is the store's, so these tests ask the store for each destination as a click did.
+let shownStore: NavigationStore;
 async function click(selection: NavigationSelection) {
-  await act(async () => { fireEvent.click(tab(selection)); });
+  await act(async () => { void shownStore.navigate(selection); });
+}
+/** What the window shows for a saved selection: a session's Map (the test renders its id), or a page heading. */
+function showing(selection: NavigationSelection) {
+  if (selection.kind === 'session') return screen.queryByText(`Showing ${selection.session.session_id}`);
+  return screen.queryByRole('heading', { name: selection.kind === 'all_sessions' ? 'All sessions' : 'Projects', level: 1 });
 }
 async function advance(milliseconds = 0) {
   await act(async () => { await vi.advanceTimersByTimeAsync(milliseconds); });
@@ -79,7 +79,7 @@ const opening = () => screen.queryAllByRole('status').find(element => /^Opening(
 function shown(selection: NavigationSelection, store: NavigationStore, transport: QueuedTransport) {
   expect(transport.preferences.global.selected_navigation).toEqual(selection);
   expect(store.getSnapshot().preferences?.global.selected_navigation).toEqual(selection);
-  expect(tab(selection).getAttribute('aria-current')).toBe('page');
+  expect(showing(selection)).not.toBeNull();
   expect(opening()).toBeUndefined();
   expect(store.getSnapshot()).toMatchObject({ pendingNavigation: null, writing: false, pendingOperationId: null, error: null });
 }
@@ -243,13 +243,13 @@ describe('latest queued workspace navigation', () => {
     expect(screen.getByText(`Showing ${secondId}`)).toBeTruthy();
   });
 
-  it('keeps tab clicks enabled during an owner write and saves only the newest after it', async () => {
+  it('keeps the switcher enabled during an owner write and saves only the newest navigation after it', async () => {
     const { store, transport } = await setup(), owner = gate();
     transport.beforePatch = async request => { if (selectionOf(request)?.kind === 'session') await owner.promise; };
     let saving!: Promise<boolean>;
     await act(async () => { saving = store.saveTheme('dark', 1); });
     expect(store.getSnapshot().writing).toBe(true);
-    expect(tab(projects).disabled).toBe(false);
+    expect(document.querySelector<HTMLButtonElement>('[data-popover-trigger="switcher"]')!.disabled).toBe(false);
     await click(projects);
     await click(second);
     expect(opening()).toBeDefined();
