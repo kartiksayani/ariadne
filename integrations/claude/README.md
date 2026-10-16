@@ -103,10 +103,17 @@ share one retry notice, while changed actionable states print immediately.
 Terminal notices always print and close the episode; otherwise three consecutive
 successful calls end it. Transient failures wait two minutes from the current
 transient streak; held states and silent lease refusals reset that grace period.
+Report-save failures use the same grace and sustained recovery rules. App-unreachable
+failures across announcements, claims, reconnects and helper hooks share one outage
+notice; owner commands return their direct answer without another outage line.
+Successful local report saves cannot reset app reachability.
 Background diagnostics contain timestamps and fixed codes only, recording episode
 starts, visible meaning changes and endings in a separate 20-record `hook-log`.
 Its pending write queue is also bounded and never holds up polling or owner
-`connect-log` receipts. Helper calls allow eight seconds for the helper's five-second
+`connect-log` receipts. Automatic reconnects record only their first and final
+outcomes in `hook-log`; only owner-started operations write `connect-log` receipts.
+The diagnostic-code table is checked against the generated Core error enum.
+Helper calls allow eight seconds for the helper's five-second
 control timeout to return its typed error. Owner commands still answer immediately.
 
 Real installer rendering, owner CLI commands, durable core/report composition,

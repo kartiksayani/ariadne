@@ -206,12 +206,12 @@ function bindingGone(state, h, loop) {
   state.announcementScope = null;
   state.target = null;
   state.note = null;
-  state.owner?.forget();
+  state.owner?.forget(h);
   void forget(h,state.claudeSessionId);
   if (!state.ownerTransition) void announce(state,h);
 }
 function createLoop(state, binding) {
-  const loop = claimLoop(state.descriptor.helperPath,binding,{onEnded:h => bindingGone(state,h,loop)});
+  const loop = claimLoop(state.descriptor.helperPath,binding,{onEnded:h => bindingGone(state,h,loop),notices:state.notices.fork()});
   return loop;
 }
 // Stops the loops of a conversation that is no longer current. Each reports
@@ -223,7 +223,7 @@ async function retire(state, h) {
   state.pending = null;
   state.announcementScope = null;
   state.note = null;
-  state.owner?.forget();
+  state.owner?.forget(h);
   state.retired.push(...old);
   for (const loop of old) await loop.stop(h,true);
 }
@@ -256,7 +256,7 @@ async function followChange(state, $) {
   if (followed) await forget(h,previous);
   state.target = await recall(h,id) ?? followed ?? null;
   // The new conversation has seen none of these, so each may print again (a closed app included).
-  for (const slot of ['auto','announce','helper','qualification']) state.notices.delete(slot);
+  state.notices.reset();
   await announce(state,h);
   if (state.target) await autoConnect(state,$);
 }
@@ -301,7 +301,7 @@ async function autoConnect(state, $) {
   try {
     // The app accepts the new conversation once the old one's end is saved.
     if (!await drainRetired(state,h)) return;
-    const result = await bind(state,$,state.target.session_id);
+    const result = await bind(state,$,state.target.session_id,{background:true});
     if (!state.loop || result.text) return;
     state.note = {binding:result.result.binding,tries:0,sending:false};
     await deliverNote(state,$);
@@ -352,13 +352,13 @@ async function sessionStart(state, $, event, next) {
   }
   return next(event);
 }
-async function bind(state, $, requestedSessionId) {
+async function bind(state, $, requestedSessionId, options) {
   if (!state.qualified) {
     await qualifyConnection(state,$);
   }
   if (state.sessionEnded) return {text:TEXT.ended};
   const h = host($);
-  const result = await state.owner.connect(h,requestedSessionId);
+  const result = await state.owner.connect(h,requestedSessionId,options);
   const reason = busy(state);
   if (reason) return {text:BUSY[reason]};
   const replaced = state.loop;
@@ -423,6 +423,7 @@ async function disconnectAction(state, $) {
   state.target = null;
   state.note = null;
   state.notices.delete('auto');
+  state.owner?.endBackground(h);
   await forget(h,state.claudeSessionId);
   if (!state.owner.current()) return {text:TEXT.notConnected};
   if (state.loop) await state.loop.stop(h);
@@ -467,6 +468,7 @@ async function sessionEnd(state, $, event, next) {
     return next(event);
   }
   state.sessionEnded = true;
+  state.owner?.endBackground(host($));
   state.timer?.cancel();
   state.announcementTimer?.cancel();
   state.discovery.stop();

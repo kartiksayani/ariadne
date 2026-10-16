@@ -733,7 +733,7 @@ describe('conversation changes, relaunch and removal', () => {
       await beat.callback();expect(h.logs.slice(quiet)).toEqual([]);
       for (let i = 0; i < 3; i += 1) expect((await hooks.get('ariadne-status')(h.$)).text).toBe(`That did not complete. ${closed}`);
       time = 120000;await beat.callback();await beat.callback();
-      expect(h.logs.slice(quiet)).toEqual([closed,retry]);
+      expect(h.logs.slice(quiet)).toEqual([retry]);
       down = false;
       for (let i = 0; i < 3; i += 1) {
         await beat.callback();
@@ -741,7 +741,9 @@ describe('conversation changes, relaunch and removal', () => {
       }
       down = true;
       await hooks.get('ariadne-status')(h.$);await hooks.get('ariadne-status')(h.$);
-      expect(h.logs.slice(quiet)).toEqual([closed,retry,closed]);
+      expect(h.logs.slice(quiet)).toEqual([retry]);
+      time += 120000;await beat.callback();
+      expect(h.logs.slice(quiet)).toEqual([retry,retry]);
       expect(h.logs.join(' ')).not.toMatch(/host_unreachable|retain|original IDs|helper/);
     } finally { clock.mockRestore(); }
   });

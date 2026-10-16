@@ -31,8 +31,12 @@ export const NOTICE_GRACE_MS = 120000;
 const TRANSIENT = new Set(['store_busy','timeout','io_error','process_rejected','host_unreachable']);
 const DIAGNOSTIC_CODES = new Set([...TRANSIENT,'stale_generation','binding_mismatch','binding_ambiguous','binding_conflict',
   'not_found','invalid_argument','permission_denied','unsupported','unsupported_host_version','incompatible_adapter',
-  'delivery_uncertain','commit_uncertain','protocol_conflict','invalid_transition','protocol_error','lease_invalid']);
-function failureCode(error) {
+  'delivery_uncertain','commit_uncertain','protocol_conflict','invalid_transition','protocol_error','lease_invalid',
+  'revision_conflict','question_changed','unhandled_owner_message','invalid_ref','operation_reused','result_already_committed',
+  'attempt_sealed','result_missing','queue_full','topic_not_archivable','session_not_closable','preview_stale','snapshot_changed',
+  'capacity_exceeded','corrupt_session','future_schema','control_path_too_long']);
+// The integration table checks every generated CoreErrorCode against this set.
+export function failureCode(error) {
   if (error?.details?.reason === 'lease_invalid') return 'lease_invalid';
   if (DIAGNOSTIC_CODES.has(error?.code)) return error.code;
   return error instanceof ModError ? 'protocol_error' : 'process_rejected';
@@ -55,7 +59,7 @@ export function connectDiagnostic($, record) {
 // Bound the pending queue too, in case a store promise never settles.
 const backgroundRecords = [];
 let backgroundWriting = false;
-function backgroundDiagnostic($, record) {
+export function backgroundDiagnostic($, record) {
   if (backgroundRecords.length === 20) backgroundRecords.shift();
   backgroundRecords.push({store:$.store,record});
   if (backgroundWriting) return;
@@ -76,15 +80,21 @@ function backgroundDiagnostic($, record) {
 }
 // A slot remembers its last visible meaning. Transient error kinds share one
 // meaning; actionable state changes and terminal outcomes must stay visible.
-export function noticeEpisodes(now = () => Date.now()) {
+export function noticeEpisodes(now = () => Date.now(), outages = {current:null}) {
   const slots = new Map();
+  function leaveOutage(episode) {
+    if (!episode?.outage) return;
+    episode.outage.members.delete(episode);
+    if (!episode.outage.members.size && outages.current === episode.outage) outages.current = null;
+    episode.outage = null;
+  }
   return {
     fail($, slot, error, text, retryText = text, {background = true,key,terminal = false} = {}) {
       const code = failureCode(error);
       let episode = slots.get(slot);
       // Silent control refusals cannot start or age a transient streak.
       if (text === null || code === 'lease_invalid') {
-        if (episode) { episode.transientSince = null; episode.good = 0; }
+        if (episode) { episode.transientSince = null; episode.good = 0; leaveOutage(episode); }
         return;
       }
       if (!episode) {
@@ -99,25 +109,40 @@ export function noticeEpisodes(now = () => Date.now()) {
         ? ['owner_paused','session_closed','recovery_required'].includes(error?.details?.reason) ? error.details.reason : 'blocked'
         : error instanceof ModError && bounded(error.code,64) ? error.code : code);
       if (transient) episode.transientSince ??= now();
-      else episode.transientSince = null;
+      else { episode.transientSince = null; leaveOutage(episode); }
+      // Forks share app reachability, but retain their own binding/report states.
+      // Reports can save to disk while the desktop app is closed.
+      if (code === 'host_unreachable' && ['announce','helper','claim','auto'].includes(slot)) {
+        outages.current ??= {members:new Set(),shown:false,since:episode.transientSince};
+        episode.outage = outages.current;
+        episode.outage.members.add(episode);
+      }
       if (terminal) {
         $.ui.log(text);
+        leaveOutage(episode);
         slots.delete(slot);
         backgroundDiagnostic($,{step:slot,outcome:'ended',code,at:new Date(now()).toISOString()});
-      } else if (episode.lastKey !== meaning && (!background || !transient || now() - episode.transientSince >= NOTICE_GRACE_MS)) {
+      } else if (episode.lastKey !== meaning && (!background || !transient || now() - (episode.outage?.since ?? episode.transientSince) >= NOTICE_GRACE_MS)) {
+        // Owner commands already return their direct answer. They must not add
+        // another outage line or consume the background grace period.
+        if (episode.outage && (!background || episode.outage.shown)) return;
         if (episode.lastKey !== null) backgroundDiagnostic($,{step:slot,outcome:'changed',code,at:new Date(now()).toISOString()});
         episode.lastKey = meaning;
+        if (episode.outage) episode.outage.shown = true;
         $.ui.log(background && transient ? retryText : text);
       }
     },
     good($, slot) {
       const episode = slots.get(slot);
       if (!episode || ++episode.good < 3) return;
+      leaveOutage(episode);
       slots.delete(slot);
       backgroundDiagnostic($,{step:slot,outcome:'recovered',code:episode.code,at:new Date(now()).toISOString()});
     },
     // Scope changes end the old conversation's notice authority.
-    delete:slot => slots.delete(slot),
+    delete(slot) { leaveOutage(slots.get(slot)); slots.delete(slot); },
+    fork:() => noticeEpisodes(now,outages),
+    reset() { for (const episode of slots.values()) leaveOutage(episode); slots.clear(); outages.current = null; },
   };
 }
 // Owner-facing sentence per helper error code, each with a next step. Raw helper text is never shown.

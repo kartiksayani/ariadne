@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRegister } from '../../../integrations/claude/plugin/hooks/register.js';
-import { NOTICES } from '../../../integrations/claude/plugin/hooks/claims.js';
+import { claimLoop, NOTICES } from '../../../integrations/claude/plugin/hooks/claims.js';
+import { readFileSync } from 'node:fs';
 import { connectDiagnostic, ModError, noticeEpisodes } from '../../../integrations/claude/plugin/hooks/contracts.js';
-import { binding, deferred, descriptor, failure, host, ids } from './fixtures.js';
+import { setup } from '../../../integrations/claude/plugin/hooks/setup.js';
+import { binding, deferred, descriptor, failure, host, ids, prepared, status, success } from './fixtures.js';
 
 const heartbeatRetry = 'Ariadne could not check in with the app; it will keep trying, and you can open Ariadne to check that it is running.';
 const mismatch = "Ariadne and its Claude plugin don't match, so this was not recorded. Update both to the same version.";
@@ -30,6 +32,174 @@ function hooksFor() {
 }
 
 afterEach(() => vi.useRealTimers());
+const reportRows = [
+  {name:'success only',events:[[0,'start',null,0],[30000,'flush',null,0]]},
+  {name:'transient blip',events:[[0,'start','io_error',0],[30000,'flush',null,0],[60000,'flush',null,0],[90000,'flush',null,0]]},
+  {name:'alternating transient codes and rejected process',events:[[0,'start','store_busy',0],[60000,'flush','timeout',0],[119999,'flush','rejection',0],[120000,'flush','io_error',1],[600000,'flush','store_busy',1]]},
+  {name:'long failure, sustained recovery, second long failure',events:[[0,'start','host_unreachable',0],[120000,'flush','host_unreachable',1],[130000,'flush',null,1],[140000,'flush',null,1],[150000,'flush',null,1],[180000,'finish','io_error',1],[299999,'flush','io_error',1],[300000,'flush','io_error',2]]},
+  {name:'one good flush does not rearm the same meaning',events:[[0,'start','permission_denied',1],[1000,'flush',null,1],[2000,'finish','permission_denied',1],[3000,'flush',null,1],[4000,'flush',null,1],[5000,'flush',null,1],[6000,'finish','permission_denied',2]]},
+  {name:'changed non-transient meaning prints immediately',events:[[0,'start','permission_denied',1],[1000,'flush','incompatible_adapter',2],[2000,'flush','incompatible_adapter',2]]},
+];
+it.each(reportRows)('report-save episode: $name',async row => {
+  vi.useFakeTimers();vi.setSystemTime(0);
+  const value = await prepared(), submission = deferred();let code = null;
+  const h = host({claim:value,submit:() => submission.promise,handler:argv => {
+    if (argv[2] !== 'report' || !code) return;
+    if (code === 'rejection') throw new Error('Private fixture detail');
+    return failure(code);
+  }});
+  const loop = claimLoop(descriptor.helperPath,binding);
+  await loop.poll(h.$);
+  for (const [time,action,outcome,count] of row.events) {
+    vi.setSystemTime(time);code = outcome;
+    if (action === 'start') await loop.start(h.$,{text:value.formatted_payload,turnId:'report-turn'});
+    else if (action === 'finish') await loop.complete(h.$,{turnId:'report-turn',answer:`Answer ${time}`,reason:'answer',isAborted:false});
+    else await loop.drain(h.$);
+    expect(h.logs.filter(line => !line.startsWith('Ariadne: turn.start carried'))).toEqual(Array(count).fill(NOTICES.reports));
+  }
+});
+
+it.each([false,true])('one ten-minute app outage across slots, owner command: %s',async command => {
+  vi.useFakeTimers();vi.setSystemTime(0);let down = false;
+  const h = host({handler:argv => down && argv[1] !== '--version' && argv[2] !== 'report' ? failure('host_unreachable') : undefined});
+  const hooks = hooksFor();
+  await hooks.get('session.start')(h.$,{},async event => event);
+  await hooks.get('ariadne-connect')(h.$,{args:''});down = true;
+  const beat = h.timers().find(timer => timer.ms === 30000).callback;
+  const poll = h.timer().callback;
+  for (let time = 0; time <= 600000; time += 1000) {
+    vi.setSystemTime(time);
+    if (time % 30000 === 0) await beat();
+    await poll();
+    if (command && [60000,300000].includes(time)) expect((await hooks.get('ariadne-status')(h.$)).text).toContain("Ariadne can't be reached");
+    expect(h.logs).toEqual(time < 120000 ? [] : [heartbeatRetry]);
+  }
+});
+
+it('background reconnect keeps owner receipts and records only first and last attempt outcomes',async () => {
+  vi.useFakeTimers();vi.setSystemTime(0);let down = false;
+  let resumed = false;
+  const h = host({handler:argv => {
+    if (down && argv[1] !== '--version' && argv[2] !== 'report') return failure('host_unreachable');
+    if (resumed && argv[2] === 'connection-status') return success({...status,external_session_id:'resumed-conversation'});
+  }});
+  const hooks = hooksFor();
+  await hooks.get('session.start')(h.$,{},async event => event);
+  await hooks.get('ariadne-connect')(h.$,{args:''});
+  // Rotate conversation while reachable, but leave its connect waiting for a receipt.
+  h.switchSession('resumed-conversation');resumed = true;down = true;
+  const receipts = h.store.get('connect-log');
+  const beat = h.timers().find(timer => timer.ms === 30000).callback;
+  for (let time = 0; time <= 600000; time += 30000) {vi.setSystemTime(time);await beat();}
+  expect(h.calls.filter(call => call.argv.includes('--replay-only')).length).toBeGreaterThan(15);
+  expect(h.store.get('connect-log')).toEqual(receipts);
+  expect(h.logs).toEqual([heartbeatRetry]);
+  await vi.waitFor(() => expect((h.store.get('hook-log') ?? []).filter(record => record.step === 'reconnect')).toHaveLength(1));
+  down = false;await beat();
+  await vi.waitFor(() => expect((h.store.get('hook-log') ?? []).filter(record => record.step === 'reconnect').map(record => [record.outcome,record.code])).toEqual([['started','host_unreachable'],['recovered','ok']]));
+  expect(h.store.get('connect-log')).toEqual(receipts);
+});
+
+it.each(['get','set'])('hung background reconnect diagnostics (%s) never block retries or owner receipts',async method => {
+  let down = false;
+  const h = host({handler:argv => down && argv[1] === 'binding' ? failure('host_unreachable') : undefined});
+  const owner = setup(descriptor.helperPath);await owner.connect(h.$);
+  const receipts = h.store.get('connect-log'), held = deferred(), original = h.$.store[method];
+  h.$.store[method] = (key,...args) => key === 'hook-log' ? held.promise : original(key,...args);
+  try {
+    down = true;
+    for (let i = 0; i < 3; i += 1) await expect(owner.connect(h.$,ids.session,{background:true})).rejects.toMatchObject({code:'host_unreachable'});
+    expect(h.store.get('connect-log')).toEqual(receipts);
+    await expect(owner.connect(h.$,ids.session)).rejects.toMatchObject({code:'host_unreachable'});
+    expect(h.store.get('connect-log')).toHaveLength(receipts.length + 1);
+    down = false;await owner.connect(h.$,ids.session,{background:true});
+  } finally { held.resolve(); }
+});
+
+it.each(['recover','conversation change'])('shared outage survives local report saves and rearms after %s',async reset => {
+  vi.useFakeTimers();vi.setSystemTime(0);
+  const h = host(), notices = noticeEpisodes();let claims = notices.fork();
+  const error = new ModError('Fixture outage');error.code = 'host_unreachable';
+  const fail = () => {
+    for (const slot of ['announce','helper','auto']) notices.fail(h.$,slot,error,heartbeatRetry);
+    claims.fail(h.$,'claim',error,NOTICES.failure);
+  };
+  fail();vi.setSystemTime(120000);fail();expect(h.logs).toEqual([heartbeatRetry]);
+  // Reports are local saves, so even sustained report success cannot reset an app outage.
+  for (let i = 0; i < 3; i += 1) claims.good(h.$,'reports');
+  for (let i = 0; i < 2; i += 1) {
+    for (const slot of ['announce','helper','auto']) notices.good(h.$,slot);
+    claims.good(h.$,'claim');
+  }
+  fail();expect(h.logs).toEqual([heartbeatRetry]);
+  if (reset === 'recover') for (let i = 0; i < 3; i += 1) {
+    for (const slot of ['announce','helper','auto']) notices.good(h.$,slot);
+    claims.good(h.$,'claim');
+  }
+  else {notices.reset();claims = notices.fork();}
+  vi.setSystemTime(180000);fail();expect(h.logs).toEqual([heartbeatRetry]);
+  vi.setSystemTime(300000);fail();expect(h.logs).toEqual([heartbeatRetry,heartbeatRetry]);
+});
+
+it.each(['disconnected','not_found','stale_generation','binding_mismatch'])('recovering an old claim (%s) cannot swallow the next app outage',async retirement => {
+  vi.useFakeTimers();vi.setSystemTime(0);let phase = 'healthy', statusSeen = false;
+  const h = host({handler:argv => {
+    if (argv[1] === '--version' || argv[2] === 'report') return;
+    if (phase === 'down' || phase === 'recover' && argv[2] === 'claim') return failure('host_unreachable');
+    if (phase === 'recover' && argv[2] === 'connection-status' && !statusSeen) {
+      statusSeen = true;
+      return retirement === 'disconnected' ? success({...status,connection_state:'disconnected',dispatch_state:'disconnected'}) : failure(retirement);
+    }
+  }});
+  const hooks = hooksFor();await hooks.get('session.start')(h.$,{},async event => event);
+  await hooks.get('ariadne-connect')(h.$,{args:''});
+  const beat = h.timers().find(timer => timer.ms === 30000).callback, poll = h.timer().callback;
+  phase = 'down';await beat();await poll();vi.setSystemTime(120000);await beat();await poll();
+  expect(h.logs).toEqual([heartbeatRetry]);
+  phase = 'recover';expect((await hooks.get('ariadne-connect')(h.$,{args:''})).text).toContain('connected to Ariadne');
+  expect(statusSeen).toBe(true);phase = 'healthy';
+  for (let i = 0; i < 3; i += 1) {await beat();await poll();}
+  phase = 'down';vi.setSystemTime(180000);await beat();await poll();
+  vi.setSystemTime(300000);await beat();await poll();
+  expect(h.logs).toEqual([heartbeatRetry,heartbeatRetry]);
+});
+
+it.each(['disconnect','session end'])('stopping an automatic reconnect with %s records its final outcome',async stop => {
+  let down = false;
+  const h = host({handler:argv => down && argv[1] === 'binding' ? failure('host_unreachable') : undefined});
+  const hooks = hooksFor();await hooks.get('session.start')(h.$,{},async event => event);
+  h.store.set('binding:resumed-conversation',{project_id:ids.project,session_id:ids.session,saved_at:'2026-01-01T00:00:00.000Z'});
+  h.switchSession('resumed-conversation');down = true;
+  const beat = h.timers().find(timer => timer.ms === 30000).callback;
+  await beat();
+  if (stop === 'disconnect') expect((await hooks.get('ariadne-disconnect')(h.$)).text).toBe('This conversation is not connected to Ariadne.');
+  else await hooks.get('session.end')(h.$,{reason:'exit'},async event => event);
+  const calls = h.calls.length;await beat();
+  expect(h.calls.filter(call => call.argv[1] === 'binding')).toHaveLength(2);
+  if (stop === 'session end') expect(h.calls).toHaveLength(calls);
+  await vi.waitFor(() => expect((h.store.get('hook-log') ?? []).filter(record => record.step === 'reconnect').map(record => [record.outcome,record.code])).toEqual([['started','host_unreachable'],['ended','host_unreachable']]));
+});
+
+it('a late background reply cannot reopen canceled reconnect diagnostics',async () => {
+  const held = deferred();let holding = false;
+  const h = host({handler:argv => argv[1] === 'binding' ? holding ? held.promise : failure('host_unreachable') : undefined});
+  const owner = setup(descriptor.helperPath);
+  await expect(owner.connect(h.$,ids.session,{background:true})).rejects.toMatchObject({code:'host_unreachable'});
+  holding = true;const attempt = owner.connect(h.$,ids.session,{background:true});
+  await vi.waitFor(() => expect(h.calls.filter(call => call.argv[1] === 'binding')).toHaveLength(2));
+  owner.endBackground(h.$);held.resolve(failure('store_busy'));
+  await expect(attempt).rejects.toMatchObject({code:'store_busy'});
+  await vi.waitFor(() => expect(h.store.get('hook-log')?.map(record => [record.outcome,record.code])).toEqual([['started','host_unreachable'],['ended','host_unreachable']]));
+});
+
+const coreCodes = JSON.parse(readFileSync(new URL('../../../contracts/generated/core/CoreErrorCode.schema.json',import.meta.url),'utf8')).enum;
+it.each(coreCodes)('preserves canonical diagnostic code %s',async code => {
+  const h = host(), notices = noticeEpisodes();
+  const error = new ModError('Private fixture detail');error.code = code;
+  notices.fail(h.$,'announce',error,'Open Ariadne.');
+  await vi.waitFor(() => expect(h.store.get('hook-log')).toContainEqual(expect.objectContaining({code})));
+});
+
 describe.each(['heartbeat','claim'])('%s notice episode invariant', source => {
   it.each(rows)('$name',async row => {
     vi.useFakeTimers();vi.setSystemTime(0);

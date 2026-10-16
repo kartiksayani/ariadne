@@ -1,4 +1,4 @@
-import { API_VERSION, HOST_VERSION, HELPER_TIMEOUT_MS, connectDiagnostic, ModError, bounded, descriptorValid, envelope, fields, hostVersionStatus, uuid } from './contracts.js';
+import { API_VERSION, HOST_VERSION, HELPER_TIMEOUT_MS, backgroundDiagnostic, connectDiagnostic, failureCode, ModError, bounded, descriptorValid, envelope, fields, hostVersionStatus, uuid } from './contracts.js';
 
 export async function qualify($, descriptor) {
   if (!descriptorValid(descriptor,$.plugin)) {
@@ -83,14 +83,16 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
   let connectRequest = null;
   let binding = null;
   let disconnectRequest = null;
-  async function owner($, noun, verb, request, replayOnly = false) {
+  let backgroundFailure = null;
+  let backgroundGeneration = 0;
+  async function owner($, noun, verb, request, replayOnly = false, background = false) {
     try {
       const value = envelope(await $.process.run([helperPath,noun,verb,...(replayOnly ? ['--replay-only'] : []),'--json-stdin'],
         {stdin:JSON.stringify(request),timeoutMs:HELPER_TIMEOUT_MS}));
-      await diagnostic($,request.command.op_id,replayOnly ? 'lookup' : verb,'ok');
+      if (!background) await diagnostic($,request.command.op_id,replayOnly ? 'lookup' : verb,'ok');
       return value;
     } catch (error) {
-      await diagnostic($,request.command.op_id,replayOnly ? 'lookup' : verb,error?.code ?? 'unknown');
+      if (!background) await diagnostic($,request.command.op_id,replayOnly ? 'lookup' : verb,failureCode(error));
       throw error;
     }
   }
@@ -116,7 +118,38 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
       }
     }
   }
-  async function connect($, requestedSessionId = null) {
+  function reconnectDiagnostic($, outcome, code) {
+    backgroundDiagnostic($,{step:'reconnect',outcome,code,at:new Date().toISOString()});
+  }
+  function endBackground($) {
+    backgroundGeneration += 1;
+    if ($ && backgroundFailure !== null) reconnectDiagnostic($,'ended',backgroundFailure);
+    backgroundFailure = null;
+  }
+  async function connect($, requestedSessionId = null, {background = false} = {}) {
+    const generation = backgroundGeneration;
+    try {
+      const result = await connectAttempt($,requestedSessionId,background);
+      if (background && generation !== backgroundGeneration) return result;
+      if (backgroundFailure !== null) reconnectDiagnostic($,'recovered','ok');
+      else if (background) reconnectDiagnostic($,'ended','ok');
+      backgroundFailure = null;
+      return result;
+    } catch (error) {
+      if (background && generation !== backgroundGeneration) throw error;
+      const code = failureCode(error);
+      if (background && backgroundFailure === null) {
+        reconnectDiagnostic($,'started',code);
+      }
+      if (background) backgroundFailure = code;
+      if (backgroundFailure !== null && (!background || error?.code === 'not_found')) {
+        reconnectDiagnostic($,'ended',code);
+        backgroundFailure = null;
+      }
+      throw error;
+    }
+  }
+  async function connectAttempt($, requestedSessionId, background) {
     if (requestedSessionId !== null && !uuid(requestedSessionId)) {
       throw new ModError('Choose an explicit canonical Ariadne session UUID, or omit it to connect normally.');
     }
@@ -132,7 +165,7 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
       throw new ModError('Session/project changed with a pending owner operation; recover the original operation in the app.');
     }
     if (projectId === null) {
-      const receipt = await owner($,'project','register',projectRequest);
+      const receipt = await owner($,'project','register',projectRequest,false,background);
       if (!fields(receipt,['operation_id','project_id','registry_revision'])
         || receipt.operation_id !== projectRequest.command.op_id || !uuid(receipt.project_id)
         || !positive(receipt.registry_revision)) {
@@ -145,7 +178,7 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
         || connectRequest.command.params.external_session_id !== externalSession;
       // Never execute an obsolete request to discover whether it committed.
       let saved;
-      try { saved = await owner($,'binding','connect',connectRequest,true); }
+      try { saved = await owner($,'binding','connect',connectRequest,true,background); }
       catch (error) {
         if (!changed || !(error instanceof ModError) || !['not_found','io_error'].includes(error.code)) throw error;
         // A removed session can fail lookup with io_error. Connectivity failures
@@ -173,7 +206,7 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
       endpoint:{kind:'local_bridge',name:'claude-mod'},configuration:{namespace:'claude_code_mod',values:{}},
       existing_session_id:targetSessionId,
     })};
-    const receipt = await owner($,'binding','connect',connectRequest);
+    const receipt = await owner($,'binding','connect',connectRequest,false,background);
     const selected = selection(receipt,connectRequest);
     if (targetSessionId !== null && receipt.session_id !== targetSessionId) {
       throw new ModError('Binding receipt differs from the explicit Ariadne session; retain the original operation ID and recover that target in the app.');
@@ -226,10 +259,11 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
   }
   // A new Claude conversation replaced the bound one (/clear, /resume): its
   // connection and any operation retained for the old conversation no longer apply.
-  function forget() {
+  function forget($) {
+    endBackground($);
     binding = null;
     connectRequest = null;
     disconnectRequest = null;
   }
-  return {connect,status,disconnect,forget,current:() => binding};
+  return {connect,status,disconnect,forget,endBackground,current:() => binding};
 }

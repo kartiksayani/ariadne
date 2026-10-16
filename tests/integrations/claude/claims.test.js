@@ -604,8 +604,8 @@ describe('captured Claude claim lifecycle', () => {
     await loop.start(h.$,{text:value.formatted_payload,turnId:'turn'});
     await loop.complete(h.$,{turnId:'turn',answer:'done',reason:'answer',isAborted:false});
     expect(loop.status().pending_reports).toBe(3);
-    // Three failed saves, one notice.
-    expect(h.logs.filter(log => log === NOTICES.reports)).toHaveLength(1);
+    // Rapid transient save failures stay quiet while the exact reports retry.
+    expect(h.logs.filter(log => log === NOTICES.reports)).toHaveLength(0);
     failing = false;await loop.settle(h.$);
     expect(loop.status().pending_reports).toBe(0);
     expect(loop.busy()).toBe(null);

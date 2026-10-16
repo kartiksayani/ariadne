@@ -43,7 +43,7 @@ export const FOLD_GRACE_MS = 5000;
 const FOLD_SNAPSHOTS = 3;
 
 // One captured claim and one serialized reporter. Core remains the sole queue authority.
-export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => Date.now()} = {}) {
+export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => Date.now(), notices = noticeEpisodes(now)} = {}) {
   let active = null;
   let polling = null;
   let admissionOpen = true;
@@ -55,8 +55,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
   let claimId = null;
   // An earlier try with claimId had an unknown outcome, so the app may have saved it.
   let claimUnknown = false;
-  const claimNotices = noticeEpisodes(now);
-  let reportNotice = false;
+  const claimNotices = notices;
   let capturedSubmission = null;
   let disconnected = false;
   let observedForm = false;
@@ -99,9 +98,9 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     })();
     try {
       await reporting;
-      reportNotice = false;
+      claimNotices.good($,'reports');
     } catch (error) {
-      if (!reportNotice && !stopped) { reportNotice = true; $.ui.log(NOTICES.reports); }
+      if (!stopped) claimNotices.fail($,'reports',error,NOTICES.reports);
       throw error;
     } finally { reporting = null; }
   }
@@ -328,6 +327,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
   async function stop($, sessionEnd = false) {
     stopped = true;
     await quiesce();
+    claimNotices.delete('claim');
     const captured = active;
     if (captured && captured.turnId === null && !captured.released && !ended) {
       // A pending fold is confirmed only on evidence that the turn it was folded
@@ -381,6 +381,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     claimId = null;
     claimUnknown = false;
     stopped = true;
+    claimNotices.delete('claim');
     recovered = true;
     admissionOpen = false;
     return true;
