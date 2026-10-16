@@ -4,12 +4,12 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { route } from '../app/transport';
-import { sessionButton } from '../app/open';
+import { goToSession } from '../app/open';
 import { HistoryTransport } from './fixture';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 async function openSource() {
-  fireEvent.click(await sessionButton(route)); await screen.findByRole('tree', { name: 'Session items' });
+  await goToSession(route); await screen.findByRole('tree', { name: 'Session items' });
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
       expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');

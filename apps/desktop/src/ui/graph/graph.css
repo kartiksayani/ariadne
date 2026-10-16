@@ -29,7 +29,7 @@
   position: relative;
   flex: 1;
   min-height: 0;
-  padding-bottom: 40px;
+  padding-bottom: calc(40px + var(--dock-inset, 0px));
   overflow: auto;
   outline: none;
 }

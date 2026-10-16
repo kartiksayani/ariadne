@@ -17,6 +17,8 @@ import { applyChange, mergeChange, relatedEdgePath, sessionGraph, statusVisual, 
 import './graph.css';
 import { useFilterFolds } from '../shared/filterFolds';
 import { notices } from '../pages/notices';
+import { scrollIntoViewIfHidden } from '../shared/scroll';
+import { useDockInset } from '../shell/dockInset';
 
 export interface GraphViewProps {
   readonly store: SessionStore;
@@ -41,17 +43,18 @@ export interface GraphViewProps {
 
 /** Room kept beside a keyboard-reached target: its focus ring (2px outline + 2px offset) plus a little air. */
 const RING_ROOM = 8;
-/** Scrolls `element` into the scroller: centred (Reveal selected, links) or just into view (Ariadne.dc.html:990). */
-function scrollToNode(scroller: HTMLElement, element: Element, center: boolean) {
+/**
+ * Scrolls `element` into the scroller: centred (Reveal selected, links) or just into view (Ariadne.dc.html:990).
+ * The visible area ends above the floating dock (`bottomInset`), so a node under the dock counts as hidden.
+ */
+function scrollToNode(scroller: HTMLElement, element: Element, center: boolean, bottomInset = 0) {
   const a = scroller.getBoundingClientRect(), b = element.getBoundingClientRect();
   if (center) {
-    scroller.scrollTop += (b.top + Math.min(b.height, 120) / 2) - (a.top + a.height / 2);
+    scroller.scrollTop += (b.top + Math.min(b.height, 120) / 2) - (a.top + (a.height - bottomInset) / 2);
     scroller.scrollLeft += (b.left + b.width / 2) - (a.left + a.width / 2);
     return;
   }
-  const top = 48;
-  if (b.top < a.top + top) scroller.scrollTop -= a.top + top - b.top;
-  else if (b.bottom > a.bottom - 8) scroller.scrollTop += Math.min(b.bottom - a.bottom + 8, b.top - a.top - top);
+  scrollIntoViewIfHidden(scroller, element, { top: 48, bottom: 8, bottomInset });
   // The same nearest-edge move across: a card or stub reached by key lands whole, with room for its 2px focus ring and
   // 2px offset (the ring is clipped by this scroller). Nothing moves while the target and its ring are already in view.
   if (b.left < a.left + RING_ROOM) scroller.scrollLeft -= a.left + RING_ROOM - b.left;
@@ -166,7 +169,7 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   const state = useSession(store), raw = state.snapshot?.session, hidden = useHidden();
   const session = useMemo(() => raw && visibleSession(raw, state.route, hidden), [raw, state.route, hidden]);
   const marker = useId().replace(/:/g, '');
-  const scroller = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null), dockInset = useDockInset();
   const [localReveal, setLocalReveal] = useState<{ result: RevealedItem; external: RevealedItem | null } | null>(null);
   const [localSelection, setLocalSelection] = useState<{ id: string; external: RevealedItem | null } | null>(null);
   const [dismissedReveal, setDismissedReveal] = useState<RevealedItem | null>(null);
@@ -364,7 +367,7 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
     const box = scroller.current;
     const element = target ? box?.querySelector<HTMLElement>(`[data-row="${CSS.escape(target.id)}"], [data-stub="${CSS.escape(target.id)}"]`) : null;
     if (box && element && target) {
-      scrollToNode(box, element, target.center);
+      scrollToNode(box, element, target.center, dockInset);
       if (target.focus || box.contains(document.activeElement)) element.focus({ preventScroll: true });
     } else if (initial) box?.focus({ preventScroll: true });
   });

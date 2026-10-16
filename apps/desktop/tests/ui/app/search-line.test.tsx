@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { AppTransport, route, secondId } from './transport';
-import { sessionButton } from './open';
+import { goToSession } from './open';
 
 afterEach(cleanup);
 
@@ -12,7 +12,7 @@ it('explains a saved search and clears it in the box and saved view while keepin
   view.filters.search = 'receipt';
   view.filters.statuses = ['open'];
   render(<DesktopApp service={createDesktopService(transport)} />);
-  fireEvent.click(await sessionButton(route));
+  await goToSession(route);
   expect(await screen.findByText('Showing 1 of 9 items matching “receipt” in the statuses you picked')).toBeTruthy();
   const search = document.querySelector<HTMLInputElement>('[data-shell-search]')!;
   expect(search.value).toBe('receipt');
@@ -31,7 +31,7 @@ it('saves an explicit clear before switching to another session and typing there
   transport.preferences.sessions[0]!.filters.statuses = ['open'];
   transport.preferences.sessions.push(transport.view(secondId));
   render(<DesktopApp service={createDesktopService(transport)} />);
-  fireEvent.click(await sessionButton(route));
+  await goToSession(route);
   const clear = await screen.findByRole<HTMLButtonElement>('button', { name: 'Clear search' });
   await waitFor(() => expect(clear.disabled).toBe(false));
   fireEvent.click(clear);

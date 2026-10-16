@@ -10,7 +10,10 @@ import { SessionActionControllers } from '../bindings/actions';
 import { RegisterProject, BindSession } from './Registration';
 import type { DiscoveryController } from '../../data/discovery';
 import { Shell } from '../../ui/shell/Shell';
-import type { HeaderProps } from '../../ui/shell/Header';
+import { DetailsColumn } from '../../ui/shell/DetailsColumn';
+import { Footer } from '../../ui/shell/Footer';
+import { Header, type HeaderProps } from '../../ui/shell/Header';
+import { TabBar } from '../../ui/shell/TabBar';
 import { agentName, footerSummary, headerText, tabModels, type ConversationFooterState, type HeaderInput, type SessionFacts } from '../../ui/shell/model';
 import type { RemoveHandler } from '../../ui/dialogs/remove';
 import { ProjectsPage } from '../../ui/pages/ProjectsPage';
@@ -272,15 +275,19 @@ export function NavigationWorkspace({ store, discovery, waitingContent, conversa
       ? 'Opening All sessions…' : state.pendingNavigation.kind === 'projects' ? 'Opening Projects…'
         : state.pendingNavigation.kind === 'project' ? 'Opening the project…' : 'Opening the session…'}</p>}
   </>;
-  return <Shell header={{ ...defaultChrome,...chrome, text: headerText(headerInput, at), disabled }}
-    conversationFooter={conversationFooter}
-    tabs={{ tabs, disabled: navigationDisabled, closeDisabled: disabled, onSelect: selectTab, onClose: closeTab }}
-    body={{ waiting: waitingContent ?? <WaitingFrame count="–" loading />,
-      center, conversation, detail, detailPath, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide,
-      detailWidth: shown.detail_width ?? null, waitingFolded: shown.waiting_collapsed ?? false,
-      onResizeDetail: width => saveLayout({ detail_width: width }), onFoldWaiting: folded => saveLayout({ waiting_collapsed: folded }) }}
-    summary={footerSummary(global ? { items: Object.values(global.items_by_status).reduce((sum, count) => sum + count, 0), waiting: global.waiting_unanswered,
-      inProgress: global.items_by_status.in_progress, open: global.items_by_status.open, archivedTopics: global.archived_topics } : null)} overlay={registering
+  const summary = footerSummary(global ? { items: Object.values(global.items_by_status).reduce((sum, count) => sum + count, 0), waiting: global.waiting_unanswered,
+    inProgress: global.items_by_status.in_progress, open: global.items_by_status.open, archivedTopics: global.archived_topics } : null);
+  return <Shell topBar={<>
+    <Header {...defaultChrome} {...chrome} text={headerText(headerInput, at)} disabled={disabled} />
+    <TabBar tabs={tabs} disabled={navigationDisabled} closeDisabled={disabled} onSelect={selectTab} onClose={closeTab} />
+  </>}
+    main={center}
+    side={detail ? <DetailsColumn path={detailPath} onClose={onCloseDetail} onRemove={onRemove} hidden={hiddenItem} hiddenNotice={hiddenNotice} onHide={onHide}
+      onResize={width => saveLayout({ detail_width: width })}>{detail}</DetailsColumn> : undefined}
+    footer={<Footer summary={summary} conversation={conversation ? conversationFooter ?? { question: false } : undefined} />}
+    legacy={{ waiting: waitingContent ?? <WaitingFrame count="–" loading />, conversation,
+      sideWidth: shown.detail_width ?? null, waitingFolded: shown.waiting_collapsed ?? false, onFoldWaiting: folded => saveLayout({ waiting_collapsed: folded }) }}
+    overlay={registering
       ? <RegisterProject store={store} initialRoot={registrationRoot} disabled={mutationDisabled} close={() => setRegistering(false)} />
       : binding ? <BindSession store={store} project={binding} sessions={sessions.filter(session => session.project_id === binding.project_id)}
         adapters={adapterChoices} discovery={discovery} disabled={mutationDisabled} close={() => setBinding(null)} /> : undefined} />;

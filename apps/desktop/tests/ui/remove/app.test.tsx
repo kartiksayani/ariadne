@@ -5,14 +5,14 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { AppTransport, route } from '../app/transport';
-import { sessionButton } from '../app/open';
+import { goToSession } from '../app/open';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`);
 
 it('removes an item from the detail trash or ⌫ after asking, with Undo, and runs it when the page goes', async () => {
   const transport = new AppTransport(); render(<DesktopApp service={createDesktopService(transport)} />);
-  fireEvent.click(await sessionButton(route)); await screen.findByRole('tree', { name: 'Session items' });
+  await goToSession(route); await screen.findByRole('tree', { name: 'Session items' });
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
       expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
