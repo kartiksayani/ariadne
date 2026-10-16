@@ -401,6 +401,22 @@ fn scope_ended(error: &CoreError) -> bool {
         .as_ref()
         .is_some_and(|details| details.reason == Some(BarrierReason::Disconnected))
 }
+
+#[cfg(test)]
+#[test]
+fn unavailable_project_folder_does_not_end_the_supervisors_scope() {
+    let cause = CoreError::new(
+        CoreErrorCode::HostUnreachable,
+        "The selected project folder is missing or inaccessible; restore access to the project folder or select it again before reconnecting",
+        "Retry the bounded read-only check.",
+    );
+    assert!(!scope_ended(&cause));
+    assert!(scope_ended(&CoreError::new(
+        CoreErrorCode::BindingMismatch,
+        "Mod announcement differs from the selected canonical project root",
+        "",
+    )));
+}
 impl Worker {
     fn new(
         connected: ConnectedSupervisor,

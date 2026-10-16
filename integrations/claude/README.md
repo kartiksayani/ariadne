@@ -98,29 +98,32 @@ retries keep their original request; live conversations elsewhere stay protected
 The owner gets plain instructions, while exact operation IDs remain in the
 plugin store's bounded `connect-log` diagnostics. See [ADR-0096](../../docs/adr/ADR-0096-recover-stale-claude-connect.md).
 
-Background slots and claim-loop forks share the last visible meaning. Advice with
-identical words is one meaning even when diagnostic codes differ; held states
-also share a meaning across producer-specific wording. A changed
-nonurgent meaning needs ten seconds and two consecutive calls from that producer;
-all background slots together print at most one nonurgent line per two minutes.
-Returning advice can replace stale advice after those bounds. Initial held states
-speak immediately. Terminal notices always print and close their slot. Missing or
-unusable helpers, missing installed resources and version mismatches share one
-installation repair notice, which speaks immediately outside the rate cap.
-Structured spawn errors distinguish these from temporary process failures; raw
-error text is never used to classify or describe them.
+One conversation health record collects announce, helper, claim, report, automatic
+reconnect and qualification outcomes. Producers drop out after three of their own
+call intervals without a call. The current condition is the most important live
+outcome: terminal, installation failure, held state, transient failure, then healthy.
+Among equal priorities the line already showing stays while its producer still
+fails; otherwise the most recent failed call wins, with a fixed producer order for ties.
+Terminal, installation and owner-needed held advice (paused, closed, recovery,
+conflicting or removed sessions, uncertain saves) speaks immediately when it becomes
+current; identical consecutive lines are suppressed. Generic held codes, such as an
+unreadable reply, wait like retries. Missing or unusable helpers, installed
+resources and version mismatches share one installation repair sentence. Structured
+spawn codes distinguish these from temporary process failures; raw text is never shown.
+A helper stopped before it wrote anything counts as a temporary timeout.
 
-Transient failures share one retry sentence and wait two minutes. Alternating
-causes and overlapping producers retain that grace clock; three consecutive real
-successful calls retire a producer. A held state or silent lease refusal withdraws
-that producer's transient evidence; lease-only refusals cannot open or age grace.
-Report saves use the same rules, with only completed flushes that saved records
-counting as successes. Retiring a claim loop retires its notice evidence too.
-Owner commands return their direct answer and never age or consume background
-grace or the rate cap. Project-folder access failures ask the owner to restore
-access or reconnect, rather than advising an installation update.
-Background diagnostics contain timestamps and fixed codes only, recording episode
-starts, visible meaning changes and endings in a separate 20-record `hook-log`.
+Transient failures share one retry sentence. They and generic held advice speak after
+two minutes of continuous unhealthy outcomes, even when codes change or urgent advice
+intervenes, and are spaced at least two minutes apart. A retry line never replaces
+held, installation or terminal advice until the producer that printed it recovers or
+expires. Kinds come from error codes only, never from `retryable` or the hint. Transient producers need three
+consecutive successful calls to recover; other conditions clear on their next success.
+An empty report flush is successful. Only every live producer being healthy resets
+the continuous failure clock and last line. New conversations and `/clear` reset
+all evidence and spacing. Owner commands answer directly without changing health.
+Project-folder access failures retain retry authority and ask the owner to restore access.
+Background diagnostics contain timestamps and fixed codes only, recording health
+starts, visible meaning changes and recovery in a separate 20-record `hook-log`.
 Its pending write queue is also bounded and never holds up polling or owner
 `connect-log` receipts. Automatic reconnects record only their first and final
 outcomes in `hook-log`; only owner-started operations write `connect-log` receipts.

@@ -200,8 +200,14 @@ fn version_output(path: &Path, deadline: Instant) -> Result<String, AdapterError
         if let Some(status) = child.0.try_wait().map_err(|_| io_error())? {
             read_pipe(&mut stdout, Some(&mut output), &mut diagnostic_bytes)?;
             read_pipe(&mut stderr, None, &mut diagnostic_bytes)?;
-            if status.signal().is_some() {
-                return Err(io_error());
+            if let Some(signal) = status.signal() {
+                return Err(
+                    if matches!(signal, libc::SIGTERM | libc::SIGINT | libc::SIGHUP) {
+                        io_error()
+                    } else {
+                        resource_error()
+                    },
+                );
             }
             if !status.success() {
                 return Err(error(
@@ -409,9 +415,9 @@ fn canonical(path: &Path) -> Result<PathBuf, AdapterError> {
     std::fs::canonicalize(path).map_err(inspection_error)
 }
 fn project_root(path: &Path) -> Result<PathBuf, AdapterError> {
-    let project = std::fs::canonicalize(path).map_err(|_| project_error())?;
+    let project = std::fs::canonicalize(path).map_err(project_inspection_error)?;
     if !std::fs::metadata(&project)
-        .map_err(|_| project_error())?
+        .map_err(project_inspection_error)?
         .is_dir()
     {
         return Err(project_error());
@@ -419,7 +425,24 @@ fn project_root(path: &Path) -> Result<PathBuf, AdapterError> {
     Ok(project)
 }
 fn project_error() -> AdapterError {
-    error(AdapterErrorCode::BindingMismatch, "The selected project folder is missing or inaccessible; restore access to the project folder or select it again before reconnecting")
+    error(AdapterErrorCode::HostUnreachable, "The selected project folder is missing or inaccessible; restore access to the project folder or select it again before reconnecting")
+}
+fn project_inspection_error(cause: std::io::Error) -> AdapterError {
+    if matches!(
+        cause.raw_os_error(),
+        Some(
+            libc::ENOENT
+                | libc::ENOTDIR
+                | libc::EACCES
+                | libc::EPERM
+                | libc::ELOOP
+                | libc::ENAMETOOLONG
+        )
+    ) {
+        project_error()
+    } else {
+        io_error()
+    }
 }
 fn metadata_signature(metadata: &std::fs::Metadata) -> FileIdentity {
     (
@@ -604,5 +627,45 @@ mod tests {
                 "{code}"
             );
         }
+    }
+
+    #[test]
+    fn project_canonicalize_and_metadata_errors_never_end_binding_scope() {
+        for errno in [
+            libc::ENOENT,
+            libc::ENOTDIR,
+            libc::EACCES,
+            libc::EPERM,
+            libc::ELOOP,
+            libc::ENAMETOOLONG,
+        ] {
+            let cause = project_inspection_error(std::io::Error::from_raw_os_error(errno));
+            assert_eq!(cause, project_error(), "{errno}");
+            assert_eq!(cause.code, AdapterErrorCode::HostUnreachable);
+            assert!(cause
+                .message
+                .contains("project folder is missing or inaccessible"));
+        }
+        for errno in [
+            libc::EAGAIN,
+            libc::EMFILE,
+            libc::ENFILE,
+            libc::EIO,
+            libc::EINTR,
+            libc::ENOSPC,
+            libc::ENOEXEC,
+            libc::EISDIR,
+            libc::ENOTSUP,
+        ] {
+            assert_eq!(
+                project_inspection_error(std::io::Error::from_raw_os_error(errno)),
+                io_error(),
+                "{errno}"
+            );
+        }
+        assert_eq!(
+            project_inspection_error(std::io::Error::other("unknown")),
+            io_error()
+        );
     }
 }

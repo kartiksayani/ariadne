@@ -399,7 +399,7 @@ fn broken_installation_is_incompatible_not_an_unreachable_app() {
 }
 
 fn assert_project_folder_recovery(cause: &AdapterError) {
-    assert_eq!(cause.code, AdapterErrorCode::BindingMismatch);
+    assert_eq!(cause.code, AdapterErrorCode::HostUnreachable);
     assert!(
         cause.message.contains("project folder"),
         "{}",
@@ -417,7 +417,13 @@ fn assert_project_folder_recovery(cause: &AdapterError) {
 #[test]
 fn selected_and_announced_project_failures_require_project_folder_recovery() {
     for selected in [true, false] {
-        for case in ["missing", "not a directory", "inaccessible", "symlink loop"] {
+        for case in [
+            "missing",
+            "not a directory",
+            "inaccessible",
+            "symlink loop",
+            "long component",
+        ] {
             let mut fixture = Fixture::new(SUPPORTED_HOST_VERSION);
             let mut identity = fixture.identity();
             let bad_project = fixture._root.path().join("bad-project");
@@ -439,6 +445,7 @@ fn selected_and_announced_project_failures_require_project_folder_recovery() {
                     std::os::unix::fs::symlink("bad-project", &bad_project).unwrap();
                     bad_project
                 }
+                "long component" => fixture._root.path().join("x".repeat(256)),
                 _ => unreachable!(),
             };
             if selected {
@@ -491,12 +498,22 @@ fn removed_connected_project_requires_project_folder_recovery_on_observe() {
     wait(adapter.connect(connect())).unwrap();
     fs::remove_dir(&fixture.options.project_root).unwrap();
     assert_project_folder_recovery(&wait(adapter.observe(observe())).unwrap_err());
+    fs::create_dir(&fixture.options.project_root).unwrap();
+    wait(adapter.observe(observe())).unwrap();
+    wait(adapter.connect(connect())).unwrap();
 }
 
 #[test]
-fn signalled_version_children_are_temporary_but_nonzero_exits_are_incompatible() {
+fn version_child_termination_distinguishes_interruptions_from_installation_failures() {
     for (termination, expected) in [
         ("kill -TERM $$", AdapterErrorCode::HostUnreachable),
+        ("kill -INT $$", AdapterErrorCode::HostUnreachable),
+        ("kill -HUP $$", AdapterErrorCode::HostUnreachable),
+        ("kill -KILL $$", AdapterErrorCode::IncompatibleAdapter),
+        ("kill -ABRT $$", AdapterErrorCode::IncompatibleAdapter),
+        ("kill -SEGV $$", AdapterErrorCode::IncompatibleAdapter),
+        ("kill -BUS $$", AdapterErrorCode::IncompatibleAdapter),
+        ("kill -ILL $$", AdapterErrorCode::IncompatibleAdapter),
         ("exit 7", AdapterErrorCode::IncompatibleAdapter),
     ] {
         let fixture = Fixture::new(SUPPORTED_HOST_VERSION);

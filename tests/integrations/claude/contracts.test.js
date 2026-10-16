@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { claimLoop } from '../../../integrations/claude/plugin/hooks/claims.js';
 import { binding as fixtureBinding, host, ids, prepared as fixturePrepared } from './fixtures.js';
 import modEvents from '../../../fixtures/providers/claude/mod-events.json';
-import { bytes, claudeSessionEndEventId, clip, descriptorValid, envelope, hash, lifecycle, plainFailure, prepared, reportReceipt } from '../../../integrations/claude/plugin/hooks/contracts.js';
+import { backgroundOutcome, bytes, claudeSessionEndEventId, clip, descriptorValid, envelope, hash, lifecycle, plainFailure, prepared, reportReceipt } from '../../../integrations/claude/plugin/hooks/contracts.js';
 
 const binding = { binding_id:'11111111-1111-4111-8111-111111111111', generation:'22222222-2222-4222-8222-222222222222' };
 const input = '33333333-3333-4333-8333-333333333333';
@@ -59,6 +59,23 @@ describe('published wire consumers', () => {
     expect(plainFailure('toString')).toContain('Open the Ariadne app');
     for (const value of [{stdout:'not JSON',exitCode:0},{...result(null),exitCode:1},{stdout:'{"api_version":2,"ok":true,"data":null}',exitCode:0}]) {
       try { envelope(value); } catch (error) { expect(error.plain).toMatch(/^[A-Z].*[.]$/); expect(error.plain).not.toMatch(/retain|JSON|envelope/); }
+    }
+  });
+  it('treats a helper killed before it answered as a temporary timeout, not an unreadable reply', () => {
+    const outcome = value => {try {envelope(value);} catch (error) {return {code:error.code,plain:error.plain,kind:backgroundOutcome(error).kind};}};
+    expect(outcome({exitCode:null,stdout:'',stderr:''})).toEqual({code:'timeout',plain:'Ariadne took too long to answer. Open Ariadne, then try again.',kind:'transient'});
+    // Any output, or a real exit status, is still judged as a reply.
+    expect(outcome({exitCode:null,stdout:'{"api_vers',stderr:''}).kind).toBe('held');
+    expect(outcome({exitCode:1,stdout:'',stderr:''}).kind).toBe('held');
+  });
+  it('keeps missing project-folder advice retryable without reflecting paths or installation advice', () => {
+    const message = 'The selected project folder is missing or inaccessible: /private-sample/project';
+    const failed = {exitCode:4,stdout:JSON.stringify({api_version:1,ok:false,error:{code:'host_unreachable',message,hint:'h',retryable:false,field_errors:[]}})};
+    try {envelope(failed);throw new Error('Expected a refusal');}
+    catch (error) {
+      expect(error.code).toBe('host_unreachable');
+      expect(error.plain).toBe('The project folder is missing or inaccessible. Restore access or select it again; Ariadne will keep trying.');
+      expect(error.plain).not.toMatch(/private-sample|update both|replaced/i);
     }
   });
   it('validates exact marker, full UTF8 bytes and original generation with no reconstruction', async () => {

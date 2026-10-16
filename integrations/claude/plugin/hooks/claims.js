@@ -1,4 +1,4 @@
-import { BACKGROUND_RETRY, bounded, claudeSessionEndEventId, clip, envelope, hash, lifecycle, ModError, noticeEpisodes, plainFailure, prepared, reportReceipt, HELPER_TIMEOUT_MS } from './contracts.js';
+import { BACKGROUND_RETRY, bounded, claudeSessionEndEventId, clip, envelope, hash, lifecycle, ModError, conversationHealth, backgroundOutcome, plainFailure, prepared, reportReceipt, HELPER_TIMEOUT_MS } from './contracts.js';
 import { bindingStatus, connectionGone } from './setup.js';
 
 // 'exact' when text is the payload, 'framed' when the payload sits intact as whole
@@ -17,13 +17,12 @@ function carried(text, captured) {
 // Owner-facing notices. Each prints once when its state starts, never every poll.
 export const NOTICES = Object.freeze({
   removed:'This session was removed from Ariadne (or connected elsewhere). Run /ariadne-connect to connect again.',
-  owner_paused:'Ariadne: sending to this session is paused in the app. Messages will arrive here when you resume it.',
-  session_closed:'Ariadne: this session is closed in the app. Messages will arrive here if you reopen it.',
-  recovery_required:'Ariadne: a message to this session needs your attention in the app before more can be sent.',
-  blocked:'Ariadne: the app is holding messages for this session for now. They will arrive here when it lets them through.',
+  owner_paused:plainFailure('invalid_transition',{reason:'owner_paused'}),
+  session_closed:plainFailure('invalid_transition',{reason:'session_closed'}),
+  recovery_required:plainFailure('invalid_transition',{reason:'recovery_required'}),
+  blocked:plainFailure('invalid_transition'),
   failure:BACKGROUND_RETRY,
   reports:BACKGROUND_RETRY,
-  ended:'Ariadne: could not tell the app that this conversation ended. Open the Ariadne app to see its current state.',
 });
 // What still holds a loop open, in the words /ariadne-connect and /ariadne-disconnect use.
 export const BUSY = Object.freeze({
@@ -43,7 +42,7 @@ export const FOLD_GRACE_MS = 5000;
 const FOLD_SNAPSHOTS = 3;
 
 // One captured claim and one serialized reporter. Core remains the sole queue authority.
-export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => Date.now(), notices = noticeEpisodes(now)} = {}) {
+export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => Date.now(), health = conversationHealth(now)} = {}) {
   let active = null;
   let polling = null;
   let admissionOpen = true;
@@ -55,7 +54,6 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
   let claimId = null;
   // An earlier try with claimId had an unknown outcome, so the app may have saved it.
   let claimUnknown = false;
-  const claimNotices = notices;
   let capturedSubmission = null;
   let disconnected = false;
   let observedForm = false;
@@ -72,16 +70,15 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     admissionOpen = false;
     // Evidence for a binding that no longer exists has nowhere to go.
     pending.length = 0;
-    claimNotices.delete('reports');
+    health.delete($,'reports');
     if (ended) return;
     ended = true;
     if (!live) return;
-    claimNotices.fail($,'claim',error,NOTICES.removed,NOTICES.removed,{key:'binding_gone',terminal:true});
+    health.record($,'claim',backgroundOutcome(error,NOTICES.removed,{terminal:true}));
     onEnded($);
   }
   async function flush($) {
     if (reporting) return reporting;
-    let saved = false;
     reporting = (async () => {
       while (pending.length) {
         const record = pending[0];
@@ -94,17 +91,16 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
           throw error;
         }
         pending.shift();
-        saved = true;
         // A durable terminal or uncertain record hands the attempt to the app.
         if (record.release && active === record.claim) active = null;
       }
     })();
     try {
       await reporting;
-      if (saved) claimNotices.good($,'reports');
+      if (!stopped) health.record($,'reports',{kind:'ok'});
     } catch (error) {
-      if (!stopped) claimNotices.fail($,'reports',error,
-        (error instanceof ModError ? error.plain : undefined) ?? plainFailure(error?.code,error?.details),NOTICES.reports);
+      if (!stopped) health.record($,'reports',backgroundOutcome(error,
+        (error instanceof ModError ? error.plain : undefined) ?? plainFailure(error?.code,error?.details)));
       throw error;
     } finally { reporting = null; }
   }
@@ -157,6 +153,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     if (polling) await polling;
   }
   async function refused($, error) {
+    if (stopped) return;
     const reason = error?.details?.reason;
     if (bindingGone(error)) { await end($,error); return; }
     // The app is closed or does not hold this session right now; retry quietly.
@@ -164,7 +161,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     // may have saved is kept; otherwise nothing was saved under it.
     if (reason === 'lease_invalid') {
       if (!claimUnknown) claimId = null;
-      await claimNotices.fail($,'claim',error,null);
+      health.record($,'claim',{kind:'ok'});
       return;
     }
     if (error?.code === 'invalid_transition') {
@@ -172,11 +169,11 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
       // so this refusal proves nothing was saved under the ID.
       claimId = null;
       claimUnknown = false;
-      await claimNotices.fail($,'claim',error,NOTICES[['owner_paused','session_closed','recovery_required'].includes(reason) ? reason : 'blocked']);
+      health.record($,'claim',backgroundOutcome(error));
       return;
     }
     claimUnknown = true;
-    await claimNotices.fail($,'claim',error,(error instanceof ModError ? error.plain : undefined) ?? plainFailure(),NOTICES.failure);
+    health.record($,'claim',backgroundOutcome(error,(error instanceof ModError ? error.plain : undefined) ?? plainFailure(error?.code,error?.details)));
   }
   async function runPoll($) {
     // Saved evidence goes first; a claim never overtakes an unsaved report.
@@ -192,10 +189,10 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     let value;
     try {
       const result = envelope(await $.process.run([helperPath,'bridge','claim',...route,'--request-id',claimId],{timeoutMs:HELPER_TIMEOUT_MS}));
-      if (result === null) { await claimNotices.good($,'claim'); claimId = null; claimUnknown = false; return; }
+      if (result === null) { if (!stopped) health.record($,'claim',{kind:'ok'}); claimId = null; claimUnknown = false; return; }
       value = await prepared(result,binding);
     } catch (error) { await refused($,error); return; }
-    await claimNotices.good($,'claim');
+    if (!stopped) health.record($,'claim',{kind:'ok'});
     const captured = {...value,turnId:null,accepted:false,settled:false,released:false,foldable:new Set(),folding:null,terminalSnapshots:[],terminalGap:false,uncertainReasons:new Set()};
     active = captured;
     capturedSubmission = captured;
@@ -331,8 +328,8 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
   async function stop($, sessionEnd = false) {
     stopped = true;
     await quiesce();
-    claimNotices.delete('claim');
-    claimNotices.delete('reports');
+    health.delete($,'claim');
+    health.delete($,'reports');
     const captured = active;
     if (captured && captured.turnId === null && !captured.released && !ended) {
       // A pending fold is confirmed only on evidence that the turn it was folded
@@ -354,7 +351,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
         input_id:null,attempt_id:null,host_turn_id:null,observed_at:new Date().toISOString(),kind:'disconnected',payload:{reason:'Original Claude session ended.'}},release:false});
     }
     try { await flush($); }
-    catch { if (sessionEnd) $.ui.log(NOTICES.ended); }
+    catch (error) { if (sessionEnd) health.record($,'reports',backgroundOutcome(error)); }
   }
   // Before an owner connect/disconnect: hold new claims, finish what is in
   // flight, save pending reports and retry an unconfirmed claim with its ID.
@@ -386,15 +383,15 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     claimId = null;
     claimUnknown = false;
     stopped = true;
-    claimNotices.delete('claim');
-    claimNotices.delete('reports');
+    health.delete($,'claim');
+    health.delete($,'reports');
     recovered = true;
     admissionOpen = false;
     return true;
   }
   // Retry unsaved reports of a retired loop; true once nothing is left.
-  async function drain($) {
-    try { await flush($); } catch { /* retried later */ }
+  async function drain($, onFailure = () => {}) {
+    try { await flush($); } catch (error) { onFailure(error); }
     return pending.length === 0;
   }
   function busy() {

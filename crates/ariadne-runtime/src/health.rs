@@ -95,6 +95,11 @@ pub type HealthObserver = dyn Fn(SupervisorHealth) + Send + Sync;
 /// Owner-facing words for why the desktop is not sending. No IDs or jargon.
 pub fn plain_reason(error: &CoreError) -> String {
     let message = error.message.to_ascii_lowercase();
+    if error.code == CoreErrorCode::HostUnreachable
+        && message.contains("project folder is missing or inaccessible")
+    {
+        return "The project folder is missing or inaccessible. Restore access or select it again; Ariadne will keep trying.".into();
+    }
     let reason = error.details.as_ref().and_then(|details| details.reason);
     if message.contains("thread is unavailable")
         || message.contains("thread is not available")
@@ -345,6 +350,16 @@ mod tests {
                 assert!(!text.to_lowercase().contains(jargon), "{text}");
             }
         }
+    }
+
+    #[test]
+    fn unavailable_project_folder_keeps_folder_recovery_words() {
+        let cause = CoreError::new(
+            CoreErrorCode::HostUnreachable,
+            "The selected project folder is missing or inaccessible; restore access to the project folder or select it again before reconnecting",
+            "",
+        );
+        assert_eq!(plain_reason(&cause), "The project folder is missing or inaccessible. Restore access or select it again; Ariadne will keep trying.");
     }
 
     #[test]

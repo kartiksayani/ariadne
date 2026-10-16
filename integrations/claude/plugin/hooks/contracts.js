@@ -30,7 +30,7 @@ export const HELPER_TIMEOUT_MS = 8000;
 export const NOTICE_GRACE_MS = 120000;
 const TRANSIENT = new Set(['store_busy','timeout','io_error','process_rejected','host_unreachable']);
 // Spawn failures with these fixed OS codes require repairing the installation.
-// Other rejected SDK calls can still be temporary; never inspect their raw text.
+// Other rejected SDK calls can still be temporary; their raw text is never read.
 const INSTALL_FAILURES = new Set(['ENOENT','EACCES','EPERM','ENOEXEC','ENOTDIR','EISDIR','ELOOP','ENAMETOOLONG']);
 const DIAGNOSTIC_CODES = new Set([...TRANSIENT,'stale_generation','binding_mismatch','binding_ambiguous','binding_conflict',
   'not_found','invalid_argument','permission_denied','unsupported','unsupported_host_version','incompatible_adapter',
@@ -82,114 +82,103 @@ export function backgroundDiagnostic($, record) {
     } finally { backgroundWriting = false; }
   })().catch(() => {});
 }
-// Slots retain their own recovery and stability evidence. Forks share the last
-// visible meaning and rate cap, so one problem cannot multiply across producers.
 export const BACKGROUND_RETRY = 'Ariadne is having trouble keeping this conversation up to date; it will keep trying, and you can open Ariadne to check on it.';
-export function noticeEpisodes(now = () => Date.now(), shared = {active:new Set(),lastKey:null,lastNonUrgentAt:null,retrySince:null}) {
-  const slots = new Map(), ownerSlots = new Map();
-  function refreshRetry() {
-    if (![...shared.active].some(episode => episode.transientSince !== null)) shared.retrySince = null;
+const PRODUCER_INTERVALS = Object.freeze({announce:30000,helper:30000,auto:30000,qualification:30000,claim:1000,reports:1000});
+const HEALTH_PRIORITY = Object.freeze({ok:0,transient:1,held:2,install:3,terminal:4});
+// Held codes whose advice the owner must act on. Other held codes, such as
+// protocol_error, wait out the grace and spacing like retries do.
+const OWNER_HELD = new Set(['invalid_transition','binding_conflict','stale_generation','binding_mismatch','binding_ambiguous',
+  'not_found','permission_denied','unsupported','unsupported_host_version','delivery_uncertain','commit_uncertain','protocol_conflict']);
+function urgent(condition) {
+  return condition.kind === 'terminal' || condition.kind === 'install' || (condition.kind === 'held' && OWNER_HELD.has(condition.code));
+}
+// The kind comes from the error code alone, never from `retryable` or the hint.
+// The text is a fixed sentence: plainFailure may pick one from a fixed helper
+// message, but never echoes it. Background retries never inherit connect advice.
+export function backgroundOutcome(error, text, {terminal = false} = {}) {
+  const code = failureCode(error);
+  if (text === null || code === 'lease_invalid') return {kind:'ok'};
+  if (terminal) return {kind:'terminal',code,text:text ?? plainFailure(code,error?.details)};
+  if (code === 'incompatible_adapter') return {kind:'install',code,text:plainFailure(code)};
+  if (TRANSIENT.has(code)) return {kind:'transient',code,text:BACKGROUND_RETRY};
+  return {kind:'held',code,text:code === 'invalid_transition' ? plainFailure(code,error?.details) : text ?? plainFailure(code,error?.details)};
+}
+// One conversation record. Selection depends on live producer outcomes and on
+// which producer printed the line showing now. Printing remembers continuous
+// ill health, the last line, its producer and the spacing of non-urgent lines.
+export function conversationHealth(now = () => Date.now(), intervals = PRODUCER_INTERVALS) {
+  const producers = new Map(), order = Object.keys(PRODUCER_INTERVALS);
+  let unhealthySince = null, lastLine = null, quietAt = null, shown = null;
+  function failing() {
+    return [...producers.entries()].filter(([producer,value]) => now() - value.lastCall <= intervals[producer] * 3 && value.kind !== 'ok');
   }
-  function remove(map, slot) {
-    const episode = map.get(slot);
-    map.delete(slot);
-    if (map === slots) {
-      shared.active.delete(episode);
-      refreshRetry();
-      if (!shared.active.size) shared.lastKey = null;
+  function current() {
+    const live = failing();
+    if (!live.length) return {kind:'ok'};
+    live.sort(([left,a],[right,b]) => HEALTH_PRIORITY[b.kind] - HEALTH_PRIORITY[a.kind] || b.failedAt - a.failedAt || order.indexOf(left) - order.indexOf(right));
+    // The line showing now stays while its producer still fails at the top priority.
+    const kept = live.find(([producer,value]) => producer === shown?.producer && HEALTH_PRIORITY[value.kind] === HEALTH_PRIORITY[live[0][1].kind]);
+    const [producer,value] = kept ?? live[0];
+    return {kind:value.kind,code:value.code,text:value.kind === 'transient' ? BACKGROUND_RETRY : value.text,producer};
+  }
+  function evaluate($) {
+    const condition = current();
+    if (condition.kind === 'ok') {
+      if (unhealthySince !== null) backgroundDiagnostic($,{step:'health',outcome:'recovered',code:'ok',at:new Date(now()).toISOString()});
+      unhealthySince = null;
+      lastLine = null;
+      shown = null;
+      return condition;
     }
+    if (unhealthySince === null) {
+      unhealthySince = now();
+      backgroundDiagnostic($,{step:condition.producer,outcome:'started',code:condition.code,at:new Date(now()).toISOString()});
+    }
+    const quiet = !urgent(condition);
+    if (condition.text === lastLine) return condition;
+    if (quiet && (now() - unhealthySince < NOTICE_GRACE_MS || (quietAt !== null && now() - quietAt < NOTICE_GRACE_MS))) return condition;
+    // A retry line never replaces held, installation or terminal advice while
+    // the producer that printed it has neither recovered nor expired.
+    if (condition.kind === 'transient' && shown && shown.kind !== 'transient' && failing().some(([producer]) => producer === shown.producer)) return condition;
+    if (lastLine !== null) backgroundDiagnostic($,{step:condition.producer,outcome:'changed',code:condition.code,at:new Date(now()).toISOString()});
+    $.ui.log(condition.text);
+    lastLine = condition.text;
+    shown = {producer:condition.producer,kind:condition.kind};
+    if (quiet) quietAt = now();
+    return condition;
   }
-  function changed($, slot, episode, meaning) {
-    if (episode.lastKey !== null) backgroundDiagnostic($,{step:slot,outcome:'changed',code:episode.code,at:new Date(now()).toISOString()});
-    episode.lastKey = meaning;
+  function expire($) {
+    for (const [producer,value] of producers) if (now() - value.lastCall > intervals[producer] * 3) producers.delete(producer);
+    if (current().kind === 'ok') evaluate($);
   }
   return {
-    fail($, slot, error, text, retryText = text, {background = true,key,terminal = false} = {}) {
-      const code = failureCode(error), map = background ? slots : ownerSlots;
-      let episode = map.get(slot);
-      // Reset removes forked evidence too; a later call starts a fresh episode.
-      if (background && episode && !shared.active.has(episode)) { map.delete(slot); episode = null; }
-      // A silent refusal cannot open or age a visible transient streak.
-      if (text === null || code === 'lease_invalid') {
-        if (episode) { episode.transientSince = null; episode.good = 0; episode.meaning = null; episode.calls = 0; if (background) refreshRetry(); }
-        return;
-      }
-      const transient = TRANSIENT.has(code);
-      const display = code === 'incompatible_adapter' ? plainFailure(code) : transient ? retryText : text;
-      // The advice is the meaning: different diagnostic codes must not repeat
-      // identical words or interrupt their stability evidence. Held-state wording
-      // also varies by producer, so use its canonical advice. Never persist it.
-      const backgroundMeaning = code === 'invalid_transition' && key === undefined ? plainFailure(code,error?.details) : display;
-      const meaning = background ? backgroundMeaning : key ?? (transient ? 'retrying' : code === 'invalid_transition'
-        ? ['owner_paused','session_closed','recovery_required'].includes(error?.details?.reason) ? error.details.reason : 'blocked'
-        : code !== 'incompatible_adapter' && error instanceof ModError && bounded(error.code,64) ? error.code : code);
-      if (!episode) {
-        episode = {transientSince:null,good:0,lastKey:null,meaning:null,calls:0,since:now(),code};
-        map.set(slot,episode);
-        if (background) shared.active.add(episode);
-        backgroundDiagnostic($,{step:slot,outcome:'started',code,at:new Date(now()).toISOString()});
-      }
-      if (episode.meaning === meaning && episode.good === 0) episode.calls += 1;
-      else { episode.calls = 1; episode.since = now(); }
-      episode.meaning = meaning;
-      episode.good = 0;
-      episode.code = code;
-      // Changing transient causes does not restart the grace clock. One or two
-      // good calls also leave it running; a held state or sustained recovery ends it.
-      if (transient) {
-        episode.transientSince ??= now();
-        if (background) shared.retrySince ??= now();
-      } else {
-        episode.transientSince = null;
-        if (background) refreshRetry();
-      }
-      if (!background) {
-        // The command always returns its direct answer. App outages add no
-        // extra log line and owner calls never consume background grace or cap.
-        if (code !== 'host_unreachable' && episode.lastKey !== meaning) { changed($,slot,episode,meaning); $.ui.log(text); }
-        if (terminal) remove(map,slot);
-        return;
-      }
-      const urgent = terminal || code === 'incompatible_adapter';
-      if (terminal || shared.lastKey !== meaning) {
-        if (!urgent) {
-          if (transient && now() - shared.retrySince < NOTICE_GRACE_MS) return;
-          if (shared.lastNonUrgentAt !== null && now() - shared.lastNonUrgentAt < NOTICE_GRACE_MS) return;
-          // First advice can speak at once. Changed advice needs stable evidence
-          // from this producer, never calls from another slot or fork.
-          if (shared.lastKey !== null && (episode.calls < 2 || now() - episode.since < 10000)) return;
-          shared.lastNonUrgentAt = now();
-        }
-        changed($,slot,episode,meaning);
-        shared.lastKey = meaning;
-        $.ui.log(display);
-      }
-      if (terminal) {
-        remove(map,slot);
-        backgroundDiagnostic($,{step:slot,outcome:'ended',code,at:new Date(now()).toISOString()});
-      }
+    current,
+    record($, producer, outcome) {
+      if ($.background === false) return;
+      expire($);
+      const previous = producers.get(producer);
+      if (outcome.kind === 'ok' && previous?.kind === 'transient' && previous.good < 2) {
+        producers.set(producer,{...previous,lastCall:now(),good:previous.good + 1});
+      } else producers.set(producer,{...outcome,lastCall:now(),failedAt:now(),good:0});
+      return evaluate($);
     },
-    good($, slot) {
-      for (const map of [slots,ownerSlots]) {
-        const episode = map.get(slot);
-        if (!episode) continue;
-        if (map === slots && !shared.active.has(episode)) { map.delete(slot); continue; }
-        if (++episode.good < 3) continue;
-        remove(map,slot);
-        backgroundDiagnostic($,{step:slot,outcome:'recovered',code:episode.code,at:new Date(now()).toISOString()});
-      }
+    delete($, producer) {
+      if ($.background === false) return;
+      producers.delete(producer);
+      expire($);
+      return evaluate($);
     },
-    // Scope changes retire local evidence. A reset invalidates all shared forks.
-    delete(slot) { remove(slots,slot); remove(ownerSlots,slot); },
-    fork:() => noticeEpisodes(now,shared),
-    reset() { slots.clear(); ownerSlots.clear(); shared.active.clear(); shared.lastKey = null; shared.retrySince = null; },
+    reset() {producers.clear();unhealthySince = null;lastLine = null;quietAt = null;shown = null;},
   };
 }
-// Owner-facing sentence per helper error code, each with a next step. Raw helper text is never shown.
+// Owner-facing sentence per helper error code, each with a next step. Raw helper
+// text is never shown; one fixed helper message, a missing project folder, is
+// recognised to pick its own fixed sentence.
 const GENERIC_FAILURE = 'Ariadne ran into a problem and could not record this. Open the Ariadne app to see what happened; if it keeps happening, update Ariadne.';
 const MISMATCH_FAILURE = "Ariadne and its Claude plugin don't match, so this was not recorded. Update both to the same version.";
 const UNREADABLE_FAILURE = "Ariadne's reply was cut off or unreadable, so this was not recorded. Open Ariadne and try again; if it keeps happening, update Ariadne.";
-const GONE_FAILURE = "This conversation's link to its Ariadne session is out of date or was removed. Run /ariadne-connect to connect it again.";
+const TIMEOUT_FAILURE = 'Ariadne took too long to answer. Open Ariadne, then try again.';
+const GONE_FAILURE ="This conversation's link to its Ariadne session is out of date or was removed. Run /ariadne-connect to connect it again.";
 const UNCERTAIN_FAILURE = "Ariadne couldn't confirm that its last step was saved. Open Ariadne and check before sending anything again.";
 const HELD_FAILURES = Object.freeze({
   owner_paused: 'Sending to this Ariadne session is paused in the app. Resume it in Ariadne and messages will arrive here.',
@@ -214,7 +203,10 @@ const HELPER_FAILURES = Object.freeze({
   store_busy: 'Ariadne is busy with something else right now. Wait a moment, then try again.',
 });
 // A refusal of the app to take more work: the reason says what to do, not the code.
-export function plainFailure(code, details) {
+export function plainFailure(code, details, message) {
+  if (code === 'host_unreachable' && typeof message === 'string' && message.toLowerCase().includes('project folder is missing or inaccessible')) {
+    return 'The project folder is missing or inaccessible. Restore access or select it again; Ariadne will keep trying.';
+  }
   const own = (table, key) => typeof key === 'string' && Object.hasOwn(table,key) ? table[key] : undefined;
   if (code === 'binding_conflict' && bounded(details?.connected_session_name,4096)
     && !/\p{Cc}/u.test(details.connected_session_name)) {
@@ -255,6 +247,13 @@ export function envelope(result) {
     || typeof result.stdout !== 'string' || bytes(result.stdout) > 1024 * 1024) {
     throw new ModError('Ariadne helper returned incomplete or oversized output; retain pending request/event IDs.',UNREADABLE_FAILURE);
   }
+  // A helper killed before it wrote anything (exit status null) timed out;
+  // that is temporary, not an unreadable reply.
+  if (result.exitCode === null && result.stdout === '') {
+    const failure = new ModError('Ariadne helper was stopped before it answered; retain pending request/event IDs.',TIMEOUT_FAILURE);
+    failure.code = 'timeout';
+    throw failure;
+  }
   let value;
   try { value = JSON.parse(result.stdout); }
   catch { throw new ModError('Ariadne helper returned malformed JSON; retain pending request/event IDs.',UNREADABLE_FAILURE); }
@@ -278,7 +277,7 @@ export function envelope(result) {
     const known = ['delivery_uncertain','commit_uncertain','host_unreachable','unsupported','protocol_conflict','stale_generation','permission_denied','invalid_argument','not_found'];
     const label = known.includes(error.code) ? ` (${error.code})` : '';
     const details = error.details && typeof error.details === 'object' && !Array.isArray(error.details) ? error.details : null;
-    const failure = new ModError(`Ariadne helper failed${label}; retain original IDs and inspect the app.`,plainFailure(error.code,details));
+    const failure = new ModError(`Ariadne helper failed${label}; retain original IDs and inspect the app.`,plainFailure(error.code,details,error.message));
     failure.code = error.code;
     failure.details = details;
     throw failure;

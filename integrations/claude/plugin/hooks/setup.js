@@ -5,7 +5,8 @@ export async function qualify($, descriptor) {
     throw Object.assign(new ModError('Installed helper descriptor is missing or incompatible.','Update Ariadne and its Claude plugin so they match, then run /ariadne-connect again.'),{code:'incompatible_adapter'});
   }
   if (hostVersionStatus((await $.session.version()).version) === null) {
-    throw new ModError(`This Mod requires Claude Code ${HOST_VERSION} or newer; update Claude Code.`,`Update Claude Code to ${HOST_VERSION} or newer, then run /ariadne-connect again.`);
+    // The owner must update Claude Code, so background health speaks at once.
+    throw Object.assign(new ModError(`This Mod requires Claude Code ${HOST_VERSION} or newer; update Claude Code.`,`Update Claude Code to ${HOST_VERSION} or newer, then run /ariadne-connect again.`),{code:'unsupported_host_version'});
   }
   const result = await $.process.run([descriptor.helperPath,'--version'],{timeoutMs:HELPER_TIMEOUT_MS});
   if (result.exitCode !== 0 || result.isStdoutTruncated || result.isStderrTruncated

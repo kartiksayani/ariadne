@@ -665,7 +665,9 @@ fn missing_installed_helper_or_resource_cannot_advertise_a_qualified_connection(
             "That did not complete. Ariadne and its Claude plugin don't match, so this was not recorded. Update both to the same version."
         };
         assert_eq!(failed["value"]["text"], sentence);
-        assert!(!failed["logs"].as_array().unwrap().is_empty());
+        // Owner commands answer directly and never change background health,
+        // so the reply is the only place this sentence appears.
+        assert!(failed["logs"].as_array().unwrap().is_empty(), "{failed}");
         assert!(failed["appended"].as_array().unwrap().is_empty());
         assert!(failed["prompts"].as_array().unwrap().is_empty());
         assert!(failed["reports"].as_array().unwrap().is_empty());
@@ -692,7 +694,9 @@ fn installed_session_end_reports_saved_scope_after_sdk_loses_actual_status_resul
         pending["value"]["text"],
         format!("That did not complete. {sentence}")
     );
-    assert!(pending["logs"]
+    // Owner commands answer directly and never change background health,
+    // so the reply is the only place this sentence appears.
+    assert!(!pending["logs"]
         .as_array()
         .unwrap()
         .iter()
