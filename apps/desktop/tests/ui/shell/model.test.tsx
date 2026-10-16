@@ -23,7 +23,7 @@ describe('shell model', () => {
     expect(sessionWhen(at(1, 14, 2), now)).toBe('Yesterday');
     expect(sessionWhen(at(3, 14, 2), now)).toBe('3 days ago');
     expect(sessionWhen(at(8, 14, 2), now)).toBe('Last week');
-    expect(sessionWhen(at(20, 14, 2), now)).toBe(new Date(at(20, 14, 2)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }));
+    expect(sessionWhen(at(20, 14, 2), now)).toBe(new Date(at(20, 14, 2)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }).replace('Sept', 'Sep'));
   });
 
   it('uses the owner name and description when set, with agent fallbacks for unnamed sessions', () => {

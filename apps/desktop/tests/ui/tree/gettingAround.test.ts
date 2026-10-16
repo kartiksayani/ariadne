@@ -33,7 +33,8 @@ describe('Map getting around selectors', () => {
   it('maps Space and Cmd+E without taking plain e or Ctrl+E', () => {
     expect(workspaceIntent({ key: ' ' })).toEqual({ kind: 'peek' });
     expect(workspaceIntent({ key: 'e', metaKey: true })).toEqual({ kind: 'recent' });
-    expect(workspaceIntent({ key: 'e' })).toEqual({ kind: 'archive' });
+    // Plain e archived the topic once; SPEC 6.1 leaves it unbound.
+    expect(workspaceIntent({ key: 'e' })).toBeNull();
     expect(workspaceIntent({ key: 'e', ctrlKey: true })).toBeNull();
   });
 });
