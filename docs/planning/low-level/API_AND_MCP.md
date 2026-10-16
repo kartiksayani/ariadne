@@ -864,6 +864,15 @@ to retry. Prefer permission, capacity, busy or commit-uncertain codes when known
 This code does not assert that an irreversible operation was unsent; uncertain
 provider delivery retains `delivery_uncertain` and must never authorize a resend.
 
+`store_busy` is the one transient code and is always `retryable`: a lock wait ran
+out, usually before anything was read or written, and sending the same operation
+again is safe (a removal resumes its saved steps). Read-only CLI, owner and MCP
+queries retry it themselves first, within 5 s; `bridge connection-status` and
+the saved-connect lookup, which the plugin runs under its helper timeout, within
+2.5 s. Local
+errors carry one plain hint per code
+([ADR-0101](../../adr/ADR-0101-lock-free-claim-check-and-busy-read-retry.md)).
+
 Error messages explain a concrete recovery action and contain bounded IDs/revisions,
 not raw stderr/environment/content dumps. Retryable means the **same operation**
 can be retried; it never authorizes resending an uncertain provider message.

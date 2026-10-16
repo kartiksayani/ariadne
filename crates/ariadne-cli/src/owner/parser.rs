@@ -1,6 +1,7 @@
 use ariadne_core::*;
 use std::io::Read;
 
+#[derive(Clone)]
 pub(super) enum Request {
     Query(OwnerQueryRequest),
     Mutation(OwnerMutationRequest),

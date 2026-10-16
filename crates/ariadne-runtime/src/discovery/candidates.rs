@@ -103,9 +103,21 @@ impl Discovery {
         within(deadline)?;
         announcement.validate()?;
         let binding = self.resolve(&announcement)?;
-        let canonical = |value: &str| {
-            let path = std::fs::canonicalize(value).map_err(|_| invalid("SDK announcement directory is not accessible; refresh the original conversation."))?;
-            if !path.is_dir() {
+        let canonical = |value: &str, project: bool| {
+            let inspection_error = |cause| {
+                if project {
+                    project_error(cause)
+                } else {
+                    invalid("SDK announcement directory is not accessible; refresh the original conversation.")
+                }
+            };
+            let path = std::fs::canonicalize(value).map_err(inspection_error)?;
+            if !std::fs::metadata(&path).map_err(inspection_error)?.is_dir() {
+                if project {
+                    return Err(project_error(std::io::Error::from_raw_os_error(
+                        libc::ENOTDIR,
+                    )));
+                }
                 return Err(invalid(
                     "SDK announcement directory must be an existing directory.",
                 ));
@@ -116,8 +128,8 @@ impl Discovery {
                 .ok_or_else(|| invalid("Canonical SDK path exceeds the UTF-8 metadata bound."))?;
             Ok(path.to_owned())
         };
-        announcement.cwd = canonical(&announcement.cwd)?;
-        announcement.plugin.root = canonical(&announcement.plugin.root)?;
+        announcement.cwd = canonical(&announcement.cwd, true)?;
+        announcement.plugin.root = canonical(&announcement.plugin.root, false)?;
         // Display text only: an unusable label is dropped, never a refusal.
         announcement.host_location = announcement
             .host_location
@@ -530,6 +542,31 @@ fn same_snapshot(current: &Candidate, selected: &Candidate) -> bool {
         && current.freshness == Freshness::Fresh
         && current.received.elapsed() < LIFETIME
 }
+fn project_error(cause: std::io::Error) -> CoreError {
+    if matches!(
+        cause.raw_os_error(),
+        Some(
+            libc::ENOENT
+                | libc::ENOTDIR
+                | libc::EACCES
+                | libc::EPERM
+                | libc::ELOOP
+                | libc::ENAMETOOLONG
+        )
+    ) {
+        CoreError::new(
+            CoreErrorCode::HostUnreachable,
+            "The selected project folder is missing or inaccessible; restore access to the project folder or select it again before reconnecting",
+            "Restore access to the project folder or select it again, then retry the original announcement.",
+        )
+    } else {
+        CoreError::new(
+            CoreErrorCode::IoError,
+            "Project directory inspection could not finish; retry the bounded read-only check.",
+            "Retry the original conversation's announcement.",
+        )
+    }
+}
 fn within(deadline: Instant) -> Result<(), CoreError> {
     if Instant::now() >= deadline {
         return Err(CoreError::new(CoreErrorCode::HostUnreachable, "Announcement validation exceeded its original control deadline.", "Refresh the original conversation; a timed-out announcement never grants dispatch authority."));
@@ -615,6 +652,110 @@ mod tests {
         assert!(!c.loaded);
         assert_eq!(c.announcement().unwrap().plugin.name, "ariadne");
         assert_eq!(c.announcement().unwrap().host_location, None);
+    }
+    #[test]
+    fn unavailable_announcement_cwd_is_retryable_with_project_folder_words() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        for case in [
+            "missing",
+            "not a directory",
+            "inaccessible",
+            "symlink loop",
+            "long component",
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let bad = root.path().join("bad-project");
+            let locked = root.path().join("locked");
+            let cwd = match case {
+                "missing" => bad,
+                "not a directory" => {
+                    std::fs::write(&bad, "file").unwrap();
+                    bad
+                }
+                "inaccessible" => {
+                    std::fs::create_dir(&locked).unwrap();
+                    let nested = locked.join("project");
+                    std::fs::create_dir(&nested).unwrap();
+                    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000))
+                        .unwrap();
+                    nested
+                }
+                "symlink loop" => {
+                    symlink("bad-project", &bad).unwrap();
+                    bad
+                }
+                "long component" => root.path().join("x".repeat(256)),
+                _ => unreachable!(),
+            };
+            let d = discovery();
+            let mut a = announcement(root.path());
+            a.cwd = cwd.to_str().unwrap().into();
+            let result = admit(&d, a);
+            if case == "inaccessible" {
+                std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            let cause = result.unwrap_err();
+            assert_eq!(cause.code, CoreErrorCode::HostUnreachable, "{case}");
+            assert!(
+                cause
+                    .message
+                    .contains("project folder is missing or inaccessible"),
+                "{case}: {cause:?}"
+            );
+            assert!(
+                !cause.hint.contains("installed descriptor"),
+                "{case}: {cause:?}"
+            );
+            assert!(d.snapshot().unwrap().candidates.is_empty());
+            std::fs::create_dir(root.path().join("restored")).unwrap();
+            admit(&d, announcement(&root.path().join("restored"))).unwrap();
+        }
+    }
+    #[test]
+    fn announcement_project_io_errors_keep_folder_faults_distinct_from_temporary_io() {
+        for errno in [
+            libc::ENOENT,
+            libc::ENOTDIR,
+            libc::EACCES,
+            libc::EPERM,
+            libc::ELOOP,
+            libc::ENAMETOOLONG,
+        ] {
+            let cause = project_error(std::io::Error::from_raw_os_error(errno));
+            assert_eq!(cause.code, CoreErrorCode::HostUnreachable, "{errno}");
+            assert!(
+                cause
+                    .message
+                    .contains("project folder is missing or inaccessible"),
+                "{errno}"
+            );
+            assert!(!cause.hint.contains("installed descriptor"));
+        }
+        for errno in [
+            libc::EAGAIN,
+            libc::EMFILE,
+            libc::ENFILE,
+            libc::EIO,
+            libc::EINTR,
+            libc::ENOSPC,
+            libc::ENOEXEC,
+            libc::EISDIR,
+            libc::ENOTSUP,
+        ] {
+            let cause = project_error(std::io::Error::from_raw_os_error(errno));
+            assert_eq!(cause.code, CoreErrorCode::IoError, "{errno}");
+            assert!(
+                cause.message.contains("retry the bounded read-only check"),
+                "{errno}"
+            );
+            assert!(
+                !cause.message.contains("missing or inaccessible"),
+                "{errno}"
+            );
+        }
+        let cause = project_error(std::io::Error::other("unknown"));
+        assert_eq!(cause.code, CoreErrorCode::IoError);
+        assert!(!cause.message.contains("missing or inaccessible"));
     }
     #[test]
     fn host_location_is_optional_display_text_normalized_at_intake() {

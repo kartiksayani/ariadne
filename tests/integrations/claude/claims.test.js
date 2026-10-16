@@ -1,7 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { FOLD_GRACE_MS, NOTICES, claimLoop } from '../../../integrations/claude/plugin/hooks/claims.js';
-import { hash } from '../../../integrations/claude/plugin/hooks/contracts.js';
+import { BACKGROUND_RETRY, hash, plainFailure } from '../../../integrations/claude/plugin/hooks/contracts.js';
 import { binding, deferred, descriptor, failure, host, ids, prepared, success } from './fixtures.js';
+
+const held = reason => plainFailure('invalid_transition',reason ? {reason} : undefined);
+
+afterEach(() => vi.useRealTimers());
 
 describe('captured Claude claim lifecycle', () => {
   it('detaches submission, matches exact first-line marker+full digest, ignores unrelated/subagent turns', async () => {
@@ -89,7 +93,7 @@ describe('captured Claude claim lifecycle', () => {
     const loop = claimLoop(descriptor.helperPath,binding);
     for (let index=0;index<3;index++) await loop.poll(h.$);
     expect(h.calls.filter(call => call.argv[2] === 'claim')).toHaveLength(3);
-    expect(h.logs).toEqual([NOTICES.owner_paused]);
+    expect(h.logs).toEqual([held('owner_paused')]);
     expect(h.logs.join('')).not.toMatch(/owner_paused|needs_attention|generation/);
     expect(loop.status().admission_open).toBe(true);
     expect(h.prompts).toHaveLength(0);
@@ -100,7 +104,7 @@ describe('captured Claude claim lifecycle', () => {
     const h = host({claim:value,handler:argv => argv[2] === 'claim' && closed ? failure('invalid_transition',{reason:'session_closed'}) : undefined});
     const loop = claimLoop(descriptor.helperPath,binding);
     for (let index=0;index<3;index++) await loop.poll(h.$);
-    expect(h.logs).toEqual([NOTICES.session_closed]);
+    expect(h.logs).toEqual([held('session_closed')]);
     closed = false;await loop.poll(h.$);
     expect(h.prompts).toEqual([{text:value.formatted_payload,asUser:true}]);
   });
@@ -108,7 +112,7 @@ describe('captured Claude claim lifecycle', () => {
     const h = host({handler:argv => argv[2] === 'claim' ? failure('invalid_transition',{reason:'evil\nreason $(x)'}) : undefined});
     const loop = claimLoop(descriptor.helperPath,binding);
     await loop.poll(h.$);
-    expect(h.logs).toEqual([NOTICES.blocked]);
+    expect(h.logs).toEqual([held()]);
     expect(h.logs.join('')).not.toContain('evil');
   });
   it('keeps a claim request ID the app may have saved while it holds no lease, and retries it quietly', async () => {
@@ -121,7 +125,7 @@ describe('captured Claude claim lifecycle', () => {
     const removed = [];
     const loop = claimLoop(descriptor.helperPath,binding,{onEnded:() => removed.push(true)});
     for (let index=0;index<3;index++) await loop.poll(h.$);
-    expect(h.logs).toEqual([NOTICES.failure]);expect(removed).toEqual([]);
+    expect(h.logs).toEqual([plainFailure('delivery_uncertain')]);expect(removed).toEqual([]);
     expect(loop.busy()).toBe('claim');
     mode = 'leased';await loop.poll(h.$);
     const claims = h.calls.filter(call => call.argv[2] === 'claim').map(call => call.argv.at(-1));
@@ -187,13 +191,18 @@ describe('captured Claude claim lifecycle', () => {
     const loop = claimLoop(descriptor.helperPath,binding,{onEnded:() => ended.push(true)});
     await loop.stop(h.$,true);
     expect(h.logs).toEqual([]);expect(ended).toEqual([]);
-    expect(await loop.drain(h.$)).toBe(true);
+    // Nothing is left to drain.
+    expect(await loop.drain(h.$)).toBe(null);
   });
-  it('logs a malformed claim once across three polls', async () => {
+  it('logs a malformed claim once, after the grace, across polls', async () => {
+    let time = 0;
     const h = host({handler:argv => argv[2] === 'claim' ? success({input_id:'not-a-claim'}) : undefined});
-    const loop = claimLoop(descriptor.helperPath,binding);
+    const loop = claimLoop(descriptor.helperPath,binding,{now:() => time});
+    // protocol_error is generic, not owner-needed: it waits like a retry.
     for (let index=0;index<3;index++) await loop.poll(h.$);
-    expect(h.logs).toHaveLength(1);
+    expect(h.logs).toEqual([]);
+    for (time = 1000; time <= 122000; time += 1000) await loop.poll(h.$);
+    expect(h.logs).toEqual([plainFailure()]);
     expect(h.prompts).toHaveLength(0);
   });
   it('correlates a framed turn.start when the marker also appears mid-line before the payload line', async () => {
@@ -203,29 +212,29 @@ describe('captured Claude claim lifecycle', () => {
     await loop.start(h.$,{text:`Note: ${value.wire_marker} is quoted here\n${value.formatted_payload}\nrest`,turnId:'later'});
     expect(loop.status().active.host_turn_id).toBe('later');
   });
-  it('logs a blocked claim again after an empty queue resets the reason', async () => {
+  it('clears a held claim condition on an empty queue and prints a later block again', async () => {
     let mode = 'blocked';
     const h = host({handler:argv => argv[2] === 'claim' && mode === 'blocked' ? failure('invalid_transition',{reason:'owner_paused'}) : undefined});
     const loop = claimLoop(descriptor.helperPath,binding);
     await loop.poll(h.$);await loop.poll(h.$);
     mode = 'empty';await loop.poll(h.$);
     mode = 'blocked';await loop.poll(h.$);await loop.poll(h.$);
-    expect(h.logs).toEqual([NOTICES.owner_paused,NOTICES.owner_paused]);
+    expect(h.logs).toEqual([held('owner_paused'),held('owner_paused')]);
   });
-  it('logs a repeated claim failure once across polls', async () => {
+  it('keeps short repeated transient claim failures quiet', async () => {
     const h = host({handler:argv => argv[2] === 'claim' ? failure('host_unreachable') : undefined});
     const loop = claimLoop(descriptor.helperPath,binding);
     for (let index=0;index<3;index++) await loop.poll(h.$);
-    expect(h.logs).toEqual([NOTICES.failure]);
+    expect(h.logs).toEqual([]);
   });
-  it('logs a claim failure again after an empty queue resets it', async () => {
+  it('keeps a transient claim episode through one empty queue', async () => {
     let mode = 'down';
     const h = host({handler:argv => argv[2] === 'claim' && mode === 'down' ? failure('host_unreachable') : undefined});
     const loop = claimLoop(descriptor.helperPath,binding);
     await loop.poll(h.$);await loop.poll(h.$);
     mode = 'empty';await loop.poll(h.$);
     mode = 'down';await loop.poll(h.$);await loop.poll(h.$);
-    expect(h.logs).toHaveLength(2);
+    expect(h.logs).toEqual([]);
   });
   it('logs one failure notice while the claim keeps failing, whatever the error code', async () => {
     let code = 'host_unreachable';
@@ -233,7 +242,21 @@ describe('captured Claude claim lifecycle', () => {
     const loop = claimLoop(descriptor.helperPath,binding);
     await loop.poll(h.$);await loop.poll(h.$);
     code = 'not_found';await loop.poll(h.$);await loop.poll(h.$);
-    expect(h.logs).toEqual([NOTICES.failure]);
+    expect(h.logs).toEqual([plainFailure('not_found')]);
+  });
+  it('prints changed urgent held meanings immediately, including returning advice, and suppresses repeats',async () => {
+    vi.useFakeTimers();vi.setSystemTime(0);
+    let reason = 'owner_paused';
+    const h = host({handler:argv => argv[2] === 'claim' ? failure('invalid_transition',{reason}) : undefined});
+    const loop = claimLoop(descriptor.helperPath,binding), transcript = [];
+    for (const [time,next,shown] of [[0,'owner_paused',true],[1000,'owner_paused',false],
+      [2000,'session_closed',true],[3000,'session_closed',false],[4000,'recovery_required',true],
+      [5000,'recovery_required',false],[6000,'owner_paused',true],[7000,'owner_paused',false]]) {
+      vi.setSystemTime(time);reason = next;await loop.poll(h.$);
+      if (shown) transcript.push(held(next));
+      expect(h.logs).toEqual(transcript);
+    }
+    expect(h.logs).toEqual([held('owner_paused'),held('session_closed'),held('recovery_required'),held('owner_paused')]);
   });
   it('serializes concurrent poll callbacks and retains lifecycle exactly across desktop/helper failure', async () => {
     const value = await prepared();const response = deferred();const admitted = deferred();const submission = deferred();let failing = true;
@@ -595,8 +618,8 @@ describe('captured Claude claim lifecycle', () => {
     await loop.start(h.$,{text:value.formatted_payload,turnId:'turn'});
     await loop.complete(h.$,{turnId:'turn',answer:'done',reason:'answer',isAborted:false});
     expect(loop.status().pending_reports).toBe(3);
-    // Three failed saves, one notice.
-    expect(h.logs.filter(log => log === NOTICES.reports)).toHaveLength(1);
+    // Rapid transient save failures stay quiet while the exact reports retry.
+    expect(h.logs.filter(log => log === BACKGROUND_RETRY)).toHaveLength(0);
     failing = false;await loop.settle(h.$);
     expect(loop.status().pending_reports).toBe(0);
     expect(loop.busy()).toBe(null);

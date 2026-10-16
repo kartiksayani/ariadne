@@ -1,8 +1,10 @@
 //! Concrete synchronous delegates. Entrypoints retain responsibility for trusted
 //! routes, provider qualification, actual leases, scheduler ticks and UI hints.
 mod agent;
+mod busy;
 mod connection;
 pub use agent::AgentResolver;
+pub use busy::{retry_busy_read, retry_busy_within, PLUGIN_READ_BUDGET, READ_RETRY_WINDOW};
 mod errors;
 mod preferences;
 pub(crate) use preferences::session_preferences_without_legacy_rail;

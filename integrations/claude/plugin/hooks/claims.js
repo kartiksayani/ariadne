@@ -1,4 +1,4 @@
-import { bounded, claudeSessionEndEventId, clip, envelope, hash, lifecycle, prepared, reportReceipt } from './contracts.js';
+import { bounded,claudeSessionEndEventId, clip, envelope, hash, lifecycle, ModError, conversationHealth, backgroundOutcome, plainFailure, prepared, reportReceipt, HELPER_TIMEOUT_MS } from './contracts.js';
 import { bindingStatus, connectionGone } from './setup.js';
 
 // 'exact' when text is the payload, 'framed' when the payload sits intact as whole
@@ -14,16 +14,9 @@ function carried(text, captured) {
   return null;
 }
 
-// Owner-facing notices. Each prints once when its state starts, never every poll.
+// Owner-facing notice of a stopped loop. Held and retry notices come from plainFailure.
 export const NOTICES = Object.freeze({
   removed:'This session was removed from Ariadne (or connected elsewhere). Run /ariadne-connect to connect again.',
-  owner_paused:'Ariadne: sending to this session is paused in the app. Messages will arrive here when you resume it.',
-  session_closed:'Ariadne: this session is closed in the app. Messages will arrive here if you reopen it.',
-  recovery_required:'Ariadne: a message to this session needs your attention in the app before more can be sent.',
-  blocked:'Ariadne: the app is holding messages for this session for now. They will arrive here when it lets them through.',
-  failure:'Ariadne: could not check the app for new messages. It will keep trying.',
-  reports:"Ariadne: could not save Claude's progress to the app yet. It will keep trying.",
-  ended:'Ariadne: could not tell the app that this conversation ended. Open the Ariadne app to see its current state.',
 });
 // What still holds a loop open, in the words /ariadne-connect and /ariadne-disconnect use.
 export const BUSY = Object.freeze({
@@ -33,8 +26,9 @@ export const BUSY = Object.freeze({
 });
 // The binding no longer exists or another connection replaced it: polling cannot recover.
 export function bindingGone(error) {
-  return error?.code === 'stale_generation' || error?.details?.reason === 'session_removed';
+  return ['stale_generation','binding_mismatch'].includes(error?.code) || error?.details?.reason === 'session_removed';
 }
+const OK = Object.freeze({kind:'ok'});
 const SEEN_TURNS = 64;
 // How long a turn that may have taken a mid-turn message in waits for a next
 // turn that carries the message instead (Claude runs it as its own turn then).
@@ -43,7 +37,7 @@ export const FOLD_GRACE_MS = 5000;
 const FOLD_SNAPSHOTS = 3;
 
 // One captured claim and one serialized reporter. Core remains the sole queue authority.
-export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => Date.now()} = {}) {
+export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => Date.now(), health = conversationHealth(now)} = {}) {
   let active = null;
   let polling = null;
   let admissionOpen = true;
@@ -52,11 +46,11 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
   let stopped = false;
   let recovered = false;
   let ended = false;
+  // The terminal claim outcome once the app removed this binding.
+  let removal = null;
   let claimId = null;
   // An earlier try with claimId had an unknown outcome, so the app may have saved it.
   let claimUnknown = false;
-  let claimNotice = null;
-  let reportNotice = false;
   let capturedSubmission = null;
   let disconnected = false;
   let observedForm = false;
@@ -65,12 +59,10 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
   const running = new Set();
   const seen = [];
   const route = ['--binding',binding.binding_id,'--generation',binding.generation];
-  function claimSays($, key) {
-    if (claimNotice === key) return;
-    claimNotice = key;
-    $.ui.log(NOTICES[key]);
-  }
-  function end($) {
+  // Stops this loop for a binding the app no longer has. True when the owner
+  // must be told: then `removal` is the claim outcome that tells them, which
+  // the claim producer keeps until its next call or retirement.
+  function end($, error) {
     // A loop already stopped (this conversation ended or was replaced) expects
     // its binding to be gone; only a live loop tells the owner.
     const live = !stopped;
@@ -78,23 +70,32 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     admissionOpen = false;
     // Evidence for a binding that no longer exists has nowhere to go.
     pending.length = 0;
-    if (ended) return;
+    health.retire($,'reports');
+    health.retire($,'helper');
+    if (ended) return false;
     ended = true;
-    if (!live) return;
-    $.ui.log(NOTICES.removed);
-    onEnded($);
+    if (!live) return false;
+    removal = backgroundOutcome(error,NOTICES.removed,{terminal:true});
+    return true;
   }
+  // One report call per flush that is not already running; an empty flush is
+  // a successful call. A stopped loop's reports belong to no producer: its
+  // retired reports surface through the reconnect that drains them.
   async function flush($) {
     if (reporting) return reporting;
+    const settle = stopped ? () => {} : health.call($,'reports');
     reporting = (async () => {
       while (pending.length) {
         const record = pending[0];
         try {
           const result = await $.process.run([helperPath,'bridge','report',...route,'--json-stdin'],
-            {stdin:JSON.stringify(record.event),timeoutMs:5000});
+            {stdin:JSON.stringify(record.event),timeoutMs:HELPER_TIMEOUT_MS});
           reportReceipt(envelope(result),record.event,binding.session);
         } catch (error) {
-          if (bindingGone(error)) { end($); return; }
+          if (bindingGone(error)) {
+            if (end($,error)) { health.record($,'claim',removal); onEnded($); }
+            return;
+          }
           throw error;
         }
         pending.shift();
@@ -104,9 +105,9 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     })();
     try {
       await reporting;
-      reportNotice = false;
+      settle(OK);
     } catch (error) {
-      if (!reportNotice && !stopped) { reportNotice = true; $.ui.log(NOTICES.reports); }
+      settle(backgroundOutcome(error,(error instanceof ModError ? error.plain : undefined) ?? plainFailure(error?.code,error?.details)));
       throw error;
     } finally { reporting = null; }
   }
@@ -158,45 +159,67 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     admissionOpen = false;
     if (polling) await polling;
   }
+  // The claim outcome of a refused claim request, and whether the owner must
+  // be told that the binding is gone.
   function refused($, error) {
+    if (stopped) return {outcome:OK};
+    if (bindingGone(error)) {
+      const told = end($,error);
+      return {outcome:told ? removal : OK,told};
+    }
+    return {outcome:refusal(error)};
+  }
+  function refusal(error) {
     const reason = error?.details?.reason;
-    if (bindingGone(error)) { end($); return; }
     // The app is closed or does not hold this session right now; retry quietly.
     // The lease is checked before the store, so an ID an earlier unanswered try
     // may have saved is kept; otherwise nothing was saved under it.
     if (reason === 'lease_invalid') {
       if (!claimUnknown) claimId = null;
-      return;
+      return OK;
     }
     if (error?.code === 'invalid_transition') {
       // Core replays a saved claim before it checks pause, close or recovery,
       // so this refusal proves nothing was saved under the ID.
       claimId = null;
       claimUnknown = false;
-      claimSays($,['owner_paused','session_closed','recovery_required'].includes(reason) ? reason : 'blocked');
-      return;
+      return backgroundOutcome(error);
     }
     claimUnknown = true;
-    claimSays($,'failure');
+    return backgroundOutcome(error,(error instanceof ModError ? error.plain : undefined) ?? plainFailure(error?.code,error?.details));
+  }
+  // One claim request, or none when there is nothing to claim: its outcome,
+  // plus the verified claim when the app handed one over.
+  async function requestClaim($) {
+    if (!admissionOpen || stopped || active || (capturedSubmission && !capturedSubmission.settled)) return {outcome:OK};
+    // Another conversation is current; the register follows it and retires this loop.
+    if (await $.session.id() !== binding.external_session_id) return {outcome:OK};
+    if (!admissionOpen || stopped) return {outcome:OK};
+    // A timed-out or failed claim is retried with its original request ID.
+    claimId ??= globalThis.crypto.randomUUID();
+    try {
+      const result = envelope(await $.process.run([helperPath,'bridge','claim',...route,'--request-id',claimId],{timeoutMs:HELPER_TIMEOUT_MS}));
+      if (result === null) { claimId = null; claimUnknown = false; return {outcome:OK}; }
+      return {outcome:OK,value:await prepared(result,binding)};
+    } catch (error) { return refused($,error); }
   }
   async function runPoll($) {
     // Saved evidence goes first; a claim never overtakes an unsaved report.
     try { await flush($); }
     catch { return; }
     if (active?.folding && !stopped && now() >= active.folding.until) await confirmFold($,active);
-    if (!admissionOpen || stopped || active || (capturedSubmission && !capturedSubmission.settled)) return;
-    // Another conversation is current; the register follows it and retires this loop.
-    if (await $.session.id() !== binding.external_session_id) return;
-    if (!admissionOpen || stopped) return;
-    // A timed-out or failed claim is retried with its original request ID.
-    claimId ??= globalThis.crypto.randomUUID();
-    let value;
-    try {
-      const result = envelope(await $.process.run([helperPath,'bridge','claim',...route,'--request-id',claimId],{timeoutMs:5000}));
-      if (result === null) { claimNotice = null; claimId = null; claimUnknown = false; return; }
-      value = await prepared(result,binding);
-    } catch (error) { refused($,error); return; }
-    claimNotice = null;
+    if (stopped) return;
+    // Every poll that gets here is one claim call, with one outcome; a poll
+    // with nothing to claim records ok. Once the binding is gone, its removal
+    // stays the claim outcome.
+    const settle = health.call($,'claim');
+    let claimed;
+    try { claimed = await requestClaim($); }
+    catch (error) { settle(removal ?? backgroundOutcome(error)); throw error; }
+    settle(removal ?? claimed.outcome);
+    if (claimed.told) onEnded($);
+    const {value} = claimed;
+    if (!value) return;
     const captured = {...value,turnId:null,accepted:false,settled:false,released:false,foldable:new Set(),folding:null,terminalSnapshots:[],terminalGap:false,uncertainReasons:new Set()};
     active = captured;
     capturedSubmission = captured;
@@ -332,6 +355,9 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
   async function stop($, sessionEnd = false) {
     stopped = true;
     await quiesce();
+    health.retire($,'claim');
+    health.retire($,'reports');
+    health.retire($,'helper');
     const captured = active;
     if (captured && captured.turnId === null && !captured.released && !ended) {
       // A pending fold is confirmed only on evidence that the turn it was folded
@@ -352,8 +378,8 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
       pending.push({event:{event_id:claudeSessionEndEventId(binding.binding_id,binding.generation),binding_id:binding.binding_id,generation:binding.generation,
         input_id:null,attempt_id:null,host_turn_id:null,observed_at:new Date().toISOString(),kind:'disconnected',payload:{reason:'Original Claude session ended.'}},release:false});
     }
-    try { await flush($); }
-    catch { if (sessionEnd) $.ui.log(NOTICES.ended); }
+    // Unsaved reports are retried by the reconnect that drains retired loops.
+    try { await flush($); } catch { /* see drain */ }
   }
   // Before an owner connect/disconnect: hold new claims, finish what is in
   // flight, save pending reports and retry an unconfirmed claim with its ID.
@@ -374,7 +400,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     // active turns and unsaved reports still block rotation.
     try {
       const value = envelope(await $.process.run([helperPath,'bridge','connection-status',...route,
-        '--request-id',globalThis.crypto.randomUUID()],{timeoutMs:5000}));
+        '--request-id',globalThis.crypto.randomUUID()],{timeoutMs:HELPER_TIMEOUT_MS}));
       const current = bindingStatus(value,binding);
       if (current.connection_state !== 'disconnected' && current.dispatch_state !== 'disconnected') return;
     } catch (error) {
@@ -385,14 +411,17 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     claimId = null;
     claimUnknown = false;
     stopped = true;
+    health.retire($,'claim');
+    health.retire($,'reports');
+    health.retire($,'helper');
     recovered = true;
     admissionOpen = false;
     return true;
   }
-  // Retry unsaved reports of a retired loop; true once nothing is left.
+  // Retries unsaved reports of a retired loop. Resolves to the failure while
+  // any are left, or null once none are.
   async function drain($) {
-    try { await flush($); } catch { /* retried later */ }
-    return pending.length === 0;
+    try { await flush($); return null; } catch (error) { return error; }
   }
   function busy() {
     if (ended) return null;

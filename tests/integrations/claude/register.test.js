@@ -1,6 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
+import { BACKGROUND_RETRY } from '../../../integrations/claude/plugin/hooks/contracts.js';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { createRegister } from '../../../integrations/claude/plugin/hooks/register.js';
 import { capabilities, deferred, descriptor, failure, host, ids, prepared, status, success } from './fixtures.js';
+afterEach(() => vi.useRealTimers());
+
 function callbacks(descriptor) {
   const hooks = new Map();
   // Connect gives up on the first not_found so retained-operation retry stays observable.
@@ -48,8 +51,9 @@ describe('supported Mod entry convention', () => {
       }});
       const hooks = callbacks(descriptor);
       await hooks.get('session.start')(h.$,{},next);
-      await hooks.get('ariadne-connect')(h.$,{args:ids.session});
-      expect(h.logs.at(-1)).toContain('Run /ariadne-connect');
+      const pending = await hooks.get('ariadne-connect')(h.$,{args:ids.session});
+      expect(pending.text).toContain('Run /ariadne-connect');
+      expect(h.logs).toEqual([]);
       expect(bound).toEqual([{binding_id:ids.binding,generation:ids.generation}]);
       const original = h.calls.find(call => call.argv[1] === 'binding').options.stdin;
       await h.timer().callback();
@@ -142,7 +146,7 @@ describe('supported Mod entry convention', () => {
     const pending = await hooks.get('ariadne-connect')(h.$,{args:ids.session});
     const sentence = 'Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.';
     expect(pending.text).toBe(`That did not complete. ${sentence}`);
-    expect(h.logs).toEqual([sentence]);
+    expect(h.logs).toEqual([]);
     expect(h.appended).toEqual([]);
     await hooks.get('session.end')(h.$,{},next);
     expect(h.events).toHaveLength(1);
@@ -549,20 +553,72 @@ describe('conversation changes, relaunch and removal', () => {
       expect(h.appended.at(-1).message.content[0].text.split('\n')).toContain(`Command: ${printed}`);
     }
   });
-  it('prints the unsupported-host notice again in the new conversation after a conversation change', async () => {
-    const h = rotatingApp({before:argv => argv[2] === 'announce' ? failure('unsupported') : undefined});
+  it.each([false,true])('prints an urgent notice immediately after /clear, including same-ID clear (%s)', async sameId => {
+    vi.useFakeTimers();vi.setSystemTime(0);
+    let code = 'store_busy';
+    const h = rotatingApp({before:argv => argv[2] === 'announce' ? failure(code) : undefined});
     const hooks = callbacks(descriptor);
-    const outage = "This version of Claude Code or Ariadne can't do that yet. Update Claude Code and the Ariadne app, then try again.";
+    const urgent = "This version of Claude Code or Ariadne can't do that yet. Update Claude Code and the Ariadne app, then try again.";
     await hooks.get('session.start')(h.$,{},next);
     const heartbeat = h.timers().find(timer => timer.ms === 30000);
-    await heartbeat.callback();
-    expect(h.logs.filter(log => log === outage)).toHaveLength(1);
-    h.switchSession('new-conversation');
+    for (let time = 30000; time <= 120000; time += 30000) {vi.setSystemTime(time);await heartbeat.callback();}
+    expect(h.logs).toEqual([BACKGROUND_RETRY]);
+    if (!sameId) h.switchSession('new-conversation');
+    code = 'unsupported';
     await hooks.get('session.end')(h.$,{reason:'clear'},next);
-    await h.timer().callback();
-    await vi.waitFor(() => expect(h.logs.filter(log => log === outage)).toHaveLength(2));
     await heartbeat.callback();
-    expect(h.logs.filter(log => log === outage)).toHaveLength(2);
+    expect(h.logs).toEqual([BACKGROUND_RETRY,urgent]);
+    await heartbeat.callback();
+    expect(h.logs).toEqual([BACKGROUND_RETRY,urgent]);
+  });
+  it.each([false,true])('ignores a delayed old announcement after /clear (same conversation ID: %s)', async sameId => {
+    const entered = deferred(), reply = deferred();
+    let waiting = false;
+    const h = host({handler:async argv => {
+      if (waiting && argv[2] === 'announce') {entered.resolve();return reply.promise;}
+    }});
+    const hooks = callbacks(descriptor);
+    await hooks.get('session.start')(h.$,{},next);
+    waiting = true;
+    const pending = h.timers().find(timer => timer.ms === 30000).callback();
+    await entered.promise;
+    if (!sameId) h.switchSession('new-conversation');
+    await hooks.get('session.end')(h.$,{reason:'clear'},next);
+    reply.resolve(failure('incompatible_adapter'));
+    await pending;
+    expect(h.logs).toEqual([]);
+    waiting = false;
+    await h.timers().find(timer => timer.ms === 30000).callback();
+    expect(h.logs).toEqual([]);
+  });
+  it('does not announce an old automatic reconnect when /clear overtakes its routing note',async () => {
+    const entered = deferred(), reply = deferred();
+    const h = host({append:async () => {entered.resolve();await reply.promise;return {uuid:'routing-note'};}});
+    h.store.set(`binding:${'original-host-session'}`,{project_id:ids.project,session_id:ids.session,saved_at:'2026-01-01T00:00:00.000Z'});
+    const hooks = callbacks(descriptor);
+    await hooks.get('session.start')(h.$,{},next);
+    await entered.promise;
+    await hooks.get('session.end')(h.$,{reason:'clear'},next);
+    reply.resolve();
+    await vi.waitFor(() => expect(h.appended).toHaveLength(1));
+    expect(h.logs).toEqual([]);
+  });
+  it.each(['store_busy','incompatible_adapter'])('retired report %s failures remain visible while they block reconnect',async code => {
+    vi.useFakeTimers();vi.setSystemTime(0);
+    const h = host({handler:argv => argv[2] === 'report' ? failure(code) : undefined});
+    const hooks = callbacks(descriptor);
+    await hooks.get('session.start')(h.$,{},next);
+    await hooks.get('ariadne-connect')(h.$);
+    await hooks.get('session.end')(h.$,{reason:'clear'},next);
+    const before = h.logs.length, beat = h.timers().find(timer => timer.ms === 30000);
+    vi.setSystemTime(1000);await h.timer().callback();
+    for (let at = 30000; at <= 300000; at += 30000) {
+      vi.setSystemTime(at);await beat.callback();
+      await hooks.get('ariadne-status')(h.$);
+    }
+    expect(h.logs.slice(before)).toEqual([code === 'store_busy' ? BACKGROUND_RETRY : "Ariadne and its Claude plugin don't match, so this was not recorded. Update both to the same version."]);
+    expect(h.calls.filter(call => call.argv[2] === 'report').length).toBeGreaterThan(10);
+    expect(h.calls.filter(call => call.argv[2] === 'connect')).toHaveLength(1);
   });
   it('after /clear while the app cannot save, never finishes the old message with the new conversation\'s answer', async () => {
     const value = await prepared();let claims = 0, down = false;
@@ -718,31 +774,38 @@ describe('conversation changes, relaunch and removal', () => {
     expect(last.map(body => body.binding_scope === null)).toEqual([false,true]);
     expect(h.logs.slice(before)).toEqual([]);
   });
-  it('tells the owner once per outage, in plain words, and again only after the app recovered and failed again', async () => {
+  it('keeps background outages quiet during grace while owner commands still answer, then rearms after three successes', async () => {
     const closed = "Ariadne can't be reached, so this session's work isn't being recorded. Open Ariadne and it will reconnect.";
-    let down = false;
-    const h = host({handler:argv => down && argv[1] !== '--version' ? failure('host_unreachable') : undefined});
-    const hooks = callbacks(descriptor);
-    await hooks.get('session.start')(h.$,{},next);await hooks.get('ariadne-connect')(h.$);
-    const quiet = h.logs.length;
-    down = true;
-    // The first heartbeat and every command in the outage share one notice, yet each command still answers.
-    const beat = h.timers().find(timer => timer.ms === 30000);
-    await beat.callback();
-    for (let i = 0; i < 3; i += 1) expect((await hooks.get('ariadne-status')(h.$)).text).toBe(`That did not complete. ${closed}`);
-    await beat.callback();
-    expect(h.logs.slice(quiet)).toEqual([closed]);
-    down = false;
-    await beat.callback();
-    expect(JSON.parse((await hooks.get('ariadne-status')(h.$)).text).binding.generation).toBe(ids.generation);
-    expect(h.logs.slice(quiet)).toEqual([closed]);
-    down = true;
-    await hooks.get('ariadne-status')(h.$);
-    await hooks.get('ariadne-status')(h.$);
-    expect(h.logs.slice(quiet)).toEqual([closed,closed]);
-    expect(h.logs.join(' ')).not.toMatch(/host_unreachable|retain|original IDs|helper|isn't open|app is closed/);
+    const retry = BACKGROUND_RETRY;
+    let down = false, time = 0;
+    const clock = vi.spyOn(Date,'now').mockImplementation(() => time);
+    try {
+      const h = host({handler:argv => down && argv[1] !== '--version' ? failure('host_unreachable') : undefined});
+      const hooks = callbacks(descriptor);
+      await hooks.get('session.start')(h.$,{},next);await hooks.get('ariadne-connect')(h.$);
+      const quiet = h.logs.length;
+      down = true;
+      const beat = h.timers().find(timer => timer.ms === 30000);
+      await beat.callback();expect(h.logs.slice(quiet)).toEqual([]);
+      for (let i = 0; i < 3; i += 1) expect((await hooks.get('ariadne-status')(h.$)).text).toBe(`That did not complete. ${closed}`);
+      for (time = 30000; time <= 120000; time += 30000) await beat.callback();
+      time = 120000;
+      expect(h.logs.slice(quiet)).toEqual([retry]);
+      down = false;
+      for (let i = 0; i < 3; i += 1) {
+        await beat.callback();
+        expect(JSON.parse((await hooks.get('ariadne-status')(h.$)).text).binding.generation).toBe(ids.generation);
+      }
+      down = true;
+      await hooks.get('ariadne-status')(h.$);await hooks.get('ariadne-status')(h.$);
+      await beat.callback();
+      expect(h.logs.slice(quiet)).toEqual([retry]);
+      for (let elapsed = 30000; elapsed <= 120000; elapsed += 30000) {time = 120000 + elapsed;await beat.callback();}
+      expect(h.logs.slice(quiet)).toEqual([retry,retry]);
+      expect(h.logs.join(' ')).not.toMatch(/host_unreachable|retain|original IDs|helper/);
+    } finally { clock.mockRestore(); }
   });
-  it('gives each helper failure code its own plain sentence with a next step, shown once per change of state', async () => {
+  it('owner commands answer changed meanings directly without adding background notices', async () => {
     let code = 'stale_generation', details, armed = false;
     const h = host({handler:argv => armed && argv[2] === 'connection-status' ? failure(code,details) : undefined});
     const hooks = callbacks(descriptor);
@@ -753,15 +816,16 @@ describe('conversation changes, relaunch and removal', () => {
     const gone = await say();
     expect(gone).toContain('/ariadne-connect');
     expect(await say()).toBe(gone);
-    expect(h.logs.slice(before)).toHaveLength(1);
-    expect(gone).toContain(h.logs[before]);
+    expect(h.logs.slice(before)).toEqual([]);
     code = 'invalid_transition';details = {reason:'owner_paused'};
     expect(await say()).toContain('paused in the app. Resume it in Ariadne');
+    await say();
     code = 'delivery_uncertain';details = undefined;
     expect(await say()).toContain('check before sending anything again');
     code = 'invented_by_a_future_helper';
     expect(await say()).toContain('Open the Ariadne app to see what happened');
-    expect(h.logs.slice(before)).toHaveLength(4);
+    await say();
+    expect(h.logs.slice(before)).toEqual([]);
     expect(h.logs.slice(before).join(' ')).not.toMatch(/stale_generation|owner_paused|delivery_uncertain|invented|retain|original IDs/);
   });
   it('admits claims again after an owner command is refused', async () => {
@@ -775,8 +839,12 @@ describe('conversation changes, relaunch and removal', () => {
     submission.resolve({text:value.formatted_payload});
     await hooks.get('turn.start')(h.$,{text:value.formatted_payload,turnId:'turn'},next);
     await hooks.get('turn.complete')(h.$,{turnId:'turn',answer:'done',reason:'answer',isAborted:false},next);
-    await vi.waitFor(() => expect(h.events.at(-1).kind).toBe('turn_finished'));
-    await h.timer().callback();
-    await vi.waitFor(() => expect(h.calls.filter(call => call.argv[2] === 'claim')).toHaveLength(2));
+    await h.reported('turn_finished');
+    // Submission settlement may still follow its terminal report. Drive the
+    // poll until it observes settlement, instead of racing a single timer tick.
+    await vi.waitFor(async () => {
+      await h.timer().callback();
+      expect(h.calls.filter(call => call.argv[2] === 'claim')).toHaveLength(2);
+    });
   });
 });
