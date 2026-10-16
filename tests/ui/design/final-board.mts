@@ -53,6 +53,12 @@ export async function openBoard(context: BrowserContext, origin: string, part: s
   // The board measures its text when its first timer fires (the dock's height, the Map's scroll), so the fonts must be in
   // before the clock moves again: otherwise the result depends on whether they loaded in time.
   await page.evaluate(() => document.fonts.ready);
+  // Both families must really be loaded and usable before anything is captured: a face that failed to load falls back silently.
+  expect(await page.evaluate(async () => {
+    const mono = await document.fonts.load('400 12px "JetBrains Mono"', 'a'), icons = await document.fonts.load('12px Phosphor', 'a');
+    const ready = (faces: FontFace[]) => faces.length > 0 && faces.every(face => face.status === 'loaded');
+    return { jetBrainsMono: ready(mono) && document.fonts.check('400 12px "JetBrains Mono"', 'a'), phosphor: ready(icons) && document.fonts.check('12px Phosphor', 'a') };
+  }), 'the board fonts are loaded').toEqual({ jetBrainsMono: true, phosphor: true });
   await flush(page);
   // The board also sizes itself from what it measures (resize observers fire in real time, not on the fake clock): give it
   // a real moment to take those measurements before its first timer fires, so the timer always sees the same layout.
@@ -77,12 +83,16 @@ export async function boardFrame(page: Page, variant: Variant): Promise<Buffer> 
   return page.screenshot({ animations: 'disabled', clip: { x: Math.round(box.x), y: Math.round(box.y), width, height } });
 }
 
-/** Renders one state of the board: open, check nothing outside the served files was asked for, return the frame. */
+/**
+ * Renders one state of the board: open, check nothing outside the served files was asked for while this render ran
+ * (`denied` is the worker's whole record; only what it gained since this call started counts), return the frame.
+ */
 export async function renderBoard(context: BrowserContext, origin: string, state: Pick<FinalState, 'part' | 'sid'>, variant: Variant, denied: readonly string[]): Promise<Buffer> {
+  const seen = denied.length;
   const page = await openBoard(context, origin, state.part, state.sid, variant);
   try {
     const png = await boardFrame(page, variant);
-    expect(denied, 'the board asked for nothing outside its own files').toEqual([]);
+    expect(denied.slice(seen), 'the board asked for nothing outside its own files').toEqual([]);
     return png;
   } finally { await page.close(); }
 }

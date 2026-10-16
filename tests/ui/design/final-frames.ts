@@ -42,7 +42,8 @@ export interface ItemEdit { readonly s?: 'decided' | 'done' | 'in_progress' | 'o
  */
 export interface AppFixture {
   readonly sessions?: { readonly current?: string; readonly connection?: Connection; readonly unnamed?: boolean };
-  readonly items?: { readonly edit?: Readonly<Record<string, ItemEdit>>; readonly afterAnswer?: boolean; readonly longText?: boolean; readonly hidden?: readonly string[]; readonly empty?: boolean };
+  readonly items?: { readonly edit?: Readonly<Record<string, ItemEdit>>; readonly afterAnswer?: boolean; readonly longText?: boolean; readonly hidden?: readonly string[]; readonly empty?: boolean;
+    /** Items the owner parked ("Later"): kept in the preferences, not on the item. */ readonly later?: readonly string[] };
   readonly questions?: { readonly sent?: readonly string[]; readonly failed?: readonly string[]; readonly othersSent?: boolean };
   readonly drafts?: readonly Draft[];
   readonly view?: {
@@ -58,14 +59,34 @@ export interface AppFixture {
   readonly chrome?: { readonly page?: Page; readonly overlay?: Overlay; readonly otherPopover?: string };
   readonly act?: readonly Step[];
 }
-export type Connection = 'live' | 'none' | 'off' | 'closed' | 'loading' | 'reconnecting' | 'unreadable' | 'stale' | 'unsaved';
+/**
+ * The fields of an AppFixture the fixture builder (final-fixtures.ts) accepts but cannot yet put the current app in: the
+ * dock, the "Show more" links, a bigger Details, an overlay, the other-sessions popover, the connection states the app
+ * has no data for (`unreadable`, `stale`, `unsaved`), and an open session other than the default. A state that lists any
+ * of them cannot match the board until the app grows the feature; its frame JSON records them as `unhonoured`, so a builder
+ * knows the mismatch is the feature, not a fixture mistake.
+ */
+export function unhonoured(app: AppFixture): string[] {
+  const { view, chrome, sessions } = app, out: string[] = [];
+  if (view?.dock) out.push(`view.dock=${view.dock}`);
+  if (view?.dockQuestion !== undefined) out.push(`view.dockQuestion=${view.dockQuestion}`);
+  if (view?.dockHeight !== undefined) out.push(`view.dockHeight=${view.dockHeight}`);
+  if (view?.shown) out.push(`view.shown=${view.shown.join(',')}`);
+  if (view?.details === 'bigger') out.push('view.details=bigger');
+  if (chrome?.overlay) out.push(`chrome.overlay=${chrome.overlay}`);
+  if (chrome?.otherPopover) out.push(`chrome.otherPopover=${chrome.otherPopover}`);
+  if (sessions?.connection && ['unreadable', 'stale', 'unsaved'].includes(sessions.connection)) out.push(`sessions.connection=${sessions.connection}`);
+  if (sessions?.current && sessions.current !== 's2') out.push(`sessions.current=${sessions.current}`);
+  return out;
+}
+export type Connection ='live' | 'none' | 'off' | 'closed' | 'loading' | 'reconnecting' | 'unreadable' | 'stale' | 'unsaved';
 export type Page = 'projects' | 'sessions' | 'archive' | 'first' | 'project-empty';
 export type Overlay = 'switcher' | 'switcher-search' | 'help-keys' | 'help-marks' | 'connection-card' | 'projects-menu';
 
 export interface FinalState {
-  /** "2.1": the screen and the state, as SPEC.md numbers them. */
+  /** "2.1": the screen and the state, numbered as in this list. */
   readonly id: string;
-  /** Where the board draws it: the part and state id of its `only` mechanism (`Board Check.dc.html`). */
+  /** Where the board draws it: the part and state id of its `only` mechanism (the `PARTS` list of the board source). */
   readonly part: string;
   readonly sid: string;
   readonly title: string;
@@ -108,7 +129,7 @@ export const finalStates: readonly FinalState[] = [
   { id: '12.6', part: 'R4-Connection', sid: 'c-reconnect', owner: 'topbar', pending: true, title: 'Reconnecting', app: { sessions: { connection: 'reconnecting' } } },
   { id: '12.7', part: 'R4-Connection', sid: 'c-unreadable', owner: 'topbar', pending: true, title: 'This session can’t be read', app: { sessions: { connection: 'unreadable' } } },
   { id: '12.8', part: 'R4-Connection', sid: 'c-stale', owner: 'topbar', pending: true, title: 'Showing the last good copy', app: { sessions: { connection: 'stale' } } },
-  { id: '12.9', part: 'R4-Connection', sid: 'c-unsaved', owner: 'topbar', pending: true, title: 'Your last change may not be saved', app: { sessions: { connection: 'unsaved' }, items: { edit: { a8: { s: 'open' } } } } },
+  { id: '12.9', part: 'R4-Connection', sid: 'c-unsaved', owner: 'topbar', pending: true, title: 'Your last change may not be saved', app: { sessions: { connection: 'unsaved' }, items: { later: ['a8'] } } },
   // 13. Session and project switcher
   { id: '13.1', part: 'R4-Switcher', sid: 's-open', owner: 'nav-state', pending: true, title: 'Open', app: { chrome: { overlay: 'switcher' }, act: [{ key: 'Meta+o' }] } },
   { id: '13.2', part: 'R4-Switcher', sid: 's-search', owner: 'nav-state', pending: true, title: 'Typing finds sessions and projects by name', app: { chrome: { overlay: 'switcher-search' }, act: [{ key: 'Meta+o' }, { type: 'sch' }] } },
@@ -122,7 +143,7 @@ export const finalStates: readonly FinalState[] = [
   { id: '15.1', part: 'R4-Empty', sid: 'e-first', owner: 'nav-state', pending: true, title: 'No projects yet', app: { chrome: { page: 'first' } } },
   { id: '15.2', part: 'R4-Empty', sid: 'e-nosess', owner: 'nav-state', pending: true, title: 'A project with no sessions', app: { chrome: { page: 'project-empty' } } },
   { id: '15.3', part: 'R4-Empty', sid: 'e-emptymap', owner: 'nav-state', pending: true, title: 'Empty Map', app: { sessions: { unnamed: true }, items: { empty: true }, view: { dock: 'line' } } },
-  { id: '15.4', part: 'R4-Empty', sid: 'e-nowait', owner: 'nav-state', pending: true, title: 'Nothing waiting on me', app: { questions: { sent: [Q1], othersSent: false }, view: { dock: 'line' } } },
+  { id: '15.4', part: 'R4-Empty', sid: 'e-nowait', owner: 'nav-state', pending: true, title: 'Nothing waiting on me', app: { questions: { sent: [Q1], othersSent: false }, items: { edit: { [Q2]: { s: 'in_progress' } } }, view: { dock: 'line' } } },
   // 16. Help
   { id: '16.1', part: 'R4-Help', sid: 'h-keys', owner: 'topbar', pending: true, title: 'Keys, grouped by what I’m doing', app: { chrome: { overlay: 'help-keys' }, act: [{ key: '?' }] } },
   { id: '16.2', part: 'R4-Help', sid: 'h-marks', owner: 'topbar', pending: true, title: 'Markers and statuses', app: { chrome: { overlay: 'help-marks' }, act: [{ key: '?' }, { click: 'Markers and statuses' }] } }

@@ -91,6 +91,11 @@ export function finalFixture(state: Pick<FinalState, 'id' | 'app'>, variant: Var
   const drafts = state.app.drafts ?? [];
   if (!fixture.route) return fixture;
   const route = fixture.route, session = fixture.transport.sessions.get(route.session_id)!;
+  // "Later" is the owner's own mark (a preference), not a status of the item.
+  fixture.transport.preferences.later = (state.app.items?.later ?? []).map(item => {
+    if (!session.items[item]) throw new Error(`final ${state.id}: later on an item that is not in the session: ${item}`);
+    return { ...route, item_id: item };
+  });
   fixture.transport.preferences.drafts = drafts.map((draft, at): OwnerDraft => {
     const item = session.items[draft.item];
     if (!item) throw new Error(`final ${state.id}: draft on an item that is not in the session: ${draft.item}`);

@@ -1,7 +1,7 @@
 // The mock world of the final design board, as plain data: the one topic, its items, the two waiting
 // questions, the questions waiting in other sessions, the conversations and the projects. It is written out
 // here (not read from the board) because the board is untrusted data that only ever runs inside the rendering
-// page. Names follow the board's mock data (SPEC.md section 4). Kept free of app imports so Node and Vite read it alike.
+// page. Names follow the board's mock data. Kept free of app imports so Node and Vite read it alike.
 
 export type WStatus = 'decided' | 'done' | 'in_progress' | 'open' | 'waiting_on_me' | 'replaced';
 export interface WOption { readonly label: string; readonly consequence: string; readonly recommended?: boolean }

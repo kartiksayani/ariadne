@@ -1674,7 +1674,6 @@ async function capture(page: Page, designPage: Page, spec: FrameSpec, id: string
     }) : null;
     // Graph frames compare the legend and the Graph with the intended move applied (frames.ts graphShift); the rest as is.
     const graph = graphFrame(spec) ? await graphBands(page, designPage, card, columns) : null;
-    expect(denied).toEqual([]);
     try {
       await captureFrame(canvas, { id, design, app, directory: output, threshold: (thresholds as Record<string, number>)[id] ?? 0,
         regions: columns, masks: [...(mask ? [mask] : []), ...(graph?.masks ?? [])], shifts: graph?.shifts ?? [],
@@ -1682,6 +1681,8 @@ async function capture(page: Page, designPage: Page, spec: FrameSpec, id: string
           shifted: graph ? { reason: graphShift.reason, legend: graph.legend, graph: graph.body, bands: graph.shifts, masks: graph.masks } : null,
           columns: Object.fromEntries(columns.map((column, at) => [column.name, Number(result.regions[at].toFixed(4))])),
           size: { width: result.width, height: result.height }, viewport: { width: spec.width, height: spec.height }, shell }) });
+      // After the capture: a blocked request still leaves the frame, its diff and its JSON behind as evidence.
+      expect(denied).toEqual([]);
     } finally { await canvas.close(); }
   }
 }
