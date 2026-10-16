@@ -110,10 +110,11 @@
   <script id="roadmap-data" type="application/json">{
   "schema_version": 1,
   "status": {
-    "updated_at": "2026-10-15T00:00:00Z",
-    "headline": "Alpha.17 released (v0.1.0-alpha.17, #162): Map fixes on top of alpha.16 (#160, the item conversation view) and alpha.15 (#156–#159).",
+    "updated_at": "2026-10-17T00:00:00Z",
+    "headline": "Alpha.18 released (v0.1.0-alpha.18, #164): quiet hook notices, and a busy store is retryable. It follows alpha.17 (#162, Map fixes), alpha.16 (#160, the item conversation view) and alpha.15 (#156–#159).",
     "notes": [
-      "Next: the UI is being redesigned. Mockups are made in Claude Design, the owner approves them, and only then does it get built. The Map and window layout are chosen; the remaining rounds are answering plus conversation, what changed plus peek, and dialogs, notices and pages.",
+      "Next: the alpha.18 follow-ups (P11.17–P11.27) go into alpha.19 or later. The hook notice and store follow-ups come first; they are small and have no redesign dependency.",
+      "The UI is being redesigned. Mockups are made in Claude Design, the owner approves them, and only then does it get built. The Map and window layout are chosen; the remaining rounds are answering plus conversation, what changed plus peek, and dialogs, notices and pages.",
       "Queued behind the redesign: the #162 follow-ups (P11.10–P11.14), the recovery edge cases from a failure table and the previous-release read test.",
       "Owner decision: no session-wide Conversation view and no host transcript reading. Chat with the agent stays in the terminal.",
       "Before merging a PR whose base is behind main, merge main into it and let push-triggered quality run on that head; the tree-equality check assumes this.",
@@ -3203,6 +3204,330 @@
       ],
       "checks": [
         "Watch only until a second failure; then follow the Flakes rule in ORCHESTRATOR."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.15",
+      "title": "Quiet background hook notices",
+      "phase": "M11",
+      "depends_on": [
+        "P11.14"
+      ],
+      "paths": [
+        "integrations/claude/plugin/hooks/*",
+        "integrations/claude/README.md",
+        "tests/integrations/claude/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "An idle session no longer fills up with repeated background notices.",
+        "Each conversation keeps one health record, and every hook call records exactly one outcome.",
+        "A call open more than 10 s counts as a transient timeout. Urgent conditions print at once; transient and generic held conditions get a 2-minute grace; recovery takes 3 successes.",
+        "A broken install (SIGABRT, SEGV, BUS, ILL) speaks at once; SIGKILL is transient."
+      ],
+      "checks": [
+        "npm run check; Claude integration tests; independent review at the exact head."
+      ],
+      "estimate_days": 2,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/164"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          164
+        ],
+        "note": "Merged in #164. Released in v0.1.0-alpha.18."
+      }
+    },
+    {
+      "id": "P11.16",
+      "title": "Store busy is retryable and reads ride it out",
+      "phase": "M11",
+      "depends_on": [
+        "P11.15"
+      ],
+      "paths": [
+        "crates/ariadne-store/*",
+        "crates/ariadne-core/*",
+        "crates/ariadne-cli/*",
+        "docs/adr/ADR-0101-lock-free-claim-check-and-busy-read-retry.md"
+      ],
+      "spec": [
+        "docs/adr/ADR-0101-lock-free-claim-check-and-busy-read-retry.md"
+      ],
+      "acceptance": [
+        "Each error code has a plain hint, and store_busy is retryable and only it.",
+        "Reads ride out a busy store: 5 s for the agent CLI, owner queries and MCP; 2.5 s for plugin reads. An attempt starts only if it still fits the budget.",
+        "The claim check reads the committed file without the lock (Store::peek) and decides again under the lock."
+      ],
+      "checks": [
+        "cargo test --workspace; npm run check; independent review at the exact head."
+      ],
+      "estimate_days": 2,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/164"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          164
+        ],
+        "note": "Merged in #164. Released in v0.1.0-alpha.18."
+      }
+    },
+    {
+      "id": "P11.17",
+      "title": "Retire the claim after a binding is removed",
+      "phase": "M11",
+      "depends_on": [
+        "P11.15"
+      ],
+      "paths": [
+        "integrations/claude/plugin/hooks/claims.js",
+        "tests/integrations/claude/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "end() in claims.js retires the claim once the removal is recorded, so the terminal \"removed\" line no longer stays current and hides later advice until reconnect."
+      ],
+      "checks": [
+        "npm run check; a Claude integration test that shows later advice after a removal."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.18",
+      "title": "Do not hold the owner transition while the connect note is delivered",
+      "phase": "M11",
+      "depends_on": [
+        "P11.15"
+      ],
+      "paths": [
+        "integrations/claude/plugin/hooks/register.js",
+        "tests/integrations/claude/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "autoConnect no longer awaits deliverNote while it holds ownerTransition (a dead end that predates alpha.18). If $.session.append hangs, /ariadne-connect and /ariadne-disconnect still answer instead of \"already connecting\" forever.",
+        "Either the note is delivered outside the transition window or the wait is time-boxed."
+      ],
+      "checks": [
+        "npm run check; a test where $.session.append never resolves and a later connect or disconnect still completes."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.19",
+      "title": "Make the notice oracle's one-outcome check non-circular",
+      "phase": "M11",
+      "depends_on": [
+        "P11.15"
+      ],
+      "paths": [
+        "tests/integrations/claude/notice-invariants.test.js",
+        "tests/integrations/claude/register.test.js",
+        "tests/integrations/claude/connect-recovery.test.mjs"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "The one-outcome check in notice-invariants.test.js no longer depends on the code it checks.",
+        "The balanced() ledger is turned on in register.test.js and connect-recovery.test.mjs."
+      ],
+      "checks": [
+        "npm run check; the Claude integration tests; the ledger fails when a call records no outcome or two."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.20",
+      "title": "A transient turn-callback failure must not claim it keeps trying while idle",
+      "phase": "M11",
+      "depends_on": [
+        "P11.15"
+      ],
+      "paths": [
+        "integrations/claude/plugin/hooks/*",
+        "tests/integrations/claude/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "A transient turn-callback failure no longer stays current while the session is idle, or its wording stops saying \"it will keep trying\", which is false there."
+      ],
+      "checks": [
+        "npm run check; a test for the idle case."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.21",
+      "title": "Per-producer hung-call thresholds",
+      "phase": "M11",
+      "depends_on": [
+        "P11.15"
+      ],
+      "paths": [
+        "integrations/claude/plugin/hooks/contracts.js",
+        "integrations/claude/README.md",
+        "tests/integrations/claude/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "HUNG_CALL_MS (10 s) assumes one helper run per call, but the auto and reports producers run several. Each producer has its own threshold.",
+        "The README wording matches."
+      ],
+      "checks": [
+        "npm run check; a test where a multi-run call is not reported as hung before its own threshold."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.22",
+      "title": "Fair store lock waiting",
+      "phase": "M11",
+      "depends_on": [
+        "P11.16"
+      ],
+      "paths": [
+        "crates/ariadne-store/src/session/lock.rs",
+        "crates/ariadne-store/tests/*"
+      ],
+      "spec": [
+        "docs/adr/ADR-0101-lock-free-claim-check-and-busy-read-retry.md"
+      ],
+      "acceptance": [
+        "Lock acquisition is no longer unfair. Today try_lock with a backoff growing to 50 ms lets a newcomer polling at 10 ms beat the longest waiter. Use a flat 10 ms poll or a FIFO handoff.",
+        "A test shows the longest waiter is not starved by newcomers."
+      ],
+      "checks": [
+        "cargo test --workspace; the lock tests several times in a row."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.23",
+      "title": "Make claim_contention model real readers and stay stable under load",
+      "phase": "M11",
+      "depends_on": [
+        "P11.16"
+      ],
+      "paths": [
+        "crates/ariadne-core/tests/claim_contention.rs"
+      ],
+      "spec": [
+        "docs/adr/ADR-0101-lock-free-claim-check-and-busy-read-retry.md"
+      ],
+      "acceptance": [
+        "The readers in claim_contention resolve like the CLI (AgentResolver::resolve), so a busy catalogue fails the try instead of hiding a 2 s wait.",
+        "Queue inputs are placed outside the 2.3 s lock holds (space 150–200 ms apart).",
+        "Every existing assertion is kept. Today it fails 2 to 4 of 5 local runs on a shared machine."
+      ],
+      "checks": [
+        "cargo test --workspace; the test passes 5 of 5 runs, including under moderate machine load."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.24",
+      "title": "Owner session reads without the session lock",
+      "phase": "M11",
+      "depends_on": [
+        "P11.16"
+      ],
+      "paths": [
+        "crates/ariadne-core/src/queries/mod.rs",
+        "crates/ariadne-store/src/session/catalogue.rs"
+      ],
+      "spec": [
+        "docs/adr/ADR-0101-lock-free-claim-check-and-busy-read-retry.md"
+      ],
+      "acceptance": [
+        "The owner's session_read no longer takes the session lock (queries/mod.rs reaches catalogue.rs); peek-based reads are used where a stale-by-one-commit read is safe.",
+        "Where a read must be exact, the reason is written next to it."
+      ],
+      "checks": [
+        "cargo test --workspace; a test where a held session lock does not delay the owner's read."
+      ],
+      "estimate_days": 2
+    },
+    {
+      "id": "P11.25",
+      "title": "Install-time doctor rides out a busy store",
+      "phase": "M11",
+      "depends_on": [
+        "P11.16"
+      ],
+      "paths": [
+        "scripts/install/*",
+        "crates/ariadne-cli/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "While the old app runs, install.sh's doctor no longer prints \"some data was busy or unreadable\" and \"Saved data couldn't be read safely\". Today a rerun right after says \"No problems found\".",
+        "Either the install-time doctor rides out busy like other reads, or it words the case as busy, try again."
+      ],
+      "checks": [
+        "Install over a running older app and read the doctor output; npm run check."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.26",
+      "title": "Deflake the load-sensitive tests",
+      "phase": "M11",
+      "depends_on": [],
+      "paths": [
+        "crates/ariadne-cli/tests/claude_installed_join.rs",
+        "crates/ariadne-cli/tests/doctor.rs",
+        "crates/ariadne-adapter-codex/*",
+        "apps/desktop/tests/ui/*",
+        "docs/delivery/HANDOFF.md"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md",
+        "ORCHESTRATOR.md"
+      ],
+      "acceptance": [
+        "The alpha.18 load flakes listed in HANDOFF are fixed or have a deadline that no longer depends on machine load: claude_installed_join (deadline asserts), the two doctor.rs Codex tests, the Codex queue.rs version probe, owner-input.test.tsx, the App.test.tsx reveal test, the itemNavigation reveal tests and the tree component status-chip test.",
+        "No assertion is removed or relaxed to pass."
+      ],
+      "checks": [
+        "Each test passes alone and in a full gate run on a loaded machine."
+      ],
+      "estimate_days": 2
+    },
+    {
+      "id": "P11.27",
+      "title": "Alphas are distinguishable in the Claude plugin cache",
+      "phase": "M11",
+      "depends_on": [],
+      "paths": [
+        "integrations/claude/*",
+        "scripts/install/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Every alpha ships as plugin version 0.1.0, so the Claude plugin cache cannot tell two alphas apart. The plugin version changes with each alpha, or the install forces a refresh."
+      ],
+      "checks": [
+        "Install two alphas in a row on a clean home and confirm the Claude plugin cache holds the newer plugin."
       ],
       "estimate_days": 1
     }
