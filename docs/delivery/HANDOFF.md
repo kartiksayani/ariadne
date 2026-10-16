@@ -1,8 +1,10 @@
 # Ariadne handoff — 2026-10-17
 
-Claude Code on **Opus 5.5** maintains delivery. At most **3 Codex companion jobs**
-(**gpt-6.1-sol, high effort**) implement bounded work in isolated worktrees with
-declared, disjoint paths. Independent review uses a separate **Opus 5.5** context
+Claude Code on **Opus 5.5** maintains delivery. Team mode (ORCHESTRATOR): **Sonnet 5.5
+(high effort)** does most implementation, including browser work; **Codex
+(gpt-6.1-sol, high effort)** does pure-logic pieces its sandbox can test, in isolated
+worktrees with declared, disjoint paths. The maintainer integrates the pieces and runs
+one full gate on the combined head. Independent review uses a separate **Opus 5.5** context
 at the exact head; one targeted re-review follows fixes. The owner authorized
 pushes and squash merges with green `quality` and exact-head review. The maintainer
 uses `gh pr merge --squash --match-head-commit <head>` and verifies main's tree
@@ -10,9 +12,10 @@ matches the PR head (`git diff --quiet <head> origin/main`). Test Ariadne behavi
 is not a gate (ADR-0068). Keep the process budget in ORCHESTRATOR. Preserve worktrees,
 branches and history; no force-push or open-source licence.
 
-Codex jobs cannot run browsers, sockets, the app, native e2e or `git add`/commits.
-The maintainer runs Playwright, design frames and the local native journey before
-push, stages and commits, and plans time for it. Before UI implementation, share a
+Codex jobs cannot run browsers, sockets, the app, native e2e or `git add`/commits, so
+that work goes to Sonnet. Implementers run `npm run check` and targeted tests, then
+hand back. The maintainer runs the full gate (Playwright, design frames and the local
+native journey) once on the integrated head before push, and plans time for it. Before UI implementation, share a
 clickable HTML mock under `designs/mocks/`; the owner signs off and implementation
 follows it.
 
@@ -30,6 +33,7 @@ can follow, from #150 (`395736a2`), #151 (`bc7fa712`), #152 (`63295ec5`), #153
 P11.15 and P11.16. It was installed and verified on the owner's Mac. What changed for the
 owner:
 
+- The same release also carries [#165](https://github.com/kartiksayani/ariadne/pull/165) (harness: team mode) and [#166](https://github.com/kartiksayani/ariadne/pull/166) (shell seams: groundwork for the redesign; nothing visible changes).
 - An idle session no longer fills up with repeated background hook notices.
 - Each conversation keeps one health record, and every hook call records exactly one outcome. A producer counts from its first outcome until it is explicitly retired (loop stop, binding end, qualify, reset).
 - A call open more than 10 s counts as a transient timeout.

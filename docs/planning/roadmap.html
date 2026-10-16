@@ -3211,9 +3211,7 @@
       "id": "P11.15",
       "title": "Quiet background hook notices",
       "phase": "M11",
-      "depends_on": [
-        "P11.14"
-      ],
+      "depends_on": [],
       "paths": [
         "integrations/claude/plugin/hooks/*",
         "integrations/claude/README.md",
@@ -3504,7 +3502,7 @@
       ],
       "acceptance": [
         "The alpha.18 load flakes listed in HANDOFF are fixed or have a deadline that no longer depends on machine load: claude_installed_join (deadline asserts), the two doctor.rs Codex tests, the Codex queue.rs version probe, owner-input.test.tsx, the App.test.tsx reveal test, the itemNavigation reveal tests and the tree component status-chip test.",
-        "No assertion is removed or relaxed to pass."
+        "No assertion is removed or relaxed to pass. The one exception is a native timing assertion that fails again: the owner ruling of 2026-10-06 (ORCHESTRATOR.md, Delivery feedback rules, on latency budgets) says to remove that assertion rather than change product code."
       ],
       "checks": [
         "Each test passes alone and in a full gate run on a loaded machine."
