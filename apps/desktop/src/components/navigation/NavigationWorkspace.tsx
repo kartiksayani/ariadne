@@ -211,7 +211,7 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
   const searchShown = searchOpen || !!chrome.query;
   // While the switcher or Help is open, keys are theirs: Esc closes either, and ? closes Help (SPEC §5.16).
   useIntents({
-    'switcher.open': () => { if (!state.preferences || view.kind === 'first-run') return false; setHelpOpen(false); setSwitcherOpen(true); return true; },
+    'switcher.open': () => { if (navigationDisabled || view.kind === 'first-run') return false; setHelpOpen(false); setSwitcherOpen(true); return true; },
     'help.toggle': () => { setSwitcherOpen(false); setHelpOpen(open => !open); return true; },
     'search.focus': () => {
       if (view.kind !== 'session' || !chrome.onQueryChange || chrome.searchBlocked) return false;
@@ -247,6 +247,8 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
   const selectedProject = pageProjectId ? projects.find(project => project.project_id === pageProjectId) : null;
   const mutationDisabled = refreshPending || state.writing || state.pendingOperationId !== null;
   const disabled = mutationDisabled || !state.preferences;
+  // Navigation stays open during an owner write: a switcher choice queues as the newest navigation and runs after it.
+  const navigationDisabled = refreshPending || !state.preferences;
   const refresh = async () => {
     if (refreshPending) return;
     setRefreshPending(true);
@@ -328,8 +330,9 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
       {state.status === 'ready' && projects.length === 0 && <p className="pw-page-note">No registered projects. Register a project to connect an existing session.</p>}
     </ProjectsPage>
     : <SessionLists navigation={store} actions={actions} projects={selectedProject ? [selectedProject] : pageProjectId ? [] : projects} single={!!pageProjectId}
-      sessions={sessions} currentSession={last} now={at} narrow={narrow} disabled={disabled} back={back} onOpenArchive={() => showPage('archive')} onOpenSession={openSession}>
-      {setupCard}{connectExisting}
+      sessions={sessions} currentSession={last} now={at} narrow={narrow} disabled={disabled} back={back} onOpenArchive={() => showPage('archive')} onOpenSession={openSession}
+      notes={setupCard}>
+      {connectExisting}
       {sessionNote}
       {pageProjectId && !selectedProject && state.status === 'ready' && <p className="pw-page-note">This project is no longer registered.</p>}
     </SessionLists>;
@@ -342,7 +345,7 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
   </>;
   const onSession = view.kind === 'session';
   const bar = {
-    narrow, variant: firstRun ? 'first-run' as const : page ? 'page' as const : 'session' as const, disabled,
+    narrow, variant: firstRun ? 'first-run' as const : page ? 'page' as const : 'session' as const, disabled, switcherDisabled: navigationDisabled,
     sessionName: lastSummary?.name?.trim() || lastSummary?.title || (screen === 'archive' ? 'Archive' : screen === 'all_sessions' ? 'All sessions' : 'Projects'),
     project: lastProject ? projectName(lastProject) : undefined, otherWaiting: switcher.otherWaitingCount,
     switcherOpen, onSwitcherToggle: () => { setHelpOpen(false); setSwitcherOpen(value => !value); },

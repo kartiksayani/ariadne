@@ -45,7 +45,7 @@ function Group<R>({ group, narrow, props }: { readonly group: SessionGroupData<R
 }
 
 export function SessionsList<R>(props: SessionsListProps<R>) {
-  const { narrow, back, title, sub, tabs, groups } = props;
+  const { narrow, back, title, sub, tabs, groups, notes, children } = props;
   return <PageColumn label={title}>
     <PageHead back={back} title={title} sub={sub}>
       {tabs && <span className="pp-segs" role="group" aria-label="Show">
@@ -54,6 +54,8 @@ export function SessionsList<R>(props: SessionsListProps<R>) {
         </button>)}
       </span>}
     </PageHead>
+    {notes}
     {groups.map(group => <Group key={group.id} group={group} narrow={narrow} props={props} />)}
+    {children}
   </PageColumn>;
 }

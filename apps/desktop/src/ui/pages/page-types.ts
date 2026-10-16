@@ -1,5 +1,6 @@
 // Prop types of the redesign's pages, first-run view and dialogs (contract C8). Pure data in, callbacks out.
 // `R` is the caller's own session route; the components only hand it back through callbacks.
+import type { ReactNode } from 'react';
 import type { RunState } from '../topbar/model';
 
 export interface PageSession<R> {
@@ -69,6 +70,10 @@ export interface SessionsListProps<R> {
   /** Omit on a single project's page: no tabs. */
   readonly tabs?: { readonly value: SessionsTab; readonly counts: Readonly<Record<SessionsTab, number>>; readonly onChange: (tab: SessionsTab) => void };
   readonly groups: readonly SessionGroupData<R>[];
+  /** Under the page head, above the groups: the card of a session that just connected. */
+  readonly notes?: ReactNode;
+  /** After the groups, inside the page column: page notes and links. */
+  readonly children?: ReactNode;
   readonly onOpen: (session: PageSession<R>) => void;
   readonly onRename: (session: PageSession<R>) => void;
   /** Greyed ("Already closed") on a closed row: Reopen is on the opened session's connection card. */

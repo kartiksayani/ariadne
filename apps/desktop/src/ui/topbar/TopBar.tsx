@@ -107,7 +107,7 @@ export function TopBar(props: TopBarProps) {
     {first
       ? <span className="tb-btn tb-switch tb-switch-static"><span className="tb-name tb-name-quiet">No projects yet</span></span>
       : <button type="button" className="tb-btn tb-switch" data-popover-trigger="switcher" title="Switch session or project ( ⌘O )" data-active={props.switcherOpen || undefined}
-        aria-haspopup="dialog" aria-expanded={props.switcherOpen} disabled={disabled} onClick={props.onSwitcherToggle}
+        aria-haspopup="dialog" aria-expanded={props.switcherOpen} disabled={props.switcherDisabled ?? disabled} onClick={props.onSwitcherToggle}
         aria-label={`Switch session or project. ${props.project && !narrow ? `${props.project} / ` : ''}${props.sessionName}${props.otherWaiting > 0 ? `, ${plural(props.otherWaiting, 'question')} waiting in other sessions` : ''}`}>
         {!narrow && props.project && <><span className="tb-proj">{props.project}</span><span className="tb-slash">/</span></>}
         <span className="tb-name">{props.sessionName}</span>

@@ -154,4 +154,6 @@ export interface TopBarProps {
   readonly onToggleTheme: () => void;
   readonly help: { readonly open: boolean; readonly onToggle: () => void };
   readonly disabled?: boolean;
+  /** The switcher alone; defaults to `disabled`. It stays usable during a write: a choice queues as the newest navigation. */
+  readonly switcherDisabled?: boolean;
 }

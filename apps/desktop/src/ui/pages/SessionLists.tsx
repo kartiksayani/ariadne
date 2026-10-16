@@ -167,13 +167,15 @@ export interface SessionListsProps {
   readonly back?: PageBack;
   readonly onOpenArchive?: () => void;
   readonly onOpenSession: (route: SessionRef) => void;
-  /** Under the list: catalogue notes, the connect-session setup card. */
+  /** Under the page head, above the sessions: the connect-session setup card. */
+  readonly notes?: ReactNode;
+  /** Under the list, inside the page column: catalogue notes, the connect-existing link. */
   readonly children?: ReactNode;
 }
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
-export function SessionLists({ navigation, actions, projects, sessions, single = false, currentSession, now, narrow, disabled, back, onOpenArchive, onOpenSession, children }: SessionListsProps) {
+export function SessionLists({ navigation, actions, projects, sessions, single = false, currentSession, now, narrow, disabled, back, onOpenArchive, onOpenSession, notes, children }: SessionListsProps) {
   const [tab, setTab] = useState<SessionsTabValue>('open');
   const [acting, setActing] = useState<{ summary: Immutable<SessionSummary>; act: RowAct } | null>(null);
   const archive = useSessionArchive({ navigation, actions, now, disabled });
@@ -199,8 +201,8 @@ export function SessionLists({ navigation, actions, projects, sessions, single =
       groups={sessionGroups(projects, listed, shownTab, now, currentSession, single, onOpenArchive)}
       // While navigation is held (a Refresh, a save) a row opens nothing, as Rename, Close and Archive wait too.
       onOpen={row => { if (!disabled) onOpenSession(row.route); }} onRename={act('rename')} onClose={act('close')}
-      onArchive={row => { const summary = summaryOf(row); if (summary && !acting) void archive.archive(summary); }} />
-    {children}
+      onArchive={row => { const summary = summaryOf(row); if (summary && !acting) void archive.archive(summary); }}
+      notes={notes}>{children}</SessionsList>
     {acting && store && <SessionRowAction key={`${sessionKey(acting.summary)}:${acting.act}`} actions={actions.forSession(store)} act={acting.act}
       naming={{ name: ownerName(acting.summary) ?? '', description: ownerDescription(acting.summary) ?? '',
         unnamedAs: acting.summary.title }}
