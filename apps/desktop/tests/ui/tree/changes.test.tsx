@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { SessionSeen } from '../../../src/generated/core';
@@ -6,6 +7,8 @@ import { NavigationStore } from '../../../src/state/navigation/store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { SessionActionControllers } from '../../../src/components/bindings/actions';
 import { TreeView, type TreeViewProps } from '../../../src/ui/tree/TreeView';
+import { intentKeyHandlers, useWorkspaceKeys } from '../../../src/ui/keys';
+import { dispatchIntent } from '../../../src/ui/intents';
 import { mapChanges, nextMarkedItem } from '../../../src/ui/tree/model';
 import { AppTransport, route } from '../app/transport';
 import { notices } from '../../../src/ui/pages/notices';
@@ -15,7 +18,15 @@ const stores: NavigationStore[] = [];
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); notices.clear(); vi.restoreAllMocks(); vi.useRealTimers(); });
 const row = (id: string) => document.querySelector<HTMLElement>(`.tree-item[data-item-id="${id}"]`)!;
 const target = () => document.querySelector<HTMLElement>('.tree-item[data-next-unseen]');
-const next = () => fireEvent.keyDown(window, { key: 'n' });
+// The app root's workspace key handler (App.tsx): `n` asks for the map.nextUnseen intent and the Map answers it.
+// Keys go to this root, as they do in the app, so the key filters (typing, dialogs, modifiers) apply for real.
+function Workspace({ children }: { readonly children: ReactNode }) {
+  const keys = useWorkspaceKeys<HTMLDivElement>(intentKeyHandlers<HTMLDivElement>(), { scope: 'workspace' });
+  return <div data-testid="workspace" tabIndex={-1} onKeyDown={keys}>{children}</div>;
+}
+const workspace = () => document.querySelector<HTMLElement>('[data-testid="workspace"]')!;
+const press = (init: KeyboardEventInit = {}, at: Element = workspace()) => fireEvent.keyDown(at, { key: 'n', ...init });
+const next = () => press();
 
 function changesFixture() {
   const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
@@ -38,8 +49,8 @@ async function mount(configure?: (transport: AppTransport) => void, extra: Parti
   const props: TreeViewProps = { navigation, store, actions: new SessionActionControllers(service).forSession(store), drafts: new OwnerDraftStore(service),
     query: '', reveal: null, selectedId: null, detailOpen: false, summaries: [],
     onSelected: selected, onDismissReveal: () => {}, onResume: () => {}, onAct: () => {}, onClearFilters: () => {}, onShowArchive: () => {}, onRemove: () => {}, ...extra };
-  const rendered = render(<TreeView {...props} />);
-  return { transport, navigation, store, selected, rerender: (extra: Partial<TreeViewProps>) => rendered.rerender(<TreeView {...props} {...extra} />) };
+  const rendered = render(<Workspace><TreeView {...props} /></Workspace>);
+  return { transport, navigation, store, selected, rerender: (extra: Partial<TreeViewProps>) => rendered.rerender(<Workspace><TreeView {...props} {...extra} /></Workspace>) };
 }
 
 describe('Map change markers and next unseen navigation', () => {
@@ -140,18 +151,26 @@ describe('Map change markers and next unseen navigation', () => {
   it('skips typing, dialogs, modified or composing keys, repeated keys and Graph mode', async () => {
     const view = await mount();
     for (const tag of ['input', 'textarea', 'select']) {
-      const editor = document.createElement(tag); document.body.append(editor);
-      fireEvent.keyDown(editor, { key: 'n' }); expect(target()).toBeNull(); editor.remove();
+      const editor = document.createElement(tag); workspace().append(editor);
+      press({}, editor); expect(target()).toBeNull(); editor.remove();
     }
-    const editor = document.createElement('div'); editor.contentEditable = 'true'; editor.setAttribute('contenteditable', 'true'); document.body.append(editor);
-    fireEvent.keyDown(editor, { key: 'n' }); expect(target()).toBeNull(); editor.remove();
-    const dialog = document.createElement('div'); dialog.setAttribute('role', 'dialog'); document.body.append(dialog);
-    fireEvent.keyDown(dialog, { key: 'n' }); expect(target()).toBeNull(); dialog.remove();
+    const editor = document.createElement('div'); editor.contentEditable = 'true'; editor.setAttribute('contenteditable', 'true'); workspace().append(editor);
+    press({}, editor); expect(target()).toBeNull(); editor.remove();
+    const dialog = document.createElement('div'); dialog.setAttribute('role', 'dialog'); workspace().append(dialog);
+    press({}, dialog); expect(target()).toBeNull();
+    // An open dialog also stops the key when focus stays on the Map.
+    next(); expect(target()).toBeNull(); dialog.remove();
     for (const modifier of ['metaKey', 'ctrlKey', 'altKey', 'isComposing', 'repeat']) {
-      fireEvent.keyDown(window, { key: 'n', [modifier]: true }); expect(target()).toBeNull();
+      press({ [modifier]: true }); expect(target()).toBeNull();
     }
     view.rerender({ graph: <div>Graph fixture</div> }); next(); expect(target()).toBeNull();
-    view.rerender({ graph: undefined }); fireEvent.keyDown(window, { key: 'N', shiftKey: true });
+    view.rerender({ graph: undefined }); next();
+    expect(target()).toBe(row('1.1'));
+  });
+
+  it('also takes a capital N (caps lock) as the next unseen key', async () => {
+    await mount();
+    press({ key: 'N', shiftKey: true });
     expect(target()).toBe(row('1.1'));
   });
 
@@ -209,7 +228,8 @@ describe('Map change markers and next unseen navigation', () => {
       const view = await mount(undefined, { selectedId: '1' });
       const box = document.querySelector<HTMLElement>('.tree-scroll')!;
       box.scrollTop = 500; fireEvent.scroll(box);
-      fireEvent.keyDown(window, { key: 'j', metaKey: true });
+      // `.` (back to the selected item) is the jump to the selection; the Map answers the intent.
+      act(() => { dispatchIntent('map.backToSelected'); });
       expect(row('1').getBoundingClientRect().top).toBe(68);
       const selections = view.selected.mock.calls.length;
       next(); expect(target()).toBe(row('1.1'));
