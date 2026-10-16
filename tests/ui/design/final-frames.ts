@@ -114,9 +114,11 @@ export const finalStates: readonly FinalState[] = [
   { id: '13.2', part: 'R4-Switcher', sid: 's-search', owner: 'nav-state', pending: true, title: 'Typing finds sessions and projects by name', app: { chrome: { overlay: 'switcher-search' }, act: [{ key: 'Meta+o' }, { type: 'sch' }] } },
   // 14. Pages
   { id: '14.1', part: 'R4-Pages', sid: 'p-projects', owner: 'nav-state', pending: true, title: 'Projects', app: { chrome: { page: 'projects' } } },
-  { id: '14.2', part: 'R4-Pages', sid: 'p-sessions', owner: 'nav-state', pending: true, title: 'All sessions', app: { chrome: { page: 'sessions' } } },
-  { id: '14.3', part: 'R4-Pages', sid: 'p-archive', owner: 'nav-state', pending: true, title: 'Archive', app: { chrome: { page: 'archive' } } },
-  { id: '14.4', part: 'R4-Pages', sid: 'p-projmenu', owner: 'nav-state', pending: true, title: 'Projects, with its … menus', app: { chrome: { page: 'projects', overlay: 'projects-menu' } } },
+  { id: '14.2', part: 'R4-Pages', sid: 'p-sessions', owner: 'nav-state', pending: true, title: 'All sessions', app: { chrome: { page: 'sessions' }, act: [{ click: 'All 6' }] } },
+  // A page is never saved (old ui.json), so the Archive is opened from the Map's top bar.
+  { id: '14.3', part: 'R4-Pages', sid: 'p-archive', owner: 'nav-state', pending: true, title: 'Archive', app: { chrome: { page: 'archive' }, act: [{ click: 'Archive' }] } },
+  { id: '14.4', part: 'R4-Pages', sid: 'p-projmenu', owner: 'nav-state', pending: true, title: 'Projects, with its … menus',
+    app: { chrome: { page: 'projects', overlay: 'projects-menu' }, act: [{ click: 'Register a project, discover sessions' }] } },
   { id: '14.5', part: 'R4-Pages', sid: 'p-chip', owner: 'nav-state', pending: true, title: 'From a page back to the dock', app: { view: { selected: null, dock: 'open', dockQuestion: 0 } } },
   // 15. Empty and first-run states
   { id: '15.1', part: 'R4-Empty', sid: 'e-first', owner: 'nav-state', pending: true, title: 'No projects yet', app: { chrome: { page: 'first' } } },

@@ -6,6 +6,7 @@ import type { ProjectSummary } from '../../generated/domain/models';
 import type { Immutable } from '../../data';
 import type { WaitingRow, WaitingSession } from '../../selectors/waiting/rows';
 import { agentRunning, connectionOf } from '../../ui/shared/connection';
+import { shortDate } from '../../ui/shell/model';
 import type { SessionRoute } from './view';
 
 export const sameSession = (a: SessionRef | null | undefined, b: SessionRef | null | undefined) =>
@@ -29,12 +30,12 @@ export function waitedFor(at: number, now: number): string {
   if (minutes < 60) return `${minutes} min`;
   if (minutes < 24 * 60) return `${Math.floor(minutes / 60)} h`;
   const days = Math.floor(minutes / (24 * 60));
-  return days === 1 ? 'yesterday' : new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return days === 1 ? 'yesterday' : shortDate(at);
 }
 
 const closedWhen = (at: number, now: number) => {
   const days = Math.floor((now - at) / 86_400_000);
-  return days < 1 ? 'today' : days === 1 ? 'yesterday' : new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return days < 1 ? 'today' : days === 1 ? 'yesterday' : shortDate(at);
 };
 
 export interface SwitcherQuestion { readonly itemId: string; readonly title: string; readonly since?: string }

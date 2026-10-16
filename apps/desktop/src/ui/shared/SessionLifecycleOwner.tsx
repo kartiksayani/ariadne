@@ -21,9 +21,9 @@ export function SessionLifecycleOwner({ actions, children }: { readonly actions:
  * The lifecycle of `actions`' session: the owner's instance when one owns this session (its dialog then renders at
  * the owner, so `dialog` here is null), else an instance of its own, for a view mounted outside the workspace.
  */
-export function useSessionLifecycleFor(actions: SessionActions): SessionLifecycle {
+export function useSessionLifecycleFor(actions: SessionActions | null): SessionLifecycle {
   const owned = useContext(Owner);
-  const shared = owned && owned.actions === actions ? owned.lifecycle : null;
+  const shared = owned && actions && owned.actions === actions ? owned.lifecycle : null;
   const own = useSessionLifecycle(shared ? null : actions);
   return useMemo(() => shared ? { ...shared, dialog: null } : own, [shared, own]);
 }

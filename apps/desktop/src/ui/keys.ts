@@ -69,6 +69,8 @@ export function workspaceIntent(event: KeyLike): WorkspaceIntent | null {
   }
   if (event.metaKey || event.ctrlKey || event.altKey) return null;
   if (event.shiftKey && event.key.toLowerCase() === 'f') return { kind: 'focus' };
+  // As before the redesign: n with caps lock on (or Shift) still outlines the next unseen row.
+  if (event.key === 'N') return { kind: 'next-unseen' };
   if (/^[1-9]$/.test(event.key)) return { kind: 'choose', index: Number(event.key) - 1 };
   const kind = plain[event.key];
   return kind ? { kind } : null;

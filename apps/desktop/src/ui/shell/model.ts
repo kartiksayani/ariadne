@@ -49,6 +49,13 @@ export function clock(at: number): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** "3 Oct", "12 Sep": the board's short date. Fixed words: en-GB in newer ICU writes "Sept". */
+export function shortDate(at: number): string {
+  const date = new Date(at);
+  return `${date.getDate()} ${MONTHS[date.getMonth()]}`;
+}
+
 /** Day word for a timestamp: "" today, "Yesterday", a weekday this week, else "3 Oct". */
 export function dayWord(at: number, now: number): string {
   const days = daysBefore(at, now);
@@ -56,7 +63,7 @@ export function dayWord(at: number, now: number): string {
   if (days === 1) return 'Yesterday';
   const date = new Date(at);
   if (days < 7) return date.toLocaleDateString('en-GB', { weekday: 'short' });
-  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return shortDate(at);
 }
 
 /** Session start as the tab sub-label shows it: "Today 14:02", "Yesterday", "3 days ago", "Last week". */
@@ -66,7 +73,7 @@ export function sessionWhen(at: number, now: number): string {
   if (days === 1) return 'Yesterday';
   if (days < 7) return `${days} days ago`;
   if (days < 14) return 'Last week';
-  return new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return shortDate(at);
 }
 
 /** Body column widths in CSS pixels. The detail bounds match the saved `detail_width` bounds. */

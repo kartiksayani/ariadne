@@ -129,6 +129,18 @@ describe('connection card session actions (were the session bar’s)', { timeout
     await waitFor(() => expect(dot().getAttribute('aria-label')).not.toMatch(/^Closed/));
   });
 
+  it('the top bar stays mounted across a session switch: the control that had focus keeps it', async () => {
+    await setup();
+    const theme = screen.getByRole('button', { name: /^Switch to (light|dark)$/ });
+    theme.focus();
+    fireEvent.keyDown(theme, { key: 'o', metaKey: true });
+    const menu = await screen.findByRole('dialog', { name: 'Switch session or project' });
+    fireEvent.click(within(menu).getByRole('option', { name: /Separate session/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Switch session or project/ }).textContent).toContain('Separate session'));
+    expect(theme.isConnected).toBe(true);
+    expect(document.activeElement).toBe(theme);
+  });
+
   it('Sending… opens the Sending dialog with Pause and Resume (was the dispatch chip)', async () => {
     const transport = await setup();
     const view = await openCard();

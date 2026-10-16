@@ -4,7 +4,7 @@ import { activeItems, activeTopics, itemRemoved } from '../../selectors/removed'
 import type { Immutable } from '../../data/session-store';
 import type { ContinuePreview, SessionRef } from '../../generated/core';
 import type { Item, ItemStatus, ProjectSummary, Session, SessionSummary, Topic } from '../../generated/domain/models';
-import { agentName, clock, ownerName, sessionWhen } from '../shell/model';
+import { agentName, clock, ownerName, sessionWhen, shortDate } from '../shell/model';
 import { agentRunning, connectionOf } from '../shared/connection';
 import { unsentOf } from '../remove/model';
 import { sessionEnded, waitingOnOwner } from '../../selectors/sessionClosed';
@@ -32,13 +32,13 @@ export function relativeDay(at: number, now: number): string {
   if (days === 1) return 'yesterday';
   if (days < 7) return `${days} days ago`;
   if (days < 14) return 'last week';
-  return new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return shortDate(at);
 }
 
-/** A project's last activity: "today 15:04", "yesterday 16:40", "3 days ago", "last week". */
+/** When something last happened, as the pages write it (SPEC 14.1–14.3): "today 15:04", "yesterday 16:40", "3 Oct". */
 export function lastActivity(at: number, now: number): string {
   const day = relativeDay(at, now);
-  return day === 'today' || day === 'yesterday' ? `${day} ${clock(at)}` : day;
+  return day === 'today' || day === 'yesterday' ? `${day} ${clock(at)}` : shortDate(at);
 }
 
 /** The agent of a session is running: active in Ariadne and its binding connected or reconnecting (ui/shared/connection). */
