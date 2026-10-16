@@ -2,14 +2,14 @@
 // height reaches. Nothing here changes what the owner sees while no dock is open.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, render, renderHook, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { Shell } from '../../../src/ui/shell/Shell';
 import { DetailsColumn } from '../../../src/ui/shell/DetailsColumn';
 import { DockInsetProvider, useDockInset } from '../../../src/ui/shell/dockInset';
 
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(cleanup);
 
 const css = (file: string) => readFileSync(resolve(__dirname, '../../../src', file), 'utf8');
 const rules = (source: string, selector: string) => source.match(new RegExp(`(?:^|\\n)${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{([^}]*)\\}`))?.[1] ?? '';
@@ -66,19 +66,8 @@ describe('dock inset', () => {
 });
 
 describe('Details column in the side slot', () => {
-  it('saves a width stepped by keys even when the column closes before the pause ends', () => {
-    vi.useFakeTimers();
-    const resize = vi.fn();
-    const side = <DetailsColumn onResize={resize}><p>Details</p></DetailsColumn>;
-    const { rerender } = render(<Shell topBar={null} main={null} side={side} />);
-    fireEvent.keyDown(screen.getByRole('separator', { name: 'Resize detail panel' }), { key: 'ArrowLeft' });
-    rerender(<Shell topBar={null} main={null} />);
-    expect(resize).not.toHaveBeenCalled();
-    act(() => { vi.advanceTimersByTime(500); });
-    expect(resize).toHaveBeenCalledExactlyOnceWith(416);
-  });
   it('outside a shell body shows at the default width with its head and content', () => {
-    render(<DetailsColumn path={<span>Topic / #2</span>} onResize={vi.fn()}><p>Details</p></DetailsColumn>);
+    render(<DetailsColumn path={<span>Topic / #2</span>}><p>Details</p></DetailsColumn>);
     expect(screen.getByRole('separator', { name: 'Resize detail panel' }).getAttribute('aria-valuenow')).toBe('400');
     expect(screen.getByText('Topic / #2')).toBeTruthy();
     expect(screen.getByText('Details').parentElement?.className).toBe('shell-detail-scroll');

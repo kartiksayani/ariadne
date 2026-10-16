@@ -82,9 +82,10 @@ describe('shell model', () => {
   });
 
   it('uses the pane minimum in a very narrow window without inventing a third column', () => {
+    // The pane minimum is the narrow Details minimum, 280 (C9, state/details/column.ts); 320 is only the least saved width.
     expect(bodyLayout({ width: 600, detail: true, detailWidth: 2000 })).toEqual({
-      detailWidth: 320, detailMax: 320, columns: 'minmax(280px,1fr) 320px',
+      detailWidth: 280, detailMax: 280, columns: 'minmax(320px,1fr) 280px',
     });
-    expect(bodyLayout({ width: 300, detail: true }).columns).toBe('minmax(0px,1fr) 320px');
+    expect(bodyLayout({ width: 300, detail: true }).columns).toBe('minmax(20px,1fr) 280px');
   });
 });

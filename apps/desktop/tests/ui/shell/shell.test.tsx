@@ -1,18 +1,22 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { Shell as SlotShell } from '../../../src/ui/shell/Shell';
 import { TopBar } from '../../../src/ui/topbar/TopBar';
 import type { TopBarProps } from '../../../src/ui/topbar/model';
 import { DetailsColumn } from '../../../src/ui/shell/DetailsColumn';
+import { DetailsColumnProvider } from '../../../src/state/details/column';
 import { resolveTheme, useAppliedTheme } from '../../../src/ui/shell/theme';
 import { DockInsetProvider } from '../../../src/ui/shell/dockInset';
 import { ItemHistoryContext } from '../../../src/ui/shell/itemHistory';
 import { notices } from '../../../src/ui/pages/notices';
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); delete document.documentElement.dataset.theme; });
+const jsdomWidth = window.innerWidth;
+// Details is 400 wide in a window of 1100 or more (state/details/column.ts); a body without a measured width is a wide one.
+beforeEach(() => { setWindow(1280); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); delete document.documentElement.dataset.theme; setWindow(jsdomWidth); });
 
 /** The chrome (top bar, detail) and the floating dock through the shell's slots, as NavigationWorkspace builds it. */
 interface ShellProps {
@@ -25,11 +29,11 @@ interface ShellProps {
   readonly overlay?: ReactNode;
 }
 function Shell({ header, body, overlay }: ShellProps) {
-  return <DockInsetProvider height={body.dockHeight ?? 0}><SlotShell topBar={<TopBar {...header} />} main={body.center}
+  return <DetailsColumnProvider saved={body.detailWidth} onSave={body.onResizeDetail}><DockInsetProvider height={body.dockHeight ?? 0}><SlotShell topBar={<TopBar {...header} />} main={body.center}
     side={body.detail ? <DetailsColumn path={body.detailPath} onClose={body.onCloseDetail} onRemove={body.onRemove} hidden={body.hidden} hiddenNotice={body.hiddenNotice}
-      onHide={body.onHide} onResize={body.onResizeDetail}>{body.detail}</DetailsColumn> : undefined}
-    dock={body.dock} legacy={{ conversation: body.conversation, sideWidth: body.detailWidth }}
-    overlay={overlay} /></DockInsetProvider>;
+      onHide={body.onHide}>{body.detail}</DetailsColumn> : undefined}
+    dock={body.dock} legacy={{ conversation: body.conversation }}
+    overlay={overlay} /></DockInsetProvider></DetailsColumnProvider>;
 }
 function props(patch: Partial<ShellProps> = {}): ShellProps {
   return {
@@ -43,8 +47,13 @@ function props(patch: Partial<ShellProps> = {}): ShellProps {
   };
 }
 
+/** The window is as wide as the body here: the Details column sizes itself from the window, the body lays out from its own width. */
+function setWindow(width: number) {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
+}
 function measureBody(initialWidth: number): (width: number) => void {
   let resize: ((width: number) => void) | undefined;
+  setWindow(initialWidth);
   vi.stubGlobal('ResizeObserver', class {
     constructor(private readonly receive: ResizeObserverCallback) {}
     observe() {
@@ -53,7 +62,7 @@ function measureBody(initialWidth: number): (width: number) => void {
     }
     disconnect() {}
   });
-  return width => act(() => resize?.(width));
+  return width => act(() => { setWindow(width); window.dispatchEvent(new Event('resize')); resize?.(width); });
 }
 
 describe('Paperwhite shell', () => {
@@ -66,7 +75,7 @@ describe('Paperwhite shell', () => {
     const draft = screen.getByRole<HTMLInputElement>('textbox', { name: 'Map draft' });
     const detail = screen.getByRole('complementary', { name: 'Item detail' });
     const columns = grid.style.gridTemplateColumns;
-    expect(columns).toBe('minmax(500px,1fr) 400px');
+    expect(columns).toBe('minmax(560px,1fr) 340px');
     fireEvent.change(draft, { target: { value: 'Still here' } });
     rerender(<Shell {...value} body={{ ...value.body, conversation: <p>Conversation content</p> }} />);
     const overlay = screen.getByText('Conversation content').parentElement!;
@@ -166,11 +175,11 @@ describe('Paperwhite shell', () => {
       act(() => { draft.focus(); notices.push({ id: 'shell-anchor', icon: 'ph ph-check', text: 'Reference copied.' }); vi.advanceTimersByTime(300); });
       expect(within(region).getByText('Reference copied.')).toBeTruthy();
       expect(document.activeElement).toBe(draft);
-      rerender(<Shell {...value} body={{ ...value.body, detailWidth: 976 }} />);
+      rerender(<Shell {...value} body={{ ...value.body, detailWidth: 700 }} />);
       expect(screen.getAllByRole('region', { name: 'Notifications' })).toEqual([region]);
       expect(region.parentElement).toBe(anchor);
       expect(anchor.style.left).toBe('0px');
-      expect(anchor.style.right).toBe('976px');
+      expect(anchor.style.right).toBe('700px');
       expect(center.querySelector('.shell-center-content')).toBe(scroll);
       expect(document.activeElement).toBe(draft);
       act(() => { notices.dismiss('shell-anchor'); });
@@ -308,6 +317,9 @@ describe('Paperwhite shell', () => {
     expect(grid.style.gridTemplateColumns).toBe(columns);
   });
 
+  // The resize edge through the slot shell (C9: the range follows the window; tests/ui/shell/details-column.test.tsx
+  // tables every step). These keep the dock's protections: one write per settled change, the Map's minimum, the dock
+  // out of the grid.
   it('resizes the detail panel from its left edge by pointer and keys, inside the bounds, and saves the width', () => {
     vi.useFakeTimers();
     try {
@@ -319,42 +331,51 @@ describe('Paperwhite shell', () => {
       fireEvent.pointerMove(edge, { clientX: 880, pointerId: 1 });
       expect((document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns).toBe('minmax(560px,1fr) 520px');
       fireEvent.pointerUp(edge, { clientX: 880, pointerId: 1 });
-      expect(resize).toHaveBeenCalledWith(520);
+      act(() => { vi.advanceTimersByTime(600); });
+      expect(resize).toHaveBeenCalledExactlyOnceWith(520);
       rerender(<Shell {...props({ body: { center: null, detail: <p>Detail</p>, onResizeDetail: resize, detailWidth: 520 } })} />);
       // Dragging past the bounds stops at them.
       fireEvent.pointerDown(edge, { button: 0, clientX: 1000, pointerId: 1 });
       fireEvent.pointerMove(edge, { clientX: 1900, pointerId: 1 });
       fireEvent.pointerUp(edge, { pointerId: 1 });
+      act(() => { vi.advanceTimersByTime(600); });
       expect(resize).toHaveBeenLastCalledWith(320);
+      rerender(<Shell {...props({ body: { center: null, detail: <p>Detail</p>, onResizeDetail: resize, detailWidth: 320 } })} />);
       // Keys step it and save once they settle.
       resize.mockClear();
       fireEvent.keyDown(edge, { key: 'ArrowLeft' }); fireEvent.keyDown(edge, { key: 'ArrowLeft' });
-      expect(edge.getAttribute('aria-valuenow')).toBe('552');
+      expect(edge.getAttribute('aria-valuenow')).toBe('352');
       expect(resize).not.toHaveBeenCalled();
       act(() => { vi.advanceTimersByTime(600); });
-      expect(resize).toHaveBeenCalledOnce(); expect(resize).toHaveBeenCalledWith(552);
+      expect(resize).toHaveBeenCalledExactlyOnceWith(352);
       fireEvent.doubleClick(edge);
+      act(() => { vi.advanceTimersByTime(600); });
       expect(resize).toHaveBeenLastCalledWith(400);
     } finally { vi.useRealTimers(); }
   });
 
   it('clamps a saved wide pane on window resize without writing a new preference or moving the dock into the grid', () => {
-    const resizeWindow = measureBody(3400), resize = vi.fn();
-    render(<Shell {...props({ body: { dock: <section aria-label="Answer dock">Question</section>, dockHeight: 180,
-      center: <p>Map</p>, detail: <p>Details</p>, detailWidth: 2000, onResizeDetail: resize } })} />);
-    const grid = document.querySelector<HTMLElement>('.shell-body')!;
-    const edge = screen.getByRole('separator', { name: 'Resize detail panel' });
-    expect(grid.style.gridTemplateColumns).toBe('minmax(560px,1fr) 2000px');
-    resizeWindow(2000);
-    expect(grid.style.gridTemplateColumns).toBe('minmax(380px,1fr) 1620px');
-    expect(edge.getAttribute('aria-valuemax')).toBe('1620');
-    resizeWindow(1200);
-    expect(grid.style.gridTemplateColumns).toBe('minmax(380px,1fr) 820px');
-    expect(edge.getAttribute('aria-valuenow')).toBe('820');
-    resizeWindow(3400);
-    expect(grid.style.gridTemplateColumns).toBe('minmax(560px,1fr) 2000px');
-    expect(resize).not.toHaveBeenCalled();
-    expect(grid.contains(screen.getByRole('region', { name: 'Answer dock' }))).toBe(false);
+    vi.useFakeTimers();
+    try {
+      const resizeWindow = measureBody(3400), resize = vi.fn();
+      render(<Shell {...props({ body: { dock: <section aria-label="Answer dock">Question</section>, dockHeight: 180,
+        center: <p>Map</p>, detail: <p>Details</p>, detailWidth: 2000, onResizeDetail: resize } })} />);
+      const grid = document.querySelector<HTMLElement>('.shell-body')!;
+      const edge = screen.getByRole('separator', { name: 'Resize detail panel' });
+      expect(grid.style.gridTemplateColumns).toBe('minmax(560px,1fr) 2000px');
+      resizeWindow(2000);
+      // At its widest (the window less 480), Details still leaves the Map 480px.
+      expect(grid.style.gridTemplateColumns).toBe('minmax(480px,1fr) 1520px');
+      expect(edge.getAttribute('aria-valuemax')).toBe('1520');
+      resizeWindow(1200);
+      expect(grid.style.gridTemplateColumns).toBe('minmax(480px,1fr) 720px');
+      expect(edge.getAttribute('aria-valuenow')).toBe('720');
+      resizeWindow(3400);
+      expect(grid.style.gridTemplateColumns).toBe('minmax(560px,1fr) 2000px');
+      act(() => { vi.advanceTimersByTime(600); });
+      expect(resize).not.toHaveBeenCalled();
+      expect(grid.contains(screen.getByRole('region', { name: 'Answer dock' }))).toBe(false);
+    } finally { vi.useRealTimers(); }
   });
 
   it('uses the available width with End, preserves the Map minimum and resets the saved width', () => {
@@ -366,21 +387,22 @@ describe('Paperwhite shell', () => {
       const { rerender } = render(<Shell {...value} />);
       const grid = document.querySelector<HTMLElement>('.shell-body')!;
       const edge = screen.getByRole('separator', { name: 'Resize detail panel' });
-      expect(edge.getAttribute('aria-valuemax')).toBe('1020');
+      expect(edge.getAttribute('aria-valuemax')).toBe('920');
       fireEvent.keyDown(edge, { key: 'End' });
-      expect(grid.style.gridTemplateColumns).toBe('minmax(380px,1fr) 1020px');
+      expect(grid.style.gridTemplateColumns).toBe('minmax(480px,1fr) 920px');
       act(() => { vi.advanceTimersByTime(600); });
-      expect(resize).toHaveBeenCalledExactlyOnceWith(1020);
-      rerender(<Shell {...value} body={{ ...value.body, detailWidth: 1020 }} />);
+      expect(resize).toHaveBeenCalledExactlyOnceWith(920);
+      rerender(<Shell {...value} body={{ ...value.body, detailWidth: 920 }} />);
       fireEvent.keyDown(edge, { key: 'ArrowRight' });
-      expect(edge.getAttribute('aria-valuenow')).toBe('1004');
-      fireEvent.blur(edge);
-      expect(resize).toHaveBeenLastCalledWith(1004);
+      expect(edge.getAttribute('aria-valuenow')).toBe('904');
+      act(() => { vi.advanceTimersByTime(600); });
+      expect(resize).toHaveBeenLastCalledWith(904);
       fireEvent.keyDown(edge, { key: 'Home' });
       expect(grid.style.gridTemplateColumns).toBe('minmax(560px,1fr) 320px');
       act(() => { vi.advanceTimersByTime(600); });
       expect(resize).toHaveBeenLastCalledWith(320);
       fireEvent.doubleClick(edge);
+      act(() => { vi.advanceTimersByTime(600); });
       expect(resize).toHaveBeenLastCalledWith(400);
       rerender(<Shell {...value} body={{ ...value.body, detailWidth: 400 }} />);
       expect(grid.style.gridTemplateColumns).toBe('minmax(560px,1fr) 400px');

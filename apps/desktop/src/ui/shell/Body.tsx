@@ -1,14 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
-import { bodyLayout, DETAIL_MAX } from './model';
+import { bodyLayout } from './model';
 import { useDockInset } from './dockInset';
-import { SideLayoutContext, type SideLayout } from './sideLayout';
+import { SideCovered } from './sideCovered';
+import { DETAILS_RAIL, useDetailsColumn } from '../../state/details/column';
 import { Notices } from '../pages/notices';
 
-/** Body state the Details column replaces; until then the shell keeps today's layout. */
+/** Body state the dock and the Details column replace; until then the shell keeps today's layout. */
 export interface LegacyBody {
   readonly conversation?: ReactNode;
-  /** The owner's saved side column width; null or absent for the default. */
-  readonly sideWidth?: number | null;
 }
 
 export interface BodyProps extends LegacyBody {
@@ -18,8 +17,6 @@ export interface BodyProps extends LegacyBody {
   /** Floats over the main and side areas, anchored to the bottom. */
   readonly dock?: ReactNode;
 }
-
-const SETTLE_MS = 500;
 
 /** The body's visible width, following window resizes; null where it cannot be measured. */
 function useWidth(ref: RefObject<HTMLDivElement | null>): number | null {
@@ -74,42 +71,27 @@ function useNoticeBand(view: RefObject<HTMLElement | null>, layer: RefObject<HTM
 
 /**
  * The shell body: the main area and the side column, with the dock floating over both at the bottom. It publishes the
- * dock's height as `--dock-inset` and lays out the side column through `SideLayoutContext`.
+ * dock's height as `--dock-inset` and sizes the side column from `useDetailsColumn` (C9): the owner's width, or the 36px
+ * rail while Details is folded.
  */
-export function Body({ main, side, dock, conversation, sideWidth = null }: BodyProps) {
+export function Body({ main, side, dock, conversation }: BodyProps) {
   const ref = useRef<HTMLDivElement>(null), view = useRef<HTMLDivElement>(null), layer = useRef<HTMLDivElement>(null);
   useNoticeBand(view, layer, !!conversation);
   const width = useWidth(ref);
   // No dock (a page), no room under it.
   const dockInset = useDockInset(), inset = dock ? dockInset : 0;
-  // The width being dragged or stepped, until it is saved.
-  const [drag, setDrag] = useState<number | null>(null);
-  const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const detail = !!side;
-  const layout = bodyLayout({ width, detail, detailWidth: drag ?? sideWidth });
-  const resizeMax = bodyLayout({ width, detail, detailWidth: DETAIL_MAX }).detailMax;
-  useEffect(() => () => { if (settle.current) clearTimeout(settle.current); }, []);
-  const commit = (value: number, save: (width: number) => void) => {
-    if (settle.current) { clearTimeout(settle.current); settle.current = null; }
-    setDrag(null);
-    save(value);
-  };
-  // The body keeps a stepped width's pending save, so closing the column does not lose it.
-  const sideLayout: SideLayout = { width: layout.detailWidth, max: resizeMax, drag, preview: setDrag, commit, covered: !!conversation,
-    step: (value, save) => {
-      setDrag(value);
-      if (settle.current) clearTimeout(settle.current);
-      settle.current = setTimeout(() => commit(value, save), SETTLE_MS);
-    },
-    flush: save => { if (settle.current && drag !== null) commit(drag, save); } };
+  const column = useDetailsColumn();
+  const railed = !!side && column.folded;
+  const layout = bodyLayout({ width, detail: !!side && !railed, detailWidth: column.width });
+  const sideWidth = !side ? 0 : railed ? DETAILS_RAIL : layout.detailWidth;
   // The retained grid can exceed a narrow viewport; Conversation follows the viewport instead.
   return <div ref={ref} className="shell-body-viewport" style={{ '--dock-inset': `${inset}px` } as CSSProperties}>
-    <div className="shell-body" style={{ gridTemplateColumns: layout.columns }}>
+    <div className="shell-body" style={{ gridTemplateColumns: railed ? `${layout.columns} ${DETAILS_RAIL}px` : layout.columns }}>
     <main className="shell-center" inert={!!conversation || undefined} aria-hidden={!!conversation || undefined}><div className="shell-center-content">{main}</div></main>
-    {side && <SideLayoutContext.Provider value={sideLayout}>{side}</SideLayoutContext.Provider>}
+    {side && <SideCovered.Provider value={!!conversation}>{side}</SideCovered.Provider>}
     </div>
     {conversation && <div ref={view} className="shell-conversation" style={{ left: 0 }}>{conversation}</div>}
     {dock && <div className="shell-dock">{dock}</div>}
-    <div ref={layer} className="shell-notices" data-conversation={conversation ? '' : undefined} style={{ left: 0, right: !conversation && detail ? layout.detailWidth : 0 }}><Notices /></div>
+    <div ref={layer} className="shell-notices" data-conversation={conversation ? '' : undefined} style={{ left: 0, right: conversation ? 0 : sideWidth }}><Notices /></div>
   </div>;
 }

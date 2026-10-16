@@ -13,6 +13,7 @@ import { RegisterProject, BindSession } from './Registration';
 import type { DiscoveryController } from '../../data/discovery';
 import { Shell } from '../../ui/shell/Shell';
 import { DetailsColumn } from '../../ui/shell/DetailsColumn';
+import { DetailsColumnProvider } from '../../state/details/column';
 import type { ShellTheme } from '../../ui/shell/model';
 import type { TextSize } from '../../ui/shell/textScale';
 import { NARROW_BELOW } from '../../ui/topbar/model';
@@ -54,6 +55,10 @@ export interface NavigationWorkspaceProps {
   readonly detail?: ReactNode;
   /** The detail header's breadcrumb. */
   readonly detailPath?: ReactNode;
+  /** The selected item's status icon, shown on the rail while Details is folded. */
+  readonly detailRail?: ReactNode;
+  /** Counts the owner's choices of an item to show; each one unfolds a folded Details column. */
+  readonly detailAsked?: number;
   /** Top bar controls owned by the composition: search, views, filter, Recent, text size and theme. */
   readonly chrome?: WorkspaceChrome;
   readonly onCloseDetail?: () => void;
@@ -164,7 +169,7 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   </>;
 }
 
-export function NavigationWorkspace({ store, discovery, dockContent, waitingStore, conversation, detail, detailPath, chrome = defaultChrome, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
+export function NavigationWorkspace({ store, discovery, dockContent, waitingStore, conversation, detail, detailPath, detailRail, detailAsked, chrome = defaultChrome, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
   actions: injectedActions, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
   const dock = useDock();
@@ -365,16 +370,18 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
   // Pages take the place of the Map, Waiting and Details (SPEC §6.16).
   // The bar's session owns one lifecycle: the connection card, the Map and a page row share its review and Undo.
   const barActions = barSession ? actions.forSession(barSession) : null;
-  return <NavigationProvider store={store} waiting={waiting}><SessionLifecycleOwner actions={barActions}><Shell topBar={<WorkspaceTopBar bar={bar} store={barSession} controllers={actions} line={onSession ? lineHost : null} />}
+  return <NavigationProvider store={store} waiting={waiting}><SessionLifecycleOwner actions={barActions}>
+    <DetailsColumnProvider saved={shown.detail_width ?? null} unfoldWhen={detailAsked} onSave={width => saveLayout({ detail_width: width })}>
+    <Shell topBar={<WorkspaceTopBar bar={bar} store={barSession} controllers={actions} line={onSession ? lineHost : null} />}
     main={center}
-    side={detail && !page ? <DetailsColumn path={detailPath} onClose={onCloseDetail} onRemove={onRemove} hidden={hiddenItem} hiddenNotice={hiddenNotice} onHide={onHide}
-      onResize={width => saveLayout({ detail_width: width })}>{detail}</DetailsColumn> : undefined}
+    side={detail && !page ? <DetailsColumn path={detailPath} rail={detailRail} onClose={onCloseDetail} onRemove={onRemove} hidden={hiddenItem} hiddenNotice={hiddenNotice} onHide={onHide}>{detail}</DetailsColumn> : undefined}
     dock={page ? undefined : dockContent}
-    legacy={page ? undefined : { conversation, sideWidth: shown.detail_width ?? null }}
+    legacy={page ? undefined : { conversation }}
     overlay={<>{switcherOpen && <SwitcherMenu projects={switcher.projects} onClose={closeSwitcher}
       onOpenSession={(target, _projectId, itemId) => openAt(target.route, itemId)} onOpenPage={page => showPage(page)} />}
     {helpOpen && <HelpPanel narrow={narrow} onClose={closeHelp} />}{registering
       ? <RegisterProject store={store} initialRoot={registrationRoot} disabled={mutationDisabled} close={() => setRegistering(false)} />
       : binding ? <BindSession store={store} project={binding} sessions={sessions.filter(session => session.project_id === binding.project_id)}
-        adapters={adapterChoices} discovery={discovery} disabled={mutationDisabled} close={() => setBinding(null)} /> : undefined}</>} /></SessionLifecycleOwner></NavigationProvider>;
+        adapters={adapterChoices} discovery={discovery} disabled={mutationDisabled} close={() => setBinding(null)} /> : undefined}</>} />
+    </DetailsColumnProvider></SessionLifecycleOwner></NavigationProvider>;
 }

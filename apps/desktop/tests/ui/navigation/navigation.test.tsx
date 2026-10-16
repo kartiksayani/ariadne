@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import projectsFixture from '../../../../../fixtures/domain/projections/projects.json';
 import sessionsFixture from '../../../../../fixtures/domain/projections/sessions.json';
@@ -910,6 +910,10 @@ describe('source-backed navigation views and explicit registration', () => {
   });
 
   it('saves the detail width with the global preferences and applies it at once', async () => {
+    // A wide window, where Details opens at 400 (a window under 1100 opens it at 340).
+    const jsdomWidth = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1280 });
+    onTestFinished(() => { Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: jsdomWidth }); });
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'session', session: route };
     read(transport, prefs); transport.enqueue('session_get', loaded());
     render(<NavigationWorkspace store={store} waitingStore={quietWaiting()} onRemoveTarget={() => {}} adapterChoices={[adapter]} detail={<p>Detail</p>} renderSession={() => <p>Session workspace</p>} />);

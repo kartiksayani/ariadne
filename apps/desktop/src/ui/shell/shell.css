@@ -80,11 +80,67 @@
   border-left: 1px solid var(--color-divider);
 }
 
+/* The column's content: resize edge, head and scroll area. The column leaves the dock's height free below it (set by
+   DetailsColumn from the dock inset), so its composer sits above the floating dock. */
+.shell-detail-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Folded: the content keeps its open width (set inline), so scroll positions and typed text survive, but out of sight; the
+   rail is all that shows in the 36px column. */
+.shell-detail-folded {
+  overflow: hidden;
+}
+
+.shell-detail-folded > .shell-detail-body {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* The rail: one button, the whole strip. The » pointing back, the item's status, then "Details" set upright on its side. */
+.shell-detail-rail {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  min-height: 0;
+  padding: 12px 0;
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  cursor: pointer;
+}
+
+.shell-detail-rail:hover,
+.shell-detail-rail:focus-visible {
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+  color: var(--color-text);
+}
+
+.shell-detail-rail > i {
+  font-size: calc(15px * var(--text-scale));
+}
+
+.shell-detail-rail-label {
+  font-size: calc(12px * var(--text-scale));
+  writing-mode: vertical-rl;
+}
+
+/* The bigger view stops where the dock starts, so its composer is never under it. */
 .shell-conversation {
   position: absolute;
   top: 0;
   right: 0;
-  bottom: 0;
+  bottom: var(--dock-inset, 0);
   z-index: 3;
   display: flex;
   min-width: 0;
@@ -119,8 +175,8 @@
   top: 0;
   bottom: 0;
   left: -4px;
-  z-index: 2;
-  width: 7px;
+  z-index: 12;
+  width: 8px;
   cursor: col-resize;
   outline: none;
   touch-action: none;

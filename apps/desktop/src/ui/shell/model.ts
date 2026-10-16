@@ -78,7 +78,8 @@ export function sessionWhen(at: number, now: number): string {
 
 /** Body column widths in CSS pixels. The detail bounds match the saved `detail_width` bounds. */
 export const CENTRE_MIN = 560;
-export const DETAIL_MIN = 320, DETAIL_MAX = 2400, DETAIL_DEFAULT = 400;
+/** The narrowest the side column can show (a narrow window, state/details/column.ts); core saves a width of 320 to 2400. */
+export const DETAIL_MIN = 280, DETAIL_MAX = 2400, DETAIL_DEFAULT = 400;
 const CENTRE_RESIZE_MIN = 380;
 export interface BodyLayoutInput {
   readonly width: number | null;
