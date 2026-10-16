@@ -27,8 +27,8 @@ export interface AnswerSlotProps {
   readonly drafts: OwnerDraftStore;
   readonly store: SessionStore;
   readonly itemId: string;
-  /** Where the cards sit: the dock (3 columns), Details (one column), Details' bigger view, or a peek / other-sessions list. */
-  readonly layout?: 'dock' | 'details' | 'wide' | 'compact';
+  /** Where the cards sit: the dock (3 columns), Details (one column), Details' bigger view, the peek, or the other-sessions list. */
+  readonly layout?: 'dock' | 'details' | 'wide' | 'compact' | 'list';
   /** The idle bar text in place of the default hint. */
   readonly hint?: string;
   /** "? Waiting on you … Waiting 34 min" above the cards (Details, peek). */

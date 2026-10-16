@@ -102,6 +102,16 @@ describe('answer cards', () => {
     expect(values.onSendOption).toHaveBeenCalledExactlyOnceWith(0, undefined);
   });
 
+  it.each(['compact', 'list'] as const)('the %s cards show the consequence only in the other-sessions list', layout => {
+    const values = props({ layout }); render(<AnswerControl {...values} />);
+    const option = values.options.find(value => value.consequence)!;
+    const card = screen.getByRole('button', { name: new RegExp(`^${option.label}`) });
+    expect(card.textContent?.includes(option.consequence)).toBe(layout === 'list');
+    expect(card.title.includes(option.consequence)).toBe(layout === 'compact');
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Write my own answer' })).toBeNull();
+  });
+
   it.each(['blocked', 'frozen', 'locked'] as const)('keeps every send gated while %s without losing the note', state => {
     const values = props({ ...(state === 'blocked' ? { blocked: 'Review the current question' } : { [state]: true }) });
     const view = render(<AnswerControl {...values} />);

@@ -29,7 +29,8 @@ export interface AnswerBar {
 
 /**
  * - `layout`: `dock` (3 columns, 2 narrow), `details` (one column; the list scrolls past 330px), `wide` (Details' bigger
- *   view: auto-fit columns) or `compact` (peek and other sessions: small cards, no own-words card, consequence in the title).
+ *   view: auto-fit columns), `compact` (the peek: small cards, no own-words card, consequence in the title) or `list`
+ *   (other sessions: small cards in one column with their consequence, no own-words card).
  * - `selected`: index of the picked option, or -1. Recommendations never pick (`defaultSelection`).
  * - `draft`: the words: the picked option's note, or my own answer when no option is picked.
  * - `bar`: the caller's phase (sending, sent, failed); without it the bar shows the idle hint and Send.
@@ -41,7 +42,7 @@ export interface AnswerBar {
  */
 export interface AnswerControlProps {
   readonly options: readonly AnswerOption[];
-  readonly layout?: 'dock' | 'details' | 'wide' | 'compact';
+  readonly layout?: 'dock' | 'details' | 'wide' | 'compact' | 'list';
   readonly selected: number;
   readonly draft: string;
   readonly warn?: string;
@@ -71,7 +72,7 @@ const range = (count: number) => count > 1 ? `1–${Math.min(count, 9)}` : '1';
 export function AnswerControl({ options, layout = 'details', selected, draft, warn, warnAction, blocked, locked = false, frozen = false, bar, hint, label,
   onSelect, onDraft, onSendOption, onSendText, onEscape }: AnswerControlProps) {
   const root = useRef<HTMLDivElement>(null), box = useRef<HTMLTextAreaElement>(null);
-  const compact = layout === 'compact';
+  const compact = layout === 'compact' || layout === 'list', peek = layout === 'compact';
   const picked = options[selected];
   const words = !compact;
   // "Write my own answer" is picked: no option, and the owner opened it or has words in it.
@@ -134,14 +135,14 @@ export function AnswerControl({ options, layout = 'details', selected, draft, wa
     value={draft} disabled={locked || sealed} onClick={event => event.stopPropagation()} onChange={event => onDraft(event.target.value)} />;
   const cards = options.map((option, index) => {
     const on = index === selected;
-    const tip = compact ? [option.label, option.consequence].filter(Boolean).join('\n') : index < 9 ? `Press ${index + 1} to pick` : undefined;
+    const tip = peek ? [option.label, option.consequence].filter(Boolean).join('\n') : index < 9 ? `Press ${index + 1} to pick` : undefined;
     return <div key={option.id} className={`answer-card${on ? ' answer-card-on' : ''}${sealed && !on ? ' answer-card-dim' : ''}`}>
       <button type="button" data-answer-option={index} aria-pressed={on} title={tip} {...gate(locked, frozen || sealed)}
         className="answer-option" onClick={event => { event.stopPropagation(); choose(index); }}>
         <span className="answer-key" aria-hidden="true">{index + 1}</span>
         <span className="answer-body">
-          <span className="answer-label">{option.label}{compact && option.recommended && <span className="answer-star" aria-label="Recommended"> · <i className="ph-fill ph-star" aria-hidden="true" /></span>}</span>
-          {!compact && (option.recommended || option.consequence) && <span className="answer-consequence">
+          <span className="answer-label">{option.label}{peek && option.recommended && <span className="answer-star" aria-label="Recommended"> · <i className="ph-fill ph-star" aria-hidden="true" /></span>}</span>
+          {!peek && (option.recommended || option.consequence) && <span className="answer-consequence">
             {option.recommended && <span className="answer-recommended"><i className="ph-fill ph-star" aria-hidden="true" />Recommended</span>}
             {option.recommended && option.consequence && ' · '}{option.consequence}</span>}
         </span>

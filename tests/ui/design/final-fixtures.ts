@@ -7,7 +7,7 @@ import type { OwnerDraft } from '../../../apps/desktop/src/generated/core';
 import { buildFixture, type DesignFixture, type PrototypeData, type ProtoItem, type ProtoMessage, type ProtoSession, type ProtoTopic } from './fixtures';
 import type { FrameSpec, Scenario } from './frames';
 import { finalNow, variants, type AppFixture, type FinalState, type Variant } from './final-frames';
-import { conversations, items as worldItems, longText, others, projects, sessions as worldSessions, topicName, topicShort, type WItem } from './final-world';
+import { conversations, items as worldItems, longText, others, projects, Q1, Q2, sessions as worldSessions, topicName, topicShort, type WItem } from './final-world';
 
 const statusOf = { decided: 'decided', done: 'done', in_progress: 'progress', open: 'open', waiting_on_me: 'waiting', replaced: 'replaced' } as const;
 const typeOf = (item: WItem): ProtoItem['type'] => item.kind === 'task' ? 'task' : item.kind === 'finding' ? 'finding' : item.kind === 'explanation' ? 'explanation'
@@ -77,7 +77,10 @@ export function finalSpec(state: Pick<FinalState, 'id' | 'app'>, variant: Varian
   const submissions = [...(app.questions?.sent ?? []).map(item => ({ item, choice: picked(item), stage: 'received' as const })),
     ...(app.questions?.failed ?? []).map(item => ({ item, choice: picked(item), stage: 'failed' as const }))];
   const folded = ['h1', ...(app.items?.hidden ?? [])];
-  const selected = view.selected ?? undefined;
+  // Board screen 2 lights the open dock question's Map row without Details. In the app the dock never selects in the
+  // Map (a selection opens Details and takes its question out of the dock), so that row is not selected.
+  const lit = view.dock === 'open' && (view.selected === Q1 || view.selected === Q2);
+  const selected = lit ? undefined : view.selected ?? undefined;
   return { id: `final-${state.id}`, width, height, theme, scenario: page ? pageScenario[page] : 'project',
     state: app.items?.empty ? 'empty' : app.sessions?.connection === 'loading' ? 'loading' : 'ready',
     ...(selected ? { selected } : {}), ...(selected && (view.details ?? 'open') !== 'folded' ? { detail: true } : {}), ...(view.mode === 'graph' ? { view: 'graph' as const } : {}),

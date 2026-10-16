@@ -132,8 +132,11 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
     && entry.draft.session.session_id === route.session_id && !entry.receipt && (entry.draft.text.trim() || entry.draft.selected_option_id)
     && entry.draft.target.item_id !== state.current?.itemId);
   const sent = sentWaiting(session, drafts);
+  // A failed answer stays on its own question in the dock, with its Retry; it is not also "sent".
+  const inDock = new Set(questions.map(question => question.itemId));
   const standing = session ? Object.values(session.inputs).filter(input => !!input && input.target.item_id
-    && ['queued', 'in_flight', 'needs_attention'].includes(input.state)).sort((a, b) => b!.seq - a!.seq) : [];
+    && ['queued', 'in_flight', 'needs_attention'].includes(input.state)
+    && !(input.state === 'needs_attention' && input.kind === 'answer' && inDock.has(input.target.item_id))).sort((a, b) => b!.seq - a!.seq) : [];
   const index = questions.findIndex(question => question.id === state.current?.id);
   const item = open ? session?.items[state.current!.itemId] : undefined;
   const waitingNow = unsent.length > 0;
@@ -201,7 +204,7 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
             <i className="ph ph-arrow-right" aria-hidden="true" /></button>
         </span>
         {keptChip}
-        {session && item && <nav className="dock-path" aria-label="Question location">{dockPath(session, item.id, fullPath).map((part, at, parts) => <span key={`${part.itemId ?? part.label}:${at}`} className="dock-crumb">
+        {session && item && <nav className="dock-path" aria-label="Question location">{dockPath(session, item.id, fullPath).map((part, at, parts) => <span key={`${part.itemId ?? part.label}:${at}`} className="dock-crumb" data-more={part.more || undefined}>
           {part.more ? <button type="button" className="dock-link" title="Show the full path" onClick={() => setFullPath(true)}>…</button>
             : part.itemId && onOpenItem ? <button type="button" className="dock-link" title={`Go to “${part.label}”`} onClick={() => onOpenItem(part.itemId!)}>{part.label}</button>
               : <span className="dock-crumb-text" title={part.full}>{part.label}</span>}
@@ -280,7 +283,7 @@ export function OtherSessionQuestions({ waiting, drafts, currentSession, onAgent
               <span className="dock-other-age">{answered ? 'Sent' : row.item.waiting_since ? waitingAge(Date.parse(row.item.waiting_since), now()) : ''}</span>
               <i className={expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} aria-hidden="true" />
             </button>
-            {expanded && store && <AnswerSlot drafts={drafts} store={store} itemId={row.item.id} layout="compact" onEscape={() => setOpenRow(null)} onAgentNotRunning={onAgentNotRunning}
+            {expanded && store && <AnswerSlot drafts={drafts} store={store} itemId={row.item.id} layout="list" onEscape={() => setOpenRow(null)} onAgentNotRunning={onAgentNotRunning}
               hint={`Goes to ${agent} in “${name}”, once.`}
               onSent={() => { navigationVisits.record(row.route, row.item.id, 'answered'); void store.refresh(); void waiting.refresh(); }} />}
           </div>;

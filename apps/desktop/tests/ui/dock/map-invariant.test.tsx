@@ -106,4 +106,24 @@ describe('the Map never moves and the dock never opens by itself', () => {
       && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.selected_item_id !== null
         && entry.preferences.selected_item_id !== '3')).length).toBe(0);
   });
+
+  // The dock's provider sits above Shell, so Body (and through it the Tree and the Graph) reads the dock's real height:
+  // rows under the dock never count as visible. Wrapping only the dock slot would leave them all at 0.
+  it('hands the dock height to the Map viewport, folded and open, without moving the Map', async () => {
+    const value = await mount();
+    const viewport = value.tree.closest<HTMLElement>('.shell-body-viewport')!;
+    expect(viewport.style.getPropertyValue('--dock-inset')).toBe('40px');
+    const rect = Element.prototype.getBoundingClientRect;
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      return this.matches('.answer-dock[data-open]') ? new DOMRect(0, 400, 1280, 300) : rect.call(this);
+    });
+    const before = value.snapshot();
+    fireEvent.click(within(value.dock()).getByRole('button', { name: /^1 waiting$/ }));
+    await waitFor(() => expect(viewport.style.getPropertyValue('--dock-inset')).toBe('300px'));
+    value.row.focus();
+    expect(value.snapshot()).toEqual({ ...before, focus: value.row });
+    fireEvent.click(within(value.dock()).getByRole('button', { name: 'Fold the dock' }));
+    await waitFor(() => expect(viewport.style.getPropertyValue('--dock-inset')).toBe('40px'));
+    expect(value.scroller.scrollTop).toBe(before.scroll);
+  });
 });

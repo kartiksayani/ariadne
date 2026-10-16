@@ -9,6 +9,7 @@ import { captureFrame, crop } from './compare.mts';
 import { boardContext, boardFrame, labelHeight, openBoard, renderBoard, settle } from './final-board.mts';
 import { finalNow, finalStates, variantNames, variants, type FinalState, type Step, type Variant } from './final-frames';
 import { finalMembers, runtimeHashes } from './final-source.mts';
+import { others } from './final-world';
 import { startDesignServer } from './server.mts';
 import { repo } from './source.mts';
 import thresholds from './final-thresholds.json' with { type: 'json' };
@@ -69,6 +70,15 @@ async function renderApp(page: Page, origin: string, state: FinalState, variant:
   await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
   if (state.app.sessions?.connection !== 'loading') await expect(page.getByText(/^(Loading|Opening)\b/)).toHaveCount(0, { timeout: 30_000 });
   await settle(page);
+  // The dock never opens by itself: the owner's ] opens it at the first waiting question, and each further ] pages on.
+  const view = state.app.view ?? {};
+  if (view.dock === 'open') for (let at = 0; at <= (view.dockQuestion ?? 0); at++) await perform(page, { key: ']' });
+  const other = others.find(value => value.k === state.app.chrome?.otherPopover);
+  if (other) {
+    await page.getByRole('button', { name: /in other sessions$/ }).first().click();
+    await page.getByRole('button', { name: other.q }).click();
+    await settle(page);
+  }
   for (const step of state.app.act ?? []) await perform(page, step);
   await page.mouse.move(0, 0);
   expect(denied, 'the app asked for nothing outside the dev server').toEqual([]);

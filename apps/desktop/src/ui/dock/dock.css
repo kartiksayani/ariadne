@@ -237,6 +237,12 @@
   flex-shrink: 1;
 }
 
+/* "…" keeps its own width: the 6ch floor is for named segments. */
+.dock-crumb[data-more] {
+  flex: none;
+  min-width: 0;
+}
+
 .dock-crumb > i {
   flex: none;
   font-size: calc(10px * var(--text-scale));

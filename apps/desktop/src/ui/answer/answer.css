@@ -72,10 +72,6 @@
   overflow: auto;
 }
 
-.answer-dock .answer-options {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
 .answer-wide .answer-options {
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
 }
@@ -85,13 +81,19 @@
   padding: 0;
 }
 
-.answer-compact .answer-options {
+.answer-compact .answer-options,
+.answer-list .answer-options {
   gap: 6px;
   padding: 0;
 }
 
+/* `.answer.answer-dock`: the dock's own section is also `.answer-dock`, and holds the other-sessions list. */
+.answer.answer-dock > .answer-options {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 @container answer (width < 1000px) {
-  .answer-dock .answer-options {
+  .answer.answer-dock > .answer-options {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -107,7 +109,8 @@
   box-shadow: inset 0 0 0 1px var(--a-edge);
 }
 
-.answer-compact .answer-card {
+.answer-compact .answer-card,
+.answer-list .answer-card {
   padding: 6px 8px;
 }
 
@@ -162,7 +165,8 @@
   box-shadow: inset 0 0 0 1px var(--a-edge);
 }
 
-.answer-compact .answer-key {
+.answer-compact .answer-key,
+.answer-list .answer-key {
   width: 16px;
   height: 16px;
 }
@@ -222,8 +226,9 @@
   cursor: pointer;
 }
 
+/* The box sits in the card's text column: after the 18px number and its 9px gap, before the 9px gap and 15px check. */
 .answer-text {
-  width: calc(100% - 27px);
+  width: calc(100% - 51px);
   margin-left: 27px;
   padding: 6px 8px;
   border: 0;
@@ -234,7 +239,7 @@
   color: var(--color-text);
   background: var(--a-bg);
   box-shadow: inset 0 0 0 1px var(--a-edge);
-  resize: vertical;
+  resize: none;
 }
 
 .answer-text:focus {
@@ -272,13 +277,15 @@
 
 .answer-details .answer-bar,
 .answer-wide .answer-bar,
-.answer-compact .answer-bar {
+.answer-compact .answer-bar,
+.answer-list .answer-bar {
   min-height: 0;
   margin-top: 8px;
   padding: 8px 0 0;
 }
 
-.answer-compact .answer-bar {
+.answer-compact .answer-bar,
+.answer-list .answer-bar {
   box-shadow: none;
 }
 
@@ -308,7 +315,8 @@
 }
 
 .answer-details .answer-bar-text,
-.answer-wide .answer-bar-text {
+.answer-wide .answer-bar-text,
+.answer-list .answer-bar-text {
   white-space: normal;
 }
 
@@ -354,7 +362,8 @@
   cursor: default;
 }
 
-.answer-compact .answer-send {
+.answer-compact .answer-send,
+.answer-list .answer-send {
   height: 26px;
 }
 
