@@ -1,12 +1,18 @@
-// Projects (frames 1ab, 1p), ported from Ariadne.dc.html:201-223.
+// The Projects page (SPEC 5.14): a card per registered folder with its sessions; Register a project and Discover
+// sessions behind the page's "…", Remove project behind each card's.
 import { useEffect, useState, type ReactNode } from 'react';
 import type { Immutable } from '../../data/session-store';
+import type { SessionRef } from '../../generated/core';
 import type { ProjectSummary, Session, SessionSummary } from '../../generated/domain/models';
 import type { DiscoveryController } from '../../data/discovery';
 import { CandidateList } from '../../components/navigation/Discovery';
-import { RemoveDialog } from '../dialogs/RemoveDialog';
+import { Dialog } from '../dialogs/Dialog';
+import { RemoveProjectDialog } from '../dialogs/RemoveProjectDialog';
 import type { RemoveHandler, RemoveSubject } from '../dialogs/remove';
-import { projectCard, projectRemoval, sessionKey } from './model';
+import { projectName, projectRemoval, sessionKey } from './model';
+import { ProjectsCards } from './ProjectsCards';
+import type { PageBack } from './page-types';
+import { projectCardData } from '../../components/navigation/pageData';
 import './pages.css';
 
 export interface ProjectsPageProps {
@@ -14,15 +20,16 @@ export interface ProjectsPageProps {
   readonly sessions: readonly Immutable<SessionSummary>[];
   readonly snapshots: ReadonlyMap<string, Immutable<Session>>;
   readonly now: number;
-  /** First launch: Ariadne found the projects itself (frame 1p). */
-  readonly discovered: boolean;
-  readonly disabled: boolean;
-  readonly navigationDisabled?: boolean;
+  readonly currentSession?: SessionRef | null;
+  readonly back?: PageBack;
+  /** While navigation saves, opening, registering and removing wait. */
+  readonly disabled?: boolean;
   readonly discovery?: DiscoveryController;
   readonly onOpen: (projectId: string) => void;
+  readonly onOpenSession: (route: SessionRef) => void;
   readonly onRegister: (root: string) => void;
   readonly onRemove: RemoveHandler;
-  /** Shown under the grid: loading, empty and catalogue notes. */
+  /** Under the cards: loading, empty and catalogue notes. */
   readonly children?: ReactNode;
 }
 
@@ -31,55 +38,31 @@ function Discover({ controller, register, sessions }: { controller: DiscoveryCon
   return <section className="pw-discover" aria-label="Discover host sessions"><CandidateList controller={controller} sessions={sessions} select={candidate => register(candidate.cwd)} /></section>;
 }
 
-export function ProjectsPage({ projects, sessions, snapshots, now, discovered, disabled, navigationDisabled = disabled, discovery, onOpen, onRegister, onRemove, children }: ProjectsPageProps) {
-  const [removing, setRemoving] = useState<{ id: string; subject: RemoveSubject } | null>(null);
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+
+export function ProjectsPage({ projects, sessions, snapshots, now, currentSession, back, disabled = false, discovery, onOpen, onOpenSession, onRegister, onRemove, children }: ProjectsPageProps) {
+  const unless = <A extends unknown[]>(run: (...args: A) => void) => (...args: A) => { if (!disabled) run(...args); };
+  const [removing, setRemoving] = useState<{ id: string; subject: Extract<RemoveSubject, { kind: 'project' }> } | null>(null);
   const [discovering, setDiscovering] = useState(false);
-  const remove = (project: Immutable<ProjectSummary>, name: string) => {
-    const own = sessions.filter(session => session.project_id === project.project_id);
+  const cards = projects.map(project => projectCardData(project, sessions, now, currentSession));
+  const waiting = cards.reduce((sum, card) => sum + card.waiting, 0);
+  const remove = (id: string) => {
+    const project = projects.find(value => value.project_id === id);
+    if (!project) return;
+    const own = sessions.filter(session => session.project_id === id);
     const counts = projectRemoval(own.flatMap(session => snapshots.get(sessionKey(session)) ?? []));
-    setRemoving({ id: project.project_id, subject: { kind: 'project', name, path: project.canonical_root, sessions: own.length, ...counts } });
+    setRemoving({ id, subject: { kind: 'project', name: projectName(project), path: project.canonical_root, sessions: own.length, ...counts } });
   };
-  return <div className="pw-page pw-projects">
-    <div className="pw-page-title">
-      <h1 className="pw-page-name">Projects</h1>
-      <span className="pw-page-sub">{`${projects.length} folder${projects.length === 1 ? '' : 's'} with claude-code or codex sessions · found automatically`}</span>
-    </div>
-    {discovered && <div className="pw-discover-note"><i className="ph ph-magnifying-glass" aria-hidden="true" />
-      <span>Ariadne found these projects in your claude-code and codex session folders. Open one to see its sessions.</span></div>}
-    {projects.length > 0 && <div className="pw-project-grid">
-      {projects.map(project => {
-        const card = projectCard(project, sessions, now);
-        return <div key={card.id} className="pw-project-card" style={{ boxShadow: card.ring }} data-project-id={card.id}
-          onClick={() => { if (!navigationDisabled) onOpen(card.id); }}>
-          <div className="pw-project-head">
-            <i className="ph ph-folder-simple pw-project-icon" aria-hidden="true" />
-            <button type="button" className="pw-project-remove" title="Remove project" aria-label="Remove project"
-              onClick={event => { event.stopPropagation(); remove(project, card.name); }}>
-              <i className="ph ph-trash" aria-hidden="true" /></button>
-            <button type="button" className="pw-project-open" disabled={navigationDisabled} onClick={event => { event.stopPropagation(); onOpen(card.id); }}>
-              <span className="pw-project-name">{card.name}</span><span className="pw-project-path">{card.path}</span></button>
-          </div>
-          <div className="pw-project-facts">
-            <span><i className="ph ph-chats-teardrop pw-fact-icon" aria-hidden="true" />{card.sessionsText}</span>
-            <span style={{ color: card.runColor }}><span className="pw-dot pw-dot-8" style={{ background: card.runDot, boxShadow: card.runRing }} />{card.runText}</span>
-            <span style={{ color: card.waitColor }}><i className="ph-fill ph-question" aria-hidden="true" />{card.waitText}</span>
-            <span><i className="ph ph-clock pw-fact-icon" aria-hidden="true" />{card.last}</span>
-          </div>
-          {card.agents.length > 0 && <div className="pw-project-agents">{card.agents.map(agent => <span key={agent} className="pw-agent-chip">
-            <i className="ph ph-terminal-window" aria-hidden="true" />{agent}</span>)}</div>}
-        </div>;
-      })}
-    </div>}
-    {/* Not in the handoff: registering and discovery sit under the grid so the frame keeps its layout. */}
-    <div className="pw-page-tools">
-      <button type="button" className="btn btn-ghost pw-small" disabled={disabled} onClick={() => onRegister('')}>
-        <i className="ph ph-plus" aria-hidden="true" />Register project</button>
-      {discovery && <button type="button" className="btn btn-ghost pw-small" aria-expanded={discovering} onClick={() => setDiscovering(value => !value)}>
-        <i className="ph ph-magnifying-glass" aria-hidden="true" />Discover host sessions</button>}
-    </div>
+  return <>
+    <ProjectsCards<SessionRef> back={back} sub={`${plural(projects.length, 'project')} · ${plural(waiting, 'question')} waiting on you`} projects={cards}
+      onOpenProject={unless(card => onOpen(card.id))} onOpenSession={unless((_card, session) => onOpenSession(session.route))}
+      onRegister={unless(() => onRegister(''))} onDiscover={unless(() => { if (discovery) setDiscovering(true); })} onRemoveProject={unless(card => remove(card.id))} />
     {children}
-    {discovering && discovery && <Discover controller={discovery} register={onRegister} sessions={sessions} />}
-    {removing && <RemoveDialog subject={removing.subject} onCancel={() => setRemoving(null)}
-      onConfirm={() => onRemove({ kind: 'project', project_id: removing.id }, removing.subject)} />}
-  </div>;
+    {discovering && discovery && <Dialog label="Discover sessions" width={620} onCancel={() => setDiscovering(false)}>
+      <div className="dialog-title">Discover sessions</div><Discover controller={discovery} register={root => { setDiscovering(false); onRegister(root); }} sessions={sessions} />
+      <div className="dialog-actions"><button type="button" className="btn btn-ghost" onClick={() => setDiscovering(false)}>Done</button></div>
+    </Dialog>}
+    {removing && <RemoveProjectDialog name={removing.subject.name} path={removing.subject.path} sessionCount={removing.subject.sessions} waitingCount={removing.subject.waiting}
+      onCancel={() => setRemoving(null)} onRemove={() => { const { id, subject } = removing; setRemoving(null); onRemove({ kind: 'project', project_id: id }, subject); }} />}
+  </>;
 }

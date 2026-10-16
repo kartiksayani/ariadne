@@ -1,17 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { footerKeys } from '../../../apps/desktop/src/ui/shell/model';
 import { handoffMembers } from '../design/source.mts';
 import { footerChrome } from '../design/footer-chrome';
 
+// The app has no footer any more (SPEC §2); these pin only the old board's patched footer.
 describe('shortcut footer design frames', () => {
   const source = handoffMembers()['Ariadne.dc.html']!;
-
-  it('shows every current shortcut hint in the same order as the app', () => {
-    const keys = /keys:\s*\[([^\]]+)\],\s*summary:/.exec(source)?.[1] ?? '';
-    const hints = [...keys.matchAll(/\{ k: '([^']+)', t: '([^']+)' \}/g)]
-      .map(([, k, t]) => ({ k, t }));
-    expect(hints).toEqual(footerKeys);
-  });
 
   it('keeps the same clipping and spacing with a summary after the hints', () => {
     const footer = /<footer[^>]+>[\s\S]+?<\/footer>/.exec(source)?.[0] ?? '';

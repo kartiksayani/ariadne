@@ -8,6 +8,7 @@ import { Dialog } from '../../ui/dialogs/Dialog';
 import { ownerName } from '../../ui/shell/model';
 import { candidateIdentity, useDiscovery, type DiscoveryController } from '../../data/discovery';
 import { archivedCandidate, CandidateList } from './Discovery';
+import { RegisterProjectDialog } from '../../ui/dialogs/RegisterProjectDialog';
 
 function RegistrationFailure({ store }: { store: NavigationStore }) {
   const state = useNavigation(store);
@@ -18,16 +19,11 @@ function RegistrationFailure({ store }: { store: NavigationStore }) {
   </div>;
 }
 
+/** The Register a project dialog (C8) against the navigation store: it closes once the folder is registered. */
 export function RegisterProject({ store, disabled, close, initialRoot = '' }: { store: NavigationStore; disabled: boolean; close: () => void; initialRoot?: string }) {
-  const [root, setRoot] = useState(initialRoot);
-  const submit = async (event: FormEvent) => { event.preventDefault(); if (await store.register(root)) close(); };
-  return <Dialog label="Register project" width={520} onCancel={close}><div className="dialog-title">Register project</div><div className="nav-registration">
-    <p>Enter the project’s folder. A path starting with ~/ starts in your home folder.</p>
-    <RegistrationFailure store={store} />
-    <form onSubmit={event => { void submit(event); }}><fieldset disabled={disabled}><label>Project root<input required value={root} onChange={event => setRoot(event.target.value)} placeholder="~/path/to/project" /></label>
-      <div className="nav-dialog-actions"><button type="button" className="btn btn-ghost" onClick={close}>Cancel</button>
-        <button type="submit" className="btn btn-primary">Register project</button></div></fieldset></form>
-  </div></Dialog>;
+  const state = useNavigation(store);
+  return <RegisterProjectDialog initialPath={initialRoot} busy={disabled || state.writing} error={state.error ? registrationFailure(state.error) : undefined}
+    onCancel={close} onRegister={path => { void store.register(path).then(saved => { if (saved) close(); }); }} />;
 }
 
 export function BindSession({ store, project, sessions, adapters, disabled, close, discovery }: { store: NavigationStore; project: Immutable<ProjectSummary>;

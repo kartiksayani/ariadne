@@ -1,0 +1,428 @@
+/* The 40px top bar and the waiting-here chip. Values follow the Claude Design board (SPEC 2.1). */
+.tb {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 40px;
+  padding: 0 8px 0 12px;
+  background: var(--a-side);
+  box-shadow: inset 0 -1px 0 var(--color-divider);
+  font-size: calc(13px * var(--text-scale));
+  color: var(--color-text);
+}
+
+.tb :focus-visible { outline-offset: 1px; }
+
+.tb-mark {
+  flex: none;
+  color: var(--a-acc-text);
+}
+
+.tb-spacer {
+  flex: 1;
+  min-width: 0;
+}
+
+.tb-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 28px;
+  border-radius: 6px;
+  background: transparent;
+  white-space: nowrap;
+}
+
+.tb-btn:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+.tb-btn:disabled { cursor: default; }
+.tb-btn:disabled:hover { background: transparent; }
+
+/* An open popover tints its button. */
+.tb-btn[data-active],
+.tb-btn[data-active]:hover { background: color-mix(in srgb, var(--color-accent) 14%, transparent); }
+
+.tb-icon[data-active],
+.tb-icon[data-active]:hover {
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  color: var(--a-acc-text);
+}
+
+.tb-icon { font-size: calc(16px * var(--text-scale)); }
+
+.tb-aa,
+.tb-help {
+  font-size: calc(13px * var(--text-scale));
+  font-weight: 500;
+}
+
+/* The session switcher: project / session, the waiting chip, a caret. The name gives way to a long window. */
+.tb-switch {
+  flex: 0 1 auto;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 8px;
+  margin-left: 2px;
+}
+
+.tb-switch-static { cursor: default; }
+.tb-switch-static:hover { background: transparent; }
+
+.tb-proj {
+  flex: none;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.tb-slash {
+  flex: none;
+  color: color-mix(in srgb, var(--color-text) 35%, transparent);
+}
+
+.tb-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+
+.tb-name-quiet {
+  font-weight: 400;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.tb-caret {
+  flex: none;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.tb-conn {
+  gap: 6px;
+  padding: 0 7px;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+.tb-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.tb-dot-ring { box-shadow: inset 0 0 0 1.5px var(--st-open); }
+.tb-conn-icon { font-size: calc(13px * var(--text-scale)); }
+
+.tb-conn-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* "2 waiting in this session": back to the session, on a page. */
+.tb-here {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  margin: 0 0 0 4px;
+  padding: 0 9px 0 7px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--a-acc-text);
+  color: var(--a-bg);
+  font: inherit;
+  font-size: calc(12px * var(--text-scale));
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tb-here:hover { filter: brightness(1.08); }
+
+/* Search: idle, then active with a count and match arrows. */
+.tb-search {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  width: 210px;
+  height: 28px;
+  padding: 0 6px 0 9px;
+  margin: 0 4px 0 0;
+  border: 0;
+  border-radius: 6px;
+  background: var(--a-bg);
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+  font: inherit;
+  font-size: calc(12.5px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tb-search > i { font-size: calc(15px * var(--text-scale)); }
+.tb-search-hint { flex: 1; }
+
+.tb-search-on {
+  position: relative;
+  gap: 2px;
+  width: 260px;
+  padding: 0 3px 0 9px;
+  box-shadow: inset 0 0 0 1.5px var(--color-accent);
+  color: var(--color-text);
+  cursor: text;
+}
+
+.tb-search-narrow { width: 210px; }
+
+.tb-search-on > .tb-search-icon {
+  flex: none;
+  margin-right: 5px;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.tb-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  color: var(--color-text);
+}
+
+.tb-search-input::placeholder { color: color-mix(in srgb, var(--color-text) 45%, transparent); }
+
+.tb-search-count {
+  flex: none;
+  padding: 0 4px;
+  white-space: nowrap;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 64%, transparent);
+}
+
+.tb-search-btn {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font-size: calc(13px * var(--text-scale));
+  cursor: pointer;
+}
+
+.tb-search-btn:hover { background: color-mix(in srgb, var(--color-text) 8%, transparent); }
+.tb-search-x { color: color-mix(in srgb, var(--color-text) 62%, transparent); }
+
+/* "Also matching: 1 in a hidden item." under the box. */
+.tb-search-note {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: var(--a-card);
+  box-shadow: var(--shadow-md), 0 0 0 1px var(--color-divider);
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--color-text) 74%, transparent);
+}
+
+.tb-search-narrow .tb-search-note { width: 260px; }
+
+.tb-search-note > i {
+  flex: none;
+  margin-top: 2px;
+}
+
+.tb-note-text {
+  flex: 1;
+  min-width: 0;
+  text-wrap: pretty;
+}
+
+.tb-note-action {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 500;
+  color: var(--color-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* Tree / Graph. */
+.tb-seg {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  margin: 0 4px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+}
+
+.tb-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  font: inherit;
+  font-size: calc(12.5px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+  cursor: pointer;
+}
+
+.tb-seg-btn > i { font-size: calc(15px * var(--text-scale)); }
+
+.tb-seg-btn[aria-pressed="true"] {
+  background: var(--a-card);
+  box-shadow: var(--shadow-sm);
+  color: var(--color-text);
+}
+
+.tb-filter { position: relative; }
+
+.tb-badge {
+  position: absolute;
+  top: 0;
+  right: -1px;
+  display: grid;
+  place-items: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--color-accent);
+  color: var(--a-bg);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.tb-div {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--color-divider);
+}
+
+/* Popovers that hang off a bar button: the sizes and the narrow "…" menu. */
+.tb-anchor {
+  position: relative;
+  display: flex;
+  flex: none;
+}
+
+.tb-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border-radius: 8px;
+  background: var(--a-card);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-divider);
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.4;
+}
+
+.tb-sizes { min-width: 160px; }
+.tb-more { width: 260px; }
+
+.tb-size,
+.tb-more-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tb-size:hover,
+.tb-more-row:hover,
+.tb-size:focus-visible,
+.tb-more-row:focus-visible { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
+
+.tb-size:focus-visible,
+.tb-more-row:focus-visible { outline-offset: -2px; }
+
+.tb-size > i,
+.tb-more-row > i {
+  flex: none;
+  width: 15px;
+  font-size: calc(15px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+
+.tb-more-row > .p-key { margin-left: auto; }
+
+.tb-more-q {
+  font-style: normal;
+  font-size: calc(13px * var(--text-scale));
+  font-weight: 500;
+  text-align: center;
+}
+
+.tb-more-label {
+  padding: 8px 8px 4px;
+  font-size: calc(11px * var(--text-scale));
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.tb-more-sizes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 8px 4px;
+}
+
+.tb-size-chip {
+  width: auto;
+  height: 26px;
+  padding: 0 8px;
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+}
+
+.tb-size-chip[aria-checked="true"] {
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  color: var(--a-acc-text);
+}

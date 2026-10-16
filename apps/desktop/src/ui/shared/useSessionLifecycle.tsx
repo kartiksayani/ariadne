@@ -3,10 +3,10 @@ import { itemRemoved } from '../../selectors/removed';
 // a topic with open items or unsent messages asks one plain confirmation that
 // says what stays and what is cancelled; one with neither archives at once.
 // Either way an "Archived" banner offers Undo.
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { CoreFailure, plainFailure, useSession, type ServiceFailure } from '../../data';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { CoreFailure, plainFailure, type ServiceFailure } from '../../data';
 import type { OwnerCommand } from '../../generated/core';
-import { SessionActions, useSessionActions } from '../../components/bindings/actions';
+import type { SessionActions } from '../../components/bindings/actions';
 import { unconfirmedText } from '../../components/bindings/unconfirmed';
 import { Dialog } from '../dialogs/Dialog';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
@@ -35,7 +35,10 @@ export type SessionLifecycleState = 'active' | 'closed' | 'archived' | null;
 export interface SessionLifecycle {
   /** Close or reopen the session through the review; restore an archived session (as Closed) at once. */
   readonly session: () => void;
-  /** The session bar's Close, Reopen and Restore: each is `session`, acting on the session as it is now. */
+  /**
+   * The connection card's and the rows' Close, Reopen and Restore: `session`, run only while the session is still
+   * active, closed or archived respectively; otherwise nothing changes and `error` says why.
+   */
   readonly close: () => void;
   readonly reopen: () => void;
   readonly restoreSession: () => void;
@@ -59,26 +62,59 @@ export interface SessionLifecycle {
   readonly pending: string | null;
   readonly reconcile: () => void;
   readonly dialog: ReactNode;
+  /** A review or confirmation is open (wherever its dialog renders). */
+  readonly reviewing: boolean;
 }
 
+const noop = () => {};
+const idleSubscribe = () => noop;
+const idleSnapshot = () => null;
+/** No session: every control does nothing and the lifecycle reads busy. */
+const idle: SessionLifecycle = Object.freeze({
+  session: noop, close: noop, reopen: noop, restoreSession: noop, archiveTopic: noop, restoreTopic: noop, copySessionId: noop,
+  state: null, rename: () => Promise.resolve(loadingError), archive: noop, restore: noop, archived: null, undo: noop, dismiss: noop,
+  busy: true, error: null, pending: null, reconcile: noop, dialog: null, reviewing: false,
+});
+type SessionStanding = Exclude<SessionLifecycleState, null>;
+const standing = (session: { readonly archived_at?: string | null; readonly state: string }): SessionStanding =>
+  session.archived_at != null ? 'archived' : session.state === 'closed' ? 'closed' : 'active';
+/** Said when a Close, Reopen or Restore click meets a session that another client changed meanwhile. */
+const changedMeanwhile: Record<SessionStanding, string> = {
+  active: 'This session is open now. Nothing changed.',
+  closed: 'This session is already closed. Nothing changed.',
+  archived: 'This session was archived meanwhile. Nothing changed.',
+};
+
 /**
- * Close, reopen and restore the session; rename it; archive and restore its topics. `actions` is the session's
- * controller (`SessionActionControllers.forSession`). The review dialogs and the running guard are local to each
- * call, so one view owns a session's lifecycle at a time.
+ * Close, reopen and restore the session; rename it; archive and restore its topics. `input` is the session's
+ * controller (`SessionActionControllers.forSession`), or null with no session (every control is then inert). The review
+ * dialogs, the running guard and the Undo state are local to each call: mount it once per screen (SessionLifecycleOwner)
+ * and read it with useSessionLifecycleFor. A new `input` (another session) starts from no review, error or Undo.
  */
-export function useSessionLifecycle(actions: SessionActions): SessionLifecycle {
-  const state = useSession(actions.session), operation = useSessionActions(actions);
+export function useSessionLifecycle(input: SessionActions | null): SessionLifecycle {
+  const state = useSyncExternalStore(input?.session.subscribe ?? idleSubscribe, input?.session.getSnapshot ?? idleSnapshot, input?.session.getSnapshot ?? idleSnapshot);
+  const operation = useSyncExternalStore(input?.subscribe ?? idleSubscribe, input?.getSnapshot ?? idleSnapshot, input?.getSnapshot ?? idleSnapshot);
   const [review, setReview] = useState<Review | null>(null);
   /** The topic whose archive confirmation is open, with the failure of its last try. */
   const [confirming, setConfirming] = useState<{ readonly topicId: string; readonly error: string | null } | null>(null);
   const [archived, setArchived] = useState<Archived | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const running = useRef<string | null>(null);
+  const [waiting, setWaiting] = useState(false);
+  const [owner, setOwner] = useState(input);
+  if (owner !== input) {
+    setOwner(input); setReview(null); setConfirming(null); setArchived(null); setError(null); setWaiting(false);
+  }
+  /** The write in flight; a token, so a write that finishes after a session switch never clears the next one's guard. */
+  const running = useRef<{ readonly key: string } | null>(null);
   const readyWait = useRef<{ cancelled: boolean; cancel: () => void } | null>(null);
+  /** The latest copy; a superseded one (a newer copy, or another session) reports nothing. */
+  const copies = useRef(0);
   useEffect(() => () => {
     if (readyWait.current) { readyWait.current.cancelled = true; readyWait.current.cancel(); }
-  }, [actions]);
-  const [waiting, setWaiting] = useState(false);
+    running.current = null; copies.current += 1;
+  }, [input]);
+  if (!input || !state || !operation) return idle;
+  const actions = input;
   const session = state.snapshot?.session ?? null;
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] ?? null : null;
   const agent = binding ? agentName(binding.adapter_id) : 'the agent';
@@ -105,8 +141,9 @@ export function useSessionLifecycle(actions: SessionActions): SessionLifecycle {
       }
       return false;
     };
-    if (running.current) return running.current === key ? false : report(savingError);
-    running.current = key;
+    if (running.current) return running.current.key === key ? false : report(savingError);
+    const token = { key };
+    running.current = token;
     let abandon!: () => void;
     const cancellation = new Promise<boolean>(resolve => { abandon = () => resolve(false); });
     const attempt = { cancelled: false, cancel: abandon, cancellation };
@@ -120,7 +157,9 @@ export function useSessionLifecycle(actions: SessionActions): SessionLifecycle {
       readyWait.current = null;
       const result = change(ready.session);
       return typeof result === 'boolean' ? result : await result;
-    } finally { readyWait.current = null; running.current = null; setWaiting(false); }
+    } finally {
+      if (running.current === token) { readyWait.current = null; running.current = null; setWaiting(false); }
+    }
   };
   const rename = async (name: string, description: string) => {
     if (actions.getSnapshot().pending && !actions.getSnapshot().writing) return 'Ariadne isn’t sure your last change was saved. Check again before renaming this session.';
@@ -251,20 +290,38 @@ export function useSessionLifecycle(actions: SessionActions): SessionLifecycle {
       {(error || review.error || operation.pending && operation.error) && <p role="alert">{error ?? (typeof review.error === 'string' ? review.error : plainFailure(review.error ?? operation.error))} {operation.pending && 'Ariadne isn’t sure your last change was saved. Check again before confirming another.'}</p>}
     </div><div className="dialog-actions">{buttons}</div></Dialog>;
   }
-  const sessionAction = () => {
-    if (operation.pending && !operation.writing) { if (session) prepare(session.state === 'closed' ? 'session_reopen' : 'session_close'); else setError(loadingError); return; }
+  /**
+   * The session's toggle, acting on the session as it is now. `expected` is the standing the clicked control was for
+   * (Close: active, Reopen: closed, Restore: archived); a session in any other standing is left as it is, so a Close
+   * click on a session another client just archived never restores it.
+   */
+  const sessionAction = (expected?: SessionStanding) => {
+    const changed = (current: { readonly archived_at?: string | null; readonly state: string }) => {
+      if (expected === undefined || standing(current) === expected) return false;
+      setError(changedMeanwhile[standing(current)]);
+      return true;
+    };
+    if (operation.pending && !operation.writing && expected !== 'archived') {
+      if (!session) setError(loadingError);
+      else if (!changed(session)) prepare(session.state === 'closed' ? 'session_reopen' : 'session_close');
+      return;
+    }
     void withReady('session', current => {
+      if (changed(current)) return false;
       if (current.archived_at != null) return run({ command: 'session_restore', api_version: 1, op_id: '', params: { expected_revision: current.revision } }, current);
       prepare(current.state === 'closed' ? 'session_reopen' : 'session_close', null, current);
       return false;
     });
   };
   return {
-    session: sessionAction, close: sessionAction, reopen: sessionAction, restoreSession: sessionAction,
+    session: () => sessionAction(), close: () => sessionAction('active'), reopen: () => sessionAction('closed'), restoreSession: () => sessionAction('archived'),
     archiveTopic: archive, restoreTopic: restore,
-    copySessionId: () => { void copySessionReference(actions.session.getSnapshot().route.session_id); },
+    copySessionId: () => {
+      const attempt = ++copies.current;
+      void copySessionReference(actions.session.getSnapshot().route.session_id, () => copies.current === attempt);
+    },
     state: !session ? null : session.archived_at != null ? 'archived' : session.state === 'closed' ? 'closed' : 'active',
-    rename, archive, restore, archived, undo, dismiss: () => setArchived(null), busy: disabled, error, dialog,
+    rename, archive, restore, archived, undo, dismiss: () => setArchived(null), busy: disabled, error, dialog, reviewing: dialog !== null,
     pending: operation.pending && !review ? unconfirmedText(operation.pending.command.command) : null,
     reconcile: () => {
       if (operation.writing) return;

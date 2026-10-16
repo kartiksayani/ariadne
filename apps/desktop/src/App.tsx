@@ -9,11 +9,12 @@ import { AgentRemovalNotices } from './ui/remove/AgentRemovalNotices';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createDesktopService, type RendererService } from './data/service';
 import { DiscoveryController } from './data/discovery';
-import { useSession, type Immutable, type SessionState, type SessionStore } from './data/session-store';
+import { useSession, type Immutable, type SessionStore } from './data/session-store';
 import type { RevealedItem } from './data/routes';
 import { navigationFailure } from './data/plain';
 import type { ItemRoute, SessionPreferences, SessionRef } from './generated/core';
 import { NavigationStore, useNavigation } from './state/navigation/store';
+import { viewOf } from './state/navigation/view';
 import { OwnerDraftStore, useOwnerDrafts } from './state/drafts/store';
 import { WaitingStore } from './selectors/waiting/store';
 import { NavigationWorkspace, type AdapterChoice, type OpenedSessionView } from './components/navigation/NavigationWorkspace';
@@ -22,7 +23,6 @@ import type { OwnerFocusRequest, PendingSubmission } from './ui/answer/useSubmit
 import { agentNotRunning } from './ui/answer/notRunning';
 import { ConversationView } from './ui/detail/ConversationView';
 import { conversationDivider } from './ui/detail/conversationSeen';
-import { conversationAnswerState } from './ui/detail/ItemConversation';
 import { DetailPath, ItemDetail } from './ui/detail/ItemDetail';
 import { AnswerDock } from './ui/dock/AnswerDock';
 import { DockProvider } from './ui/dock/api';
@@ -39,8 +39,6 @@ import { SessionNotice } from './components/edge-states/EdgeState';
 import { DraftConflictNotices } from './components/edge-states/DraftConflictNotices';
 import { hiddenItems, hiddenParentSource, hiddenSource } from './ui/tree/hidden';
 import { TreeView, type RowIntent } from './ui/tree/TreeView';
-import { ArchivePage } from './ui/pages/ArchivePage';
-import { useSessionSnapshots } from './ui/pages/snapshots';
 import { AgentNotRunningHost } from './ui/dialogs/AgentNotRunning';
 import { ContinueTopicHost } from './ui/dialogs/ContinueTopicDialog';
 import type { RemoveHandler, RemoveSubject, RemoveTarget } from './ui/dialogs/remove';
@@ -49,20 +47,18 @@ import { notices } from './ui/pages/notices';
 import { isViewConflict } from './ui/shared/conflictNotice';
 import { RemovalContext, RemovalQueue } from './ui/remove/queue';
 import { nextSelection, removeSubject, subtree, targetSession } from './ui/remove/model';
-import { agentName, hostApp, themeToggle, type SessionFacts } from './ui/shell/model';
+import { themeToggle } from './ui/shell/model';
 import { useAppliedTheme } from './ui/shell/theme';
 import { useWindowKeys } from './ui/shell/windowKeys';
 import { nextTextSize, textSize, useAppliedTextSize, type TextSize } from './ui/shell/textScale';
 import { ItemHistoryContext, useItemHistory, type HistoryDirection } from './ui/shell/itemHistory';
-import { connectionOf } from './ui/shared/connection';
 import { acknowledge, ackBlocked, ackFailure, ackTarget } from './ui/shared/ack';
-import { displayStatus } from './selectors/waiting/replied';
 import { earlierAgent } from './ui/shared/excerpt';
 import { FileRefs, LinkOpener } from './ui/shared/MarkdownText';
 import { fileOpener, linkOpener, listenForLinkFailures } from './ui/shared/openers';
-import type { ViewTab } from './ui/shell/Header';
 import { useWorkspaceKeys } from './ui/keys';
-import { workspaceKeys, type TreeRemoveTarget } from './ui/shell/workspaceKeys';
+import { itemIntents, workspaceKeys, type ItemIntentApp, type TreeRemoveTarget } from './ui/shell/workspaceKeys';
+import { dispatchIntent, useIntents } from './ui/intents';
 import { useConversation } from './ui/detail/useConversation';
 
 const adapters: readonly AdapterChoice[] = [
@@ -83,52 +79,29 @@ interface Application {
   removals: RemovalQueue;
 }
 const sameSession = (a: SessionRef, b: SessionRef) => a.project_id === b.project_id && a.session_id === b.session_id;
-/** Header facts for the selected session, from its loaded snapshot. */
-function sessionFacts(state: SessionState | null, projectName: (projectId: string) => string): SessionFacts | null {
-  const session = state?.snapshot?.session;
-  if (!state || !session) return null;
-  const binding = session.active_binding_id ? session.bindings[session.active_binding_id] : null;
-  const last = session.messages.at(-1);
-  return { projectName: projectName(session.project_id), createdAt: Date.parse(session.created_at), messageCount: session.messages.length,
-    agent: binding ? agentName(binding.adapter_id) : null, where: hostApp(binding?.host_location),
-    connection: connectionOf(binding, binding ? state.presence[binding.id] : null),
-    lastMessage: last ? { number: last.number, createdAt: Date.parse(last.created_at) } : null };
-}
 const clearedFilters = (filters: { readonly archived: boolean }): SessionPreferences['filters'] =>
   ({ search: '', statuses: [], owners: [], topic_id: null, hide_later: false, archived: filters.archived });
 const filtering = (filters: Immutable<SessionPreferences['filters']>) => !!filters.search.trim() || hasStatusFilter(filters.statuses)
   || filters.owners.length > 0 || filters.hide_later;
-/** The archive (1x): archived topics of every session in the project. */
-function SessionArchive({ application, view, onRemove }: { application: Application; view: OpenedSessionView; onRemove: RemoveHandler }) {
-  const state = useSession(view.store), navigation = useNavigation(application.navigation);
-  const route = state.route;
-  const sessions = (navigation.sessions?.sessions.items ?? []).filter(summary => summary.project_id === route.project_id);
-  const snapshots = useSessionSnapshots(application.service, sessions);
-  const project = navigation.projects?.projects.items.find(value => value.project_id === route.project_id);
-  return <section className="app-session" aria-label="Session workspace">
-    <SessionNotice state={state} refresh={() => { void view.store.refresh(); }} />
-    <ArchivePage navigation={application.navigation} actions={application.actions} projectName={project?.project?.display_name ?? 'this project'}
-      sessions={sessions} snapshots={snapshots} target={route} query={view.preferences?.filters.search ?? ''} now={Date.now()} onRemove={onRemove} />
-  </section>;
-}
 interface CenterProps {
   readonly application: Application; readonly view: OpenedSessionView; readonly graph: boolean; readonly query: string;
   readonly reveal: RevealedItem | null; readonly selectedId: string | null; readonly detailOpen: boolean;
   readonly historyReveal: RevealedItem | null;
   readonly covered?: boolean;
+  readonly actingId?: string | null;
   readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
   readonly onDismissReveal: () => void; readonly onResume: () => void; readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
   readonly onOpenItem: (itemId: string) => void;
   readonly onClearFilters: () => void; readonly onClearSearch: () => void; readonly onShowArchive: () => void;
-  readonly onRemove: (target: TreeRemoveTarget) => void; readonly onRemoveTarget: RemoveHandler;
+  readonly onRemove: (target: TreeRemoveTarget) => void;
+  readonly filterOpen?: boolean;
 }
-function SessionCenter({ application, view, graph, reveal, onRemoveTarget, ...props }: CenterProps) {
+function SessionCenter({ application, view, graph, reveal, ...props }: CenterProps) {
   const state = useSession(view.store), session = state.snapshot?.session;
   const navigation = useNavigation(application.navigation);
   const actions = application.actions.forSession(view.store);
   const seen = useReadingSeen(application.navigation.reading, navigation.preferences, state.route);
   useImplicitCaughtUp(application.navigation, session, seen, state.status === 'ready' && state.snapshot?.freshness === 'fresh');
-  if (view.preferences?.filters.archived) return <SessionArchive application={application} view={view} onRemove={onRemoveTarget} />;
   const summaries = navigation.sessions?.sessions.items ?? [];
   const recovering = session ? recoveryTargets(session).length > 0 : false;
   const notice = state.status !== 'loading' && <SessionNotice state={state} refresh={() => { void view.store.refresh(); }} />;
@@ -137,7 +110,7 @@ function SessionCenter({ application, view, graph, reveal, onRemoveTarget, ...pr
     topicContent={session ? topicId => <TopicChanges session={session} topicId={topicId} navigation={application.navigation}
       onOpenItem={props.onOpenItem} /> : undefined}
     notices={notice || recovering ? <div className="tree-notices">{notice}{recovering && <RecoveryPanel actions={actions} />}</div> : null}
-    graph={graph && !view.preferences?.filters.archived ? <NavigationGraph navigation={application.navigation} store={view.store} query={props.query}
+    graph={graph ? <NavigationGraph navigation={application.navigation} store={view.store} query={props.query}
       tight={props.detailOpen} reveal={reveal} onReveal={props.onSelected} /> : null} />;
 }
 function Workspace({ application }: { application: Application }) {
@@ -357,28 +330,6 @@ function Workspace({ application }: { application: Application }) {
       if (quickRequests.current.get(identity) === token && (!published || shortcutSequence.current !== token)) quickRequests.current.delete(identity);
     });
   };
-  const quickAnswer = (target: ItemRoute, index?: number) => {
-    const current = store && route && sameSession(route, target) ? store.getSnapshot() : application.waiting.sessionState(target);
-    const session = current?.snapshot?.session, item = session?.items[target.item_id];
-    const draftState = application.drafts.getSnapshot(), entry = application.drafts.find(target, target.item_id, 'answer');
-    if (session && item && (current?.status !== 'ready' || current.error)) {
-      notices.push({ id: 'quick-answer-not-ready', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
-        text: "Ariadne is still loading this session's latest changes. Try again." });
-      return true;
-    }
-    notices.dismiss('quick-answer-not-ready');
-    if (!session || !item || current?.status !== 'ready' || current.error || session.state !== 'active'
-      || itemRemoved(session, item.id) || session.topics[item.topic_id]?.archived_at !== null || displayStatus(session, item) !== 'waiting_on_me'
-      || state.writing || state.pendingOperationId !== null || !draftState.ready || draftState.preferenceUncertain
-      || quickRequests.current.has(JSON.stringify(target))
-      || Object.values(draftState.entries).some(value => sameSession(value.draft.session, target) && value.draft.target.item_id === item.id && (value.saving || value.uncertain))
-      || entry?.receipt
-      || index !== undefined && !item.options[index]) return false;
-    focusOwner(target, 'answer', index, undefined, index === undefined ? 'words' : 'send', index === undefined ? undefined : {
-      optionId: item.options[index]!.id, revision: item.revision, questionRevision: item.question_revision, bindingId: session.active_binding_id,
-    });
-    return true;
-  };
   const queueBring = async (target: ItemRoute, onReveal?: (result: RevealedItem) => void) => {
     const identity = JSON.stringify(target);
     if (bringing.current.has(identity)) return;
@@ -464,10 +415,10 @@ function Workspace({ application }: { application: Application }) {
       void navigation.saveTextScale(size, current.preferences.revision).then(saved => restoreRefusedTextSize(saved, size));
     }
   };
-  const projectName = (projectId: string) => state.projects?.projects.items.find(project => project.project_id === projectId)?.project?.display_name ?? 'Unavailable project';
+  // A view saved by an older release may still show archived topics in the Tree; Tree or Graph leaves that.
   const archived = view?.filters.archived ?? false;
-  // The archive is kept per project (1x), so the label counts the project's archived topics.
-  const archivedTopics = route ? state.projects?.projects.items.find(project => project.project_id === route.project_id)?.counts.archived_topics ?? 0 : 0;
+  const [filterOpen, setFilterOpen] = useState(false);
+
   // Remove (handoff README "Remove"): ask, then hide at once and run after the undo window (ui/remove/queue).
   const [asking, setAsking] = useState<{ target: RemoveTarget; subject: RemoveSubject } | null>(null);
   const askRemove = (target: TreeRemoveTarget): boolean => {
@@ -499,10 +450,10 @@ function Workspace({ application }: { application: Application }) {
         restore = () => { const back = { ...at, item_id: shown }; if (wasOpen) revealItem(back); else moveSelection(at, shown); };
       }
     } else if (target.kind === 'project') {
-      const current = state.preferences?.global.selected_navigation;
-      if (current?.kind === 'project' && current.project_id === target.project_id) {
-        void navigation.navigate({ kind: 'projects' });
-        restore = () => { void navigation.navigate({ kind: 'project', project_id: target.project_id }); };
+      const shown = viewOf(state);
+      if (shown.kind === 'page' && shown.projectId === target.project_id) {
+        navigation.openPage({ kind: 'page', page: 'projects' });
+        restore = () => { navigation.openPage({ kind: 'page', page: 'sessions', projectId: target.project_id }); };
       }
     }
     removals.schedule(target, subject, { restore });
@@ -510,13 +461,9 @@ function Workspace({ application }: { application: Application }) {
   const showView = (mode: 'tree' | 'graph' | 'archive') => {
     if (conversation) closeConversation();
     setGraphModes(previous => ({ ...previous, [key]: mode === 'graph' }));
-    if (view && archived !== (mode === 'archive')) saveView({ filters: { ...structuredClone(view.filters), archived: mode === 'archive' } } as Partial<SessionPreferences>);
+    if (mode === 'archive') { navigation.openPage({ kind: 'page', page: 'archive' }); return; }
+    if (view?.filters.archived) saveView({ filters: { ...structuredClone(view.filters), archived: false } } as Partial<SessionPreferences>);
   };
-  const views: readonly ViewTab[] | null = store ? [
-    { label: 'Tree', icon: 'ph ph-tree-view', title: 'Tree (g)', on: !graph && !archived, onSelect: () => showView('tree') },
-    { label: 'Graph', icon: 'ph ph-graph', title: 'Graph (g)', on: graph && !archived, onSelect: () => showView('graph') },
-    { label: archivedTopics ? `Archive ${archivedTopics}` : 'Archive', icon: 'ph ph-archive', title: 'Archived topics', on: archived, onSelect: () => showView('archive') },
-  ] : null;
   const clearFilters = () => {
     if (!view) return;
     setSearchEdit(null); setDismissedReveal(currentReveal);
@@ -547,8 +494,8 @@ function Workspace({ application }: { application: Application }) {
   const hiddenParent = hiddenParentId ? selectedSession?.items[hiddenParentId]?.question : null;
   const hiddenNotice = hiddenParent ? selectedId && explicitHidden.has(selectedId)
     ? `Hidden, along with its parent “${hiddenParent}”.` : `Hidden with its parent “${hiddenParent}”` : undefined;
-  const keys = useWorkspaceKeys<HTMLDivElement>(workspaceKeys({
-    store: !!store, closeDetail, closeConversation: conversationOpen ? closeConversation : undefined, focusOwner, quickAnswer, queueBring, ack: (target, repeat) => {
+  const intentApp: ItemIntentApp = {
+    store: !!store, toggleFilters: () => setFilterOpen(value => !value), closeDetail, closeConversation: conversationOpen ? closeConversation : undefined, focusOwner, queueBring, ack: (target, repeat) => {
       const store = navigation.opened.open(target), session = store.getSnapshot().snapshot?.session, item = session?.items[target.item_id];
       if (!session || !item || !ackTarget(session, item)) return false;
       const actions = application.actions.forSession(store);
@@ -570,26 +517,24 @@ function Workspace({ application }: { application: Application }) {
         if (attempted === ackRequest.current) notices.push({ id, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: ackFailure(error) });
       });
       return true;
-    }, archiveTopic: topicId => {
-      const control = document.querySelector<HTMLButtonElement>(`[data-shortcut-archive-topic="${topicId}"]`);
-      if (!control || control.disabled) return false;
-      control.focus(); control.click(); return true;
     },
-    focused: event => {
+    focused: () => {
+      const session = sessionState?.snapshot?.session;
+      // The bigger view's item, even when the Map selected another one meanwhile.
       if (conversationOpen && conversation && route) {
-        const item = sessionState?.snapshot?.session.items[conversation.itemId];
-        return item ? { item, target: { ...route, item_id: item.id } } : null;
+        const item = session?.items[conversation.itemId];
+        return session && item && !itemRemoved(session, item.id) ? { item, target: { ...route, item_id: item.id } } : null;
       }
-      const focusedId = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-item-id]')?.dataset.itemId : undefined;
-      const session = sessionState?.snapshot?.session, item = session?.items[focusedId ?? selectedId ?? ''];
+      const item = session?.items[selectedId ?? ''];
       return route && session && item && !itemRemoved(session, item.id) && !hidden.item(route, session, item.id) ? { item, target: { ...route, item_id: item.id } } : null;
     },
     askRemove,
-    oldestWaiting: () => application.waiting.getSnapshot().waiting[0]?.route,
     toggleLater, toggleHidden,
     toggleGraph: () => setGraphModes(previous => ({ ...previous, [key]: !graph })),
     clearFilters: detailOpen && !!selectedId || !view || !filtering(view.filters) && !query ? undefined : clearFilters,
-  }), { scope: 'workspace' });
+  };
+  useIntents(itemIntents(intentApp));
+  const keys = useWorkspaceKeys<HTMLDivElement>(workspaceKeys(intentApp), { scope: 'workspace' });
   // Keys pressed while focus is on <body> (after launch or a click on a non-focusable area) still reach the keymap.
   const appRoot = useRef<HTMLDivElement>(null);
   useWindowKeys(appRoot, historyControls, intent => changeTextSize(nextTextSize(textSizeIntent.current ?? navigation.getSnapshot().preferences?.global.text_scale, intent)));
@@ -601,11 +546,10 @@ function Workspace({ application }: { application: Application }) {
       if (!conversationOpen) return;
       if (event.key === 'Escape' && !event.nativeEvent.isComposing && !event.metaKey && !event.ctrlKey && !event.altKey
         && !document.querySelector('[aria-modal="true"]')) {
-        // These controls own Escape before a peek or the conversation does.
-        const control = document.querySelector<HTMLElement>('.shell-text-size-menu')
-          ?? document.querySelector<HTMLElement>('.pw-rename');
+        // An open top-bar menu owns Escape before a peek or the conversation does.
+        const control = document.querySelector<HTMLElement>('.tb-pop');
         if (control) {
-          const owner = control.closest('.shell-text-size') ?? control;
+          const owner = control.closest('.tb-anchor') ?? control;
           if (!(event.target instanceof Node) || !owner.contains(event.target)) {
             event.preventDefault(); event.stopPropagation();
             control.dispatchEvent(new globalThis.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
@@ -625,9 +569,10 @@ function Workspace({ application }: { application: Application }) {
     <AgentRemovalNotices waiting={application.waiting} controllers={application.actions} navigation={navigation}
       selectedSession={sessionState?.snapshot?.session ?? null} onTree={showBinTree} />
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
-      onRemoveTarget={removeTarget}
-      session={store ? sessionFacts(sessionState, projectName) : undefined}
-      chrome={{ query, views, theme: shown,
+      onRemoveTarget={removeTarget} waitingStore={application.waiting}
+      chrome={{ query, graph: graph && !archived, onView: store ? showView : undefined, theme: shown, searchBlocked: conversationOpen,
+        filter: store ? { active: filterOpen, count: view && hasStatusFilter(view.filters.statuses) ? view.filters.statuses.length : 0, onToggle: () => setFilterOpen(value => !value) } : undefined,
+        onRecent: store ? () => { dispatchIntent('recent.open'); } : undefined,
         textSize: shownTextSize, onTextSizeChange: changeTextSize,
         // A new search is a filter change: it drops the temporary reveal (the selection stays as its own row).
         onQueryChange: view ? text => { if (conversation) closeConversation(); setSearchEdit({ route: key, text, attempted: false }); setDismissedReveal(currentReveal); } : undefined,
@@ -650,9 +595,6 @@ function Workspace({ application }: { application: Application }) {
         onLater={value => preferences ? navigation.setLater({ ...route, item_id: selectedId }, value, preferences.revision) : Promise.resolve(false)}
         provenance={<CopiedProvenance store={store} itemId={selectedId}
           projectPath={projectId => state.projects?.projects.items.find(project => project.project_id === projectId)?.canonical_root ?? null} revealItem={revealLinkedItem} />} /> : undefined}
-      conversationFooter={conversationOpen && conversation && route && sessionState?.snapshot?.session.items[conversation.itemId] ? {
-        question: conversationAnswerState(sessionState.snapshot.session, conversation.itemId, application.drafts.find(route, conversation.itemId, 'answer')).live,
-      } : undefined}
       conversation={conversation?.route === key && store && route ? <ConversationView key={`${key}:${conversation.itemId}`} drafts={application.drafts}
         store={store} itemId={conversation.itemId} later={preferences?.later.some(value => sameSession(value, route) && value.item_id === conversation.itemId) ?? false}
         onClose={closeConversation} onBring={() => { void queueBring({ ...route, item_id: conversation.itemId }); }} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })}
@@ -661,8 +603,8 @@ function Workspace({ application }: { application: Application }) {
         onFocusRequestConsumed={consumeOwnerRequest} onAgentNotRunning={onAgentNotRunning}
         onLater={value => preferences ? navigation.setLater({ ...route, item_id: conversation.itemId }, value, preferences.revision) : Promise.resolve(false)} /> : undefined}
       onCloseDetail={closeDetail}
-      renderSession={opened => <SessionCenter application={application} view={opened} graph={graph} query={query} reveal={treeReveal}
-        covered={conversationOpen}
+      renderSession={opened => <SessionCenter filterOpen={filterOpen} application={application} view={opened} graph={graph} query={query} reveal={treeReveal}
+        covered={conversationOpen} actingId={conversationOpen ? conversation?.itemId : null}
         historyReveal={historyReveal.current === treeReveal ? historyReveal.current : null}
         selectedId={treeSelectedId} detailOpen={conversationOpen || detailOpen && !!selectedId}
         onSelected={selected}
@@ -679,7 +621,7 @@ function Workspace({ application }: { application: Application }) {
           if (view) saveView({ filters: { ...structuredClone(view.filters), search: '' } as SessionPreferences['filters'] });
         }}
         onClearFilters={clearFilters} onShowArchive={() => showView('archive')}
-        onRemove={target => { askRemove(target); }} onRemoveTarget={removeTarget} />} />
+        onRemove={target => { askRemove(target); }} />} />
     {asking && <RemoveDialog subject={asking.subject} onCancel={() => setAsking(null)} onConfirm={() => removeTarget(asking.target, asking.subject)} />}
     <ContinueTopicHost navigation={navigation} actions={application.actions} onSent={target => {
       // The continued topic now lives in the target session: show it there in the tree.
@@ -707,9 +649,8 @@ export function DesktopApp({ service }: { service: RendererService }) {
       removed: async target => {
         if (target.kind === 'item' || target.kind === 'topic') await navigation.opened.open(targetSession(target)).refresh();
         else {
-          const views = navigation.getSnapshot().preferences?.sessions.filter(view => view.tab_open && (target.kind === 'project'
-            ? view.session.project_id === target.project_id : sameSession(view.session, target.session))) ?? [];
-          for (const view of views) await navigation.closeTab(view.session);
+          const selected = navigation.getSnapshot().preferences?.global.selected_navigation;
+          if (selected?.kind === 'session' && (target.kind === 'project' ? selected.session.project_id === target.project_id : sameSession(selected.session, target.session))) await navigation.navigate({ kind: 'projects' });
         }
         await navigation.refresh();
         void waiting.refresh();

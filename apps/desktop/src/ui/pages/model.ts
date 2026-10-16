@@ -1,17 +1,12 @@
 import { activeItems, activeTopics, itemRemoved } from '../../selectors/removed';
-// Strings and colours of the Projects, Project, All sessions and Archive pages,
-// ported from Ariadne.dc.html (runOf, sessCard, group, projCards: 1605-1680;
-// projectVals: 1727-1775) and built from catalogue summaries and session snapshots.
+// Words of the pages built from catalogue summaries and session snapshots: relative days, archived topics, the
+// Continue dialog's groups and the Remove dialog's counts.
 import type { Immutable } from '../../data/session-store';
 import type { ContinuePreview, SessionRef } from '../../generated/core';
 import type { Item, ItemStatus, ProjectSummary, Session, SessionSummary, Topic } from '../../generated/domain/models';
-import { agentLine, agentName, clock, ownerName, sessionLabel, sessionRange, sessionWhen } from '../shell/model';
+import { agentName, clock, ownerName, sessionWhen, shortDate } from '../shell/model';
 import { agentRunning, connectionOf } from '../shared/connection';
-import { shortLabel } from '../shared/short';
-import type { SupervisorHealth } from '../../data/service';
-import { dispatchStatus, type DispatchStatus } from '../../components/bindings/dispatch';
 import { unsentOf } from '../remove/model';
-import { displayStatus } from '../../selectors/waiting/replied';
 import { sessionEnded, waitingOnOwner } from '../../selectors/sessionClosed';
 
 export type VisualStatus = 'open' | 'waiting' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
@@ -19,14 +14,9 @@ export const ICON: Readonly<Record<VisualStatus, string>> = {
   open: 'ph ph-circle', waiting: 'ph-fill ph-question', progress: 'ph ph-circle-half', decided: 'ph ph-check-circle',
   done: 'ph-fill ph-check-circle', dropped: 'ph ph-x-circle', replaced: 'ph ph-arrow-circle-right',
 };
-export const STATUS_LABEL: Readonly<Record<VisualStatus, string>> = {
-  open: 'Open', waiting: 'Waiting on me', progress: 'In progress', decided: 'Decided', done: 'Done', dropped: 'Dropped', replaced: 'Replaced',
-};
 export const visualStatus = (status: ItemStatus): VisualStatus => status === 'waiting_on_me' ? 'waiting' : status === 'in_progress' ? 'progress' : status;
-const closedStatuses = new Set<ItemStatus>(['decided', 'done', 'dropped', 'replaced']);
 
 export const neutral = (percent: number) => `color-mix(in srgb, var(--color-text) ${percent}%, transparent)`;
-const accentMix = (percent: number) => `color-mix(in srgb, var(--color-accent) ${percent}%, transparent)`;
 export const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 export const sessionKey = (route: Immutable<SessionRef>) => JSON.stringify([route.project_id, route.session_id]);
 export const routeOf = (summary: Immutable<SessionSummary>): SessionRef => ({ project_id: summary.project_id, session_id: summary.session_id });
@@ -42,63 +32,18 @@ export function relativeDay(at: number, now: number): string {
   if (days === 1) return 'yesterday';
   if (days < 7) return `${days} days ago`;
   if (days < 14) return 'last week';
-  return new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return shortDate(at);
 }
 
-/** A project's last activity: "today 15:04", "yesterday 16:40", "3 days ago", "last week". */
+/** When something last happened, as the pages write it (SPEC 14.1–14.3): "today 15:04", "yesterday 16:40", "3 Oct". */
 export function lastActivity(at: number, now: number): string {
   const day = relativeDay(at, now);
-  return day === 'today' || day === 'yesterday' ? `${day} ${clock(at)}` : day;
+  return day === 'today' || day === 'yesterday' ? `${day} ${clock(at)}` : shortDate(at);
 }
 
 /** The agent of a session is running: active in Ariadne and its binding connected or reconnecting (ui/shared/connection). */
 export const isRunning = (session: Immutable<SessionSummary>) => session.archived_at == null && session.state === 'active' && agentRunning(connectionOf(session.active_binding));
 export const agentOf = (session: Immutable<SessionSummary>) => session.active_binding ? agentName(session.active_binding.adapter_id) : 'No agent';
-
-/** The card's sending state, read like the session bar's chip (components/bindings/dispatch). */
-export function cardDispatch(summary: Immutable<SessionSummary>, health: SupervisorHealth | null = null, now = Date.now()): DispatchStatus {
-  return dispatchStatus({ binding: summary.active_binding, closed: summary.archived_at != null || summary.state === 'closed', presence: summary.active_binding?.presence ?? null,
-    needsDecision: summary.counts.sent_inputs.needs_attention > 0, health, agent: agentOf(summary), now });
-}
-export interface Run { readonly run: string; readonly runColor: string; readonly runDot: string; readonly runRing: string; readonly dispatch: DispatchStatus }
-/** A filled dot only while inputs reach the agent; paused, blocked and disconnected show a ring. */
-export function runOf(dispatch: DispatchStatus): Run {
-  return { run: dispatch.label, runColor: dispatch.color, dispatch,
-    runDot: dispatch.live ? dispatch.color : 'transparent', runRing: dispatch.live ? 'none' : `inset 0 0 0 1.5px ${dispatch.color}` };
-}
-
-export interface ProjectCardModel {
-  readonly id: string;
-  readonly name: string;
-  readonly path: string;
-  readonly sessionsText: string;
-  readonly runText: string;
-  readonly runColor: string;
-  readonly runDot: string;
-  readonly runRing: string;
-  readonly waitText: string;
-  readonly waitColor: string;
-  readonly last: string;
-  readonly agents: readonly string[];
-  readonly ring: string;
-}
-
-export function projectCard(project: Immutable<ProjectSummary>, sessions: readonly Immutable<SessionSummary>[], now: number): ProjectCardModel {
-  const own = sessions.filter(session => session.project_id === project.project_id && session.archived_at == null);
-  const active = own.filter(session => session.state !== 'closed').length, closed = own.length - active, running = own.filter(isRunning).length;
-  const wait = project.counts.waiting_unanswered;
-  const latest = Math.max(...own.map(session => Date.parse(session.updated_at)));
-  return {
-    id: project.project_id, name: projectName(project), path: project.canonical_root,
-    sessionsText: `${active} active · ${closed} closed`,
-    runText: running ? `${running} agent${running > 1 ? 's' : ''} running` : 'No agent running',
-    runColor: running ? 'var(--st-done)' : neutral(60), runDot: running ? 'var(--st-done)' : 'transparent', runRing: running ? 'none' : `inset 0 0 0 1.5px ${neutral(50)}`,
-    waitText: wait ? `${wait} waiting on you` : 'Nothing waiting', waitColor: wait ? 'var(--a-acc-text)' : neutral(60),
-    last: `Last activity ${Number.isFinite(latest) ? lastActivity(latest, now) : '—'}`,
-    agents: [...new Set(own.filter(session => session.active_binding).map(agentOf))],
-    ring: `${wait ? `0 0 0 1px ${accentMix(45)}` : '0 0 0 1px var(--color-divider)'}, var(--a-lift)`,
-  };
-}
 
 /** Topics continued from or into another session, by `${session}:${topic}`. */
 export function continuationLinks(sessions: readonly Immutable<Session>[]): { readonly movedOn: ReadonlySet<string>; readonly shared: ReadonlySet<string> } {
@@ -117,49 +62,6 @@ export function continuationLinks(sessions: readonly Immutable<Session>[]): { re
 
 const topicItems = (session: Immutable<Session>, topicId: string) => activeItems(session).filter(item => item.topic_id === topicId);
 export const sortedTopics = (session: Immutable<Session>) => [...activeTopics(session)].sort((a, b) => a.order - b.order);
-
-/** `name` is the short label the chip shows; `full` is the topic's whole name, for the tooltip. */
-export interface TopicChip { readonly id: string; readonly name: string; readonly full: string; readonly counts: string; readonly icon: string; readonly color: string }
-export function topicChips(session: Immutable<Session>, movedOn: ReadonlySet<string>): TopicChip[] {
-  return sortedTopics(session).map(topic => {
-    const items = topicItems(session, topic.id), moved = movedOn.has(`${session.id}:${topic.id}`);
-    // Local delivery projections retain their own counts alongside domain statuses.
-    const shown = items.map(item => ({ item, status: displayStatus(session, item) }));
-    const waiting = items.filter(item => waitingOnOwner(session, item)).length;
-    const sent = shown.filter(({ status }) => status === 'sent').length, queued = shown.filter(({ status }) => status === 'queued').length;
-    const open = shown.filter(({ status }) => status === 'open' || status === 'in_progress').length;
-    const closed = items.filter(item => closedStatuses.has(item.status)).length;
-    const counts = topic.archived_at !== null ? 'archived' : moved ? 'continued later'
-      : [waiting && `${waiting} waiting`, sent && `${sent} sent`, queued && `${queued} queued`, open && `${open} open`, closed && `${closed} closed`].filter(Boolean).join(' · ');
-    return { id: topic.id, name: shortLabel(topic), full: topic.name, counts, icon: topic.archived_at !== null ? 'ph ph-archive' : moved ? 'ph ph-arrow-bend-down-right' : 'ph ph-folder-simple',
-      color: topic.archived_at !== null ? neutral(64) : 'var(--color-text)' };
-  });
-}
-
-export interface SessionCardText extends Run {
-  readonly agent: string;
-  /** The owner's name for the session; unnamed, "claude-code · iTerm window 1" as before. */
-  readonly title: string;
-  /** The agent line kept quietly under a name; null while unnamed. */
-  readonly secondary: string | null;
-  /** The owner's description, or null. */
-  readonly description: string | null;
-  readonly named: boolean;
-  readonly meta: string;
-  readonly titleColor: string;
-  readonly background: string;
-  readonly closed: boolean;
-}
-export function sessionCardText(summary: Immutable<SessionSummary>, snapshot: Immutable<Session> | null, now: number, where: string | null = null,
-  health: SupervisorHealth | null = null): SessionCardText {
-  const closed = summary.archived_at != null || summary.state === 'closed', running = isRunning(summary), agent = agentOf(summary);
-  const range = sessionRange(Date.parse(summary.created_at), Date.parse(summary.closed_at ?? summary.updated_at), running, now);
-  const messages = snapshot ? ` · ${plural(snapshot.messages.length, 'message')}` : '';
-  const label = sessionLabel(summary, agentLine(agent, where));
-  return { ...runOf(cardDispatch(summary, health, now)), agent, closed, title: label.title, secondary: label.secondary, description: label.description, named: label.named,
-    meta: `${range}${messages}${closed ? ' · read-only' : ''}`,
-    titleColor: closed ? neutral(74) : 'var(--color-text)', background: closed ? 'transparent' : 'var(--a-card)' };
-}
 
 export interface ArchivedTopic {
   readonly source: SessionRef;

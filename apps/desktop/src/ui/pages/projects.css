@@ -1,0 +1,168 @@
+/* The Projects page. Values follow the Claude Design board (SPEC 5.14). */
+.pj-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.pj-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 8px;
+  background: var(--a-card);
+  box-shadow: 0 0 0 1px var(--color-divider);
+  cursor: pointer;
+}
+
+.pj-card:hover { box-shadow: 0 0 0 1.5px var(--a-edge-strong), var(--shadow-sm); }
+
+.pj-current,
+.pj-current:hover { box-shadow: 0 0 0 1.5px var(--color-accent), var(--shadow-sm); }
+
+.pj-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.pj-folder {
+  flex: none;
+  margin-top: 1px;
+  font-size: calc(18px * var(--text-scale));
+  color: var(--a-acc-text);
+}
+
+.pj-id {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pj-name {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: calc(14.5px * var(--text-scale));
+  font-weight: 500;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pj-path {
+  overflow: hidden;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pj-more-anchor {
+  position: relative;
+  display: flex;
+  flex: none;
+}
+
+.pj-more {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin: -3px -4px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  font: inherit;
+  font-size: calc(15px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+  cursor: pointer;
+}
+
+.pj-more:hover { background: color-mix(in srgb, var(--color-text) 8%, transparent); }
+
+.pj-more[data-active],
+.pj-more[data-active]:hover { background: color-mix(in srgb, var(--color-accent) 14%, transparent); }
+
+.pj-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: -4px;
+  width: 270px;
+}
+
+.pj-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pj-sess {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: calc(12.5px * var(--text-scale));
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pj-sess-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pj-sess:hover .pj-sess-name {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.pj-sess-closed { color: color-mix(in srgb, var(--color-text) 66%, transparent); }
+
+.pj-sess-meta {
+  flex: none;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 56%, transparent);
+}
+
+.pj-sess-wait {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  font-size: calc(12px * var(--text-scale));
+  font-weight: 500;
+  color: var(--a-acc-text);
+}
+
+.pj-none {
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  text-wrap: pretty;
+}
+
+.pj-foot {
+  padding-top: 9px;
+  box-shadow: inset 0 1px 0 var(--color-divider);
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 56%, transparent);
+}
+
+.pj-name:focus-visible,
+.pj-sess:focus-visible,
+.pj-more:focus-visible { outline-offset: 1px; }

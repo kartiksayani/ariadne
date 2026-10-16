@@ -1,0 +1,126 @@
+/* First run: "No projects yet". Values follow the Claude Design board (SPEC 5.15). */
+.fr {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  min-height: 0;
+  padding: 32px 24px;
+  overflow: auto;
+  color: var(--color-text);
+  font-size: calc(13px * var(--text-scale));
+}
+
+.fr-col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 560px;
+}
+
+.fr-title {
+  margin: 0;
+  font-family: inherit;
+  font-size: calc(18px * var(--text-scale));
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: inherit;
+}
+
+.fr-lead {
+  margin: 0;
+  line-height: 1.6;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+  text-wrap: pretty;
+}
+
+.fr-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: var(--a-card);
+  box-shadow: 0 0 0 1px var(--color-divider);
+  line-height: 1.5;
+  list-style: none;
+}
+
+.fr-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.fr-num {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+  font-size: calc(11.5px * var(--text-scale));
+  font-weight: 500;
+}
+
+.fr-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+  padding-top: 1px;
+  text-wrap: pretty;
+}
+
+.fr-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.fr-code {
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: var(--a-bg);
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+  font: inherit;
+  white-space: nowrap;
+}
+
+.fr-alt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: calc(12.5px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+
+.fr .p-btn-copy {
+  height: 24px;
+  padding: 0 8px;
+  gap: 5px;
+  border-radius: 5px;
+  color: var(--color-text);
+}
+
+.fr-wait {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: calc(12.5px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 64%, transparent);
+  text-wrap: pretty;
+}
+
+.fr-ring {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--st-open);
+}

@@ -13,7 +13,6 @@ import { EdgeState, SessionNotice, type EdgeKind } from '../../../src/components
 import { immutable } from '../../../src/data';
 import { stuckInput } from '../../../src/selectors/waiting/stuck';
 import { StuckNote } from '../../../src/ui/answer/StuckNote';
-import { DispatchChip } from '../../../src/components/bindings/DispatchChip';
 import { notices } from '../../../src/ui/pages/notices';
 
 const opId = '00000000-0000-4000-8000-000000000099';
@@ -115,7 +114,7 @@ describe('a delivered message with no answer yet', () => {
   });
   it('shows truthful words and ordered actions, asks for a result-only repair, and hides cancellation', async () => {
     const { actions, transport, input, attempt } = await waitingAnswer();
-    render(<><StuckNote actions={actions} input={immutable(input)} stuck={stuckInput(immutable(transport.session), immutable(input))!} /><DispatchChip actions={actions} /></>);
+    render(<><StuckNote actions={actions} input={immutable(input)} stuck={stuckInput(immutable(transport.session), immutable(input))!} />{dispatch(actions)}</>);
     const note = document.querySelector<HTMLElement>('.stuck-note')!;
     expect(note.getAttribute('data-stuck')).toBe('answer');
     expect(note.textContent).toContain('claude-code has your message but hasn’t saved its answer yet. It may still be working.');
@@ -124,7 +123,7 @@ describe('a delivered message with no answer yet', () => {
     expect(screen.getByRole('button', { name: 'Ask for the answer' }).title).toBe('Asks claude-code to save its answer now. An answer it’s still working on won’t be linked to this message.');
     expect(screen.queryByRole('button', { name: 'Cancel message' })).toBeNull();
     expect(note.textContent).not.toMatch(/Not delivered|Couldn’t deliver/);
-    expect(screen.getByRole('group', { name: 'Sending to the agent' }).textContent).toMatch(/^Waiting for claude-code to answer “/);
+    expect(document.querySelector('dd[data-dispatch]')?.textContent).toMatch(/^Waiting for claude-code to answer “/);
     expect(screen.getByRole('button', { name: 'Stop waiting' }).title).toBe('Stop waiting for an answer. If claude-code answers later, its answer will still show.');
     transport.replies.push(transport.receipt('input_resolve', 'request_result_repair'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Ask for the answer' })); });

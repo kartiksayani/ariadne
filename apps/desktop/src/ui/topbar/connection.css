@@ -1,0 +1,149 @@
+/* The connection card and the line above the Map. Values follow the Claude Design board (SPEC 5.12). */
+.cc {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 320px;
+  padding: 12px;
+  border-radius: 9px;
+  background: var(--a-card);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-divider);
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.5;
+  color: var(--color-text);
+  white-space: normal;
+  outline: none;
+}
+
+.cc-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: calc(13px * var(--text-scale));
+  font-weight: 500;
+}
+
+.cc-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.cc-dot-ring { box-shadow: inset 0 0 0 1.5px var(--st-open); }
+
+.cc-line {
+  color: color-mix(in srgb, var(--color-text) 74%, transparent);
+  text-wrap: pretty;
+}
+
+.cc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+/* The line above the Map: in flow, so it never covers the Map. */
+.cl {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 10px;
+  margin: 8px 10px;
+  padding: 8px 8px 8px 12px;
+  border-radius: 7px;
+  background: var(--a-side);
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.45;
+  color: var(--color-text);
+}
+
+.cl-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px 10px;
+}
+
+.cl-icon {
+  flex: none;
+  margin-top: 2px;
+  font-size: calc(14px * var(--text-scale));
+}
+
+.cl-text {
+  flex: 1 1 280px;
+  min-width: 0;
+  padding-top: 1px;
+  text-wrap: pretty;
+}
+
+.cl-title { font-weight: 500; }
+.cl-body { color: color-mix(in srgb, var(--color-text) 76%, transparent); }
+
+.cl-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.cl .cl-btn {
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 5px;
+  font-size: inherit;
+  font-weight: 500;
+}
+
+.cl-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 0 0 4px 24px;
+}
+
+.cl-step {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.cl .cl-copy {
+  padding: 0 8px;
+  font-size: calc(12px * var(--text-scale));
+  font-weight: 400;
+}
+
+.cl-num {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+  font-size: calc(11px * var(--text-scale));
+  font-weight: 500;
+}
+
+.cl-code {
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: var(--a-bg);
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+  white-space: nowrap;
+}
+
+.cl-foot {
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  text-wrap: pretty;
+}

@@ -85,72 +85,12 @@
   white-space: pre-wrap;
 }
 
-/* The dispatch chip (session bar, project card) and the editors' paused note. */
-.dispatch-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.dispatch-dot {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-
-.dispatch-label {
-  font: inherit;
-}
-
-.dispatch-details {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-}
-
-.dispatch-details:hover {
-  text-decoration: underline;
-}
-
+/* Inline action buttons of the editors' paused note and the stuck notes. */
 .dispatch-action {
   height: 24px;
   padding: 0 8px;
   font-size: calc(12px * var(--text-scale));
   gap: 4px;
-}
-
-/* Pause / Resume: a square icon button no taller than the line of text beside it. */
-.dispatch-action.dispatch-icon {
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  justify-content: center;
-}
-
-.dispatch-error {
-  color: var(--a-warn);
-  font-size: calc(12px * var(--text-scale));
-}
-
-/* The project page card's sending state: a visible button, not link text. */
-.pw-run.dispatch-card {
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--color-divider);
-  border-radius: 999px;
-  background: transparent;
-}
-
-.pw-run.dispatch-card:hover {
-  text-decoration: none;
-  border-color: currentcolor;
-}
-
-.pw-run.dispatch-card:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
 }
 
 .dispatch-note {

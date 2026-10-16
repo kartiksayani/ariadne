@@ -31,6 +31,17 @@ const press = (target: EventTarget, key: string, init: KeyboardEventInit = {}) =
 };
 
 describe('window-level workspace keys', () => {
+  it.each(['dialog', 'switcher', 'help'])('never moves focus or replays Map actions behind an open %s', kind => {
+    const onKey = vi.fn(() => true);
+    render(<Workspace onKey={onKey} />);
+    const overlay = document.body.appendChild(document.createElement('div'));
+    if (kind === 'dialog') overlay.setAttribute('role', 'dialog');
+    else overlay.setAttribute('data-workspace-overlay', kind);
+    for (const key of ['a', 'd', 'h', 'Backspace', 'Delete', 'c', 'f', 'g', 'ArrowDown', '?']) press(document.body, key);
+    expect(onKey).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(document.body);
+  });
+
   it('routes Cmd brackets directly from body, buttons and tree rows while leaving removal keys unchanged', () => {
     const root = document.createElement('div'); root.innerHTML = '<button>Back</button><div tabindex="0"></div>';
     document.body.append(root);
@@ -98,6 +109,7 @@ describe('window-level workspace keys', () => {
     onKey.mockClear();
     expect(press(document.body, 'q').defaultPrevented).toBe(false);
     expect(press(document.body, 'j', { metaKey: true }).defaultPrevented).toBe(false);
+    expect(press(document.body, 'g', { isComposing: true }).defaultPrevented).toBe(false);
     const outside = document.body.appendChild(document.createElement('textarea'));
     press(outside, 'g');
     const dialog = document.body.appendChild(document.createElement('div'));
@@ -113,17 +125,17 @@ describe('window-level workspace keys', () => {
     act(() => { field.focus(); });
     // A save starts: the field is disabled and focus falls to <body>.
     field.disabled = true; field.blur();
-    expect(press(document.body, 'e').defaultPrevented).toBe(false);
+    expect(press(document.body, 'h').defaultPrevented).toBe(false);
     expect(onKey).not.toHaveBeenCalled();
     // Clicking elsewhere is a deliberate move: keys on <body> are shortcuts again.
     act(() => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
-    expect(press(document.body, 'e').defaultPrevented).toBe(true);
+    expect(press(document.body, 'h').defaultPrevented).toBe(true);
     expect(onKey).toHaveBeenCalled();
     // A field that is enabled again, or gone, no longer holds the keys back.
     onKey.mockClear();
     act(() => { field.disabled = false; field.focus(); field.disabled = true; field.blur(); });
     field.remove();
-    expect(press(document.body, 'e').defaultPrevented).toBe(true);
+    expect(press(document.body, 'h').defaultPrevented).toBe(true);
   });
 
   /** A text field outside the app root that the owner is typing in, then a save disables it (focus falls to <body>). */
@@ -268,7 +280,7 @@ describe('window-level workspace keys', () => {
     press(document.body, 'd');
     field.remove();
     // The keys went with the field: a later field gets none of them, and keys are shortcuts again.
-    expect(press(document.body, 'e').defaultPrevented).toBe(true);
+    expect(press(document.body, 'h').defaultPrevented).toBe(true);
     expect(onKey).toHaveBeenCalled();
     const later = document.body.appendChild(document.createElement('textarea'));
     act(() => { later.focus(); });

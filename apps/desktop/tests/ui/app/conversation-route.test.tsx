@@ -42,7 +42,7 @@ it('guards conversation targets and footer on the first render of a different se
     inspected = true;
     // Layout effects run before App's passive route cleanup. This is the render
     // which previously resolved the old conversation id against the new session.
-    expect(props.conversation).toBeUndefined(); expect(props.conversationFooter).toBeUndefined();
+    expect(props.conversation).toBeUndefined();
     const root = document.querySelector('.product-app')!;
     fireEvent.keyDown(root, { key: 'r' });
     fireEvent.keyDown(root, { key: 'Escape' });

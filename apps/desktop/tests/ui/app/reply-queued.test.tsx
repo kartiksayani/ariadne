@@ -22,7 +22,7 @@ async function replySession() {
   Object.assign(transport.preferences.sessions[0], { tab_open: true, selected_item_id: '2' });
   render(<DesktopApp service={createDesktopService(transport)} />);
   await screen.findByRole('region', { name: 'Session tree' });
-  await waitFor(() => expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false'));
+  await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false'));
   await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
   return { transport, session, row };
@@ -73,7 +73,7 @@ describe('Reply after queued navigation', { timeout: 10_000 }, () => {
       expect(replyFocus()).toEqual([box]);
       ++session.revision;
       await act(async () => { transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: session.revision }); });
-      await waitFor(() => expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false'));
+      await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false'));
       expect(document.activeElement).toBe(box);
       expect(replyFocus()).toEqual([box]);
       expect(transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(0);

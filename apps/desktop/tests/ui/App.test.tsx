@@ -7,19 +7,14 @@ import { createDesktopService } from '../../src/data/service';
 import { RegisteredRoutes } from '../../src/data/routes';
 import { OwnFailure } from '../../src/data/plain';
 import { WaitingStore } from '../../src/selectors/waiting/store';
-import { ItemDetail } from '../../src/ui/detail/ItemDetail';
 import { TreeView } from '../../src/ui/tree/TreeView';
 import { AppTransport, route, secondId } from './app/transport';
 import { goToSession } from './app/open';
-import { page, projections } from './history/fixtures';
+import { page as historyPage, projections } from './history/fixtures';
 
 vi.mock('react-dom/client', async importOriginal => {
   const actual = await importOriginal<typeof ReactDOM>();
   return { ...actual, createRoot: vi.fn(actual.createRoot) };
-});
-vi.mock('../../src/ui/detail/ItemDetail', async importOriginal => {
-  const actual = await importOriginal<typeof import('../../src/ui/detail/ItemDetail')>();
-  return { ...actual, ItemDetail: vi.fn(actual.ItemDetail) };
 });
 vi.mock('../../src/ui/tree/TreeView', async importOriginal => {
   const actual = await importOriginal<typeof import('../../src/ui/tree/TreeView')>();
@@ -33,18 +28,20 @@ async function openSession(id = route.session_id, pending = false) {
   await screen.findByRole('region', { name: 'Session tree' });
   if (!pending) await waitFor(() => {
     expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-    expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    expect(screen.getByRole('button', { name: /^Switch session or project/ }).hasAttribute('disabled')).toBe(false);
   });
 }
 async function goToChip(element: Element) {
   await act(async () => { fireEvent.click(element); });
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Go to' })); });
 }
-async function allSessions() {
-  const button = screen.getByRole('button', { name: /^All sessions/ });
-  await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false)); fireEvent.click(button);
-  await screen.findByRole('heading', { name: 'All sessions' });
+async function navigatePage(name: 'Projects' | 'All sessions') {
+  fireEvent.click(screen.getByRole('button', { name: /^Switch session or project/ }));
+  const pages = within(await screen.findByRole('navigation', { name: 'Pages' }));
+  fireEvent.click(pages.getByRole('button', { name }));
+  await screen.findByRole('heading', { name });
 }
+async function allSessions() { await navigatePage('All sessions'); }
 function setup(strict = false) {
   const transport = new AppTransport(), service = createDesktopService(transport);
   const app = <DesktopApp service={service} />;
@@ -124,7 +121,8 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     const initialProjectWrites = projectWrites().length;
     fireEvent.click(screen.getByRole('button', { name: 'Switch to light' }));
     await waitFor(() => expect(writing).toBe(true));
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Projects' })); });
+    expect(screen.getByRole('button', { name: /^Switch session or project/ }).hasAttribute('disabled')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: /^Switch session or project/ }));
     await goToChip(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     expect(projectWrites()).toHaveLength(initialProjectWrites);
     await act(async () => { releaseOwner(); });
@@ -155,7 +153,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     });
     await goToChip(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     await waitFor(() => expect(resolving).toBe(true));
-    fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
+    await navigatePage('Projects');
     await screen.findByRole('heading', { name: 'Projects' });
     await act(async () => { release(); });
     expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'projects' });
@@ -205,7 +203,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       const request = args.request;
       if ('request' in request && request.request.command === 'item_rounds' && request.request.params.item_id === '1') {
         const session = transport.sessions.get(route.session_id)!;
-        return { api_version: 1, ok: true, data: { kind: 'item_rounds', data: { item_id: '1', rounds: page(projections(session).rounds, session.revision) } } };
+        return { api_version: 1, ok: true, data: { kind: 'item_rounds', data: { item_id: '1', rounds: historyPage(projections(session).rounds, session.revision) } } };
       }
       if (!failed && 'command' in request && request.command.command === 'preferences_patch'
         && request.command.params.entries.every(entry => entry.kind === 'mark_seen')) {
@@ -222,7 +220,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     await waitFor(() => {
       expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
-      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      expect(screen.getByRole('button', { name: /^Switch session or project/ }).hasAttribute('disabled')).toBe(false);
     });
     await waitFor(() => expect(entered).toBe(true), { timeout: 3000 });
     fireEvent.click(await screen.findByRole('button', { name: /^Branched into Add the receipt lookup/ }));
@@ -363,13 +361,8 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
   });
   it('shows seeded presence to a late reader, shares tree/graph selection and opens complete item conversations', async () => {
     const { transport } = setup(); await openSession();
-    await waitFor(() => expect(document.querySelector('.shell-context')?.textContent).toContain('Ariadne canonical demo · started'));
-    expect(document.querySelector('.shell-context')?.textContent).not.toMatch(/Host unknown|heartbeat/);
-    // No presence hint is emitted: opening after the host event must seed its canonical observation.
-    // The bar words whether Ariadne is sending ("Sending · Pause"); host-freshness phrases stay out of the session bar.
-    await waitFor(() => expect(document.querySelector('.tree-run')?.getAttribute('data-connection')).toBe('connected'));
-    expect(document.querySelector('.tree-run .dispatch-label')?.textContent).toBe('Sending');
-    expect(document.querySelector('.tree-run')?.getAttribute('title')).toBeNull();
+    expect(screen.getByRole('button', { name: /^Switch session or project/ }).textContent).toContain('Ariadne canonical demo');
+    expect(screen.getByRole('button', { name: '● Live' }).getAttribute('title')).toBe('Live · demo.local');
     expect(transport.queries).toContainEqual({ session: null, request: { command: 'session_list', params: {
       project_id: route.project_id, state: null, cursor: null, limit: 100,
     } } });
@@ -412,12 +405,12 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => {
       expect(waiting.getSnapshot().status).toBe('ready');
       expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
-      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      expect(screen.getByRole('button', { name: /^Switch session or project/ }).hasAttribute('disabled')).toBe(false);
       for (const message of ownMessages) expect(conversation.querySelector(`[data-message-id="${message.id}"]`)).not.toBeNull();
     });
     await act(async () => {});
-    const treeRenders = vi.mocked(TreeView).mock.calls.length;
-    const detailRenders = vi.mocked(ItemDetail).mock.calls.length;
+    const treeNode = screen.getByRole('tree', { name: 'Session items' });
+    const detailNode = screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     const previous = waiting.getSnapshot(), observation = {
       ...waiting.sessionState(route)!.presence[transport.sessions.get(route.session_id)!.active_binding_id!],
       generation: binding.generation, last_seen_at: '2026-10-05T02:05:00.000Z', execution_state: 'running' as const, freshness: 'fresh' as const,
@@ -425,8 +418,9 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: binding.id, generation: binding.generation, observation }); });
     expect(waiting.getSnapshot()).not.toBe(previous);
     expect(waiting.sessionState({ ...route, session_id: secondId })?.presence[binding.id]).toEqual(observation);
-    expect.soft(vi.mocked(TreeView).mock.calls).toHaveLength(treeRenders);
-    expect.soft(vi.mocked(ItemDetail).mock.calls).toHaveLength(detailRenders);
+    expect(screen.getByRole('tree', { name: 'Session items' })).toBe(treeNode);
+    expect(screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' })).toBe(detailNode);
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
   });
   it('answers the latest oldest waiting question after a background capture finishes', async () => {
     const starts = vi.spyOn(WaitingStore.prototype, 'start');
@@ -452,9 +446,10 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => expect(entered).toBe(true));
     await act(async () => { release(); await capture; });
     expect(waiting.getSnapshot().waiting[0].route.session_id).toBe(secondId);
-    fireEvent.keyDown(document.querySelector('.product-app')!, { key: 'a' });
+    const nextQuestion = waiting.getSnapshot().waiting[0];
+    fireEvent.click(document.querySelector<HTMLElement>(`[data-session-id="${nextQuestion.route.session_id}"][data-waiting-item="2"] .waiting-details`)!);
     const detail = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
-    await waitFor(() => expect(document.activeElement?.closest('.detail-answer-slot')).toBe(detail.querySelector('.detail-answer-slot')));
+    expect(detail.getAttribute('data-detail-item-id')).toBe('2');
     expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: { ...route, session_id: secondId } });
     expect(mutations(transport, 'input_submit')).toHaveLength(0);
   });
@@ -476,32 +471,27 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     expect(within(screen.getByRole('region', { name: 'Your request' })).getByText('Sending')).toBeTruthy();
     expect(transport.sessions.get(route.session_id)?.items['8']?.status).toBe(originalStatus);
   });
-  it('keeps uncertain binding actions isolated across sessions and retries the frozen request after tab close and reopen', async () => {
-    const { transport } = setup(); await openSession(); transport.failNext = 'binding_pause';
-    // The session bar's Pause is one click; the pause is the binding action under test.
-    const pause = async () => {
-      const chip = await screen.findByRole('group', { name: 'Sending to the agent' });
-      await waitFor(() => expect(within(chip).getByRole('button', { name: 'Pause' }).hasAttribute('disabled')).toBe(false));
-      fireEvent.click(within(chip).getByRole('button', { name: 'Pause' }));
+  it('keeps uncertain binding actions isolated across sessions and retries the frozen request after reopening its dialog', async () => {
+    const { transport } = setup(); await openSession(); await allSessions(); transport.failNext = 'binding_pause';
+    const openDispatch = async (id: string) => {
+      const card = document.querySelector<HTMLElement>(`[data-session-card="${id}"]`)!;
+      fireEvent.click(within(card).getByTitle('Sending and connection'));
+      return screen.findByRole('dialog', { name: /Sending to / });
     };
-    await pause();
-    await screen.findAllByRole('button', { name: 'Check again' });
+    let dialog = await openDispatch(route.session_id);
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Pause sending' }));
+    await within(dialog).findByRole('button', { name: 'Check again' });
     const original = structuredClone(mutations(transport, 'binding_pause')[0]);
-    expect(screen.getByText(/^Pausing sending isn’t confirmed yet\./)).toBeTruthy();
-    expect(screen.getByText('Your last change wasn’t confirmed.')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /Close .* tab/ }));
-    await screen.findByRole('heading', { name: 'Projects' });
-    await allSessions(); await openSession(secondId);
-    expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull();
-    await pause();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+    dialog = await openDispatch(secondId);
+    expect(within(dialog).queryByRole('button', { name: 'Check again' })).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Pause sending' }));
     await waitFor(() => expect(mutations(transport, 'binding_pause')).toHaveLength(2));
     expect(mutations(transport, 'binding_pause')[1].session?.session_id).toBe(secondId);
-    await allSessions(); await openSession(route.session_id, true);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+    dialog = await openDispatch(route.session_id);
     expect(mutations(transport, 'binding_pause')).toHaveLength(2);
-    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
-    expect(screen.getByRole('menuitem', { name: 'Close session' }).hasAttribute('disabled')).toBe(true);
-    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
-    fireEvent.click(await screen.findByRole('button', { name: 'Check again' }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Check again' }));
     await waitFor(() => expect(mutations(transport, 'binding_pause')).toHaveLength(3));
     expect(mutations(transport, 'binding_pause')[2]).toEqual(original);
   });
@@ -798,7 +788,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       const request = args.request;
       if ('request' in request && request.request.command === 'item_rounds' && request.request.params.item_id === '1') {
         const session = transport.sessions.get(route.session_id)!;
-        return { api_version: 1, ok: true, data: { kind: 'item_rounds', data: { item_id: '1', rounds: page(projections(session).rounds, session.revision) } } };
+        return { api_version: 1, ok: true, data: { kind: 'item_rounds', data: { item_id: '1', rounds: historyPage(projections(session).rounds, session.revision) } } };
       }
       if ('command' in request && request.command.command === 'preferences_patch'
         && request.command.params.entries.every(entry => entry.kind === 'set_session_view' && entry.preferences.scroll !== null)) {
@@ -897,7 +887,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       const request = args.request;
       if ('request' in request && request.request.command === 'item_rounds' && request.request.params.item_id === '1') {
         const session = transport.sessions.get(route.session_id)!;
-        return { api_version: 1, ok: true, data: { kind: 'item_rounds', data: { item_id: '1', rounds: page(projections(session).rounds, session.revision) } } };
+        return { api_version: 1, ok: true, data: { kind: 'item_rounds', data: { item_id: '1', rounds: historyPage(projections(session).rounds, session.revision) } } };
       }
       if (!rejected && 'command' in request && request.command.command === 'preferences_patch'
         && request.command.params.entries.every(entry => entry.kind === 'set_session_view' && entry.preferences.scroll !== null)) {
@@ -948,7 +938,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
     }
   });
-  it.each(['parent selection', 'tab close', 'read failure'])('preserves the latest selection after %s during late catalogue completion', async outcome => {
+  it.each(['parent selection', 'page departure', 'read failure'])('preserves the latest selection after %s during late catalogue completion', async outcome => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[data-item-id="1"]')!);
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
@@ -986,15 +976,15 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
       await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
       await waitFor(() => expect(search.hasAttribute('disabled')).toBe(false));
-    } else if (outcome === 'tab close') {
-      fireEvent.click(screen.getByRole('button', { name: /Close .* tab/ }));
+    } else if (outcome === 'page departure') {
+      await navigatePage('Projects');
       await screen.findByRole('heading', { name: 'Projects' });
     }
     await act(async () => { releaseRead(); await readGate; });
     await waitFor(() => expect(completed).toBe(true));
-    if (outcome === 'tab close') {
+    if (outcome === 'page departure') {
       expect(screen.queryByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' })).toBeNull();
-      expect(transport.preferences.sessions[0].tab_open).toBe(false);
+      expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'projects' });
     } else expect(await screen.findByLabelText(/^Detail of /, { selector: `[data-detail-item-id="${outcome === 'parent selection' ? '1' : '1.1'}"]` })).toBeTruthy();
     // A coalesced successful read after the rejected capture clears its banner.
     if (outcome === 'read failure') await waitFor(() => expect(document.querySelector('.nav-banner[role="alert"]')).toBeNull());
@@ -1088,6 +1078,70 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     expect(screen.getByRole('region', { name: 'Answer dock' }).getAttribute('data-open')).toBe(open);
     expect(screen.queryByRole('button', { name: /Waiting on me/ })).toBeNull();
   });
+
+  it('leaves removed chrome shortcuts unbound, including while typing', async () => {
+    const { transport } = setup(); await openSession();
+    const root = document.querySelector('.product-app')!, before = JSON.stringify(transport.preferences.global);
+    for (const key of ['w', 'e', 'l', 'x']) fireEvent.keyDown(root, { key });
+    fireEvent.keyDown(root, { key: 'j', metaKey: true });
+    fireEvent.keyDown(document.querySelector('[data-shell-search]')!, { key: 'w' });
+    await act(async () => { await Promise.resolve(); });
+    expect(JSON.stringify(transport.preferences.global)).toBe(before);
+    expect(mutations(transport, 'input_submit')).toHaveLength(0);
+  });
+
+  it('opens and closes Help and the switcher with their shortcuts while blocking item actions behind them', async () => {
+    const { transport } = setup(); await openSession();
+    const selected = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
+    fireEvent.click(selected); await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
+    fireEvent.keyDown(document.body, { key: '?' });
+    const help = await screen.findByRole('dialog', { name: 'Help' });
+    expect(within(help).getByRole('tab', { name: 'Keys' }).getAttribute('aria-selected')).toBe('true');
+    const before = transport.mutations.length;
+    for (const key of ['a', 'd', 'h', 'Backspace', 'Delete', 'c', 'z']) fireEvent.keyDown(selected, { key });
+    expect(transport.mutations).toHaveLength(before);
+    fireEvent.keyDown(document.body, { key: '?' }); expect(screen.queryByRole('dialog', { name: 'Help' })).toBeNull();
+    fireEvent.keyDown(document.body, { key: 'o', metaKey: true });
+    await screen.findByRole('dialog', { name: 'Switch session or project' });
+    for (const key of ['d', 'h', 'Backspace', 'Delete', 'z']) fireEvent.keyDown(selected, { key });
+    expect(transport.mutations).toHaveLength(before);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Switch session or project' })).toBeNull();
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
+  });
+
+  it('toggles the status filter with f while letters in search remain text', async () => {
+    setup(); await openSession();
+    const button = screen.getByRole('button', { name: 'Filter by status' }), root = document.querySelector('.product-app')!;
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.keyDown(root, { key: 'f' }); expect(button.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.keyDown(screen.getByLabelText('Search questions and outcomes'), { key: 'f' }); expect(button.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.keyDown(root, { key: 'f' }); expect(button.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('acts on the selected item when another row has keyboard focus or pointer hover', async () => {
+    const { transport } = setup(); await openSession();
+    const selected = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
+    const other = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
+    fireEvent.click(selected);
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('4'));
+    fireEvent.mouseEnter(other); other.focus(); fireEvent.keyDown(other, { key: 'h' });
+    await waitFor(() => expect(transport.preferences.sessions[0].hidden_item_ids).toEqual(['4']));
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('4');
+    expect(mutations(transport, 'input_submit')).toHaveLength(0);
+  });
+
+  it('keeps a as Ack only when a waiting question is selected', async () => {
+    const { transport } = setup(); await openSession();
+    const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
+    fireEvent.click(row); await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('2'));
+    row.focus(); fireEvent.keyDown(row, { key: 'a' });
+    await act(async () => { await Promise.resolve(); });
+    expect(document.activeElement).toBe(row);
+    expect(mutations(transport, 'input_submit')).toHaveLength(0);
+    expect(mutations(transport, 'ack')).toHaveLength(0);
+  });
+
   it('leaves the reply box with Escape, then closes detail with Escape, and keeps the draft for reopening', async () => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[data-item-id="8"]')!);
@@ -1108,13 +1162,13 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     expect((await screen.findByLabelText('Reply message') as HTMLTextAreaElement).value).toBe('Retain this draft when Escape closes detail.');
     expect(mutations(transport, 'input_submit')).toHaveLength(0);
   });
-  it('retains an unsent owner draft across tab close and reopen', async () => {
+  it('retains an unsent owner draft across page departure and reopen', async () => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[data-item-id="8"]')!);
     fireEvent.click(await screen.findByRole('button', { name: 'Reply' }));
     fireEvent.change(await screen.findByLabelText('Reply message'), { target: { value: 'Keep this draft across views.' } });
     await waitFor(() => expect(transport.preferences.drafts.some(draft => draft.text === 'Keep this draft across views.')).toBe(true));
-    fireEvent.click(screen.getByRole('button', { name: /Close .* tab/ }));
+    await navigatePage('Projects');
     await screen.findByRole('heading', { name: 'Projects' });
     await allSessions(); await openSession();
     fireEvent.click(await screen.findByRole('button', { name: 'Reply' }));

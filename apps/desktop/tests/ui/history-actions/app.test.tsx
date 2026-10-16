@@ -12,7 +12,7 @@ async function openSource() {
   await goToSession(route); await screen.findByRole('tree', { name: 'Session items' });
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
     });
 }
 it.each(['Cancel', 'Escape', 'Close session'])('returns focus to Session actions after %s through an asynchronous lifecycle review', async finish => {

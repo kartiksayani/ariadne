@@ -1,28 +1,38 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AdapterConfig, ProjectSummary, SummaryCounts } from '../../generated/domain/models';
-import type { NavigationSelection, SessionPreferences, SessionRef } from '../../generated/core';
+import type { SessionPreferences, SessionRef } from '../../generated/core';
 import { plainFailure } from '../../data/plain';
 import { CoreFailure } from '../../data/service';
 import { useSession, type Immutable, type SessionStore } from '../../data/session-store';
 import { NavigationStore, useNavigation, type LayoutChange, type NavigationState } from '../../state/navigation/store';
+import { currentSession, NavigationProvider, viewOf, type PageName } from '../../state/navigation/view';
+import { useIntents } from '../../ui/intents';
+import { useDock } from '../../ui/dock/api';
 import { SessionActionControllers } from '../bindings/actions';
 import { RegisterProject, BindSession } from './Registration';
 import type { DiscoveryController } from '../../data/discovery';
 import { Shell } from '../../ui/shell/Shell';
 import { DetailsColumn } from '../../ui/shell/DetailsColumn';
-import { Footer } from '../../ui/shell/Footer';
-import { Header, type HeaderProps } from '../../ui/shell/Header';
-import { TabBar } from '../../ui/shell/TabBar';
-import { agentName, footerSummary, headerText, tabModels, type ConversationFooterState, type HeaderInput, type SessionFacts } from '../../ui/shell/model';
+import type { ShellTheme } from '../../ui/shell/model';
+import type { TextSize } from '../../ui/shell/textScale';
+import { NARROW_BELOW } from '../../ui/topbar/model';
+import { SwitcherMenu } from '../../ui/topbar/SwitcherMenu';
+import { HelpPanel } from '../../ui/help/HelpPanel';
+import { WorkspaceTopBar } from './WorkspaceTopBar';
+import { WaitingStore, useWaiting } from '../../selectors/waiting/store';
+import { switcherData } from '../../state/navigation/switcher';
+import { ArchivePage } from '../../ui/pages/ArchivePage';
 import type { RemoveHandler } from '../../ui/dialogs/remove';
 import { ProjectsPage } from '../../ui/pages/ProjectsPage';
-import { SessionLists, type SessionGroup } from '../../ui/pages/SessionLists';
+import { SessionLists } from '../../ui/pages/SessionLists';
+import { FirstRun } from '../../ui/pages/FirstRun';
+import { copyText } from '../../ui/shared/clipboard';
 import { LoadingSession } from '../../ui/pages/SessionStates';
 import { notices } from '../../ui/pages/notices';
 import { conflictNotice, isViewConflict } from '../../ui/shared/conflictNotice';
 import { useSessionSnapshots } from '../../ui/pages/snapshots';
 import { useHidden } from '../../ui/remove/queue';
-import { isRunning } from '../../ui/pages/model';
+import { SessionLifecycleOwner } from '../../ui/shared/SessionLifecycleOwner';
 import '../../styles/navigation.css';
 
 export interface AdapterChoice { readonly adapter_id: string; readonly label: string; readonly configuration: AdapterConfig;
@@ -40,14 +50,12 @@ export interface NavigationWorkspaceProps {
   /** The answer dock; it floats over the Map and Details. Absent on pages. */
   readonly dockContent?: ReactNode;
   readonly conversation?: ReactNode;
-  readonly conversationFooter?: ConversationFooterState;
+  readonly waitingStore?: WaitingStore;
   readonly detail?: ReactNode;
   /** The detail header's breadcrumb. */
   readonly detailPath?: ReactNode;
-  /** Header controls owned by the composition: search, views and theme. */
-  readonly chrome?: Omit<HeaderProps, 'text' | 'disabled'>;
-  /** Facts for the selected session tab's header; null while it opens. */
-  readonly session?: SessionFacts | null;
+  /** Top bar controls owned by the composition: search, views, filter, Recent, text size and theme. */
+  readonly chrome?: WorkspaceChrome;
   readonly onCloseDetail?: () => void;
   /** The detail column's trash button: asks to remove the item it shows. */
   readonly onRemove?: () => void;
@@ -66,8 +74,36 @@ export interface NavigationWorkspaceProps {
 const key = (route: SessionRef) => JSON.stringify([route.project_id, route.session_id]);
 const projectName = (project: Immutable<ProjectSummary>) => project.project?.display_name ?? 'Unavailable project';
 const partial = (counts: Immutable<SummaryCounts>) => counts.completeness === 'partial';
-const running = isRunning;
-const defaultChrome: Omit<HeaderProps, 'text' | 'disabled'> ={ query: '', views: null, theme: 'dark' };
+/** What the App gives the top bar for the session on screen. Absent controls show disabled. */
+export interface WorkspaceChrome {
+  readonly query: string;
+  readonly onQueryChange?: (query: string) => void;
+  readonly graph?: boolean;
+  readonly onView?: (view: 'tree' | 'graph') => void;
+  readonly filter?: { readonly active: boolean; readonly count: number; readonly onToggle: () => void };
+  readonly onRecent?: () => void;
+  readonly theme: ShellTheme;
+  readonly onToggleTheme?: () => void;
+  readonly textSize?: TextSize;
+  readonly onTextSizeChange?: (size: TextSize) => void;
+  /** The bigger view covers the Map, so search waits (as `/` does). */
+  readonly searchBlocked?: boolean;
+}
+const defaultChrome: WorkspaceChrome = { query: '', theme: 'dark' };
+const noop = () => {};
+/** The board's wide frame is 1280 and its narrow one 900; below NARROW_BELOW the bar keeps its five main controls. */
+function useNarrow(): boolean {
+  const query = useMemo(() => typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia(`(max-width: ${NARROW_BELOW - 0.02}px)`) : null, []);
+  const [narrow, setNarrow] = useState(() => query?.matches ?? false);
+  useEffect(() => {
+    if (!query) return undefined;
+    const change = () => setNarrow(query.matches);
+    change(); query.addEventListener('change', change);
+    return () => query.removeEventListener('change', change);
+  }, [query]);
+  return narrow;
+}
 
 /** Saved binding-connect receipt: what to give the host, plus capabilities the owner cannot rely on. */
 function SetupCard({ setup, adapterId, onDismiss }: { setup: NonNullable<NavigationState['setup']>; adapterId: string | null; onDismiss: () => void }) {
@@ -122,16 +158,16 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   if (session.status === 'loading' && !session.snapshot) return <LoadingSession />;
   return <>
     {session.error && <p role="alert">{plainFailure(session.error)}</p>}
-    {session.snapshot?.session.state === 'closed' && <p className="nav-banner">{session.snapshot.session.archived_at != null ? 'Archived session · restore it, then reopen it to resume sending.' : 'Closed session · opening this tab does not resume dispatch.'}</p>}
     {matchingReveal?.kind === 'missing_item' && <p className="nav-banner" role="status">{matchingReveal.banner}</p>}
     {renderSession({ store, preferences, temporaryExpandedItemIds: matchingReveal?.kind === 'item' ? matchingReveal.temporaryExpandedItemIds : [],
       missingItemBanner: matchingReveal?.kind === 'missing_item' ? matchingReveal.banner : null })}
   </>;
 }
 
-export function NavigationWorkspace({ store, discovery, dockContent, conversation, conversationFooter, detail, detailPath, chrome, session, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
+export function NavigationWorkspace({ store, discovery, dockContent, waitingStore, conversation, detail, detailPath, chrome = defaultChrome, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
   actions: injectedActions, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
+  const dock = useDock();
   const transientError = !state.pendingOperationId && state.error === store.getMutationFailure() ? state.error : null;
   useEffect(() => () => notices.dismiss('navigation-action-failed'), [store]);
   useEffect(() => {
@@ -160,6 +196,40 @@ export function NavigationWorkspace({ store, discovery, dockContent, conversatio
   }, [store, transientError]);
   const ownActions = useMemo(() => injectedActions ? null : new SessionActionControllers(store.service), [injectedActions, store]);
   const actions = injectedActions ?? ownActions!;
+  const ownWaiting = useMemo(() => waitingStore ? null : new WaitingStore(store.service, store.opened), [waitingStore, store]);
+  const waiting = waitingStore ?? ownWaiting!;
+  const waitingState = useWaiting(waiting);
+  useEffect(() => { void waiting.start(); return () => { ownWaiting?.stop(); }; }, [waiting, ownWaiting]);
+  const [switcherOpen, setSwitcherOpen] = useState(false), [helpOpen, setHelpOpen] = useState(false);
+  const closeSwitcher = useCallback(() => setSwitcherOpen(false), []);
+  const closeHelp = useCallback(() => setHelpOpen(false), []);
+  const narrow = useNarrow();
+  // The search field shows while it holds words or since `/` or a click opened it.
+  const [searchOpen, setSearchOpen] = useState(false);
+  // The connection line above the Map is drawn by the top bar's session (it shares the card's actions) into this slot.
+  const [lineHost, setLineHost] = useState<HTMLDivElement | null>(null);
+  const searchShown = searchOpen || !!chrome.query;
+  // While the switcher or Help is open, keys are theirs: Esc closes either, and ? closes Help (SPEC §5.16).
+  useIntents({
+    'switcher.open': () => { if (navigationDisabled || view.kind === 'first-run') return false; setHelpOpen(false); setSwitcherOpen(true); return true; },
+    'help.toggle': () => { setSwitcherOpen(false); setHelpOpen(open => !open); return true; },
+    'search.focus': () => {
+      if (view.kind !== 'session' || !chrome.onQueryChange || chrome.searchBlocked) return false;
+      setSearchOpen(true);
+      document.querySelector<HTMLInputElement>('.tb-search-input')?.focus();
+      return true;
+    },
+  });
+  useEffect(() => {
+    if (!helpOpen) return undefined;
+    const question = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== '?' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+      if (event.target instanceof Element && event.target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])')) return;
+      event.preventDefault(); setHelpOpen(false);
+    };
+    document.addEventListener('keydown', question, true);
+    return () => document.removeEventListener('keydown', question, true);
+  }, [helpOpen]);
   const [registering, setRegistering] = useState(false);
   const [registrationRoot, setRegistrationRoot] = useState('');
   const [binding, setBinding] = useState<Immutable<ProjectSummary> | null>(null);
@@ -167,17 +237,17 @@ export function NavigationWorkspace({ store, discovery, dockContent, conversatio
   // The composition that owns this injected store disposes it. A view mount
   // must not permanently stop a shared store during React's effect replay.
   useEffect(() => { void store.start(); }, [store]);
-  const selection: Immutable<NavigationSelection> = state.preferences?.global.selected_navigation ?? { kind: 'projects' };
-  // A pending project or session removal hides its cards and tabs until it runs or is undone.
+  // A pending project or session removal hides its cards and rows until it runs or is undone.
   const hidden = useHidden();
+  const view = viewOf(state, id => hidden.project(id));
+  const pageProjectId = view.kind === 'page' ? view.projectId ?? null : null;
   const projects = (state.projects?.projects.items ?? []).filter(project => !hidden.project(project.project_id));
-  const projectId = selection.kind === 'project' ? selection.project_id : null;
-  const matchingSessions = state.sessionProjectId === projectId ? state.sessions : null;
+  const matchingSessions = state.sessions;
   const sessions = (matchingSessions?.sessions.items ?? []).filter(session => !hidden.session(session));
-  const selectedProject = selection.kind === 'project' ? projects.find(project => project.project_id === selection.project_id) : null;
-  const selectedSession = selection.kind === 'session' ? sessions.find(session => key(session) === key(selection.session)) : null;
+  const selectedProject = pageProjectId ? projects.find(project => project.project_id === pageProjectId) : null;
   const mutationDisabled = refreshPending || state.writing || state.pendingOperationId !== null;
   const disabled = mutationDisabled || !state.preferences;
+  // Navigation stays open during an owner write: a switcher choice queues as the newest navigation and runs after it.
   const navigationDisabled = refreshPending || !state.preferences;
   const refresh = async () => {
     if (refreshPending) return;
@@ -185,7 +255,7 @@ export function NavigationWorkspace({ store, discovery, dockContent, conversatio
     try { await store.refresh(); }
     finally { setRefreshPending(false); }
   };
-  const select = (next: NavigationSelection) => { void store.navigate(next); };
+  const showPage = (page: PageName, projectId?: string) => { store.openPage({ kind: 'page', page, ...(projectId ? { projectId } : {}) }); };
   // Layout choices apply at once; the saved preferences catch up when the write lands.
   const [layout, setLayout] = useState<LayoutChange>({});
   const shown: LayoutChange = { detail_width: state.preferences?.global.detail_width, ...layout };
@@ -193,38 +263,29 @@ export function NavigationWorkspace({ store, discovery, dockContent, conversatio
     setLayout(current => ({ ...current, ...change }));
     if (state.preferences) void store.saveLayout(change, state.preferences.revision);
   };
-  const openViews: readonly Immutable<SessionPreferences>[] = state.preferences?.sessions.filter(view => view.tab_open && !hidden.session(view.session))
-    .sort((a, b) => a.tab_order - b.tab_order || key(a.session).localeCompare(key(b.session))) ?? [];
-  const archivedTab = (view: Immutable<SessionPreferences>) => {
-    const summary = sessions.find(value => key(value) === key(view.session));
-    return summary ? summary.archived_at != null : store.opened.get(view.session)?.getSnapshot().snapshot?.session.archived_at != null;
-  };
-  const unarchivedViews = openViews.filter(view => !archivedTab(view));
-  const projectNameOf = (projectId: string) => { const project = projects.find(value => value.project_id === projectId); return project ? projectName(project) : 'Unavailable project'; };
   const at = now();
-  const tabs = tabModels({ selection: selection.kind === 'project' ? 'projects' : selection.kind, projectCount: projects.length,
-    sessions: openViews.map(view => {
-      const summary = sessions.find(value => key(value) === key(view.session));
-      return { id: key(view.session), archived: archivedTab(view), project: projectNameOf(view.session.project_id), agent: summary?.active_binding ? agentName(summary.active_binding.adapter_id) : null,
-        where: summary?.active_binding?.host_location ?? null, naming: summary,
-        createdAt: summary ? Date.parse(summary.created_at) : null, endedAt: summary ? Date.parse(summary.closed_at ?? summary.updated_at) : null, running: summary ? running(summary) : false,
-        on: selection.kind === 'session' && key(selection.session) === key(view.session) };
-    }) }, at);
-  const selectTab = (id: string) => {
-    if (id === 'projects' || id === 'all_sessions') { select({ kind: id }); return; }
-    const view = openViews.find(value => key(value.session) === id);
-    if (view) select({ kind: 'session', session: view.session });
+  const last = currentSession(state);
+  // A single project's page lists only its own sessions; the waiting capture lists every unarchived one.
+  const lastSummary = sessions.find(value => last && key(value) === key(last))
+    ?? waitingState.sessions.find(value => last && key(value.summary) === key(last))?.summary;
+  const lastProject = projects.find(value => value.project_id === last?.project_id);
+  const firstRun = view.kind === 'first-run';
+  const screen = view.kind === 'first-run' ? 'first_run' : view.kind === 'session' ? 'map'
+    : view.page === 'archive' ? 'archive' : view.page === 'sessions' ? 'all_sessions' : 'projects';
+  const switcher = switcherData({ projects, sessions: waitingState.sessions, waiting: waitingState.waiting, current: last, now: at,
+    hiddenSession: route => hidden.session(route) });
+  // Opens a session, then the dock at one of its questions (C6: the dock opens it once that session loads).
+  const openAt = (route: SessionRef, itemId?: string) => {
+    void store.navigate({ kind: 'session', session: route }).then(saved => { if (saved && itemId) dock.openAt({ route, itemId }); });
   };
-  const closeTab = (id: string) => { const view = openViews.find(value => key(value.session) === id); if (view) void store.closeTab(view.session); };
-  const headerInput: HeaderInput = selection.kind === 'all_sessions'
-    ? { kind: 'all_sessions', openTabs: unarchivedViews.length, openProjects: new Set(unarchivedViews.map(view => view.session.project_id)).size }
-    : selection.kind === 'session' ? { kind: 'session', facts: session ?? null, fallbackAgent: selectedSession?.active_binding ? agentName(selectedSession.active_binding.adapter_id) : null }
-      : { kind: 'projects', projectCount: projects.length, runningAgents: sessions.filter(running).length, projectPath: selectedProject?.canonical_root ?? null };
-  const global = state.projects?.counts;
-  const listing = selection.kind !== 'session';
+  const returnToWaiting = () => {
+    if (!last) return;
+    openAt(last, switcher.projects.flatMap(project => project.sessions).find(value => value.current)?.waiting[0]?.itemId);
+  };
+  const listing = view.kind === 'page';
   // Message counts, topic chips and remove counts come from each listed session's snapshot.
   const snapshots = useSessionSnapshots(listing ? store.service : null, listing ? sessions : []);
-  const counts = selection.kind === 'projects' ? state.projects?.counts : matchingSessions?.counts;
+  const counts = view.kind === 'page' && view.page === 'projects' ? state.projects?.counts : matchingSessions?.counts;
   // The connect card belongs to the project page it was made on, directly under the project header,
   // and goes with its session: dismissed, removed (or pending removal), or another page shown.
   const setup = state.setup;
@@ -232,17 +293,15 @@ export function NavigationWorkspace({ store, discovery, dockContent, conversatio
     && !sessions.some(summary => summary.session_id === setup.session_id && summary.archived_at != null)
     && !hidden.session({ project_id: selectedProject.project_id, session_id: setup.session_id })
     ? <SetupCard setup={setup} adapterId={state.setupAdapterId} onDismiss={() => store.dismissSetup()} /> : null;
-  const openTabs = new Set(openViews.map(view => key(view.session)));
   const register = (root: string) => { setRegistrationRoot(root); setRegistering(true); };
-  const openSession = (route: SessionRef) => select({ kind: 'session', session: route });
-  const openProject = (id: string) => select({ kind: 'project', project_id: id });
-  // All sessions (1z) lists the projects that have open tabs, in tab order.
-  const openProjectIds = [...new Set(openViews.map(view => view.session.project_id))];
-  const groups: readonly SessionGroup[] = selection.kind === 'project'
-    ? selectedProject ? [{ project: selectedProject, openLink: false, extra: setupCard,
-      tools: <button type="button" className="btn btn-ghost pw-group-link" disabled={disabled || selectedProject.availability !== 'available' || adapterChoices.length === 0}
-        onClick={() => setBinding(selectedProject)}><i className="ph ph-plugs-connected" aria-hidden="true" />Connect existing session</button> }] : []
-    : openProjectIds.flatMap(id => { const project = projects.find(value => value.project_id === id); return project ? [{ project, openLink: true }] : []; });
+  const openSession = (route: SessionRef) => { void store.navigate({ kind: 'session', session: route }); };
+  const openProject = (id: string) => showPage('sessions', id);
+  // "← cache PR review" returns to the session; a project's page goes back to Projects.
+  const back = pageProjectId ? { label: 'Projects', onBack: () => showPage('projects') }
+    : last ? { label: lastSummary?.name?.trim() || lastSummary?.title || 'Back to session', onBack: () => openSession(last) } : undefined;
+  const connectExisting = selectedProject && <div className="pw-page-notes"><button type="button" className="btn btn-ghost pw-group-link"
+    disabled={disabled || selectedProject.availability !== 'available' || adapterChoices.length === 0}
+    onClick={() => setBinding(selectedProject)}><i className="ph ph-plugs-connected" aria-hidden="true" />Connect existing session</button></div>;
   const notes = <>
     {state.error && !transientError && <div className="nav-banner" role="alert"><p>{plainFailure(state.error)}</p>
       {state.pendingOperationId ? <><p>Ariadne isn’t sure your last change was saved. Check before changing anything else.</p>
@@ -253,42 +312,69 @@ export function NavigationWorkspace({ store, discovery, dockContent, conversatio
     {state.status === 'stale' && <p className="pw-page-note" role="status">Showing the last complete catalogue. Refresh failed.</p>}
     {counts && partial(counts) && <p className="pw-page-note" role="status">Counts are incomplete. Unavailable sessions: {counts.unavailable_session_ids.join(', ') || 'not individually identified'}.</p>}
   </>;
-  const sessionNote = selection.kind !== 'projects' && !matchingSessions
+  const sessionNote = view.kind === 'page' && view.page !== 'projects' && !matchingSessions
     && <p className="pw-page-note" role="status">{state.error ? 'Sessions are unavailable for this view.' : 'Loading sessions…'}</p>;
-  const page = selection.kind === 'session' ? null : selection.kind === 'projects'
-    ? <ProjectsPage projects={projects} sessions={sessions} snapshots={snapshots} now={at} discovered={state.status === 'ready' && state.preferences?.sessions.length === 0 && projects.length > 0}
-      disabled={mutationDisabled} navigationDisabled={navigationDisabled} discovery={discovery} onOpen={openProject} onRegister={register} onRemove={onRemoveTarget}>
+  // The setup instruction a Codex thread needs comes from the last connect receipt, when there is one.
+  const instruction = setup?.data.kind === 'binding_connect' ? setup.data.setup_instruction : null;
+  const copyWords = (text: string, done: string) => {
+    void copyText(text).then(() => notices.push({ icon: 'ph ph-check-circle', text: done }),
+      () => notices.push({ icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)', tone: 'problem', text: 'Copy failed. Try again.' }));
+  };
+  const page = view.kind === 'page' && view.page === 'archive'
+    ? <ArchivePage navigation={store} actions={actions} projects={projects} sessions={sessions} snapshots={snapshots} now={at} disabled={disabled} back={back} onRemove={onRemoveTarget} />
+    : firstRun ? <FirstRun command="/ariadne-connect" onCopyCommand={() => copyWords('/ariadne-connect', 'Command copied.')}
+      onCopyInstruction={() => { if (instruction) copyWords(instruction, 'Instruction copied.'); else register(''); }} />
+    : view.kind === 'session' ? null : view.page === 'projects'
+    ? <ProjectsPage currentSession={last} projects={projects} sessions={sessions} snapshots={snapshots} now={at} back={back} disabled={disabled}
+      discovery={discovery} onOpen={openProject} onOpenSession={openSession} onRegister={register} onRemove={onRemoveTarget}>
       {state.status === 'ready' && projects.length === 0 && <p className="pw-page-note">No registered projects. Register a project to connect an existing session.</p>}
     </ProjectsPage>
-    : <SessionLists navigation={store} actions={actions} groups={groups} sessions={sessions} snapshots={snapshots} openTabs={openTabs} now={at} disabled={disabled} navigationDisabled={navigationDisabled}
-      onBack={selection.kind === 'project' ? () => select({ kind: 'projects' }) : undefined}
-      overview={selection.kind === 'all_sessions' ? { sub: openProjectIds.length
-        ? `Every session in ${openProjectIds.map(projectNameOf).join(' and ')}` : 'Open a session from Projects to see it here.' } : undefined}
-      onOpenProject={openProject} onOpenSession={openSession} onRemove={onRemoveTarget}>
+    : <SessionLists navigation={store} actions={actions} projects={selectedProject ? [selectedProject] : pageProjectId ? [] : projects} single={!!pageProjectId}
+      sessions={sessions} currentSession={last} now={at} narrow={narrow} disabled={disabled} back={back} onOpenArchive={() => showPage('archive')} onOpenSession={openSession}
+      notes={setupCard}>
+      {connectExisting}
       {sessionNote}
-      {selection.kind === 'project' && !selectedProject && state.status === 'ready' && <p className="pw-page-note">This project is no longer registered.</p>}
+      {pageProjectId && !selectedProject && state.status === 'ready' && <p className="pw-page-note">This project is no longer registered.</p>}
     </SessionLists>;
   const center = <>
     {page && <div className="pw-page-notes">{notes}</div>}
-    {page ?? <div className="nav-content nav-session-content">{notes}<SelectedSession navigation={store} renderSession={renderSession} /></div>}
+    {page ?? <div className="nav-content nav-session-content">{notes}<div className="nav-connection-line" ref={setLineHost} /><SelectedSession navigation={store} renderSession={renderSession} /></div>}
     {state.pendingNavigation && <p className="nav-opening" role="status">{state.pendingNavigation.kind === 'all_sessions'
       ? 'Opening All sessions…' : state.pendingNavigation.kind === 'projects' ? 'Opening Projects…'
         : state.pendingNavigation.kind === 'project' ? 'Opening the project…' : 'Opening the session…'}</p>}
   </>;
-  const summary = footerSummary(global ? { items: Object.values(global.items_by_status).reduce((sum, count) => sum + count, 0), waiting: global.waiting_unanswered,
-    inProgress: global.items_by_status.in_progress, open: global.items_by_status.open, archivedTopics: global.archived_topics } : null);
-  return <Shell topBar={<>
-    <Header {...defaultChrome} {...chrome} text={headerText(headerInput, at)} disabled={disabled} />
-    <TabBar tabs={tabs} disabled={navigationDisabled} closeDisabled={disabled} onSelect={selectTab} onClose={closeTab} />
-  </>}
+  const onSession = view.kind === 'session';
+  const bar = {
+    narrow, variant: firstRun ? 'first-run' as const : page ? 'page' as const : 'session' as const, disabled, switcherDisabled: navigationDisabled,
+    sessionName: lastSummary?.name?.trim() || lastSummary?.title || (screen === 'archive' ? 'Archive' : screen === 'all_sessions' ? 'All sessions' : 'Projects'),
+    project: lastProject ? projectName(lastProject) : undefined, otherWaiting: switcher.otherWaitingCount,
+    switcherOpen, onSwitcherToggle: () => { setHelpOpen(false); setSwitcherOpen(value => !value); },
+    waitingHere: page ? switcher.thisWaitingCount : 0, onWaitingHere: returnToWaiting,
+    search: { active: onSession && searchShown, query: chrome.query, onOpen: () => { if (onSession && chrome.onQueryChange) setSearchOpen(true); },
+      onQuery: (text: string) => chrome.onQueryChange?.(text), onClear: () => { chrome.onQueryChange?.(''); setSearchOpen(false); } },
+    view: chrome.graph ? 'graph' as const : 'tree' as const, onView: chrome.onView ?? noop,
+    filter: chrome.filter ?? { active: false, count: 0, onToggle: noop },
+    recent: { active: false, onToggle: chrome.onRecent ?? noop },
+    archive: { active: view.kind === 'page' && view.page === 'archive', onOpen: () => showPage('archive') },
+    textSize: chrome.textSize ?? 80, onTextSizeChange: chrome.onTextSizeChange ?? noop,
+    theme: chrome.theme, onToggleTheme: chrome.onToggleTheme ?? noop,
+    help: { open: helpOpen, onToggle: () => { setSwitcherOpen(false); setHelpOpen(value => !value); } },
+  };
+  // The bar carries the connection of the session on screen, or of the one a page returns to.
+  const barSession = onSession ? store.selectedSession() : last ? store.opened.get(last) ?? null : null;
+  // Pages take the place of the Map, Waiting and Details (SPEC §6.16).
+  // The bar's session owns one lifecycle: the connection card, the Map and a page row share its review and Undo.
+  const barActions = barSession ? actions.forSession(barSession) : null;
+  return <NavigationProvider store={store} waiting={waiting}><SessionLifecycleOwner actions={barActions}><Shell topBar={<WorkspaceTopBar bar={bar} store={barSession} controllers={actions} line={onSession ? lineHost : null} />}
     main={center}
-    side={detail ? <DetailsColumn path={detailPath} onClose={onCloseDetail} onRemove={onRemove} hidden={hiddenItem} hiddenNotice={hiddenNotice} onHide={onHide}
+    side={detail && !page ? <DetailsColumn path={detailPath} onClose={onCloseDetail} onRemove={onRemove} hidden={hiddenItem} hiddenNotice={hiddenNotice} onHide={onHide}
       onResize={width => saveLayout({ detail_width: width })}>{detail}</DetailsColumn> : undefined}
-    footer={<Footer summary={summary} conversation={conversation ? conversationFooter ?? { question: false } : undefined} />}
-    dock={dockContent}
-    legacy={{ conversation, sideWidth: shown.detail_width ?? null }}
-    overlay={registering
+    dock={page ? undefined : dockContent}
+    legacy={page ? undefined : { conversation, sideWidth: shown.detail_width ?? null }}
+    overlay={<>{switcherOpen && <SwitcherMenu projects={switcher.projects} onClose={closeSwitcher}
+      onOpenSession={(target, _projectId, itemId) => openAt(target.route, itemId)} onOpenPage={page => showPage(page)} />}
+    {helpOpen && <HelpPanel narrow={narrow} onClose={closeHelp} />}{registering
       ? <RegisterProject store={store} initialRoot={registrationRoot} disabled={mutationDisabled} close={() => setRegistering(false)} />
       : binding ? <BindSession store={store} project={binding} sessions={sessions.filter(session => session.project_id === binding.project_id)}
-        adapters={adapterChoices} discovery={discovery} disabled={mutationDisabled} close={() => setBinding(null)} /> : undefined} />;
+        adapters={adapterChoices} discovery={discovery} disabled={mutationDisabled} close={() => setBinding(null)} /> : undefined}</>} /></SessionLifecycleOwner></NavigationProvider>;
 }

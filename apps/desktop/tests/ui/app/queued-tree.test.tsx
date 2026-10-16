@@ -35,7 +35,7 @@ describe('queued navigation in the current tree', () => {
     Object.assign(transport.preferences.sessions[0], { tab_open: true, expanded_item_ids: expanded });
     render(<DesktopApp service={createDesktopService(transport)} />);
     await screen.findByRole('region', { name: 'Session tree' });
-    await waitFor(() => expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false'));
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false'));
     const tree = screen.getByRole('tree', { name: 'Session items' });
     const rows = () => [...tree.querySelectorAll<HTMLElement>('.tree-item')];
     const originalRows = rows();
