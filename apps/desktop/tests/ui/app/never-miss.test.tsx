@@ -3,12 +3,12 @@
 //
 // | Screen                         | Waiting in this session                    | Waiting in another session            |
 // |--------------------------------|--------------------------------------------|---------------------------------------|
-// | The session's Map              | its Waiting line (the dock, once it lands) | the pill on the switcher button       |
+// | The session's Map              | the answer dock's line                     | the pill on the switcher button       |
 // | Projects, All sessions, Archive| "N waiting in this session" chip           | the pill on the switcher button       |
 // | The switcher, open             | (the Map behind it)                        | the question, under its session's row |
 // | First run (no projects)        | none can exist                             | none can exist                        |
 //
-// The page chip takes me back to the session at its first waiting question.
+// The page chip takes me back to the session with the dock open at its first waiting question (C6 openAt).
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DesktopApp } from '../../../src/App';
@@ -42,9 +42,9 @@ async function openPage(name: 'Projects' | 'All sessions' | 'Archive') {
 }
 
 describe('never miss a question', { timeout: 20_000 }, () => {
-  it('the Map: this session’s question is on its Waiting line; another session’s is on the switcher button', async () => {
+  it('the Map: this session’s question is on the dock’s line; another session’s is on the switcher button', async () => {
     await setup();
-    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Waiting questions' })).getAllByText(question).length).toBeGreaterThan(0));
+    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Answer dock' })).getAllByText(question).length).toBeGreaterThan(0));
     expect(switcherButton().querySelector('[aria-label*="waiting on you in other sessions"], [title*="waiting on you in other sessions"]')).not.toBeNull();
   });
 
@@ -55,12 +55,23 @@ describe('never miss a question', { timeout: 20_000 }, () => {
     expect(switcherButton().getAttribute('aria-label')).toContain('1 question waiting in other sessions');
   });
 
-  it('the page chip returns to the session at its first waiting question', async () => {
+  it('the page chip returns to the session with the dock open at its first waiting question', async () => {
     await setup();
     await openPage('All sessions');
     fireEvent.click(await screen.findByRole('button', { name: '1 waiting in this session' }));
     await screen.findByRole('region', { name: 'Session tree' });
-    await waitFor(() => expect(document.querySelector('[data-detail-item-id]')?.getAttribute('data-detail-item-id')).toBe('2'));
+    const dock = await screen.findByRole('region', { name: 'Answer dock' });
+    await waitFor(() => expect(dock.getAttribute('data-open')).toBe('true'));
+    expect(dock.querySelector('.dock-question-title')?.textContent).toBe(question);
+  });
+
+  it.each(['the Map', 'the body'] as const)('[ and ] reach the dock as intents: ] from %s opens it at the current question', async from => {
+    await setup();
+    const dock = screen.getByRole('region', { name: 'Answer dock' });
+    expect(dock.getAttribute('data-open')).toBeNull();
+    if (from === 'the body') (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.keyDown(from === 'the Map' ? document.querySelector('.product-app')! : document.body, { key: ']' });
+    await waitFor(() => expect(dock.getAttribute('data-open')).toBe('true'));
   });
 
   it('the switcher, open, names the question waiting in the other session under its row', async () => {

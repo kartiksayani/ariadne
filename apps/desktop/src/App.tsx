@@ -569,7 +569,7 @@ function Workspace({ application }: { application: Application }) {
     <AgentRemovalNotices waiting={application.waiting} controllers={application.actions} navigation={navigation}
       selectedSession={sessionState?.snapshot?.session ?? null} onTree={showBinTree} />
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
-      onRemoveTarget={removeTarget} waitingStore={application.waiting} onOpenWaiting={revealItem}
+      onRemoveTarget={removeTarget} waitingStore={application.waiting}
       chrome={{ query, graph: graph && !archived, onView: store ? showView : undefined, theme: shown, searchBlocked: conversationOpen,
         filter: store ? { active: filterOpen, count: view && hasStatusFilter(view.filters.statuses) ? view.filters.statuses.length : 0, onToggle: () => setFilterOpen(value => !value) } : undefined,
         onRecent: store ? () => { dispatchIntent('recent.open'); } : undefined,

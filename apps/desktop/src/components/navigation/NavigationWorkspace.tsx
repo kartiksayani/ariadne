@@ -7,6 +7,7 @@ import { useSession, type Immutable, type SessionStore } from '../../data/sessio
 import { NavigationStore, useNavigation, type LayoutChange, type NavigationState } from '../../state/navigation/store';
 import { currentSession, NavigationProvider, viewOf, type PageName } from '../../state/navigation/view';
 import { useIntents } from '../../ui/intents';
+import { useDock } from '../../ui/dock/api';
 import { SessionActionControllers } from '../bindings/actions';
 import { RegisterProject, BindSession } from './Registration';
 import type { DiscoveryController } from '../../data/discovery';
@@ -50,8 +51,6 @@ export interface NavigationWorkspaceProps {
   readonly dockContent?: ReactNode;
   readonly conversation?: ReactNode;
   readonly waitingStore?: WaitingStore;
-  /** J1 opens the dock at this question after navigation confirms. */
-  readonly onOpenWaiting?: (question: import('../../generated/core').ItemRoute) => void;
   readonly detail?: ReactNode;
   /** The detail header's breadcrumb. */
   readonly detailPath?: ReactNode;
@@ -165,9 +164,10 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   </>;
 }
 
-export function NavigationWorkspace({ store, discovery, dockContent, waitingStore, onOpenWaiting, conversation, detail, detailPath, chrome = defaultChrome, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
+export function NavigationWorkspace({ store, discovery, dockContent, waitingStore, conversation, detail, detailPath, chrome = defaultChrome, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
   actions: injectedActions, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
+  const dock = useDock();
   const transientError = !state.pendingOperationId && state.error === store.getMutationFailure() ? state.error : null;
   useEffect(() => () => notices.dismiss('navigation-action-failed'), [store]);
   useEffect(() => {
@@ -272,9 +272,9 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
     : view.page === 'archive' ? 'archive' : view.page === 'sessions' ? 'all_sessions' : 'projects';
   const switcher = switcherData({ projects, sessions: waitingState.sessions, waiting: waitingState.waiting, current: last, now: at,
     hiddenSession: route => hidden.session(route) });
-  // Opens a session, then (once it shows) the dock at one of its questions.
+  // Opens a session, then the dock at one of its questions (C6: the dock opens it once that session loads).
   const openAt = (route: SessionRef, itemId?: string) => {
-    void store.navigate({ kind: 'session', session: route }).then(saved => { if (saved && itemId) onOpenWaiting?.({ ...route, item_id: itemId }); });
+    void store.navigate({ kind: 'session', session: route }).then(saved => { if (saved && itemId) dock.openAt({ route, itemId }); });
   };
   const returnToWaiting = () => {
     if (!last) return;

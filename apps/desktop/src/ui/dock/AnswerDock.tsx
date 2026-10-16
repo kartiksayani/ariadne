@@ -16,6 +16,7 @@ import { peekNames } from '../peek/names';
 import { navigationVisits } from '../navigation/visits';
 import { agentName, ownerName } from '../shell/model';
 import { useDockModel } from './api';
+import { useIntents } from '../intents';
 import { dockPath, dockQuestions, sentWaiting, waitingAge } from './model';
 import './dock.css';
 
@@ -85,7 +86,13 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
     return () => { observer?.disconnect(); };
   }, [report, open]);
   useEffect(() => () => report?.(0), [report]);
-  // `[` and `]` anywhere outside a text box or dialog; 1–9 and ⌘↵ only while the open dock has no rival for the focus.
+  // `[` and `]` are intents (ui/keys.ts): the workspace keymap asks for them anywhere outside a text box or dialog.
+  useIntents({
+    'dock.prev': ({ repeat }) => { if (!repeat) model.step(-1); return true; },
+    'dock.next': ({ repeat }) => { if (!repeat) model.step(1); return true; },
+    'dock.fold': () => { if (!model.getSnapshot().open) return false; model.fold(); return true; },
+  });
+  // 1–9 and ⌘↵ only while the open dock has no rival for the focus.
   // Never Esc: Esc belongs to whatever has the focus. A key another handler took (defaultPrevented) is left alone.
   useEffect(() => {
     const keys = (event: globalThis.KeyboardEvent) => {
@@ -94,8 +101,7 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
       if (target?.closest(editable) || document.querySelector('[aria-modal="true"]')) return;
       const inDock = !!target && !!root.current?.contains(target);
       const idle = !document.activeElement || document.activeElement === document.body;
-      if (!event.metaKey && (event.key === '[' || event.key === ']')) model.step(event.key === '[' ? -1 : 1);
-      else if (!model.getSnapshot().open || !(inDock || idle)) return;
+      if (!model.getSnapshot().open || !(inDock || idle)) return;
       else if (!event.metaKey && /^[1-9]$/.test(event.key)) {
         if (inDock && target?.closest('.answer')) return;
         root.current?.querySelector<HTMLButtonElement>(`.answer-dock-current [data-answer-option="${Number(event.key) - 1}"]`)?.click();
