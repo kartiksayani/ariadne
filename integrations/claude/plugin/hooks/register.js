@@ -62,7 +62,7 @@ function failureText(state, error, connect = false) {
   return (error instanceof ModError ? error.plain : undefined) ?? (connect ? TEXT.failure : TEXT.heartbeatRetry);
 }
 function failure(state, $, error, connect = false, background = true) {
-  return state.notices.fail(host($),'helper',error,failureText(state,error,connect),TEXT.heartbeatRetry,background);
+  return state.notices.fail(host($),'helper',error,failureText(state,error,connect),TEXT.heartbeatRetry,{background});
 }
 // A command always answers the owner, even when its log line was already shown.
 async function checked(state, $, action, connect = false) {
@@ -72,20 +72,24 @@ async function checked(state, $, action, connect = false) {
     return result;
   } catch (error) { await failure(state,$,error,connect,false); return {text:`That did not complete. ${failureText(state,error,connect)}`}; }
 }
-function notice(state, h, slot, text) {
-  return state.notices.fail(h,slot,new ModError('State notice.'),text);
+function notice(state, h, slot, error, text, key, terminal = false) {
+  return state.notices.fail(h,slot,error,text,text,{key,terminal});
+}
+function announcementGood(state, h) {
+  state.notices.good(h,'announce');
+  state.notices.good(h,'helper');
+  if (state.qualified) state.notices.good(h,'qualification');
 }
 async function announce(state, h) {
   try {
     if (await state.discovery.announce(h,state.announcementScope)) {
-      await state.notices.good(h,'announce');
-      if (state.qualified) await state.notices.good(h,'qualification');
+      announcementGood(state,h);
     }
   } catch (error) {
     let last = error;
     // A scope the app no longer has still leaves this conversation discoverable.
     if (state.announcementScope && STALE_SCOPE.includes(error?.code)) {
-      try { if (await state.discovery.announce(h,null)) await state.notices.good(h,'announce'); return; }
+      try { if (await state.discovery.announce(h,null)) announcementGood(state,h); return; }
       catch (fallback) { last = fallback; }
     }
     await state.notices.fail(h,'announce',last,failureText(state,last),TEXT.heartbeatRetry);
@@ -307,10 +311,10 @@ async function autoConnect(state, $) {
     if (error?.code === 'not_found') {
       state.target = null;
       await forget(h,state.claudeSessionId);
-      await notice(state,h,'auto',TEXT.gone);
-    } else if (error?.code === 'invalid_transition') await notice(state,h,'auto',TEXT.closed);
+      notice(state,h,'auto',error,TEXT.gone,'auto:gone',true);
+    } else if (error?.code === 'invalid_transition') notice(state,h,'auto',error,TEXT.closed,'auto:closed');
     // Still retried quietly: the other conversation may end or disconnect.
-    else if (error?.code === 'binding_conflict') await notice(state,h,'auto',TEXT.elsewhere);
+    else if (error?.code === 'binding_conflict') notice(state,h,'auto',error,TEXT.elsewhere,'auto:conflict');
     else await state.notices.fail(h,'auto',error,failureText(state,error),TEXT.retrying);
   } finally {
     state.ownerTransition = false;
@@ -432,13 +436,17 @@ async function disconnectAction(state, $) {
   return {text:JSON.stringify(receipt)};
 }
 async function turnStart(state, $, event, next) {
-  try { if (state.loop) await state.loop.start(host($),event); }
+  try { if (state.loop) { await state.loop.start(host($),event); state.notices.good(host($),'helper'); } }
   catch (error) { failure(state,$,error); }
   return next(event);
 }
 async function turnComplete(state, $, event, next) {
   // A retired loop still records the end of a turn it delivered.
-  try { for (const loop of [state.loop,...state.retired]) if (loop) await loop.complete(host($),event); }
+  try {
+    const active = [state.loop,...state.retired].filter(Boolean);
+    for (const loop of active) await loop.complete(host($),event);
+    if (active.length) state.notices.good(host($),'helper');
+  }
   catch (error) { failure(state,$,error); }
   return next(event);
 }

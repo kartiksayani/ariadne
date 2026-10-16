@@ -745,7 +745,7 @@ describe('conversation changes, relaunch and removal', () => {
       expect(h.logs.join(' ')).not.toMatch(/host_unreachable|retain|original IDs|helper/);
     } finally { clock.mockRestore(); }
   });
-  it('answers each owner command with current advice but logs once per helper episode', async () => {
+  it('prints changed helper meanings and suppresses repeats of the current meaning', async () => {
     let code = 'stale_generation', details, armed = false;
     const h = host({handler:argv => armed && argv[2] === 'connection-status' ? failure(code,details) : undefined});
     const hooks = callbacks(descriptor);
@@ -760,11 +760,13 @@ describe('conversation changes, relaunch and removal', () => {
     expect(gone).toContain(h.logs[before]);
     code = 'invalid_transition';details = {reason:'owner_paused'};
     expect(await say()).toContain('paused in the app. Resume it in Ariadne');
+    await say();
     code = 'delivery_uncertain';details = undefined;
     expect(await say()).toContain('check before sending anything again');
     code = 'invented_by_a_future_helper';
     expect(await say()).toContain('Open the Ariadne app to see what happened');
-    expect(h.logs.slice(before)).toHaveLength(1);
+    await say();
+    expect(h.logs.slice(before)).toHaveLength(4);
     expect(h.logs.slice(before).join(' ')).not.toMatch(/stale_generation|owner_paused|delivery_uncertain|invented|retain|original IDs/);
   });
   it('admits claims again after an owner command is refused', async () => {

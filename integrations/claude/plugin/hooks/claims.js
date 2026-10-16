@@ -33,7 +33,7 @@ export const BUSY = Object.freeze({
 });
 // The binding no longer exists or another connection replaced it: polling cannot recover.
 export function bindingGone(error) {
-  return error?.code === 'stale_generation' || error?.details?.reason === 'session_removed';
+  return ['stale_generation','binding_mismatch'].includes(error?.code) || error?.details?.reason === 'session_removed';
 }
 const SEEN_TURNS = 64;
 // How long a turn that may have taken a mid-turn message in waits for a next
@@ -76,7 +76,7 @@ export function claimLoop(helperPath, binding, {onEnded = () => {}, now = () => 
     if (ended) return;
     ended = true;
     if (!live) return;
-    await claimNotices.fail($,'claim',error,NOTICES.removed);
+    claimNotices.fail($,'claim',error,NOTICES.removed,NOTICES.removed,{key:'binding_gone',terminal:true});
     onEnded($);
   }
   async function flush($) {

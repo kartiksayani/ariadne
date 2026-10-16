@@ -235,6 +235,15 @@ describe('captured Claude claim lifecycle', () => {
     code = 'not_found';await loop.poll(h.$);await loop.poll(h.$);
     expect(h.logs).toEqual([plainFailure('not_found')]);
   });
+  it('prints each changed held meaning, suppressing repeats of the current meaning',async () => {
+    let reason = 'owner_paused';
+    const h = host({handler:argv => argv[2] === 'claim' ? failure('invalid_transition',{reason}) : undefined});
+    const loop = claimLoop(descriptor.helperPath,binding);
+    for (const next of ['owner_paused','owner_paused','session_closed','session_closed','recovery_required','recovery_required','owner_paused']) {
+      reason = next;await loop.poll(h.$);
+    }
+    expect(h.logs).toEqual([NOTICES.owner_paused,NOTICES.session_closed,NOTICES.recovery_required,NOTICES.owner_paused]);
+  });
   it('serializes concurrent poll callbacks and retains lifecycle exactly across desktop/helper failure', async () => {
     const value = await prepared();const response = deferred();const admitted = deferred();const submission = deferred();let failing = true;
     const attempts = [];

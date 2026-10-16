@@ -98,12 +98,15 @@ retries keep their original request; live conversations elsewhere stay protected
 The owner gets plain instructions, while exact operation IDs remain in the
 plugin store's bounded `connect-log` diagnostics. See [ADR-0096](../../docs/adr/ADR-0096-recover-stale-claude-connect.md).
 
-Background heartbeat and claim notices print once per slot per failure episode.
-Transient failures stay quiet for two minutes; three consecutive successful calls
-end the episode. Changing error kinds or one successful call never reprints a
-notice. Background episode diagnostics contain timestamps and fixed codes only,
-share the 20-record `connect-log` limit, and record starts and recoveries rather
-than every retry. Helper calls allow eight seconds for the helper's five-second
+Background notices deduplicate by meaning within each slot: transient error kinds
+share one retry notice, while changed actionable states print immediately.
+Terminal notices always print and close the episode; otherwise three consecutive
+successful calls end it. Transient failures wait two minutes from the current
+transient streak; held states and silent lease refusals reset that grace period.
+Background diagnostics contain timestamps and fixed codes only, recording episode
+starts, visible meaning changes and endings in a separate 20-record `hook-log`.
+Its pending write queue is also bounded and never holds up polling or owner
+`connect-log` receipts. Helper calls allow eight seconds for the helper's five-second
 control timeout to return its typed error. Owner commands still answer immediately.
 
 Real installer rendering, owner CLI commands, durable core/report composition,

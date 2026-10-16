@@ -28,17 +28,16 @@ export class ModError extends Error {
 // Allow the helper's five-second control timeout to return a typed refusal.
 export const HELPER_TIMEOUT_MS = 8000;
 export const NOTICE_GRACE_MS = 120000;
-const TRANSIENT = new Set(['store_busy','timeout','io_error','process_rejected','host_unreachable','lease_invalid']);
+const TRANSIENT = new Set(['store_busy','timeout','io_error','process_rejected','host_unreachable']);
 const DIAGNOSTIC_CODES = new Set([...TRANSIENT,'stale_generation','binding_mismatch','binding_ambiguous','binding_conflict',
   'not_found','invalid_argument','permission_denied','unsupported','unsupported_host_version','incompatible_adapter',
-  'delivery_uncertain','commit_uncertain','protocol_conflict','invalid_transition','protocol_error']);
+  'delivery_uncertain','commit_uncertain','protocol_conflict','invalid_transition','protocol_error','lease_invalid']);
 function failureCode(error) {
   if (error?.details?.reason === 'lease_invalid') return 'lease_invalid';
   if (DIAGNOSTIC_CODES.has(error?.code)) return error.code;
   return error instanceof ModError ? 'protocol_error' : 'process_rejected';
 }
-// Serialize best-effort appends from claim, heartbeat and owner commands. No
-// payloads enter this log; callers supply fixed fields and bounded codes only.
+// Owner-operation receipts retain their own history and write queue.
 let diagnostics = Promise.resolve();
 export function connectDiagnostic($, record) {
   const append = diagnostics.then(async () => {
@@ -52,32 +51,70 @@ export function connectDiagnostic($, record) {
   diagnostics = append;
   return append;
 }
-// Each slot owns an episode, independently of error text/kind. One good call
-// cannot hide a flapping failure: three consecutive good calls close it.
+// Background diagnostics must neither evict owner receipts nor hold up intake.
+// Bound the pending queue too, in case a store promise never settles.
+const backgroundRecords = [];
+let backgroundWriting = false;
+function backgroundDiagnostic($, record) {
+  if (backgroundRecords.length === 20) backgroundRecords.shift();
+  backgroundRecords.push({store:$.store,record});
+  if (backgroundWriting) return;
+  backgroundWriting = true;
+  void (async () => {
+    try {
+      while (backgroundRecords.length) {
+        const {store,record} = backgroundRecords.shift();
+        try {
+          const previous = await store.get('hook-log');
+          const records = Array.isArray(previous) ? previous.slice(-19) : [];
+          records.push(record);
+          await store.set('hook-log',records);
+        } catch { /* best effort; no retry authority */ }
+      }
+    } finally { backgroundWriting = false; }
+  })().catch(() => {});
+}
+// A slot remembers its last visible meaning. Transient error kinds share one
+// meaning; actionable state changes and terminal outcomes must stay visible.
 export function noticeEpisodes(now = () => Date.now()) {
   const slots = new Map();
   return {
-    async fail($, slot, error, text, retryText = text, background = true) {
+    fail($, slot, error, text, retryText = text, {background = true,key,terminal = false} = {}) {
       const code = failureCode(error);
       let episode = slots.get(slot);
-      let recorded = Promise.resolve();
+      // Silent control refusals cannot start or age a transient streak.
+      if (text === null || code === 'lease_invalid') {
+        if (episode) { episode.transientSince = null; episode.good = 0; }
+        return;
+      }
       if (!episode) {
-        episode = {since:now(),good:0,shown:false,code};
+        episode = {transientSince:null,good:0,lastKey:null,code};
         slots.set(slot,episode);
-        recorded = connectDiagnostic($,{step:slot,outcome:'started',code,at:new Date(now()).toISOString()});
+        backgroundDiagnostic($,{step:slot,outcome:'started',code,at:new Date(now()).toISOString()});
       }
       episode.good = 0;
-      if (text !== null && !episode.shown && (!background || !TRANSIENT.has(code) || now() - episode.since >= NOTICE_GRACE_MS)) {
-        episode.shown = true;
-        $.ui.log(background && TRANSIENT.has(code) ? retryText : text);
+      episode.code = code;
+      const transient = TRANSIENT.has(code);
+      const meaning = key ?? (transient ? 'retrying' : code === 'invalid_transition'
+        ? ['owner_paused','session_closed','recovery_required'].includes(error?.details?.reason) ? error.details.reason : 'blocked'
+        : error instanceof ModError && bounded(error.code,64) ? error.code : code);
+      if (transient) episode.transientSince ??= now();
+      else episode.transientSince = null;
+      if (terminal) {
+        $.ui.log(text);
+        slots.delete(slot);
+        backgroundDiagnostic($,{step:slot,outcome:'ended',code,at:new Date(now()).toISOString()});
+      } else if (episode.lastKey !== meaning && (!background || !transient || now() - episode.transientSince >= NOTICE_GRACE_MS)) {
+        if (episode.lastKey !== null) backgroundDiagnostic($,{step:slot,outcome:'changed',code,at:new Date(now()).toISOString()});
+        episode.lastKey = meaning;
+        $.ui.log(background && transient ? retryText : text);
       }
-      await recorded;
     },
-    async good($, slot) {
+    good($, slot) {
       const episode = slots.get(slot);
       if (!episode || ++episode.good < 3) return;
       slots.delete(slot);
-      await connectDiagnostic($,{step:slot,outcome:'recovered',code:episode.code,at:new Date(now()).toISOString()});
+      backgroundDiagnostic($,{step:slot,outcome:'recovered',code:episode.code,at:new Date(now()).toISOString()});
     },
     // Scope changes end the old conversation's notice authority.
     delete:slot => slots.delete(slot),
