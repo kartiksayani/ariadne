@@ -115,6 +115,8 @@ export function AnswerControl({ options, layout = 'details', selected, draft, wa
       const focused = optionIndex(event.target);
       if (focused < 0 && event.target !== event.currentTarget) return false;
       event.stopPropagation();
+      // A held Enter that repeats onto the control sends nothing: only a real press does.
+      if (event.repeat) return true;
       if (focused >= 0 && focused !== selected) choose(focused);
       if (focused >= 0) sendOption(focused); else sendAnswer();
       return true;
