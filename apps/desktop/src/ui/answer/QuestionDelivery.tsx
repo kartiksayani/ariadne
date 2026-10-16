@@ -45,6 +45,13 @@ const button = (props: { label: string; icon: string; title?: string; onClick?: 
     onClick={props.kind === 'ghost' || props.kind === 'sending' ? undefined : props.onClick}>
     <i className={props.icon} aria-hidden="true" />{props.label}</button>;
 
+/** When this window first saw core accept an input: every place showing it before the session read agrees on the time. */
+const accepted = new Map<string, number>();
+function acceptedAt(inputId: string): number {
+  if (!accepted.has(inputId)) accepted.set(inputId, Date.now());
+  return accepted.get(inputId)!;
+}
+
 export function useQuestionDelivery({ drafts, store, itemId, inputId }: {
   readonly drafts: OwnerDraftStore; readonly store: SessionStore; readonly itemId: string; readonly inputId?: string;
 }): Delivery {
@@ -71,11 +78,16 @@ export function useQuestionDelivery({ drafts, store, itemId, inputId }: {
   const extraOf = (stuck: ReactNode) => <>{stuck}{outcome && <ReviewResult outcome={outcome} />}
     {copyFailed && <textarea className="answer-copy-fallback" aria-label="Copy your answer" readOnly value={words} />}</>;
   if (!input) {
-    // The receipt is in, the session read is not: the input exists but cannot be undone from here yet.
     if (!receiptId && !entry?.saving) return { content: null, bar: null, extra: extraOf(null) };
-    return { content: entry?.sent ?? (entry ? { selected_option_id: entry.draft.selected_option_id, text: entry.draft.text } : null), extra: extraOf(null),
+    const held = entry?.sent ?? (entry ? { selected_option_id: entry.draft.selected_option_id, text: entry.draft.text } : null);
+    if (entry?.saving || !receiptId) return { content: held, extra: extraOf(null),
       bar: { icon: 'ph ph-circle-notch answer-spin', tone: 'accent', text: 'Sending to the agent…', sealed: true,
         actions: button({ label: 'Sending…', icon: 'ph ph-circle-notch', title: 'Already sending', kind: 'sending' }) } };
+    // Core accepted it (the receipt is in) and the session read does not show it yet: sent, and Undo waits for that read.
+    const at = clock(acceptedAt(receiptId));
+    return { content: held, extra: extraOf(null),
+      bar: { icon: 'ph ph-check', tone: 'done', text: `Sent at ${at}. Waiting for the agent to pick it up.`, narrow: `Sent at ${at}. Waiting for the agent.`, sealed: true,
+        actions: button({ label: 'Sent', icon: 'ph ph-paper-plane-right', title: 'Already sent', kind: 'ghost' }) } };
   }
   const binding = session?.bindings[input.binding_id] ?? null;
   const presence = binding ? state.presence[binding.id] ?? null : null;

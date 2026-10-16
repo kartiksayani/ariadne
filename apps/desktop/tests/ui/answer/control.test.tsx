@@ -68,7 +68,7 @@ describe('answer cards', () => {
     expect(values.onSelect).toHaveBeenCalledExactlyOnceWith(-1);
     expect(values.onDraft).not.toHaveBeenCalled();
     view.rerender(<AnswerControl {...values} selected={-1} />);
-    const own = screen.getByRole('textbox', { name: 'Answer in your own words' }) as HTMLTextAreaElement;
+    const own = screen.getByRole('textbox', { name: 'Reply in your own words' }) as HTMLTextAreaElement;
     expect(own.value).toBe(values.draft);
     expect(own.getAttribute('placeholder')).toBe('Answer in your own words…');
     expect(screen.getByRole('button', { name: 'Write my own answer' }).getAttribute('aria-pressed')).toBe('true');
@@ -134,7 +134,7 @@ describe('answer cards', () => {
     const user = userEvent.setup(), values = props({ options: [], selected: -1 });
     render(<AnswerControl {...values} />);
     expect(screen.queryByRole('button', { name: '+ Add a note' })).toBeNull();
-    screen.getByRole('textbox', { name: 'Answer in your own words' }).focus(); await user.keyboard('{Meta>}{Enter}{/Meta}');
+    screen.getByRole('textbox', { name: 'Reply in your own words' }).focus(); await user.keyboard('{Meta>}{Enter}{/Meta}');
     expect(values.onSendText).toHaveBeenCalledExactlyOnceWith(values.draft);
   });
 

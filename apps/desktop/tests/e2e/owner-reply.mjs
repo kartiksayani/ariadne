@@ -93,9 +93,10 @@ export async function openFollowUp(afterSaved = false) {
 export function replyControlState(itemId) {
   const form = document.querySelector(`.item-detail [data-owner-input="${itemId}"]`);
   const detail = form?.closest('.item-detail') ?? document.querySelector('.item-detail');
+  // A reply box (.detail-box) or the answer cards (.answer: the words box opens from "Write my own answer" or "+ Add a note").
   const editor = form?.querySelector('textarea');
-  const composer = editor?.closest('.detail-box, .answer-reply');
-  const send = composer?.querySelector('button[aria-label^="Send "], button.answer-reply-send');
+  const composer = editor?.closest('.detail-box, .answer') ?? form?.querySelector('.answer');
+  const send = composer?.querySelector('button[aria-label^="Send "], button[data-answer-send]');
   return { formPresent: Boolean(form), editorPresent: Boolean(editor), value: editor?.value ?? null,
     editorEnabled: Boolean(editor && !editor.disabled), sendPresent: Boolean(send),
     sendEnabled: Boolean(send && !send.disabled && send.getAttribute('aria-disabled') !== 'true'),

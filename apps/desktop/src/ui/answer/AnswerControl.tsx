@@ -3,6 +3,7 @@
 // Send. The dock, Details, the peek and the other-sessions list all render this one control.
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useWorkspaceKeys } from '../keys';
+import { useGrow } from './useGrow';
 import './answer.css';
 
 export interface AnswerOption {
@@ -93,6 +94,9 @@ export function AnswerControl({ options, layout = 'details', selected, draft, wa
     onSelect(index);
   };
   const noteShown = (option: AnswerOption) => words && !sealed && (noteOpen === option.id || !!draft.trim());
+  // In Details the words box grows with its text, up to a third of the pane.
+  const boxShown = !sealed && (own || options.length === 0 && words || !!picked && noteShown(picked));
+  useGrow(box, draft, (layout === 'details' || layout === 'wide') && boxShown);
   // A newly opened box takes the focus, so the owner types straight away.
   const focusNext = useRef(false);
   useLayoutEffect(() => { if (focusNext.current && box.current) { focusNext.current = false; box.current.focus(); } });
@@ -155,7 +159,7 @@ export function AnswerControl({ options, layout = 'details', selected, draft, wa
       <span className="answer-key" aria-hidden="true"><i className="ph ph-pencil-simple" /></span>
       <span className="answer-body"><span className="answer-label">Write my own answer</span></span>
     </button>
-    {own && !sealed && textBox('Answer in your own words…', 'Answer in your own words')}
+    {own && !sealed && textBox('Answer in your own words…', 'Reply in your own words')}
     {own && sealed && draft.trim() && <p className="answer-sent-note">{draft}</p>}
   </div>;
   const idle = hint ? { icon: 'ph ph-info', text: hint, narrow: hint }
@@ -167,12 +171,14 @@ export function AnswerControl({ options, layout = 'details', selected, draft, wa
     {warn && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{warn}</span>
       {warnAction && <button type="button" className="btn btn-secondary answer-warn-action" onClick={event => { event.stopPropagation(); warnAction.onAction(); }}>{warnAction.label}</button>}</div>}
     <div className="answer-options">{cards}{ownCard}</div>
-    {options.length === 0 && words && !sealed && <div className="answer-card answer-own answer-card-on">{textBox('Answer in your own words…', 'Answer in your own words')}</div>}
+    {options.length === 0 && words && !sealed && <div className="answer-card answer-own answer-card-on">{textBox('Answer in your own words…', 'Reply in your own words')}</div>}
     {blocked && <div className="answer-blocked" role="status"><i className="ph ph-wifi-slash" aria-hidden="true" /><span>{blocked}</span></div>}
     <div className="answer-bar" data-tone={shown && 'tone' in shown ? shown.tone : undefined}>
       <i className={`${shown.icon} answer-bar-icon`} aria-hidden="true" />
       <span className="answer-bar-text" role={bar ? 'status' : undefined}>
-        <span className="answer-bar-wide">{shown.text}</span><span className="answer-bar-narrow" aria-hidden="true">{shown.narrow ?? shown.text}</span>
+        {shown.narrow && shown.narrow !== shown.text
+          ? <><span className="answer-bar-wide">{shown.text}</span><span className="answer-bar-narrow" aria-hidden="true">{shown.narrow}</span></>
+          : shown.text}
       </span>
       {bar ? bar.actions : <button type="button" data-answer-send className="answer-send" {...gate(locked || !ready, frozen || !!blocked)}
         title={ready ? 'Send ( ↵ )' : 'Pick an option or write an answer first'} onClick={event => { event.stopPropagation(); sendAnswer(); }}>

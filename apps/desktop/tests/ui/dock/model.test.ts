@@ -52,7 +52,7 @@ describe('dock view invariant: only owner actions open it; no Map side effects',
     dock.dispose();
   });
   it('brackets step in order and the pager selects without touching drafts', () => {
-    const dock = new DockStore(); dock.sync('session-a', questions);
+    const dock = new DockStore(); dock.sync('session-a', questions); dock.show();
     dock.step(1); expect(dock.getSnapshot().current?.id).toBe('q2');
     dock.step(-1); expect(dock.getSnapshot().current?.id).toBe('q1');
     dock.show('q3'); expect(dock.getSnapshot().current?.id).toBe('q3');
@@ -64,6 +64,46 @@ describe('dock view invariant: only owner actions open it; no Map side effects',
     dock.sync('session-a', questions); dock.show('q2'); dock.sent('q2');
     dock.sync('session-a', [questions[0]!, questions[2]!]); vi.advanceTimersByTime(2700);
     expect(dock.getSnapshot().current?.id).toBe('q3'); dock.dispose();
+  });
+  it('keeps "1 of N" true during the Sent hold: the held question stays in its place', () => {
+    vi.useFakeTimers(); const dock = new DockStore();
+    dock.sync('session-a', questions); dock.show('q2'); dock.sent('q2');
+    dock.sync('session-a', [questions[0]!, questions[2]!]);
+    expect(dock.getSnapshot().questions.map(question => question.id)).toEqual(['q1', 'q2', 'q3']);
+    expect(dock.getSnapshot().current?.id).toBe('q2');
+    // Another question answered elsewhere meanwhile: the held one keeps its place among the rest.
+    dock.sync('session-a', [questions[2]!]);
+    expect(dock.getSnapshot().questions.map(question => question.id)).toEqual(['q2', 'q3']);
+    vi.advanceTimersByTime(2700);
+    expect(dock.getSnapshot().questions.map(question => question.id)).toEqual(['q3']);
+    expect(dock.getSnapshot().current?.id).toBe('q3');
+    dock.dispose();
+  });
+  it('[ and ] open a folded dock at the current question without moving it', () => {
+    const dock = new DockStore(); dock.sync('session-a', questions); dock.show('q2'); dock.fold();
+    dock.step(1);
+    expect(dock.getSnapshot()).toMatchObject({ open: true, current: { id: 'q2' } });
+    dock.fold(); dock.step(-1);
+    expect(dock.getSnapshot()).toMatchObject({ open: true, current: { id: 'q2' } });
+    dock.dispose();
+  });
+  it.each(['same session', 'session not loaded yet', 'answered meanwhile'] as const)('openAt opens at the asked question: %s', path => {
+    const dock = new DockStore(); dock.sync('session-a', questions);
+    if (path === 'same session') {
+      dock.openAt('session-a', '3');
+      expect(dock.getSnapshot()).toMatchObject({ open: true, current: { id: 'q3' } });
+    } else {
+      dock.openAt('session-b', path === 'answered meanwhile' ? '9' : '3');
+      expect(dock.getSnapshot().open).toBe(false);
+      dock.sync('session-b', [], false);
+      expect(dock.getSnapshot().open).toBe(false);
+      dock.sync('session-b', questions, true);
+      expect(dock.getSnapshot()).toMatchObject({ open: true, current: { id: path === 'answered meanwhile' ? 'q1' : 'q3' } });
+      // The request is spent: a later session change does not open it again.
+      dock.fold(); dock.sync('session-a', questions); dock.sync('session-b', questions);
+      expect(dock.getSnapshot().open).toBe(false);
+    }
+    dock.dispose();
   });
   it('cancels auto-advance when Undo returns the question to the queue', () => {
     vi.useFakeTimers(); const dock = new DockStore();

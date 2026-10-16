@@ -143,6 +143,12 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
   const othersChip = otherRows.length > 0 && <button type="button" className="dock-others" aria-expanded={popover === 'others'} onClick={() => toggle('others')}
     title="Questions waiting on you in other sessions">
     <i className="ph ph-squares-four" aria-hidden="true" /><span className="dock-wide">{otherRows.length} in other sessions</span><span className="dock-narrow">{otherRows.length} elsewhere</span></button>;
+  // Drafts on other questions, or on one no longer waiting (withdrawn, session closed): reachable from the line too.
+  const keptChip = kept.length > 0 && <button type="button" className="dock-draft" aria-expanded={popover === 'drafts'} title={kept.map(entry => nameOf(entry.draft.target.item_id ?? '')).join(', ')} onClick={() => {
+    const target = questions.find(question => question.itemId === kept[0]!.draft.target.item_id);
+    if (kept.length === 1 && target) model.show(target.id); else toggle('drafts');
+  }}><i className="ph ph-pencil-simple" aria-hidden="true" /><span className="dock-wide">Draft kept on {quote(nameOf(kept[0]!.draft.target.item_id ?? ''))}{kept.length > 1 ? ` +${kept.length - 1}` : ''}</span>
+    <span className="dock-narrow">Draft kept</span></button>;
   const visibleHeight = open ? drag ?? height : null;
   const first = unsent[0] ?? null;
   return <section ref={root} className="answer-dock" aria-label="Answer dock" data-open={open || undefined} data-waiting={waitingNow || open || undefined}
@@ -160,10 +166,12 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
       onKeyDown={event => {
         if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
         event.preventDefault(); event.stopPropagation();
-        const base = root.current?.getBoundingClientRect().height || DOCK_LINE;
+        // Folded, ↑ opens the dock at its kept height; open, the arrows step it by 16px and fold it under 120.
+        if (!open) { if (event.key === 'ArrowUp' && waitingNow) model.show(); return; }
+        const base = visibleHeight ?? Math.max(DOCK_MIN, Math.round(root.current?.getBoundingClientRect().height ?? 0));
         const result = releaseDockHeight(base + (event.key === 'ArrowUp' ? 16 : -16), window.innerHeight);
         if (result.fold) { model.fold(); return; }
-        setHeight(result.height); saveDockHeight(result.height); model.show();
+        setHeight(result.height); saveDockHeight(result.height);
       }}><span aria-hidden="true" /></div>}
     {!open ? <div className="answer-dock-line">
       {waitingNow ? <>
@@ -174,7 +182,7 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
         <i className="ph-fill ph-question" aria-hidden="true" />Answering {quote(nameOf(answering))} in Details</span>
         : <span className="dock-line-text dock-line-quiet"><i className="ph-fill ph-check-circle dock-done" aria-hidden="true" />Nothing waiting on you</span>}
       <span className="dock-spacer" />
-      {sentChip}{othersChip}
+      {keptChip}{sentChip}{othersChip}
       {waitingNow && <button type="button" className="dock-icon" aria-label="Open the answer dock" title="Open the answer dock at the next waiting question ( ] )"
         onClick={() => model.show()}><i className="ph ph-caret-up" aria-hidden="true" /></button>}
     </div> : <>
@@ -188,11 +196,7 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
           <button type="button" className="dock-icon dock-small" aria-label="Next question" title="Next question ( ] )" disabled={index >= questions.length - 1} onClick={() => model.step(1)}>
             <i className="ph ph-arrow-right" aria-hidden="true" /></button>
         </span>
-        {kept.length > 0 && <button type="button" className="dock-draft" aria-expanded={popover === 'drafts'} title={kept.map(entry => nameOf(entry.draft.target.item_id ?? '')).join(', ')} onClick={() => {
-          const target = questions.find(question => question.itemId === kept[0]!.draft.target.item_id);
-          if (kept.length === 1 && target) model.show(target.id); else toggle('drafts');
-        }}><i className="ph ph-pencil-simple" aria-hidden="true" /><span className="dock-wide">Draft kept on {quote(nameOf(kept[0]!.draft.target.item_id ?? ''))}{kept.length > 1 ? ` +${kept.length - 1}` : ''}</span>
-          <span className="dock-narrow">Draft kept</span></button>}
+        {keptChip}
         {session && item && <nav className="dock-path" aria-label="Question location">{dockPath(session, item.id, fullPath).map((part, at, parts) => <span key={`${part.itemId ?? part.label}:${at}`} className="dock-crumb">
           {part.more ? <button type="button" className="dock-link" title={part.full} onClick={() => setFullPath(true)}>…</button>
             : part.itemId && onOpenItem ? <button type="button" className="dock-link" title={part.full} onClick={() => onOpenItem(part.itemId!)}>{part.label}</button>
