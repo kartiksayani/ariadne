@@ -9,7 +9,7 @@ import { OwnFailure } from '../../src/data/plain';
 import { WaitingStore } from '../../src/selectors/waiting/store';
 import { TreeView } from '../../src/ui/tree/TreeView';
 import { AppTransport, route, secondId } from './app/transport';
-import { goToSession } from './app/open';
+import { goToPage, goToSession } from './app/open';
 import { page as historyPage, projections } from './history/fixtures';
 
 vi.mock('react-dom/client', async importOriginal => {
@@ -36,11 +36,17 @@ async function goToChip(element: Element) {
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Go to' })); });
 }
 async function navigatePage(name: 'Projects' | 'All sessions') {
-  fireEvent.click(screen.getByRole('button', { name: /^Switch session or project/ }));
-  const pages = within(await screen.findByRole('navigation', { name: 'Pages' }));
-  fireEvent.click(pages.getByRole('button', { name }));
+  await goToPage(name);
   await screen.findByRole('heading', { name });
 }
+/** The top bar's search: a button until opened, then the box (`.tb-search-input`). */
+async function searchBox() {
+  if (!document.querySelector('.tb-search-input')) fireEvent.click(await screen.findByRole('button', { name: 'Search the Map' }));
+  await waitFor(() => expect(document.querySelector('.tb-search-input')).not.toBeNull());
+  return document.querySelector<HTMLInputElement>('.tb-search-input')!;
+}
+/** Opens the Aa menu and returns its size choice; a choice is a radio item now, checked rather than pressed. */
+const sizeChoice = (name: string) => screen.getByRole('menuitemradio', { name });
 async function allSessions() { await navigatePage('All sessions'); }
 function setup(strict = false) {
   const transport = new AppTransport(), service = createDesktopService(transport);
@@ -137,7 +143,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
   });
 
-  it('keeps a later tab selection when an earlier item reveal finishes resolving', async () => {
+  it('keeps a later page choice when an earlier item reveal finishes resolving', async () => {
     const { transport } = setup(); await openSession();
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
@@ -156,7 +162,9 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await navigatePage('Projects');
     await screen.findByRole('heading', { name: 'Projects' });
     await act(async () => { release(); });
-    expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'projects' });
+    // A page is not saved (SPEC 6.16): the saved selection stays the session; the page is what shows.
+    expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
+    expect(screen.getByRole('heading', { name: 'Projects' })).toBeTruthy();
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
     expect(screen.queryByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' })).toBeNull();
     expect(mutations(transport, 'preferences_patch').some(request => request.command.command === 'preferences_patch'
@@ -236,7 +244,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
         && seen.items.some(item => item.item_id === '1'))).toBe(true);
     }, { timeout: 3000 });
     expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull();
-    expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(false);
+    expect((await searchBox()).hasAttribute('disabled')).toBe(false);
     expect(screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' })).toBeTruthy();
   });
 
@@ -362,7 +370,9 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
   it('shows seeded presence to a late reader, shares tree/graph selection and opens complete item conversations', async () => {
     const { transport } = setup(); await openSession();
     expect(screen.getByRole('button', { name: /^Switch session or project/ }).textContent).toContain('Ariadne canonical demo');
-    expect(screen.getByRole('button', { name: '● Live' }).getAttribute('title')).toBe('Live · demo.local');
+    // The connection dot names the agent's state and where it runs.
+    const dot = document.querySelector<HTMLElement>('[data-popover-trigger="connection"]')!;
+    expect(dot.textContent).toContain('Live'); expect(dot.getAttribute('title')).toBe('Connected · demo.local');
     expect(transport.queries).toContainEqual({ session: null, request: { command: 'session_list', params: {
       project_id: route.project_id, state: null, cursor: null, limit: 100,
     } } });
@@ -446,11 +456,14 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => expect(entered).toBe(true));
     await act(async () => { release(); await capture; });
     expect(waiting.getSnapshot().waiting[0].route.session_id).toBe(secondId);
-    const nextQuestion = waiting.getSnapshot().waiting[0];
-    fireEvent.click(document.querySelector<HTMLElement>(`[data-session-id="${nextQuestion.route.session_id}"][data-waiting-item="2"] .waiting-details`)!);
-    const detail = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
-    expect(detail.getAttribute('data-detail-item-id')).toBe('2');
-    expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: { ...route, session_id: secondId } });
+    // The Waiting column is gone: the switcher names this question under its session, and choosing it opens that session with the dock at it.
+    fireEvent.click(await screen.findByRole('button', { name: /^Switch session or project/ }));
+    const menu = await screen.findByRole('dialog', { name: 'Switch session or project' });
+    await waitFor(() => expect(menu.querySelectorAll('.swm-q')).toHaveLength(1));
+    fireEvent.click(menu.querySelector('.swm-q')!);
+    await waitFor(() => expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: { ...route, session_id: secondId } }));
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Answer dock' }).getAttribute('data-open')).toBe('true'));
+    expect(document.querySelector('.answer-dock-current')).not.toBeNull();
     expect(mutations(transport, 'input_submit')).toHaveLength(0);
   });
   it('submits a deliberate owner reply through the shared draft service and renders its real Sent and conversation text', async () => {
@@ -472,10 +485,12 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     expect(transport.sessions.get(route.session_id)?.items['8']?.status).toBe(originalStatus);
   });
   it('keeps uncertain binding actions isolated across sessions and retries the frozen request after reopening its dialog', async () => {
-    const { transport } = setup(); await openSession(); await allSessions(); transport.failNext = 'binding_pause';
+    const { transport } = setup(); await openSession(); transport.failNext = 'binding_pause';
+    // Sending… lives in the connection card of the session on screen (SPEC 5.12), so each session is opened before its dialog.
     const openDispatch = async (id: string) => {
-      const card = document.querySelector<HTMLElement>(`[data-session-card="${id}"]`)!;
-      fireEvent.click(within(card).getByTitle('Sending and connection'));
+      await openSession(id);
+      fireEvent.click(document.querySelector<HTMLElement>('[data-popover-trigger="connection"]')!);
+      fireEvent.click(await screen.findByRole('button', { name: 'Sending…' }));
       return screen.findByRole('dialog', { name: /Sending to / });
     };
     let dialog = await openDispatch(route.session_id);
@@ -500,7 +515,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     transport.preferences.sessions[0].filters.owners = [{ kind: 'me' }];
     await openSession();
     const count = mutations(transport, 'preferences_patch').length;
-    fireEvent.change(screen.getByLabelText('Search questions and outcomes'), { target: { value: 'missing needle' } });
+    fireEvent.change(await searchBox(), { target: { value: 'missing needle' } });
     await waitFor(() => expect(transport.preferences.sessions[0].filters.search).toBe('missing needle'));
     expect(transport.preferences.sessions[0].filters.owners).toEqual([{ kind: 'me' }]);
     expect(mutations(transport, 'preferences_patch')).toHaveLength(count + 1);
@@ -531,7 +546,8 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     expect(document.activeElement?.closest('[role="tree"]')).not.toBeNull();
     (document.activeElement as HTMLElement).blur();
     expect(press('/').defaultPrevented).toBe(true);
-    expect(document.activeElement).toBe(screen.getByLabelText('Search questions and outcomes'));
+    expect(document.activeElement).toBe(document.querySelector('.tb-search-input'));
+    expect(document.activeElement).not.toBeNull();
     (document.activeElement as HTMLElement).blur();
     expect(press('g').defaultPrevented).toBe(true);
     await screen.findAllByRole('tree', { name: / graph$/ });
@@ -553,11 +569,13 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       return invoke(name, args);
     });
     const writes = mutations(transport, 'preferences_patch').length;
-    const search = screen.getByLabelText('Search questions and outcomes') as HTMLInputElement;
+    const search = await searchBox();
+    let lockedWhileUnsure: boolean | null = null;
     fireEvent.change(search, { target: { value: 'missing pending needle' } });
     fireEvent.click(screen.getByRole('button', { name: 'Switch to light' }));
     await waitFor(() => expect(entered).toBe(true));
-    expect(search.disabled).toBe(true);
+    // Asserted last (see below), so a box that stays editable does not hide the checks on what is saved.
+    const lockedWhileSaving = search.disabled;
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
     expect(screen.getByText(/^Nothing matches “missing/)).toBeTruthy();
     expect(transport.preferences.sessions[0].filters.search).toBe(before.filters.search);
@@ -566,7 +584,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await act(async () => { release(); await gate; });
     if (completion === 'reconciled') {
       const reconcile = await screen.findByRole('button', { name: 'Check again' });
-      expect(search.disabled).toBe(true);
+      lockedWhileUnsure = search.disabled;
       expect(search.value).toBe('missing pending needle');
       expect(mutations(transport, 'preferences_patch')).toHaveLength(writes + 1);
       fireEvent.click(reconcile);
@@ -579,6 +597,9 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     const searches = mutations(transport, 'preferences_patch').filter(request => request.command.command === 'preferences_patch'
       && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.filters.search === 'missing pending needle'));
     expect(searches).toHaveLength(1);
+    // The box is locked while the shared write is pending or unsure, as the old header's was.
+    expect(lockedWhileSaving).toBe(true);
+    if (completion === 'reconciled') expect(lockedWhileUnsure).toBe(true);
   });
   it('accumulates two text-size keyboard presses before React renders either change', async () => {
     const { transport } = setup();
@@ -610,7 +631,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('0.8'));
     expect(transport.preferences.global.text_scale).toBeUndefined();
     fireEvent.click(screen.getByRole('button', { name: 'Text size' }));
-    expect(screen.getByRole('button', { name: '80% (default)' }).getAttribute('aria-pressed')).toBe('true');
+    expect(sizeChoice('80% (default)').getAttribute('aria-checked')).toBe('true');
     // The next shortcut starts from the saved size, rather than the refused target.
     fireEvent.keyDown(document.body, { key: '=', metaKey: true });
     expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('0.9');
@@ -678,7 +699,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => expect(transport.preferences.global.text_scale).toBe(100));
     expect(mutations(transport, 'preferences_patch')).toHaveLength(2);
     fireEvent.click(screen.getByRole('button', { name: 'Text size' }));
-    expect(screen.getByRole('button', { name: '100%' }).getAttribute('aria-pressed')).toBe('true');
+    expect(sizeChoice('100%').getAttribute('aria-checked')).toBe('true');
   });
   it('uses the clicked text size as the next keyboard step while its save is pending', async () => {
     const { transport } = setup();
@@ -693,7 +714,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       return invoke(name, args);
     });
     fireEvent.click(screen.getByRole('button', { name: 'Text size' }));
-    fireEvent.click(screen.getByRole('button', { name: '110%' }));
+    fireEvent.click(sizeChoice('110%'));
     await waitFor(() => expect(entered).toBe(true));
     expect(document.documentElement.style.getPropertyValue('--text-scale')).toBe('1.1');
     fireEvent.keyDown(document.body, { key: '-', metaKey: true });
@@ -713,7 +734,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       }
       return invoke(name, args);
     });
-    const search = screen.getByLabelText('Search questions and outcomes') as HTMLInputElement;
+    const search = await searchBox();
     fireEvent.change(search, { target: { value: 'retain this typed search' } });
     fireEvent.click(screen.getByRole('button', { name: 'Switch to light' }));
     await waitFor(() => expect(entered).toBe(true));
@@ -816,7 +837,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Go to' })); });
     await waitFor(() => expect(entered).toBe(true));
-    expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(true);
+    expect(screen.getByLabelText('Search the Map').hasAttribute('disabled')).toBe(true);
     // Opening the peek already blurred the row; Go to waits for that write before resolving.
     expect(transport.queries.some(query => query.request.command === 'reveal_item' && query.request.params.item_id === '1.1')).toBe(false);
     if (outcome === 'uncertain') transport.failNext = 'preferences_patch';
@@ -836,7 +857,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
       expect(document.querySelector('.product-app')).toBeNull();
     } else if (outcome === 'confirmed' || outcome === 'rejected') {
-      await waitFor(() => expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(false));
+      await waitFor(() => expect(screen.getByLabelText('Search the Map').hasAttribute('disabled')).toBe(false));
       await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
       expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1');
       // The saved row offset is below its 40 px topic header: 20 - 40.
@@ -847,7 +868,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
         const frozen = structuredClone(mutations(transport, 'preferences_patch').at(-1));
         expect(screen.queryByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' })).toBeNull();
         fireEvent.click(reconcile);
-        await waitFor(() => expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(false));
+        await waitFor(() => expect(screen.getByLabelText('Search the Map').hasAttribute('disabled')).toBe(false));
         const reconciliation = mutations(transport, 'preferences_patch').filter(request => request.command.op_id === frozen?.command.op_id);
         expect(reconciliation).toEqual([frozen, frozen]);
         await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
@@ -860,7 +881,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
         await waitFor(() => expect(mutations(transport, 'input_submit')).toHaveLength(1));
         expect(mutations(transport, 'input_submit')[0].command).toMatchObject({ params: { kind: 'bring', text: 'Bring this up.', target: { item_id: '1' } } });
       }
-      else await waitFor(() => expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(false));
+      else await waitFor(() => expect(screen.getByLabelText('Search the Map').hasAttribute('disabled')).toBe(false));
       if (outcome === 'native route') {
         await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
         expect(transport.queries.some(query => query.request.command === 'reveal_item' && query.request.params.item_id === '2')).toBe(true);
@@ -962,10 +983,10 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     fireEvent.click(screen.getByRole('button', { name: 'Switch to light' }));
     await waitFor(() => expect(writing).toBe(true));
     await goToChip(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
-    expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(true);
+    expect(screen.getByLabelText('Search the Map').hasAttribute('disabled')).toBe(true);
     await act(async () => { releaseWrite(); await writeGate; });
     await waitFor(() => expect(reading).toBe(true));
-    const search = screen.getByLabelText('Search questions and outcomes');
+    const search = screen.getByLabelText('Search the Map');
     await waitFor(() => expect(search.hasAttribute('disabled')).toBe(false));
     // The saved theme releases the queued link before its catalogue finishes.
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
@@ -984,7 +1005,9 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => expect(completed).toBe(true));
     if (outcome === 'page departure') {
       expect(screen.queryByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' })).toBeNull();
-      expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'projects' });
+      // A page is not saved (SPEC 6.16): the saved selection stays the session while the Projects page shows.
+      expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
+      expect(screen.getByRole('heading', { name: 'Projects' })).toBeTruthy();
     } else expect(await screen.findByLabelText(/^Detail of /, { selector: `[data-detail-item-id="${outcome === 'parent selection' ? '1' : '1.1'}"]` })).toBeTruthy();
     // A coalesced successful read after the rejected capture clears its banner.
     if (outcome === 'read failure') await waitFor(() => expect(document.querySelector('.nav-banner[role="alert"]')).toBeNull());
@@ -1011,7 +1034,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await goToChip(within(screen.getByRole('region', { name: 'Child items' })).getByRole('button', { name: /Add the receipt lookup test/ }));
     await waitFor(() => expect(entered).toBe(true));
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
-    const search = screen.getByLabelText('Search questions and outcomes');
+    const search = screen.getByLabelText('Search the Map');
     await waitFor(() => expect(search.hasAttribute('disabled')).toBe(false));
     expect(completed).toBe(false);
     const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
@@ -1047,7 +1070,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => expect(entered).toBe(true));
     const parent = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
     expect(parent.getAttribute('aria-disabled')).toBe('true');
-    expect(screen.getByLabelText('Search questions and outcomes').hasAttribute('disabled')).toBe(true);
+    expect(screen.getByLabelText('Search the Map').hasAttribute('disabled')).toBe(true);
     const revealReads = transport.queries.filter(query => query.request.command === 'reveal_item').length;
     fireEvent.click(parent); fireEvent.keyDown(parent, { key: 'Enter' });
     expect(transport.queries.filter(query => query.request.command === 'reveal_item')).toHaveLength(revealReads);
@@ -1084,7 +1107,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     const root = document.querySelector('.product-app')!, before = JSON.stringify(transport.preferences.global);
     for (const key of ['w', 'e', 'l', 'x']) fireEvent.keyDown(root, { key });
     fireEvent.keyDown(root, { key: 'j', metaKey: true });
-    fireEvent.keyDown(document.querySelector('[data-shell-search]')!, { key: 'w' });
+    fireEvent.keyDown(await searchBox(), { key: 'w' });
     await act(async () => { await Promise.resolve(); });
     expect(JSON.stringify(transport.preferences.global)).toBe(before);
     expect(mutations(transport, 'input_submit')).toHaveLength(0);
@@ -1095,12 +1118,12 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     const selected = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1"]')!;
     fireEvent.click(selected); await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
     fireEvent.keyDown(document.body, { key: '?' });
-    const help = await screen.findByRole('dialog', { name: 'Help' });
+    const help = await screen.findByRole('dialog', { name: 'Help: keys and markers' });
     expect(within(help).getByRole('tab', { name: 'Keys' }).getAttribute('aria-selected')).toBe('true');
     const before = transport.mutations.length;
     for (const key of ['a', 'd', 'h', 'Backspace', 'Delete', 'c', 'z']) fireEvent.keyDown(selected, { key });
     expect(transport.mutations).toHaveLength(before);
-    fireEvent.keyDown(document.body, { key: '?' }); expect(screen.queryByRole('dialog', { name: 'Help' })).toBeNull();
+    fireEvent.keyDown(document.body, { key: '?' }); expect(screen.queryByRole('dialog', { name: 'Help: keys and markers' })).toBeNull();
     fireEvent.keyDown(document.body, { key: 'o', metaKey: true });
     await screen.findByRole('dialog', { name: 'Switch session or project' });
     for (const key of ['d', 'h', 'Backspace', 'Delete', 'z']) fireEvent.keyDown(selected, { key });
@@ -1115,7 +1138,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     const button = screen.getByRole('button', { name: 'Filter by status' }), root = document.querySelector('.product-app')!;
     expect(button.getAttribute('aria-pressed')).toBe('false');
     fireEvent.keyDown(root, { key: 'f' }); expect(button.getAttribute('aria-pressed')).toBe('true');
-    fireEvent.keyDown(screen.getByLabelText('Search questions and outcomes'), { key: 'f' }); expect(button.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.keyDown(await searchBox(), { key: 'f' }); expect(button.getAttribute('aria-pressed')).toBe('true');
     fireEvent.keyDown(root, { key: 'f' }); expect(button.getAttribute('aria-pressed')).toBe('false');
   });
 
