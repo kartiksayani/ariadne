@@ -27,6 +27,9 @@ pub(crate) fn keyed(path: &Path) -> Result<Arc<Mutex<()>>, StoreError> {
         }))
 }
 
+/// How long one lock acquisition waits before it reports `StoreError::Busy`.
+pub const LOCK_WAIT: Duration = Duration::from_secs(2);
+
 pub(crate) struct Wait {
     deadline: Instant,
     delay: Duration,
@@ -35,7 +38,7 @@ pub(crate) struct Wait {
 impl Wait {
     pub fn new() -> Self {
         Self {
-            deadline: Instant::now() + Duration::from_secs(2),
+            deadline: Instant::now() + LOCK_WAIT,
             delay: Duration::from_millis(10),
         }
     }

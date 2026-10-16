@@ -76,6 +76,8 @@ impl AgentResolver {
                         CoreErrorCode::AttemptSealed,
                         "The owner removed the work of this input; drop it and carry on.",
                     );
+                    // Removed work is not to be reloaded: say the same as the message.
+                    error.hint = "Drop this input's work and carry on with the rest.".into();
                     error.details = Some(details(
                         &binding_id,
                         BarrierReason::InputCancelled,

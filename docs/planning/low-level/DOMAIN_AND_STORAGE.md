@@ -697,9 +697,10 @@ Claim polls first `peek` the committed session file without the session lock:
 commits are atomic renames, so one open sees exactly one committed version. Claim
 answers "nothing to send" and guard refusals from that validated snapshot, and
 takes the lock, rereads and decides again whenever it may send an input or replay a
-saved claim receipt. The parsed snapshot is cached by file identity and reparsed
-only after a commit replaced the file. Read-only entrypoints retry `store_busy`
-for about 3 s before returning it; see
+saved claim receipt. The parsed snapshot is cached by file identity (device,
+inode, size, mtime and ctime) and reparsed when a commit replaced the file or
+something rewrote it in place. Read-only entrypoints retry `store_busy` within a
+budget (5 s, or 2.5 s for reads the plugin runs) before returning it; see
 [ADR-0101](../../adr/ADR-0101-lock-free-claim-check-and-busy-read-retry.md).
 
 The transaction follows this algorithm:

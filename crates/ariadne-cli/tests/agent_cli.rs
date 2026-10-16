@@ -484,11 +484,15 @@ fn topic_delete_uses_topic_guard_and_read_reports_removed_topics_and_items() {
         .unwrap()
         .contains("Wrong topic contents"));
 }
-/// Holds the session lock (as a long write would) for `hold`, then releases it
-/// without writing.
-fn hold_session_lock(setup: &Setup, hold: std::time::Duration) -> std::thread::JoinHandle<()> {
+/// Holds the session lock (as a long write would) until the returned sender
+/// signals or `hold` passes, then releases it without writing.
+fn hold_session_lock(
+    setup: &Setup,
+    hold: std::time::Duration,
+) -> (std::sync::mpsc::Sender<()>, std::thread::JoinHandle<()>) {
     let store = setup.store();
     let (locked_tx, locked_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
     let holder = std::thread::spawn(move || {
         let _ = store.transact(
             &id(2),
@@ -497,7 +501,7 @@ fn hold_session_lock(setup: &Setup, hold: std::time::Duration) -> std::thread::J
             &json!({"hold": true}),
             |_| {
                 locked_tx.send(()).unwrap();
-                std::thread::sleep(hold);
+                let _ = release_rx.recv_timeout(hold);
                 Err::<SavedReceiptData, _>(())
             },
         );
@@ -505,7 +509,7 @@ fn hold_session_lock(setup: &Setup, hold: std::time::Duration) -> std::thread::J
     locked_rx
         .recv_timeout(std::time::Duration::from_secs(5))
         .unwrap();
-    holder
+    (release_tx, holder)
 }
 
 #[test]
@@ -518,12 +522,12 @@ fn reads_ride_out_a_busy_session_but_writes_report_busy_at_once() {
     ];
     for (method, flags) in reads {
         // Longer than the store's 2 s lock deadline, inside the read retry.
-        let holder = hold_session_lock(&setup, std::time::Duration::from_millis(2_600));
+        let (_release, holder) = hold_session_lock(&setup, std::time::Duration::from_millis(2_600));
         let output = setup.agent(method, &flags, None);
         holder.join().unwrap();
         envelope(&output, 0);
     }
-    let holder = hold_session_lock(&setup, std::time::Duration::from_millis(2_600));
+    let (_release, holder) = hold_session_lock(&setup, std::time::Duration::from_millis(2_600));
     let dry_run = setup.agent(
         &["apply"],
         &["--json-stdin", "--dry-run", "--json"],
@@ -533,8 +537,10 @@ fn reads_ride_out_a_busy_session_but_writes_report_busy_at_once() {
     assert_eq!(envelope(&dry_run, 0)["data"]["dry_run"], true);
 
     let before = setup.bytes();
-    let holder = hold_session_lock(&setup, std::time::Duration::from_millis(3_000));
+    // Held until the apply has returned, however long it took to start.
+    let (release, holder) = hold_session_lock(&setup, std::time::Duration::from_secs(30));
     let apply = setup.apply(&request(902));
+    release.send(()).unwrap();
     holder.join().unwrap();
     let error = &envelope(&apply, 4)["error"];
     assert_eq!(error["code"], "store_busy");

@@ -518,6 +518,12 @@ fn removal_takes_an_in_flight_input_and_late_agent_reports_are_ignored() {
     )
     .unwrap_err();
     assert_eq!(error.code, CoreErrorCode::AttemptSealed);
+    // Message and hint agree: drop the work, nothing to reload.
+    assert!(error.message.contains("drop it and carry on"));
+    assert_eq!(
+        error.hint,
+        "Drop this input's work and carry on with the rest."
+    );
     assert_eq!(
         error.details.unwrap().reason,
         Some(BarrierReason::InputCancelled)

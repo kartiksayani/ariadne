@@ -94,6 +94,79 @@ fn peek_reparses_only_when_a_commit_replaces_the_file() {
     }
 }
 
+fn live(root: &Path) -> PathBuf {
+    root.join(format!("sessions/{}.json", id(2).as_str()))
+}
+
+#[test]
+fn an_in_place_rewrite_is_picked_up_on_the_next_peek() {
+    let root = project();
+    let path = live(root.path());
+    let backup = fs::read(&path).unwrap();
+    retitle(root.path(), 100, || {});
+    assert_eq!(store(root.path()).peek(&id(2)).unwrap().title, "Title 100");
+    let inode = |path: &Path| std::os::unix::fs::MetadataExt::ino(&fs::metadata(path).unwrap());
+    let committed = inode(&path);
+
+    // `cp backup.json sessions/<id>.json`: new bytes in the same inode.
+    fs::write(&path, &backup).unwrap();
+    assert_eq!(inode(&path), committed, "the rewrite kept the inode");
+    let restored = store(root.path()).peek(&id(2)).unwrap();
+    assert_eq!(restored.revision.value(), 1);
+    assert_eq!(*restored, store(root.path()).read(&id(2)).unwrap());
+
+    // Same size and the old mtime: only ctime tells the bytes changed.
+    let current = fs::read(&path).unwrap();
+    let title = restored.title.clone();
+    let same_length = "X".repeat(title.len());
+    let rewritten = String::from_utf8(current.clone()).unwrap().replacen(
+        &format!("\"{title}\""),
+        &format!("\"{same_length}\""),
+        1,
+    );
+    assert_eq!(rewritten.len(), current.len());
+    let modified = fs::metadata(&path).unwrap().modified().unwrap();
+    fs::write(&path, rewritten).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+    assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
+    assert_eq!(inode(&path), committed);
+    assert_eq!(store(root.path()).peek(&id(2)).unwrap().title, same_length);
+}
+
+#[test]
+fn a_removed_session_releases_its_cached_parse_and_file() {
+    let cached = |root: &Path| super::peek::peek_cached(&live(root), &id(1));
+    let removed = project();
+    let other = project();
+    store(removed.path()).peek(&id(2)).unwrap();
+    assert!(cached(removed.path()));
+
+    // A peek that finds the file gone drops the entry, and with it the open file.
+    fs::remove_file(live(removed.path())).unwrap();
+    assert!(matches!(
+        store(removed.path()).peek(&id(2)),
+        Err(StoreError::Io {
+            kind: std::io::ErrorKind::NotFound,
+            ..
+        })
+    ));
+    assert!(!cached(removed.path()));
+
+    // Without that peek, the next insert drops a cached file that has no link.
+    let unpeeked = project();
+    store(unpeeked.path()).peek(&id(2)).unwrap();
+    assert!(cached(unpeeked.path()));
+    fs::remove_file(live(unpeeked.path())).unwrap();
+    store(other.path()).peek(&id(2)).unwrap();
+    assert!(!cached(unpeeked.path()));
+    assert!(cached(other.path()));
+}
+
 #[test]
 fn peek_never_waits_for_the_session_lock_and_sees_the_commit_after_it() {
     let root = project();

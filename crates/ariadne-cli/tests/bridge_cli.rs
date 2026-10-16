@@ -263,6 +263,70 @@ fn announcement_cli_rejects_route_flags_and_untrusted_payload_without_a_socket_c
     }
 }
 #[test]
+fn a_busy_status_read_ends_inside_the_plugin_helper_timeout() {
+    let r = cases::load(root()).routing;
+    let home = home();
+    let owner = DesktopOwner::acquire(home.path()).unwrap();
+    let path = owner.control_path();
+    let listener = UnixListener::bind(&path).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let busy = CoreError::new(
+        CoreErrorCode::StoreBusy,
+        "Another Ariadne task is using this session right now.",
+        "Ariadne is busy for a moment; try again.",
+    );
+    // Every request spends the store's full lock wait, then reports Busy.
+    let server = std::thread::spawn(move || {
+        let _owner = owner;
+        let mut answered = 0;
+        loop {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut prefix = [0; 4];
+            if stream.read_exact(&mut prefix).is_err() {
+                return answered;
+            }
+            let mut bytes = vec![0; u32::from_be_bytes(prefix) as usize];
+            stream.read_exact(&mut bytes).unwrap();
+            let request: ControlRequest = serde_json::from_slice(&bytes).unwrap();
+            std::thread::sleep(ariadne_store::session::LOCK_WAIT);
+            let response = serde_json::to_vec(
+                &serde_json::json!({"v":1,"kind":"response","id":request.id,"error":busy}),
+            )
+            .unwrap();
+            stream
+                .write_all(&(response.len() as u32).to_be_bytes())
+                .unwrap();
+            stream.write_all(&response).unwrap();
+            answered += 1;
+        }
+    });
+    let started = std::time::Instant::now();
+    let child = command()
+        .args([
+            "bridge",
+            "connection-status",
+            "--binding",
+            r.binding_id.as_str(),
+            "--generation",
+            r.generation.as_str(),
+            "--request-id",
+            r.generation.as_str(),
+        ])
+        .env("ARIADNE_HOME", home.path())
+        .output()
+        .unwrap();
+    let took = started.elapsed();
+    // Wake the server so it reports how many requests it answered.
+    drop(std::os::unix::net::UnixStream::connect(&path).unwrap());
+    let answered = server.join().unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&child.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "store_busy");
+    assert_eq!(value["error"]["retryable"], true);
+    // A second full wait would not fit in the 2.5 s budget, so none starts.
+    assert_eq!(answered, 1);
+    assert!(took < Duration::from_secs(4), "{took:?}");
+}
+#[test]
 fn executable_status_preserves_unknown_host_state_and_explicit_correlation() {
     let r = cases::load(root()).routing;
     let home = home();

@@ -9,6 +9,7 @@ pub(crate) mod lock;
 mod peek;
 pub use catalogue::{ProjectCatalogue, SessionReadOutcome};
 pub use events::{EventIdentity, EventMutation, EventTransaction};
+pub use lock::LOCK_WAIT;
 
 use ariadne_domain::history::{validate_session_history, HistoryError};
 use ariadne_domain::models::*;

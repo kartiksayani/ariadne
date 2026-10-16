@@ -4,7 +4,7 @@ mod agent;
 mod busy;
 mod connection;
 pub use agent::AgentResolver;
-pub use busy::{retry_busy_read, retry_busy_within, READ_RETRY_WINDOW};
+pub use busy::{retry_busy_read, retry_busy_within, PLUGIN_READ_BUDGET, READ_RETRY_WINDOW};
 mod errors;
 mod preferences;
 pub(crate) use preferences::session_preferences_without_legacy_rail;

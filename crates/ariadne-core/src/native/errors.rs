@@ -60,10 +60,12 @@ pub(crate) fn hint(code: CoreErrorCode) -> &'static str {
 pub(super) fn store(error: StoreError) -> CoreError {
     store_ref(&error)
 }
+const BUSY_MESSAGE: &str = "Another Ariadne task is using this session right now.";
+
 pub(super) fn store_ref(error: &StoreError) -> CoreError {
-    let message = match error {
-        StoreError::Busy => "Another Ariadne task is using this session right now.".into(),
-        error => error.to_string(),
+    let message = match store_code(error) {
+        CoreErrorCode::StoreBusy => BUSY_MESSAGE.into(),
+        _ => error.to_string(),
     };
     local(store_code(error), message)
 }
@@ -93,9 +95,10 @@ pub(super) fn registry(error: RegistryError) -> CoreError {
     match error {
         RegistryError::Store(error) => store(error),
         RegistryError::InvalidData { path, source }
-        | RegistryError::Unavailable { path, source } => {
-            local(store_code(&source), format!("{}: {source}", path.display()))
-        }
+        | RegistryError::Unavailable { path, source } => match store_code(&source) {
+            CoreErrorCode::StoreBusy => local(CoreErrorCode::StoreBusy, BUSY_MESSAGE),
+            code => local(code, format!("{}: {source}", path.display())),
+        },
         RegistryError::InvalidRegistry => {
             local(CoreErrorCode::CorruptSession, "Invalid registry data")
         }
@@ -252,6 +255,10 @@ mod tests {
             assert_eq!(mapped.code, code, "{error:?}");
             assert_eq!(mapped.retryable, retryable, "{error:?}");
             assert_eq!(mapped.hint, hint(code), "{error:?}");
+            // Every busy cause, nested in a session file or not, reads plainly.
+            if code == C::StoreBusy {
+                assert_eq!(mapped.message, BUSY_MESSAGE, "{error:?}");
+            }
             mapped.validate().unwrap();
         }
         let busy = store(StoreError::Busy);
@@ -319,13 +326,39 @@ mod tests {
 
     #[test]
     fn registry_errors_carry_the_plain_hint_of_their_code() {
-        let busy = registry(RegistryError::Unavailable {
-            path: "/data/registry.json".into(),
-            source: StoreError::Busy,
+        let path = PathBuf::from("/data/projects/p");
+        let busy_file = || StoreError::SessionFile {
+            path: path.join("sessions/s.json"),
+            source: Box::new(StoreError::Busy),
+        };
+        for busy in [
+            registry(RegistryError::Unavailable {
+                path: path.clone(),
+                source: StoreError::Busy,
+            }),
+            registry(RegistryError::Unavailable {
+                path: path.clone(),
+                source: busy_file(),
+            }),
+            registry(RegistryError::InvalidData {
+                path: path.clone(),
+                source: busy_file(),
+            }),
+            registry(RegistryError::Store(busy_file())),
+        ] {
+            assert_eq!(busy.code, CoreErrorCode::StoreBusy);
+            assert!(busy.retryable);
+            assert_eq!(busy.hint, hint(CoreErrorCode::StoreBusy));
+            assert_eq!(
+                busy.message, BUSY_MESSAGE,
+                "plain, no path or variant names"
+            );
+        }
+        let unreadable = registry(RegistryError::Unavailable {
+            path: path.clone(),
+            source: StoreError::InvalidSnapshot,
         });
-        assert_eq!(busy.code, CoreErrorCode::StoreBusy);
-        assert!(busy.retryable);
-        assert_eq!(busy.hint, hint(CoreErrorCode::StoreBusy));
+        assert!(unreadable.message.starts_with("/data/projects/p: "));
         let missing = registry(RegistryError::NotFound);
         assert_eq!(missing.code, CoreErrorCode::NotFound);
         assert!(!missing.retryable);
