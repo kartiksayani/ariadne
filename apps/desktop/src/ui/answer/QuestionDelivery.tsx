@@ -36,6 +36,8 @@ export interface Delivery {
   readonly bar: AnswerBar | null;
   /** StuckNote, the Undo outcome and the copy fallback. */
   readonly extra: ReactNode;
+  /** The option label and the words, as they went out (empty before anything was sent). */
+  readonly words: string;
 }
 
 const button = (props: { label: string; icon: string; title?: string; onClick?: () => void; disabled?: boolean; kind?: 'primary' | 'ghost' | 'sending' }) =>
@@ -77,17 +79,18 @@ export function useQuestionDelivery({ drafts, store, itemId, inputId }: {
   };
   const extraOf = (stuck: ReactNode) => <>{stuck}{outcome && <ReviewResult outcome={outcome} />}
     {copyFailed && <textarea className="answer-copy-fallback" aria-label="Copy your answer" readOnly value={words} />}</>;
+  const done = (value: Omit<Delivery, 'words'>): Delivery => ({ ...value, words: value.content ? words : '' });
   if (!input) {
-    if (!receiptId && !entry?.saving) return { content: null, bar: null, extra: extraOf(null) };
+    if (!receiptId && !entry?.saving) return done({ content: null, bar: null, extra: extraOf(null) });
     const held = entry?.sent ?? (entry ? { selected_option_id: entry.draft.selected_option_id, text: entry.draft.text } : null);
-    if (entry?.saving || !receiptId) return { content: held, extra: extraOf(null),
+    if (entry?.saving || !receiptId) return done({ content: held, extra: extraOf(null),
       bar: { icon: 'ph ph-circle-notch answer-spin', tone: 'accent', text: 'Sending to the agent…', sealed: true,
-        actions: button({ label: 'Sending…', icon: 'ph ph-circle-notch', title: 'Already sending', kind: 'sending' }) } };
+        actions: button({ label: 'Sending…', icon: 'ph ph-circle-notch', title: 'Already sending', kind: 'sending' }) } });
     // Core accepted it (the receipt is in) and the session read does not show it yet: sent, and Undo waits for that read.
     const at = clock(acceptedAt(receiptId));
-    return { content: held, extra: extraOf(null),
+    return done({ content: held, extra: extraOf(null),
       bar: { icon: 'ph ph-check', tone: 'done', text: `Sent at ${at}. Waiting for the agent to pick it up.`, narrow: `Sent at ${at}. Waiting for the agent.`, sealed: true,
-        actions: button({ label: 'Sent', icon: 'ph ph-paper-plane-right', title: 'Already sent', kind: 'ghost' }) } };
+        actions: button({ label: 'Sent', icon: 'ph ph-paper-plane-right', title: 'Already sent', kind: 'ghost' }) } });
   }
   const binding = session?.bindings[input.binding_id] ?? null;
   const presence = binding ? state.presence[binding.id] ?? null : null;
@@ -100,31 +103,32 @@ export function useQuestionDelivery({ drafts, store, itemId, inputId }: {
   const copyButton = button({ label: 'Copy', icon: 'ph ph-copy', title: 'Copy your answer', onClick: copy });
   if (failed && !agentReceived(attempt) && session) {
     const stuck = stuckInput(session, input, presence);
-    return { content, extra: extraOf(stuck && <StuckNote actions={actions} input={input} stuck={stuck} />),
-      bar: { icon: 'ph ph-warning-circle', tone: 'danger', text: 'Not sent. Your answer is kept.', sealed: true, actions: copyButton } };
+    return done({ content, extra: extraOf(stuck && <StuckNote actions={actions} input={input} stuck={stuck} />),
+      bar: { icon: 'ph ph-warning-circle', tone: 'danger', text: 'Not sent. Your answer is kept.', sealed: true, actions: copyButton } });
   }
-  if (checking) return { content, extra: extraOf(null),
+  if (checking) return done({ content, extra: extraOf(null),
     bar: { icon: 'ph ph-circle-notch', tone: 'accent', text: 'Checking delivery. Your answer is kept.', narrow: 'Checking delivery.', sealed: true,
-      actions: <>{copyButton}{button({ label: 'Check delivery', icon: 'ph ph-arrows-clockwise', onClick: () => { void store.refresh(); } })}</> } };
+      actions: <>{copyButton}{button({ label: 'Check delivery', icon: 'ph ph-arrows-clockwise', onClick: () => { void store.refresh(); } })}</> } });
   if (input.state === 'queued') {
     const undoButton = button({ label: 'Undo', icon: 'ph ph-arrow-counter-clockwise', title: 'Take the answer back; it works until the agent picks it up',
       disabled: busy || operation.writing || !!operation.pending || state.status !== 'ready', onClick: () => { void undo(); } });
     const queued = evidence.kind === 'queued';
-    return { content, extra: extraOf(null), bar: queued
+    return done({ content, extra: extraOf(null), bar: queued
       ? { icon: 'ph ph-hourglass-medium', text: `Queued at ${sentAt}. It goes when the agent is running.`, narrow: `Queued at ${sentAt}.`, sealed: true,
         actions: <>{undoButton}{button({ label: 'Queued', icon: 'ph ph-hourglass-medium', title: 'Already queued', kind: 'ghost' })}</> }
       : { icon: 'ph ph-check', tone: 'done', text: `Sent at ${sentAt}. Waiting for the agent to pick it up.`, narrow: `Sent at ${sentAt}. Waiting for the agent.`, sealed: true,
-        actions: <>{undoButton}{button({ label: 'Sent', icon: 'ph ph-paper-plane-right', title: 'Already sent', kind: 'ghost' })}</> } };
+        actions: <>{undoButton}{button({ label: 'Sent', icon: 'ph ph-paper-plane-right', title: 'Already sent', kind: 'ghost' })}</> } });
   }
   const picked = pickedAt ? `Picked up at ${clock(Date.parse(pickedAt))}.` : 'Picked up by the agent.';
-  return { content, extra: extraOf(null),
-    bar: { icon: 'ph ph-check', tone: 'done', text: picked, sealed: true, actions: button({ label: 'Sent', icon: 'ph ph-paper-plane-right', title: 'Already sent', kind: 'ghost' }) } };
+  return done({ content, extra: extraOf(null),
+    bar: { icon: 'ph ph-check', tone: 'done', text: picked, sealed: true, actions: button({ label: 'Sent', icon: 'ph ph-paper-plane-right', title: 'Already sent', kind: 'ghost' }) } });
 }
 
-/** One sent answer as a line: the dock's Sent list. */
+/** One sent answer as a line: the dock's Sent list. It shows the words exactly as they went out. */
 export function QuestionDelivery(props: { readonly drafts: OwnerDraftStore; readonly store: SessionStore; readonly itemId: string; readonly inputId?: string }) {
-  const { bar, extra } = useQuestionDelivery(props);
+  const { bar, extra, words } = useQuestionDelivery(props);
   return <div className="question-delivery">
+    {words && <p className="question-sent-words">{words}</p>}
     {bar && <div className="answer-bar" data-tone={bar.tone}><i className={`${bar.icon} answer-bar-icon`} aria-hidden="true" />
       <span className="answer-bar-text" role="status">{bar.text}</span>{bar.actions}</div>}
     {extra}

@@ -413,7 +413,11 @@ export class OwnerDraftStore {
     if (this.holds.get(id) !== token) return false;
     this.holds.delete(id); this.entry(id, { holding: false }); return true;
   }
-  /** Read-only reconciliation for an unknown result. It never issues input_submit. */
+  /**
+   * Read-only reconciliation for an unknown result. It never issues input_submit. Core commits an input and its receipt
+   * together, so a fresh read without the receipt means it was not sent: the entry becomes a definite failure, whose
+   * "Try sending again" replays the same operation (one op_id, so never a second answer).
+   */
   async check(id: string): Promise<boolean> {
     const entry = this.state.entries[id];
     if (!entry || entry.saving || !entry.uncertain) return false;
@@ -421,7 +425,10 @@ export class OwnerDraftStore {
       const snapshot = await this.service.query({ session: entry.draft.session, request: { command: 'session_get', params: {} } });
       if (snapshot.freshness !== 'fresh') return false;
       await this.reconcile(snapshot.session);
-      return !!this.state.entries[id]?.receipt;
+      const now = this.state.entries[id];
+      if (now?.receipt) return true;
+      if (now?.uncertain && !now.rejected && !now.saving) this.entry(id, { rejected: true });
+      return false;
     } catch { return false; }
   }
   private async send(id: string, as?: OwnerIntent): Promise<boolean> {

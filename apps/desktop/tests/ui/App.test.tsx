@@ -472,7 +472,8 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     // The detail shows the request's delivery steps and the reply in its timeline.
     expect(await screen.findByRole('region', { name: 'Your request' })).toBeTruthy();
     await waitFor(() => expect(within(screen.getByRole('region', { name: 'Conversation' })).getByText('Owner nonce: exact café second line', { exact: false })).toBeTruthy());
-    expect(await screen.findAllByText(/Sent/)).not.toHaveLength(0);
+    // The Waiting column's Sent list is gone; the request's own steps show where it is.
+    expect(within(screen.getByRole('region', { name: 'Your request' })).getByText('Sending')).toBeTruthy();
     expect(transport.sessions.get(route.session_id)?.items['8']?.status).toBe(originalStatus);
   });
   it('keeps uncertain binding actions isolated across sessions and retries the frozen request after tab close and reopen', async () => {
@@ -1076,18 +1077,16 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
     expect(parent.getAttribute('aria-selected')).toBe('true');
   });
-  it('w folds and unfolds the Waiting column through its saved fold, and not while typing', async () => {
+  it('w is no longer a key: it writes nothing and leaves the dock line as it was', async () => {
     const { transport } = setup(); await openSession();
     const root = document.querySelector('.product-app')!;
+    const dock = await screen.findByRole('region', { name: 'Answer dock' });
+    const writes = mutations(transport, 'preferences_patch').length, open = dock.getAttribute('data-open');
     fireEvent.keyDown(root, { key: 'w' });
-    await screen.findByRole('button', { name: /^Show Waiting on me/ });
-    await waitFor(() => expect(transport.preferences.global.waiting_collapsed).toBe(true));
-    fireEvent.keyDown(root, { key: 'w' });
-    await screen.findByRole('button', { name: 'Hide Waiting on me' });
-    await waitFor(() => expect(transport.preferences.global.waiting_collapsed).toBe(false));
-    const writes = mutations(transport, 'preferences_patch').length;
-    fireEvent.keyDown(document.querySelector('[data-shell-search]')!, { key: 'w' });
+    await act(async () => { await Promise.resolve(); });
     expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);
+    expect(screen.getByRole('region', { name: 'Answer dock' }).getAttribute('data-open')).toBe(open);
+    expect(screen.queryByRole('button', { name: /Waiting on me/ })).toBeNull();
   });
   it('leaves the reply box with Escape, then closes detail with Escape, and keeps the draft for reopening', async () => {
     const { transport } = setup(); await openSession();

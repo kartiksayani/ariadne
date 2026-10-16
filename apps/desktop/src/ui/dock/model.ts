@@ -54,13 +54,15 @@ export function waitingAge(at: number, now: number): string {
 
 export interface PathPart { readonly label: string; readonly full: string; readonly itemId: string | null; readonly more?: boolean }
 
-/** Topic and ancestors. Past three levels: first, second, "…", last, unless `expanded`. */
+/** Topic, ancestors and the question itself. Past three parts: first, second, "…", last, unless `expanded`. */
 export function dockPath(session: Immutable<Session>, itemId: string, expanded = false): PathPart[] {
-  const names = peekNames(session), item = session.items[itemId];
-  const topic = item ? session.topics[item.topic_id] : undefined;
-  const parts: PathPart[] = detailPath(session, itemId).map(crumb => crumb.itemId === null
+  const names = peekNames(session), item = session.items[itemId], path = detailPath(session, itemId);
+  if (!item || !path.length) return [];
+  const topic = session.topics[item.topic_id];
+  const name = (id: string) => ({ label: names.get(id) ?? session.items[id]?.question ?? '', full: session.items[id]?.question ?? '', itemId: id });
+  const parts: PathPart[] = [...path.map(crumb => crumb.itemId === null
     ? { label: crumb.label ?? topic?.name ?? '', full: topic?.name ?? crumb.label ?? '', itemId: null }
-    : { label: names.get(crumb.itemId) ?? session.items[crumb.itemId]?.question ?? '', full: session.items[crumb.itemId]?.question ?? '', itemId: crumb.itemId });
+    : name(crumb.itemId)), name(itemId)];
   if (expanded || parts.length <= 3) return parts;
   return [parts[0]!, parts[1]!, { label: '…', full: 'Show the full path', itemId: null, more: true }, parts[parts.length - 1]!];
 }

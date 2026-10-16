@@ -72,6 +72,13 @@ function outsideTree(id: string) {
   const rectangle = treeRow(id).getBoundingClientRect();
   expect(rectangle.top < 0 || rectangle.bottom > 400).toBe(true);
 }
+/** Opens the dock's first waiting question and follows its path's last segment, the question itself (as a Waiting card did). */
+async function fromDock() {
+  const dock = screen.getByRole('region', { name: 'Answer dock' });
+  if (!dock.hasAttribute('data-open')) await click(within(dock).getByRole('button', { name: /^\d+ (more )?waiting$/ }));
+  const crumbs = dock.querySelectorAll<HTMLButtonElement>('.dock-path .dock-link');
+  await click(crumbs[crumbs.length - 1]!);
+}
 function inTree(id: string) {
   const rectangle = treeRow(id).getBoundingClientRect();
   expect(rectangle.top).toBeGreaterThanOrEqual(0);
@@ -233,7 +240,7 @@ describe('composed item navigation', { timeout: 10_000 }, () => {
     await click(control('Back')); await selected('1.1');
   });
 
-  it('records graph keyboard selection, Waiting and native routes through the same effective selection', async () => {
+  it('records graph keyboard selection, dock and native routes through the same effective selection', async () => {
     const transport = await setup(); await openSession(); await pick('4');
     await click(control('Graph')); screen.getAllByRole('tree', { name: / graph$/ }); ready();
     const graphRow = document.querySelector<HTMLElement>('.graph-node[data-item-id="4"]')!;
@@ -241,7 +248,7 @@ describe('composed item navigation', { timeout: 10_000 }, () => {
     expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id).toBe('5');
     ready();
     await keyDown(document.body, '[', true); await selected('4');
-    await click(document.querySelector('[data-waiting-item="2"]')!); await selected('2');
+    await fromDock(); await selected('2');
     await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '8' }); }); await selected('8');
     await keyDown(document.body, '[', true); await selected('2');
     await keyDown(document.body, '[', true); await selected('4');
@@ -297,8 +304,9 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
     expect(target()!.getAttribute('aria-selected')).toBe('true');
     expect(document.activeElement).toBe(target());
     const rectangle = target()!.getBoundingClientRect();
+    // Centred in the room above the 40px dock line: (300 − 40) / 2.
     expect(rectangle.left + rectangle.width / 2).toBe(200);
-    expect(rectangle.top + rectangle.height / 2).toBe(150);
+    expect(rectangle.top + rectangle.height / 2).toBe(130);
     expect(document.querySelector('.graph-node[data-item-id="1"]')!.getAttribute('aria-expanded')).toBe('true');
     expect(screen.queryByLabelText('Item detail')).toBeNull();
     const current = transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!;
@@ -368,13 +376,13 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
     outsideTree('8');
   });
 
-  it.each(['card', 'Details'] as const)('brings a Waiting target into view through its %s, including the already-selected target', async entry => {
+  it('brings a waiting question into view from the dock path, including the already-selected target', async () => {
     treeGeometry(); await setup(); await openSession(); await pick('2');
-    const card = document.querySelector<HTMLElement>('[data-waiting-item="2"]')!;
-    const open = () => click(entry === 'card' ? card : within(card).getByRole('button', { name: 'Details' }));
     for (let attempt = 0; attempt < 2; ++attempt) {
+      // Details answers the selected question, so the dock holds it once Details closes.
+      await click(screen.getByRole('button', { name: 'Close detail' }));
       await readAt(600); outsideTree('2');
-      await open(); selected('2');
+      await fromDock(); selected('2');
       expect(treeScroll().scrollTop).toBeLessThan(600);
       inTree('2');
       expect(treeRow('2').getBoundingClientRect().top).toBe(8);
@@ -440,7 +448,7 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
     expect(screen.getByLabelText<HTMLInputElement>('Search questions and outcomes').value).toBe('receipt');
   });
 
-  it('keeps Waiting, linked and history reveals working after opening an archived saved selection', async () => {
+  it('keeps dock, linked and history reveals working after opening an archived saved selection', async () => {
     treeGeometry();
     const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
     transport.preferences.sessions[0]!.selected_item_id = '8';
@@ -449,7 +457,7 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
     await setup(transport); await openSession();
     expect(treeRow('8')).toBeNull();
     await readAt(600);
-    await click(document.querySelector('[data-waiting-item="2"]')!);
+    await fromDock();
     selected('2'); inTree('2');
     expect(document.activeElement).toBe(treeRow('2'));
     await readAt(600);
@@ -480,7 +488,8 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
       await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '8' }); });
       selected('8'); inTree('8');
       expect(treeScroll().scrollTop).toBeGreaterThan(150);
-      expect(treeRow('8').getBoundingClientRect().bottom).toBe(392);
+      // 8px above the 40px dock line that floats over the Map's bottom.
+      expect(treeRow('8').getBoundingClientRect().bottom).toBe(352);
     }
   });
 

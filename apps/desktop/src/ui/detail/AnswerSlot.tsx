@@ -106,7 +106,7 @@ export function AnswerSlot({ drafts, store, itemId, layout = 'details', hint, he
   if (!item) return null;
   // data-owner-input marks every owner input of the detail (this slot and the action box) for native tests.
   if (!state.ready || !entry) return <div className="detail-answer-slot" data-owner-input={mark} role="status">Loading saved drafts…{error && <p role="alert">{error}</p>}</div>;
-  const preferences = state.preferenceUncertain && <div className="answer-preferences" role="alert">
+  const preferences = state.preferenceUncertain && <div className="answer-preferences">
     <p>Saving your draft could not be confirmed. Sending waits until it is.</p>
     <button type="button" className="btn btn-secondary" onClick={submit.retryPreferences}>Try saving your draft again</button></div>;
   const options = item.options, draft = entry.draft;
@@ -114,8 +114,10 @@ export function AnswerSlot({ drafts, store, itemId, layout = 'details', hint, he
     <i className="ph-fill ph-question" aria-hidden="true" /><span className="answer-head-title">Waiting on you</span>
     {item.waiting_since && <span className="answer-head-age">Waiting {waitingAge(Date.parse(item.waiting_since), Date.now())}</span>}</div>;
   // Sent: the same cards stay, sealed, with the delivery bar. An answer already on its way locks every place.
-  const delivered = entry.receipt?.data.kind === 'input_submit' || entry.saving && !entry.uncertain
-    || !!session && (ownerReplied(session, item) || answerStanding(session, itemId));
+  // The owner's own unknown or failed send is reconciled here first, even when another input (a note) left the queue.
+  const recovering = !entry.receipt && (entry.uncertain || !!entry.error && !entry.saving && !answerStanding(session, itemId));
+  const delivered = !recovering && (entry.receipt?.data.kind === 'input_submit' || entry.saving && !entry.uncertain
+    || !!session && (ownerReplied(session, item) || answerStanding(session, itemId)));
   if (delivered && delivery.bar) {
     const content = delivery.content;
     return <div ref={root} className="detail-answer-slot" data-owner-input={mark}>
@@ -135,14 +137,14 @@ export function AnswerSlot({ drafts, store, itemId, layout = 'details', hint, he
   const copy = barButton('Copy', 'ph ph-copy', () => { void copyText(words).catch(() => {}); }, { title: 'Copy your answer' });
   const busy = entry.saving || state.preferenceUncertain;
   const bar: AnswerBar | null = entry.uncertain && !entry.rejected
-    ? { icon: 'ph ph-question', tone: 'accent', text: 'Ariadne isn’t sure this was sent. Check before sending again; your words are kept.', narrow: 'Not sure it was sent. Words kept.',
+    ? { icon: 'ph-fill ph-question', tone: 'accent', text: 'Ariadne isn’t sure this was sent. Check before sending again; your words are kept.', narrow: 'Not sure it was sent. Words kept.',
       actions: <>{copy}{barButton('Check delivery', 'ph ph-arrows-clockwise', () => { void submit.retry(); }, { primary: true, disabled: busy })}</> }
     : entry.uncertain
-      ? { icon: 'ph ph-warning-circle', tone: 'danger', text: `Not sent${error ? `: ${error.replace(/\.$/, '')}` : ''}. Your words are kept.`, narrow: 'Not sent. Your words are kept.',
+      ? { icon: 'ph ph-warning-circle', tone: 'danger', text: 'Not sent. Your words are kept.',
         actions: <>{copy}{barButton('Edit and send again', 'ph ph-pencil-simple', submit.prepareRevised, { disabled: ended || busy })}
           {barButton('Try sending again', 'ph ph-arrow-clockwise', () => { void submit.retry(); }, { primary: true, disabled: ended || busy, title: 'Send the same answer again, once' })}</> }
       : entry.error
-        ? { icon: 'ph ph-warning-circle', tone: 'danger', text: `Not sent${error ? `: ${error.replace(/\.$/, '')}` : ''}. Your words are kept.`, narrow: 'Not sent. Your words are kept.',
+        ? { icon: 'ph ph-warning-circle', tone: 'danger', text: 'Not sent. Your words are kept.',
           actions: <>{copy}{barButton('Retry', 'ph ph-arrow-clockwise', () => { void submit.retry(); }, { primary: true, disabled: busy || !!submit.blocked || submit.changed, title: 'Send again ( ↵ )' })}</> }
         : null;
   return <div ref={root} className="detail-answer-slot" data-owner-input={mark}>
@@ -155,7 +157,8 @@ export function AnswerSlot({ drafts, store, itemId, layout = 'details', hint, he
       onSelect={index => { const option = options[index]; if (index === -1) submit.select(null); else if (option) submit.select(option.id); }}
       onDraft={submit.write} onSendOption={(index, note) => { const option = options[index]; if (option) submit.sendOption(option.id, note); }}
       onSendText={submit.sendText} onEscape={onEscape} />
-    {error && !bar && <p className="detail-error" role="alert">{error}</p>}
+    {/* The one alert: why it failed, under the bar that offers the way on. */}
+    {error && <p className="detail-error" role="alert">{error}</p>}
     {preferences}
   </div>;
 }

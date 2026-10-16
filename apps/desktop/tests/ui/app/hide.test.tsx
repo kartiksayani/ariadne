@@ -202,13 +202,19 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
     expect(row('4')!.classList.contains('tree-item-hidden')).toBe(false);
   });
 
-  it('keeps a hidden waiting question in the rail and reveals it dimmed when selected there', async () => {
+  it('keeps a hidden waiting question in the dock and reveals it dimmed when opened from its path', async () => {
     const { transport } = await mount(); const waitingBefore = chip('Waiting on me').textContent;
     await hide('2');
     expect(chip('Waiting on me').textContent).toBe(waitingBefore);
     expect(within(group()).getByText('waiting on you')).toBeTruthy();
-    const card = document.querySelector<HTMLElement>('[data-waiting-item="2"]')!; expect(card).not.toBeNull();
-    fireEvent.click(card); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' }); await ready();
+    const dock = screen.getByRole('region', { name: 'Answer dock' }), current = () => dock.querySelector('.answer-dock-current [data-owner-input="2"]');
+    fireEvent.click(within(dock).getByRole('button', { name: /^\d+ (more )?waiting$/ }));
+    await waitFor(() => expect(dock.querySelector('.answer-dock-current')).not.toBeNull());
+    const next = () => within(dock).getByRole<HTMLButtonElement>('button', { name: 'Next question' });
+    while (!current() && !next().disabled) fireEvent.click(next());
+    expect(current()).not.toBeNull();
+    const crumbs = dock.querySelectorAll<HTMLButtonElement>('.dock-path .dock-link');
+    fireEvent.click(crumbs[crumbs.length - 1]!); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' }); await ready();
     expect(group().getAttribute('aria-expanded')).toBe('true');
     expect(row('2')!.classList.contains('tree-item-hidden')).toBe(true);
     expect(saved(transport).hidden_item_ids).toEqual(['2']);
@@ -217,7 +223,7 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
     expect(row('2')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Unhide item' }));
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([]));
-    expect(document.querySelector('[data-waiting-item="2"]')).not.toBeNull();
+    expect(row('2')).not.toBeNull();
   });
 
   it('reveals a hidden descendant from a native item route and keeps its preference', async () => {

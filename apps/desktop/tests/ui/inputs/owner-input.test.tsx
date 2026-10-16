@@ -26,6 +26,7 @@ import { sentAs } from '../../../src/ui/detail/model';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
 import { HistoryTransport } from '../history/fixtures';
 import { useWindowKeys } from '../../../src/ui/shell/windowKeys';
+import { answerWords } from '../answer/words';
 // @ts-expect-error Native e2e helpers are plain ESM without type declarations.
 import { replyControlState, replyDraftState } from '../../e2e/owner-reply.mjs';
 
@@ -164,14 +165,9 @@ async function setup(saved: OwnerDraft[] = [], change: (session: Session) => voi
     render: (itemId = '2', props: Partial<AnswerSlotProps> = {}) => render(<AnswerSlot drafts={drafts} store={store} itemId={itemId} onEscape={() => {}} {...props} />),
     restart: async () => { const restored = new OwnerDraftStore(service, () => uuid(++counter)); await restored.load(); return restored; } };
 }
-/** The answer's words box, opened the way the owner opens it: "+ Add a note" on the picked card, else "Write my own answer". */
+/** The answer's words box, opened the way the owner opens it; else the one text box on screen (a reply box). */
 function editor(root: ParentNode = document): HTMLTextAreaElement {
-  const box = () => root.querySelector<HTMLTextAreaElement>('.answer textarea');
-  if (!box()) {
-    const open = root.querySelector<HTMLButtonElement>('.answer-note-link') ?? root.querySelector<HTMLButtonElement>('[data-answer-own]');
-    if (open) act(() => { fireEvent.click(open); });
-  }
-  return box() ?? screen.getByRole<HTMLTextAreaElement>('textbox');
+  return root.querySelector('.answer') ? answerWords(root) : screen.getByRole<HTMLTextAreaElement>('textbox');
 }
 /** Waits for the answer cards, then opens and returns the words box. */
 async function findEditor(root: ParentNode = document): Promise<HTMLTextAreaElement> {

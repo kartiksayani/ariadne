@@ -40,7 +40,7 @@ describe('detail actions while the owner view is stale', () => {
     expect(document.activeElement).toBe(box);
     expect(box.value).toBe(' My saved note\non two lines. ');
     expect(drafts.find(route, '2', 'answer')?.draft.selected_option_id).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /1Keep it/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Keep it/ }));
     view.rerender(<AnswerSlot {...props} />);
     expect(drafts.find(route, '2', 'answer')?.draft.selected_option_id).toBe('keep');
     expect(consume).toHaveBeenCalledExactlyOnceWith(1);
@@ -86,7 +86,8 @@ describe('detail actions while the owner view is stale', () => {
     if (state === 'in_flight') {
       // A committed result waiting for host completion is handled by Close, rather than cancelled.
       const attempt = structuredClone(Object.values(source.inputs).find(value => value?.target.item_id === '2' && value.id !== input.id)!.attempts[0]!);
-      attempt.id = crypto.randomUUID(); attempt.sealed_at = null;
+      // Its turn is still running on the host: the committed result is published, so the item reads Sent.
+      attempt.id = crypto.randomUUID(); attempt.sealed_at = null; attempt.turn_state = 'running';
       input.active_attempt_id = attempt.id; input.attempts = [attempt];
     }
     ++source.revision;
@@ -437,6 +438,7 @@ describe('detail actions while the owner view is stale', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(drafts.find(route, '2', 'answer')?.uncertain).toBe(true));
     expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(screen.getAllByText('Ariadne isn’t sure this was sent. Check before sending again; your words are kept.')).toHaveLength(1);
     expect((box as HTMLTextAreaElement).value).toBe('Keep my exact answer.');
     expect(sends(transport)).toHaveLength(1);
     const session = transport.sessions.get(route.session_id)!;

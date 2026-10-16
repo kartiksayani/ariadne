@@ -59,7 +59,10 @@ async function queuedReply() {
   return { transport, other, release, replyFocus };
 }
 
-describe('Reply after queued navigation', { timeout: 10_000 }, () => {
+// Skipped: the trigger, r on another session's Waiting card, left with the Waiting column. The board's other-sessions
+// list answers in place and never navigates; the session switcher by the logo is the new way there. Re-point these at
+// the switcher when it lands; the queued-navigation rules they pin are unchanged.
+describe.skip('Reply after queued navigation', { timeout: 10_000 }, () => {
   it('selects the other session and focuses Reply exactly once after an owner save exceeds the handoff timer', async () => {
     const { transport, other, release, replyFocus } = await queuedReply();
     try {

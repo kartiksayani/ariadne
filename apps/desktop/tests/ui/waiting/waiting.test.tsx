@@ -15,6 +15,7 @@ import { StuckNote } from '../../../src/ui/answer/StuckNote';
 import { stuckInput } from '../../../src/selectors/waiting/stuck';
 import { SessionActionControllers } from '../../../src/components/bindings/actions';
 import { AppTransport, secondId } from '../app/transport';
+import { answerWords } from '../answer/words';
 
 const route = { project_id: demo.project_id, session_id: demo.id };
 function fixture(): { session: Session; project: ProjectSummary; summary: SessionSummary } {
@@ -425,7 +426,8 @@ async function dockUI(configure: (transport: AppTransport) => void = () => {}) {
   return { transport, opened, waiting, drafts, current, view };
 }
 const dock = () => screen.getByRole('region', { name: 'Answer dock' });
-const openDock = () => fireEvent.click(within(dock()).getByRole('button', { name: /waiting on you/ }));
+const openDock = () => fireEvent.click(within(dock()).getByRole('button', { name: /^\d+ waiting$/ }));
+const pager = () => dock().querySelector('.dock-pager [aria-live]')?.textContent;
 const option = (index: number) => dock().querySelector<HTMLButtonElement>(`[data-answer-option="${index}"]`)!;
 const send = () => dock().querySelector<HTMLButtonElement>('[data-answer-send]')!;
 function answerInput(session: Session, suffix: string) {
@@ -443,7 +445,7 @@ function otherSession(transport: AppTransport) {
 describe('source-backed answer dock', () => {
   it('starts as a folded current-session count and stays folded when a new question arrives', async () => {
     const { transport, current, drafts } = await dockUI();
-    expect(within(dock()).getByRole('button', { name: '1 waiting on you' })).toBeTruthy();
+    expect(within(dock()).getByRole('button', { name: '1 waiting' })).toBeTruthy();
     expect(dock().hasAttribute('data-open')).toBe(false);
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(Object.keys(drafts.getSnapshot().entries)).toHaveLength(0);
@@ -451,7 +453,7 @@ describe('source-backed answer dock', () => {
     seed.items['10'] = { ...structuredClone(seed.items['2']!), id: '10', ordinal: 10, question: 'A newly arrived decision' };
     seed.revision++;
     await act(async () => { await current.refresh(); });
-    expect(within(dock()).getByRole('button', { name: '2 waiting on you' })).toBeTruthy();
+    expect(within(dock()).getByRole('button', { name: '2 waiting' })).toBeTruthy();
     expect(dock().hasAttribute('data-open')).toBe(false);
     expect(screen.queryByRole('textbox')).toBeNull();
   });
@@ -466,9 +468,9 @@ describe('source-backed answer dock', () => {
     expect(option(0).getAttribute('aria-pressed')).toBe('false');
     expect(option(1).getAttribute('aria-pressed')).toBe('false');
     expect(send().disabled).toBe(true);
-    expect((within(dock()).getByLabelText('Question pager') as HTMLSelectElement).value).toBe('2:1');
+    expect(pager()).toBe('1 of 2'); expect(dock().querySelector('[data-owner-input="2"]')).not.toBeNull();
     fireEvent.click(within(dock()).getByRole('button', { name: 'Next question' }));
-    expect((within(dock()).getByLabelText('Question pager') as HTMLSelectElement).value).toBe('10:1');
+    expect(pager()).toBe('2 of 2'); expect(dock().querySelector('[data-owner-input="10"]')).not.toBeNull();
     expect(transport.queries.some(query => query.request.command === 'reveal_item')).toBe(false);
     fireEvent.click(within(dock()).getByRole('button', { name: 'Fold the dock' }));
     expect(screen.queryByRole('textbox')).toBeNull();
@@ -476,13 +478,13 @@ describe('source-backed answer dock', () => {
 
   it('groups other sessions behind an explicit control without selecting or navigating the Map', async () => {
     const { transport } = await dockUI(otherSession);
-    expect(within(dock()).getByRole('button', { name: '1 waiting on you' })).toBeTruthy();
+    expect(within(dock()).getByRole('button', { name: '1 waiting' })).toBeTruthy();
     fireEvent.click(within(dock()).getByRole('button', { name: '1 in other sessions' }));
     const others = document.querySelector<HTMLElement>('[aria-label="Questions in other sessions"]')!;
     expect(within(others).getByRole('heading', { name: /Separate session/ })).toBeTruthy();
     expect(within(others).getByText('Other session decision')).toBeTruthy();
     expect(within(others).queryByText(transport.sessions.get(route.session_id)!.items['2']!.question)).toBeNull();
-    expect(within(dock()).queryByRole('combobox', { name: 'Question pager' })).toBeNull();
+    expect(dock().hasAttribute('data-open')).toBe(false);
     expect(transport.queries.some(query => query.request.command === 'reveal_item')).toBe(false);
     expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'all_sessions' });
   });
@@ -490,7 +492,10 @@ describe('source-backed answer dock', () => {
   it('sends an other-session answer to its original session and item without navigation', async () => {
     const { transport } = await dockUI(otherSession);
     fireEvent.click(within(dock()).getByRole('button', { name: '1 in other sessions' }));
+    fireEvent.click(dock().querySelector<HTMLElement>('.dock-other-head')!);
     await waitFor(() => expect(option(0)?.disabled).toBe(false));
+    // The routing line: where this answer goes, before anything is sent.
+    expect(dock().querySelector('.dock-other-row .answer-bar')?.textContent).toMatch(/^Goes to .+ in “Separate session”, once\./);
     fireEvent.click(option(0));
     await waitFor(() => expect(send()?.disabled).toBe(false));
     fireEvent.click(send());
@@ -538,7 +543,7 @@ describe('source-backed answer dock', () => {
       expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(false);
       await act(async () => { gate.resolve(); await current.refresh(); });
       await waitFor(() => expect(current.getSnapshot().status).toBe('ready'));
-      expect(dock().querySelector('.answer-dock-content > p')?.textContent).toContain('The revised current question');
+      expect(dock().querySelector('.dock-question-title')?.textContent).toContain('The revised current question');
       expect(held(option(0))).toBe(false);
       expect(screen.queryByText(/This item changed/)).toBeNull();
       expect(Object.values(drafts.getSnapshot().entries).every(entry => entry.draft.question_revision === 2)).toBe(true);
@@ -548,7 +553,7 @@ describe('source-backed answer dock', () => {
   it('keeps the last question and typed words while a session read fails, and blocks sending', async () => {
     const { transport, current } = await dockUI(); openDock();
     await waitFor(() => expect(option(0)?.disabled).toBe(false));
-    const text = within(dock()).getByRole('textbox');
+    const text = answerWords(dock());
     fireEvent.change(text, { target: { value: 'Keep these words' } });
     await waitFor(() => expect(send().disabled).toBe(false));
     const invoke = transport.invoke.bind(transport);
@@ -562,6 +567,34 @@ describe('source-backed answer dock', () => {
     expect(within(dock()).getByText('The session is unavailable or stale. Refresh before sending.')).toBeTruthy();
     fireEvent.click(send());
     expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(false);
+  });
+
+  it('keeps a refused answer in place with its choice frozen and one Try sending again of the same operation', async () => {
+    const { transport } = await dockUI(); openDock();
+    await waitFor(() => expect(option(1)?.disabled).toBe(false));
+    const invoke = transport.invoke.bind(transport), refused: string[] = [];
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const request = args.request;
+      if (!refused.length && 'command' in request && request.command.command === 'input_submit') {
+        refused.push(request.command.op_id);
+        return { api_version: 1, ok: false, error: { ...error, code: 'queue_full', message: 'The queue is full.' } };
+      }
+      return invoke(name, args);
+    });
+    const question = dock().querySelector('.dock-question-title')?.textContent;
+    fireEvent.click(option(1));
+    await waitFor(() => expect(send().disabled).toBe(false));
+    fireEvent.click(send());
+    const again = await within(dock()).findByRole('button', { name: 'Try sending again' });
+    expect(within(dock()).getByText('Not sent. Your words are kept.')).toBeTruthy();
+    // The same question, the same pick, nothing else to choose until the owner acts.
+    expect(dock().querySelector('.dock-question-title')?.textContent).toBe(question);
+    expect(option(1).getAttribute('aria-pressed')).toBe('true');
+    expect(option(0).disabled).toBe(true);
+    expect(dock().querySelector('[data-answer-send]')).toBeNull();
+    fireEvent.click(again);
+    await waitFor(() => expect(transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(1));
+    expect(transport.mutations.find(request => request.command.command === 'input_submit')!.command.op_id).toBe(refused[0]);
   });
 
   it('locks sending and offers reconciliation when a draft preference write is uncertain', async () => {
@@ -594,18 +627,17 @@ describe('source-backed answer dock', () => {
       value.payload.target_snapshot.options = [{ id: 'old', label: 'Original choice', consequence: 'Old consequence', recommended: false }];
       seed.items['4']!.options = [{ id: 'new', label: 'Current choice', consequence: '', recommended: false }];
     });
-    fireEvent.click(within(dock()).getByRole('button', { name: /sent$/ }));
+    fireEvent.click(within(dock()).getByRole('button', { name: /^\d+ sent/ }));
     const sent = document.querySelector<HTMLElement>('[aria-label="Sent answers"]')!;
     const delivery = [...sent.querySelectorAll<HTMLElement>('.question-delivery')].find(element => element.textContent?.includes('exact original words'))!;
     expect(delivery.querySelector('.question-sent-words')!.textContent).toBe('Original choice\n\n  exact original words  ');
-    expect(within(delivery).getByRole('button', { name: 'Copy answer' })).toBeTruthy();
     expect(within(delivery).getByRole('button', { name: 'Undo' })).toBeTruthy();
     expect(transport.preferences.drafts).toEqual([]);
   });
 
   it('checks an uncertain persisted delivery without retrying or submitting another answer', async () => {
     const { transport, current } = await dockUI(transport => { answerInput(transport.sessions.get(route.session_id)!, '74'); });
-    fireEvent.click(within(dock()).getByRole('button', { name: /sent$/ }));
+    fireEvent.click(within(dock()).getByRole('button', { name: /^\d+ sent/ }));
     const sent = document.querySelector<HTMLElement>('[aria-label="Sent answers"]')!;
     const delivery = [...sent.querySelectorAll<HTMLElement>('.question-delivery')].find(element => element.textContent?.includes('Followup request'))!;
     expect(within(delivery).getByText('Checking delivery. Your answer is kept.')).toBeTruthy();

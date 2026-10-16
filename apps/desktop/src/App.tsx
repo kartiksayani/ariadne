@@ -426,6 +426,11 @@ function Workspace({ application }: { application: Application }) {
   // The waiting question Details (or the bigger view) is answering leaves the dock's list.
   const answeringId = conversationOpen ? conversation?.itemId ?? null : detailOpen ? selectedId : null;
   const answering = answeringId && sessionState?.snapshot?.session.items[answeringId]?.status === 'waiting_on_me' ? answeringId : null;
+  // As the Waiting column did: with the conversation open, a dock path segment shows that item there and the Map stays.
+  const openFromDock = (itemId: string) => {
+    if (conversationOpen) openConversation(itemId);
+    else if (route) revealItem({ ...route, item_id: itemId });
+  };
   const shown = useAppliedTheme(theme);
   const [textSizeTarget, setTextSizeTarget] = useState<TextSize | null>(null);
   const textSizeIntent = useRef<TextSize | null>(null);
@@ -630,7 +635,7 @@ function Workspace({ application }: { application: Application }) {
       hidden={selectedHidden} hiddenNotice={hiddenNotice} onHide={route && selectedId ? () => { toggleHidden({ ...route, item_id: selectedId }); } : undefined}
       onRemove={() => { if (route && selectedId) askRemove({ kind: 'item', item: { ...route, item_id: selectedId } }); }}
       dockContent={store && route ? <AnswerDock store={store} waiting={application.waiting} drafts={application.drafts} answering={answering}
-        onAgentNotRunning={onAgentNotRunning} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })}
+        onAgentNotRunning={onAgentNotRunning} onOpenItem={openFromDock}
         onSeen={(itemId, revision) => navigation.markItemSeen(route, itemId, revision)} /> : undefined}
       detailPath={store && selectedId && detailOpen && route ? <DetailPath store={store} itemId={selectedId} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} /> : undefined}
       detail={conversationOpen ? <div data-covered-detail="" /> : store && selectedId && detailOpen && route ? <ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}

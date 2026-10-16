@@ -69,8 +69,6 @@ export function StuckNote({ actions, input, stuck, onEdit, compactActions = fals
   const attempt = stoppedAttempt(input);
   const waiting = awaitingAnswer(input);
   const received = agentReceived(input.attempts.find(value => value.id === input.active_attempt_id));
-  const retryable = !!attempt && attempt.acceptance !== 'uncertain' && !received
-    && (attempt.acceptance === 'rejected' || attempt.turn_state === 'failed' || attempt.turn_state === 'interrupted');
   const repair = waiting && attempt?.turn_state === 'completed' && !attempt.domain_result;
   const stopWithoutIdle = skipWithoutIdle(attempt);
   const quiet = (run: () => void) => (event: MouseEvent) => { event.stopPropagation(); run(); };
@@ -110,7 +108,7 @@ export function StuckNote({ actions, input, stuck, onEdit, compactActions = fals
       {repair && <button type="button" className="btn btn-secondary dispatch-action" disabled={busy || !!working}
         title={`Asks ${agent} to save its answer now. An answer it’s still working on won’t be linked to this message.`}
         onClick={quiet(() => resolve('request_result_repair'))}>Ask for the answer</button>}
-      {stuck.retry && retryable && <button type="button" className={`btn ${waiting ? 'btn-ghost' : received ? 'btn-primary' : 'btn-secondary'} dispatch-action`} disabled={busy || !!working}
+      {stuck.retry && <button type="button" className={`btn ${waiting ? 'btn-ghost' : received ? 'btn-primary' : 'btn-secondary'} dispatch-action`} disabled={busy || !!working}
         title={working ?? (presence?.idle ? 'Send it again' : `Send it again. Use this only if ${agent} isn’t working on it now.`)}
         onClick={quiet(() => { if (received && attempt) setResending(attempt.id); else resolve('resend'); })}>{received ? 'Send again' : 'Retry'}</button>}
       {!waiting && stuck.settle === 'skip' && <button type="button" className="btn btn-secondary dispatch-action" disabled={busy || !stopWithoutIdle && !!working}

@@ -13,6 +13,7 @@ import { QuestionDelivery } from '../answer/QuestionDelivery';
 import type { PendingSubmission } from '../answer/useSubmit';
 import { useSeenDwell } from '../changes/useSeenDwell';
 import { peekNames } from '../peek/names';
+import { navigationVisits } from '../navigation/visits';
 import { agentName, ownerName } from '../shell/model';
 import { useDockModel } from './api';
 import { dockPath, dockQuestions, sentWaiting, waitingAge } from './model';
@@ -137,18 +138,21 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
   const item = open ? session?.items[state.current!.itemId] : undefined;
   const waitingNow = unsent.length > 0;
   const toggle = (name: 'others' | 'drafts' | 'sent') => setPopover(value => value === name ? null : name);
-  const sentChip = sent.length > 0 && <button type="button" className="dock-sent" aria-expanded={popover === 'sent'} onClick={() => toggle('sent')}
-    title="Answers sent and not picked up yet">
-    <i className="ph ph-paper-plane-tilt" aria-hidden="true" /><span className="dock-wide">{sent.length} sent, waiting for the agent</span><span className="dock-narrow">{sent.length} sent</span></button>;
+  // "N sent" counts answers not picked up yet; with none, the chip still opens the list of picked-up or stuck ones.
+  const sentCount = sent.length || standing.length;
+  const sentChip = sentCount > 0 && <button type="button" className="dock-sent" aria-expanded={popover === 'sent'} onClick={() => toggle('sent')}
+    title={sent.length ? 'Answers sent and not picked up yet' : 'Sent, picked up or needing a look'}>
+    <i className="ph ph-paper-plane-tilt" aria-hidden="true" /><span className="dock-wide">{sentCount} sent{sent.length ? ', waiting for the agent' : ''}</span>
+    <span className="dock-narrow" aria-hidden="true">{sentCount} sent</span></button>;
   const othersChip = otherRows.length > 0 && <button type="button" className="dock-others" aria-expanded={popover === 'others'} onClick={() => toggle('others')}
     title="Questions waiting on you in other sessions">
-    <i className="ph ph-squares-four" aria-hidden="true" /><span className="dock-wide">{otherRows.length} in other sessions</span><span className="dock-narrow">{otherRows.length} elsewhere</span></button>;
+    <i className="ph ph-squares-four" aria-hidden="true" /><span className="dock-wide">{otherRows.length} in other sessions</span><span className="dock-narrow" aria-hidden="true">{otherRows.length} elsewhere</span></button>;
   // Drafts on other questions, or on one no longer waiting (withdrawn, session closed): reachable from the line too.
   const keptChip = kept.length > 0 && <button type="button" className="dock-draft" aria-expanded={popover === 'drafts'} title={kept.map(entry => nameOf(entry.draft.target.item_id ?? '')).join(', ')} onClick={() => {
     const target = questions.find(question => question.itemId === kept[0]!.draft.target.item_id);
     if (kept.length === 1 && target) model.show(target.id); else toggle('drafts');
   }}><i className="ph ph-pencil-simple" aria-hidden="true" /><span className="dock-wide">Draft kept on {quote(nameOf(kept[0]!.draft.target.item_id ?? ''))}{kept.length > 1 ? ` +${kept.length - 1}` : ''}</span>
-    <span className="dock-narrow">Draft kept</span></button>;
+    <span className="dock-narrow" aria-hidden="true">Draft kept</span></button>;
   const visibleHeight = open ? drag ?? height : null;
   const first = unsent[0] ?? null;
   return <section ref={root} className="answer-dock" aria-label="Answer dock" data-open={open || undefined} data-waiting={waitingNow || open || undefined}
@@ -198,8 +202,8 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
         </span>
         {keptChip}
         {session && item && <nav className="dock-path" aria-label="Question location">{dockPath(session, item.id, fullPath).map((part, at, parts) => <span key={`${part.itemId ?? part.label}:${at}`} className="dock-crumb">
-          {part.more ? <button type="button" className="dock-link" title={part.full} onClick={() => setFullPath(true)}>…</button>
-            : part.itemId && onOpenItem ? <button type="button" className="dock-link" title={part.full} onClick={() => onOpenItem(part.itemId!)}>{part.label}</button>
+          {part.more ? <button type="button" className="dock-link" title="Show the full path" onClick={() => setFullPath(true)}>…</button>
+            : part.itemId && onOpenItem ? <button type="button" className="dock-link" title={`Go to “${part.label}”`} onClick={() => onOpenItem(part.itemId!)}>{part.label}</button>
               : <span className="dock-crumb-text" title={part.full}>{part.label}</span>}
           {at < parts.length - 1 && <i className="ph ph-caret-right" aria-hidden="true" />}</span>)}</nav>}
         <span className="dock-spacer" />
@@ -214,7 +218,7 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
           {item.note && item.note.split(/\n{2,}/).map((paragraph, at) => <p key={at} className="dock-question-body">{paragraph}</p>)}
         </div>
         <AnswerSlot drafts={drafts} store={store} itemId={item.id} layout="dock" onEscape={() => {}} onAgentNotRunning={onAgentNotRunning}
-          onSent={() => { model.sent(state.current!.id); void store.refresh(); }} />
+          onSent={() => { navigationVisits.record(route, item.id, 'answered'); model.sent(state.current!.id); void store.refresh(); }} />
       </div>}
     </>}
     {popover === 'drafts' && <div className="dock-popover dock-popover-left" role="dialog" aria-label="Kept drafts">
@@ -274,10 +278,11 @@ export function OtherSessionQuestions({ waiting, drafts, currentSession, onAgent
               <i className={answered ? 'ph ph-paper-plane-tilt' : 'ph-fill ph-question'} aria-hidden="true" />
               <span className="dock-other-text">{row.item.question}</span>
               <span className="dock-other-age">{answered ? 'Sent' : row.item.waiting_since ? waitingAge(Date.parse(row.item.waiting_since), now()) : ''}</span>
-              <i className={`ph ph-caret-${expanded ? 'down' : 'right'}`} aria-hidden="true" />
+              <i className={expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} aria-hidden="true" />
             </button>
             {expanded && store && <AnswerSlot drafts={drafts} store={store} itemId={row.item.id} layout="compact" onEscape={() => setOpenRow(null)} onAgentNotRunning={onAgentNotRunning}
-              hint={`Goes to ${agent} in “${name}”, once.`} onSent={() => { void store.refresh(); void waiting.refresh(); }} />}
+              hint={`Goes to ${agent} in “${name}”, once.`}
+              onSent={() => { navigationVisits.record(row.route, row.item.id, 'answered'); void store.refresh(); void waiting.refresh(); }} />}
           </div>;
         })}
       </section>;

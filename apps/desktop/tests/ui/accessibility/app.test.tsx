@@ -87,9 +87,9 @@ it('routes owner shortcuts from roving rows, repeats focus requests and never su
     const row = document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
     await act(async () => { row.focus(); fireEvent.keyDown(row, { key }); });
   };
-  // a answers inline in the tree (frame 1c); the number keys then change the picked option.
+  // a opens the answer in Details (the tree row has no answer box); the number keys then change the picked option.
   await press('2', 'a');
-  await waitFor(() => expect(document.querySelector('[role="treeitem"][data-item-id="2"] .answer')).not.toBeNull());
+  await waitFor(() => expect(document.querySelector('.shell-detail-scroll .detail-answer-slot .answer')).not.toBeNull());
   await press('2', '2');
   await waitFor(() => expect(transport.preferences.drafts.some(value => value.target.item_id === '2' && value.selected_option_id === transport.sessions.get(route.session_id)!.items['2']!.options[1].id)).toBe(true));
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);
@@ -117,9 +117,8 @@ it('sends Back to Open as one press from the o shortcut (Ariadne.dc.html:1207)',
 it('answers the oldest waiting item when the focused item is not waiting', async () => {
   await setup(); const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="4"]')!;
   row.focus(); fireEvent.keyDown(row, { key: 'a' });
-  const waiting = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
-  await waitFor(() => expect(waiting.querySelector('.answer')).not.toBeNull());
-  expect(document.activeElement).toBe(waiting);
+  // The oldest waiting question's answer opens in Details.
+  await waitFor(() => expect(document.querySelector('[data-detail-item-id="2"] .detail-answer-slot .answer')).not.toBeNull());
 });
 
 it('queues a fresh Bring once with its visible fixed text and reveals its receipt on repeat', async () => {
@@ -189,15 +188,16 @@ it.each(['item', 'question', 'binding'])('preserves retained option until explic
       intent: 'answer', selected_option_id: 'morning', text: 'Retain deliberate draft.', supersedes_answer_id: null, submission_attempted: false });
   });
   const row = document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="2"]')!;
-  row.focus(); fireEvent.keyDown(row, { key: '2' }); await screen.findByLabelText('Reply in your own words');
+  row.focus(); fireEvent.keyDown(row, { key: '2' });
+  await waitFor(() => expect(document.querySelector('.shell-detail-scroll .detail-answer-slot .answer')).not.toBeNull());
   const detail = within(document.querySelector('.shell-detail-scroll')!);
-  expect(detail.getByRole('button', { name: /^2Afternoon/ }).hasAttribute('disabled')).toBe(true);
-  expect(detail.getByRole('button', { name: /^1Morning/ }).getAttribute('aria-pressed')).toBe('true');
+  expect(detail.getByRole('button', { name: /^Afternoon/ }).hasAttribute('disabled')).toBe(true);
+  expect(detail.getByRole('button', { name: /^Morning/ }).getAttribute('aria-pressed')).toBe('true');
   fireEvent.keyDown(detail.getByRole('group', { name: 'Answer' }), { key: '2' });
   expect(transport.preferences.drafts[0].selected_option_id).toBe('morning');
   fireEvent.click(detail.getByRole('button', { name: 'Review this question' }));
   await waitFor(() => expect(transport.preferences.drafts[0].selected_option_id).toBeNull());
-  expect(detail.getByRole('button', { name: /^2Afternoon/ }).getAttribute('aria-pressed')).toBe('false');
+  expect(detail.getByRole('button', { name: /^Afternoon/ }).getAttribute('aria-pressed')).toBe('false');
   row.focus(); fireEvent.keyDown(row, { key: '2' });
   await waitFor(() => expect(transport.preferences.drafts[0].selected_option_id).toBe('afternoon'));
   expect(transport.preferences.drafts[0].text).toBe('Retain deliberate draft.');
@@ -211,12 +211,12 @@ it('consumes a numeric request so detail remount preserves the owner’s later c
   const saved = () => transport.preferences.drafts.find(value => value.intent === 'answer' && value.target.item_id === '2')!;
   await waitFor(() => expect(saved().selected_option_id).toBe('afternoon'));
   const editor = document.querySelector<HTMLElement>('.shell-detail-scroll .detail-answer-slot .answer')!;
-  fireEvent.click(within(editor).getByRole('button', { name: /^1Morning/ })); await waitFor(() => expect(saved().selected_option_id).toBe('morning'));
+  fireEvent.click(within(editor).getByRole('button', { name: /^Morning/ })); await waitFor(() => expect(saved().selected_option_id).toBe('morning'));
   // Esc in the answer returns focus to the row (Ariadne.dc.html:1412); Esc there closes detail.
   fireEvent.keyDown(editor, { key: 'Escape' }); expect(document.activeElement).toBe(row);
   fireEvent.keyDown(row, { key: 'Escape' }); expect(document.querySelector('.shell-detail')).toBeNull();
   fireEvent.click(row); await waitFor(() => expect(document.querySelector('.shell-detail-scroll .detail-answer-slot .answer')).not.toBeNull());
-  expect(within(document.querySelector('.shell-detail-scroll')!).getByRole('button', { name: /^1Morning/ }).getAttribute('aria-pressed')).toBe('true');
+  expect(within(document.querySelector('.shell-detail-scroll')!).getByRole('button', { name: /^Morning/ }).getAttribute('aria-pressed')).toBe('true');
   expect(saved().selected_option_id).toBe('morning');
 });
 

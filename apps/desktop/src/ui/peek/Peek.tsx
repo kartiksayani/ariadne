@@ -175,7 +175,7 @@ function PeekCard({ shown, drafts, card, allowAnswer, onClose, onGoTo, onAgentNo
       <div className="peek-tags"><span>{item.type}</span><StatusBadge status={statusKey[displayStatus(session, item)]} /></div>
       <Markdown className="peek-summary" text={item.outcome || item.ask || item.why || 'No summary yet.'} compact />
       {allowAnswer && item.status === 'waiting_on_me' && !ownerReplied(session, item) && session.state === 'active' && session.archived_at == null
-        ? <PeekAnswer drafts={drafts} store={shown.store} itemId={item.id} onAgentNotRunning={onAgentNotRunning} onAnswered={onAnswered} onGoTo={onGoTo} />
+        ? <PeekAnswer drafts={drafts} store={shown.store} itemId={item.id} words={item.options.length === 0} onAgentNotRunning={onAgentNotRunning} onAnswered={onAnswered} onGoTo={onGoTo} />
         : item.status === 'waiting_on_me' && !ownerReplied(session, item) && session.state !== 'active' && <p className="peek-hint">{sessionAnswerBlocked(session)}</p>}
       <div className="peek-footer"><button type="button" className="btn btn-secondary" onClick={() => {
         void copyText(`${item.id} — ${item.question}`).then(() => { setCopied(true); setCopyFailed(false); }, () => setCopyFailed(true));
@@ -185,13 +185,15 @@ function PeekCard({ shown, drafts, card, allowAnswer, onClose, onGoTo, onAgentNo
   </div>;
 }
 
-function PeekAnswer({ drafts, store, itemId, onAgentNotRunning, onAnswered, onGoTo }: {
-  readonly drafts: OwnerDraftStore; readonly store: SessionStore; readonly itemId: string;
+/** The peek answers with option cards and Send only; a question that wants words is answered in Details. */
+function PeekAnswer({ drafts, store, itemId, words, onAgentNotRunning, onAnswered, onGoTo }: {
+  readonly drafts: OwnerDraftStore; readonly store: SessionStore; readonly itemId: string; readonly words: boolean;
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void; readonly onAnswered: () => void; readonly onGoTo: () => void;
 }) {
   return <section className="peek-answer" aria-label="Answer question">
-    <AnswerSlot drafts={drafts} store={store} itemId={itemId} layout="compact" head onAgentNotRunning={onAgentNotRunning}
-      onEscape={() => {}} onSent={() => { onAnswered(); void store.refresh(); }} />
+    {words ? <p className="peek-hint">This question wants your own words. Answer it in Details.</p>
+      : <AnswerSlot drafts={drafts} store={store} itemId={itemId} layout="compact" head onAgentNotRunning={onAgentNotRunning}
+        onEscape={() => {}} onSent={() => { onAnswered(); void store.refresh(); }} />}
     <button type="button" className="btn btn-ghost peek-details" onClick={onGoTo}>Open details</button>
   </section>;
 }
