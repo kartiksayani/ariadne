@@ -25,6 +25,64 @@ export class ModError extends Error {
     if (plain !== undefined) this.plain = plain;
   }
 }
+// Allow the helper's five-second control timeout to return a typed refusal.
+export const HELPER_TIMEOUT_MS = 8000;
+export const NOTICE_GRACE_MS = 120000;
+const TRANSIENT = new Set(['store_busy','timeout','io_error','process_rejected','host_unreachable','lease_invalid']);
+const DIAGNOSTIC_CODES = new Set([...TRANSIENT,'stale_generation','binding_mismatch','binding_ambiguous','binding_conflict',
+  'not_found','invalid_argument','permission_denied','unsupported','unsupported_host_version','incompatible_adapter',
+  'delivery_uncertain','commit_uncertain','protocol_conflict','invalid_transition','protocol_error']);
+function failureCode(error) {
+  if (error?.details?.reason === 'lease_invalid') return 'lease_invalid';
+  if (DIAGNOSTIC_CODES.has(error?.code)) return error.code;
+  return error instanceof ModError ? 'protocol_error' : 'process_rejected';
+}
+// Serialize best-effort appends from claim, heartbeat and owner commands. No
+// payloads enter this log; callers supply fixed fields and bounded codes only.
+let diagnostics = Promise.resolve();
+export function connectDiagnostic($, record) {
+  const append = diagnostics.then(async () => {
+    try {
+      const previous = await $.store.get('connect-log');
+      const records = Array.isArray(previous) ? previous.slice(-19) : [];
+      records.push(record);
+      await $.store.set('connect-log',records);
+    } catch { /* diagnostics never change retry authority */ }
+  });
+  diagnostics = append;
+  return append;
+}
+// Each slot owns an episode, independently of error text/kind. One good call
+// cannot hide a flapping failure: three consecutive good calls close it.
+export function noticeEpisodes(now = () => Date.now()) {
+  const slots = new Map();
+  return {
+    async fail($, slot, error, text, retryText = text, background = true) {
+      const code = failureCode(error);
+      let episode = slots.get(slot);
+      let recorded = Promise.resolve();
+      if (!episode) {
+        episode = {since:now(),good:0,shown:false,code};
+        slots.set(slot,episode);
+        recorded = connectDiagnostic($,{step:slot,outcome:'started',code,at:new Date(now()).toISOString()});
+      }
+      episode.good = 0;
+      if (text !== null && !episode.shown && (!background || !TRANSIENT.has(code) || now() - episode.since >= NOTICE_GRACE_MS)) {
+        episode.shown = true;
+        $.ui.log(background && TRANSIENT.has(code) ? retryText : text);
+      }
+      await recorded;
+    },
+    async good($, slot) {
+      const episode = slots.get(slot);
+      if (!episode || ++episode.good < 3) return;
+      slots.delete(slot);
+      await connectDiagnostic($,{step:slot,outcome:'recovered',code:episode.code,at:new Date(now()).toISOString()});
+    },
+    // Scope changes end the old conversation's notice authority.
+    delete:slot => slots.delete(slot),
+  };
+}
 // Owner-facing sentence per helper error code, each with a next step. Raw helper text is never shown.
 const GENERIC_FAILURE = 'Ariadne ran into a problem and could not record this. Open the Ariadne app to see what happened; if it keeps happening, update Ariadne.';
 const MISMATCH_FAILURE = "Ariadne and its Claude plugin don't match, so this was not recorded. Update both to the same version.";

@@ -98,6 +98,14 @@ retries keep their original request; live conversations elsewhere stay protected
 The owner gets plain instructions, while exact operation IDs remain in the
 plugin store's bounded `connect-log` diagnostics. See [ADR-0096](../../docs/adr/ADR-0096-recover-stale-claude-connect.md).
 
+Background heartbeat and claim notices print once per slot per failure episode.
+Transient failures stay quiet for two minutes; three consecutive successful calls
+end the episode. Changing error kinds or one successful call never reprints a
+notice. Background episode diagnostics contain timestamps and fixed codes only,
+share the 20-record `connect-log` limit, and record starts and recoveries rather
+than every retry. Helper calls allow eight seconds for the helper's five-second
+control timeout to return its typed error. Owner commands still answer immediately.
+
 Real installer rendering, owner CLI commands, durable core/report composition,
 trusted native Claude qualification, discovery announcements, and live host
 acceptance remain the P6/P2.4/P2.2/P3.4/P3.7 joins. The installed `ariadne` helper provides

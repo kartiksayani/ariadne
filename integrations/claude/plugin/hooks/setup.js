@@ -1,4 +1,4 @@
-import { API_VERSION, HOST_VERSION, ModError, bounded, descriptorValid, envelope, fields, hostVersionStatus, uuid } from './contracts.js';
+import { API_VERSION, HOST_VERSION, HELPER_TIMEOUT_MS, connectDiagnostic, ModError, bounded, descriptorValid, envelope, fields, hostVersionStatus, uuid } from './contracts.js';
 
 export async function qualify($, descriptor) {
   if (!descriptorValid(descriptor,$.plugin)) {
@@ -7,7 +7,7 @@ export async function qualify($, descriptor) {
   if (hostVersionStatus((await $.session.version()).version) === null) {
     throw new ModError(`This Mod requires Claude Code ${HOST_VERSION} or newer; update Claude Code.`,`Update Claude Code to ${HOST_VERSION} or newer, then run /ariadne-connect again.`);
   }
-  const result = await $.process.run([descriptor.helperPath,'--version'],{timeoutMs:5000});
+  const result = await $.process.run([descriptor.helperPath,'--version'],{timeoutMs:HELPER_TIMEOUT_MS});
   if (result.exitCode !== 0 || result.isStdoutTruncated || result.isStderrTruncated
     || result.stdout !== `ariadne ${descriptor.appVersion}\n`) {
     throw new ModError('Installed Ariadne helper/Mod versions disagree; reinstall matching resources.','Update Ariadne and its Claude plugin so they match, then run /ariadne-connect again.');
@@ -86,7 +86,7 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
   async function owner($, noun, verb, request, replayOnly = false) {
     try {
       const value = envelope(await $.process.run([helperPath,noun,verb,...(replayOnly ? ['--replay-only'] : []),'--json-stdin'],
-        {stdin:JSON.stringify(request),timeoutMs:5000}));
+        {stdin:JSON.stringify(request),timeoutMs:HELPER_TIMEOUT_MS}));
       await diagnostic($,request.command.op_id,replayOnly ? 'lookup' : verb,'ok');
       return value;
     } catch (error) {
@@ -95,18 +95,13 @@ export function setup(helperPath, savedBinding = async () => {}, publish = {wait
     }
   }
   async function diagnostic($, operationId, step, outcome) {
-    try {
-      const previous = await $.store.get('connect-log');
-      const records = Array.isArray(previous) ? previous.slice(-19) : [];
-      records.push({operation_id:operationId,step,outcome,at:new Date().toISOString()});
-      await $.store.set('connect-log',records);
-    } catch { /* diagnostics never change retry authority */ }
+    await connectDiagnostic($,{operation_id:operationId,step,outcome,at:new Date().toISOString()});
   }
   async function status($, selected = binding) {
     if (!selected) throw new ModError('Run /ariadne-connect in this original conversation first.','This conversation is not connected to Ariadne. Run /ariadne-connect to connect it.');
     const value = envelope(await $.process.run([helperPath,'bridge','connection-status',
       '--binding',selected.binding_id,'--generation',selected.generation,
-      '--request-id',globalThis.crypto.randomUUID()],{timeoutMs:5000}));
+      '--request-id',globalThis.crypto.randomUUID()],{timeoutMs:HELPER_TIMEOUT_MS}));
     return bindingStatus(value,selected);
   }
   // The app publishes the route only after the bound announcement and history

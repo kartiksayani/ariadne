@@ -1,7 +1,7 @@
 import installed from './installed.js';
 import { BUSY, claimLoop } from './claims.js';
 import { forget, qualify, recall, remember, setup } from './setup.js';
-import { bounded, descriptorValid, ModError, plainFailure, uuid } from './contracts.js';
+import { bounded, descriptorValid, ModError, noticeEpisodes, plainFailure, uuid } from './contracts.js';
 import { announcements } from './discovery.js';
 import { prCommentsPrompt } from './pr-comments.js';
 
@@ -38,6 +38,7 @@ const TEXT = Object.freeze({
   unreachable:"Ariadne can't be reached, so this session's work isn't being recorded. Open Ariadne and it will reconnect.",
   failure:'Ariadne could not finish connecting this conversation. Run /ariadne-connect again; if it keeps happening, update Ariadne and its Claude plugin.',
   connectAgain:'Ariadne has not finished connecting this conversation. Run /ariadne-connect again; if it keeps happening, check this session in Ariadne.',
+  heartbeatRetry:'Ariadne could not check in with the app; it will keep trying, and you can open Ariadne to check that it is running.',
 });
 // Codes with which the app refuses an announcement for a scope it no longer has.
 const STALE_SCOPE = ['stale_generation','binding_mismatch','not_found','invalid_argument'];
@@ -56,50 +57,62 @@ export function createRegister(descriptor, publish) {
 
 // Only our bounded plain sentences are displayed; raw rejected host
 // promises, helper stderr and owner payloads are never reflected.
-function failureText(state, error) {
+function failureText(state, error, connect = false) {
   if (state.loopBinding && error instanceof ModError && error.code === 'host_unreachable' && error.plain === plainFailure('host_unreachable')) return TEXT.unreachable;
-  return (error instanceof ModError ? error.plain : undefined) ?? TEXT.failure;
+  return (error instanceof ModError ? error.plain : undefined) ?? (connect ? TEXT.failure : TEXT.heartbeatRetry);
 }
-// Printed once per outage: the 'helper' slot clears when a helper call works again.
-function failure(state, $, error) {
-  notice(state,host($),'helper',failureText(state,error));
+function failure(state, $, error, connect = false, background = true) {
+  return state.notices.fail(host($),'helper',error,failureText(state,error,connect),TEXT.heartbeatRetry,background);
 }
 // A command always answers the owner, even when its log line was already shown.
-async function checked(state, $, action) {
+async function checked(state, $, action, connect = false) {
   try {
     const result = await action();
-    state.notices.delete('helper');
+    await state.notices.good(host($),'helper');
     return result;
-  } catch (error) { failure(state,$,error); return {text:`That did not complete. ${failureText(state,error)}`}; }
+  } catch (error) { await failure(state,$,error,connect,false); return {text:`That did not complete. ${failureText(state,error,connect)}`}; }
 }
-// One owner notice per state: a slot prints again only after its text changes
-// or the state clears.
 function notice(state, h, slot, text) {
-  if (state.notices.get(slot) === text) return;
-  state.notices.set(slot,text);
-  h.ui.log(text);
+  return state.notices.fail(h,slot,new ModError('State notice.'),text);
 }
 async function announce(state, h) {
   try {
-    await state.discovery.announce(h,state.announcementScope);
-    for (const slot of ['heartbeat','helper']) state.notices.delete(slot);
+    if (await state.discovery.announce(h,state.announcementScope)) {
+      await state.notices.good(h,'announce');
+      if (state.qualified) await state.notices.good(h,'qualification');
+    }
   } catch (error) {
     let last = error;
     // A scope the app no longer has still leaves this conversation discoverable.
     if (state.announcementScope && STALE_SCOPE.includes(error?.code)) {
-      try { await state.discovery.announce(h,null); for (const slot of ['heartbeat','helper']) state.notices.delete(slot); return; }
+      try { if (await state.discovery.announce(h,null)) await state.notices.good(h,'announce'); return; }
       catch (fallback) { last = fallback; }
     }
-    // The closed-app outage shares one slot with hook failures, so it is told once.
-    if (last instanceof ModError && last.code === 'host_unreachable') notice(state,h,'helper',failureText(state,last));
-    else notice(state,h,'heartbeat',failureText(state,last));
+    await state.notices.fail(h,'announce',last,failureText(state,last),TEXT.heartbeatRetry);
   }
+}
+// Startup and an owner command may overlap a heartbeat. Share qualification,
+// and retry a rejected startup check instead of leaving intake silently off.
+function qualifyConnection(state, $) {
+  state.qualifying ??= qualify(host($),state.descriptor).then(() => {
+    state.qualified = true;
+    startPolling(state,$);
+  }).finally(() => { state.qualifying = null; });
+  return state.qualifying;
 }
 async function heartbeat(state, $) {
   if (state.sessionEnded) return;
   await follow(state,$);
   if (state.sessionEnded || state.ownerTransition) return;
   await announce(state,host($));
+  if (!state.qualified) {
+    try {
+      await qualifyConnection(state,$);
+      await state.notices.good(host($),'qualification');
+    } catch (error) {
+      await state.notices.fail(host($),'qualification',error,failureText(state,error),TEXT.heartbeatRetry);
+    }
+  }
   if (state.target && !state.loop) await autoConnect(state,$);
   else await drainRetired(state,host($));
 }
@@ -112,7 +125,7 @@ async function tick(state, $) {
   if (state.note) await deliverNote(state,$);
 }
 function pollLoop(state, $) {
-  void tick(state,$);
+  return tick(state,$);
 }
 function startPolling(state, $) {
   if (!state.sessionEnded) state.timer ??= $.clock.every(1000,() => pollLoop(state,$));
@@ -239,7 +252,7 @@ async function followChange(state, $) {
   if (followed) await forget(h,previous);
   state.target = await recall(h,id) ?? followed ?? null;
   // The new conversation has seen none of these, so each may print again (a closed app included).
-  for (const slot of ['auto','heartbeat','helper']) state.notices.delete(slot);
+  for (const slot of ['auto','announce','helper','qualification']) state.notices.delete(slot);
   await announce(state,h);
   if (state.target) await autoConnect(state,$);
 }
@@ -288,16 +301,17 @@ async function autoConnect(state, $) {
     if (!state.loop || result.text) return;
     state.note = {binding:result.result.binding,tries:0,sending:false};
     await deliverNote(state,$);
-    notice(state,h,'auto',TEXT.reconnected);
+    state.notices.delete('auto');
+    h.ui.log(TEXT.reconnected);
   } catch (error) {
     if (error?.code === 'not_found') {
       state.target = null;
       await forget(h,state.claudeSessionId);
-      notice(state,h,'auto',TEXT.gone);
-    } else if (error?.code === 'invalid_transition') notice(state,h,'auto',TEXT.closed);
+      await notice(state,h,'auto',TEXT.gone);
+    } else if (error?.code === 'invalid_transition') await notice(state,h,'auto',TEXT.closed);
     // Still retried quietly: the other conversation may end or disconnect.
-    else if (error?.code === 'binding_conflict') notice(state,h,'auto',TEXT.elsewhere);
-    else notice(state,h,'auto',TEXT.retrying);
+    else if (error?.code === 'binding_conflict') await notice(state,h,'auto',TEXT.elsewhere);
+    else await state.notices.fail(h,'auto',error,failureText(state,error),TEXT.retrying);
   } finally {
     state.ownerTransition = false;
     reopen(state);
@@ -324,23 +338,19 @@ async function sessionStart(state, $, event, next) {
   }
   if (state.sessionEnded) return next(event);
   try {
-    await qualify(host($),state.descriptor);
-    state.qualified = true;
-    startPolling(state,$);
-  } catch (error) { failure(state,$,error); }
+    await qualifyConnection(state,$);
+  } catch (error) { await state.notices.fail(host($),'qualification',error,failureText(state,error),TEXT.heartbeatRetry); }
   // `claude --resume` of a connected conversation reconnects it; a new
   // conversation has no remembered session and only announces itself.
-  if (state.qualified && !state.sessionEnded) {
+  if (!state.sessionEnded) {
     state.target = await recall(host($),state.claudeSessionId);
-    if (state.target) void autoConnect(state,$);
+    if (state.qualified && state.target) void autoConnect(state,$);
   }
   return next(event);
 }
 async function bind(state, $, requestedSessionId) {
   if (!state.qualified) {
-    await qualify(host($),state.descriptor);
-    state.qualified = true;
-    startPolling(state,$);
+    await qualifyConnection(state,$);
   }
   if (state.sessionEnded) return {text:TEXT.ended};
   const h = host($);
@@ -378,7 +388,7 @@ function connectRun(state, $, event) {
   return checked(state,$,() => {
     const requestedSessionId = selectedSession(event);
     return transition(state,$,() => connectTransition(state,$,requestedSessionId),true);
-  });
+  },true);
 }
 async function prCommentsRun(state, $, event) {
   let text;
@@ -398,11 +408,11 @@ async function prCommentsRun(state, $, event) {
   return {text:'The agent will file the review choices in Ariadne. Pick Fix, Reply or Skip there.'};
 }
 async function statusAction(state, $) {
-  if (!state.qualified) await qualify(host($),state.descriptor);
+  if (!state.qualified) await qualifyConnection(state,$);
   return {text:JSON.stringify({binding:await state.owner.status(host($)),local:state.loop?.status() ?? null})};
 }
 async function disconnectAction(state, $) {
-  if (!state.qualified) await qualify(host($),state.descriptor);
+  if (!state.qualified) await qualifyConnection(state,$);
   if (state.sessionEnded) return {text:TEXT.ended};
   const h = host($);
   // An explicit disconnect also cancels any automatic reconnect.
@@ -468,6 +478,7 @@ function registerModule(descriptor, on, publish) {
     loopBinding: null,
     pending: null,
     qualified: false,
+    qualifying: null,
     ownerTransition: false,
     sessionEnded: false,
     started: false,
@@ -482,7 +493,7 @@ function registerModule(descriptor, on, publish) {
     note: null,
     retired: [],
     following: null,
-    notices: new Map(),
+    notices: noticeEpisodes(),
     discovery: announcements(descriptor),
     owner: null,
   };

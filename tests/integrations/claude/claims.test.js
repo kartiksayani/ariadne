@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { FOLD_GRACE_MS, NOTICES, claimLoop } from '../../../integrations/claude/plugin/hooks/claims.js';
-import { hash } from '../../../integrations/claude/plugin/hooks/contracts.js';
+import { hash, plainFailure } from '../../../integrations/claude/plugin/hooks/contracts.js';
 import { binding, deferred, descriptor, failure, host, ids, prepared, success } from './fixtures.js';
 
 describe('captured Claude claim lifecycle', () => {
@@ -121,7 +121,7 @@ describe('captured Claude claim lifecycle', () => {
     const removed = [];
     const loop = claimLoop(descriptor.helperPath,binding,{onEnded:() => removed.push(true)});
     for (let index=0;index<3;index++) await loop.poll(h.$);
-    expect(h.logs).toEqual([NOTICES.failure]);expect(removed).toEqual([]);
+    expect(h.logs).toEqual([plainFailure('delivery_uncertain')]);expect(removed).toEqual([]);
     expect(loop.busy()).toBe('claim');
     mode = 'leased';await loop.poll(h.$);
     const claims = h.calls.filter(call => call.argv[2] === 'claim').map(call => call.argv.at(-1));
@@ -193,7 +193,7 @@ describe('captured Claude claim lifecycle', () => {
     const h = host({handler:argv => argv[2] === 'claim' ? success({input_id:'not-a-claim'}) : undefined});
     const loop = claimLoop(descriptor.helperPath,binding);
     for (let index=0;index<3;index++) await loop.poll(h.$);
-    expect(h.logs).toHaveLength(1);
+    expect(h.logs).toEqual([plainFailure()]);
     expect(h.prompts).toHaveLength(0);
   });
   it('correlates a framed turn.start when the marker also appears mid-line before the payload line', async () => {
@@ -203,29 +203,29 @@ describe('captured Claude claim lifecycle', () => {
     await loop.start(h.$,{text:`Note: ${value.wire_marker} is quoted here\n${value.formatted_payload}\nrest`,turnId:'later'});
     expect(loop.status().active.host_turn_id).toBe('later');
   });
-  it('logs a blocked claim again after an empty queue resets the reason', async () => {
+  it('keeps a blocked claim episode through one empty queue', async () => {
     let mode = 'blocked';
     const h = host({handler:argv => argv[2] === 'claim' && mode === 'blocked' ? failure('invalid_transition',{reason:'owner_paused'}) : undefined});
     const loop = claimLoop(descriptor.helperPath,binding);
     await loop.poll(h.$);await loop.poll(h.$);
     mode = 'empty';await loop.poll(h.$);
     mode = 'blocked';await loop.poll(h.$);await loop.poll(h.$);
-    expect(h.logs).toEqual([NOTICES.owner_paused,NOTICES.owner_paused]);
+    expect(h.logs).toEqual([NOTICES.owner_paused]);
   });
-  it('logs a repeated claim failure once across polls', async () => {
+  it('keeps short repeated transient claim failures quiet', async () => {
     const h = host({handler:argv => argv[2] === 'claim' ? failure('host_unreachable') : undefined});
     const loop = claimLoop(descriptor.helperPath,binding);
     for (let index=0;index<3;index++) await loop.poll(h.$);
-    expect(h.logs).toEqual([NOTICES.failure]);
+    expect(h.logs).toEqual([]);
   });
-  it('logs a claim failure again after an empty queue resets it', async () => {
+  it('keeps a transient claim episode through one empty queue', async () => {
     let mode = 'down';
     const h = host({handler:argv => argv[2] === 'claim' && mode === 'down' ? failure('host_unreachable') : undefined});
     const loop = claimLoop(descriptor.helperPath,binding);
     await loop.poll(h.$);await loop.poll(h.$);
     mode = 'empty';await loop.poll(h.$);
     mode = 'down';await loop.poll(h.$);await loop.poll(h.$);
-    expect(h.logs).toHaveLength(2);
+    expect(h.logs).toEqual([]);
   });
   it('logs one failure notice while the claim keeps failing, whatever the error code', async () => {
     let code = 'host_unreachable';
@@ -233,7 +233,7 @@ describe('captured Claude claim lifecycle', () => {
     const loop = claimLoop(descriptor.helperPath,binding);
     await loop.poll(h.$);await loop.poll(h.$);
     code = 'not_found';await loop.poll(h.$);await loop.poll(h.$);
-    expect(h.logs).toEqual([NOTICES.failure]);
+    expect(h.logs).toEqual([plainFailure('not_found')]);
   });
   it('serializes concurrent poll callbacks and retains lifecycle exactly across desktop/helper failure', async () => {
     const value = await prepared();const response = deferred();const admitted = deferred();const submission = deferred();let failing = true;

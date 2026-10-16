@@ -718,31 +718,34 @@ describe('conversation changes, relaunch and removal', () => {
     expect(last.map(body => body.binding_scope === null)).toEqual([false,true]);
     expect(h.logs.slice(before)).toEqual([]);
   });
-  it('tells the owner once per outage, in plain words, and again only after the app recovered and failed again', async () => {
+  it('keeps background outages quiet during grace while owner commands still answer, then rearms after three successes', async () => {
     const closed = "Ariadne can't be reached, so this session's work isn't being recorded. Open Ariadne and it will reconnect.";
-    let down = false;
-    const h = host({handler:argv => down && argv[1] !== '--version' ? failure('host_unreachable') : undefined});
-    const hooks = callbacks(descriptor);
-    await hooks.get('session.start')(h.$,{},next);await hooks.get('ariadne-connect')(h.$);
-    const quiet = h.logs.length;
-    down = true;
-    // The first heartbeat and every command in the outage share one notice, yet each command still answers.
-    const beat = h.timers().find(timer => timer.ms === 30000);
-    await beat.callback();
-    for (let i = 0; i < 3; i += 1) expect((await hooks.get('ariadne-status')(h.$)).text).toBe(`That did not complete. ${closed}`);
-    await beat.callback();
-    expect(h.logs.slice(quiet)).toEqual([closed]);
-    down = false;
-    await beat.callback();
-    expect(JSON.parse((await hooks.get('ariadne-status')(h.$)).text).binding.generation).toBe(ids.generation);
-    expect(h.logs.slice(quiet)).toEqual([closed]);
-    down = true;
-    await hooks.get('ariadne-status')(h.$);
-    await hooks.get('ariadne-status')(h.$);
-    expect(h.logs.slice(quiet)).toEqual([closed,closed]);
-    expect(h.logs.join(' ')).not.toMatch(/host_unreachable|retain|original IDs|helper|isn't open|app is closed/);
+    const retry = 'Ariadne could not check in with the app; it will keep trying, and you can open Ariadne to check that it is running.';
+    let down = false, time = 0;
+    const clock = vi.spyOn(Date,'now').mockImplementation(() => time);
+    try {
+      const h = host({handler:argv => down && argv[1] !== '--version' ? failure('host_unreachable') : undefined});
+      const hooks = callbacks(descriptor);
+      await hooks.get('session.start')(h.$,{},next);await hooks.get('ariadne-connect')(h.$);
+      const quiet = h.logs.length;
+      down = true;
+      const beat = h.timers().find(timer => timer.ms === 30000);
+      await beat.callback();expect(h.logs.slice(quiet)).toEqual([]);
+      for (let i = 0; i < 3; i += 1) expect((await hooks.get('ariadne-status')(h.$)).text).toBe(`That did not complete. ${closed}`);
+      time = 120000;await beat.callback();await beat.callback();
+      expect(h.logs.slice(quiet)).toEqual([closed,retry]);
+      down = false;
+      for (let i = 0; i < 3; i += 1) {
+        await beat.callback();
+        expect(JSON.parse((await hooks.get('ariadne-status')(h.$)).text).binding.generation).toBe(ids.generation);
+      }
+      down = true;
+      await hooks.get('ariadne-status')(h.$);await hooks.get('ariadne-status')(h.$);
+      expect(h.logs.slice(quiet)).toEqual([closed,retry,closed]);
+      expect(h.logs.join(' ')).not.toMatch(/host_unreachable|retain|original IDs|helper/);
+    } finally { clock.mockRestore(); }
   });
-  it('gives each helper failure code its own plain sentence with a next step, shown once per change of state', async () => {
+  it('answers each owner command with current advice but logs once per helper episode', async () => {
     let code = 'stale_generation', details, armed = false;
     const h = host({handler:argv => armed && argv[2] === 'connection-status' ? failure(code,details) : undefined});
     const hooks = callbacks(descriptor);
@@ -761,7 +764,7 @@ describe('conversation changes, relaunch and removal', () => {
     expect(await say()).toContain('check before sending anything again');
     code = 'invented_by_a_future_helper';
     expect(await say()).toContain('Open the Ariadne app to see what happened');
-    expect(h.logs.slice(before)).toHaveLength(4);
+    expect(h.logs.slice(before)).toHaveLength(1);
     expect(h.logs.slice(before).join(' ')).not.toMatch(/stale_generation|owner_paused|delivery_uncertain|invented|retain|original IDs/);
   });
   it('admits claims again after an owner command is refused', async () => {
@@ -775,8 +778,12 @@ describe('conversation changes, relaunch and removal', () => {
     submission.resolve({text:value.formatted_payload});
     await hooks.get('turn.start')(h.$,{text:value.formatted_payload,turnId:'turn'},next);
     await hooks.get('turn.complete')(h.$,{turnId:'turn',answer:'done',reason:'answer',isAborted:false},next);
-    await vi.waitFor(() => expect(h.events.at(-1).kind).toBe('turn_finished'));
-    await h.timer().callback();
-    await vi.waitFor(() => expect(h.calls.filter(call => call.argv[2] === 'claim')).toHaveLength(2));
+    await h.reported('turn_finished');
+    // Submission settlement may still follow its terminal report. Drive the
+    // poll until it observes settlement, instead of racing a single timer tick.
+    await vi.waitFor(async () => {
+      await h.timer().callback();
+      expect(h.calls.filter(call => call.argv[2] === 'claim')).toHaveLength(2);
+    });
   });
 });
