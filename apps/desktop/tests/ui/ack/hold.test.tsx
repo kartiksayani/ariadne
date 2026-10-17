@@ -1,64 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { SessionStore } from '../../../src/data/session-store';
-import { createDesktopService } from '../../../src/data/service';
-import { SessionActions } from '../../../src/components/bindings/actions';
-import type { MutationReceipt, OwnerMutationRequest, OwnerQueryRequest } from '../../../src/generated/core';
 import { ACK_HOLD_MS, ackHoldFor, attachAckHolds, flushAckHold, stopAckHolds, useAckHeld } from '../../../src/ui/shared/ack';
-import { ackAllFor, ackAllItems } from '../../../src/ui/navigation/ackAllController';
+import { ACK_ALL_HOLD_MS, ackAllFor, ackAllItems } from '../../../src/ui/navigation/ackAllController';
 import { notices } from '../../../src/ui/pages/notices';
-import { AppTransport, route } from '../app/transport';
+import { route } from '../app/transport';
+import { acked, acks, change, itemOf, noticeTexts, ready, stores, type Ready } from './ackFixture';
 
-const stores: SessionStore[] = [];
 afterEach(() => { cleanup(); stores.forEach(store => store.close()); stores.length = 0; notices.clear(); vi.useRealTimers(); vi.restoreAllMocks(); });
-
-class AckTransport extends AppTransport {
-  gate: Promise<void> | null = null;
-  refuse = false;
-  inFlight = 0;
-  maxInFlight = 0;
-  override async invoke<T>(name: string, args: { request: OwnerQueryRequest | OwnerMutationRequest }): Promise<T> {
-    const request = args.request;
-    if (!('command' in request) || request.command.command !== 'ack') return super.invoke(name, args);
-    this.mutations.push(structuredClone(request));
-    this.maxInFlight = Math.max(this.maxInFlight, ++this.inFlight);
-    try {
-      await this.gate;
-      if (this.refuse) return { api_version: 1, ok: false, error: {
-        code: 'invalid_transition', message: 'Ack predicate no longer holds.', hint: 'Reload item state.', retryable: false, field_errors: [],
-      } } as T;
-      const command = request.command, session = this.sessions.get(request.session!.session_id)!, item = session.items[command.params.item_id]!;
-      const status = item.ack_to!;
-      item.status = status; item.ack_to = null; item.revision++; session.revision++;
-      if (['decided', 'done', 'dropped'].includes(status)) { item.outcome ??= 'Acknowledged by the owner.'; item.why ??= 'The owner read this item.'; }
-      const receipt: MutationReceipt = { operation_id: command.op_id, session_id: session.id, revision: session.revision,
-        data: { kind: 'item_ack', item_id: item.id, item_revision: item.revision, status, message_id: crypto.randomUUID() } };
-      return { api_version: 1, ok: true, data: receipt } as T;
-    } finally { --this.inFlight; }
-  }
-}
-async function ready() {
-  const transport = new AckTransport(), session = transport.sessions.get(route.session_id)!;
-  Object.values(session.items).forEach(item => { if (item) item.ack_to = null; });
-  for (const [id, type] of [['1', 'finding'], ['1.1', 'explanation']] as const) {
-    Object.assign(session.items[id]!, { type, status: 'open', ack_to: 'done', ask: null, question: `Result ${id}`, outcome: null, why: null });
-  }
-  const service = createDesktopService(transport), store = new SessionStore(service, route);
-  stores.push(store); await store.refresh();
-  const actions = new SessionActions(service, store), topicId = session.items['1']!.topic_id;
-  return { transport, service, session, store, actions, topicId, hold: ackHoldFor(route.session_id, actions) };
-}
-type Ready = Awaited<ReturnType<typeof ready>>;
-const acks = (transport: AppTransport) => transport.mutations.filter(value => value.command.command === 'ack');
-const acked = (transport: AppTransport) => acks(transport).map(value => value.command.command === 'ack' && value.command.params.item_id);
-const itemOf = (r: Ready, id = '1') => r.store.getSnapshot().snapshot!.session.items[id]!;
-const noticeTexts = () => notices.getSnapshot().map(notice => notice.text);
-/** Changes the server's item, then lets the session store read it. */
-async function change(r: Ready, edit: (item: NonNullable<Ready['session']['items'][string]>) => void, id = '1') {
-  const item = r.session.items[id]!;
-  edit(item); item.revision++; r.session.revision++;
-  await r.store.refresh(true);
-}
 
 describe('the single-Ack hold', () => {
   it('holds an Ack for 6 s without writing, then saves it once', async () => {
@@ -291,10 +239,23 @@ describe('Ack all and single holds', () => {
     const r = await ready(); vi.useFakeTimers();
     const controller = ackAllFor(r.actions);
     expect(controller.confirm(r.topicId, 'Results', ackAllItems(r.store.getSnapshot().snapshot!.session, r.topicId))).toBe(true);
+    // The hold is still running when Ack all's window ends, so Ack all leaves the item to it.
+    await vi.advanceTimersByTimeAsync(ACK_ALL_HOLD_MS - ACK_HOLD_MS + 3000);
     r.hold.ack(itemOf(r));
     await vi.advanceTimersByTimeAsync(ACK_HOLD_MS * 3);
     expect(acked(r.transport).sort()).toEqual(['1', '1.1']);
+    expect(new Set(acked(r.transport)).size).toBe(2);
     expect(controller.getSnapshot()).toMatchObject({ phase: 'done', completed: 1, total: 1 });
+  });
+
+  it('an item held and saved before Ack all\'s window ends is counted by Ack all as done, with no second write', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    const controller = ackAllFor(r.actions);
+    expect(controller.confirm(r.topicId, 'Results', ackAllItems(r.store.getSnapshot().snapshot!.session, r.topicId))).toBe(true);
+    r.hold.ack(itemOf(r));
+    await vi.advanceTimersByTimeAsync(ACK_ALL_HOLD_MS * 2);
+    expect(acked(r.transport).sort()).toEqual(['1', '1.1']);
+    expect(controller.getSnapshot()).toMatchObject({ phase: 'done', completed: 2, total: 2 });
   });
 
   it('an Undone single Ack is not skipped by Ack all', async () => {
@@ -333,5 +294,116 @@ describe('Ack all and single holds', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(acked(r.transport)).toEqual(['1', '1.1']);
     expect(r.transport.maxInFlight).toBe(1);
+  });
+});
+
+describe('a held Ack with no row or Details to show it (the Graph, a peek)', () => {
+  const held = () => notices.getSnapshot().find(notice => notice.text.startsWith('Acked'));
+  const shown = async () => { await vi.advanceTimersByTimeAsync(400); return held(); };
+
+  it('announces itself with an Undo, and the Undo writes nothing', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    r.hold.ack(itemOf(r));
+    const notice = await shown();
+    expect(notice?.text).toBe('Acked “Result 1”');
+    expect(notice?.actions?.map(action => action.label)).toEqual(['Undo']);
+    notice!.actions![0]!.run();
+    expect(held()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(ACK_HOLD_MS * 2);
+    expect(acks(r.transport)).toHaveLength(0);
+  });
+
+  it('is gone when the save starts, and the Ack is written once', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    r.hold.ack(itemOf(r));
+    await shown();
+    expect(held()).toBeDefined();
+    await vi.advanceTimersByTimeAsync(ACK_HOLD_MS);
+    expect(held()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(acked(r.transport)).toEqual(['1']);
+  });
+
+  it('a flush (a session switch) removes the notice too', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    r.hold.ack(itemOf(r));
+    await shown();
+    await r.hold.flush();
+    expect(held()).toBeUndefined();
+  });
+
+  it('does not announce when a row or Details shows the Undo', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    const release = r.hold.showing(['1']);
+    r.hold.ack(itemOf(r));
+    await vi.advanceTimersByTimeAsync(400);
+    expect(held()).toBeUndefined();
+    release();
+  });
+
+  it('hands the Undo to a notice when the view showing it goes away mid-hold (a Tree to Graph switch), and the Undo writes nothing', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    const release = r.hold.showing(['1']);
+    r.hold.ack(itemOf(r));
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(held()).toBeUndefined();
+    release();
+    expect(held()?.text).toBe('Acked “Result 1”');
+    held()!.actions![0]!.run();
+    expect(held()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(ACK_HOLD_MS * 2);
+    expect(acks(r.transport)).toHaveLength(0);
+  });
+
+  it('does not flush on that switch: the hold goes on and the Ack is written once at 6 s', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    const release = r.hold.showing(['1']);
+    r.hold.ack(itemOf(r));
+    release();
+    await vi.advanceTimersByTimeAsync(ACK_HOLD_MS - 1000);
+    expect(acks(r.transport)).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1000); await vi.advanceTimersByTimeAsync(0);
+    expect(acked(r.transport)).toEqual(['1']);
+    expect(held()).toBeUndefined();
+  });
+
+  it('withdraws the notice when a view shows the item again', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    r.hold.ack(itemOf(r));
+    expect(held()).toBeDefined();
+    const release = r.hold.showing(['1']);
+    expect(held()).toBeUndefined();
+    release();
+    expect(held()).toBeDefined();
+  });
+
+  it('counts the views: one of two going away leaves the Undo where the other draws it', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    const row = r.hold.showing(['1', '1.1']), details = r.hold.showing(['1']);
+    r.hold.ack(itemOf(r));
+    row();
+    expect(held()).toBeUndefined();
+    details();
+    expect(held()).toBeDefined();
+    details();                                                  // a second release changes nothing
+    expect(held()).toBeDefined();
+  });
+
+  it('a view showing a different item does not carry this item\'s Undo', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    const other = r.hold.showing(['1.1']);
+    r.hold.ack(itemOf(r));
+    expect(held()).toBeDefined();
+    other();
+  });
+
+  it('shows no notice for an item whose save has started', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    const release = r.hold.showing(['1']);
+    r.hold.ack(itemOf(r));
+    await vi.advanceTimersByTimeAsync(ACK_HOLD_MS);
+    release();
+    expect(held()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(0);
   });
 });

@@ -1,5 +1,5 @@
-import { AgentBin } from '../remove/AgentBin';
-import { itemRemoved } from '../../selectors/removed';
+import { AgentBin, binView } from '../remove/AgentBin';
+import { activeItems, itemRemoved, removedRoots, removedSubtree } from '../../selectors/removed';
 // The session tree column (handoff "Session tree"): session bar, status menu,
 // banners, topic bands and item rows, with the tree keyboard
 // and the empty and loading states. Selection, expansion, topic folds and filters
@@ -13,7 +13,7 @@ import type { Input, SessionSummary } from '../../generated/domain/models';
 import { NavigationStore, useNavigation } from '../../state/navigation/store';
 import { useReadingSeen } from '../../state/preferences/reading';
 import { OwnerDraftStore, useOwnerDrafts } from '../../state/drafts/store';
-import type { SessionActions } from '../../components/bindings/actions';
+import { useSessionActions, type SessionActions } from '../../components/bindings/actions';
 import { useSupervisorHealth } from '../../components/bindings/health';
 import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { useIntents } from '../intents';
@@ -25,11 +25,16 @@ import { Keycap } from '../parts/parts';
 import { Strip } from './Strip';
 import { hiddenGroupKey, hiddenGroupsFor, hiddenSource } from './hidden';
 import { HideIcon } from '../shared/HideIcon';
-import { ackHoldFor, ackTarget, ackTitle, useAck, useAckHeld } from '../shared/ack';
+import { ackHoldFor, ackTarget, ackTitle, useAckHeld } from '../shared/ack';
 import { STATUS } from '../shared/status';
 import { Guides } from './Guides';
 import { ItemRow, type RowAction } from './ItemRow';
-import { TopicRow, type TopicAction } from './TopicRow';
+import { TopicRow, type BandSlots, type TopicAction } from './TopicRow';
+import { ContinueButton } from './band/ContinueButton';
+import { FocusButton } from './band/FocusButton';
+import { NextUnseen } from './band/NextUnseen';
+import { ChangesOpener } from '../changes/ChangesOpener';
+import { TopicMenu } from './band/TopicMenu';
 import { TopicReply } from '../answer/TopicReply';
 import { StuckNote } from '../answer/StuckNote';
 import { editQueued, inEditor } from '../answer/held';
@@ -189,13 +194,10 @@ export function TreeView(props: TreeViewProps) {
   useEffect(() => navigationVisits.bind(navigation), [navigation]);
   useOwnerDrafts(drafts, raw);
   const lifecycle = useSessionLifecycleFor(actions);
-  const ack = useAck(actions, selectedId);
+  // A row's Ack and the `a` key start a 6 s hold in the session's hold store; the store saves it, or drops it on Undo.
+  const hold = useMemo(() => ackHoldFor(route.session_id, actions), [route.session_id, actions]);
   const ackHeld = useAckHeld(route.session_id);
-  const [ackItemId, setAckItemId] = useState<string | null>(null);
-  const runAck = (itemId: string) => { setAckItemId(itemId); return ack.run(itemId).then(saved => {
-    if (saved) navigationVisits.record(route, itemId, 'acked');
-    return saved;
-  }); };
+  const runAck = (itemId: string) => { const item = session?.items[itemId]; if (item) hold.ack(item); };
   const noticeCallbacks = useRef({ lifecycle, onShowArchive });
   noticeCallbacks.current = { lifecycle, onShowArchive };
   const archivedNotice = lifecycle.archived;
@@ -216,17 +218,10 @@ export function TreeView(props: TreeViewProps) {
     if (notice && notice.actions?.[0]?.disabled !== lifecycle.busy) noticeStore.push({ ...notice,
       actions: notice.actions?.map(action => action.label === 'Undo' ? { ...action, disabled: lifecycle.busy } : action) });
   }, [archiveNoticeId, lifecycle.busy]);
-  const actionState = actions.getSnapshot();
+  const actionState = useSessionActions(actions);
   const controllerFailure = !actionState.pending && isViewConflict(actionState.error) ? plainFailure(actionState.error) : null;
-  const ackNotice = ack.error === controllerFailure ? null : ack.error;
   const lifecycleNotice = lifecycle.reviewing || lifecycle.error === controllerFailure ? null : lifecycle.error;
-  const ackNoticeId = JSON.stringify(['item-ack', route.project_id, route.session_id, ackItemId]);
   const lifecycleNoticeId = JSON.stringify(['tree-lifecycle', route.project_id, route.session_id]);
-  useEffect(() => () => noticeStore.dismiss(ackNoticeId), [ackNoticeId]);
-  useEffect(() => {
-    if (!ackNotice) { noticeStore.dismiss(ackNoticeId); return; }
-    noticeStore.push({ id: ackNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: ackNotice });
-  }, [ackNoticeId, ackNotice]);
   useEffect(() => () => noticeStore.dismiss(lifecycleNoticeId), [lifecycleNoticeId]);
   useEffect(() => {
     if (!lifecycleNotice) { noticeStore.dismiss(lifecycleNoticeId); return; }
@@ -252,14 +247,18 @@ export function TreeView(props: TreeViewProps) {
   const scope = useMemo<FilterScope | null>(() => session && view ? { session, view, later, local: localChips.chips } : null,
     [session, view, later, localChips.chips]);
   const filter = useMemo(() => scope ? filterOf(scope) : null, [scope]);
-  const model = useMemo(() => session && view && filter ? treeModel({ session, view, filter, focusRootId: focusedId, search: query, searchShown, later, collapsedTopics: closedTopics, selectedId, revealId,
+  const model = useMemo(() => session && view && filter ? treeModel({ session, view, filter, focusRootId: focusedId, ackHeld, search: query, searchShown, later, collapsedTopics: closedTopics, selectedId, revealId,
     filterCollapsedItemIds: filterFolds.items, filterCollapsedTopicIds: filterFolds.topics,
     attentionRevealId: nextRevealId, expandedHiddenGroups, temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute }) : null,
-  [session, view, filter, focusedId, query, searchShown, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, nextRevealId, presence, health, summaries, minute]);
+  [session, view, filter, focusedId, ackHeld, query, searchShown, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, nextRevealId, presence, health, summaries, minute]);
   const summary = summaries.find(value => value.project_id === route.project_id && value.session_id === route.session_id) ?? null;
   const bar = sessionBar(session, summary, presence);
   const focusedBranch = useMemo(() => session && focusedId ? branchItems(session, focusedId) : null, [session, focusedId]);
   const rows = useMemo(() => model?.rows ?? [], [model]);
+  // Every mounted item row would draw "✓ Acked · Undo" for a held Ack. Say so to the hold: a row folded away, filtered out or
+  // gone with the Graph leaves the Undo to a notice (D11).
+  const drawnItems = useMemo(() => graph ? '' : rows.flatMap(row => row.kind === 'item' ? [row.key] : []).join('\n'), [rows, graph]);
+  useEffect(() => hold.showing(drawnItems ? drawnItems.split('\n') : []), [hold, drawnItems]);
   const names = useMemo(() => session ? peekNames(session) : new Map<string, string>(), [session]);
   const sections = useMemo(() => {
     const groups: { topic: Extract<Row, { kind: 'topic' }>; items: Exclude<Row, { kind: 'topic' }> [] }[] = [];
@@ -595,7 +594,7 @@ export function TreeView(props: TreeViewProps) {
         if (!event.repeat) {
           if (viewBusy) noticeStore.push({ id: 'tree-ack-view-saving', icon: 'ph ph-warning-circle', dismissible: true,
             text: 'Another view change is being saved. Wait for it, then try Ack again.' });
-          else void runAck(row.item.id);
+          else runAck(row.item.id);
         }
         return true;
       }
@@ -804,8 +803,6 @@ export function TreeView(props: TreeViewProps) {
   const spacer = useRef(0);
   const panelTarget = useRef<{ readonly key: string; readonly top: number; readonly scrollTop: number } | null>(null);
   const [breadcrumb, setBreadcrumb] = useState<readonly string[]>([]);
-  /** Keep an exit in the band whenever the focused row's own Unfocus is unavailable. */
-  const [focusExitMissing, setFocusExitMissing] = useState(false);
   const placed = useRef<Anchor | null>(null);
   placed.current = anchor;
   /** The scroller width `holding` last held the reading row at. */
@@ -931,12 +928,6 @@ export function TreeView(props: TreeViewProps) {
       return !ancestor || ancestor.getBoundingClientRect().top < top;
     }) : [];
     setBreadcrumb(previous => previous.length === next.length && previous.every((id, index) => id === next[index]) ? previous : next);
-    const focusRoot = latest.current.focusedId ? elements.current.get(latest.current.focusedId) : undefined;
-    const leave = focusRoot?.querySelector('.tree-focus-action');
-    const rect = leave?.getBoundingClientRect();
-    const bottom = Math.min(visibleBottom(box), window.innerHeight);
-    const missing = !rect || rect.width <= 0 || rect.height <= 0 || rect.top < top || rect.bottom > bottom;
-    setFocusExitMissing(previous => previous === missing ? previous : missing);
   };
   const layoutState = useRef({ selectedId, reveal, detailOpen });
   const releaseReveal = () => {
@@ -1118,7 +1109,7 @@ export function TreeView(props: TreeViewProps) {
   const itemActions = (row: ItemRowModel): RowAction[] => {
     const item = row.item, target = { ...route, item_id: item.id }, list: RowAction[] = [];
     const ackTo = row.ack;
-    if (ackTo) list.push({ icon: 'ph ph-check', title: ackTitle(ackTo, item.status), persistent: true, disabled: viewBusy || ack.busy, run: () => { void runAck(item.id); } });
+    if (ackTo) list.push({ icon: 'ph ph-check', title: ackTitle(ackTo, item.status), persistent: true, disabled: viewBusy || actionState.writing || !!actionState.pending || ackHeld.has(item.id), run: () => { runAck(item.id); } });
     const act = (intent: RowIntent) => () => {
       ++request.current; centered.current = true; settled.current = true; setAnchor(null);
       scrollRequested.current = null;
@@ -1148,22 +1139,36 @@ export function TreeView(props: TreeViewProps) {
     list.push({ icon: 'ph ph-trash', title: 'Remove (⌫)', run: () => onRemove({ kind: 'item', item: target }) });
     return list;
   };
-  const topicActions = (row: Extract<Row, { kind: 'topic' }>): TopicAction[] => {
-    const id = row.topic.id;
-    if (archivedMode) return [{ icon: 'ph ph-arrow-counter-clockwise', label: 'Restore', title: 'Restore topic', run: () => lifecycle.restore(id), archive: true }];
-    const remove = { icon: 'ph ph-trash', label: 'Remove', title: 'Remove topic (⌫)', run: () => onRemove({ kind: 'topic', session: route, topic_id: id }) };
-    // Archive is always offered: open items stay as they are and unsent messages are cancelled (ADR-0090).
-    const archive = { icon: 'ph ph-archive', label: 'Archive', title: 'Archive topic', run: () => lifecycle.archive(id), archive: true };
-    // While a topic reply is on its way to the agent, the topic takes no new reply or continuation.
-    if (row.delivery) return [archive, remove];
-    return [
-      ...session?.state === 'active' && session.active_binding_id ? [{ icon: 'ph ph-chat-text', label: 'Reply to topic', title: 'Tell the agent something about this whole topic', run: () => setReplying(id) }] : [],
-      // Continuation is a core workflow: every topic without an origin offers it,
-      // not only earlier-session ones as the prototype draws (main, P8.3 WP1).
-      ...!row.topic.origin ? [{ icon: 'ph ph-arrow-bend-down-right', label: 'Continue here', title: `Continue this topic with ${bar?.agent ?? 'this session'}`, run: () => setContinuing(id) }] : [],
-      archive,
-      remove,
-    ];
+  // The archive view's only hover action is Restore; a live topic's actions are the band's buttons and its "…" menu.
+  const topicActions = (row: Extract<Row, { kind: 'topic' }>): TopicAction[] => archivedMode
+    ? [{ icon: 'ph ph-arrow-counter-clockwise', label: 'Restore', title: 'Restore topic', run: () => lifecycle.restore(row.topic.id), archive: true }] : [];
+  /** Unseen items of one topic, in Map order: the band's Next steps through them. */
+  const unseenIn = (topicId: string) => changes && session
+    ? changes.order.filter(id => changes.markers.has(id) && session.items[id]?.topic_id === topicId) : [];
+  const bandSlots = (row: Extract<Row, { kind: 'topic' }>): BandSlots => {
+    if (archivedMode || !session) return {};
+    const id = row.topic.id, unseen = unseenIn(id), at = nextTarget ? unseen.indexOf(nextTarget.id) : -1;
+    const focusedName = focusedId ? names.get(focusedId) ?? (focusedItem ? shortLabel(focusedItem) : focusedId) : null;
+    const focusedCount = focusedBranch ? [...focusedBranch].filter(itemId => !itemRemoved(session, itemId)).length : 0;
+    const replyBlocked = row.delivery ? 'a reply to this topic is on its way'
+      : session.state === 'active' && session.active_binding_id ? null : 'the agent is not running';
+    const binItems = removedRoots(session, id).reduce((sum, item) => sum + removedSubtree(session, item.id).length, 0);
+    return {
+      // While focused, the counts line says so, in the counts' place (D9).
+      counts: focusedName ? <span className="tree-count tree-focused"><i className="ph ph-crosshair" aria-hidden="true" />
+        Focused on “{focusedName}” · {focusedCount} item{focusedCount === 1 ? '' : 's'}</span> : undefined,
+      changes: <ChangesOpener session={session} topicId={id} seen={seen} navigation={navigation}
+        onOpenItem={itemId => { if (covered && props.onOpenItem) props.onOpenItem(itemId); else select(itemId, false); }} />,
+      next: <NextUnseen position={at >= 0 ? at + 1 : null} total={unseen.length} onNext={() => nextCallbacks.current()} />,
+      focus: <FocusButton focusedName={focusedName} canFocus={!!actingItem()} busy={focusDisabled} onToggle={() => { toggleSelectedFocus(); }} />,
+      continue: row.topic.origin ? undefined
+        : <ContinueButton disabled={!!row.delivery} title="A reply to this topic is on its way" onContinue={() => setContinuing(id)} />,
+      menu: <TopicMenu topicName={row.topic.name} dismissKey={row.key}
+        reply={{ run: () => setReplying(id), unavailable: replyBlocked }}
+        bin={{ count: binItems, open: () => binView.reveal(route, id) }}
+        archive={() => lifecycle.archive(id)}
+        remove={{ run: () => onRemove({ kind: 'topic', session: route, topic_id: id }), items: activeItems(session).filter(item => item.topic_id === id).length }} />,
+    };
   };
   // A stopped delivery, or a topic reply not sent yet, is answered on its row; keys there stay off the tree's shortcuts.
   // Edit puts a topic reply back in the topic's reply box and opens it.
@@ -1182,8 +1187,7 @@ export function TreeView(props: TreeViewProps) {
     {sections.map(({ topic: row, items }) => {
       const eligible = !archivedMode && session ? ackAllItems(session, row.topic.id) : [];
       return <div key={row.key} className="tree-topic-group" role="presentation">
-      <TopicRow row={row} focused={focusKey === row.key} actions={topicActions(row)}
-        ackAllCount={eligible.length}
+      <TopicRow row={row} focused={focusKey === row.key} actions={topicActions(row)} slots={bandSlots(row)}
         ackAll={!archivedMode ? <AckAll actions={actions} topicId={row.topic.id} topicName={row.topic.name} items={eligible} disabled={viewBusy} /> : undefined}
         prompt={row.allClosed && !archivedMode ? () => lifecycle.archive(row.topic.id) : null}
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
@@ -1200,7 +1204,7 @@ export function TreeView(props: TreeViewProps) {
         note={row.collapsed ? collapsedNote(row.collapsed) : null}
         actions={itemActions(row)} fix={fixOf(row)}
         unfolded={isUnfolded(row.key)} onUnfold={unfold}
-        acked={ackHeld.has(row.key)} onUndoAck={id => { ackHoldFor(route.session_id, actions).undo(id); }}
+        acked={ackHeld.has(row.key)} onUndoAck={id => { hold.undo(id); }}
         onPeekHover={(id, event) => { const handlers = peek?.chipProps({ ...route, item_id: id });
           if (event.type === 'mouseenter') handlers?.onMouseEnter(event); else handlers?.onMouseMove(event);
         }}
@@ -1239,18 +1243,19 @@ export function TreeView(props: TreeViewProps) {
           : `${bar?.agent ?? 'The agent'} is not running · items appear when it writes`}</div>
     </div>;
   } else if (model?.noMatch) {
-    // Only the filters can empty the Map; a search never does.
+    // Only the filters can empty the Map; a search never does. No band is drawn then, so while Focus is on this is the
+    // one place left to leave it.
     body = <div className="tree-no-match">
-      <div className="tree-no-match-title">No items match these filters.</div>
-      <button type="button" className="btn btn-secondary" onClick={onClearFilters}>Clear filters</button>
+      <div className="tree-no-match-title">{focusedId ? 'Nothing in the focus matches these filters.' : 'No items match these filters.'}</div>
+      <div className="tree-no-match-actions">
+        {focusedId && <button type="button" className="btn btn-secondary" disabled={focusDisabled} onClick={() => focusBranch(null)}>Unfocus</button>}
+        <button type="button" className="btn btn-secondary" onClick={onClearFilters}>Clear filters</button>
+      </div>
     </div>;
   } else if (model && archivedMode && !rows.length) {
     body = <div className="tree-no-match"><div className="tree-no-match-title">No archived topics in this session.</div></div>;
   } else body = tree;
 
-  // The sticky copy also covers filtered, folded or otherwise unmounted rows.
-  const unfocusCopy = focusedId && <button type="button" className="tree-focus-action" aria-label={`Unfocus ${names.get(focusedId) ?? (focusedItem ? shortLabel(focusedItem) : focusedId)}`} disabled={focusDisabled}
-    onClick={() => focusBranch(null)}>Unfocus</button>;
   // "↓ Back to “name” ." (SPEC §5.8 8.5): floats over the Map while the selected row is out of view, at the top or above the
   // dock by the side it went; `.` does the same. It covers rows rather than moving them. Not in the Graph.
   const selectedItem = selectedId ? session?.items[selectedId] : undefined;
@@ -1290,7 +1295,7 @@ export function TreeView(props: TreeViewProps) {
       <div className="tree-path">
         <nav className="tree-breadcrumb" aria-label="Map ancestors">{breadcrumb.map((id, index) => <span key={id}>
           {index > 0 && <span aria-hidden="true"> › </span>}<button type="button" title={session?.items[id]?.question} onClick={() => select(id, false)}>{names.get(id)}</button>
-        </span>)}{focusExitMissing && unfocusCopy}</nav>
+        </span>)}</nav>
       </div>
       <div ref={scroller} className="tree-scroll" onScroll={() => {
         // At the held scrollTop this can be our own correction's delayed event;

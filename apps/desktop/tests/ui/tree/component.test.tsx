@@ -84,6 +84,13 @@ async function mount({ transport = new AppTransport(), configure, props = {}, lo
 }
 const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
 const topicRow = (name: string) => screen.getByRole('treeitem', { name });
+/** An entry of a topic band's "…" menu (Reply to topic, Open the bin, Archive topic…, Remove topic…). */
+const bandMenu = (band: HTMLElement, entry: RegExp) => {
+  fireEvent.click(within(band).getByRole('button', { name: /^More actions for/ }));
+  fireEvent.click(screen.getByRole('menuitem', { name: entry }));
+};
+/** The band's Focus / Unfocus button (D9): it acts on the selected item's root, like ⇧F. */
+const focusButton = () => screen.getAllByRole<HTMLButtonElement>('button', { name: /^(Focus|Unfocus “.*”)$/ })[0]!;
 const ids = () => [...document.querySelectorAll('[role="treeitem"][data-item-id]')].map(element => element.getAttribute('data-item-id'));
 const viewOf = (transport: AppTransport) => transport.preferences.sessions.find(value => value.session.session_id === route.session_id)!;
 const patches = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'preferences_patch');
@@ -148,15 +155,6 @@ describe('session tree rows', () => {
       expect(viewOf(transport).focused_item_id).toBe('1');
       cleanup(); view.navigation.stop();
     }
-  });
-
-  it('keeps a sticky Focus exit before the cold session has loaded', async () => {
-    const view = await mount({ load: false, configure: transport => { viewOf(transport).focused_item_id = '1'; } });
-    expect(view.store.getSnapshot().snapshot).toBeNull();
-    fireEvent.click(within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name: 'Unfocus 1' }));
-    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
-    await act(async () => { await view.store.refresh(); });
-    expect(viewOf(view.transport).focused_item_id).toBeUndefined();
   });
 
   it('preserves Focus through pending root removal and Undo', async () => {
@@ -230,23 +228,23 @@ describe('session tree rows', () => {
     }, props: { selectedId: '1' } });
     const name = peekNames(view.store.getSnapshot().snapshot!.session).get('1')!;
     expect(name).toBe('Shared name');
-    fireEvent.click(within(row('1')).getByRole('button', { name: `Focus on ${name}` }));
-    // One place to leave: the focused item's own button, which has taken over from Focus. No banner.
+    fireEvent.click(focusButton());
+    // One place to leave: the band's button, which takes over from Focus. No banner, and no Focus button on any row.
     expect(screen.queryByText(/^Focused:/)).toBeNull();
-    expect(within(row('1')).getByRole('button', { name: `Unfocus ${name}` }).textContent).toBe('Unfocus');
-    expect(within(row('1')).queryByRole('button', { name: /^Focus on / })).toBeNull();
+    expect(focusButton().getAttribute('aria-label')).toBe(`Unfocus “${name}”`);
+    expect(focusButton().textContent).toBe('Unfocus');
+    expect(screen.queryByRole('button', { name: /^Focus on / })).toBeNull();
     const box = document.querySelector<HTMLElement>('.tree-scroll')!; box.scrollTop = 100; fireEvent.scroll(box);
     expect(backPill('above').querySelector('.tree-back-label')!.textContent).toBe(`Back to “${name}”`);
     const crumbs = within(screen.getByRole('navigation', { name: 'Map ancestors' }));
     expect(crumbs.getByRole('button', { name }).textContent).toBe(name);
-    // Scrolled under the sticky band, the focused item's sticky copy carries Unfocus too.
-    expect(crumbs.getByRole('button', { name: `Unfocus ${name}` }).textContent).toBe('Unfocus');
   });
 
-  it('keeps Focus discoverable without a tab stop on every top-level row', async () => {
-    await mount();
-    for (const button of screen.getAllByRole('button', { name: /^Focus on / })) expect(button.tabIndex).toBe(-1);
-    expect(within(row('1')).getByRole('button', { name: /^Focus on / }).textContent).toBe('Focus');
+  it('draws no Focus button on a row: Focus lives in the band, and there is nothing on a row to tab through', async () => {
+    await mount({ props: { selectedId: '1' } });
+    expect(screen.queryByRole('button', { name: /^Focus on / })).toBeNull();
+    expect(document.querySelector('.tree-item .tree-focus-action')).toBeNull();
+    expect(focusButton().textContent).toBe('Focus');
   });
 
   it('updates Recent Changed only immediately while a seen save is still pending', async () => {
@@ -274,9 +272,10 @@ describe('session tree rows', () => {
     expect(view.transport.preferences.seen![0]!.items).toEqual([]);
     await act(async () => { release(); await gate; });
   });
-  it('enters Focus by visible action, remembers it on remount, and leaves by the same button, now reading Unfocus', async () => {
-    const view = await mount();
-    fireEvent.click(within(row('1')).getByRole('button', { name: /^Focus on /  }));
+  it('enters Focus from the band button, remembers it on remount, and leaves by the same button, now reading Unfocus', async () => {
+    const view = await mount({ props: { selectedId: '1' } });
+    expect(focusButton().textContent).toBe('Focus');
+    fireEvent.click(focusButton());
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
     expect(ids()).toEqual(['1', '1.1']);
     const label = shortLabel(view.transport.sessions.get(route.session_id)!.items['1']!);
@@ -284,25 +283,15 @@ describe('session tree rows', () => {
     expect(screen.queryByRole('button', { name: 'Leave Focus' })).toBeNull();
     cleanup(); await mount({ transport: view.transport });
     expect(ids()).toEqual(['1', '1.1']);
-    const leave = within(row('1')).getByRole('button', { name: `Unfocus ${label}` });
+    const leave = focusButton();
+    expect(leave.getAttribute('aria-label')).toBe(`Unfocus “${label}”`);
     expect(leave.textContent).toBe('Unfocus');
-    expect(leave.tabIndex).toBe(-1);
     fireEvent.click(leave);
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
     expect(ids()).toContain('8');
-    expect(within(row('1')).getByRole('button', { name: /^Focus on / }).textContent).toBe('Focus');
   });
 
-  it('leaves Focus by double click on the focused item’s icon', async () => {
-    const view = await mount();
-    fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
-    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
-    fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
-    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
-    expect(ids()).toContain('8');
-  });
-
-  it.each(['row Unfocus button', 'disabled item icon', 'sticky Unfocus button'] as const)('ignores the %s while the view is busy', async control => {
+  it('keeps the band Focus button while the view is busy saving, then lets it act', async () => {
     const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
@@ -314,17 +303,16 @@ describe('session tree rows', () => {
     act(() => { saving = view.navigation.saveSessionView(structuredClone(viewOf(view.transport)), view.transport.preferences.revision); });
     await waitFor(() => expect(view.navigation.getSnapshot().writing).toBe(true));
     expect(view.navigation.isWritingRecent()).toBe(false);
-    const leave = control === 'sticky Unfocus button' ? within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name: /^Unfocus / })
-      : within(row('1')).getByRole('button', { name: /^Unfocus / });
-    expect((leave as HTMLButtonElement).disabled).toBe(true);
-    if (control === 'disabled item icon') fireEvent.doubleClick(row('1').querySelector('.tree-icon')!); else fireEvent.click(leave);
-    expect(within(row('1')).getByRole('button', { name: /^Unfocus / })).toBeTruthy();
+    expect(focusButton().disabled).toBe(true);
+    fireEvent.click(focusButton());
+    expect(focusButton().getAttribute('aria-label')).toMatch(/^Unfocus /);
     await act(async () => { release(); await saving; });
     expect(viewOf(view.transport).focused_item_id).toBe('1');
-    expect(within(row('1')).getByRole('button', { name: /^Unfocus / })).toBeTruthy();
+    expect(focusButton().getAttribute('aria-label')).toMatch(/^Unfocus /);
+    expect(focusButton().disabled).toBe(false);
   });
 
-  it.each(['row', 'icon', 'sticky'] as const)('allows %s Unfocus through a busy automatic Recent save', async control => {
+  it('allows the band Unfocus through a busy automatic Recent save', async () => {
     const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
@@ -336,11 +324,9 @@ describe('session tree rows', () => {
     act(() => { saving = view.navigation.saveRecentItems(route, [{ item_id: '1', action: 'peeked', visited_at: '2026-10-13T12:00:00.000Z' }], view.transport.preferences.revision); });
     await waitFor(() => expect(view.navigation.isWritingRecent()).toBe(true));
     expect(view.navigation.getSnapshot().writing).toBe(true);
-    const leave = control === 'sticky' ? within(screen.getByRole('navigation', { name: 'Map ancestors' })).getByRole('button', { name: /^Unfocus / })
-      : within(row('1')).getByRole('button', { name: /^Unfocus / });
-    expect((leave as HTMLButtonElement).disabled).toBe(false);
-    if (control === 'icon') fireEvent.doubleClick(row('1').querySelector('.tree-icon')!); else fireEvent.click(leave);
-    expect(within(row('1')).queryByRole('button', { name: /^Unfocus / })).toBeNull();
+    expect(focusButton().disabled).toBe(false);
+    fireEvent.click(focusButton());
+    expect(focusButton().textContent).toBe('Focus');
     await act(async () => { release(); await saving; });
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
   });
@@ -356,30 +342,20 @@ describe('session tree rows', () => {
     expect(row('1')).toBeTruthy(); expect(row('8')).toBeTruthy();
   });
 
-  it('keeps the focused row and its own Focus exit under a search that matches nothing, since a search unmounts no row', async () => {
+  it('keeps the focused row and the band Unfocus under a search that matches nothing, since a search unmounts no row', async () => {
     const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
-    const band = within(screen.getByRole('navigation', { name: 'Map ancestors' }));
     view.rerender({ query: 'no matching item anywhere' });
     expect(ids()).toEqual(['1', '1.1']);
-    fireEvent.click(within(row('1')).getByRole('button', { name: /^Unfocus / }));
-    expect(band.queryByRole('button', { name: /^Unfocus / })).toBeNull();
+    fireEvent.click(focusButton());
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
   });
 
-  it.each(['filter', 'folded topic', 'pending removal'] as const)('keeps a sticky Focus exit when %s unmounts the row', async exclusion => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      if (this.matches('.tree-scroll')) return new DOMRect(0, 0, 300, 400);
-      if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 60);
-      if (this.matches('.tree-item .tree-focus-action')) return new DOMRect(0, 100, 60, 20);
-      return new DOMRect(0, 100, 300, 100);
-    });
+  it.each(['filter', 'folded topic', 'pending removal'] as const)('keeps the band Unfocus reachable when %s unmounts the row', async exclusion => {
     const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
     viewOf(transport).focused_item_id = '1';
     const removal = new RemovalQueue({ service: createDesktopService(transport), notices, read: async () => session });
     await mount({ transport, removal });
-    const band = within(screen.getByRole('navigation', { name: 'Map ancestors' }));
-    expect(within(row('1')).getByRole('button', { name: /^Unfocus / })).toBeTruthy();
-    expect(band.queryByRole('button', { name: /^Unfocus / })).toBeNull();
+    expect(focusButton().getAttribute('aria-label')).toMatch(/^Unfocus /);
     if (exclusion === 'filter') fireEvent.click(chip('In progress'));
     else if (exclusion === 'folded topic') fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Expand or collapse topic' }));
     else {
@@ -387,10 +363,32 @@ describe('session tree rows', () => {
       act(() => { removal.schedule(target, removeSubject(session, target)!); });
     }
     expect(row('1')).toBeNull();
-    const leave = band.getByRole('button', { name: /^Unfocus / });
-    await waitFor(() => expect((leave as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(leave);
+    await waitFor(() => expect(focusButton().disabled).toBe(false));
+    fireEvent.click(focusButton());
     await waitFor(() => expect(viewOf(transport).focused_item_id).toBeUndefined());
+  });
+
+  it('offers Unfocus beside Clear filters when Focus and the filters leave nothing (the Map has no band then)', async () => {
+    const view = await mount({ configure: transport => {
+      viewOf(transport).focused_item_id = '1';
+      for (const item of Object.values(transport.sessions.get(route.session_id)!.items)) if (item) item.status = 'done';
+    } });
+    fireEvent.click(chip('In progress'));
+    await waitFor(() => expect(screen.queryAllByRole('treeitem')).toHaveLength(0));
+    const empty = within(screen.getByText('Nothing in the focus matches these filters.').parentElement!);
+    expect(empty.getByRole('button', { name: 'Clear filters' })).toBeTruthy();
+    fireEvent.click(empty.getByRole('button', { name: 'Unfocus' }));
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+    expect(view.calls.cleared).toBe(0);
+  });
+  it('keeps the plain empty-filter words and only Clear filters when nothing is focused', async () => {
+    await mount({ configure: transport => {
+      for (const item of Object.values(transport.sessions.get(route.session_id)!.items)) if (item) item.status = 'done';
+    } });
+    fireEvent.click(chip('In progress'));
+    await waitFor(() => expect(screen.queryAllByRole('treeitem')).toHaveLength(0));
+    expect(screen.getByText('No items match these filters.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Unfocus' })).toBeNull();
   });
 
   it('ends Focus when hidden ids change for the focused top-level item', async () => {
@@ -398,7 +396,7 @@ describe('session tree rows', () => {
     const session = view.store.getSnapshot().snapshot!.session;
     expect(session.items['1']!.parent).toBeNull();
     expect(viewOf(view.transport).hidden_item_ids ?? []).not.toContain('1');
-    expect(within(row('1')).getByRole('button', { name: /^Unfocus / })).toBeTruthy();
+    expect(focusButton().getAttribute('aria-label')).toMatch(/^Unfocus /);
     await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: ['1'] }, view.transport.preferences.revision); });
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
     expect(viewOf(view.transport).hidden_item_ids).toContain('1');
@@ -406,23 +404,6 @@ describe('session tree rows', () => {
     await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), hidden_item_ids: [] }, view.transport.preferences.revision); });
     expect(viewOf(view.transport).focused_item_id).toBeUndefined();
     expect(row('1')).toBeTruthy();
-  });
-
-  it.each(['above', 'below'] as const)('keeps a sticky Focus exit when its button is %s the viewport', async edge => {
-    let buttonTop = 100;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      if (this.matches('.tree-scroll')) return new DOMRect(0, 0, 300, 400);
-      if (this.matches('.tree-topic')) return new DOMRect(0, 0, 300, 60);
-      if (this.matches('.tree-item .tree-focus-action')) return new DOMRect(0, buttonTop, 60, 20);
-      return new DOMRect(0, 100, 300, 100);
-    });
-    const view = await mount({ configure: transport => { viewOf(transport).focused_item_id = '1'; } });
-    const band = within(screen.getByRole('navigation', { name: 'Map ancestors' }));
-    expect(band.queryByRole('button', { name: /^Unfocus / })).toBeNull();
-    buttonTop = edge === 'above' ? 40 : 450;
-    fireEvent.scroll(document.querySelector('.tree-scroll')!);
-    fireEvent.click(band.getByRole('button', { name: /^Unfocus / }));
-    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
   });
 
   it.each(['removed', 'no longer top-level', 'reparented beneath a hidden ancestor'] as const)('ends invalid Focus when the item is %s', async invalid => {
@@ -441,9 +422,9 @@ describe('session tree rows', () => {
     }
   });
 
-  it('focuses a top-level bullet on double click and focuses the mounted target when an external reveal exits Focus', async () => {
-    const view = await mount();
-    fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
+  it('focuses the mounted target when an external reveal exits Focus', async () => {
+    const view = await mount({ props: { selectedId: '1' } });
+    fireEvent.click(focusButton());
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
     const target: RevealedItem = { kind: 'item', route: { ...route, item_id: '8' }, store: view.store, temporaryExpandedItemIds: [] };
     view.rerender({ selectedId: '8', reveal: target });
@@ -453,8 +434,8 @@ describe('session tree rows', () => {
   });
 
   it('expires a Go to focus request after a failed Focus exit and a different selection', async () => {
-    const view = await mount();
-    fireEvent.doubleClick(row('1').querySelector('.tree-icon')!);
+    const view = await mount({ props: { selectedId: '1' } });
+    fireEvent.click(focusButton());
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
     const exit = structuredClone(viewOf(view.transport));
     delete exit.focused_item_id;
@@ -481,7 +462,8 @@ describe('session tree rows', () => {
     const view = await mount();
     const target: RevealedItem = { kind: 'item', route: { ...route, item_id: '8' }, store: view.store, temporaryExpandedItemIds: [] };
     view.rerender({ selectedId: '8', reveal: target });
-    fireEvent.click(within(row('1')).getByRole('button', { name: /^Focus on /  }));
+    // Focus acts on the selected item's root, so enter it on item 1 the way the band does: through the saved view.
+    await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), focused_item_id: '1' }, view.transport.preferences.revision); });
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
     expect(ids()).toEqual(['1', '1.1']);
     expect(backPill('below')).toBeTruthy();
@@ -489,7 +471,7 @@ describe('session tree rows', () => {
 
   it('returns Selected keyboard focus after revealing a row outside Focus', async () => {
     const view = await mount({ props: { selectedId: '8' } });
-    fireEvent.click(within(row('1')).getByRole('button', { name: /^Focus on /  }));
+    await act(async () => { await view.navigation.saveSessionView({ ...structuredClone(viewOf(view.transport)), focused_item_id: '1' }, view.transport.preferences.revision); });
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBe('1'));
     const tag = backPill('below');
     tag.focus(); await userEvent.keyboard('{Enter}');
@@ -896,8 +878,11 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     } });
     const band = topicRow('Continued context');
     expect(band.querySelector('.tree-topic-line')).not.toBeNull();
-    expect(within(band).getByRole('button', { name: 'Remove' })).toBeTruthy();
-    expect(within(band).getByRole('button', { name: 'Archive' })).toBeTruthy();
+    // Reply waits while the reply is on its way; Archive and Remove stay in the "…" menu.
+    fireEvent.click(within(band).getByRole('button', { name: /^More actions for/ }));
+    expect(screen.getByRole('menuitem', { name: /^Remove topic/ })).toBeTruthy();
+    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: /^Archive topic/ }).disabled).toBe(false);
+    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: /^Reply to topic/ }).disabled).toBe(true);
   });
   const text = 'Keep the retry limits as they are';
   // The first input on item 8's topic becomes a queued reply to the whole topic.
@@ -914,7 +899,7 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     let id = '';
     const { transport } = await mount({ configure: value => { id = queuedReply(value); } });
     const band = topicRow('Continued context');
-    expect(within(band).getByRole('button', { name: 'Archive' })).toBeTruthy();
+    expect(within(band).getByRole('button', { name: /^More actions for/ })).toBeTruthy();
     await act(async () => { fireEvent.click(within(band.parentElement!).getByRole('button', { name: 'Delete' })); });
     expect(cancels(transport).map(request => request.command.params)).toMatchObject([{ input_id: id }]);
     await waitFor(() => expect(within(topicRow('Continued context').parentElement!).queryByRole('button', { name: 'Delete' })).toBeNull());
@@ -1413,7 +1398,8 @@ describe('session tree lifecycle', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Undo' })); });
     await waitFor(() => expect(screen.queryByText('Archived “Continued context”.')).toBeNull());
     expect(transport.mutations.map(value => value.command.command)).toEqual(['topic_archive', 'topic_restore']);
-    await act(async () => { fireEvent.click(within(topicRow('Continued context')).getByRole('button', { name: 'Archive' })); });
+    bandMenu(topicRow('Continued context'), /^Archive topic/);
+    await act(async () => {});
     fireEvent.click(await screen.findByRole('button', { name: 'View archive' }));
     expect(calls.archive).toBe(1); expect(screen.queryByText('Archived “Continued context”.')).toBeNull();
     expect(notices.getSnapshot().some(notice => notice.actions?.some(action => action.label === 'Undo'))).toBe(false);
@@ -1425,7 +1411,8 @@ describe('session tree lifecycle', () => {
       for (const input of Object.values(session.inputs)) if (input && input.target.topic_id === session.items['8']!.topic_id) input.state = 'handled';
     } });
     render(<Notices />);
-    await act(async () => { fireEvent.click(within(topicRow('Continued context')).getByRole('button', { name: 'Archive' })); });
+    bandMenu(topicRow('Continued context'), /^Archive topic/);
+    await act(async () => {});
     await screen.findByText('Archived “Continued context”.');
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     view.rerender({ detailOpen: true });
@@ -1441,7 +1428,7 @@ describe('session tree lifecycle', () => {
     const statuses = Object.values(session.items).map(item => item!.status);
     expect(unsent.length).toBeGreaterThan(1);
     // Archive is offered on a topic with open items; it asks first and never refuses.
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Archive' }));
+    bandMenu(topicRow('Delivery decisions'), /^Archive topic/);
     const dialog = within(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' }));
     expect(dialog.getByText(/open items? stays? as (it is|they are)\. .*archiving cancels them\. You can restore it any time\.$/)).toBeTruthy();
     await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
@@ -1454,7 +1441,7 @@ describe('session tree lifecycle', () => {
     const transport = new HistoryTransport(); await mount({ transport });
     transport.replies.push({ api_version: 1, ok: false,
       error: { code: 'invalid_argument', message: 'Refused archive.', hint: '', retryable: false, field_errors: [] } });
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Archive' }));
+    bandMenu(topicRow('Delivery decisions'), /^Archive topic/);
     const dialog = within(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' }));
     await act(async () => { fireEvent.click(dialog.getByRole('button', { name: 'Archive topic' })); });
     const alert = await screen.findByRole('alert');
@@ -1468,25 +1455,25 @@ describe('session tree lifecycle', () => {
     // SPEC 6.1 leaves e unbound: archiving is the band's own button.
     row('4').focus(); fireEvent.keyDown(row('4'), { key: 'e' });
     expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Archive' }));
+    bandMenu(topicRow('Delivery decisions'), /^Archive topic/);
     expect(screen.getByRole('dialog', { name: 'Archive “Delivery decisions”?' })).toBeTruthy();
   });
-  it('offers Continue here on an earlier topic and asks which other session takes it', async () => {
+  it('offers Continue elsewhere on an earlier topic and asks which other session takes it', async () => {
     const { navigation, rerender } = await mount();
     rerender({ summaries: navigation.getSnapshot().sessions!.sessions.items });
-    expect(within(topicRow('Continued context')).queryByRole('button', { name: 'Continue here' })).toBeNull();
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Continue here' }));
+    expect(within(topicRow('Continued context')).queryByRole('button', { name: 'Continue elsewhere' })).toBeNull();
+    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Continue elsewhere' }));
     const dialog = within(screen.getByRole('dialog', { name: 'Continue “Delivery decisions” in another session' }));
     expect(dialog.getAllByRole('button').map(button => button.getAttribute('aria-labelledby') ? button.textContent : null).filter(Boolean))
       .toEqual([expect.stringMatching(/^Separate session/)]);
     fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog')).toBeNull();
   });
-  it('offers Continue here on a topic from a session created today', async () => {
+  it('offers Continue elsewhere on a topic from a session created today', async () => {
     const session = new AppTransport().sessions.get(route.session_id)!;
     await mount({ props: { now: () => Date.parse(session.created_at) } });
     expect(within(topicRow('Delivery decisions')).queryByText(/· (today|yesterday)/)).toBeNull();
-    expect(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Continue here' })).toBeTruthy();
+    expect(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Continue elsewhere' })).toBeTruthy();
   });
   it('keeps an uncertain session action for an exact reconcile from the column', async () => {
     const transport = new HistoryTransport();
@@ -1597,7 +1584,7 @@ describe('Reply to topic', () => {
       for (const item of Object.values(transport.sessions.get(route.session_id)!.items)) if (item) item.status = 'done';
     } });
     const band = topicRow('Delivery decisions'), group = band.parentElement!;
-    fireEvent.click(within(band).getByRole('button', { name: 'Reply to topic' }));
+    bandMenu(band, /^Reply to topic/);
     await waitFor(() => expect(box()).not.toBeNull());
     expect(band.querySelector('.tree-prompt')).toBeNull();
     expect(band.contains(box())).toBe(false);
@@ -1606,7 +1593,7 @@ describe('Reply to topic', () => {
     expect(content.contains(box())).toBe(true);
     expect(content.querySelector('.tree-prompt')).not.toBeNull();
     expect(group.contains(row('1'))).toBe(true);
-    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    const css = ['tree.css', 'tree-band.css'].map(name => readFileSync(resolve(__dirname, '../../../src/ui/tree', name), 'utf8')).join('\n');
     expect(css).toMatch(/\.tree-topic-group\s*\{[^}]*position: relative/s);
     expect(css).toMatch(/\.tree-topic\s*\{[^}]*position: sticky;[^}]*top: 0/s);
     expect(css).toMatch(/\.tree-topic-status > span\s*\{[^}]*white-space: nowrap;[^}]*text-overflow: ellipsis/s);
@@ -1614,7 +1601,7 @@ describe('Reply to topic', () => {
   });
   it('opens a box on the topic band and sends a topic reply with no item', async () => {
     const { transport, drafts } = await mount();
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
+    bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
     await waitFor(() => expect(box()).not.toBeNull());
     await waitFor(() => expect(drafts.getSnapshot().ready).toBe(true));
     const text = within(box()!).getByLabelText('Reply to this topic');
@@ -1631,18 +1618,18 @@ describe('Reply to topic', () => {
   });
   it('closes on Escape and keeps the draft for next time', async () => {
     await mount();
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
+    bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
     await waitFor(() => expect((within(box()!).getByLabelText('Reply to this topic') as HTMLTextAreaElement).disabled).toBe(false));
     const text = within(box()!).getByLabelText('Reply to this topic');
     fireEvent.change(text, { target: { value: 'Half a thought' } });
     fireEvent.keyDown(text, { key: 'Escape' });
     expect(box()).toBeNull(); expect(document.activeElement).toBe(topicRow('Delivery decisions'));
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
+    bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
     await waitFor(() => expect((within(box()!).getByLabelText('Reply to this topic') as HTMLTextAreaElement).value).toBe('Half a thought'));
   });
   it('keeps the words and the focus when typed while the session view refreshes, with no shortcut firing, and holds Send until it is fresh', async () => {
     const { transport, store, calls } = await mount(), user = userEvent.setup();
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
+    bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
     await waitFor(() => expect(box()).not.toBeNull());
     const text = within(box()!).getByLabelText('Reply to this topic') as HTMLTextAreaElement;
     await waitFor(() => expect(text.disabled).toBe(false));
@@ -1670,7 +1657,8 @@ describe('Reply to topic', () => {
   });
   it('is not offered in a closed session', async () => {
     await mount({ configure: transport => { const session = transport.sessions.get(route.session_id)!; session.state = 'closed'; session.closed_at = session.updated_at; } });
-    expect(within(topicRow('Delivery decisions')).queryByRole('button', { name: 'Reply to topic' })).toBeNull();
+    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: /^More actions for/ }));
+    expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: /^Reply to topic/ }).disabled).toBe(true);
   });
 });
 
@@ -2301,6 +2289,8 @@ describe('item details in the tree', () => {
     // The hover bar's buttons are never tab stops (only Ack is).
     expect(document.activeElement?.closest('.tree-actions')).toBeNull();
     for (const button of row('1').querySelectorAll<HTMLButtonElement>('.tree-actions button')) expect(button.tabIndex).toBe(-1);
+    // Focus is not on the row at all (D9): the band carries it.
+    expect(within(row('1')).queryByRole('button', { name: /^Focus on / })).toBeNull();
   });
 
   it('preserves full Markdown structure and agent-written item links without selecting their row', async () => {
@@ -2334,7 +2324,7 @@ describe('item details in the tree', () => {
     expect(slices('1.1')).toEqual(['1', '2f']);
     expect(row('1.1').dataset.branch).toBe(row('1').dataset.branch);
     expect(row('1.1').style.getPropertyValue('--depth')).toBe('2');
-    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
+    const css = ['tree.css', 'tree-band.css'].map(name => readFileSync(resolve(__dirname, '../../../src/ui/tree', name), 'utf8')).join('\n');
     expect(css).toMatch(/\.tree-topic\s*\{[^}]*position: sticky;[^}]*top: 0;[^}]*background: var\(--a-side\)/s);
     expect(css).toMatch(/scroll-padding-top: var\(--tree-header-height, 0\)/);
   });
@@ -2377,30 +2367,18 @@ describe('item details in the tree', () => {
     for (const slot of ['marker', 'related']) expect(css).toMatch(new RegExp(`\\.tree-end-${slot}\\s*\\{\\s*width: var\\(--tree-end-${slot}\\)`));
     expect(css).toMatch(/\.tree-ack-slot\s*\{\s*width: var\(--tree-end-ack\)/);
   });
-  it('keeps the space of a topic band’s actions so the topic name never rewraps on hover or focus', async () => {
+  it('draws the band the same at rest, on hover and on focus: no hover icons, so the topic name never rewraps', async () => {
     await mount({ configure: transport => {
       const session = transport.sessions.get(route.session_id)!;
       for (const item of Object.values(session.items)) if (item) item.status = 'done';
     } });
     const band = topicRow('Delivery decisions'), before = band.innerHTML;
-    expect(band.querySelector('.tree-topic-actions')).not.toBeNull();
+    expect(band.querySelector('.tree-topic-actions')).toBeNull();
     fireEvent.mouseEnter(band); band.focus();
     expect(band.innerHTML).toBe(before);
-    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
-    const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter(([, selector]) => /\.tree-topic-actions\b/.test(selector!));
-    const hidden = rules.filter(([, , declarations]) => /visibility:\s*hidden/.test(declarations!));
-    const shown = rules.filter(([, , declarations]) => /visibility:\s*visible/.test(declarations!));
-    // Hidden by visibility and opacity only: no rule takes the actions out of the flow, at rest or on hover or focus.
-    expect(hidden).toHaveLength(1); expect(hidden[0]![2]).toMatch(/opacity:\s*0/);
-    expect(shown).toHaveLength(1); expect(shown[0]![1]).toMatch(/:hover[^,]*\.tree-topic-actions/); expect(shown[0]![1]).toMatch(/:focus-within/);
-    for (const [, , declarations] of rules) expect(declarations).not.toMatch(/display:\s*none|width:|position:\s*absolute/);
-    // The buttons stay out of the tab order while hidden, like the item shortcuts.
-    for (const button of band.querySelectorAll('.tree-topic-actions button')) expect((button as HTMLElement).tabIndex).toBe(-1);
-    // Icon-only like the item shortcuts, so the reserved room is small: each has its plain name and a distinct icon.
-    const buttons = [...band.querySelectorAll<HTMLElement>('.tree-topic-actions button')];
-    expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(['Reply to topic', 'Continue here', 'Archive', 'Remove']);
-    for (const button of buttons) { expect(button.textContent).toBe(''); expect(button.title).not.toBe(''); }
-    expect(new Set(buttons.map(button => button.querySelector('i')!.className)).size).toBe(buttons.length);
+    // Reply, the bin, Archive and Remove are one "…" menu button, always in the band (D12).
+    expect(within(band).getByRole('button', { name: /^More actions for/ })).toBeTruthy();
+    for (const name of ['Reply to topic', 'Archive', 'Remove']) expect(within(band).queryByRole('button', { name })).toBeNull();
   });
 });
 
@@ -2945,7 +2923,7 @@ describe('scrolling the tree', () => {
       return rect.call(this);
     });
     const view = await mount();
-    fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Reply to topic' }));
+    bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
     await waitFor(() => expect(document.querySelector('.tree-topic-reply')).not.toBeNull());
     scroller().scrollTop = 190;
     const target = link(view, '2'); // top 10: on screen, but behind the 60 px band.

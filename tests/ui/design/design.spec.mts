@@ -504,6 +504,9 @@ for (const frame of ['graph-hidden', 'graph-hidden-small'] as const) for (const 
   });
 }
 
+/* The sticky Unfocus copy in the path row is gone (D9): Focus and Unfocus are one band button, kept in reach by
+ * tests/e2e/tree-layout/tree-layout.spec.mts (the 92px swap and the 560/480px Map at the largest text). */
+
 test.describe.configure({ mode: 'parallel' });
 
 for (const width of [1920, 1600, 1280]) for (const acceptedFailure of [false, true]) {

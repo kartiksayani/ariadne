@@ -8,7 +8,7 @@ import { acknowledge, ackClaimed, ackFailure, ackLane, ackProposal as proposal, 
 import { notices } from '../pages/notices';
 import { navigationVisits } from './visits';
 
-export const ACK_ALL_HOLD_MS = 5000;
+export const ACK_ALL_HOLD_MS = 8000;
 const eligibleBySession = new WeakMap<Immutable<Session>, ReadonlyMap<string, readonly Immutable<Item>[]>>();
 const NO_ITEMS: readonly Immutable<Item>[] = [];
 /** Headers and their bulk controls share one eligibility pass per immutable snapshot. */
@@ -60,8 +60,8 @@ export class AckAllController {
     this.state = Object.freeze({ ...this.state, ...update, remaining: this.queue.length });
     this.listeners.forEach(listener => listener());
     const { phase, topicName, completed, total, remaining, error } = this.state;
-    if (phase === 'holding') notices.push({ id: this.noticeId, icon: 'ph ph-check', dismissible: false,
-      text: `Ack ${total} results in “${topicName}” in 5 seconds.`, actions: [{ label: 'Undo', run: () => { this.undo(); } }] });
+    // While held, the band shows "Acked N results · Undo"; a notice carries the Undo only if the band goes away (see announce).
+    if (phase === 'holding') notices.dismiss(this.noticeId);
     else if (phase === 'saving') notices.push({ id: this.noticeId, icon: 'ph ph-check', dismissible: false,
       text: `Acknowledging results in “${topicName}”: ${completed} of ${total} saved.` });
     else if (phase === 'failed') notices.push({ id: this.noticeId, icon: 'ph ph-warning', tone: 'problem', dismissible: false,
@@ -88,6 +88,14 @@ export class AckAllController {
     this.timer = setTimeout(() => { this.timer = undefined; void this.retry(); }, ACK_ALL_HOLD_MS);
     return true;
   }
+  /** The band that shows the Undo is going away (the Graph, a removed topic): keep the Undo reachable in a notice. */
+  announce(): void {
+    if (this.state.phase !== 'holding') return;
+    notices.push({ id: this.noticeId, icon: 'ph ph-check', dismissible: false,
+      text: `Acked ${this.state.total} results in “${this.state.topicName}”`, actions: [{ label: 'Undo', run: () => { this.undo(); } }] });
+  }
+  /** The band is back and shows the Undo itself. */
+  withdraw(): void { if (this.state.phase === 'holding') notices.dismiss(this.noticeId); }
   undo(): boolean {
     if (this.state.phase !== 'holding') return false;
     clearTimeout(this.timer); this.timer = undefined; this.queue = [];

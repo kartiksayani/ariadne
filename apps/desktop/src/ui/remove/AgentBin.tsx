@@ -105,7 +105,14 @@ export function AgentBin({ session, actions, topicId = null, onRemove }: {
     if (!immediateError) { notices.dismiss(errorNoticeId); return; }
     notices.push({ id: errorNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: immediateError });
   }, [errorNoticeId, immediateError]);
-  useEffect(() => { if (request.key === key) setOpen(true); }, [request, key]);
+  // Asked for by the owner (the band's "…" menu, a View notice): open it, and bring it into view if it is off-screen.
+  const root = useRef<HTMLDivElement>(null), scrollOnOpen = useRef(false);
+  useEffect(() => { if (request.key === key) { scrollOnOpen.current = true; setOpen(true); } }, [request, key]);
+  useEffect(() => {
+    if (!scrollOnOpen.current || !open) return;
+    scrollOnOpen.current = false;
+    root.current?.scrollIntoView?.({ block: 'nearest' });
+  });
   const entries = topicId ? removedRoots(session, topicId).map(item => ({ topicId, itemId: item.id, name: shortLabel(item), items: removedSubtree(session, item.id) }))
     : Object.values(session.topics).filter(topic => !!topic?.removed_at).map(topic => ({ topicId: topic!.id, itemId: null, name: topic!.name,
       items: Object.values(session.items).filter(item => item?.topic_id === topic!.id) }));
@@ -138,7 +145,7 @@ export function AgentBin({ session, actions, topicId = null, onRemove }: {
       onRemove(item ? { kind: 'item', item: { ...route, item_id: item } } : { kind: 'topic', session: route, topic_id: topic });
     } finally { pending.current = null; running.current = false; if (!attempt.cancelled) setBusy(false); }
   };
-  return <div className="agent-bin" data-agent-bin={topicId ?? 'topics'}>
+  return <div className="agent-bin" ref={root} data-agent-bin={topicId ?? 'topics'}>
     <button type="button" className="btn btn-ghost agent-bin-fold" aria-expanded={open} onClick={() => setOpen(value => !value)}>
       <i className={open ? 'ph ph-caret-down' : 'ph ph-caret-right'} aria-hidden="true" />Removed by agent · {count}</button>
     {operation.pending && error && <p role="alert">{error}</p>}

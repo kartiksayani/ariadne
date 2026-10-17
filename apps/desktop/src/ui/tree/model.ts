@@ -264,6 +264,8 @@ export interface TreeInput {
   readonly filter: TreeFilter;
   /** The walk keeps only this top item (and its topic); the other top items of its topic become one 'focus' strip. */
   readonly focusRootId?: string | null;
+  /** Items whose single Ack is held for its 6 s Undo. The band's "N to ack" leaves them out: they are as good as acked. */
+  readonly ackHeld?: ReadonlySet<string>;
   /** The header search as typed, which can run ahead of the saved filter. It highlights; it never decides rows. */
   readonly search: string;
   /** What "Show them" opened for the search (in memory, never saved). */
@@ -397,7 +399,7 @@ export function treeModel(input: TreeInput): TreeModel {
     const topicItems = all.filter(item => item.topic_id === topic.id), statuses = topicItems.map(display);
     const chipValue = topicChip(session, topic, input.summaries, input.now);
     const delivery = deliveryLine(session, { topicId: topic.id, itemId: null }, input.presence, input.health);
-    built.push({ kind: 'topic', key: topic.id, topic, depth: 0, expanded: open, first: built.length === 0, counts: topicCounts(statuses, topicItems.filter(item => ackTarget(session, item)).length, sessionEnded(session)),
+    built.push({ kind: 'topic', key: topic.id, topic, depth: 0, expanded: open, first: built.length === 0, counts: topicCounts(statuses, topicItems.filter(item => ackTarget(session, item) && !input.ackHeld?.has(item.id)).length, sessionEnded(session)),
       earlier: !topic.origin && !!chipValue, chip: chipValue, allClosed: !delivery && statuses.length > 0 && statuses.every(closed), delivery });
     if (!open) continue;
     const walk = (list: readonly Immutable<Item>[], depth: number) => {

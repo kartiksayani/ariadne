@@ -449,6 +449,24 @@ describe('agent removal bin', () => {
     act(() => { binView.reveal({ ...route, session_id: 'another-session' }, topicB); });
   });
 
+  it('scrolls the bin into view when it is asked for, folded or already open, and only then', async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    const value = await setup(); render(<LiveBin actions={value.actions} />);
+    expect(scroll).not.toHaveBeenCalled();                       // mounting the bin does not move the Map
+    act(() => { binView.reveal(route, topicA); });
+    expect(screen.getByRole('button', { name: 'Removed by agent · 4' }).getAttribute('aria-expanded')).toBe('true');
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll.mock.contexts[0]).toBe(screen.getByRole('button', { name: 'Removed by agent · 4' }).parentElement);
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });  // nothing moves when it is already in view
+    act(() => { binView.reveal(route, topicA); });
+    expect(scroll).toHaveBeenCalledTimes(2);                     // asked again while open: scrolls again, stays open
+    expect(screen.getByRole('button', { name: 'Removed by agent · 4' }).getAttribute('aria-expanded')).toBe('true');
+    act(() => { binView.reveal(route, topicB); });
+    expect(scroll).toHaveBeenCalledTimes(2);                     // another topic's bin is not this one
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  });
+
   it('waits for a stale item refresh, then restores once against the fresh item revision', async () => {
     const value = await setup(); render(<LiveBin actions={value.actions} />);
     fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));

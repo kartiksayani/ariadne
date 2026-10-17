@@ -184,12 +184,22 @@ for (const theme of ['light', 'dark']) test(`Getting around keeps breadcrumbs an
     // Focus restricts Map rows while Waiting remains complete.
     const root = page.locator('.tree-item[data-item-id="1"]');
     const waitingCount = await page.locator('.waiting-card').count();
-    await root.getByRole('button', { name: /^Focus on / }).click();
-    await expect(root.getByRole('button', { name: /^Unfocus / })).toBeVisible();
-    await expect(page.getByText(/^Focused:/)).toHaveCount(0);
+    // The band's Focus acts on the selected item's root: no row carries a Focus button any more.
+    await expect(root.getByRole('button', { name: /Focus/ })).toHaveCount(0);
+    const rootBand = page.locator('.tree-topic-group', { has: root }).locator('.tree-topic');
+    await expect(rootBand.getByRole('button', { name: 'Focus', exact: true })).toBeVisible();
+    await root.click();
+    await rootBand.getByRole('button', { name: 'Focus', exact: true }).click();
+    await expect(rootBand.getByRole('button', { name: /^Unfocus / })).toBeVisible();
+    await expect(rootBand).toContainText('Focused on “');
     await expect(page.locator('.tree-item[data-item-id="8"]')).toHaveCount(0);
     expect(await page.locator('.waiting-card').count()).toBe(waitingCount);
-    await root.getByRole('button', { name: /^Unfocus / }).click();
+    // Focus and Unfocus are one fixed 92px slot: the swap moves no neighbour.
+    const unfocus = rootBand.getByRole('button', { name: /^Unfocus / });
+    expect((await unfocus.boundingBox())!.width).toBeCloseTo(92, 0);
+    const unfocusLeft = (await unfocus.boundingBox())!.x;
+    await unfocus.click();
+    expect((await rootBand.getByRole('button', { name: 'Focus', exact: true }).boundingBox())!.x).toBeCloseTo(unfocusLeft, 0);
     await expect(page.locator('.tree-item[data-item-id="8"]')).toHaveCount(1);
     // The click left keyboard focus on the row's own button; the peek below restores focus to the row.
     await root.focus();
@@ -760,5 +770,58 @@ for (const [name, before, change] of widthTriggers) test(`keeps the reading row 
     // Let the column's own change land before the measured one starts.
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await holds(() => change(page, edge));
+  } finally { await server.close(); }
+});
+
+// The topic band keeps every button in reach (alpha.20 D10): at the narrowest Map (560px) and at the largest text, Ack all, Next,
+// the head's buttons and the "…" menu stay inside the band and can be clicked. The counts and the changes opener give way instead.
+for (const mapWidth of [560, 480]) test(`the band keeps its buttons in reach in a ${mapWidth}px Map at the largest text`, async ({ page }) => {
+  const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+    logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+  try {
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    await openTree(page, `http://127.0.0.1:${address.port}`, '?still');
+    await page.evaluate(async () => { await document.fonts.ready; });
+    const close = page.getByRole('button', { name: 'Close detail' });
+    if (await close.count()) await close.click();
+    for (let step = 0; step < 5; step++) await page.keyboard.press('Meta+=');
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--text-scale').trim())).toBe('1.2');
+    const scroller = page.locator('.tree-scroll');
+    const chrome = 1000 - (await scroller.boundingBox())!.width;
+    await page.setViewportSize({ width: mapWidth + chrome, height: 700 });
+    await expect.poll(async () => Math.round((await scroller.boundingBox())!.width)).toBe(mapWidth);
+    // Read the band where the owner sees it: its section scrolled into the Map, the band stuck under the top edge.
+    await page.locator('.tree-item[data-item-id="10"]').evaluate(element => {
+      const box = element.closest('.tree-scroll')!, header = element.closest('.tree-topic-group')!.querySelector('.tree-topic')!;
+      box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top - header.getBoundingClientRect().height + 4;
+    });
+    const band = page.locator('.tree-topic-group', { has: page.locator('.tree-item[data-item-id="10"]') }).locator('.tree-topic');
+    await expect.poll(async () => Math.round((await band.boundingBox())!.y - (await scroller.boundingBox())!.y)).toBe(0);
+    const bandBox = (await band.boundingBox())!;
+    const buttons = band.getByRole('button');
+    expect(await buttons.count()).toBeGreaterThanOrEqual(5);   // chevron, Focus, Continue, "…", Next, Ack all
+    for (let index = 0; index < await buttons.count(); index++) {
+      const button = buttons.nth(index);
+      if (!await button.isVisible()) continue;
+      const box = (await button.boundingBox())!, name = await button.evaluate(element => element.getAttribute('aria-label') ?? element.textContent);
+      expect(box.x, `${name} starts inside the band`).toBeGreaterThanOrEqual(bandBox.x - 0.5);
+      expect(box.x + box.width, `${name} ends inside the band`).toBeLessThanOrEqual(bandBox.x + bandBox.width + 0.5);
+      // Nothing covers the button's middle: a press there lands on it.
+      const covering = await button.evaluate((element, point) => {
+        const top = document.elementFromPoint(point.x, point.y);
+        return top && (element === top || element.contains(top)) ? null : `${top?.tagName}.${top?.className}`;
+      }, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+      expect(covering, `${name} can be pressed`).toBeNull();
+    }
+    // Ack all opens its review when pressed where it sits.
+    const ackAll = band.getByRole('button', { name: /^Ack all \(/ });
+    const ackBox = (await ackAll.boundingBox())!;
+    await page.mouse.click(ackBox.x + ackBox.width / 2, ackBox.y + ackBox.height / 2);
+    await expect(page.getByRole('dialog', { name: /^Acknowledge results in/ })).toBeVisible();
+    const popover = (await page.getByRole('dialog').boundingBox())!, view = page.viewportSize()!;
+    expect(popover.x).toBeGreaterThanOrEqual(0); expect(popover.x + popover.width).toBeLessThanOrEqual(view.width);
+    expect(popover.y).toBeGreaterThanOrEqual(bandBox.y + bandBox.height - 0.5);   // under the band, never over it
   } finally { await server.close(); }
 });
