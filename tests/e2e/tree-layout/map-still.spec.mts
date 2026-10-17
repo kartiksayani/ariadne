@@ -477,6 +477,33 @@ test.describe('the filter row never moves the Map', () => {
     expect(Math.abs((await viewportPlace(page, cellOf('Tree', reader.id)))!.y - before.y), 'and gave it back').toBeLessThanOrEqual(1);
   });
 
+  // Closing Details re-places the selected row, and must keep what the scroller has carried it: a flush row that the chip row
+  // opening took down with the band goes back up by as much when the chip row closes, whatever was clicked in between. (Details
+  // narrowing the Map re-wraps the band, and the row keeps the place it was last seen at: that is not the carry, so the row is
+  // measured against where it stood once Details was closed.)
+  test('Tree, scrolled to the middle: the chip row opens, a row is selected and Details closes, then the chip row closes: the row goes back up by the bar', async ({ page }) => {
+    await prepare(page, origin, 'Tree');
+    await scrollTo(page, 'Tree', 'middle');
+    await page.mouse.move(2, 690);
+    const reader = (await wholeCells(page, 'Tree'))[0]!, before = (await viewportPlace(page, cellOf('Tree', reader.id)))!, band = await bandBottom(page);
+    await openRow(page);
+    const bar = await bandBottom(page) - band;
+    expect(bar, 'the Map\'s top edge moved down').toBeGreaterThan(20);
+    await page.waitForTimeout(60); await settle(page);
+    expect((await viewportPlace(page, cellOf('Tree', reader.id)))!.y - before.y, 'the band took the row down with it').toBeGreaterThan(5);
+    const at = (await row(page, reader.id).boundingBox())!;
+    await page.mouse.click(at.x + 100, at.y + 10);
+    const close = page.getByRole('button', { name: 'Close detail' });
+    await expect(close).toBeVisible();
+    await close.click();
+    await settle(page);
+    const closed = (await viewportPlace(page, cellOf('Tree', reader.id)))!.y;
+    await funnel(page).click();
+    await expect(chipRow(page)).toHaveCount(0);
+    await page.waitForTimeout(60); await settle(page);
+    expect(Math.abs((await viewportPlace(page, cellOf('Tree', reader.id)))!.y - (closed - bar)), 'and went back up by the bar').toBeLessThanOrEqual(1);
+  });
+
   // The reading row is the selected row while it is on screen. Mid-screen, far clear of the band, it keeps its window y
   // exactly when the chip row opens and closes above the Map: the band passes nothing of it, so there is nothing to follow.
   test('Tree, scrolled to the middle: the selected row far below the band keeps its window y as the chip row opens and closes', async ({ page }) => {

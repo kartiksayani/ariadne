@@ -825,18 +825,20 @@ export function TreeView(props: TreeViewProps) {
    * afresh on each of a few passes. The scroller's own move in the window is not subtracted: the row keeps its window place,
    * except for `carried`: the sticky band goes down with a scroller that moves down (a notice opens above the Map), and a row
    * the band already covers the top of goes down by as much instead of sliding further under it.
-   * Where the rows no longer reach that far down, the bottom spacer grows to keep the scroll extent.
+   * Where the rows no longer reach that far down, the bottom spacer grows to keep the scroll extent. Returns the carry it applied,
+   * which is the one `remembering` records: a survivor's offset can differ from the gone row's.
    */
-  const restoreHeld = (box: HTMLDivElement, before: Held, offset: number, element: HTMLElement) => {
+  const restoreHeld = (box: HTMLDivElement, before: Held, offset: number, element: HTMLElement): number => {
     const carry = carried(box, before, offset);
     for (let pass = 0; pass < 3; pass++) {
       const delta = element.getBoundingClientRect().top - readingTop() - offset + box.getBoundingClientRect().top - before.boxTop - carry;
-      if (Math.abs(delta) < 1) return;
+      if (Math.abs(delta) < 1) break;
       const short = box.scrollTop + delta + box.clientHeight - scrollEnd(box);
       if (short > 0 && box.clientHeight > 0) setSpacer(box, spacer.current + short);
       box.scrollTop += delta;
       ownScroll.current = box.scrollTop;
     }
+    return carry;
   };
   /**
    * The scroll extent the rows themselves give, spacer included. A short Map (its rows end above the window's bottom)
@@ -879,7 +881,7 @@ export function TreeView(props: TreeViewProps) {
     }
     return null;
   };
-  const remembering = () => {
+  const remembering = (restored?: number) => {
     const box = scroller.current;
     if (!box) { held.current = null; return; }
     // A new width not yet held: a scroll event is handled before the frame's resize observers, so it can arrive first.
@@ -896,7 +898,7 @@ export function TreeView(props: TreeViewProps) {
     // What the scroller has carried the row since: forgotten when the owner scrolled (the row is somewhere else now).
     const driven = before && (box.scrollTop === before.scrollTop || box.scrollTop === ownScroll.current);
     ownScroll.current = null;
-    const step = before && driven ? carried(box, before, before.offset) : 0;
+    const step = before && driven ? restored ?? carried(box, before, before.offset) : 0;
     const carry = before && driven ? Math.max(0, before.carried + step) : 0;
     // A revealed row keeps the offset it was revealed at, but the band it is measured from moves with the scroller: the part of
     // the move the row did not follow is distance the band gained (or lost) over it, so the offset takes it.
@@ -965,7 +967,9 @@ export function TreeView(props: TreeViewProps) {
     if (previous.detailOpen && !current.detailOpen && target && target.key === current.selectedId) {
       const offset = Math.max(target.top, readingTop() + 8) - readingTop();
       revealedAnchor.current = { key: target.key, offset };
-      held.current = { key: target.key, offset, y: readingTop() + offset, boxTop: scroller.current?.getBoundingClientRect().top ?? 0, carried: 0, lead: Infinity,
+      held.current = { key: target.key, offset, y: readingTop() + offset, boxTop: scroller.current?.getBoundingClientRect().top ?? 0,
+        // The carry stays while the scroller has not moved: closing Details re-places the row, not the band.
+        carried: scroller.current?.scrollTop === target.scrollTop ? held.current?.carried ?? 0 : 0, lead: Infinity,
         scrollTop: target.scrollTop, sessionId: latest.current.session?.id, rows: latest.current.rows, offsets: new Map() };
     }
     if (resized || previous.selectedId !== current.selectedId || previous.reveal !== current.reveal || previous.detailOpen !== current.detailOpen) {
@@ -977,8 +981,7 @@ export function TreeView(props: TreeViewProps) {
     // (A scroller with no layout yet, zero high, has no end to clamp to.)
     const clamped = !!box && !!before && box.clientHeight > 0 && box.scrollTop < before.scrollTop && box.scrollTop >= box.scrollHeight - box.clientHeight - 1;
     const back = box && before && (box.scrollTop === before.scrollTop || clamped) && (settled.current || !placed.current) ? heldRow(before) : null;
-    if (box && before && back) restoreHeld(box, before, back.offset, back.element);
-    remembering();
+    remembering(box && before && back ? restoreHeld(box, before, back.offset, back.element) : undefined);
   };
   useLayoutEffect(holding);
   const hasRows = rows.length > 0 && !graph;
