@@ -75,8 +75,8 @@ async function openPrimary(configuration) {
 /** Opens the "Sending to <agent>" dialog from the open session's connection card (its Sending… button). */
 const openDispatch = () => openSendingDialog();
 
-// The primary item is still waiting: with nothing pending its answer slot takes the reply; once an
-// input is held, the slot hides and the next reply queues behind it from the follow-up box.
+// The primary item is still waiting and already has its handled answer, so every owner message here is a reply opened
+// from "Add a reply"; once an input is held, the next reply queues behind it from the same action.
 async function ownerReply(configuration, text, expectedSession, held = false) {
   const expected = ownerReplyTarget(expectedSession, configuration.itemId);
   await waitForOwnerReplyTarget(configuration, expected);
@@ -106,11 +106,17 @@ export async function runRecoveryAcceptance(configuration) {
   await ownerReply(configuration, workText, baseline);
   await wait(async () => (await admissions(configuration)).length === queuedBefore.length + 1, 'Recovery original input did not reach real runtime delivery');
   const original = (await admissions(configuration)).at(-1);
+  // The restored question already has its handled answer (one answer per question), so these words go out as a reply
+  // to the same item, at the question's current revision, as exactly one new input.
+  const sentWork = await snapshot(configuration);
+  assert.equal(Object.keys(sentWork.inputs).length, Object.keys(baseline.inputs).length + 1, 'The first reply must create exactly one input');
+  assert.equal(sentWork.inputs[original.inputId].target.item_id, configuration.itemId, 'The first reply must target the answered item');
+  assert.equal(sentWork.inputs[original.inputId].expected_question_revision, baseline.items[configuration.itemId].question_revision, 'The first reply must carry the current question revision');
   await ownerReply(configuration, successorText, await snapshot(configuration), true);
   let session = await snapshot(configuration);
   const input = session.inputs[original.inputId], successor = Object.values(session.inputs).find(input => input.payload.text === successorText);
   assert.ok(successor); assert.equal(input.payload.text, workText); assert.equal(input.attempts.length, 1);
-  assert.equal(input.kind, 'answer'); assert.equal(input.payload.selected_option_id, null, 'Recovery sends own words without the recommended option');
+  assert.equal(input.kind, 'reply'); assert.equal(input.payload.selected_option_id, null, 'Recovery sends own words without the recommended option');
   assert.equal(successor.kind, 'reply'); assert.equal(successor.payload.selected_option_id, null);
   assert.equal(successor.seq, input.seq + 1);
   await holdSuccessor(configuration, queuedBefore.length + 1, successor.id, 'Original running turn must hold its successor');
@@ -224,10 +230,10 @@ export async function runRecoveryAcceptance(configuration) {
   await wait(async () => (await snapshot(configuration)).inputs[successor.id].state === 'handled', 'Recovery successor did not finish its ordinary result/completion join');
   // Stop waiting releases the queue without closing the original attempt to its late answer.
   const lateWorkText = `native-stop-waiting-work-${nonce}\nSave the original answer when it becomes available.`;
-  // Nothing is held once the successor has finished, so the waiting item's own answer box takes this reply.
-  // The window may still be switching from the held follow-up; wait for the answer box before choosing an editor.
-  await wait(async () => await browser.$('.item-detail .detail-answer-slot[data-owner-input]').isExisting()
-    && !(await browser.$('.item-detail [aria-label="Reply"] [aria-label="Item actions"] button').isExisting()), 'The answer box did not return after the successor finished');
+  // Nothing is held once the successor has finished, but the item's one answer stays sealed: this reply goes out through
+  // "Add a reply". The window may still be switching from the held follow-up; wait for that action before choosing an editor.
+  await wait(async () => (await browser.$('.item-detail [aria-label="Reply"] [aria-label="Item actions"] button').isExisting())
+    && !(await browser.$('.item-detail [data-owner-input] .detail-box textarea').isExisting()), '"Add a reply" did not return after the successor finished');
   await ownerReply(configuration, lateWorkText, await snapshot(configuration));
   await wait(async () => (await admissions(configuration)).length === queuedBefore.length + 4, 'Stop-waiting input did not reach the real provider');
   const lateAdmission = (await admissions(configuration)).at(-1);
