@@ -198,16 +198,18 @@ One entry per flake: the test and its first failure, the evidence, and the suspe
   - Fix: register fixture removal queues during mount, undo every pending operation and await already-sending commands in shared teardown before clearing notices; restore mocks/globals and clear fake timers before returning to real timers. “does not leak a pending removal into a later stale selection” exercises that teardown with fake timers installed before mounting. Removing just the pending-operation cleanup makes it fail with the captured removal notice, while selection `3` is already saved. “waits for a sending removal before teardown clears its notices and timers” gates an in-flight command and fails if teardown omits the wait. No product change, added delay, retry or relaxed assertion.
   - Validation: ten post-fix whole-file coverage runs passed (199 tests each; 1,990 total; zero failures), three concurrent Vitest processes, each using `--coverage --maxWorkers=3` with separate report directories; 48–58 s per run. The regression was also checked with the cleanup removed and failed deterministically. `npm run check` passed. The exact full coverage command with `--maxWorkers=3` completed in 158.22 s: 120 files / 2,538 tests passed; only `tests/ui/reference/assets.test.ts`, “serves each local resource through Vite unchanged”, failed with “Server is not running.” (the permitted localhost-socket sandbox exception). An earlier attempt overlapping all three file processes with the full suite exhausted unrelated test timeouts; those runs were stopped and do not count toward the ten-run proof.
 
-- **`tests/integrations/claude/register.test.js`, "admits claims again after an owner command is refused".** First occurrence; not fixed yet.
+- **`tests/integrations/claude/register.test.js`, "admits claims again after an owner command is refused".** Fixed in P11.26.
   - First failed: local #162 full coverage run, 2026-10-15. Line 780 waited for 2 matching calls and saw 1. Task P11.14.
   - Evidence: the file passed 3 times in a row on its own. #162 does not touch the Claude integration.
-  - Suspected cause: timing under coverage load, where the `vi.waitFor` default timeout is too short after `h.timer().callback()`. Not confirmed.
+  - Cause: the `vi.waitFor` default limit is 1 s. Fix: the `claude-mod` project's `setup-timeouts.js` makes the default 10 s (a caller's own limit still wins) and its test limit 30 s. A wait returns the moment its callback passes, so only a wait that cannot succeed takes longer.
 
-- **`tests/e2e/tree-layout/tree-layout.spec.mts:442`, "Map look: continuous rails, clamp threshold, reserved selection tags and clear reveals" (light theme only).** First occurrence; not fixed yet.
+- **`tests/e2e/tree-layout/tree-layout.spec.mts:442`, "Map look: continuous rails, clamp threshold, reserved selection tags and clear reveals" (light theme only).** Fixed in P11.26 (cause not reproduced locally).
   - First failed: #164 CI run 38894984785, 2026-10-16. `.tree-path > .tree-selected-slot .tree-selected-edge` was not found within 5 s after `expectRevealedRow` (about line 577). The dark run passed. #164 does not touch the Map.
-  - Suspected cause: a reveal still settling, as in the :585 entry below. Not confirmed.
+  - Fix: `expectRevealedRow` now also waits for the scroller to be still for three animation frames, so a test's hand scroll cannot land inside the reveal's own correction (the held row is put back after each reflow). The Playwright `expect` limit is 20 s instead of 5 s (`tests/ui/design/playwright.config.ts`). Under load 45 to 190, 20 of 20 and 36 of 36 runs passed; a different 5 s `expect` ("Getting around ... (light)", Peek dialog) failed once before the limit changed.
 
-- **Load flakes in the alpha.18 integration gate (2026-10-17), first occurrence each.** All passed alone, so they are load-sensitive, not broken. Task P11.26.
+- **Load flakes in the alpha.18 integration gate (2026-10-17), first occurrence each.** All passed alone, so they are load-sensitive, not broken. Task P11.26. Fixed in P11.26 except `claim_contention` (P11.23).
+  - Cause and fix, all of them: a wall-clock budget raced real work on a busy machine. Rust: `ariadne_agent_protocol::deadline_scale::scaled` stretches the adapter, doctor, control-socket and Claude-qualification budgets by `ARIADNE_TEST_DEADLINE_SCALE` (1 to 100); release builds ignore it (`cfg(debug_assertions)`), so product budgets are unchanged. The Codex queue/history, doctor, `claude_installed_join` and composition tests set it to 10 and wait on their conditions with 30 to 60 s hang guards. Vitest: test limit 30 s, `waitFor` 10 s, and the per-describe 10 to 20 s limits removed.
+  - Load reproduced locally: `queue.rs` failed 8 to 9 of 28 at load 100; `claude_installed_join` failed 2 of 3 copies under 40 CPU hogs (a Node helper killed at its 8 s limit); `itemNavigation` and `App.test.tsx` failed on their 10 s limits. After the fixes all passed at load 40 to 190.
   - `crates/ariadne-cli/tests/doctor.rs`: `doctor_warns_in_plain_words_when_codex_has_not_loaded_the_selected_thread` and `executable_doctor_qualifies_only_the_existing_codex_daemon_and_exact_thread` failed in `cargo test --workspace` and passed alone (28 of 28). Same family as the `ariadne-adapter-codex` `queue.rs` "Codex version probe timed out" load flakes.
   - `crates/ariadne-cli/tests/claude_installed_join.rs` fails when 3 copies run at once (load-sensitive deadline asserts around lines 278, 667, 693 and 741) and passes alone.
   - `apps/desktop/tests/ui/inputs/owner-input.test.tsx` (two tests), the `App.test.tsx` reveal test and `crates/ariadne-adapter-codex/tests/queue.rs` also fail under load.
@@ -215,18 +217,18 @@ One entry per flake: the test and its first failure, the evidence, and the suspe
   - Not a flake: `conformance.rs:532` failed because a non-interactive shell's background job inherits SIGINT as ignored, so the fake child exited 0. Fixed in `fc090d91`: the test binary is the child, and it resets and raises the signal.
   - `claim_contention::pollers_and_readers_together…` fails at load 15–45 on a shared machine (task P11.23). CI on a quiet runner passed.
 
-- **`crates/ariadne-adapter-codex/tests/queue.rs`, "Codex version probe timed out" under load.** Second occurrence; load-sensitive. Task P11.26.
+- **`crates/ariadne-adapter-codex/tests/queue.rs`, "Codex version probe timed out" under load.** Second occurrence; fixed in P11.26.
   - First listed with the alpha.18 load flakes above. Failed again 3 times in the alpha.19 gate (2026-10-17) with no crate change since the previous gate passed.
-  - Fix with P11.26: a deadline that does not depend on machine load.
+  - Cause: `identity.rs` gives the stub `--version` 5 s of wall clock, and a busy machine takes longer than that to start `sh`. Fix: the budget goes through `deadline_scale` (see the load-flakes entry); `history.rs` also warms its stub once, outside any deadline.
 
-- **`cargo llvm-cov` coverage run, `composition::tests::wake_replaces_activation_only_after_old_monitors_exit_and_requires_fresh_bound_evidence` (`mod.rs:389`).** First occurrence; not fixed yet.
+- **`cargo llvm-cov` coverage run, `composition::tests::wake_replaces_activation_only_after_old_monitors_exit_and_requires_fresh_bound_evidence` (`mod.rs:389`).** Fixed in P11.26 (the test, not the product).
   - First failed: #169 CI coverage run, 2026-10-17. PermissionDenied: "Another desktop or supervisor holds this nonblocking lease". `src-tauri` is untouched by alpha.19.
-  - Suspected cause: another test process holds the lease while the coverage build runs the test. Not confirmed.
+  - Cause: line 389 is the bound announcement. It starts a replacement activation that takes the binding's nonblocking lease, and a request or blocking call the old activation started can still hold a lease clone just after `reconcile_after_wake` returns. A lock probe in the test saw it busy once in 40 runs at load 40. Fix: `wait_lease_free` waits for the lease file to be free before the announcement. Product follow-up, not done here: a wake followed at once by an announcement can see this refusal.
 
-- **Native journey recovery step under load.** First occurrence; not fixed yet.
+- **Native journey recovery step under load.** Waits widened in P11.26; root cause not reproduced (native runs are gate-only).
   - First failed: alpha.19 gate 2, 2026-10-17. `runRecoveryAcceptance` waited 10 s for `button=Sending…`. The failure screenshot shows the card open with Sending… present. It did not reproduce when rerun alone (2 of 2, then 3 of 3).
   - Likely related to P11.35 (silent Send in Details under load).
-  - Also seen once: the native Graph step "Tree must show the same filtered items as Graph". The accessibility `r` step got a retry press under load; replace it with a readiness wait, because a key must work on the first press.
+  - Done: WebDriver element waits (`waitforTimeout`) are 30 s instead of 10 s, every native `wait` is 60 s instead of 20 s, and the accessibility repeated `r` press now waits for the same readiness as the first (the first press already did). Not done: the native Graph step "Tree must show the same filtered items as Graph" has no known cause; it now has the 60 s wait. If it or the Sending… step fails again, capture a screenshot and the tree HTML before widening anything.
 
 - **Design harness first load: `tests/ui/design/design.spec.mts` `openApp`'s 60 s `waitForFunction` for the app to render.** Fixed in #160.
   - First failed: #155 CI. Failed again: #160 CI, "M2 chosen answer and attributed topic lists (dark)" (line 271), one of the first tests a fresh worker runs. Both times a first-load timeout.

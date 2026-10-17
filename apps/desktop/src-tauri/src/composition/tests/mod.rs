@@ -15,6 +15,23 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// How long a test may wait for something that must happen. It is a hang guard, not a
+/// speed check: every wait returns the moment its condition holds.
+const HANG_GUARD: Duration = Duration::from_secs(30);
+
+/// Claude qualification and the control socket give each call a few wall-clock seconds, which
+/// a busy machine (or a coverage build) can use up. These tests stretch those budgets tenfold.
+/// Debug builds only; release budgets stay as written.
+fn stretch_budgets() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        std::env::set_var(
+            ariadne_agent_protocol::deadline_scale::DEADLINE_SCALE_ENV,
+            "10",
+        );
+    });
+}
+
 fn id(n: u64) -> UuidV4 {
     UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
 }
@@ -56,6 +73,7 @@ pub(super) struct Fixture {
 }
 impl Fixture {
     pub(super) fn new() -> Self {
+        stretch_budgets();
         let home = tempfile::Builder::new()
             .prefix("ariadne-composition-")
             .tempdir_in("/tmp")
@@ -259,8 +277,36 @@ impl Fixture {
             },
         }
     }
+    /// Waits until nothing holds this binding's lease file. A control request or blocking
+    /// call that the old activation started keeps its lease clone until it returns, and a
+    /// replacement activation's nonblocking lease fails while any clone is alive. The probe
+    /// takes the same exclusive lock the product takes and drops it again at once.
+    fn wait_lease_free(&self, scope: &BindingScope) {
+        let path = self
+            .home
+            .join("run/leases")
+            .join(format!("{}.lock", scope.binding_id.as_str()));
+        let until = Instant::now() + HANG_GUARD;
+        loop {
+            match fs::OpenOptions::new().read(true).write(true).open(&path) {
+                // Never locked, or removed: nothing holds it.
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+                Err(error) => panic!("probe lease file: {error}"),
+                Ok(file) => {
+                    if file.try_lock().is_ok() {
+                        return;
+                    }
+                }
+            }
+            assert!(
+                Instant::now() < until,
+                "the old activation's lease was never released"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
     fn wait_route(&self, scope: &BindingScope) {
-        let until = Instant::now() + Duration::from_secs(3);
+        let until = Instant::now() + HANG_GUARD;
         loop {
             match self.call(7, ControlMethod::Ping(scope.clone())) {
                 Ok(ControlResult::Ping(_)) => return,
@@ -374,6 +420,9 @@ fn wake_replaces_activation_only_after_old_monitors_exit_and_requires_fresh_boun
     let bridge = runtime.bridge();
     let before = read(bridge.core(), &route);
     assert!(runtime.reconcile_after_wake().is_err());
+    // The announcement below starts a replacement activation that takes the binding's
+    // nonblocking lease; the old activation's last clones may still be unwinding.
+    fixture.wait_lease_free(&scope);
     assert_eq!(
         fixture
             .call(8, ControlMethod::Ping(scope.clone()))

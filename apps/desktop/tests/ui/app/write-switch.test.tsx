@@ -38,7 +38,7 @@ const switcherButton = () => screen.getByRole<HTMLButtonElement>('button', { nam
 const themeSaves = (transport: HeldTransport) => transport.themeSaves;
 const sends = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'input_submit');
 async function ready() {
-  await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'), { timeout: 5000 });
+  await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
 }
 async function choose(name: RegExp) {
   fireEvent.click(switcherButton());
@@ -52,7 +52,7 @@ async function dockWords() {
   return answerWords(dock);
 }
 
-describe('the switcher during an owner write', { timeout: 20_000 }, () => {
+describe('the switcher during an owner write', () => {
   it('keeps the draft, saves the held write once, and shows the session the owner chose', async () => {
     const transport = new HeldTransport();
     transport.preferences.global.selected_navigation = { kind: 'session', session: route };
@@ -61,7 +61,7 @@ describe('the switcher during an owner write', { timeout: 20_000 }, () => {
     await ready();
     const draft = ' Keep my exact draft: café\nsecond line ';
     fireEvent.change(await dockWords(), { target: { value: draft } });
-    await waitFor(() => expect(transport.preferences.drafts.some(saved => JSON.stringify(saved).includes('café'))).toBe(true), { timeout: 5000 });
+    await waitFor(() => expect(transport.preferences.drafts.some(saved => JSON.stringify(saved).includes('café'))).toBe(true));
 
     let release!: () => void;
     transport.hold = new Promise<void>(resolve => { release = resolve; });
@@ -73,7 +73,7 @@ describe('the switcher during an owner write', { timeout: 20_000 }, () => {
     expect(switcherButton().textContent).not.toContain('Separate session');
 
     await act(async () => { release(); });
-    await waitFor(() => expect(switcherButton().textContent).toContain('Separate session'), { timeout: 5000 });
+    await waitFor(() => expect(switcherButton().textContent).toContain('Separate session'));
     await ready();
     expect(themeSaves(transport)).toHaveLength(1);
     expect(transport.preferences.global.theme).not.toBe('system');
@@ -81,7 +81,7 @@ describe('the switcher during an owner write', { timeout: 20_000 }, () => {
 
     transport.hold = null;
     await choose(/Notes review/);
-    await waitFor(() => expect(switcherButton().textContent).toContain('Notes review'), { timeout: 5000 });
+    await waitFor(() => expect(switcherButton().textContent).toContain('Notes review'));
     await ready();
     await waitFor(async () => expect((await dockWords()).value).toBe(draft));
     expect(themeSaves(transport)).toHaveLength(1);

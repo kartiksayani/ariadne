@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { admissions, cliRequest, snapshot } from './scripted-provider.mjs';
 import { goToPeekItem, search, searchBox, showFullItemQuestion } from './tree.spec.mjs';
 
-const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
+const wait = (condition, message) => browser.waitUntil(condition, { timeout: 60000, interval: 100, timeoutMsg: message });
 const graph = () => browser.$('.graph-view');
 // The Tree / Graph switch is the top bar's segmented control.
 const views = () => browser.$('.shell-top [role="group"][aria-label="View"]');

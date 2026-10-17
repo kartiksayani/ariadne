@@ -25,7 +25,7 @@ async function firstRun() {
   return screen.findByRole('region', { name: 'No projects yet' });
 }
 
-describe('first run copy buttons', { timeout: 15_000 }, () => {
+describe('first run copy buttons', () => {
   it('says Copied after a write that landed, and "Couldn’t copy" after one that failed', async () => {
     const page = await firstRun();
     vi.mocked(copyText).mockRejectedValueOnce(new Error('no clipboard')).mockResolvedValueOnce(undefined);

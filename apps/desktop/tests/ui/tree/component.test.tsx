@@ -268,7 +268,7 @@ describe('session tree rows', () => {
     expect(within(dialog).getByRole('button', { name: / · viewed/ })).toBeTruthy();
     act(() => { view.navigation.markItemSeen(route, '1.1'); });
     expect(within(dialog).getByText('No changed items in your recent visits.')).toBeTruthy();
-    await waitFor(() => expect(entered).toBe(true), { timeout: 3000 });
+    await waitFor(() => expect(entered).toBe(true));
     expect(view.transport.preferences.seen![0]!.items).toEqual([]);
     await act(async () => { release(); await gate; });
   });

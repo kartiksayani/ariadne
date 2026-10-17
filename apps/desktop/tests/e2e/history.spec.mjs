@@ -8,7 +8,7 @@ import { admissions, assertSlimEnvelope, awaitConnected, cliRequest, completeTur
 import { openSessionButton } from './session-button.mjs';
 import { goToPeekItem, search } from './tree.spec.mjs';
 
-const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
+const wait = (condition, message) => browser.waitUntil(condition, { timeout: 60000, interval: 100, timeoutMsg: message });
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const evidence = () => process.env.ARIADNE_E2E_EVIDENCE;
 const request = operations => ({ op_id: randomUUID(), source_input_id: null, attempt_id: null,

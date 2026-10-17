@@ -88,7 +88,7 @@ function inTree(id: string) {
   expect(rectangle.bottom).toBeLessThanOrEqual(400);
 }
 
-describe('composed item navigation', { timeout: 10_000 }, () => {
+describe('composed item navigation', () => {
   it('opens and focuses the owner answer behind a change, then consumes the jump', async () => {
     const value = changesFixture(), transport = new AppTransport();
     transport.sessions.set(value.session.id, value.session);
@@ -269,7 +269,7 @@ describe('composed item navigation', { timeout: 10_000 }, () => {
   });
 });
 
-describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
+describe('composed map reveal scrolling', () => {
   it.each(['search over a collapsed ancestor', 'status', 'search matching nothing', 'collapsed ancestor'] as const)('reveals an undrawn Graph selection through its registered route after %s, preserving the saved view', async cause => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const box = this.closest<HTMLElement>('.graph-scroll');

@@ -1,7 +1,7 @@
 //! Async provider-neutral seam; all blocking socket and child IO runs on one bounded worker.
-use crate::{queue::Worker, CodexOptions, QualifiedCodexThread};
+use crate::{queue::Worker, transport::budget, CodexOptions, QualifiedCodexThread};
 use ariadne_agent_protocol::*;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 pub struct CodexAdapter {
     worker: Worker,
@@ -38,35 +38,30 @@ impl CodexAdapter {
 }
 impl Adapter for CodexAdapter {
     fn probe(&self, request: ProbeRequest) -> AdapterFuture<'_, ProbeResult> {
-        self.worker
-            .call(Duration::from_secs(10), move |state, deadline| {
-                state.probe(request, deadline)
-            })
+        self.worker.call(budget(10), move |state, deadline| {
+            state.probe(request, deadline)
+        })
     }
     fn connect(&self, request: ConnectRequest) -> AdapterFuture<'_, ConnectResult> {
-        self.worker
-            .call(Duration::from_secs(10), move |state, deadline| {
-                state.connect(request, deadline)
-            })
+        self.worker.call(budget(10), move |state, deadline| {
+            state.connect(request, deadline)
+        })
     }
     fn submit(&self, request: SubmitRequest) -> AdapterFuture<'_, SubmitOutcome> {
         self.worker.submit(request)
     }
     fn observe(&self, request: ObserveRequest) -> AdapterFuture<'_, ObserveResult> {
-        self.worker
-            .call(Duration::from_secs(5), move |state, deadline| {
-                state.observe(request, deadline)
-            })
+        self.worker.call(budget(5), move |state, deadline| {
+            state.observe(request, deadline)
+        })
     }
     fn reconcile(&self, request: ReconcileRequest) -> AdapterFuture<'_, ReconcileResult> {
-        self.worker
-            .call(Duration::from_secs(10), move |state, deadline| {
-                state.reconcile(request, deadline)
-            })
+        self.worker.call(budget(10), move |state, deadline| {
+            state.reconcile(request, deadline)
+        })
     }
     fn disconnect(&self, request: DisconnectRequest) -> AdapterFuture<'_, DisconnectResult> {
-        self.worker.call(Duration::from_secs(5), move |state, _| {
-            state.disconnect(request)
-        })
+        self.worker
+            .call(budget(5), move |state, _| state.disconnect(request))
     }
 }

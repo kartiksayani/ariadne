@@ -65,7 +65,7 @@ async function sessionReady(name: string) {
 }
 
 describe('ui.json saved by main, read and written here', () => {
-  it('opens the last active of several open tabs, saves no page, and writes only fields main reads', { timeout: 15_000 }, async () => {
+  it('opens the last active of several open tabs, saves no page, and writes only fields main reads', async () => {
     const transport = boot({ kind: 'session', session: route });
     expect(problems(transport.preferences, snapshotSchema, snapshotSchema)).toEqual([]);
     await sessionReady('Notes review');

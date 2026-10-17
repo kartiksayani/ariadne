@@ -61,7 +61,7 @@ async function queuedReply() {
   return { transport, session, row, release, replyFocus };
 }
 
-describe('Reply after queued navigation', { timeout: 10_000 }, () => {
+describe('Reply after queued navigation', () => {
   it('focuses the composer exactly once after an owner save exceeds the handoff timer, then queues the answer', async () => {
     const { transport, session, release, replyFocus } = await queuedReply();
     try {

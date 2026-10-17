@@ -6,6 +6,9 @@ import { resolve } from 'node:path';
 process.env.PLAYWRIGHT_BROWSERS_PATH = resolve('target/reference-browser');
 export default defineConfig({
   testDir: '.', testMatch: 'design.spec.mts', workers: 2, retries: 0, timeout: 240_000,
+  // An expect (toBeVisible, toHaveCount, ...) returns the moment it holds, so a longer limit costs nothing on a quiet
+  // machine; it only ends an expectation that can never hold. A busy runner can take over 5 s to draw one frame.
+  expect: { timeout: 20_000 },
   globalSetup: './setup.mts', globalTeardown: './teardown.mts',
   outputDir: '../../../coverage/design/results',
   reporter: [['list'], ['html', { outputFolder: resolve('coverage/design/playwright'), open: 'never' }]],

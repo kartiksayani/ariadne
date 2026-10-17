@@ -71,7 +71,7 @@ const ready = (scope: () => HTMLElement | null) => waitFor(() => {
   expect(own && !own.disabled).toBe(true);
 });
 
-describe('finding 1: a cancelled or skipped answer reopens its question', { timeout: 20_000 }, () => {
+describe('finding 1: a cancelled or skipped answer reopens its question', () => {
   const buttons = [['Cancel message', 'cancelled'], ['Mark as done', 'skipped']] as const;
   const places = ['Details', 'dock'] as const;
   it.each(places.flatMap(place => buttons.map(([button, state]) => [button, place, state] as const)))(
@@ -127,7 +127,7 @@ describe('finding 1: a cancelled or skipped answer reopens its question', { time
     });
 });
 
-describe('finding 2: a folded Details never claims the question', { timeout: 20_000 }, () => {
+describe('finding 2: a folded Details never claims the question', () => {
   const cases = ([true, false] as const).flatMap(folded => ([true, false] as const).flatMap(answering =>
     (['open', 'folded'] as const).map(dockState => [folded ? 'folded' : 'open', answering ? 'answering it' : 'on another item', dockState] as const)));
   it.each(cases)('Details %s, %s, dock %s: the waiting question is in view', async (details, answering, dockState) => {
@@ -149,7 +149,7 @@ describe('finding 2: a folded Details never claims the question', { timeout: 20_
   });
 });
 
-describe('finding 3: a revision of the open question keeps the dock on it', { timeout: 20_000 }, () => {
+describe('finding 3: a revision of the open question keeps the dock on it', () => {
   it.each(['typing in the dock', 'idle'] as const)('%s: same item, text and field kept, review asked only for words that predate it', async mode => {
     const { transport, session } = await mount(true);
     await openDock();
@@ -195,7 +195,7 @@ describe('finding 3: a revision of the open question keeps the dock on it', { ti
   });
 });
 
-describe('finding 4: ⌘↵ after a Details send never sends the dock’s question', { timeout: 20_000 }, () => {
+describe('finding 4: ⌘↵ after a Details send never sends the dock’s question', () => {
   it('⌘↵ twice after a Details keyboard send with a ready dock choice on another question: one send, the Details one', async () => {
     const { transport } = await mount(true);
     fireEvent.click(treeRow('2'));
@@ -225,7 +225,7 @@ describe('finding 4: ⌘↵ after a Details send never sends the dock’s questi
   });
 });
 
-describe('finding 5: a refill of an answer the agent already had never goes twice without asking', { timeout: 20_000 }, () => {
+describe('finding 5: a refill of an answer the agent already had never goes twice without asking', () => {
   const delivered = { acceptance: 'accepted', host_turn_id: 'turn-1', turn_state: 'completed', result_state: 'missing',
     error: { code: 'result_missing', reason: 'No answer saved.', retryable: false, observed_at: '2026-10-03T12:01:00.000Z' } } as const;
   const refused = { acceptance: 'rejected', error: null } as const;
@@ -347,7 +347,7 @@ describe('finding 5: a refill of an answer the agent already had never goes twic
   });
 });
 
-describe('finding 6: an idle 1–9 in the dock leaves the focus on the picked option', { timeout: 20_000 }, () => {
+describe('finding 6: an idle 1–9 in the dock leaves the focus on the picked option', () => {
   const cases = [['⌘↵', 1], ['↵', 1], ['focus to <body>, then ⌘↵', 0], ['focus on a Map row, then ⌘↵', 0]] as const;
   it.each(cases)('a digit, then %s: %i send(s) of the picked option', async (then, count) => {
     const { transport } = await mount();

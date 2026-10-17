@@ -33,6 +33,12 @@ pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 pub const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CONNECTIONS: usize = 16;
 
+/// `CONTROL_TIMEOUT` as a request actually gets it: exactly that in a release build, and
+/// stretched in a debug test run that asks for it (`deadline_scale`).
+fn control_budget() -> Duration {
+    ariadne_agent_protocol::deadline_scale::scaled(CONTROL_TIMEOUT)
+}
+
 /// Bound errors at native transport boundaries without exposing malformed facts.
 /// The original operation may have committed; this fallback never authorizes resend.
 pub fn validated_error(error: CoreError) -> CoreError {
@@ -236,7 +242,7 @@ impl ControlServer {
             let native_announcement = self.native_announcement.clone();
             let owner = self._owner.clone();
             let discovery = self.discovery.clone();
-            let deadline = Instant::now() + CONTROL_TIMEOUT;
+            let deadline = Instant::now() + control_budget();
             connections.spawn(async move {
                 let slot = Arc::new(slot);
                 let _ = tokio::time::timeout_at(
@@ -488,7 +494,7 @@ fn status(core: &dyn CoreService, lease: &BindingLease) -> Result<ControlResult,
 pub async fn call(home: PathBuf, request: ControlRequest) -> Result<ControlResult, CoreError> {
     request.validate()?;
     let binding_connect = matches!(request.method, ControlMethod::BindingConnect(_));
-    timeout(CONTROL_TIMEOUT, async move {
+    timeout(control_budget(), async move {
         let response: ControlResponse = async {
         let path = tokio::task::spawn_blocking(move || control_path(&home)).await.map_err(|_| error(CoreErrorCode::HostUnreachable, "Private endpoint validation failed."))??;
         let mut stream = UnixStream::connect(path).await.map_err(|e| io_error("Connect desktop control socket", e))?;

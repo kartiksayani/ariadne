@@ -13,7 +13,7 @@ export function sessionListingState(selector, notes) {
  * moment ago (slow CI runners draw the page first), so this keeps looking until the timeout rather than at the first settle. */
 const settle = selector => browser.waitUntil(async () =>
   await browser.execute(sessionListingState, selector, loadingNotes) === 'found' ? 'found' : false,
-{ timeout: 20000, interval: 100, timeoutMsg: `All sessions did not list ${selector} within 20 s` }).catch(() => 'missing');
+{ timeout: 60000, interval: 100, timeoutMsg: `All sessions did not list ${selector} within 60 s` }).catch(() => 'missing');
 
 async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.click(); }
 
@@ -25,7 +25,7 @@ export async function goToPage(name) {
 
 /** Waits until the open session's Map has loaded and no lifecycle change (close, reopen, rename, archive) is saving. */
 export const sessionReady = () => browser.waitUntil(async () => await browser.$('.tree-column').getAttribute('data-session-status') === 'ready'
-  && await browser.$('.tree-column').getAttribute('data-session-busy') === 'false', { timeout: 20000, interval: 100, timeoutMsg: 'The session was not ready' });
+  && await browser.$('.tree-column').getAttribute('data-session-busy') === 'false', { timeout: 60000, interval: 100, timeoutMsg: 'The session was not ready' });
 
 /** Presses a button of the top bar's connection card (Close session, Reopen session, Sending…, Copy session ID), opened from the dot. */
 export async function connectionCardButton(label) {
@@ -38,7 +38,7 @@ export async function connectionCardButton(label) {
 export async function openSendingDialog() {
   await connectionCardButton('Sending…');
   const dialog = await browser.$('[role="dialog"]');
-  await browser.waitUntil(async () => (await dialog.getText()).includes('Sending to'), { timeout: 20000, interval: 100, timeoutMsg: 'Sending dialog did not open' });
+  await browser.waitUntil(async () => (await dialog.getText()).includes('Sending to'), { timeout: 60000, interval: 100, timeoutMsg: 'Sending dialog did not open' });
   return dialog;
 }
 

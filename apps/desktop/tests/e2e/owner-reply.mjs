@@ -10,7 +10,7 @@ const dockedEditor = '.item-detail [data-owner-input] .detail-box textarea';
 // words box opens from "Write my own answer"; its Send is the bar's `data-answer-send`).
 const wordsComposer = '.detail-box, .answer';
 const wordsSend = 'button[aria-label^="Send "], button[data-answer-send]';
-const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
+const wait = (condition, message) => browser.waitUntil(condition, { timeout: 60000, interval: 100, timeoutMsg: message });
 async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.scrollIntoView({ block: 'center' }); await control.click(); }
 
 /** Rendered text with white space folded: the detail lays multi-line stored text out as one paragraph. */
@@ -159,12 +159,12 @@ export async function sendDetailReply(configuration, text, expected) {
     stage = 'readiness';
     await browser.waitUntil(async () => await editor.getValue() === text && await editor.isEnabled() && await send.isEnabled()
       && await send.getAttribute('aria-disabled') !== 'true', {
-      timeout: 20000, interval: 100, timeoutMsg: 'Detail Reply text and enabled Send were not ready for one click',
+      timeout: 60000, interval: 100, timeoutMsg: 'Detail Reply text and enabled Send were not ready for one click',
     });
     stage = 'click'; clickRequested = true; await send.click();
     stage = 'persistence';
     await browser.waitUntil(async () => Object.values((await snapshot(configuration)).inputs).some(input => input.payload.text === text), {
-      timeout: 20000, interval: 100, timeoutMsg: 'Visible detail Reply did not save the exact owner text',
+      timeout: 60000, interval: 100, timeoutMsg: 'Visible detail Reply did not save the exact owner text',
     });
   } catch (error) {
     try {

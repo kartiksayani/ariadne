@@ -42,7 +42,7 @@ async function selectElsewhere(transport: AppTransport, id: string) {
   await waitFor(() => expect(document.querySelector('[role="treeitem"][aria-selected="true"]')?.getAttribute('data-item-id')).toBe(id));
 }
 
-describe('C5 intents in the Tree, the Graph and the bigger view', { timeout: 15_000 }, () => {
+describe('C5 intents in the Tree, the Graph and the bigger view', () => {
   describe.each(['tree', 'graph', 'bigger'] as const)('%s', where => {
     it('⇧F focuses on the current item', async () => {
       const transport = await setup('4');
