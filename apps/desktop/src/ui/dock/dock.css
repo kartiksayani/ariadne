@@ -118,11 +118,12 @@
 .dock-line-quiet {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+  gap: 10px;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
 }
 
 .dock-line-quiet > i {
+  font-size: calc(15px * var(--text-scale));
   color: var(--st-waiting);
 }
 
@@ -136,13 +137,14 @@
   display: inline-flex;
   flex: none;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   font-size: calc(12px * var(--text-scale));
   white-space: nowrap;
 }
 
 .dock-sent {
-  padding: 0 4px;
+  height: 22px;
+  padding: 0 8px 0 6px;
   color: var(--st-agent);
 }
 
