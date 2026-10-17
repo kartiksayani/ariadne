@@ -107,7 +107,7 @@ async function barrierSetup(archived = false, confirmation = false) {
   const view = confirmation
     ? render(<ArchiveSessionDialog store={store} actions={actions} agent="codex" onClose={onClose} onSaved={onSaved} />)
     : archived ? render(<ArchivePage navigation={navigation} actions={controllers} projects={navigation.getSnapshot().projects!.projects.items}
-      sessions={navigation.getSnapshot().sessions!.sessions.items} snapshots={new Map()} now={Date.now()} disabled={false} onRemove={() => undefined} />)
+      sessions={navigation.getSnapshot().sessions!.sessions.items} snapshots={new Map()} now={Date.now()} disabled={false} onOpenSession={() => undefined} onRemove={() => undefined} />)
     : render(<SessionLists navigation={navigation} actions={controllers} projects={[navigation.getSnapshot().projects!.projects.items[0]!]} single
       sessions={navigation.getSnapshot().sessions!.sessions.items} now={Date.now()} narrow={false} disabled={false} onOpenSession={() => undefined} />);
   return { transport, session, store, actions, controllers, navigation, onSaved, onClose, ...view };
@@ -423,7 +423,7 @@ describe('Session archive cards', () => {
     second.name = fixture.session.name; second.state = 'closed'; second.closed_at = second.updated_at; second.archived_at = second.updated_at;
     await fixture.navigation.refresh();
     fixture.rerender(<ArchivePage navigation={fixture.navigation} actions={fixture.controllers} projects={fixture.navigation.getSnapshot().projects!.projects.items}
-      sessions={fixture.navigation.getSnapshot().sessions!.sessions.items} snapshots={new Map()} now={Date.now()} disabled={false} onRemove={() => undefined} />);
+      sessions={fixture.navigation.getSnapshot().sessions!.sessions.items} snapshots={new Map()} now={Date.now()} disabled={false} onOpenSession={() => undefined} onRemove={() => undefined} />);
     const invoke = fixture.transport.invoke.bind(fixture.transport);
     vi.spyOn(fixture.transport, 'invoke').mockImplementation(async (name, args) => name === 'session_get'
       ? { api_version: 1, ok: false, error: { code: 'io_error', message: 'Fixture read failed', hint: '', retryable: true, field_errors: [] } }
@@ -448,7 +448,7 @@ describe('Session archive cards', () => {
     fixture.rerender(<ArchivePage navigation={fixture.navigation} actions={fixture.controllers} projects={fixture.navigation.getSnapshot().projects!.projects.items}
       sessions={fixture.navigation.getSnapshot().sessions!.sessions.items}
       snapshots={new Map([[sessionKey(route), fixture.session], [sessionKey({ ...route, session_id: secondId }), second]])}
-      now={Date.now()} disabled={false} onRemove={() => undefined} />);
+      now={Date.now()} disabled={false} onOpenSession={() => undefined} onRemove={() => undefined} />);
     for (const button of screen.getAllByRole('button', { name: `Restore ${topic.name}` })) {
       await act(async () => { fireEvent.click(button); });
     }
@@ -593,6 +593,25 @@ describe('Session archive cards', () => {
     expect(session.archived_at).toBeTruthy();
     const draft = { session: route, target: { item_id: item.id, topic_id: item.topic_id } } as OwnerDraft;
     expect(blockedDraft(draft, session)).toBe('This session is archived. Restore it, then reopen it to send this reply.');
+  }, 15000);
+
+  it('an Archive row opens the archived session to read, without restoring it; its card offers Restore session', async () => {
+    const transport = await setup();
+    await archive(); await unfold();
+    fireEvent.click(within(card()).getByRole('button', { name: 'Review notes' }));
+    const dot = await waitFor(() => {
+      const found = document.querySelector<HTMLButtonElement>('[data-popover-trigger="connection"]');
+      expect(found).not.toBeNull(); expect(found!.disabled).toBe(false); return found!;
+    });
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
+    fireEvent.click(dot);
+    const connection = within(await waitFor(() => { const found = document.querySelector<HTMLElement>('.cc'); expect(found).not.toBeNull(); return found!; }));
+    expect(connection.queryByRole('button', { name: 'Reopen session' })).toBeNull();
+    expect(connection.getByRole('button', { name: 'Restore session' })).toBeTruthy();
+    expect(transport.sessions.get(route.session_id)!.archived_at).toBeTruthy();
+    expect(commands(transport)).toEqual(['session_archive']);
+    await act(async () => { fireEvent.click(connection.getByRole('button', { name: 'Restore session' })); });
+    await waitFor(() => expect(commands(transport)).toEqual(['session_archive', 'session_restore']));
   }, 15000);
 
   it('archives an already Closed session and lets Remove hide it until Undo', async () => {

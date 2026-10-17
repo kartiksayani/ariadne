@@ -53,6 +53,27 @@
   white-space: nowrap;
 }
 
+.ar-open {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: calc(13px * var(--text-scale));
+  font-weight: 500;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ar-open:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ar-open:focus-visible { outline-offset: 1px; }
+
 .ar-sub {
   overflow: hidden;
   font-size: calc(12px * var(--text-scale));

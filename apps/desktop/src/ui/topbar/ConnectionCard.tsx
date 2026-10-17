@@ -41,7 +41,7 @@ export function ConnectionLine({ view, actions, steps: control, command = '/aria
   const steps = control?.open ?? own, toggleSteps = control?.onToggle ?? (() => setOwn(open => !open));
   const [command1, markCommand] = useCopied(), [instruction, markInstruction] = useCopied();
   if (!copy) return null;
-  const connect = view.kind === 'none';
+  const connect = view.kind === 'none', onCopyInstruction = actions.onCopyInstruction;
   return <section className="cl" aria-label="Connection" role="status">
     <div className="cl-row">
       <i className={`${copy.icon}${view.kind === 'reconnect' ? ' p-spin' : ''} cl-icon`} style={{ color: copy.color }} aria-hidden="true" />
@@ -57,10 +57,15 @@ export function ConnectionLine({ view, actions, steps: control, command = '/aria
         <span className="cl-code">{command}</span>
         <OutlineButton icon={command1 ? 'ph ph-check' : 'ph ph-copy'} className="cl-btn cl-copy" onClick={() => { actions.onCopyCommand?.(); markCommand(); }}>{command1 ? 'Copied' : 'Copy'}</OutlineButton>
       </div>
-      <div className="cl-step">
-        <span className="cl-num">2</span><span>Using Codex? Paste the setup instruction into its thread once.</span>
-        <OutlineButton icon={instruction ? 'ph ph-check' : 'ph ph-copy'} className="cl-btn cl-copy" onClick={() => { actions.onCopyInstruction?.(); markInstruction(); }}>{instruction ? 'Copied' : 'Copy instruction'}</OutlineButton>
-      </div>
+      {/* Copy instruction needs a setup receipt; without one the step says where the instruction comes from instead. */}
+      {onCopyInstruction
+        ? <div className="cl-step">
+          <span className="cl-num">2</span><span>Using Codex? Paste the setup instruction into its thread once.</span>
+          <OutlineButton icon={instruction ? 'ph ph-check' : 'ph ph-copy'} className="cl-btn cl-copy" onClick={() => { onCopyInstruction(); markInstruction(); }}>{instruction ? 'Copied' : 'Copy instruction'}</OutlineButton>
+        </div>
+        : <div className="cl-step">
+          <span className="cl-num">2</span><span>Using Codex? Choose “Connect existing session” on the project’s page; Ariadne then gives you the setup instruction to paste into its thread once.</span>
+        </div>}
       <div className="cl-foot">Connecting sends nothing to the model. The dot by the session name turns green when it’s done.</div>
     </div>}
   </section>;

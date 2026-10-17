@@ -63,6 +63,8 @@ export interface ConnectionView {
   readonly droppedAt?: string;
   /** "21:33", when the owner closed the session */
   readonly closedAt?: string;
+  /** Closed because it is archived: its button restores it ("Restore session") instead of reopening it. */
+  readonly archived?: boolean;
   /** "21:31", when Ariadne couldn't write to its data folder */
   readonly unsavedAt?: string;
   /** What the unsaved change was: "Later on “separate hit metrics”". */

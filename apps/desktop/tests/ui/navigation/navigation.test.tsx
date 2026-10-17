@@ -767,8 +767,12 @@ describe('source-backed navigation views and explicit registration', () => {
     expect(await screen.findByRole('heading', { name: 'All sessions', level: 1 })).toBeTruthy();
     // The Open / Closed / All tabs count the listed sessions; Closed shows the closed one, whose Close is greyed (SPEC 14.2).
     const closedId = '00000000-0000-4000-8000-000000000003';
-    expect(document.querySelector(`button[data-session-id="${closedId}"]`)).toBeNull();
+    // The page opens on All (SPEC 14.2): the closed session is listed before any tab is chosen.
     const tabs = screen.getByRole('group', { name: 'Show' });
+    expect(within(tabs).getByRole('button', { name: /^All/ }).getAttribute('aria-pressed')).toBe('true');
+    expect(document.querySelector(`button[data-session-id="${closedId}"]`)).not.toBeNull();
+    fireEvent.click(within(tabs).getByRole('button', { name: /^Open/ }));
+    expect(document.querySelector(`button[data-session-id="${closedId}"]`)).toBeNull();
     expect(within(tabs).getByRole('button', { name: /^Open/ }).textContent).toBe('Open1');
     expect(within(tabs).getByRole('button', { name: /^Closed/ }).textContent).toBe('Closed1');
     fireEvent.click(within(tabs).getByRole('button', { name: /^Closed/ }));

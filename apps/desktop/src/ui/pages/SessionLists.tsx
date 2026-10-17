@@ -176,7 +176,7 @@ export interface SessionListsProps {
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
 export function SessionLists({ navigation, actions, projects, sessions, single = false, currentSession, now, narrow, disabled, back, onOpenArchive, onOpenSession, notes, children }: SessionListsProps) {
-  const [tab, setTab] = useState<SessionsTabValue>('open');
+  const [tab, setTab] = useState<SessionsTabValue>('all');
   const [acting, setActing] = useState<{ summary: Immutable<SessionSummary>; act: RowAct } | null>(null);
   const archive = useSessionArchive({ navigation, actions, now, disabled });
   const listed = sessions.filter(summary => projects.some(project => project.project_id === summary.project_id));

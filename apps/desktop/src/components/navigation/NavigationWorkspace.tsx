@@ -326,7 +326,7 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
       () => notices.push({ icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)', tone: 'problem', text: 'Copy failed. Try again.' }));
   };
   const page = view.kind === 'page' && view.page === 'archive'
-    ? <ArchivePage navigation={store} actions={actions} projects={projects} sessions={sessions} snapshots={snapshots} now={at} disabled={disabled} back={back} onRemove={onRemoveTarget} />
+    ? <ArchivePage navigation={store} actions={actions} projects={projects} sessions={sessions} snapshots={snapshots} now={at} disabled={disabled} back={back} onOpenSession={openSession} onRemove={onRemoveTarget} />
     : firstRun ? <FirstRun command="/ariadne-connect" onCopyCommand={() => copyWords('/ariadne-connect', 'Command copied.')}
       onCopyInstruction={() => { if (instruction) copyWords(instruction, 'Instruction copied.'); else register(''); }} />
     : view.kind === 'session' ? null : view.page === 'projects'
@@ -372,7 +372,8 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
   const barActions = barSession ? actions.forSession(barSession) : null;
   return <NavigationProvider store={store} waiting={waiting}><SessionLifecycleOwner actions={barActions}>
     <DetailsColumnProvider saved={shown.detail_width ?? null} unfoldWhen={detailAsked} onSave={width => saveLayout({ detail_width: width })}>
-    <Shell topBar={<WorkspaceTopBar bar={bar} store={barSession} controllers={actions} line={onSession ? lineHost : null} />}
+    <Shell topBar={<WorkspaceTopBar bar={bar} store={barSession} controllers={actions} line={onSession ? lineHost : null}
+      setup={setup?.data.kind === 'binding_connect' ? { sessionId: setup.session_id, instruction: setup.data.setup_instruction } : null} />}
     main={center}
     side={detail && !page ? <DetailsColumn path={detailPath} rail={detailRail} onClose={onCloseDetail} onRemove={onRemove} hidden={hiddenItem} hiddenNotice={hiddenNotice} onHide={onHide}>{detail}</DetailsColumn> : undefined}
     dock={page ? undefined : dockContent}

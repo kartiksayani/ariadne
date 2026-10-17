@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { Immutable } from '../../data/session-store';
 import { plainFailure } from '../../data/plain';
+import type { SessionRef } from '../../generated/core';
 import type { ProjectSummary, Session, SessionSummary } from '../../generated/domain/models';
 import type { NavigationStore } from '../../state/navigation/store';
 import type { SessionActionControllers } from '../../components/bindings/actions';
@@ -30,12 +31,14 @@ export interface ArchivePageProps {
   readonly now: number;
   readonly disabled: boolean;
   readonly back?: PageBack;
+  /** A row's name: open that session (archived, to read). */
+  readonly onOpenSession: (route: SessionRef) => void;
   readonly onRemove: RemoveHandler;
 }
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
-export function ArchivePage({ navigation, actions, projects, sessions, snapshots, now, disabled, back, onRemove }: ArchivePageProps) {
+export function ArchivePage({ navigation, actions, projects, sessions, snapshots, now, disabled, back, onOpenSession, onRemove }: ArchivePageProps) {
   const [removing, setRemoving] = useState<{ subject: RemoveSubject; target: RemoveTarget } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   /** Rows restored in this visit, as they were, so they stay in place with their new words. */
@@ -82,6 +85,17 @@ export function ArchivePage({ navigation, actions, projects, sessions, snapshots
     const summary = summaryOf(row.id);
     if (summary && !busy) void archive.restore(summary).then(saved => { if (saved) markRestored(row); });
   };
+  /** Opens the session to read; it stays archived. Restore is its own button. */
+  const open = (row: ArchiveRowData) => {
+    if (disabled) return;
+    if (row.kind === 'topic') {
+      const topic = topics.find(value => `${sessionKey(value.source)}:${value.topic.id}` === row.id);
+      if (topic) onOpenSession(topic.source);
+      return;
+    }
+    const summary = summaryOf(row.id);
+    if (summary) onOpenSession(routeOf(summary));
+  };
   const remove = (row: ArchiveRowData) => {
     if (row.kind === 'topic') {
       const topic = topics.find(value => `${sessionKey(value.source)}:${value.topic.id}` === row.id);
@@ -100,7 +114,7 @@ export function ArchivePage({ navigation, actions, projects, sessions, snapshots
   const shownSessions = withRestored(sessionRows, 'session'), shownTopics = withRestored(topicRows, 'topic');
   return <>
     <ArchiveList back={back} sub={`${plural(shownSessions.length, 'session')} · ${plural(shownTopics.length, 'topic')}`}
-      sessions={shownSessions} topics={shownTopics} onRestore={restore} onRemove={remove} />
+      sessions={shownSessions} topics={shownTopics} onRestore={restore} onOpen={open} onRemove={remove} />
     {archive.dialogs}
     {removing && <RemoveDialog subject={removing.subject} onCancel={() => setRemoving(null)} onConfirm={() => onRemove(removing.target, removing.subject)} />}
   </>;

@@ -199,6 +199,19 @@ describe('Archive page', () => {
     expect(screen.getByText('Back in the Map')).toBeTruthy();
   });
 
+  it('a row’s name opens it, for sessions and topics, without restoring; with no way to open, the name is plain text', () => {
+    const onOpen = vi.fn(), onRestore = vi.fn();
+    const { rerender } = render(<ArchiveList sub="x" sessions={sessions} topics={topics} onRestore={onRestore} onOpen={onOpen} />);
+    fireEvent.click(screen.getByRole('button', { name: 'March incident notes' }));
+    expect(onOpen).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'a', kind: 'session' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Old cache metrics' }));
+    expect(onOpen).toHaveBeenLastCalledWith(expect.objectContaining({ id: 't', kind: 'topic' }));
+    expect(onRestore).not.toHaveBeenCalled();
+    rerender(<ArchiveList sub="x" sessions={sessions} topics={topics} onRestore={onRestore} />);
+    expect(screen.queryByRole('button', { name: 'March incident notes' })).toBeNull();
+    expect(screen.getByText('March incident notes')).toBeTruthy();
+  });
+
   it('draws the "…" only when it can remove, and its Remove item reports the row', () => {
     const { rerender } = render(<ArchiveList sub="x" sessions={sessions} topics={[]} onRestore={vi.fn()} />);
     expect(screen.queryByRole('button', { name: /More for/ })).toBeNull();
