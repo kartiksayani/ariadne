@@ -41,7 +41,7 @@ async function openPage(name: 'Projects' | 'All sessions' | 'Archive') {
   await screen.findByRole('heading', { name: name === 'All sessions' ? 'All sessions' : name });
 }
 
-describe('never miss a question', { timeout: 20_000 }, () => {
+describe('never miss a question', () => {
   it('the Map: this session’s question is on the dock’s line; another session’s is on the switcher button', async () => {
     await setup();
     await waitFor(() => expect(within(screen.getByRole('region', { name: 'Answer dock' })).getAllByText(question).length).toBeGreaterThan(0));

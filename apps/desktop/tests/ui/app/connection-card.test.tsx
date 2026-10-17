@@ -35,7 +35,7 @@ async function openCard() {
   return within(document.querySelector<HTMLElement>('.cc')!);
 }
 
-describe('connection card session actions (were the session bar’s)', { timeout: 15_000 }, () => {
+describe('connection card session actions (were the session bar’s)', () => {
   it('Copy session ID copies the reference without showing it, says so, and keeps the card open', async () => {
     vi.mocked(copyText).mockResolvedValue(undefined);
     await setup();

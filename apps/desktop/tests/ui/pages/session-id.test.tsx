@@ -11,7 +11,7 @@ vi.mock('../../../src/ui/shared/clipboard', () => ({ copyText: vi.fn() }));
 afterEach(() => { cleanup(); notices.clear(); vi.resetAllMocks(); });
 
 describe('session ID actions', () => {
-  it('lists a session without its ID or a Copy ID action, then copies it from the connection card once opened', { timeout: 15_000 }, async () => {
+  it('lists a session without its ID or a Copy ID action, then copies it from the connection card once opened', async () => {
     const transport = new AppTransport();
     render(<DesktopApp service={createDesktopService(transport)} />);
     const list = await screen.findByRole('region', { name: 'All sessions' });

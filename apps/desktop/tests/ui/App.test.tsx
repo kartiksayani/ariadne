@@ -58,7 +58,7 @@ function setup(strict = false) {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 // These composed journeys include independent seen saves under default file parallelism.
-describe('ordinary desktop composition', { timeout: 10_000 }, () => {
+describe('ordinary desktop composition', () => {
   it('clears the New tag and Since card only after a full peek dwell, leaving an early close unread', async () => {
     const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!, target = session.items['1.1']!;
     const baseline = new Date(Date.now() - 60_000).toISOString();
@@ -232,7 +232,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
       expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
       expect(screen.getByRole('button', { name: /^Switch session or project/ }).hasAttribute('disabled')).toBe(false);
     });
-    await waitFor(() => expect(entered).toBe(true), { timeout: 3000 });
+    await waitFor(() => expect(entered).toBe(true));
     fireEvent.click(await screen.findByRole('button', { name: /^Branched into Add the receipt lookup/ }));
     const goTo = await screen.findByRole('button', { name: 'Go to' });
     await waitFor(() => expect(goTo.hasAttribute('disabled')).toBe(false));
@@ -244,7 +244,7 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => {
       expect(transport.preferences.seen?.some(seen => seen.session.session_id === route.session_id
         && seen.items.some(item => item.item_id === '1'))).toBe(true);
-    }, { timeout: 3000 });
+    });
     expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull();
     expect((await searchBox()).hasAttribute('disabled')).toBe(false);
     expect(screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' })).toBeTruthy();

@@ -13,7 +13,7 @@ async function openFirst() {
   await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
 }
 
-describe('peek desktop composition', { timeout: 10_000 }, () => {
+describe('peek desktop composition', () => {
   it.each(['Tree', 'Graph'] as const)('Go to from a filtered detail child focuses the revealed %s row without scrolling via focus', async mode => {
     const transport = new AppTransport(), source = transport.sessions.get(route.session_id)!;
     source.items['1']!.question = 'Parent search match';
