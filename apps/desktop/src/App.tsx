@@ -381,8 +381,9 @@ function Workspace({ application }: { application: Application }) {
   };
   const closeDetail = () => { invalidateOwnerRequest(); detailDismissedAt.current = navigation.getNavigationRequest(); setDetailOpen(false); };
   const later = route && selectedId ? preferences?.later.some(item => routeKey(item) === key && item.item_id === selectedId) ?? false : false;
-  // The waiting question Details (or the bigger view) is answering leaves the dock's list.
-  const answeringId = conversationOpen ? conversation?.itemId ?? null : detailOpen ? selectedId : null;
+  // The waiting question Details (or the bigger view) is answering leaves the dock's list. A folded Details shows no
+  // question, so it never claims one: the dock keeps it in view.
+  const answeringId = conversationOpen ? conversation?.itemId ?? null : detailOpen && !detailsFolded ? selectedId : null;
   const answering = answeringId && sessionState?.snapshot?.session.items[answeringId]?.status === 'waiting_on_me' ? answeringId : null;
   // As the Waiting column did: with the conversation open, a dock path segment shows that item there and the Map stays.
   const openFromDock = (itemId: string) => {

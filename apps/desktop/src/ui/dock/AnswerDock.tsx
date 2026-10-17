@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { useWaiting, type WaitingStore } from '../../selectors/waiting/store';
-import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
+import { receiptWithdrawn, useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
 import { DockStore, dockSessionKey } from '../../state/dock/store';
 import { clampDockHeight, DOCK_LINE, DOCK_MIN, loadDockHeight, releaseDockHeight, saveDockHeight } from '../../state/dock/height';
 import { useHidden } from '../remove/queue';
@@ -93,7 +93,8 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
     'dock.next': ({ repeat }) => { if (!repeat) model.step(1); return true; },
     'dock.fold': () => { if (!model.getSnapshot().open) return false; model.fold(); return true; },
   });
-  // 1–9 and ⌘↵ only while the open dock has no rival for the focus.
+  // 1–9 while the open dock has no rival for the focus; ⌘↵ only with the focus in the dock. A send elsewhere (Details)
+  // disables its field and drops the focus to <body>, so a second ⌘↵ there must never send the dock's question.
   // Never Esc: Esc belongs to whatever has the focus. A key another handler took (defaultPrevented) is left alone.
   useEffect(() => {
     const keys = (event: globalThis.KeyboardEvent) => {
@@ -107,7 +108,7 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
         if (inDock && target?.closest('.answer')) return;
         root.current?.querySelector<HTMLButtonElement>(`.answer-dock-current [data-answer-option="${Number(event.key) - 1}"]`)?.click();
       } else if (event.metaKey && event.key === 'Enter') {
-        if (inDock && target?.closest('.answer')) return;
+        if (!inDock || target?.closest('.answer')) return;
         root.current?.querySelector<HTMLButtonElement>('.answer-dock-current [data-answer-send]')?.click();
       } else return;
       event.preventDefault();
@@ -223,7 +224,8 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
         {sentChip}{othersChip}
         <button type="button" className="dock-icon" aria-label="Fold the dock" title="Fold the dock" onClick={() => model.fold()}><i className="ph ph-caret-down" aria-hidden="true" /></button>
       </div>
-      {item && <div className="answer-dock-current" key={state.current!.id}>
+      {/* Keyed by item, not question revision: a revised question keeps the owner's field, its text and its focus. */}
+      {item && <div className="answer-dock-current" key={state.current!.itemId}>
         <div className="dock-question">
           <h2 className="dock-question-title">{onOpenItem
             ? <button type="button" className="dock-question-open" aria-label={`Open ${item.question}`} title={`Go to “${item.question}”`} onClick={() => onOpenItem(item.id)}>{item.question}</button>
@@ -285,7 +287,9 @@ export function OtherSessionQuestions({ waiting, drafts, currentSession, onAgent
         <h3><i className="ph ph-terminal-window" aria-hidden="true" />{rows[0]!.projectLabel} · {name}</h3>
         {rows.map(row => {
           const store = waiting.storeOf(row.route), expanded = openRow === row.id;
-          const answered = !!drafts.find(row.route, row.item.id, 'answer')?.receipt;
+          const entry = drafts.find(row.route, row.item.id, 'answer'), read = waiting.sessionState(row.route)?.snapshot?.session;
+          // A cancelled or skipped answer is not "Sent": the question waits again.
+          const answered = !!entry?.receipt && !(read && receiptWithdrawn(entry, read));
           return <div key={row.id} className="dock-other-row" data-open={expanded || undefined}>
             <button type="button" className="dock-other-head" aria-expanded={expanded} title={expanded ? 'Fold it' : 'Read and answer it here'}
               onClick={() => setOpenRow(value => value === row.id ? null : row.id)}>

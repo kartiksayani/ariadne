@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { plainFailure } from '../../data/plain';
-import { useOwnerDrafts, type DraftEntry, type DraftState, type OwnerDraftStore } from '../../state/drafts/store';
+import { receiptWithdrawn, useOwnerDrafts, type DraftEntry, type DraftState, type OwnerDraftStore } from '../../state/drafts/store';
 import { AnswerControl, defaultSelection, type AnswerBar } from '../answer/AnswerControl';
 import { useSubmit, type OwnerFocusRequest, type PendingSubmission } from '../answer/useSubmit';
 import { ownerReplied } from '../../selectors/waiting/replied';
@@ -116,7 +116,8 @@ export function AnswerSlot({ drafts, store, itemId, layout = 'details', hint, he
   // Sent: the same cards stay, sealed, with the delivery bar. An answer already on its way locks every place.
   // The owner's own unknown or failed send is reconciled here first, even when another input (a note) left the queue.
   const recovering = !entry.receipt && (entry.uncertain || !!entry.error && !entry.saving && !answerStanding(session, itemId));
-  const delivered = !recovering && (entry.receipt?.data.kind === 'input_submit' || entry.saving && !entry.uncertain
+  // A cancelled or skipped answer's receipt no longer stands: the cards open at once, before `another` swaps the draft.
+  const delivered = !recovering && (entry.receipt?.data.kind === 'input_submit' && !(session && receiptWithdrawn(entry, session)) || entry.saving && !entry.uncertain
     || !!session && (ownerReplied(session, item) || answerStanding(session, itemId)));
   if (delivered && delivery.bar) {
     const content = delivery.content;
