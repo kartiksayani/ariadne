@@ -44,9 +44,9 @@ test('history failure evidence finds the docked follow-up send control', t => {
 test('history topic actions use their accessible names and the all-closed prompt stays outside the sticky band', async t => {
   const dom = new JSDOM(`<section class="tree-column" aria-label="Session tree" data-session-status="stale" data-session-busy="true"><div class="tree-rows"><div class="tree-topic" role="treeitem" aria-label="Native topic" data-topic-id="topic" tabindex="0">
     <button aria-label="Continue elsewhere"><i></i></button><button aria-label="More actions for “Native topic”"><i></i></button></div>
-    <div role="menu"><button role="menuitem" aria-label="Archive topic…"><span>Archive topic…</span><span>Out of the Map</span></button><button role="menuitem" aria-label="Remove topic…"><span>Remove topic…</span></button></div>
     <div class="tree-topic-content"><div class="tree-prompt"><button>Archive topic</button></div></div>
-    <div data-topic-id="other"></div><div class="tree-topic-content"><div class="tree-prompt"><button>Archive other topic</button></div></div></div></section>`);
+    <div data-topic-id="other"></div><div class="tree-topic-content"><div class="tree-prompt"><button>Archive other topic</button></div></div></div>
+    <div role="menu"><button role="menuitem" aria-label="Archive topic…"><span>Archive topic…</span><span>Out of the Map</span></button><button role="menuitem" aria-label="Remove topic…"><span>Remove topic…</span></button></div></section>`);
   const previousBrowser = globalThis.browser;
   t.after(() => { globalThis.browser = previousBrowser; dom.window.close(); });
   const clicked = [], admitted = [];
