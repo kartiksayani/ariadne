@@ -14,10 +14,11 @@ import type { PendingSubmission } from '../answer/useSubmit';
 import { useSeenDwell } from '../changes/useSeenDwell';
 import { peekNames } from '../peek/names';
 import { navigationVisits } from '../navigation/visits';
-import { agentName, ownerName } from '../shell/model';
+import { ownerName } from '../shell/model';
+import { agentProduct } from '../../state/navigation/switcher';
 import { useDockModel } from './api';
 import { useIntents } from '../intents';
-import { dockPath, dockQuestions, sentWaiting, waitingAge } from './model';
+import { compareOtherGroups, dockPath, dockQuestions, sentWaiting, waitingAge } from './model';
 import './dock.css';
 
 export { dockQuestions } from './model';
@@ -195,7 +196,7 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
         <span className="dock-line-text">{first!.question}</span>
       </> : answering && session?.items[answering] ? <span className="dock-line-text dock-line-quiet">
         <i className="ph-fill ph-question" aria-hidden="true" />Answering {quote(nameOf(answering))} in Details</span>
-        : <span className="dock-line-text dock-line-quiet"><i className="ph-fill ph-check-circle dock-done" aria-hidden="true" />Nothing waiting on you</span>}
+        : <span className="dock-line-text dock-line-quiet"><i className="ph ph-check-circle dock-done" aria-hidden="true" /><span>Nothing waiting on you<span className="dock-wide">. New questions open here.</span></span></span>}
       <span className="dock-spacer" />
       {keptChip}{sentChip}{othersChip}
       {waitingNow && <button type="button" className="dock-icon" aria-label="Open the answer dock" title="Open the answer dock at the next waiting question ( ] )"
@@ -278,8 +279,8 @@ export function OtherSessionQuestions({ waiting, drafts, currentSession, onAgent
     {[...groups].map(([key, rows]) => {
       const session = waiting.sessionState(rows[0]!.route)?.snapshot?.session;
       const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : null;
-      const agent = binding ? agentName(binding.adapter_id) : 'the agent';
-      const name = (session && ownerName(session)) ?? rows[0]!.sessionLabel;
+      return { key, rows, agent: binding ? agentProduct(binding.adapter_id) : 'the agent', name: (session && ownerName(session)) ?? rows[0]!.sessionLabel, project: rows[0]!.projectLabel };
+    }).sort(compareOtherGroups).map(({ key, rows, agent, name }) => {
       return <section key={key} className="dock-other-group">
         <h3><i className="ph ph-terminal-window" aria-hidden="true" />{rows[0]!.projectLabel} · {name}</h3>
         {rows.map(row => {

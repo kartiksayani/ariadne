@@ -19,7 +19,8 @@ function mount() {
   // The dock's dragged height is browser-local (state/dock/height.ts); the board's 'tall' is the window less 40 and 130.
   const dockHeight = state.app.view?.dockHeight;
   if (dockHeight !== undefined) {
-    localStorage.setItem('ariadne.dock.height.v1', JSON.stringify(dockHeight === 'tall' ? variants[variant].height - 170 : dockHeight === 'short' ? 200 : dockHeight));
+    const { height } = variants[variant];
+    localStorage.setItem('ariadne.dock.height.v1', JSON.stringify(dockHeight === 'tall' ? height - 170 : dockHeight === 'short' ? 200 : dockHeight === 'chip' ? Math.round(height * 0.45) : dockHeight));
   }
   window.__designFixture = fixture;
   window.__designNotices = notices;

@@ -279,3 +279,6 @@
 }
 
 .hlp-tab:focus-visible { outline-offset: -2px; }
+
+/* The panel takes focus when it opens (so Esc and the tabs work), and draws no ring of its own; the tabs keep theirs. */
+.product-app .hlp:focus-visible { outline: none; }

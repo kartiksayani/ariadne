@@ -52,6 +52,10 @@ export function waitingAge(at: number, now: number): string {
   return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
+/** The other-sessions list groups its questions by session, ordered by project and then session name (as the board lists them), not by who waited longest. */
+export const compareOtherGroups = (a: { readonly project: string; readonly name: string }, b: { readonly project: string; readonly name: string }): number =>
+  a.project.localeCompare(b.project) || a.name.localeCompare(b.name);
+
 export interface PathPart { readonly label: string; readonly full: string; readonly itemId: string | null; readonly more?: boolean }
 
 /** Topic and ancestors, as the board draws it: the question itself is the title below, not a segment. Past three parts: first, second, "…", last, unless `expanded`. */

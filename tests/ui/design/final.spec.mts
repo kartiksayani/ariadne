@@ -22,10 +22,10 @@ const output = resolve(repo, 'coverage/design/final');
 const compareAlways = process.env.FINAL_APP === '1';
 /**
  * The record-only canary: one pending state whose app side runs on every CI run with `threshold: null` (the ratio is written,
- * never asserted), so the gallery, the loading wait and the `act` steps are exercised while every state is still pending.
- * 13.2 light takes both kinds of step a builder uses most: a key (the switcher's shortcut) and typed words.
+ * never asserted), so the gallery, the loading wait and the `act` steps stay exercised by a state that is still pending (the
+ * states that are not pending run their app side anyway). 12.1 light is pending and takes a click step.
  */
-const canaryState = { id: '13.2', variant: 'light' } as const;
+const canaryState = { id: '12.1', variant: 'light' } as const;
 const canary = (state: FinalState, variant: Variant) => state.id === canaryState.id && variant === canaryState.variant;
 const threshold = (id: string, variant: Variant): number => (thresholds as Record<string, number>)[`${id} ${variant}`] ?? (thresholds as Record<string, number>)[id] ?? 0;
 
@@ -74,11 +74,24 @@ async function appContext(browser: { newContext: (options: object) => Promise<Br
 /** Steps the state's spec takes in the app after it mounts (a key, a click on a named control, a hover, typed words). */
 async function perform(page: Page, step: Step): Promise<void> {
   if ('key' in step) await page.keyboard.press(step.key);
-  else if ('click' in step) await page.getByRole('button', { name: step.click }).or(page.getByRole('tab', { name: step.click })).or(page.getByRole('menuitem', { name: step.click })).first().click();
+  else if ('click' in step) {
+    const named = (exact: boolean) => page.getByRole('button', { name: step.click, exact }).or(page.getByRole('tab', { name: step.click, exact })).or(page.getByRole('menuitem', { name: step.click, exact })).filter({ visible: true }).first();
+    // A control named exactly so, if one is on screen; else the first whose name contains it. At the narrow width the top bar
+    // folds Archive, text size, theme and Help into its "More" menu, whose own name contains "archive": open it first.
+    const more = page.getByRole('button', { name: /^More:/ });
+    if (!(await named(true).isVisible()) && await more.isVisible()) {
+      await more.click();
+      if (!(await named(true).isVisible())) await page.keyboard.press('Escape');
+    }
+    await ((await named(true).isVisible()) ? named(true) : named(false)).click();
+  }
   else if ('hover' in step) await page.locator(step.hover).first().hover();
   else await page.keyboard.type(step.type);
   await settle(page);
 }
+
+/** The board draws its window with rounded corners (about 10px); the app's window is the page, which a native window rounds itself. The four corners are left out of every comparison. */
+const corners = (width: number, height: number): Region[] => [0, 1, 2, 3].map(corner => ({ name: `corner ${corner}`, x: corner % 2 ? width - 12 : 0, y: corner > 1 ? height - 12 : 0, width: 12, height: 12 }));
 
 /** The app in the state's fixture, at the variant's size and the board's clock. */
 async function renderApp(page: Page, origin: string, state: FinalState, variant: Variant): Promise<Buffer> {
@@ -96,7 +109,8 @@ async function renderApp(page: Page, origin: string, state: FinalState, variant:
   if (view.dock === 'open') for (let at = 0; at <= (view.dockQuestion ?? 0); at++) await perform(page, { key: ']' });
   const other = others.find(value => value.k === state.app.chrome?.otherPopover);
   if (other) {
-    await page.getByRole('button', { name: /in other sessions$/ }).first().click();
+    // The dock's own chip: the top bar's switcher button also ends its name with "waiting in other sessions".
+    await page.getByRole('region', { name: 'Answer dock' }).getByRole('button', { name: /in other sessions$/ }).click();
     await page.getByRole('button', { name: other.q }).click();
     await settle(page);
   }
@@ -145,7 +159,7 @@ for (const state of finalStates) for (const variant of variantNames) {
     try {
       const app = await renderApp(await context.newPage(), origin, state, variant);
       const { report, ...score } = scoring(state, variant, state.pending);
-      await captureFrame(canvas, { id, design, app, directory: output, ...score,
+      await captureFrame(canvas, { id, design, app, directory: output, masks: corners(width, height), ...score,
         report: result => ({ pending: state.pending, owner: state.owner, size: { width: result.width, height: result.height }, unhonoured: notHonoured, ...report(result) }),
         denied: [...boardDenied, ...denied] });
     } finally { await context.close(); }
@@ -419,10 +433,13 @@ test('final-frames: every region is a whole-pixel rectangle inside the frames it
 
 // `unhonoured` reads the values a state sets against a list of values, one entry each: turning one on must not hide the others.
 test('unhonoured: each value is flagged on its own and removing one leaves the rest', () => {
-  for (const overlay of notYet.overlay) expect(unhonoured({ chrome: { overlay } }), overlay).toEqual([`chrome.overlay=${overlay}`]);
+  // The real list shrinks as the app grows features (the overlays all render now), so the mechanism is tested on a list of its own.
+  const listed = { overlay: ['switcher', 'help-keys', 'help-marks'] as const, connection: ['stale', 'unsaved'] as const };
+  for (const overlay of listed.overlay) expect(unhonoured({ chrome: { overlay } }, listed), overlay).toEqual([`chrome.overlay=${overlay}`]);
+  for (const connection of listed.connection) expect(unhonoured({ sessions: { connection } }, listed), connection).toEqual([`sessions.connection=${connection}`]);
+  expect(unhonoured({ sessions: { connection: 'live' } }, listed), 'live needs nothing').toEqual([]);
   for (const connection of notYet.connection) expect(unhonoured({ sessions: { connection } }), connection).toEqual([`sessions.connection=${connection}`]);
-  expect(unhonoured({ sessions: { connection: 'live' } }), 'live needs nothing').toEqual([]);
-  const withoutHelpKeys = { ...notYet, overlay: notYet.overlay.filter(overlay => overlay !== 'help-keys') };
+  const withoutHelpKeys = { ...listed, overlay: listed.overlay.filter(overlay => overlay !== 'help-keys') };
   expect(unhonoured({ chrome: { overlay: 'help-keys' } }, withoutHelpKeys)).toEqual([]);
   expect(unhonoured({ chrome: { overlay: 'help-marks' } }, withoutHelpKeys)).toEqual(['chrome.overlay=help-marks']);
   expect(unhonoured({ chrome: { overlay: 'switcher' }, sessions: { connection: 'stale' } }, withoutHelpKeys)).toEqual(['chrome.overlay=switcher', 'sessions.connection=stale']);

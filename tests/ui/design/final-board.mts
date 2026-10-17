@@ -99,9 +99,23 @@ async function flush(page: Page): Promise<void> {
   });
 }
 
-/** The board frame of the open page, as a PNG of exactly the variant's size. */
-export async function boardFrame(page: Page, variant: Variant): Promise<Buffer> {
+/**
+ * The board frame of the open page, as a PNG of exactly the variant's size. The design canvas puts the frame at a fractional
+ * y (67.19 px), which the crop rounds: every element at a fractional position then rasterises one row off the app's (which
+ * starts at 0), a floor of about 0.3 to 0.5% on text-heavy frames. With `aligned` the page is moved the fraction (a relative
+ * offset on the body) so the frame starts on a whole pixel and the board draws as the app's own layout would. The loader's
+ * self-check compares the board with Claude Design's screenshots, taken at the fractional offset, so it does not align.
+ */
+export async function boardFrame(page: Page, variant: Variant, aligned = false): Promise<Buffer> {
   const { width, height } = variants[variant];
+  if (aligned) {
+    await page.evaluate(async () => {
+      const top = document.querySelector('[data-theme]')!.getBoundingClientRect().y + window.scrollY;
+      document.body.style.position = 'relative';
+      document.body.style.top = `${Math.round(top) - top}px`;
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    });
+  }
   const box = await page.locator('[data-theme]').first().evaluate(node => { const rect = node.getBoundingClientRect(); return { x: rect.x + window.scrollX, y: rect.y + window.scrollY }; });
   return page.screenshot({ animations: 'disabled', clip: { x: Math.round(box.x), y: Math.round(box.y), width, height } });
 }
@@ -116,7 +130,7 @@ export async function renderBoard(context: BrowserContext, origin: string, state
   const seen = denied.length;
   const page = await openBoard(context, origin, state.part, state.sid, variant);
   let png: Buffer;
-  try { png = await boardFrame(page, variant); } finally { await page.close(); }
+  try { png = await boardFrame(page, variant, true); } finally { await page.close(); }
   // After the close: a request the board made as the page went away is still its request.
   return { png, denied: denied.slice(seen) };
 }
