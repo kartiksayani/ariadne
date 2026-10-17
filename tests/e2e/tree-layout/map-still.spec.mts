@@ -195,11 +195,11 @@ const holds: readonly Hold[] = [
   ...everywhere('the reading row leaves the filter on its own', risesAtTop, page => filter(page, ['open']), leave, goes),
   ...everywhere('the owner hides the reading row', risesAtTop, nothing, hide, goes),
   ...everywhere('the agent removes the reading row', risesAtTop, nothing, (page, reading) => agent(page, `remove:${reading}`), goes),
-  // The filter's banner opens or closes above the Map, so the scroller itself moves (D13), as rows above the reading row go
-  // or come back.
-  ...everywhere('a filter lands with its banner above the Map', held, nothing, page => filter(page, ['open']),
+  // Rows above the reading row go or come back. While the "Showing N of M" banner shows a status filter, it opens or closes
+  // above the Map too, so the scroller itself moves (D13); the chip row's own rows are the filter row block's.
+  ...everywhere('a saved filter lands', held, nothing, page => filter(page, ['open']),
     page => expect(row(page, '5')).toHaveCount(0)),
-  ...everywhere('a filter clears with its banner above the Map', risesAtTop, page => filter(page, ['open']), page => filter(page, []),
+  ...everywhere('a saved filter clears', risesAtTop, page => filter(page, ['open']), page => filter(page, []),
     page => expect(row(page, '5')).toHaveCount(1)),
   ['a row below the reading row goes and the scroll range shrinks', 'bottom', 'held', nothing, page => agent(page, 'remove:18'),
     page => expect(row(page, '18')).toHaveCount(0)],
