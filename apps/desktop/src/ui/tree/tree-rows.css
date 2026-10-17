@@ -333,6 +333,12 @@
 .tree-action:disabled:not(.tree-action-ack) {
   opacity: .3;
   cursor: default;
+  pointer-events: none; /* the .tree-action-off wrapper takes the pointer: its click selects the row instead of dying on the button */
+}
+
+.tree-action-off {
+  display: flex;
+  cursor: default;
 }
 
 .tree-action:disabled:not(.tree-action-ack):hover {
