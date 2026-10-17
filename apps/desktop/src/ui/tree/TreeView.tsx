@@ -670,11 +670,17 @@ export function TreeView(props: TreeViewProps) {
   const unfold = (id: string) => {
     // The hold stays: Show more above the reading row grows what is above it, and the row the owner reads stays put.
     settled.current = true;
-    // The row whose button this is holds its own window position through the height change, even when the band covers its top
-    // (otherwise the first whole row below becomes the one held, and this row moves). A row out of view leaves the hold as it is.
+    // A row whose Show more is on screen holds its own window position through the height change, even when the band covers
+    // its top (otherwise the first whole row below becomes the one held, and this row moves). A row whose buttons are out of
+    // view (Show more above the reading row) leaves the hold on the reading row.
     const box = scroller.current, element = elements.current.get(id), rect = element?.getBoundingClientRect();
-    if (box && rect && rect.bottom > readingTop() && rect.top < visibleBottom(box)) {
-      held.current = { key: id, offset: rect.top - readingTop(), top: rect.top - box.getBoundingClientRect().top, scrollTop: box.scrollTop };
+    const clicked = [...element?.querySelectorAll('.tree-more') ?? []].some(button => {
+      const place = button.getBoundingClientRect();
+      return place.bottom > readingTop() && place.top < visibleBottom(box!);
+    });
+    if (box && rect && clicked) {
+      revealedAnchor.current = { key: id, offset: rect.top - readingTop() };
+      remembering();
     }
     if (isUnfolded(id)) folding.current = id;
     toggleUnfolded(id);
