@@ -232,59 +232,60 @@ const stateList: readonly FinalState[] = [
 // Graph canvas are compared, and the rows' looks go to side-by-side PNGs for a human. D12 ("Continue here" is left out of the "…" menu)
 // is why 10.12 compares the menu's first row only.
 // Each state below is the Map half of a board state that is already registered above (1.3, 3.1, 3.6: those hold the
-// top bar, the dock and the Details rail) or of one that has no entry yet (4 to 10). They stay `pending` until the piece that draws
-// them has merged, and are numbered like the board; the three whose board state already has an entry above end in `m` ("Map body").
-// Their `act` steps name controls by the plan's wording (ALPHA20-REPLAN D9 to D21); a name the built control spells otherwise is
-// corrected in the step when the state is turned on.
+// top bar, the dock and the Details rail) or of one that has no entry yet (4 to 10). All are turned on (the pieces have merged), and are
+// numbered like the board; the three whose board state already has an entry above end in `m` ("Map body").
+// Their `act` steps name the built controls by role and accessible name ("Brief by the agent", "More actions for", "Filter by status").
+// A region that fails is a real difference a piece should fix, or a harness problem; a (b) deviation or data difference is left out of the
+// region with a comment (`titleLineOnly` below).
 const marked = (marks: MarkSet, rest: Omit<NonNullable<AppFixture['map']>, 'marks'> = {}): NonNullable<AppFixture['map']> => ({ marks, ...rest });
 /** The topic band's "What changed" opener: "5 new 5 changed since 20:40" (D18). */
 const openChanges: Step = { click: 'changed since' };
 const mapStateList: readonly FinalState[] = [
-  { id: '1.3m', part: 'Window', sid: 'b-graph', owner: 'graph', pending: true, title: 'Graph: the Map body',
+  { id: '1.3m', part: 'Window', sid: 'b-graph', owner: 'graph', pending: false, title: 'Graph: the Map body',
     app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: {}, act: [{ click: 'Graph' }, { click: 'Fold Details' }] } },
-  { id: '3.1m', part: 'Conversation', sid: 'c-details', owner: 'rows', pending: true, title: 'Details beside the Map: the Map body',
+  { id: '3.1m', part: 'Conversation', sid: 'c-details', owner: 'rows', pending: false, title: 'Details beside the Map: the Map body',
     app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' }, map: {} } },
-  { id: '3.6m', part: 'Conversation', sid: 'c-fold', owner: 'rows', pending: true, title: 'Details folded, dock open: the Map body',
+  { id: '3.6m', part: 'Conversation', sid: 'c-fold', owner: 'rows', pending: false, title: 'Details folded, dock open: the Map body',
     app: { view: { selected: 'a2.2.1.1', details: 'folded', dock: 'open', dockQuestion: 0 }, map: {}, act: [{ click: 'Fold Details' }] } },
-  { id: '4.1', part: 'Acking', sid: 'k-toack', owner: 'rows', pending: true, title: 'Findings to ack: marked on the row, counted on the topic, with Ack all',
+  { id: '4.1', part: 'Acking', sid: 'k-toack', owner: 'rows', pending: false, title: 'Findings to ack: marked on the row, counted on the topic, with Ack all',
     app: { view: { selected: 'a9', details: 'open', dock: 'line' }, map: {} } },
-  { id: '4.3', part: 'Acking', sid: 'k-confirm', owner: 'band', pending: true, title: 'Ack all: a short review before it saves',
+  { id: '4.3', part: 'Acking', sid: 'k-confirm', owner: 'band', pending: false, title: 'Ack all: a short review before it saves',
     app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'Ack all (3)' }] } },
-  { id: '4.4', part: 'Acking', sid: 'k-all', owner: 'band', pending: true, title: 'After Ack all: Undo stays on the topic row',
+  { id: '4.4', part: 'Acking', sid: 'k-all', owner: 'band', pending: false, title: 'After Ack all: Undo stays on the topic row',
     app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'Ack all (3)' }, { click: 'Ack all' }] } },
-  { id: '5.1', part: 'Changes', sid: 'w-glance', owner: 'changes', pending: true, title: 'Back after an hour: New and Changed on the rows, Next unseen',
+  { id: '5.1', part: 'Changes', sid: 'w-glance', owner: 'changes', pending: false, title: 'Back after an hour: New and Changed on the rows, Next unseen',
     app: { view: { selected: null, dock: 'line' }, map: marked('base') } },
-  { id: '5.2', part: 'Changes', sid: 'w-brief', owner: 'changes', pending: true, title: 'The topic brief, written by the agent',
-    app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [openChanges, { click: 'Brief' }] } },
+  { id: '5.2', part: 'Changes', sid: 'w-brief', owner: 'changes', pending: false, title: 'The topic brief, written by the agent',
+    app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [openChanges, { click: 'Brief by the agent' }] } },
   // The board opens the rows of "note on workspace keys" and "cache warm-up script" on Before → after; "shared-cache retries" is already seen.
-  { id: '5.3', part: 'Changes', sid: 'w-since', owner: 'changes', pending: true, title: 'Since you were here: before → after on demand, Mark all caught up',
+  { id: '5.3', part: 'Changes', sid: 'w-since', owner: 'changes', pending: false, title: 'Since you were here: before → after on demand, Mark all caught up',
     app: { view: { selected: null, dock: 'line' }, map: marked('base', { seen: ['a9'] }), act: [openChanges] } },
-  { id: '5.4', part: 'Changes', sid: 'w-caught', owner: 'changes', pending: true, title: 'All caught up: the markers clear, Undo stays for a few seconds',
+  { id: '5.4', part: 'Changes', sid: 'w-caught', owner: 'changes', pending: false, title: 'All caught up: the markers clear, Undo stays for a few seconds',
     app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [openChanges, { click: 'Mark all caught up' }] } },
-  { id: '5.5', part: 'Changes', sid: 'w-long', owner: 'changes', pending: true, title: 'Back after two days: a calm summary first',
-    app: { view: { selected: null, dock: 'line' }, map: marked('long'), act: [openChanges] } },
-  { id: '5.6', part: 'Changes', sid: 'w-because', owner: 'changes', pending: true, title: 'After I answer: Because you chose…',
+  { id: '5.5', part: 'Changes', sid: 'w-long', owner: 'changes', pending: false, title: 'Back after two days: a calm summary first',
+    app: { view: { selected: null, dock: 'line' }, map: marked('long'), act: [{ click: 'changes since' }] } },
+  { id: '5.6', part: 'Changes', sid: 'w-because', owner: 'changes', pending: false, title: 'After I answer: Because you chose…',
     app: { items: { afterAnswer: true, edit: { [Q2]: { s: 'decided', o: 'Bump it in this release, and warm the cache from the deploy job.' } } },
       view: { selected: 'a5.1', details: 'open', dock: 'line' }, map: marked('because') } },
-  { id: '5.7', part: 'Changes', sid: 'w-item', owner: 'changes', pending: true, title: 'On an item: what changed and why, with older history',
+  { id: '5.7', part: 'Changes', sid: 'w-item', owner: 'changes', pending: false, title: 'On an item: what changed and why, with older history',
     app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' }, map: marked('base') } },
-  { id: '7.2', part: 'Related', sid: 'r-graph', owner: 'graph', pending: true, title: 'In the Graph: related items as dashed lines',
+  { id: '7.2', part: 'Related', sid: 'r-graph', owner: 'graph', pending: false, title: 'In the Graph: related items as dashed lines',
     app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: {}, act: [{ click: 'Graph' }, { click: 'Fold Details' }] } },
-  { id: '8.2', part: 'Find', sid: 'f-filter', owner: 'filter', pending: true, title: 'Filter by status, Waiting on me first',
-    app: { view: { selected: null, dock: 'line' }, map: { filter: ['waiting_on_me', 'open'] } } },
-  { id: '8.3', part: 'Find', sid: 'f-recent', owner: 'changes', pending: true, title: 'Recent: what I viewed and what changed lately',
+  { id: '8.2', part: 'Find', sid: 'f-filter', owner: 'filter', pending: false, title: 'Filter by status, Waiting on me first',
+    app: { view: { selected: null, dock: 'line' }, map: { filter: ['waiting_on_me', 'open'] }, act: [{ click: 'Filter by status' }] } },
+  { id: '8.3', part: 'Find', sid: 'f-recent', owner: 'changes', pending: false, title: 'Recent: what I viewed and what changed lately',
     app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ click: 'Recent' }] } },
-  { id: '8.4', part: 'Find', sid: 'f-focus', owner: 'band', pending: true, title: 'Focus: only the item and what is under it stay in the Map',
+  { id: '8.4', part: 'Find', sid: 'f-focus', owner: 'band', pending: false, title: 'Focus: only the item and what is under it stay in the Map',
     app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' }, map: { focus: 'a2' } } },
-  { id: '8.5', part: 'Find', sid: 'f-jump', owner: 'rows', pending: true, title: 'The selected item has scrolled out of view: one step back to it',
+  { id: '8.5', part: 'Find', sid: 'f-jump', owner: 'rows', pending: false, title: 'The selected item has scrolled out of view: one step back to it',
     app: { view: { selected: 'a9', details: 'open', dock: 'line' }, map: {}, act: [{ scroll: 'top' }] } },
-  { id: '9.2', part: 'Markers', sid: 'm-next', owner: 'band', pending: true, title: 'n, or Next on the topic band, outlines the next unseen item',
+  { id: '9.2', part: 'Markers', sid: 'm-next', owner: 'band', pending: false, title: 'n, or Next on the topic band, outlines the next unseen item',
     app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ key: 'n' }, { key: 'n' }, { key: 'n' }, { key: 'n' }, { key: 'n' }] } },
-  { id: '9.9', part: 'Markers', sid: 'm-graph', owner: 'graph', pending: true, title: 'On Graph cards: the diamond alone, same shapes',
+  { id: '9.9', part: 'Markers', sid: 'm-graph', owner: 'graph', pending: false, title: 'On Graph cards: the diamond alone, same shapes',
     app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: marked('base'), act: [{ click: 'Graph' }, { click: 'Fold Details' }] } },
-  { id: '10.12', part: 'R4-Dialogs', sid: 'd-tmenu', owner: 'band', pending: true, title: 'The topic’s … menu',
+  { id: '10.12', part: 'R4-Dialogs', sid: 'd-tmenu', owner: 'band', pending: false, title: 'The topic’s … menu',
     // The board's R4 file draws this menu over the same marked Map as 5.1.
-    app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ click: 'Topic actions' }] } }
+    app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ click: 'More actions for' }] } }
 ];
 
 /** The Details column's left edge (its 1px border and the column's ground): where it sits, not what it says (Details' content is release 3). */
@@ -402,8 +403,18 @@ const mapRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
     ...box('first row', [0, 82, 960, 66], [0, 102, 586, 66], MAP)]
 };
 
+/**
+ * (b) A data difference, left out of the topic band regions: the band's counts line ("5 open · 16 closed" on the board, "8 open · 13 closed" in the
+ * app: the app counts the three findings to ack as open where the board counts them closed, the world's ack modelling) and the Changes opener
+ * on it, whose x moves with those counts. The band regions hold the title line only (its chevron, name, buttons); the counts line and the opener
+ * go to the side-by-side PNGs. The title line is 30px from the band's top edge.
+ */
+const BAND_TITLE_HEIGHT = 30;
+const titleLineOnly = (region: FrameRegion): FrameRegion => region.name.startsWith('topic band') && region.rect[3] > BAND_TITLE_HEIGHT
+  ? { ...region, rect: [region.rect[0], region.rect[1], region.rect[2], BAND_TITLE_HEIGHT] } : region;
+
 export const finalStates: readonly FinalState[] = [...stateList.map(state => regionsById[state.id] ? { ...state, regions: regionsById[state.id]! } : state),
-  ...mapStateList.map(state => ({ ...state, regions: mapRegionsById[state.id]! }))];
+  ...mapStateList.map(state => ({ ...state, regions: mapRegionsById[state.id]!.map(titleLineOnly) }))];
 
 export const finalIds: readonly string[] = finalStates.map(state => state.id);
 
