@@ -275,3 +275,50 @@ test('the Map holds at the bottom: an owner scroll trims the spacer and moves th
   await expect.poll(async () => (await extent()).blank).toBe(0);
   expect((await extent()).height).toBe(kept.height - kept.blank);
 }));
+
+// A row taller than the window, clipped at the top, is the only row on screen: it is the reading row (the next row starts
+// below the window), so the agent writing more on it never slides what the owner reads.
+test('the Map holds when a tall clipped row grows while it is the only row on screen', ({ page }) => served(page, async () => {
+  await page.setViewportSize({ width: 1000, height: 460 });
+  await goTo(page, 'top');
+  await settle(page);
+  await row(page, '1').getByRole('button', { name: 'Show more' }).click();
+  await expect(row(page, '1').getByRole('button', { name: 'Show less' })).toHaveCount(1);
+  await row(page, '1').evaluate(element => {
+    const box = element.closest('.tree-scroll')!;
+    box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top + 60;
+  });
+  await settle(page);
+  const clipped = await row(page, '1').evaluate(element => {
+    const box = element.closest('.tree-scroll')!.getBoundingClientRect(), rect = element.getBoundingClientRect();
+    return rect.top < box.top && rect.bottom > box.bottom;
+  });
+  expect(clipped, '1 is clipped at the top and runs past the window').toBe(true);
+  await expect(row(page, '1')).not.toHaveAttribute('aria-selected', 'true');
+  const y = (await windowTop(page, '1'))!;
+  await agent(page, 'write:1');
+  await expect(row(page, '1')).toContainText('More line 6');
+  await settle(page);
+  await expect.poll(async () => Math.abs((await windowTop(page, '1'))! - y), '1 keeps its window place').toBeLessThanOrEqual(3);
+}));
+
+// A short Map (its rows end above the window's bottom) still holds growth above the reading row and a scroller move:
+// a bottom spacer makes the scroll room, and no more than that, so no blank band can be scrolled to.
+const stale = (page: Page) => page.evaluate(() => (window as unknown as { treeLayout: { stale(): void } }).treeLayout.stale());
+const shortMap: readonly (readonly [name: string, change: (page: Page) => Promise<void>, done: (page: Page) => Promise<void>])[] = [
+  ['a row is added above', page => agent(page, 'add-top'), page => expect(row(page, '0')).toHaveCount(1)],
+  ['a notice opens above', stale, page => expect(page.getByText('Showing last valid data')).toBeVisible()],
+];
+for (const [name, change, done] of shortMap) test(`the Map holds on a short Map when ${name}`, ({ page }) => served(page, async () => {
+  await page.setViewportSize({ width: 1000, height: 4400 });
+  await goTo(page, 'top');
+  await settle(page);
+  const short = await scroller(page).evaluate(box => box.getBoundingClientRect().bottom - box.querySelector('.tree-rows')!.getBoundingClientRect().bottom);
+  expect(short, 'the rows end well above the window\'s bottom').toBeGreaterThan(300);
+  const read = await readingRow(page), y = (await windowTop(page, read.key))!;
+  await change(page);
+  await done(page);
+  await settle(page);
+  await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - y), `${read.key} keeps its window place`).toBeLessThanOrEqual(3);
+  expect(await scroller(page).evaluate(box => box.scrollHeight - box.clientHeight - box.scrollTop), 'no spare room below').toBeLessThan(1);
+}));

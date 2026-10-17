@@ -768,10 +768,20 @@ export function TreeView(props: TreeViewProps) {
     for (let pass = 0; pass < 3; pass++) {
       const delta = element.getBoundingClientRect().top - readingTop() - before.offset + box.getBoundingClientRect().top - before.boxTop;
       if (Math.abs(delta) < 1) return;
-      const room = box.scrollHeight - box.clientHeight - box.scrollTop;
-      if (delta > room && box.clientHeight > 0) setSpacer(box, spacer.current + delta - room);
+      const short = box.scrollTop + delta + box.clientHeight - scrollEnd(box);
+      if (short > 0 && box.clientHeight > 0) setSpacer(box, spacer.current + short);
       box.scrollTop += delta;
     }
+  };
+  /**
+   * The scroll extent the rows themselves give, spacer included. A short Map (its rows end above the window's bottom)
+   * reports a scroll height clamped to its own height, so there it is measured from where the rows end.
+   */
+  const scrollEnd = (box: HTMLDivElement) => {
+    const rows = box.querySelector('.tree-rows');
+    if (box.scrollHeight > box.clientHeight + 0.5 || !rows) return box.scrollHeight;
+    return rows.getBoundingClientRect().bottom - box.getBoundingClientRect().top - box.clientTop + box.scrollTop
+      + (Number.parseFloat(getComputedStyle(box).paddingBottom) || 0);
   };
   const setSpacer = (box: HTMLDivElement, height: number) => {
     const next = Math.max(0, Math.ceil(height)), rows = box.querySelector<HTMLElement>('.tree-rows');
@@ -781,7 +791,7 @@ export function TreeView(props: TreeViewProps) {
   };
   /** Keeps only the part of the bottom spacer still on screen, so trimming never moves the view; growing rows use it up. */
   const trimSpacer = (box: HTMLDivElement) => {
-    if (spacer.current) setSpacer(box, Math.min(spacer.current, box.scrollTop + box.clientHeight - (box.scrollHeight - spacer.current)));
+    if (spacer.current) setSpacer(box, Math.min(spacer.current, box.scrollTop + box.clientHeight - (scrollEnd(box) - spacer.current)));
   };
   /**
    * The held row, or when it went (filtered out, hidden or removed), the nearest surviving row below it, else above it.
@@ -835,8 +845,10 @@ export function TreeView(props: TreeViewProps) {
     // The reading row: the selected row while any of it is on screen below the band, else the first row whole below the
     // band (the clipped predecessor only when nothing else starts on screen).
     const selectedShown = panelKey && panelRect && panelRect.bottom > top + READING_EDGE_CLEARANCE && panelRect.top < visibleBottom(box) ? panelKey : null;
-    const whole = list[low + (firstTop !== undefined && firstTop >= top - READING_EDGE_CLEARANCE ? 0 : 1)]?.key;
-    const reading = selectedShown ?? (whole && elements.current.has(whole) ? whole : key);
+    const candidate = list[low + (firstTop !== undefined && firstTop >= top - READING_EDGE_CLEARANCE ? 0 : 1)]?.key;
+    const candidateTop = candidate ? elements.current.get(candidate)?.getBoundingClientRect().top : undefined;
+    const whole = candidateTop !== undefined && candidateTop < visibleBottom(box) ? candidate : undefined;
+    const reading = selectedShown ?? whole ?? key;
     // A deliberate reveal holds its own row through detail-width and preview-clamp changes.
     // The previous row may still peek out below the sticky header's eight-pixel margin.
     if (revealedAnchor.current && !elements.current.has(revealedAnchor.current.key)) revealedAnchor.current = null;
@@ -855,9 +867,10 @@ export function TreeView(props: TreeViewProps) {
       boxTop: box.getBoundingClientRect().top, scrollTop: box.scrollTop, sessionId: latest.current.session?.id, rows: latest.current.rows, offsets } : null;
     // Reading holds the first whole row, but breadcrumb names belong to the first complete
     // row below the pinned topic, which also ends on screen.
-    const completeKey = list[low + (first && first.getBoundingClientRect().top >= top ? 0 : 1)]?.key;
+    // Fractional row heights leave a row placed at the band a fraction under it: half a pixel still counts as whole.
+    const completeKey = list[low + (firstTop !== undefined && firstTop >= top - 0.5 ? 0 : 1)]?.key;
     const complete = completeKey ? elements.current.get(completeKey)?.getBoundingClientRect() : undefined;
-    const breadcrumbKey = complete && complete.top >= top && complete.bottom <= Math.min(visibleBottom(box), window.innerHeight)
+    const breadcrumbKey = complete && complete.top >= top - 0.5 && complete.bottom <= Math.min(visibleBottom(box), window.innerHeight)
       ? completeKey : null;
     const currentSession = latest.current.session;
     const next = breadcrumbKey && currentSession ? breadcrumbItems(currentSession, breadcrumbKey).filter(id => {

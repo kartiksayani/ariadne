@@ -87,8 +87,15 @@ class TreeLayoutTransport extends AppTransport {
     if (verb === 'leave' && id) { items[id]!.status = 'in_progress'; ++items[id]!.revision; }
     if (verb === 'grow' && id) { items[id]!.question = 'A longer title the agent rewrote, wrapping over a few lines of the Map. '.repeat(4); ++items[id]!.revision; }
     if (verb === 'remove' && id) { items[id]!.removed_at = session.updated_at; ++items[id]!.revision; }
+    // The agent writes more on a row: its result runs six lines longer.
+    if (verb === 'write' && id) { items[id]!.outcome += '\n' + Array.from({ length: 6 }, (_, index) => `More line ${index + 1}`).join('\n'); ++items[id]!.revision; }
     ++session.revision;
     this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+  }
+  /** A newer revision is announced but the read still returns this one: the "out of date" notice opens above the Map. */
+  stale() {
+    const session = this.sessions.get(route.session_id)!;
+    this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision + 1 });
   }
   /** A saved status filter lands, as the desktop's other window or a restore writes it. */
   filter(statuses: string[]) {
