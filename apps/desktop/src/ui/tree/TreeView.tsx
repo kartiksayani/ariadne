@@ -272,8 +272,7 @@ export function TreeView(props: TreeViewProps) {
     const next = matches[(matchIndex + by + matches.length) % matches.length]!;
     setSearchCurrent(next); setStepped(value => value + 1);
     searchScroll.current = next.id;
-    // TODO(peek): closeAll() once the peek's new API lands; close() is today's equivalent.
-    peek?.close();
+    peek?.closeAll();
   };
   const showMatches = () => {
     const reveal = model?.search.reveal;
@@ -369,6 +368,7 @@ export function TreeView(props: TreeViewProps) {
   const clickedReveal = useRef<RevealedItem | null>(null);
   const select = (id: string, fromRow = true, opening = false) => {
     if (fromRow && viewBusy && !navigation.isWritingRecent()) return false;
+    if (fromRow) peek?.closeAll();
     releaseReveal();
     const call = ++request.current;
     focusRequested.current = null;
@@ -555,7 +555,7 @@ export function TreeView(props: TreeViewProps) {
     }),
     peek: onRow((row, _index, _intent, event) => {
       if (row.kind !== 'item' || !peek) return false;
-      if (!event.repeat) peek.open({ ...route, item_id: row.item.id }, event.currentTarget);
+      if (!event.repeat) peek.toggle({ ...route, item_id: row.item.id }, event.currentTarget);
       return true;
     }),
     answer: onRow((row, _index, _intent, event) => {

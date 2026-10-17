@@ -7,7 +7,7 @@ import { OpenSessions } from '../../../apps/desktop/src/data/session-store';
 import { RegisteredRoutes } from '../../../apps/desktop/src/data/routes';
 import { createDesktopService, type DesktopTransport } from '../../../apps/desktop/src/data/service';
 import { GraphView } from '../../../apps/desktop/src/ui/graph/GraphView';
-import { MapSearchContext, NO_SEARCH, type MapSearch } from '../../../apps/desktop/src/ui/graph/search';
+import { MapSearchContext, NO_SEARCH, type MapSearch } from '../../../apps/desktop/src/ui/tree/mapSearch';
 
 // The Graph's "never moves on its own" fixture: eight top items of ten children each, one deeper chain under 4.1,
 // beside a Details column whose width the spec sets. `window.__anchor` fires each trigger; only the transport is doubled.

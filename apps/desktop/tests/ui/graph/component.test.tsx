@@ -9,7 +9,7 @@ import { OpenSessions, immutable } from '../../../src/data/session-store';
 import { RegisteredRoutes, type RevealedItem } from '../../../src/data/routes';
 import { createDesktopService, type DesktopTransport } from '../../../src/data/service';
 import { GraphView } from '../../../src/ui/graph/GraphView';
-import { MapSearchContext, NO_SEARCH, type MapSearch } from '../../../src/ui/graph/search';
+import { MapSearchContext, NO_SEARCH, type MapSearch } from '../../../src/ui/tree/mapSearch';
 import { PeekContext, type PeekNavigation } from '../../../src/ui/peek/context';
 import { GraphFilterSlot } from '../../../src/ui/tree/FilterBar';
 import type { ChangeMarker } from '../../../src/ui/tree/model';
