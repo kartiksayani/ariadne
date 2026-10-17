@@ -88,6 +88,37 @@ describe('the Recent popover from the top bar', () => {
     expect(transport.preferences.seen![0]!.items).toEqual([]);
   });
 
+  it('with the conversation in the bigger view, ⌘E opens it and a pick opens that item', async () => {
+    const transport = await openSession(transport => {
+      Object.assign(viewOf(transport), { tab_open: true, selected_item_id: '4' });
+      viewOf(transport).recent_items = [{ item_id: '2', action: 'viewed', visited_at: '2026-10-13T11:00:00.000Z' }];
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open the conversation in a bigger view' }));
+    const bigger = await screen.findByRole('region', { name: 'Item conversation' });
+    fireEvent.keyDown(bigger, { key: 'e', metaKey: true });
+    const viewed = within(await screen.findByRole('dialog', { name: 'Recent items' })).getByRole('region', { name: 'Viewed' });
+    // Opening item 4 recorded it as viewed just now; item 2 was viewed days ago, so it is the last entry.
+    fireEvent.click(within(viewed).getAllByRole('button', { name: /viewed/ }).at(-1)!);
+    expect(screen.queryByRole('dialog', { name: 'Recent items' })).toBeNull();
+    await waitFor(() => expect(viewOf(transport).selected_item_id).toBe('2'));
+    await waitFor(() => expect(screen.getByRole('article').getAttribute('data-detail-item-id')).toBe('2'));
+  });
+
+  it('gives its first Escape to an open peek and closes on the next', async () => {
+    await openSession();
+    fireEvent.click(recentButton());
+    const closed = vi.fn();
+    const peek = document.body.appendChild(document.createElement('div'));
+    peek.className = 'item-peek';
+    const close = peek.appendChild(document.createElement('button'));
+    close.setAttribute('aria-label', 'Close peek'); close.onclick = () => { closed(); peek.remove(); };
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(popover()).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Recent items' })).toBeNull();
+  });
+
   it('closes on a press outside it', async () => {
     await openSession();
     fireEvent.click(recentButton());

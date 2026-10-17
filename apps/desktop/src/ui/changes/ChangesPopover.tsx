@@ -96,7 +96,7 @@ export function ChangesPopover({ session, topicId, route, navigation, data, undo
     </div>}
   </section>;
 
-  return <div className="changes-body">
+  return <div className="changes-body" data-testid="changes-body">
     {longAway && <section className="changes-section changes-away" aria-label="While you were away">
       <p>You were away since {weekdayName(summary.baseline!)} {clockTime(summary.baseline!)}. A lot moved in this topic{quiet && quiet.count * 2 >= summary.changeCount ? ', most of it progress notes' : ''}.
         {needs ? ` ${needs.count === 1 ? 'One thing needs' : `${needs.count} things need`} you.` : ''}</p>

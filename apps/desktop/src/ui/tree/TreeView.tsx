@@ -52,7 +52,6 @@ import { isViewConflict } from '../shared/conflictNotice';
 import { TreeFonts, useTreeFonts } from './fonts';
 import { branchItems, breadcrumbItems, focusedRows } from './gettingAround';
 import { usePeek } from '../peek/Peek';
-import { ChangesOpener } from '../changes/ChangesOpener';
 import { navigationVisits } from '../navigation/visits';
 import { AckAll } from '../navigation/AckAll';
 import { ackAllItems } from '../navigation/ackAllController';
@@ -1043,9 +1042,6 @@ export function TreeView(props: TreeViewProps) {
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
         reply={replying === row.topic.id && !archivedMode ? <TopicReply drafts={drafts} store={store} actions={actions} topicId={row.topic.id}
           agent={bar?.agent ?? 'the agent'} onClose={() => { setReplying(null); focusRow(row.key); }} /> : null} fix={fixOf(row)} />
-      {/* Until the band's changes slot lands, the opener sits in a line of its own that is always there, so it appearing or
-          clearing never moves the Map. The popover it opens takes no room in the Map. */}
-      {session && <div className="tree-changes-slot"><ChangesOpener session={session} topicId={row.topic.id} seen={seen} navigation={navigation} onOpenItem={id => select(id, false)} /></div>}
       {items.map(row => row.kind === 'hidden'
         ? <Strip key={row.key} variant="hidden" row={stripOf(row)} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleHiddenGroup} />
         : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={focusDisabled} closedReason={session ? sessionAnswerBlocked(session) : undefined}
@@ -1138,7 +1134,7 @@ export function TreeView(props: TreeViewProps) {
           {index > 0 && <span aria-hidden="true"> › </span>}<button type="button" title={session?.items[id]?.question} onClick={() => select(id, false)}>{names.get(id)}</button>
         </span>)}{focusExitMissing && unfocusCopy}</nav>
       </div>
-      <div ref={scroller} className="tree-scroll" onScroll={() => {
+      <div ref={scroller} className="tree-scroll" data-testid="map-scroll" onScroll={() => {
         // At the held scrollTop this can be our own correction's delayed event;
         // remembering restores any intervening reflow before capturing again.
         if (held.current?.scrollTop !== scroller.current?.scrollTop) revealedAnchor.current = null;

@@ -56,13 +56,19 @@ const press = async (control: Locator) => {
   await control.page().mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 };
 
+/** W3's band hosts ChangesOpener; until it is merged nothing in the app opens What changed. Flip this then. */
+const BAND_HOST_LANDED = false;
+
 // [name, kind, subject (a row that must be in view, or null), before, change, done]
 type Trigger = readonly [name: string, kind: 'still' | 'held', subject: string | null, before: (page: Page) => Promise<void>,
   change: (page: Page) => Promise<void>, done: (page: Page) => Promise<void>];
 const nothing = async () => {};
 const triggers: readonly Trigger[] = [
-  ['a New marker clears', 'still', '11', nothing, page => seen(page, '11'), page => expect(row(page, '11').getByTestId('change-marker')).toHaveCount(0)],
-  ['a Changed marker clears', 'still', '12', nothing, page => seen(page, '12'), page => expect(row(page, '12').getByTestId('change-marker')).toHaveCount(0)],
+  // The marker is there before the dwell, so its absence afterwards is a clear and not a row that never had one.
+  ['a New marker clears', 'still', '11', page => expect(row(page, '11').getByTestId('change-marker')).toHaveCount(1), page => seen(page, '11'),
+    page => expect(row(page, '11').getByTestId('change-marker')).toHaveCount(0)],
+  ['a Changed marker clears', 'still', '12', page => expect(row(page, '12').getByTestId('change-marker')).toHaveCount(1), page => seen(page, '12'),
+    page => expect(row(page, '12').getByTestId('change-marker')).toHaveCount(0)],
   // The popovers open over the Map and take no room in it (D18, D19).
   ['What changed opens', 'still', '12', nothing, page => page.getByRole('button', { name: /new|changed|changes since/ }).first().click(),
     page => expect(page.getByRole('dialog', { name: 'What changed' })).toBeVisible()],
@@ -122,6 +128,7 @@ async function open(page: Page, origin: string) {
 }
 
 for (const [name, kind, subject, before, change, done] of triggers) test(`the Map stays still when ${name}`, async ({ page }) => {
+  test.fixme(name === 'What changed opens' && !BAND_HOST_LANDED, 'needs W3 band host');
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
     logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
   try {

@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import type { PreferencesSnapshot } from '../../../src/generated/core';
 import { ReadingLane, useReadingSeen } from '../../../src/state/preferences/reading';
-import { useSeenDwell } from '../../../src/ui/changes/useSeenDwell';
+import { origin, useSeenDwell } from '../../../src/ui/changes/useSeenDwell';
 import { caughtUpTopics } from '../../../src/ui/changes/useCaughtUp';
 import { changesFixture } from './fixture';
 
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 describe('shared reading observations', () => {
   it('observes an open capture after one second and cancels closing or revision changes', () => {
     vi.useFakeTimers(); const observe = vi.fn();
@@ -42,6 +42,33 @@ describe('shared reading observations', () => {
       renderHook(() => useSeenDwell('item', 1, observe));
       act(() => vi.advanceTimersByTime(5000));
       setWindow({ visible: true, focused: true });
+      act(() => vi.advanceTimersByTime(999)); expect(observe).not.toHaveBeenCalled();
+      act(() => vi.advanceTimersByTime(1)); expect(observe).toHaveBeenCalledTimes(1);
+    });
+    it('clears after a real click plus a second when the window never fired a focus event', () => {
+      vi.useFakeTimers(); const observe = vi.fn();
+      // The webview is in front but has reported no focus yet: hasFocus() is false and no `focus` event ever comes.
+      document.hasFocus = () => false;
+      renderHook(() => useSeenDwell('item', 1, observe));
+      act(() => vi.advanceTimersByTime(5000)); expect(observe).not.toHaveBeenCalled();
+      // A script's event is not the owner.
+      act(() => { document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
+      act(() => vi.advanceTimersByTime(5000)); expect(observe).not.toHaveBeenCalled();
+      vi.spyOn(origin, 'trusted').mockReturnValue(true);
+      act(() => { document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
+      act(() => vi.advanceTimersByTime(999)); expect(observe).not.toHaveBeenCalled();
+      act(() => vi.advanceTimersByTime(1)); expect(observe).toHaveBeenCalledTimes(1);
+    });
+    it('a real key also counts, and a later blur stops the dwell until focus or another press', () => {
+      vi.useFakeTimers(); const observe = vi.fn();
+      document.hasFocus = () => false;
+      renderHook(() => useSeenDwell('item', 1, observe));
+      vi.spyOn(origin, 'trusted').mockReturnValue(true);
+      act(() => { document.body.dispatchEvent(new Event('keydown', { bubbles: true })); });
+      act(() => vi.advanceTimersByTime(900));
+      act(() => { window.dispatchEvent(new Event('blur')); });
+      act(() => vi.advanceTimersByTime(5000)); expect(observe).not.toHaveBeenCalled();
+      act(() => { window.dispatchEvent(new Event('focus')); });
       act(() => vi.advanceTimersByTime(999)); expect(observe).not.toHaveBeenCalled();
       act(() => vi.advanceTimersByTime(1)); expect(observe).toHaveBeenCalledTimes(1);
     });

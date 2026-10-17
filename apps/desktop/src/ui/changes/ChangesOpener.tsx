@@ -5,6 +5,7 @@ import type { SessionSeen } from '../../generated/core';
 import type { Session } from '../../generated/domain/models';
 import type { NavigationStore } from '../../state/navigation/store';
 import { unseenTopicRows } from '../../selectors/changes/unseen';
+import { closePeekFirst } from '../parts/parts';
 import { ChangesPopover } from './ChangesPopover';
 import { clockTime, weekdayName } from './clock';
 import './changes.css';
@@ -66,10 +67,11 @@ export function ChangesOpener({ session, topicId, seen, navigation, onOpenItem }
       const target = event.target;
       if (target instanceof Node && !panel.current?.contains(target) && target.contains(button.current)) setOpen(false);
     };
-    // Escape closes it from wherever focus is, unless a peek card is open over it: that card takes the first Escape.
+    // Escape closes it from wherever focus is; a peek card open over it takes the first Escape (and is closed here, as the conversation does).
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || document.querySelector('.item-peek')) return;
-      event.preventDefault(); event.stopPropagation(); close(true);
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      event.preventDefault(); event.stopPropagation();
+      if (!closePeekFirst()) close(true);
     };
     window.addEventListener('pointerdown', outside);
     window.addEventListener('keydown', escape, true);
@@ -98,8 +100,8 @@ export function ChangesOpener({ session, topicId, seen, navigation, onOpenItem }
     {canUndo && <button type="button" className="change-link changes-undo" onClick={() => navigation.reading.undo(undoToken!)}>Undo</button>}
     {open && createPortal(<div ref={panel} id={id} role="dialog" aria-label="What changed" className="changes-popover" tabIndex={-1} style={placement}
       onKeyDown={event => {
-        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); }
-        else if (event.key !== 'F6') event.stopPropagation();
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (!closePeekFirst()) close(true); }
+        else if (event.key !== 'F6' && !event.metaKey && !event.ctrlKey) event.stopPropagation();
       }}>
       <header className="changes-head">
         <i className="ph ph-list" aria-hidden="true" />

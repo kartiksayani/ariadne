@@ -64,10 +64,46 @@ describe('ChangesOpener', () => {
     fireEvent.pointerDown(document.body);
     expect(screen.queryByRole('dialog', { name: 'What changed' })).toBeNull();
   });
+  it('gives its first Escape to an open peek by closing it, then closes on the next', async () => {
+    await setupChanges(2, 1, 1);
+    fireEvent.click(screen.getByRole('button', { name: /1 new/ }));
+    const onClose = vi.fn();
+    const peek = document.body.appendChild(document.createElement('div'));
+    peek.className = 'item-peek';
+    const close = peek.appendChild(document.createElement('button'));
+    close.setAttribute('aria-label', 'Close peek'); close.onclick = () => { onClose(); peek.remove(); };
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('dialog', { name: 'What changed' })).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'What changed' })).toBeNull();
+  });
+  it('still closes on Escape when a peek is in the page but offers no way to close it', async () => {
+    await setupChanges(2, 1, 1);
+    fireEvent.click(screen.getByRole('button', { name: /1 new/ }));
+    const peek = document.body.appendChild(document.createElement('div'));
+    peek.className = 'item-peek';
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'What changed' })).toBeNull();
+    peek.remove();
+  });
+  it('lets ⌘ and Ctrl shortcuts through to the app while focus is inside it', async () => {
+    await setupChanges(2, 1, 1);
+    fireEvent.click(screen.getByRole('button', { name: /1 new/ }));
+    const seen: string[] = [];
+    const listener = (event: KeyboardEvent) => seen.push(`${event.metaKey ? 'meta' : event.ctrlKey ? 'ctrl' : 'plain'}+${event.key}`);
+    document.body.addEventListener('keydown', listener);
+    const popover = screen.getByRole('dialog', { name: 'What changed' });
+    fireEvent.keyDown(popover, { key: 'e', metaKey: true });
+    fireEvent.keyDown(popover, { key: 'k', ctrlKey: true });
+    fireEvent.keyDown(popover, { key: 'j' });
+    document.body.removeEventListener('keydown', listener);
+    expect(seen).toEqual(['meta+e', 'ctrl+k']);
+  });
   it('closes when the Map scrolls but not when its own list does', async () => {
     await setupChanges(2, 1, 1);
     fireEvent.click(screen.getByRole('button', { name: /1 new/ }));
-    fireEvent.scroll(screen.getByRole('dialog', { name: 'What changed' }).querySelector('.changes-body')!);
+    fireEvent.scroll(within(screen.getByRole('dialog', { name: 'What changed' })).getByTestId('changes-body'));
     expect(screen.getByRole('dialog', { name: 'What changed' })).toBeTruthy();
     fireEvent.scroll(document.body.firstElementChild!);
     expect(screen.queryByRole('dialog', { name: 'What changed' })).toBeNull();

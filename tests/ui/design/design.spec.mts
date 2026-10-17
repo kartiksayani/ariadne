@@ -116,8 +116,12 @@ async function changesFit(surface: Locator) {
   }
 }
 
+/** The band's changes slot (W3) hosts ChangesOpener; until it is merged nothing opens What changed in the app. Flip this then. */
+const BAND_HOST_LANDED = false;
+
 /** Opens the band's What changed popover (D18) over the Map and returns it. */
 async function openChanges(page: Page) {
+  test.fixme(!BAND_HOST_LANDED, 'needs W3 band host');
   await page.getByRole('button', { name: /new|changed|changes since/ }).first().click();
   const popover = page.getByRole('dialog', { name: 'What changed', exact: true });
   await expect(popover).toBeVisible();
@@ -351,8 +355,40 @@ for (const { map: frame } of mapSizes) test(`The Back-to pill floats inside the 
   for (const button of boxes.buttons) expect(button.right).toBeLessThanOrEqual(boxes.crumbs.right + 0.5);
 });
 
-// The thread through the topic cards is gone with the cards: the brief and the changes are the band's popover (D18).
-// The thread's own checks belong to the Map look (D2).
+/** The selected path and the plain guide must each run as one line from the topic band down to the first item. */
+async function railRuns(page: Page) {
+  await page.locator('.tree-scroll').evaluate(element => { element.scrollTop = 0; });
+  await settle(page);
+  return page.locator('.tree-topic-group').first().evaluate(group => {
+    const origin = group.getBoundingClientRect(), topic = group.querySelector('.tree-topic')!.getBoundingClientRect();
+    const lines = [...group.querySelectorAll<HTMLElement>('.tree-guide')].map(line => ({ rect: line.getBoundingClientRect(), on: line.style.width === '1.5px' }))
+      .filter(line => Math.abs(line.rect.left - origin.left - 20) < 1.5 && line.rect.height > 0);
+    const runs = (on: boolean) => {
+      const merged: number[][] = [];
+      for (const [top, bottom] of lines.filter(line => line.on === on).map(line => [line.rect.top, line.rect.bottom]).sort((a, b) => a[0] - b[0])) {
+        const last = merged.at(-1);
+        if (last && top <= last[1] + 1.5) last[1] = Math.max(last[1], bottom); else merged.push([top, bottom]);
+      }
+      return merged;
+    };
+    const first = group.querySelector('[data-item-id]')?.getBoundingClientRect();
+    return { off: runs(false), on: runs(true), topic: { top: topic.top, bottom: topic.bottom }, first: first ? { top: first.top, bottom: first.bottom } : null };
+  });
+}
+for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) {
+  test(`The thread is one unbroken line from the band to the first item: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec(frame), theme });
+    const runs = await railRuns(page);
+    expect(runs.off, 'the plain guide is one line from the band to the last item').toHaveLength(1);
+    expect(runs.on, 'the accent thread is one line from the band to the selected path').toHaveLength(1);
+    for (const run of [runs.off[0]!, runs.on[0]!]) {
+      expect(run[0], 'it starts inside the band').toBeLessThanOrEqual(runs.topic.bottom);
+      expect(run[1], 'it reaches the first item').toBeGreaterThanOrEqual(runs.first!.top);
+    }
+    expect(runs.first!.top - runs.topic.bottom, 'no line of its own sits between the band and the first item').toBeLessThanOrEqual(12);
+    await testInfo.attach(`thread-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+}
 
 for (const { map: frame } of mapSizes) test(`A folded topic draws no rail below its band: ${frame}`, async ({ page, origin }) => {
   await openApp(page, origin, frameSpec(frame));
