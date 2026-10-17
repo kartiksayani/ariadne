@@ -330,7 +330,8 @@ describe('tree remove triggers', () => {
     // A topic has no ⌫ key; its band's Remove asks.
     fireEvent.keyDown(topic, { key: 'Backspace' });
     expect(targets).toEqual([itemTarget('1.1'), itemTarget('2'), itemTarget('4')]);
-    fireEvent.click(within(topic).getByRole('button', { name: 'Remove' }));
+    fireEvent.click(within(topic).getByRole('button', { name: /^More actions for/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Remove topic/ }));
     expect(targets).toEqual([itemTarget('1.1'), itemTarget('2'), itemTarget('4'), { kind: 'topic', session: route, topic_id: topicId }]);
   });
 
