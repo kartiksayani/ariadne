@@ -47,7 +47,6 @@ import { ContinueTopicHost } from './ui/dialogs/ContinueTopicDialog';
 import type { RemoveHandler, RemoveSubject, RemoveTarget } from './ui/dialogs/remove';
 import { RemoveDialog } from './ui/dialogs/RemoveDialog';
 import { notices } from './ui/pages/notices';
-import { isViewConflict } from './ui/shared/conflictNotice';
 import { RemovalContext, RemovalQueue } from './ui/remove/queue';
 import { nextSelection, removeSubject, subtree, targetSession } from './ui/remove/model';
 import { themeToggle } from './ui/shell/model';
@@ -55,7 +54,7 @@ import { useAppliedTheme } from './ui/shell/theme';
 import { useWindowKeys } from './ui/shell/windowKeys';
 import { nextTextSize, textSize, useAppliedTextSize, type TextSize } from './ui/shell/textScale';
 import { ItemHistoryContext, useItemHistory, type HistoryDirection } from './ui/shell/itemHistory';
-import { acknowledge, ackBlocked, ackFailure, ackTarget } from './ui/shared/ack';
+import { ackHoldFor, ackTarget, attachAckHolds, flushAckHold, stopAckHolds } from './ui/shared/ack';
 import { earlierAgent } from './ui/shared/excerpt';
 import { FileRefs, LinkOpener } from './ui/shared/MarkdownText';
 import { fileOpener, linkOpener, listenForLinkFailures } from './ui/shared/openers';
@@ -199,22 +198,23 @@ function Workspace({ application }: { application: Application }) {
   const [answerJump, setAnswerJump] = useState<{ route: string; itemId: string; messageId: string; token: number } | null>(null);
   const answerJumpSequence = useRef(0);
   const consumeAnswerJump = useCallback((token: number) => setAnswerJump(previous => previous?.token === token ? null : previous), []);
-  const ackRequest = useRef(0);
   const ackNoticeId = useRef<string | null>(null);
   const ackActions = store ? application.actions.forSession(store) : null;
   const ackState = useSyncExternalStore(ackActions?.subscribe ?? noSubscription, ackActions?.getSnapshot ?? noSession, ackActions?.getSnapshot ?? noSession);
   useEffect(() => {
-    ++ackRequest.current;
     if (ackNoticeId.current) notices.dismiss(ackNoticeId.current);
-    return () => {
-      ++ackRequest.current;
-      if (ackNoticeId.current) notices.dismiss(ackNoticeId.current);
-    };
+    return () => { if (ackNoticeId.current) notices.dismiss(ackNoticeId.current); };
   }, [key, selectedId]);
+  // Leaving a session saves its held Acks now (D11). A Tree to Graph switch stays in the session and flushes nothing.
+  const shownSessionId = route?.session_id ?? null, previousSessionId = useRef(shownSessionId);
+  useEffect(() => {
+    const before = previousSessionId.current;
+    previousSessionId.current = shownSessionId;
+    if (before && before !== shownSessionId) void flushAckHold(before);
+  }, [shownSessionId]);
   useEffect(() => {
     const receipt = ackState?.receipt;
     if (receipt && 'data' in receipt && receipt.data.kind === 'item_ack') {
-      ++ackRequest.current;
       const route = ackActions?.session.getSnapshot().route;
       if (route) notices.dismiss(JSON.stringify(['item-ack', route.project_id, route.session_id, receipt.data.item_id]));
     }
@@ -517,22 +517,12 @@ function Workspace({ application }: { application: Application }) {
       if (!session || !item || !ackTarget(session, item)) return false;
       const actions = application.actions.forSession(store);
       if (repeat) return true;
-      const id = JSON.stringify(['item-ack', target.project_id, target.session_id, target.item_id]);
-      ackNoticeId.current = id;
-      const blocked = ackBlocked(actions);
-      if (blocked) {
-        notices.push({ id, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: blocked });
-        return true;
-      }
-      const attempted = ++ackRequest.current;
-      notices.dismiss(id);
-      void acknowledge(actions, item.id, () => attempted !== ackRequest.current).then(saved => {
-        if (saved) navigationVisits.record(target, item.id, 'acked');
-        const error = actions.getSnapshot().error;
-        if (attempted === ackRequest.current && !saved && error && !isViewConflict(error)) notices.push({ id, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: ackFailure(error) });
-      }).catch(error => {
-        if (attempted === ackRequest.current) notices.push({ id, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true, text: ackFailure(error) });
-      });
+      ackNoticeId.current = JSON.stringify(['item-ack', target.project_id, target.session_id, target.item_id]);
+      // The Map's row and Details draw their own "Acked · Undo"; anywhere else (the Graph, a peek) the hold's notice is the Undo.
+      const here = !!route && sameSession(route, target);
+      const inDetails = here && (conversationOpen ? conversation?.itemId : detailOpen && !detailsFolded ? selectedId : null) === item.id;
+      const inRow = here && !graph && !conversationOpen && treeSelectedId === item.id;
+      ackHoldFor(target.session_id, actions).ack(item, { announce: !inDetails && !inRow });
       return true;
     },
     focused: () => {
@@ -677,11 +667,12 @@ export function DesktopApp({ service }: { service: RendererService }) {
     const next: Application = { service, navigation, waiting, removals,
       drafts: new OwnerDraftStore(service, undefined, navigation.preferenceWrites), actions, discovery: new DiscoveryController(service) };
     const detach = removals.attach();
-    const detachAckAll = attachAckAll(service);
+    const detachAckAll = attachAckAll(service), detachAckHolds = attachAckHolds(service);
     const detachLinkFailures = listenForLinkFailures(service);
     setApplication(next);
     // Leaving the app runs the removals still in their window rather than dropping them.
-    return () => { detachLinkFailures(); detach(); detachAckAll(); void removals.flush(); next.discovery.dispose(); next.waiting.stop(); void stopAckAll(service).finally(() => next.navigation.stop()); };
+    return () => { detachLinkFailures(); detach(); detachAckAll(); detachAckHolds(); void removals.flush(); next.discovery.dispose(); next.waiting.stop();
+      void Promise.all([stopAckAll(service), stopAckHolds(service)]).finally(() => next.navigation.stop()); };
   }, [service]);
   // Links in agent text open in the system browser; a failure leaves the app where it is and says so.
   const openLink = useMemo(() => linkOpener(service), [service]);

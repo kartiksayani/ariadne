@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useSyncExternalStore } from 'react';
 import type { Item } from '../../generated/domain/models';
 import { CoreFailure, plainFailure, type RendererService } from '../../data';
 import type { Immutable } from '../../data/session-store';
-import { useSessionActions, type SessionActions } from '../../components/bindings/actions';
+import type { SessionActions } from '../../components/bindings/actions';
 import { ackTarget } from '../../selectors/ack';
 import { notices } from '../pages/notices';
 import { navigationVisits } from '../navigation/visits';
 import { isViewConflict } from './conflictNotice';
+import { shortLabel } from './short';
 import { STATUS, statusKey } from './status';
 
 export { ackTarget } from '../../selectors/ack';
@@ -102,7 +103,7 @@ export function ackLane<T>(actions: SessionActions, task: () => Promise<T>): Pro
 
 export interface AckHold {
   /** Captures the proposal the owner is reading now, shows it held for 6 s, then saves exactly that proposal. */
-  ack(item: Immutable<Item>): void;
+  ack(item: Immutable<Item>, options?: { readonly announce?: boolean }): void;
   /** Cancels a held Ack with no write. Does nothing once the save has started. */
   undo(itemId: string): void;
   /** Saves every held Ack now. Used when the owner leaves the session and when the application closes. */
@@ -135,7 +136,9 @@ class SessionAckHold implements AckHold {
   private refuse(itemId: string, text: string) {
     notices.push({ id: this.noticeId(itemId), icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text });
   }
-  readonly ack = (item: Immutable<Item>) => {
+  /** Where no row or Details shows the held Ack, this notice is the owner's only Undo. */
+  private heldNoticeId(itemId: string) { return JSON.stringify(['ack-held', this.noticeId(itemId)]); }
+  readonly ack = (item: Immutable<Item>, options: { readonly announce?: boolean } = {}) => {
     // A second click on a held or saving item never starts a second Ack.
     if (this.entries.has(item.id)) return;
     const blocked = ackBlocked(this.actions);
@@ -147,6 +150,8 @@ class SessionAckHold implements AckHold {
     if (ackProposal(current) !== ackProposal(item)) { this.refuse(item.id, new AckChanged().message); return; }
     notices.dismiss(this.noticeId(item.id));
     this.entries.set(item.id, { reviewed: item, saving: false, timer: setTimeout(() => { void this.save(item.id); }, ACK_HOLD_MS) });
+    if (options.announce) notices.push({ id: this.heldNoticeId(item.id), icon: 'ph ph-check', dismissible: false, text: `Acked “${shortLabel(item)}”`,
+      actions: [{ label: 'Undo', run: () => { this.undo(item.id); } }] });
     this.publish();
   };
   readonly undo = (itemId: string) => {
@@ -154,6 +159,7 @@ class SessionAckHold implements AckHold {
     if (!entry || entry.saving) return;
     clearTimeout(entry.timer);
     this.entries.delete(itemId);
+    notices.dismiss(this.heldNoticeId(itemId));
     this.publish();
   };
   readonly flush = (): Promise<void> => {
@@ -164,6 +170,7 @@ class SessionAckHold implements AckHold {
     const entry = this.entries.get(id);
     if (!entry || entry.saving) return Promise.resolve();
     clearTimeout(entry.timer); entry.timer = undefined; entry.saving = true;
+    notices.dismiss(this.heldNoticeId(id));
     this.publish();
     const run: Promise<void> = ackLane(this.actions, () => this.write(id, entry.reviewed)).finally(() => {
       this.entries.delete(id); this.running.delete(run); this.publish();
@@ -222,40 +229,4 @@ export function attachAckHolds(service: RendererService, target: Window = window
   target.addEventListener('pagehide', flush);
   target.addEventListener('beforeunload', flush);
   return () => { target.removeEventListener('pagehide', flush); target.removeEventListener('beforeunload', flush); };
-}
-
-export function useAck(actions: SessionActions, selectedId: string | null) {
-  const state = useSessionActions(actions);
-  const [error, setError] = useState<string | null>(null);
-  const request = useRef(0);
-  const [loading, setLoading] = useState(false);
-  useEffect(() => {
-    ++request.current;
-    setError(null);
-    setLoading(false);
-    return () => { ++request.current; };
-  }, [actions, selectedId]);
-  useEffect(() => {
-    if (state.receipt && 'data' in state.receipt && state.receipt.data.kind === 'item_ack') setError(null);
-  }, [state.receipt]);
-  return {
-    busy: loading || state.writing || !!state.pending,
-    error,
-    run: async (itemId: string) => {
-      const blocked = ackBlocked(actions);
-      if (blocked) { setError(blocked); return false; }
-      const attempted = ++request.current;
-      setError(null);
-      setLoading(true);
-      try {
-        const saved = await acknowledge(actions, itemId, () => attempted !== request.current);
-        const failure = actions.getSnapshot().error;
-        if (attempted === request.current && !saved && failure) setError(ackFailure(failure));
-        return saved;
-      } catch (failure) {
-        if (attempted === request.current) setError(ackFailure(failure));
-        return false;
-      } finally { if (attempted === request.current) setLoading(false); }
-    },
-  };
 }

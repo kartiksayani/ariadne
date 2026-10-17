@@ -16,11 +16,11 @@ import { plainFailure } from '../../data/plain';
 import type { Immutable } from '../../data';
 import type { Session } from '../../generated/domain/models';
 import { useOwnerDrafts, type DraftEntry, type OwnerDraftStore } from '../../state/drafts/store';
-import { sessionActionsFor } from '../../components/bindings/actions';
+import { sessionActionsFor, useSessionActions } from '../../components/bindings/actions';
 import { PausedNote } from '../../components/bindings/DispatchChip';
 import { useSupervisorHealth } from '../../components/bindings/health';
 import type { OwnerFocusRequest, PendingSubmission } from '../answer/useSubmit';
-import { ackTarget, ackTitle, useAck } from '../shared/ack';
+import { ackHoldFor, ackTarget, ackTitle, useAckHeld } from '../shared/ack';
 import { STATUS } from '../shared/status';
 import { StuckNote } from '../answer/StuckNote';
 import { NotSentLine } from '../answer/NotSentLine';
@@ -31,7 +31,6 @@ import { FileRefProject, fileLinkProps, ItemReference, ItemRefs, LinkOpener, Mar
 import { fileLinkTitle, fileReference, safeHref } from '../shared/markdown';
 import { copyText } from '../shared/clipboard';
 import { notices } from '../pages/notices';
-import { isViewConflict } from '../shared/conflictNotice';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { waitingOnOwner } from '../../selectors/waiting/rows';
 import { closedSessionQuestion, sessionAnswerBlocked } from '../../selectors/sessionClosed';
@@ -294,7 +293,9 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   const presence = session?.active_binding_id ? current.presence[session.active_binding_id] ?? null : null;
   // The session's write barrier, shared with the session bar: Resume, Cancel and Retry go through it.
   const actions = useMemo(() => sessionActionsFor(drafts.service, store), [drafts, store]);
-  const ack = useAck(actions, itemId);
+  // Ack starts a 6 s hold in the session's hold store, which saves it or drops it on Undo; Details shows the Undo here.
+  const ackHold = useMemo(() => ackHoldFor(current.route.session_id, actions), [current.route.session_id, actions]);
+  const ackHeld = useAckHeld(current.route.session_id).has(itemId);
   const noticeKey = JSON.stringify([current.route.project_id, current.route.session_id, itemId]);
   const copyAttempt = useRef(0), copyMounted = useRef(true);
   useEffect(() => {
@@ -302,13 +303,8 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     return () => { copyMounted.current = false; ++copyAttempt.current; };
   }, [noticeKey]);
   const ackNoticeId = JSON.stringify(['item-ack', current.route.project_id, current.route.session_id, itemId]);
-  const actionState = actions.getSnapshot();
-  const ackError = !actionState.pending && isViewConflict(actionState.error) && ack.error === plainFailure(actionState.error) ? null : ack.error;
+  const actionState = useSessionActions(actions);
   useEffect(() => () => notices.dismiss(ackNoticeId), [ackNoticeId]);
-  useEffect(() => {
-    if (!ackError) { notices.dismiss(ackNoticeId); return; }
-    notices.push({ id: ackNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: ackError });
-  }, [ackNoticeId, ackError]);
   const laterNoticeId = `detail-later:${noticeKey}`;
   useEffect(() => () => notices.dismiss(laterNoticeId), [laterNoticeId]);
   useEffect(() => {
@@ -714,10 +710,14 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
       <i className={model.delivery.icon} aria-hidden="true" /><span>{model.delivery.text}</span></div>}
     {!(expanded && showAnswer) && (ackTo || model.open) && <div className="detail-quick-actions">
     {ackTo && <section className="detail-section detail-ack" aria-label="Acknowledge item">
-      <button type="button" className="btn btn-secondary detail-action" title={ackTitle(ackTo, item.status)} aria-label={ackTitle(ackTo, item.status)}
-        disabled={ack.busy} onClick={() => { void ack.run(item.id).then(saved => { if (saved) navigationVisits.record(current.route, item.id, 'acked'); }); }}>
-        <i className="ph ph-check" aria-hidden="true" />{ackTitle(ackTo, item.status)}<span className="detail-key" aria-hidden="true">a</span>
-      </button>
+      {ackHeld
+        ? <button type="button" className="btn btn-secondary detail-action detail-acked" title="Undo Ack" aria-label="Undo Ack" onClick={() => ackHold.undo(item.id)}>
+          <i className="ph ph-check" aria-hidden="true" />Acked · Undo
+        </button>
+        : <button type="button" className="btn btn-secondary detail-action" title={ackTitle(ackTo, item.status)} aria-label={ackTitle(ackTo, item.status)}
+          disabled={actionState.writing || !!actionState.pending} onClick={() => ackHold.ack(item)}>
+          <i className="ph ph-check" aria-hidden="true" />{ackTitle(ackTo, item.status)}<span className="detail-key" aria-hidden="true">a</span>
+        </button>}
     </section>}
     {model.open && <section className="detail-section detail-open" aria-label={model.open.title} title={dockHint ?? model.open.hint}>
       <div className="detail-actions" role="group" aria-label="Item actions">

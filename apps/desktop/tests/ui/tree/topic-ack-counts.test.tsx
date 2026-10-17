@@ -30,24 +30,24 @@ async function topic(types: readonly Item['type'][]) {
     counts: topicCounts(types.map(() => 'open'), types.length) };
   const items = ackAllItems(store.getSnapshot().snapshot!.session, topicId), eligible = items.length;
   const element = <TopicRow row={row} focused actions={[]} prompt={null} remember={() => {}}
-    onFocus={() => {}} onKeyDown={() => {}} onToggle={() => {}} ackAllCount={eligible}
+    onFocus={() => {}} onKeyDown={() => {}} onToggle={() => {}}
     ackAll={<AckAll actions={actions} topicId={topicId} topicName={row.topic.name} items={items} />} />;
   return { element, eligible };
 }
 
-it('replaces the full to-ack count with Ack all when every result is eligible', async () => {
+it('keeps the to-ack count beside Ack all when every result is eligible (SPEC 4.1)', async () => {
   const { element } = await topic(['finding', 'explanation']); render(element);
   expect(screen.getByRole('button', { name: 'Ack all (2)' })).toBeTruthy();
-  expect(screen.queryByText(/to ack/)).toBeNull();
+  expect(screen.getByText('2 to ack')).toBeTruthy();
   expect(screen.getByText('2 open')).toBeTruthy();
 });
 
-it('shows the bulk count alongside the individual question and decision count', async () => {
+it('shows the bulk count beside the whole to-ack count, never rewriting it', async () => {
   const { element, eligible } = await topic(['finding', 'explanation', 'question', 'decision']); render(element);
   expect(eligible).toBe(2);
   expect(screen.getByRole('button', { name: 'Ack all (2)' })).toBeTruthy();
-  expect(screen.getByText('2 to ack one by one')).toBeTruthy();
-  expect(screen.queryByText('4 to ack')).toBeNull();
+  expect(screen.getByText('4 to ack')).toBeTruthy();
+  expect(screen.queryByText(/one by one/)).toBeNull();
 });
 
 it.each([['question'], ['decision'], ['question', 'decision']] as const)(
