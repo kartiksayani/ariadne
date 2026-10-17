@@ -216,6 +216,15 @@ const pick = async (page: Page, label: string) => {
   await settle(page);
 };
 
+/** Every row (or Graph node) drawn now, and those standing above `heldId` with their heights. The sticky topic band stays and is left out. */
+const rowsAround = (page: Page, view: View, heldId: string) => page.evaluate(({ kind, held }) => {
+  const nodes = [...document.querySelectorAll<HTMLElement>(kind === 'Tree' ? '.tree-scroll [data-row]:not(.tree-topic)' : '.graph-scroll .graph-node[data-item-id]')];
+  const keyOf = (element: HTMLElement) => (kind === 'Tree' ? element.dataset.row : element.dataset.itemId)!;
+  const top = nodes.find(element => keyOf(element) === held)?.getBoundingClientRect().top ?? 0;
+  return { drawn: nodes.map(keyOf), above: nodes.filter(element => element.getBoundingClientRect().top < top - 0.5)
+    .map(element => ({ key: keyOf(element), height: element.getBoundingClientRect().height })) };
+}, { kind: view, held: heldId });
+
 // What an owner-caused boundary may do: at the very top the Map cannot scroll above its first row, so a row that shrinks the
 // Map's top (the chip row closing) or removes the reading row may carry the rows up by that much, and never down.
 type Allowance = 'filter row' | 'removed row' | null;
@@ -286,17 +295,23 @@ test.describe('the filter row never moves the Map', () => {
       // The row the Map must hold: the reading row, or the one under it when the trigger removes the reading row.
       const held = trigger.holds === 'reader' ? reader : cells[1]!;
       const before = (await viewportPlace(page, cellOf(view, held.id)))!;
-      // How far the Map's own top edge moves in the window when the trigger opens or closes the rows above it.
-      const edgeBefore = (await viewportPlace(page, scrollerOf(view)))!;
+      // How far the Map's own top edge moves in the window when the trigger opens or closes the rows above it, and which
+      // rows above the held one are drawn before.
+      const edgeBefore = (await viewportPlace(page, scrollerOf(view)))!, drawnBefore = await rowsAround(page, view, held.id);
       await trigger.change(page, view, reader);
       await trigger.done(page, view, reader);
       await settle(page); await page.waitForTimeout(60); await settle(page);
       const edgeMoved = Math.abs((await viewportPlace(page, scrollerOf(view)))!.y - edgeBefore.y);
+      const drawnAfter = await rowsAround(page, view, held.id);
       const after = await viewportPlace(page, cellOf(view, held.id));
       expect(after, `${held.id} is still drawn`).not.toBeNull();
       const shift = after!.y - before.y;
-      // At the top an owner-caused boundary may carry the rows up (never down) by the height that left; anywhere else, nothing moves.
-      const room = spot === 'top' && trigger.top ? (trigger.top === 'filter row' ? edgeMoved : cells[1]!.top - reader.top) + 1 : 1;
+      // What left at or above the held row: the Tree's rows (a strip leaves with the row it stood for) by their heights, the
+      // Graph's nodes by the pitch between nodes.
+      const gone = drawnBefore.above.filter(value => !drawnAfter.drawn.includes(value.key));
+      const left = view === 'Tree' ? gone.reduce((sum, value) => sum + value.height, 0) : gone.length * Math.abs(cells[1]!.top - reader.top);
+      // At the top an owner-caused boundary may carry the rows up (never down) by what left; anywhere else, nothing moves.
+      const room = spot === 'top' && trigger.top ? (trigger.top === 'filter row' ? edgeMoved : left) + 1 : 1;
       expect(shift, `${held.id} moved ${shift}px in the window`).toBeGreaterThanOrEqual(-room);
       expect(shift, `${held.id} moved ${shift}px in the window`).toBeLessThanOrEqual(1);
       expect(Math.abs(after!.x - before.x), `${held.id} moved sideways`).toBeLessThanOrEqual(1);
