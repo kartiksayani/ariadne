@@ -64,6 +64,10 @@ contains the current lease generation, while the original ClaimRequest is
 forwarded unchanged. Core replays the exact saved claim before generation/state
 guards; a fresh stale request still rejects. A socket timeout, caller drop or
 shutdown cannot release a lease while its already-started core call may commit.
+A replacement activation (after wake, or for a new generation) waits up to 2 s,
+within its deadline, for this desktop's own earlier lease on the binding, then
+returns retryable `store_busy`; a lease another desktop or supervisor holds is
+refused at once with `permission_denied` (ADR-0102).
 Every installed claim route has a mandatory native claim gate, initially closed.
 The binding supervisor opens it only after its complete startup scan and verified
 reconciliation have been reported through validated Core receipts. Stop closes

@@ -470,6 +470,27 @@ impl NativeRuntime {
             )
             .unwrap()
     }
+    #[cfg(test)]
+    pub(super) fn held_lease_for_test(
+        &self,
+        scope: &BindingScope,
+    ) -> Option<ariadne_runtime::leases::BindingLease> {
+        let workers = self.workers.lock().unwrap();
+        workers
+            .as_ref()
+            .unwrap()
+            .activation
+            .held_lease(&scope.binding_id)
+    }
+    #[cfg(test)]
+    pub(super) fn awaiting_release_for_test(&self, scope: &BindingScope) -> bool {
+        let workers = self.workers.lock().unwrap();
+        workers
+            .as_ref()
+            .unwrap()
+            .owner
+            .is_awaiting_release(&scope.binding_id)
+    }
     pub fn discovery(&self) -> Result<DiscoverySnapshot, CoreError> {
         self.discovery.snapshot()
     }
