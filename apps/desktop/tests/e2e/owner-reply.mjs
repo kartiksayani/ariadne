@@ -6,9 +6,10 @@ import { snapshot } from './scripted-provider.mjs';
 // Only the marked input is active; a retained answer slot can coexist with the docked words box.
 const ownerInput = itemId => `.item-detail [data-owner-input="${itemId}"]`;
 const dockedEditor = '.item-detail [data-owner-input] .detail-box textarea';
-// Scope to the textarea's composer: the answer slot also has a separate Send for the chosen option.
-const wordsComposer = '.detail-box, .answer-reply';
-const wordsSend = 'button[aria-label^="Send "], button.answer-reply-send';
+// The words composer: a reply box (.detail-box, its Send named "Send reply" and the like) or the answer cards (.answer: the
+// words box opens from "Write my own answer"; its Send is the bar's `data-answer-send`).
+const wordsComposer = '.detail-box, .answer';
+const wordsSend = 'button[aria-label^="Send "], button[data-answer-send]';
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.scrollIntoView({ block: 'center' }); await control.click(); }
 
@@ -17,21 +18,22 @@ export const folded = value => value.replace(/\s+/g, ' ').trim();
 
 /**
  * Opens the selected item's words editor: an answer, reply, note or follow-up as the current UI offers.
- * A waiting answer's saved receipt offers "Write another input"; open/in-progress boxes stay docked
- * and empty once they send. `afterSaved`: a previous input has saved on disk and its renderer
- * acknowledgement may still be arriving; await it before choosing the next editor.
+ * A waiting item's answer cards open their words box from "Write my own answer"; a sent answer holds the cards, so the next
+ * words queue behind it through "Add a reply"; open/in-progress boxes stay docked and empty once they send.
+ * `afterSaved`: a previous input has saved on disk and its renderer acknowledgement may still be arriving; await it
+ * before choosing the next editor.
  */
 export async function openOwnerReply(afterSaved = false) {
   const docked = await browser.$(dockedEditor);
-  const answer = await browser.$('.item-detail .detail-answer-slot[data-owner-input]');
-  if (!(await docked.isExisting()) && await answer.isExisting()) {
-    const another = await answer.$('button=Write another input');
-    if (afterSaved || await another.isExisting()) await click(another);
-    return;
-  }
   // A waiting reply closes when saved; its Add a reply action opens the next queued input.
   if (await browser.$('.item-detail[data-status="waiting"] [aria-label="Reply"] [aria-label="Item actions"] button').isExisting()) {
     await openFollowUp(afterSaved);
+    return;
+  }
+  const answer = await browser.$('.item-detail .detail-answer-slot[data-owner-input]');
+  if (!(await docked.isExisting()) && await answer.isExisting()) {
+    // The cards' words box opens from "Write my own answer"; an open box already holds the focus.
+    if (!await answer.$('textarea').isExisting()) { const own = await answer.$('[data-answer-own]'); if (await own.isExisting()) await click(own); }
     return;
   }
   if (afterSaved) {
@@ -93,9 +95,10 @@ export async function openFollowUp(afterSaved = false) {
 export function replyControlState(itemId) {
   const form = document.querySelector(`.item-detail [data-owner-input="${itemId}"]`);
   const detail = form?.closest('.item-detail') ?? document.querySelector('.item-detail');
+  // A reply box (.detail-box) or the answer cards (.answer: the words box opens from "Write my own answer" or "+ Add a note").
   const editor = form?.querySelector('textarea');
-  const composer = editor?.closest('.detail-box, .answer-reply');
-  const send = composer?.querySelector('button[aria-label^="Send "], button.answer-reply-send');
+  const composer = editor?.closest('.detail-box, .answer') ?? form?.querySelector('.answer');
+  const send = composer?.querySelector('button[aria-label^="Send "], button[data-answer-send]');
   return { formPresent: Boolean(form), editorPresent: Boolean(editor), value: editor?.value ?? null,
     editorEnabled: Boolean(editor && !editor.disabled), sendPresent: Boolean(send),
     sendEnabled: Boolean(send && !send.disabled && send.getAttribute('aria-disabled') !== 'true'),

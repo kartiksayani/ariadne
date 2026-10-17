@@ -1,96 +1,158 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render } from '@testing-library/react';
-import { useWorkspaceKeys, workspaceIntent, type KeyScope, type WorkspaceHandlers } from '../../src/ui/keys';
+import { intentKeyHandlers, keyIntents, useWorkspaceKeys, workspaceIntent, type KeyLike, type KeyScope, type WorkspaceHandlers, type WorkspaceIntent } from '../../src/ui/keys';
+import { dispatchIntent, hasIntentHandler, registerIntent } from '../../src/ui/intents';
 
 afterEach(cleanup);
 
-describe('workspace keymap', () => {
-  it('reads Option digits from physical codes and ignores repeat and other modifiers', () => {
-    for (let digit = 1; digit <= 9; digit++) expect(workspaceIntent({ key: '¡', code: `Digit${digit}`, altKey: true })).toEqual({ kind: 'choose-send', index: digit - 1 });
-    expect(workspaceIntent({ key: 'º', code: 'Digit0', altKey: true })).toEqual({ kind: 'answer-words' });
-    for (const extra of [{ repeat: true }, { shiftKey: true }, { metaKey: true }, { ctrlKey: true }]) {
-      expect(workspaceIntent({ key: '¡', code: 'Digit1', altKey: true, ...extra })).toBeNull();
-    }
-    expect(workspaceIntent({ key: '1', altKey: true })).toBeNull();
-    expect(workspaceIntent({ key: '0', code: 'Digit0', metaKey: true })).toEqual({ kind: 'text-default' });
-  });
-  it('maps the README keyboard table to intents', () => {
-    const kinds = (keys: string[]) => keys.map(key => workspaceIntent({ key })?.kind ?? null);
-    expect(kinds(['ArrowDown', 'j', 'ArrowUp', 'k', 'Home', 'End'])).toEqual(['move-down', 'move-down', 'move-up', 'move-up', 'first', 'last']);
-    expect(kinds(['ArrowRight', 'l', 'ArrowLeft', 'h', 'Enter'])).toEqual(['unfold', 'unfold', 'fold', 'fold', 'enter']);
-    expect(kinds(['a', 'b', 'r', 'd', 'z', 'x', 'o', 'e'])).toEqual(['answer', 'bring', 'respond', 'drop', 'later', 'hide', 'reopen', 'archive']);
-    expect(kinds(['/', 'g', 'm', 'w', 'Escape', 'Backspace', 'Delete'])).toEqual(['search', 'graph', null, 'waiting', 'escape', 'remove', 'remove']);
-    expect(workspaceIntent({ key: '1' })).toEqual({ kind: 'choose', index: 0 });
-    expect(workspaceIntent({ key: '9' })).toEqual({ kind: 'choose', index: 8 });
-    expect(kinds(['0', 'A', 'X', 'Tab', ' '])).toEqual([null, null, null, null, 'peek']);
-  });
+// Every supported key crosses every focus owner. Workspace actions belong only
+// to the unoccluded Map; typing and overlays must never mutate its selection.
+const bindings: readonly (readonly [KeyLike, WorkspaceIntent | null])[] = [
+  ...Object.entries({ ArrowDown: 'move-down', j: 'move-down', ArrowUp: 'move-up', k: 'move-up', Home: 'first', End: 'last',
+    ArrowRight: 'unfold', ArrowLeft: 'fold', Enter: 'enter', a: 'answer', b: 'bring', r: 'respond', d: 'drop', z: 'later', h: 'hide', o: 'reopen',
+    '/': 'search', g: 'graph', f: 'filter', c: 'continue', n: 'next-unseen', '?': 'help', Escape: 'escape', Backspace: 'remove', Delete: 'remove', ' ': 'peek',
+    '.': 'back-to-selected', '[': 'dock-prev', ']': 'dock-next',
+  }).map(([key, kind]) => [{ key }, { kind } as WorkspaceIntent] as const),
+  [{ key: 'F', shiftKey: true }, { kind: 'focus' }],
+  [{ key: '?', shiftKey: true }, { kind: 'help' }],
+  ...Object.entries({ o: 'switcher', e: 'recent', f: 'search', Enter: 'send', '[': 'history-back', ']': 'history-forward', '-': 'text-smaller', '+': 'text-larger', '0': 'text-default' })
+    .map(([key, kind]) => [{ key, metaKey: true }, { kind } as WorkspaceIntent] as const),
+  ...Array.from({ length: 9 }, (_, index) => [{ key: String(index + 1) }, { kind: 'choose', index }] as const),
+  ...['e', 'x', 'w', 'l', '0', 'A', 'H'].map(key => [{ key }, null] as const),
+  [{ key: 'j', metaKey: true }, null],
+  ...Array.from({ length: 10 }, (_, index) => [{ key: String(index), code: `Digit${index}`, altKey: true }, null] as const),
+];
 
-  it('accepts Cmd+F, Cmd+Enter and item history chords among modified keys', () => {
-    expect(workspaceIntent({ key: 'f', metaKey: true })?.kind).toBe('search');
-    expect(workspaceIntent({ key: 'F', metaKey: true })?.kind).toBe('search');
-    expect(workspaceIntent({ key: 'Enter', metaKey: true })?.kind).toBe('send');
-    expect(workspaceIntent({ key: '[', metaKey: true })?.kind).toBe('history-back');
-    expect(workspaceIntent({ key: ']', metaKey: true })?.kind).toBe('history-forward');
-    expect(workspaceIntent({ key: '[', metaKey: true, shiftKey: true })).toBeNull();
-    expect(workspaceIntent({ key: '[', ctrlKey: true })).toBeNull();
-    expect(workspaceIntent({ key: 'g', metaKey: true })).toBeNull();
-    expect(workspaceIntent({ key: 'f', metaKey: true, ctrlKey: true })).toBeNull();
-    expect(workspaceIntent({ key: 'j', ctrlKey: true })).toBeNull();
-    expect(workspaceIntent({ key: 'j', altKey: true })).toBeNull();
-  });
-});
-
-function Probe({ scope, handlers }: { readonly scope: KeyScope; readonly handlers: WorkspaceHandlers<HTMLDivElement> }) {
+type Overlay = 'dialog' | 'switcher' | 'help' | 'peek';
+function Probe({ scope = 'workspace', handlers, overlay }: {
+  readonly scope?: KeyScope; readonly handlers: WorkspaceHandlers<HTMLDivElement>; readonly overlay?: Overlay;
+}) {
   const keys = useWorkspaceKeys(handlers, { scope });
   return <div data-testid="root" tabIndex={0} onKeyDown={keys}>
-    <select data-testid="select"><option>Choice</option></select><div contentEditable data-testid="editable" /><div role="textbox" data-testid="textbox" /><input data-testid="input" /><textarea data-testid="area" /><button type="button" data-testid="button">B</button>
-    <div role="dialog"><button type="button" data-testid="dialog">D</button></div>
+    <select data-testid="select"><option>Choice</option></select><div contentEditable data-testid="editable" /><div role="textbox" data-testid="textbox" />
+    <input data-testid="input" /><textarea data-testid="area" /><button type="button" data-testid="button">B</button>
+    {overlay === 'peek' ? <div role="dialog" className="item-peek" aria-label="Peek: an item"><button type="button" data-testid="overlay">P</button></div>
+      : overlay === 'dialog' ? <div role="dialog"><button type="button" data-testid="overlay">D</button></div>
+        : overlay && <div role="dialog" data-workspace-overlay={overlay}><button type="button" data-testid="overlay">D</button></div>}
   </div>;
 }
 const node = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`)!;
 
-describe('useWorkspaceKeys', () => {
-  it('uses x for hide and unhide while keeping it in owner text fields', () => {
-    const hide = vi.fn(() => true);
-    render(<Probe scope="workspace" handlers={{ hide }} />);
-    expect(fireEvent.keyDown(node('button'), { key: 'x' })).toBe(false);
-    expect(hide).toHaveBeenCalledWith({ kind: 'hide' }, expect.anything());
-    fireEvent.keyDown(node('input'), { key: 'x' }); fireEvent.keyDown(node('area'), { key: 'x' });
-    expect(hide).toHaveBeenCalledOnce();
-  });
-
-  it.each(['workspace', 'row', 'editor'] as const)('keeps Option digits in all text fields in %s scope', scope => {
-    const quick = vi.fn(() => true);
-    render(<Probe scope={scope} handlers={{ 'choose-send': quick, 'answer-words': quick }} />);
-    for (const field of ['input', 'area', 'select', 'editable', 'textbox']) {
-      for (const digit of [0, 1]) expect(fireEvent.keyDown(node(field), { key: '¡', code: `Digit${digit}`, altKey: true })).toBe(true);
+describe('key routing invariant: key × focus owner', () => {
+  for (const [event, intent] of bindings) {
+    const name = `${event.metaKey ? 'Cmd+' : ''}${event.altKey ? 'Alt+' : ''}${event.shiftKey ? 'Shift+' : ''}${JSON.stringify(event.key)}`;
+    it(`${name} resolves to ${intent?.kind ?? 'unbound'}`, () => { expect(workspaceIntent(event)).toEqual(intent); });
+    // 'map under peek': a peek is showing and focus stays on the Map. The peek is a hover card, not a dialog:
+    // the Map keeps its keys. 'in peek': focus is inside the card, which owns its own keys.
+    for (const focus of ['plain', 'text', 'dialog', 'switcher', 'help', 'map under peek', 'in peek'] as const) {
+      const dispatches = (focus === 'plain' || focus === 'map under peek') && !!intent;
+      it(`${name} with ${focus} focus ${dispatches ? 'dispatches its action' : 'does not dispatch'}`, () => {
+        const action = vi.fn(() => true);
+        const overlay = focus === 'dialog' || focus === 'switcher' || focus === 'help' ? focus : focus === 'map under peek' || focus === 'in peek' ? 'peek' : undefined;
+        render(<Probe handlers={intent ? { [intent.kind]: action } : {}} overlay={overlay} />);
+        fireEvent.keyDown(node(focus === 'text' ? 'area' : focus === 'plain' || focus === 'map under peek' ? 'button' : 'overlay'), event);
+        expect(action).toHaveBeenCalledTimes(dispatches ? 1 : 0);
+      });
     }
-    expect(quick).not.toHaveBeenCalled();
-  });
-  it('workspace scope skips fields, dialogs and keys already handled below', () => {
-    const graph = vi.fn(() => true), remove = vi.fn(() => false);
-    render(<Probe scope="workspace" handlers={{ graph, remove }} />);
-    expect(fireEvent.keyDown(node('button'), { key: 'g' })).toBe(false); expect(graph).toHaveBeenCalledOnce();
-    expect(fireEvent.keyDown(node('button'), { key: 'Backspace' })).toBe(true); expect(remove).toHaveBeenCalledOnce();
-    fireEvent.keyDown(node('input'), { key: 'g' }); fireEvent.keyDown(node('area'), { key: 'g' }); fireEvent.keyDown(node('dialog'), { key: 'g' });
-    const handled = new KeyboardEvent('keydown', { key: 'g', bubbles: true, cancelable: true }); handled.preventDefault(); node('button').dispatchEvent(handled);
-    expect(fireEvent.keyDown(node('button'), { key: 'q' })).toBe(true);
-    expect(graph).toHaveBeenCalledOnce();
-  });
+  }
 
+  it.each(['dialog', 'switcher', 'help'] as const)('blocks every workspace action when %s is open but focus remains on the Map', overlay => {
+    const action = vi.fn(() => true);
+    const handlers = Object.fromEntries(bindings.flatMap(([, intent]) => intent ? [[intent.kind, action]] : []));
+    render(<Probe handlers={handlers} overlay={overlay} />);
+    for (const [event] of bindings) fireEvent.keyDown(node('button'), event);
+    expect(action).not.toHaveBeenCalled();
+  });
+});
+
+// C5: a key either asks for an intent (answered by whichever view registered it) or belongs to where focus is.
+describe('intent keys × focus owner', () => {
+  const scoped = new Set(['move-down', 'move-up', 'first', 'last', 'unfold', 'fold', 'enter', 'send', 'choose', 'escape', 'peek',
+    'history-back', 'history-forward', 'text-smaller', 'text-larger', 'text-default']);
+  function IntentProbe({ overlay }: { readonly overlay?: Overlay }) {
+    return <Probe handlers={intentKeyHandlers<HTMLDivElement>()} overlay={overlay} />;
+  }
+  it('every bound key is scoped to its focus owner or names an intent, and every intent key is bound', () => {
+    for (const [, intent] of bindings) if (intent) expect([intent.kind, scoped.has(intent.kind) || !!keyIntents[intent.kind]]).toEqual([intent.kind, true]);
+    const bound = new Set(bindings.flatMap(([, intent]) => intent ? [intent.kind] : []));
+    for (const kind of Object.keys(keyIntents)) expect(bound.has(kind as WorkspaceIntent['kind'])).toBe(true);
+  });
+  for (const [event, intent] of bindings.filter(([, value]) => value && keyIntents[value.kind])) {
+    const asked = keyIntents[intent!.kind]!;
+    const name = `${event.metaKey ? 'Cmd+' : ''}${event.shiftKey ? 'Shift+' : ''}${JSON.stringify(event.key)}`;
+    it.each(['plain', 'text', 'dialog', 'switcher', 'help', 'map under peek'] as const)(`${name} asks for ${asked} only from the Map (focus %s)`, focus => {
+      const handler = vi.fn(() => true), off = registerIntent(asked, handler);
+      const overlay = focus === 'dialog' || focus === 'switcher' || focus === 'help' ? focus : focus === 'map under peek' ? 'peek' : undefined;
+      render(<IntentProbe overlay={overlay} />);
+      const notCancelled = fireEvent.keyDown(node(focus === 'text' ? 'area' : focus === 'plain' || focus === 'map under peek' ? 'button' : 'overlay'), event);
+      const expected = focus === 'plain' || focus === 'map under peek' ? 1 : 0;
+      expect(handler).toHaveBeenCalledTimes(expected);
+      expect(notCancelled).toBe(expected === 0);
+      off();
+    });
+  }
+  it('the latest registration answers first; one that declines passes the intent on, and nobody answering keeps the default', () => {
+    const map = vi.fn(() => true), bigger = vi.fn(() => false);
+    const offMap = registerIntent('focus.toggle', map), offBigger = registerIntent('focus.toggle', bigger);
+    expect(dispatchIntent('focus.toggle')).toBe(true);
+    expect(bigger).toHaveBeenCalledOnce(); expect(map).toHaveBeenCalledOnce();
+    offMap(); offBigger();
+    expect(hasIntentHandler('focus.toggle')).toBe(false);
+    render(<IntentProbe />);
+    expect(fireEvent.keyDown(node('button'), { key: 'F', shiftKey: true })).toBe(true);
+  });
+  it('passes a held key on as a repeat', () => {
+    const handler = vi.fn(() => true), off = registerIntent('item.hide', handler);
+    render(<IntentProbe />);
+    fireEvent.keyDown(node('button'), { key: 'h', repeat: true });
+    expect(handler).toHaveBeenCalledWith({ repeat: true });
+    off();
+  });
+});
+
+describe('useWorkspaceKeys scopes', () => {
+  it('leaves composing keys with the input method', () => {
+    const action = vi.fn(() => true);
+    render(<Probe handlers={{ answer: action, drop: action, hide: action, remove: action }} />);
+    for (const key of ['a', 'd', 'h', 'Backspace']) fireEvent.keyDown(node('button'), { key, isComposing: true });
+    expect(action).not.toHaveBeenCalled();
+  });
+  it.each(['dialog', 'switcher', 'help'] as const)('keeps a covered editor from sending behind %s', overlay => {
+    const send = vi.fn(() => true);
+    render(<Probe scope="editor" handlers={{ send }} overlay={overlay} />);
+    fireEvent.keyDown(node('area'), { key: 'Enter', metaKey: true });
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.keyDown(node('overlay'), { key: 'Enter', metaKey: true });
+    expect(send).toHaveBeenCalledOnce();
+  });
+  it.each(['input', 'area', 'select', 'editable', 'textbox'])('keeps destructive keys in %s', field => {
+    const action = vi.fn(() => true);
+    render(<Probe handlers={{ answer: action, drop: action, hide: action, remove: action, later: action, reopen: action }} />);
+    for (const key of ['a', 'd', 'h', 'Backspace', 'Delete', 'z', 'o']) fireEvent.keyDown(node(field), { key });
+    expect(action).not.toHaveBeenCalled();
+  });
+  it('ignores keys already handled below and unhandled keys keep their default', () => {
+    const graph = vi.fn(() => true), remove = vi.fn(() => false);
+    render(<Probe handlers={{ graph, remove }} />);
+    const handled = new KeyboardEvent('keydown', { key: 'g', bubbles: true, cancelable: true });
+    handled.preventDefault(); node('button').dispatchEvent(handled);
+    expect(graph).not.toHaveBeenCalled();
+    expect(fireEvent.keyDown(node('button'), { key: 'Backspace' })).toBe(true);
+    expect(remove).toHaveBeenCalledOnce();
+  });
   it('row scope takes only keys pressed on the row itself', () => {
     const down = vi.fn(() => true);
     render(<Probe scope="row" handlers={{ 'move-down': down }} />);
     fireEvent.keyDown(node('button'), { key: 'j' }); expect(down).not.toHaveBeenCalled();
     expect(fireEvent.keyDown(node('root'), { key: 'j' })).toBe(false); expect(down).toHaveBeenCalledOnce();
   });
-
-  it('editor scope always takes Esc and Cmd+Enter, other keys only outside text fields', () => {
+  it('editor scope takes Esc and Cmd+Enter in fields, and option digits outside all editable fields', () => {
     const escape = vi.fn(), send = vi.fn(() => true), choose = vi.fn(() => true);
     render(<Probe scope="editor" handlers={{ escape, send, choose }} />);
-    expect(fireEvent.keyDown(node('area'), { key: 'Escape' })).toBe(true); expect(escape).toHaveBeenCalledOnce();
+    fireEvent.keyDown(node('area'), { key: 'Escape' }); expect(escape).toHaveBeenCalledOnce();
     expect(fireEvent.keyDown(node('area'), { key: 'Enter', metaKey: true })).toBe(false); expect(send).toHaveBeenCalledOnce();
-    fireEvent.keyDown(node('area'), { key: '2' }); fireEvent.keyDown(node('input'), { key: '2' }); expect(choose).not.toHaveBeenCalled();
+    for (const field of ['input', 'area', 'select', 'editable', 'textbox']) fireEvent.keyDown(node(field), { key: '2' });
+    expect(choose).not.toHaveBeenCalled();
     fireEvent.keyDown(node('button'), { key: '2' }); expect(choose).toHaveBeenCalledWith({ kind: 'choose', index: 1 }, expect.anything());
   });
 });

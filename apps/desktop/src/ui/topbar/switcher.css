@@ -1,0 +1,221 @@
+/* The session and project switcher. Values follow the Claude Design board (SPEC 5.13). */
+.swm {
+  position: absolute;
+  top: 38px;
+  left: 30px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: min(400px, calc(100% - 16px));
+  max-height: calc(100% - 56px);
+  padding: 8px;
+  overflow: auto;
+  scrollbar-width: thin;
+  border-radius: 9px;
+  background: var(--a-card);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-divider);
+  font-size: calc(12.5px * var(--text-scale));
+  color: var(--color-text);
+}
+
+.swm > * { flex: none; }
+
+.swm-find {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 6px 0 9px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+  background: var(--a-bg);
+  box-shadow: inset 0 0 0 1.5px var(--color-accent);
+}
+
+.swm-find > i {
+  flex: none;
+  font-size: calc(15px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+
+.swm-find > .p-key {
+  flex: none;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.swm-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  color: var(--color-text);
+}
+
+/* The wrapper draws the focus ring; the field inside draws none, whatever order the base :focus-visible rule loads in. */
+.product-app .swm-input:focus-visible { outline: none; }
+
+.swm-input::placeholder { color: color-mix(in srgb, var(--color-text) 45%, transparent); }
+
+.swm-list,
+.swm-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.swm-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px 4px;
+  font-size: calc(11px * var(--text-scale));
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.swm-head > i { font-size: calc(12px * var(--text-scale)); }
+
+.swm-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px 8px;
+  border-radius: 6px;
+}
+
+.swm-row:hover,
+.swm-row:has(.swm-main[data-cursor]) { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+
+.swm-current,
+.swm-current:hover { background: color-mix(in srgb, var(--color-accent) 9%, transparent); }
+
+.swm-current:has(.swm-main[data-cursor]) { background: color-mix(in srgb, var(--color-text) 7%, color-mix(in srgb, var(--color-accent) 9%, transparent)); }
+
+.swm-main,
+.swm-q,
+.swm-link {
+  appearance: none;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.swm-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+}
+
+.swm-name {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swm-name-closed { color: color-mix(in srgb, var(--color-text) 66%, transparent); }
+
+.swm-meta {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: calc(12px * var(--text-scale));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--color-text) 56%, transparent);
+}
+
+.swm-here {
+  flex: none;
+  color: var(--a-acc-text);
+}
+
+.swm-q {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  width: 100%;
+  padding: 0 0 0 17px;
+  border-radius: 4px;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 74%, transparent);
+}
+
+.swm-q:hover,
+.swm-q[data-cursor] { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+
+.swm-q > i {
+  flex: none;
+  color: var(--st-waiting);
+}
+
+.swm-q-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swm-q-since {
+  flex: none;
+  color: color-mix(in srgb, var(--color-text) 52%, transparent);
+}
+
+.swm-empty {
+  padding: 10px 8px;
+  color: color-mix(in srgb, var(--color-text) 64%, transparent);
+}
+
+.swm-rule {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--color-divider);
+}
+
+.swm-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.swm-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.swm-link:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+
+.swm-link > i {
+  font-size: calc(14px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+.swm-note {
+  padding: 4px 8px 2px;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 56%, transparent);
+}
+
+.swm :focus-visible { outline-offset: -2px; }

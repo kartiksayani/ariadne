@@ -7,8 +7,9 @@ export function historyFailureFacts() {
   // The detail's owner input: the answer slot of a waiting item, else the open action box with its changed-target warning.
   const owner = document.querySelector('[data-owner-input]');
   const editor = owner?.querySelector('textarea') ?? null;
-  const send = owner?.querySelector('.answer-send, .answer-reply-send, .detail-composer-row button[aria-label^="Send "], .detail-box-row .btn-primary') ?? null;
-  const search = document.querySelector('[data-shell-search]');
+  const send = owner?.querySelector('[data-answer-send], .detail-composer-row button[aria-label^="Send "], .detail-box-row .btn-primary') ?? null;
+  // The top bar's search is its idle button until it opens into the field.
+  const search = document.querySelector('.shell-top input[aria-label="Search the Map"], .shell-top button[aria-label="Search the Map"]');
   const stateButtons = /^(Refresh|Refreshing…|Check again|Register project|Connect existing session|Try saving your draft again|Try sending again|Write another input)$/;
   const active = document.activeElement;
   return {
@@ -20,7 +21,7 @@ export function historyFailureFacts() {
     navigation: { banners: all('.nav-banner').map(node => ({ role: node.getAttribute('role'), text: text(node) })),
       alerts: all('[role="alert"]').map(text), statuses: all('[role="status"]').map(text),
       stateButtons: all('button').filter(button => stateButtons.test(text(button) ?? '')).map(control),
-      disabledHeaderButtons: all('.shell-header button').filter(button => button.disabled).map(button => button.title || text(button)) },
+      disabledHeaderButtons: all('.shell-top button').filter(button => button.disabled).map(button => button.title || text(button)) },
     search: { present: Boolean(search), disabled: search ? search.disabled : null, value: search?.value ?? null,
       statusLabel: all('[role="status"]').map(text).find(label => label?.startsWith('Search preview')) ?? null },
     selected: { treeItemIds: all('[data-item-id][aria-selected="true"], [data-item-id][aria-current]').map(node => node.getAttribute('data-item-id')),

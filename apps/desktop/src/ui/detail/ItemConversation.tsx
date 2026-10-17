@@ -324,6 +324,9 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     && round.question_revision === item.question_revision;
   const answerState = session ? conversationAnswerState(session, itemId, retained) : { showAnswer: false, live: false };
   const showAnswer = answerState.showAnswer;
+  // The bigger view's pinned question owns its dock while it can be answered: r goes to it and no reply box shows there.
+  // A sealed, handled answer leaves room for the reply box below it.
+  const answerOnly = expanded && showAnswer && !model?.followUp?.answered;
   const dock = useRef<HTMLDivElement>(null);
   useDockBudget(dock, expanded && showAnswer);
   const savedAnswers = !showAnswer && session ? drafts.savedAnswers({ project_id: session.project_id, session_id: session.id }, itemId) : [];
@@ -478,7 +481,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   useEffect(() => {
     if (!focusRequest || handled.current === focusRequest.token || !model || !item) return;
     const { intent, token } = focusRequest;
-    if (intent === 'answer' || (model.status === 'waiting' && intent === 'reply' && !model.followUp)) return;
+    if (intent === 'answer' || (model.status === 'waiting' && intent === 'reply' && (!model.followUp || answerOnly))) return;
     handled.current = token;
     onFocusRequestConsumed?.(token);
     if (model.followUp) { if (intent === 'reply' && !model.followUp.disabled) openBox('reply'); return; }
@@ -491,7 +494,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   if (!session || !item || !model) return <p role="status">The current item is unavailable. Open its session again.</p>;
   // A reopen that could not go out was written against an older item (OwnerInput's Review step). Only the Open section offers it.
   const reopenStale = !!model.open && submit.changed('reopen');
-  const answerFocus = focusRequest && model.status === 'waiting' && !model.followUp && focusRequest.intent === 'reply' ? { ...focusRequest, intent: 'answer' as const } : focusRequest;
+  const answerFocus = focusRequest && model.status === 'waiting' && (!model.followUp || answerOnly) && focusRequest.intent === 'reply' ? { ...focusRequest, intent: 'answer' as const } : focusRequest;
   const copy = () => {
     const attempt = ++copyAttempt.current;
     const currentCopy = () => copyMounted.current && attempt === copyAttempt.current;
@@ -520,7 +523,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     }
   };
   const dropOff = !submit.ready || submit.saving !== null || submit.locked('drop') || submit.changed('drop');
-  const owner = !(expanded && showAnswer) && (slots.length > 0 || dropOpen || reopenStale) && <div className="detail-owner-input" data-owner-input={itemId}>
+  const owner = !answerOnly && (slots.length > 0 || dropOpen || reopenStale) && <div className="detail-owner-input" data-owner-input={itemId}>
     <PausedNote actions={actions} />
     {reopenStale && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
       <button type="button" className="btn btn-secondary answer-warn-action" disabled={submit.locked('reopen')} onClick={() => submit.review('reopen')}>Review this question</button></div>}
@@ -709,7 +712,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     {docked && <div ref={dock} className={`detail-dock${expanded && showAnswer ? ' detail-dock-question' : ''}`}>
     {expanded && model.delivery && <div className="detail-delivery" role="status" style={{ color: model.delivery.color }}>
       <i className={model.delivery.icon} aria-hidden="true" /><span>{model.delivery.text}</span></div>}
-    {!(expanded && showAnswer) && (ackTo || model.open || model.followUp) && <div className="detail-quick-actions">
+    {!(expanded && showAnswer) && (ackTo || model.open) && <div className="detail-quick-actions">
     {ackTo && <section className="detail-section detail-ack" aria-label="Acknowledge item">
       <button type="button" className="btn btn-secondary detail-action" title={ackTitle(ackTo, item.status)} aria-label={ackTitle(ackTo, item.status)}
         disabled={ack.busy} onClick={() => { void ack.run(item.id).then(saved => { if (saved) navigationVisits.record(current.route, item.id, 'acked'); }); }}>
@@ -725,37 +728,39 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
         </button>)}
       </div>
     </section>}
-
-    {model.followUp && <section className="detail-section detail-open" aria-label="Reply" title={model.followUp.hint}>
-      <div className="detail-actions" role="group" aria-label="Item actions">
-        <button type="button" className="btn btn-secondary detail-action" aria-pressed={mode === 'reply'} disabled={model.followUp.disabled || !draftState.ready}
-          title="Reply in your own words" onClick={() => openBox('reply')}>
-          <i className="ph ph-chat-text" aria-hidden="true" />{model.followUp.label}<span className="detail-key" aria-hidden="true">r</span>
-        </button>
-      </div>
-    </section>}
     </div>}
     {model.open && dockHint && <div className="detail-hint detail-delivery-hint" title={dockHint}>{dockHint}</div>}
-    {model.followUp && <div className="detail-hint detail-delivery-hint" title={model.followUp.hint}>{model.followUp.hint}</div>}
     {model.open && !owner && <PausedNote actions={actions} />}
     {submit.error && !(showAnswer && submit.error === answerSlotError(draftState, retained)
       || savedAnswers.some(entry => entry.error && submit.error === plainFailure(entry.error)))
       && <p className="detail-error" role="alert">{submit.error}</p>}
 
+    {showAnswer && <section className="detail-section detail-answer" aria-label="Your answer">
+      {model.answer && !owner && <PausedNote actions={actions} />}
+      {/* While the follow-up box is open, it is the detail's one data-owner-input. */}
+      {expanded && answerState.live && <div className="conversation-pin"><h3>Your turn · {relatedLabels.get(itemId)}</h3>
+        {/* Keyed by the item alone: an edit to the question text keeps an open full-question dialog (and its focus) mounted. */}
+        <ConversationQuestion key={itemId} text={item.ask || item.question} /></div>}
+      <AnswerSlot drafts={drafts} store={store} itemId={itemId} layout={expanded ? 'wide' : 'details'} head blocked={model.answer?.blocked} focusRequest={answerFocus}
+        marked={!owner}
+        onFocusRequestConsumed={onFocusRequestConsumed} onEscape={() => focusRoot(itemId)} onAgentNotRunning={onAgentNotRunning} onSent={sentJustNow} />
+    </section>}
+
+    {/* Below the answer: the way to say more while it is on its way, or once the agent handled it. */}
+    {model.followUp && !answerOnly && <><div className="detail-quick-actions">
+      <section className="detail-section detail-open" aria-label="Reply" title={model.followUp.hint}>
+        <div className="detail-actions" role="group" aria-label="Item actions">
+          <button type="button" className="btn btn-secondary detail-action" aria-pressed={mode === 'reply'} disabled={model.followUp.disabled || !draftState.ready}
+            title="Reply in your own words" onClick={() => openBox('reply')}>
+            <i className="ph ph-chat-text" aria-hidden="true" />{model.followUp.label}<span className="detail-key" aria-hidden="true">r</span>
+          </button>
+        </div>
+      </section></div>
+      <div className="detail-hint detail-delivery-hint" title={model.followUp.hint}>{model.followUp.hint}</div></>}
+
     {/* The one place the owner's boxes live: the same mount for every status, so typing and focus survive a status change. */}
     {owner && <section className="detail-section detail-open" aria-label="Your message">
       {owner}
-    </section>}
-
-    {showAnswer && <section className="detail-section detail-answer" aria-label="Your answer">
-      {model.answer && <PausedNote actions={actions} />}
-      {/* While the follow-up box is open, it is the detail's one data-owner-input. */}
-      <AnswerSlot drafts={drafts} store={store} itemId={itemId} compactOptions={expanded} blocked={model.answer?.blocked} focusRequest={answerFocus}
-        prompt={expanded && answerState.live ? <div className="conversation-pin"><h3>Your turn · {relatedLabels.get(itemId)}</h3>
-          {/* Keyed by the item alone: an edit to the question text keeps an open full-question dialog (and its focus) mounted. */}
-          <ConversationQuestion key={itemId} text={item.ask || item.question} /></div> : undefined}
-        marked={!owner}
-        onFocusRequestConsumed={onFocusRequestConsumed} onEscape={() => focusRoot(itemId)} onAgentNotRunning={onAgentNotRunning} onSent={sentJustNow} />
     </section>}
     {savedAnswers.length > 0 && <section className="detail-section detail-open detail-saved-message" aria-label="Saved message">
       {sectionLabel('Saved message')}

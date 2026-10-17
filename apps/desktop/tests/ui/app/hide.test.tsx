@@ -8,17 +8,20 @@ afterEach(cleanup);
 const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`);
 const saved = (transport: AppTransport) => transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!;
 const group = (count = 1) => screen.getByRole('treeitem', { name: new RegExp(`^${count} items? hidden`) });
-const filterButton = () => within(screen.getByRole('group', { name: 'Filter items' })).getByRole('button', { name: /^Filter/ });
+const filterButton = () => {
+  if (!screen.queryByRole('group', { name: 'Filter items' })) fireEvent.click(screen.getByRole('button', { name: 'Filter by status' }));
+  return within(screen.getByRole('group', { name: 'Filter items' })).getByRole('button', { name: /^Filter/ });
+};
 const chip = (name: string) => {
   if (filterButton().getAttribute('aria-expanded') !== 'true') fireEvent.click(filterButton());
   return screen.getByRole(name === 'All' ? 'menuitem' : 'menuitemcheckbox', { name: new RegExp(`^${name === 'All' ? 'Show all' : name}`) });
 };
 async function ready() {
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Session actions' })).toBeTruthy());
+  await waitFor(() => expect(screen.getByRole('button', { name: /^Switch session or project/ })).toBeTruthy());
   await waitFor(() => expect(filterButton().hasAttribute('disabled')).toBe(false));
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      expect(screen.getByRole('button', { name: /^Switch session or project/ }).hasAttribute('disabled')).toBe(false);
     });
 }
 async function mount(transport = new AppTransport()) {
@@ -29,7 +32,7 @@ async function mount(transport = new AppTransport()) {
   return { transport, ...app };
 }
 async function hide(id: string) {
-  fireEvent.click(within(row(id)!).getByRole('button', { name: 'Hide (x)' }));
+  fireEvent.click(within(row(id)!).getByRole('button', { name: 'Hide (h)' }));
   await waitFor(() => expect(row(id)).toBeNull()); await ready();
 }
 
@@ -101,7 +104,7 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
     for (const previous of order.slice(0, -1).reverse()) { fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' }); expect(document.activeElement).toBe(previous); }
   });
 
-  it('hides with x during a session refresh, saving once after the fresh read returns', async () => {
+  it('hides with h during a session refresh, saving once after the fresh read returns', async () => {
     class RefreshTransport extends AppTransport {
       holdSession: Promise<void> | null = null;
       override async invoke<T>(name: string, args: Parameters<DesktopTransport['invoke']>[1]): Promise<T> {
@@ -110,13 +113,14 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
       }
     }
     const transport = new RefreshTransport(); await mount(transport);
+    fireEvent.click(row('4')!); await waitFor(() => expect(saved(transport).selected_item_id).toBe('4'));
     let release!: () => void;
     transport.holdSession = new Promise<void>(resolve => { release = resolve; });
     const session = transport.sessions.get(route.session_id)!;
     ++session.revision;
     act(() => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
     expect(row('4')!.getAttribute('aria-disabled')).toBeNull();
-    row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'x' });
+    row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'h' });
     expect(saved(transport).hidden_item_ids ?? []).toEqual([]);
     await act(async () => { transport.holdSession = null; release(); });
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['4']));
@@ -127,36 +131,38 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
       && request.command.params.entries.some(entry => entry.kind === 'set_session_view' && entry.preferences.hidden_item_ids?.includes('4')))).toHaveLength(1);
   });
 
-  it('keeps keyboard focus on the hidden group after x and enters its dimmed rows with Right', async () => {
-    const { transport } = await mount(); row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'x' });
+  it('keeps keyboard focus on the hidden group after h and enters its dimmed rows with Right', async () => {
+    const { transport } = await mount(); fireEvent.click(row('4')!); await waitFor(() => expect(saved(transport).selected_item_id).toBe('4'));
+    row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'h' });
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['4'])); await ready();
     await waitFor(() => expect(document.activeElement).toBe(group()));
     fireEvent.keyDown(group(), { key: 'ArrowRight' });
     expect(group().getAttribute('aria-expanded')).toBe('true'); expect(document.activeElement).toBe(group());
     fireEvent.keyDown(group(), { key: 'ArrowRight' }); expect(document.activeElement).toBe(row('4'));
-    fireEvent.keyDown(row('4')!, { key: 'x' });
+    fireEvent.keyDown(row('4')!, { key: 'h' });
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([]));
     expect(row('4')!.classList.contains('tree-item-hidden')).toBe(false);
   });
 
-  it('keeps focus on a newly hidden row in an expanded group and unhides it with x', async () => {
+  it('keeps focus on a newly hidden row in an expanded group and unhides it with h', async () => {
     const { transport } = await mount(); await hide('2'); fireEvent.click(group());
-    row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'x' });
+    fireEvent.click(row('4')!); await waitFor(() => expect(saved(transport).selected_item_id).toBe('4'));
+    row('4')!.focus(); fireEvent.keyDown(row('4')!, { key: 'h' });
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['2', '4'])); await ready();
     expect(group(2).getAttribute('aria-expanded')).toBe('true');
     expect(row('4')!.classList.contains('tree-item-hidden')).toBe(true);
     expect(document.activeElement).toBe(row('4'));
-    fireEvent.keyDown(document.activeElement!, { key: 'x' });
+    fireEvent.keyDown(document.activeElement!, { key: 'h' });
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['2'])); await ready();
     expect(row('4')!.classList.contains('tree-item-hidden')).toBe(false);
     expect(document.activeElement).toBe(row('4'));
     expect(group().getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('hides a parent from the hover actions, expands and collapses its group, and unhides with x', async () => {
+  it('hides a parent from the hover actions, expands and collapses its group, and unhides with h', async () => {
     const { transport } = await mount(), sessionBefore = JSON.stringify(transport.sessions.get(route.session_id));
     const actions = row('1')!.querySelector('.tree-actions')!;
-    expect(within(actions as HTMLElement).getByRole('button', { name: 'Hide (x)' }).querySelector('svg')).not.toBeNull();
+    expect(within(actions as HTMLElement).getByRole('button', { name: 'Hide (h)' }).querySelector('svg')).not.toBeNull();
     await hide('1'); expect(row('1.1')).toBeNull();
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['1']));
     expect(group().getAttribute('aria-expanded')).toBe('false');
@@ -164,9 +170,10 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
     expect(group().getAttribute('aria-expanded')).toBe('true');
     expect(row('1')!.classList.contains('tree-item-hidden')).toBe(true);
     expect(row('1.1')!.classList.contains('tree-item-hidden')).toBe(true);
-    expect(within(row('1')!).getByRole('button', { name: 'Unhide (x)' }).getAttribute('title')).toBe('Unhide (x)');
+    expect(within(row('1')!).getByRole('button', { name: 'Unhide (h)' }).getAttribute('title')).toBe('Unhide (h)');
     group().focus(); fireEvent.keyDown(group(), { key: 'Enter' }); expect(row('1')).toBeNull();
-    fireEvent.keyDown(group(), { key: 'Enter' }); row('1')!.focus(); fireEvent.keyDown(row('1')!, { key: 'x' });
+    fireEvent.keyDown(group(), { key: 'Enter' }); fireEvent.click(row('1')!); await waitFor(() => expect(saved(transport).selected_item_id).toBe('1'));
+    row('1')!.focus(); fireEvent.keyDown(row('1')!, { key: 'h' });
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([]));
     expect(row('1')!.classList.contains('tree-item-hidden')).toBe(false); expect(row('1.1')).not.toBeNull();
     expect(screen.queryByRole('treeitem', { name: /^1 item hidden/ })).toBeNull();
@@ -179,11 +186,11 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
     expect(row('1')).not.toBeNull(); expect(group().getAttribute('aria-level')).toBe('3');
     await hide('1'); await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['1.1', '1']));
     expect(screen.getAllByRole('treeitem', { name: /^1 item hidden/ })).toHaveLength(1);
-    fireEvent.click(group()); fireEvent.click(within(row('1')!).getByRole('button', { name: 'Unhide (x)' }));
+    fireEvent.click(group()); fireEvent.click(within(row('1')!).getByRole('button', { name: 'Unhide (h)' }));
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['1.1'])); await ready();
     expect(row('1')!.classList.contains('tree-item-hidden')).toBe(false); expect(row('1.1')).toBeNull();
     expect(group().getAttribute('aria-level')).toBe('3');
-    fireEvent.click(group()); fireEvent.click(within(row('1.1')!).getByRole('button', { name: 'Unhide (x)' }));
+    fireEvent.click(group()); fireEvent.click(within(row('1.1')!).getByRole('button', { name: 'Unhide (h)' }));
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([]));
     expect(row('1.1')!.classList.contains('tree-item-hidden')).toBe(false);
   });
@@ -202,13 +209,18 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
     expect(row('4')!.classList.contains('tree-item-hidden')).toBe(false);
   });
 
-  it('keeps a hidden waiting question in the rail and reveals it dimmed when selected there', async () => {
+  it('keeps a hidden waiting question in the dock and reveals it dimmed when opened from its path', async () => {
     const { transport } = await mount(); const waitingBefore = chip('Waiting on me').textContent;
     await hide('2');
     expect(chip('Waiting on me').textContent).toBe(waitingBefore);
     expect(within(group()).getByText('waiting on you')).toBeTruthy();
-    const card = document.querySelector<HTMLElement>('[data-waiting-item="2"]')!; expect(card).not.toBeNull();
-    fireEvent.click(card); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' }); await ready();
+    const dock = screen.getByRole('region', { name: 'Answer dock' }), current = () => dock.querySelector('.answer-dock-current [data-owner-input="2"]');
+    fireEvent.click(within(dock).getByRole('button', { name: /^\d+ (more )?waiting$/ }));
+    await waitFor(() => expect(dock.querySelector('.answer-dock-current')).not.toBeNull());
+    const next = () => within(dock).getByRole<HTMLButtonElement>('button', { name: 'Next question' });
+    while (!current() && !next().disabled) fireEvent.click(next());
+    expect(current()).not.toBeNull();
+    fireEvent.click(dock.querySelector<HTMLButtonElement>('.dock-question-open')!); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' }); await ready();
     expect(group().getAttribute('aria-expanded')).toBe('true');
     expect(row('2')!.classList.contains('tree-item-hidden')).toBe(true);
     expect(saved(transport).hidden_item_ids).toEqual(['2']);
@@ -217,7 +229,7 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
     expect(row('2')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Unhide item' }));
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([]));
-    expect(document.querySelector('[data-waiting-item="2"]')).not.toBeNull();
+    expect(row('2')).not.toBeNull();
   });
 
   it('reveals a hidden descendant from a native item route and keeps its preference', async () => {
@@ -232,7 +244,9 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
   it('explains hidden search matches and adjusts the ordinary status chip counts', async () => {
     await mount(); await hide('1.1');
     expect(chip('All').textContent).toContain('8'); expect(chip('Open').textContent).toContain('2');
-    fireEvent.change(screen.getByRole('textbox', { name: 'Search questions and outcomes' }), { target: { value: 'receipt' } });
+    // The top bar's search box opens from its "Search the Map" button.
+    fireEvent.click(screen.getByRole('button', { name: 'Search the Map' }));
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Search the Map' }), { target: { value: 'receipt' } });
     expect(await screen.findByText('Showing 1 of 8 items matching “receipt” (1 hidden)')).toBeTruthy();
     expect(chip('All').textContent).toContain('1'); expect(chip('Open').textContent).toContain('0');
     fireEvent.click(chip('Open'));

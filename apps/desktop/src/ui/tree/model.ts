@@ -57,7 +57,7 @@ export function nextMarkedItem(order: readonly string[], markers: ReadonlyMap<st
 
 export const visual = (status: DisplayStatus): StatusKey => statusKey[status];
 const CLOSED: ReadonlySet<ItemStatus> = new Set(['decided', 'done', 'dropped', 'replaced']);
-export const closed = (status: ItemStatus) => CLOSED.has(status);
+export const closed = (status: DisplayStatus) => status !== 'sent' && status !== 'queued' && CLOSED.has(status);
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 const items = (session: Immutable<Session>) => activeItems(session);
 const topicList = (session: Immutable<Session>) => [...activeTopics(session)]
@@ -88,9 +88,9 @@ export function toggleChip(statuses: readonly ItemStatus[], chip: Chip): ItemSta
   const ordered = FILTER_STATUSES.filter(status => next.has(status));
   return ordered.length === FILTER_STATUSES.length ? [] : ordered;
 }
-/** Whether a status filter matches what a row shows: Waiting on agent counts as In progress, never as Waiting on me. */
+/** Local reply delivery stays under the persisted In progress filter. */
 export const statusIn = (statuses: readonly ItemStatus[], status: DisplayStatus) =>
-  status === 'waiting_on_agent' ? statuses.includes('in_progress') : statuses.includes(status);
+  status === 'sent' || status === 'queued' ? statuses.includes('in_progress') : statuses.includes(status);
 const inChip = (chip: Chip, status: DisplayStatus) => chip === 'all' || statusIn(CHIPS.find(value => value.chip === chip)!.statuses, status);
 
 // ---------------------------------------------------------------- search
@@ -229,7 +229,7 @@ export interface ItemRow {
   readonly key: string;
   readonly item: Immutable<Item>;
   readonly sessionClosed?: boolean;
-  /** What the row shows: the item's status, or Waiting on agent once the owner replied. */
+  /** The persisted item status or local Sent/Queued reply delivery. */
   readonly status: DisplayStatus;
   readonly ack: NonNullable<Item['ack_to']> | null;
   readonly depth: number;
@@ -311,11 +311,12 @@ function topicChip(session: Immutable<Session>, topic: Immutable<Topic>, summari
 export function topicCounts(statuses: readonly DisplayStatus[], ackCount = 0, ended = false): Count[] {
   const count = (test: (status: DisplayStatus) => boolean) => statuses.filter(test).length;
   const waiting = ended ? 0 : count(status => status === 'waiting_on_me'), open = count(status => status === 'open');
-  const agent = count(status => status === 'waiting_on_agent');
-  const progress = count(status => status === 'in_progress'), done = count(status => status !== 'waiting_on_agent' && closed(status));
+  const sent = count(status => status === 'sent'), queued = count(status => status === 'queued');
+  const progress = count(status => status === 'in_progress'), done = count(closed);
   return [
     waiting ? { icon: STATUS.waiting.icon, color: 'var(--st-waiting)', text: `${waiting} waiting on you` } : null,
-    agent ? { icon: STATUS.agent.icon, color: 'var(--st-agent)', text: `${agent} waiting on agent` } : null,
+    sent ? { icon: STATUS.agent.icon, color: 'var(--st-agent)', text: `${sent} sent` } : null,
+    queued ? { icon: STATUS.queued.icon, color: 'var(--st-open)', text: `${queued} queued` } : null,
     ackCount ? { icon: 'ph ph-check', color: 'var(--color-text)', text: `${ackCount} to ack` } : null,
     open ? { icon: STATUS.open.icon, color: 'var(--st-open)', text: `${open} open` } : null,
     progress ? { icon: STATUS.progress.icon, color: 'var(--st-progress)', text: `${progress} in progress` } : null,
@@ -395,7 +396,7 @@ export function treeModel(input: TreeInput): TreeModel {
     const chipValue = topicChip(session, topic, input.summaries, input.now);
     const delivery = deliveryLine(session, { topicId: topic.id, itemId: null }, input.presence, input.health);
     built.push({ kind: 'topic', key: topic.id, topic, depth: 0, expanded: open, first: built.length === 0, counts: topicCounts(statuses, topicItems.filter(item => ackTarget(session, item)).length, sessionEnded(session)),
-      earlier: !topic.origin && !!chipValue, chip: chipValue, allClosed: !delivery && statuses.length > 0 && statuses.every(status => status !== 'waiting_on_agent' && closed(status)), delivery });
+      earlier: !topic.origin && !!chipValue, chip: chipValue, allClosed: !delivery && statuses.length > 0 && statuses.every(closed), delivery });
     if (!open) continue;
     const walk = (list: readonly Immutable<Item>[], depth: number) => {
       const eligible = list.filter(item => !filtering || include.has(item.id));
@@ -422,7 +423,7 @@ export function treeModel(input: TreeInput): TreeModel {
           const gather = (id: string) => kids(id).forEach(child => { below.push(child); gather(child.id); });
           gather(item.id);
           collapsed = { waiting: below.filter(value => waitingOnOwner(session, value)).length, open: below.filter(value => value.status === 'open').length,
-            progress: below.filter(value => value.status === 'in_progress' || display(value) === 'waiting_on_agent').length, closed: below.filter(value => closed(value.status)).length };
+            progress: below.filter(value => value.status === 'in_progress' || display(value) === 'sent' || display(value) === 'queued').length, closed: below.filter(value => closed(value.status)).length };
         }
         const parked = item.status === 'open' && later.has(item.id);
         built.push({ kind: 'item', key: item.id, item, sessionClosed: closedSessionQuestion(session, item), status: display(item), ack: ackTarget(session, item), depth, hasKids: children.length > 0, expanded: open,

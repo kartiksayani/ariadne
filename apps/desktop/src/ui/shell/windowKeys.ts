@@ -4,13 +4,12 @@
 // This hook hands such keys to the element that would own them had focus been
 // there, and keeps Esc away from macOS (which would otherwise leave full screen).
 import { useEffect, useRef, type RefObject } from 'react';
-import { workspaceIntent } from '../keys';
+import { workspaceIntent, workspaceOverlaySelector } from '../keys';
 import type { ItemHistoryControls } from './itemHistory';
 import type { TextSizeIntent } from './textScale';
 
 const editable = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]';
 const dialogs = 'dialog,[role="dialog"],[role="alertdialog"]';
-const openDialogs = 'dialog[open],[role="dialog"],[role="alertdialog"]';
 // The tree's roving row, then the graph's roving node, then the graph scroller.
 const anchors = ['[data-conversation-anchor]', '.tree-column [data-row][tabindex="0"]', '.graph-scroll [tabindex="0"]', '.graph-scroll'];
 
@@ -42,7 +41,7 @@ export function routeWindowKey(event: KeyboardEvent, root: HTMLElement, stranded
   const target = event.target, page = root.ownerDocument;
   const outside = !(target instanceof Node && root.contains(target));
   const field = stranded && stranded.field.isConnected ? stranded.field : null;
-  const toBody = outside && !event.defaultPrevented && !within(target, `${editable},${dialogs}`) && !page.querySelector(openDialogs);
+  const toBody = outside && !event.defaultPrevented && !event.isComposing && !within(target, `${editable},${dialogs}`) && !page.querySelector(workspaceOverlaySelector);
   const intent = workspaceIntent(event);
   // These chords always belong to the app, including in fields and dialogs.
   // Consume them even at a size limit or during a save so WebView zoom stays off.
@@ -55,7 +54,7 @@ export function routeWindowKey(event: KeyboardEvent, root: HTMLElement, stranded
   }
   if (history && (intent?.kind === 'history-back' || intent?.kind === 'history-forward')) {
     if (!event.defaultPrevented && !event.isComposing && !field && !within(target, `${editable},${dialogs}`)
-      && !within(page.activeElement, editable) && !page.querySelector(openDialogs)) {
+      && !within(page.activeElement, editable) && !page.querySelector(workspaceOverlaySelector)) {
       if ((intent.kind === 'history-back' ? history.back : history.forward)()) event.preventDefault();
     }
     return;

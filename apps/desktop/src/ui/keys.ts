@@ -1,18 +1,38 @@
-// The one workspace keymap (handoff README, "Keyboard"). Components register
-// handlers for the intents they own; this module decides which key means what
-// and when a key belongs to the workspace rather than a text field or dialog.
-// `a` acknowledges an eligible proposed outcome; otherwise it opens the existing answer flow.
+// The one workspace keymap (SPEC §6.1). This module decides which key means what and when a key belongs to
+// the workspace rather than a text field or dialog. Keys that act on the whole window or the current view's
+// selected item ask for an intent (ui/intents.ts, the `keyIntents` table); the views that own them answer.
+// Keys that only make sense where focus is (moving along rows, Enter, Space, digits, Esc, ⌘↵) stay with
+// the focused row, editor or dock.
+// `a` acknowledges an eligible finding or explanation; `r` opens its reply flow.
 import { useCallback, useRef, type KeyboardEvent } from 'react';
+import { dispatchIntent, type Intent } from './intents';
 
 export type IntentKind =
   | 'move-down' | 'move-up' | 'first' | 'last' | 'unfold' | 'fold' | 'enter' | 'send'
-  | 'answer' | 'choose' | 'choose-send' | 'answer-words' | 'bring' | 'respond' | 'drop' | 'later' | 'hide' | 'reopen' | 'archive'
-  | 'search' | 'graph' | 'waiting' | 'escape' | 'remove' | 'history-back' | 'history-forward'
-  | 'text-smaller' | 'text-larger' | 'text-default' | 'peek' | 'recent';
+  | 'answer' | 'choose' | 'bring' | 'respond' | 'drop' | 'later' | 'hide' | 'reopen'
+  | 'search' | 'graph' | 'escape' | 'remove' | 'history-back' | 'history-forward'
+  | 'text-smaller' | 'text-larger' | 'text-default' | 'peek' | 'recent'
+  | 'switcher' | 'help' | 'filter' | 'focus' | 'continue' | 'next-unseen' | 'back-to-selected' | 'dock-prev' | 'dock-next';
 
 export type WorkspaceIntent =
-  | { readonly kind: Exclude<IntentKind, 'choose' | 'choose-send'> }
-  | { readonly kind: 'choose' | 'choose-send'; readonly index: number };
+  | { readonly kind: Exclude<IntentKind, 'choose'> }
+  | { readonly kind: 'choose'; readonly index: number };
+
+/** The keys that ask for an intent. A view registers the intent; the key never presses a button. */
+export const keyIntents: Readonly<Partial<Record<IntentKind, Intent>>> = {
+  switcher: 'switcher.open', help: 'help.toggle', focus: 'focus.toggle', recent: 'recent.open', continue: 'topic.continue',
+  answer: 'item.ack', drop: 'item.drop', hide: 'item.hide', remove: 'item.remove',
+  bring: 'item.bring', respond: 'item.respond', later: 'item.later', reopen: 'item.reopen',
+  graph: 'view.toggleGraph', search: 'search.focus', filter: 'filter.toggle', 'next-unseen': 'map.nextUnseen',
+  'back-to-selected': 'map.backToSelected',
+  'dock-prev': 'dock.prev', 'dock-next': 'dock.next',
+};
+
+/** Workspace handlers that pass every intent key on to `dispatchIntent`. Merge them under scoped handlers. */
+export function intentKeyHandlers<T extends Element>(): WorkspaceHandlers<T> {
+  return Object.fromEntries(Object.entries(keyIntents).map(([kind, intent]) =>
+    [kind, (_intent: WorkspaceIntent, event: KeyboardEvent<T>) => dispatchIntent(intent, { repeat: event.repeat })])) as WorkspaceHandlers<T>;
+}
 
 export interface KeyLike {
   readonly key: string;
@@ -24,11 +44,13 @@ export interface KeyLike {
   readonly shiftKey?: boolean;
 }
 
-const plain: Readonly<Record<string, Exclude<IntentKind, 'choose' | 'choose-send'>>> = {
+const plain: Readonly<Record<string, Exclude<IntentKind, 'choose'>>> = {
   ArrowDown: 'move-down', j: 'move-down', ArrowUp: 'move-up', k: 'move-up', Home: 'first', End: 'last',
-  ArrowRight: 'unfold', l: 'unfold', ArrowLeft: 'fold', h: 'fold', Enter: 'enter',
-  a: 'answer', b: 'bring', r: 'respond', d: 'drop', z: 'later', x: 'hide', o: 'reopen', e: 'archive',
-  '/': 'search', g: 'graph', w: 'waiting', Escape: 'escape', Backspace: 'remove', Delete: 'remove', ' ': 'peek',
+  ArrowRight: 'unfold', ArrowLeft: 'fold', Enter: 'enter',
+  a: 'answer', b: 'bring', r: 'respond', d: 'drop', z: 'later', h: 'hide', o: 'reopen',
+  '/': 'search', g: 'graph', f: 'filter', c: 'continue', n: 'next-unseen', '?': 'help',
+  '[': 'dock-prev', ']': 'dock-next', '.': 'back-to-selected',
+  Escape: 'escape', Backspace: 'remove', Delete: 'remove', ' ': 'peek',
 };
 
 /** The intent a key press means, or null when it is not a workspace key. */
@@ -41,14 +63,14 @@ export function workspaceIntent(event: KeyLike): WorkspaceIntent | null {
     if (!event.shiftKey && event.key === ']') return { kind: 'history-forward' };
     if (event.key.toLowerCase() === 'f') return { kind: 'search' };
     if (!event.shiftKey && event.key.toLowerCase() === 'e') return { kind: 'recent' };
+    if (!event.shiftKey && event.key.toLowerCase() === 'o') return { kind: 'switcher' };
     if (event.key === 'Enter') return { kind: 'send' };
     return null;
   }
-  if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.repeat) {
-    if (event.code === 'Digit0') return { kind: 'answer-words' };
-    if (/^Digit[1-9]$/.test(event.code ?? '')) return { kind: 'choose-send', index: Number(event.code!.slice(-1)) - 1 };
-  }
   if (event.metaKey || event.ctrlKey || event.altKey) return null;
+  if (event.shiftKey && event.key.toLowerCase() === 'f') return { kind: 'focus' };
+  // As before the redesign: n with caps lock on (or Shift) still outlines the next unseen row.
+  if (event.key === 'N') return { kind: 'next-unseen' };
   if (/^[1-9]$/.test(event.key)) return { kind: 'choose', index: Number(event.key) - 1 };
   const kind = plain[event.key];
   return kind ? { kind } : null;
@@ -69,14 +91,21 @@ export type IntentHandler<T extends Element> = (intent: WorkspaceIntent, event: 
 export type WorkspaceHandlers<T extends Element = HTMLElement> = Partial<Record<IntentKind, IntentHandler<T>>>;
 
 const editableSelector = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]';
+/**
+ * Open overlays own their keys even when focus is still on an underlying row. The peek (a hover card, also
+ * role="dialog") is not one of them: the Map keeps its keys while a peek is showing (SPEC §6.13).
+ */
+export const workspaceOverlaySelector = 'dialog[open],[role="dialog"]:not(.item-peek),[role="alertdialog"],[data-workspace-overlay]';
 const inside = (target: EventTarget, selector: string) => target instanceof Element && !!target.closest(selector);
 
 export function accepts(scope: KeyScope, event: Pick<KeyboardEvent<Element>, 'target' | 'currentTarget' | 'defaultPrevented'>, intent: WorkspaceIntent): boolean {
-  if ((intent.kind === 'choose-send' || intent.kind === 'answer-words') && inside(event.target, editableSelector)) return false;
-  if (scope === 'workspace') return !event.defaultPrevented && !inside(event.target, `${editableSelector},[role="dialog"],[role="alertdialog"]`);
+  if (event.defaultPrevented) return false;
+  if (event.currentTarget.ownerDocument.querySelector(workspaceOverlaySelector)
+    && (scope !== 'editor' || !inside(event.target, workspaceOverlaySelector))) return false;
+  if (scope === 'workspace') return !inside(event.target, `${editableSelector},dialog,[role="dialog"],[role="alertdialog"]`);
   if (scope === 'row') return event.target === event.currentTarget && !inside(event.target, editableSelector);
   if (intent.kind === 'escape' || intent.kind === 'send') return true;
-  return !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement);
+  return !inside(event.target, editableSelector);
 }
 
 /** A keydown handler that dispatches workspace intents to `handlers`. */
@@ -85,6 +114,7 @@ export function useWorkspaceKeys<T extends Element = HTMLElement>(handlers: Work
   latest.current = handlers;
   const { scope } = options;
   return useCallback((event: KeyboardEvent<T>) => {
+    if (event.nativeEvent.isComposing) return;
     const intent = workspaceIntent(event);
     if (!intent || !accepts(scope, event, intent)) return;
     const handler = latest.current[intent.kind];

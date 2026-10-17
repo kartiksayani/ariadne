@@ -102,6 +102,10 @@
   content: "\e13a";
 }
 
+.ph.ph-caret-up::before {
+  content: "\e13c";
+}
+
 .ph.ph-chat-text::before {
   content: "\e17a";
 }

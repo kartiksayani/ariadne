@@ -1,10 +1,11 @@
 import { AgentBin } from '../remove/AgentBin';
 import { itemRemoved } from '../../selectors/removed';
 // The session tree column (handoff "Session tree"): session bar, status menu,
-// banners, topic bands and item rows, with the tree keyboard, inline answering
+// banners, topic bands and item rows, with the tree keyboard
 // and the empty and loading states. Selection, expansion, topic folds and filters
 // persist through navigation's preference writer.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { OwnFailure, plainFailure, useSession, type Immutable, type SessionStore } from '../../data';
 import type { RevealedItem } from '../../data/routes';
 import type { ItemRoute, SessionPreferences } from '../../generated/core';
@@ -13,12 +14,9 @@ import { NavigationStore, useNavigation } from '../../state/navigation/store';
 import { useReadingSeen } from '../../state/preferences/reading';
 import { OwnerDraftStore, useOwnerDrafts } from '../../state/drafts/store';
 import type { SessionActions } from '../../components/bindings/actions';
-import { DispatchChip } from '../../components/bindings/DispatchChip';
 import { useSupervisorHealth } from '../../components/bindings/health';
-import { DispatchDialog } from '../pages/SessionDialogs';
 import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
-import { AnswerControl } from '../answer/AnswerControl';
-import type { PendingSubmission } from '../answer/useSubmit';
+import { useIntents } from '../intents';
 import { notices as noticeStore } from '../pages/notices';
 import { chipsOf, closed, collapsedNote, mapChanges, nextMarkedItem, oldestWaiting, parentKey, sessionBar, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
 import { HiddenRow } from './HiddenRow';
@@ -31,22 +29,21 @@ import { TopicReply } from '../answer/TopicReply';
 import { StuckNote } from '../answer/StuckNote';
 import { editQueued, inEditor } from '../answer/held';
 import { InlineRecovery } from '../../components/recovery/RecoveryPanel';
-import { Banner, SessionBar } from './SessionBar';
+import { Banner } from './Banner';
 import { FilterBar, GraphFilterSlot } from './FilterBar';
-import { useSessionLifecycle } from '../shared/useSessionLifecycle';
+import { useSessionLifecycleFor } from '../shared/SessionLifecycleOwner';
 import { ItemRefs } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
 import { peekNames } from '../peek/names';
 import { nearestDelta, openingTop } from './scroll';
 import { useDockInset } from '../shell/dockInset';
 import { displayStatus } from '../../selectors/waiting/replied';
-import { sessionEnded, sessionClosedReason, sessionAnswerBlocked } from '../../selectors/sessionClosed';
+import { sessionAnswerBlocked } from '../../selectors/sessionClosed';
 import { useUnfolded } from './unfold';
 import type { RemoveTarget } from '../dialogs/remove';
 import { ContinuePicker, continueTargets, openContinueTopic } from '../dialogs/ContinueTopicDialog';
 import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
-import { reconnectingNote } from '../shared/connection';
 import { useFilterFolds } from '../shared/filterFolds';
 import { isViewConflict } from '../shared/conflictNotice';
 import { TreeFonts, useTreeFonts } from './fonts';
@@ -66,6 +63,7 @@ export interface TreeViewProps {
   readonly drafts: OwnerDraftStore;
   /** The header search as typed. */
   readonly query: string;
+  readonly filterOpen?: boolean;
   /** An item revealed from a link or the waiting panel; null once dismissed. */
   readonly reveal: RevealedItem | null;
   /** The latest Back/Forward reveal; retained alongside ordinary external reveals. */
@@ -74,6 +72,10 @@ export interface TreeViewProps {
   readonly detailOpen: boolean;
   /** Conversation covers the retained tree; its global shortcuts pause until Map returns. */
   readonly covered?: boolean;
+  /** The bigger view's item while it covers the tree: Focus (⇧F) and Continue (c) act on it, not the Map's selection. */
+  readonly actingId?: string | null;
+  /** Shows an item picked from Recent while the bigger view covers the tree (it leaves the bigger view). */
+  readonly onOpenItem?: (itemId: string) => void;
   /** Graph content shown in place of the rows. */
   readonly graph?: ReactNode;
   /** Notices above the rows: stale data, recovery. */
@@ -91,8 +93,6 @@ export interface TreeViewProps {
   readonly onClearFilters: () => void;
   readonly onClearSearch?: () => void;
   readonly onShowArchive: () => void;
-  /** Called instead of sending when the agent is not running; without it the send queues. */
-  readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
   /** Asks to remove an item (and everything below it) or a topic: row trash, topic Remove, ⌫/Delete. */
   readonly onRemove: (target: Extract<RemoveTarget, { kind: 'item' | 'topic' }>) => void;
 }
@@ -112,7 +112,7 @@ const SKELETON = [
 export function TreeView(props: TreeViewProps) {
   const { navigation, store, actions, drafts, query, reveal, selectedId, detailOpen, covered = false, graph, notices,
     summaries, onSelected, onDismissReveal, onResume, onAct, onClearFilters, onClearSearch, onShowArchive,
-    onAgentNotRunning, onRemove } = props;
+    onRemove } = props;
   const state = useSession(store), raw = state.snapshot?.session ?? null;
   const fontEpoch = useTreeFonts();
   const peek = usePeek();
@@ -155,14 +155,12 @@ export function TreeView(props: TreeViewProps) {
   const seen = useReadingSeen(navigation.reading, preferences, route);
   const changes = useMemo(() => session ? mapChanges(session, seen) : null, [session, seen]);
   const [kbd, setKbd] = useState(false);
-  const [answering, setAnswering] = useState<string | null>(null);
   const [continuing, setContinuing] = useState<string | null>(null);
   const [replying, setReplying] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
   useEffect(() => navigationVisits.bind(navigation), [navigation]);
   useOwnerDrafts(drafts, raw);
-  const lifecycle = useSessionLifecycle(actions);
+  const lifecycle = useSessionLifecycleFor(actions);
   const ack = useAck(actions, selectedId);
   const [ackItemId, setAckItemId] = useState<string | null>(null);
   const runAck = (itemId: string) => { setAckItemId(itemId); return ack.run(itemId).then(saved => {
@@ -192,7 +190,7 @@ export function TreeView(props: TreeViewProps) {
   const actionState = actions.getSnapshot();
   const controllerFailure = !actionState.pending && isViewConflict(actionState.error) ? plainFailure(actionState.error) : null;
   const ackNotice = ack.error === controllerFailure ? null : ack.error;
-  const lifecycleNotice = lifecycle.dialog || lifecycle.error === controllerFailure ? null : lifecycle.error;
+  const lifecycleNotice = lifecycle.reviewing || lifecycle.error === controllerFailure ? null : lifecycle.error;
   const ackNoticeId = JSON.stringify(['item-ack', route.project_id, route.session_id, ackItemId]);
   const lifecycleNoticeId = JSON.stringify(['tree-lifecycle', route.project_id, route.session_id]);
   useEffect(() => () => noticeStore.dismiss(ackNoticeId), [ackNoticeId]);
@@ -238,8 +236,8 @@ export function TreeView(props: TreeViewProps) {
     }
     return groups;
   }, [rows]);
-  const latest = useRef({ view, preferences, rows, session, selectedId, answering, focusedId });
-  latest.current = { view, preferences, rows, session, selectedId, answering, focusedId };
+  const latest = useRef({ view, preferences, rows, session, selectedId, focusedId });
+  latest.current = { view, preferences, rows, session, selectedId, focusedId };
 
   const hiddenSelection = useRef<{ sessionId?: string; selectedId: string | null }>({ selectedId: null });
   useEffect(() => {
@@ -425,59 +423,36 @@ export function TreeView(props: TreeViewProps) {
     if (outsideSelected) void saveView(next => { next.selected_item_id = null; });
   };
 
-  // ------------------------------------------------------------ answering
-  const answerable = (row: Row | undefined): row is ItemRowModel => row?.kind === 'item' && row.item.status === 'waiting_on_me'
-    && (!row.delivery || row.delivery.failed) && !archivedMode;
-  const openAnswer = (id: string) => {
-    setAnswering(id);
-    const begin = () => {
-      const current = store.getSnapshot().snapshot?.session;
-      if (!current || !mounted.current) return;
-      const existing = drafts.find(route, id, 'answer');
-      if (existing?.receipt) drafts.another(existing.draft.op_id, current);
-      else if (!existing) drafts.begin(current, id, 'answer');
-    };
-    if (drafts.getSnapshot().ready) begin(); else void drafts.load().then(begin);
-  };
-  // Answering ends once the item has an answer on its way or stops waiting.
-  const answerRow = rows.find((row): row is ItemRowModel => row.key === answering && answerable(row));
-  const entry = answerRow ? drafts.find(route, answerRow.item.id, 'answer') : undefined;
-  const options = answerRow?.item.options ?? [];
-  const pickedIndex = entry?.draft.selected_option_id ? options.findIndex(option => option.id === entry.draft.selected_option_id) : -1;
-  const chosen = pickedIndex >= 0 ? pickedIndex : options.findIndex(option => option.recommended);
-  const blocked = session && sessionEnded(session) ? sessionAnswerBlocked(session)
-    : session?.state !== 'active' ? sessionClosedReason
-    : bar?.connection === 'reconnecting' ? reconnectingNote(bar.agent) : null;
   const focusRow = (key: string) => { setFocusKey(key); elements.current.get(key)?.focus({ preventScroll: true }); };
-  const send = (change: { selected_option_id: string | null; text: string }) => {
-    if (!entry || entry.saving || blocked) return;
-    const id = entry.draft.op_id, itemKey = answering, item = answerRow?.item;
-    // The change is saved only when the input goes out: a cancelled "not running" dialog keeps the draft as typed.
-    const submit = () => { drafts.edit(id, change); return drafts.submit(id).then(saved => {
-      if (saved && mounted.current) {
-        if (itemKey) navigationVisits.record(route, itemKey, 'answered');
-        setAnswering(current => current === itemKey ? null : current);
-        if (itemKey) focusRow(itemKey);
-      }
-      return saved;
-    }); };
-    if (item && bar?.connection !== 'connected' && onAgentNotRunning) {
-      const label = change.selected_option_id ? item.options.find(option => option.id === change.selected_option_id)?.label ?? '' : change.text;
-      onAgentNotRunning({ route: { ...route, item_id: item.id }, intent: 'answer', question: item.question, label, agent: bar?.agent ?? 'the agent', change, queue: submit });
-    } else void submit();
+
+  // ⇧F and c act on the current view's selected item: the bigger view's item while it covers the tree.
+  const actingItem = () => { const id = covered ? props.actingId ?? null : selectedId; return id ? session?.items[id] : undefined; };
+  // The bigger view makes the Map inert; the dialogs its keys open (Recent, Continue) show above it instead.
+  const lift = (node: ReactNode) => covered ? createPortal(node, scroller.current?.closest('.product-app') ?? document.body) : node;
+  const toggleSelectedFocus = () => {
+    if (focusDisabled) return false;
+    if (focusedId) { focusBranch(null); return true; }
+    let item = actingItem();
+    while (item?.parent) item = session?.items[item.parent];
+    if (!item) return false;
+    focusBranch(item.id); return true;
   };
-  const sendOption = (index: number, note?: string) => {
-    const option = options[index];
-    if (entry && option) send({ selected_option_id: option.id, text: note ?? drafts.getSnapshot().entries[entry.draft.op_id]?.draft.text ?? entry.draft.text });
+  const continueSelected = () => {
+    const item = actingItem();
+    if (!item || archivedMode) return false;
+    // As the topic band offers it: not for a topic continued from elsewhere, nor while a topic reply is on its way.
+    if (session?.topics[item.topic_id]?.origin) return false;
+    if (latest.current.rows.some(row => row.kind === 'topic' && row.topic.id === item.topic_id && row.delivery)) return false;
+    setContinuing(item.topic_id); return true;
   };
-  const answerControl = answerRow ? <AnswerControl variant="full" selected={chosen} draft={entry?.draft.text ?? ''}
-    options={options.map(option => ({ id: option.id, label: option.label, consequence: option.consequence, recommended: option.recommended }))}
-    warn={entry?.error ? plainFailure(entry.error) : undefined} blocked={blocked ?? undefined} locked={!entry || entry.saving || !!session && sessionEnded(session)}
-    onSelect={index => { if (entry && options[index]) drafts.edit(entry.draft.op_id, { selected_option_id: options[index].id }); focusRow(answerRow.key); }}
-    onDraft={text => { if (entry) drafts.edit(entry.draft.op_id, { text }); }}
-    onSendOption={sendOption} onSendText={text => send({ selected_option_id: null, text })}
-    onEscape={() => { setAnswering(null); focusRow(answerRow.key); }} /> : null;
-  useEffect(() => { if (answering && !answerRow) setAnswering(null); }, [answering, answerRow]);
+  useIntents({
+    'focus.toggle': toggleSelectedFocus,
+    'topic.continue': continueSelected,
+    'recent.open': () => { if (!session) return false; setRecentOpen(true); return true; },
+    // n outlines the next unseen row; the Graph and the bigger view have none.
+    'map.nextUnseen': ({ repeat }) => { if (graph || covered) return false; if (!repeat) nextCallbacks.current(); return true; },
+    'map.backToSelected': () => { if (graph || covered || !selectedId) return false; revealSelected(true); return true; },
+  });
 
   // ------------------------------------------------------------ keyboard
   const onRow = (act: (row: Row, index: number, intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => boolean | void) => (intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => {
@@ -511,7 +486,6 @@ export function TreeView(props: TreeViewProps) {
     enter: onRow(row => {
       if (row.kind === 'topic') { toggleTopic(row.topic.id); return true; }
       if (row.kind === 'hidden') { toggleHiddenGroup(row.key); return true; }
-      if (answering === row.key && chosen >= 0) { sendOption(chosen); return true; }
       select(row.item.id); return true;
     }),
     peek: onRow((row, _index, _intent, event) => {
@@ -519,9 +493,8 @@ export function TreeView(props: TreeViewProps) {
       if (!event.repeat) peek.open({ ...route, item_id: row.item.id }, event.currentTarget);
       return true;
     }),
-    recent: () => { setRecentOpen(true); return true; },
     answer: onRow((row, _index, _intent, event) => {
-      if (row.kind === 'item' && session && ackTarget(session, row.item)) {
+      if (row.kind === 'item' && row.item.id === selectedId && session && ackTarget(session, row.item)) {
         if (!event.repeat) {
           if (viewBusy) noticeStore.push({ id: 'tree-ack-view-saving', icon: 'ph ph-warning-circle', dismissible: true,
             text: 'Another view change is being saved. Wait for it, then try Ack again.' });
@@ -529,29 +502,13 @@ export function TreeView(props: TreeViewProps) {
         }
         return true;
       }
-      if (answerable(row)) { if (answering === row.key) setAnswering(null); else openAnswer(row.key); return true; }
-      const oldest = session ? oldestWaiting(session) : null, target = oldest ? latest.current.rows.find(value => value.key === oldest.id) : undefined;
-      if (!answerable(target)) return false;
-      focusRow(target.key); openAnswer(target.key); return true;
-    }),
-    choose: onRow((row, _index, intent) => {
-      if (row.kind !== 'item') return true;
-      if (answering !== row.key || intent.kind !== 'choose') return false;
-      if (entry && options[intent.index]) drafts.edit(entry.draft.op_id, { selected_option_id: options[intent.index].id });
-      return true;
-    }),
-    escape: onRow(row => { if (answering !== row.key) return false; setAnswering(null); return true; }),
-    archive: onRow(row => {
-      const topicId = row.kind === 'topic' ? row.topic.id : row.kind === 'hidden' ? row.topicId : row.item.topic_id;
-      if (archivedMode) lifecycle.restore(topicId); else lifecycle.archive(topicId);
-      return true;
+      return false;
     }),
     bring: topicOnly, respond: topicOnly, drop: topicOnly, reopen: topicOnly, later: topicOnly,
-    hide: (intent, event) => event.repeat ? true : onRow(row => { if (row.kind === 'item') hideItem(row); return true; })(intent, event),
+    hide: (intent, event) => onRow(row => { if (row.kind !== 'item' || row.item.id !== selectedId) return false; if (!event.repeat) hideItem(row); return true; })(intent, event),
     remove: onRow(row => {
-      if (row.kind === 'hidden') return true;
-      onRemove(row.kind === 'topic' ? { kind: 'topic', session: route, topic_id: row.topic.id } : { kind: 'item', item: { ...route, item_id: row.item.id } });
-      return true;
+      if (row.kind !== 'item' || row.item.id !== selectedId) return false;
+      onRemove({ kind: 'item', item: { ...route, item_id: row.item.id } }); return true;
     }),
   }, { scope: 'row' });
 
@@ -721,9 +678,27 @@ export function TreeView(props: TreeViewProps) {
   const [focusExitMissing, setFocusExitMissing] = useState(false);
   const placed = useRef<Anchor | null>(null);
   placed.current = anchor;
+  /** The scroller width `holding` last held the reading row at. */
+  const previousWidth = useRef<number | null>(null);
+  /**
+   * Puts the held row back at its offset below the reading edge. The sticky topic bar at that edge belongs to whichever
+   * topic is under it at this scroll position: after a width change, rows reflow and another topic's bar (wrapped to a
+   * different height) can sit there until the row is back, so settle against the bar the row ends under, measuring it
+   * afresh on each of a few passes.
+   */
+  const restoreHeld = (box: HTMLDivElement, before: { readonly offset: number }, element: HTMLElement) => {
+    for (let pass = 0; pass < 3; pass++) {
+      const delta = element.getBoundingClientRect().top - readingTop() - before.offset;
+      if (Math.abs(delta) < 1) return;
+      box.scrollTop += delta;
+    }
+  };
   const remembering = () => {
     const box = scroller.current;
     if (!box) { held.current = null; return; }
+    // A new width not yet held: a scroll event is handled before the frame's resize observers, so it can arrive first.
+    // The width change is `holding`'s (it keeps the row below the topic bar the row ends under), and it remembers after.
+    if (previousWidth.current !== null && previousWidth.current !== box.getBoundingClientRect().width) { holding(); return; }
     const before = held.current, element = before ? elements.current.get(before.key) : undefined;
     // An observer, layout effect or delayed programmatic scroll event can arrive between
     // reflows. With no owner scroll, restore the held row before adopting the new layout.
@@ -732,7 +707,7 @@ export function TreeView(props: TreeViewProps) {
       if (Math.abs(delta) >= 1) box.scrollTop += delta;
     }
     const top = readingTop(), list = latest.current.rows.filter(row => row.kind === 'item');
-    const panelKey = latest.current.answering ?? latest.current.selectedId;
+    const panelKey = latest.current.selectedId;
     const panelRect = panelKey ? elements.current.get(panelKey)?.getBoundingClientRect() : undefined;
     panelTarget.current = panelKey && panelRect && panelRect.top >= top && panelRect.top < visibleBottom(box)
       ? { key: panelKey, top: panelRect.top, scrollTop: box.scrollTop } : null;
@@ -781,17 +756,16 @@ export function TreeView(props: TreeViewProps) {
   };
   layoutState.current = { selectedId, reveal, detailOpen };
   const previousLayout = useRef(layoutState.current);
-  const previousWidth = useRef<number | null>(null);
   const holding = () => {
     const previous = previousLayout.current, current = layoutState.current;
     previousLayout.current = current;
     const width = scroller.current?.getBoundingClientRect().width ?? null;
     const resized = previousWidth.current !== null && previousWidth.current !== width;
     previousWidth.current = width;
-    // Closing detail widens previews above the selected/answered row. Preserve
+    // Closing detail widens previews above the selected row. Preserve
     // that row's last screen position rather than the earlier reading anchor.
     const target = panelTarget.current;
-    if (previous.detailOpen && !current.detailOpen && target && target.key === (latest.current.answering ?? current.selectedId)) {
+    if (previous.detailOpen && !current.detailOpen && target && target.key === current.selectedId) {
       const offset = Math.max(target.top, readingTop() + 8) - readingTop();
       revealedAnchor.current = { key: target.key, offset };
       held.current = { key: target.key, offset, top: readingTop() + offset - (scroller.current?.getBoundingClientRect().top ?? 0), scrollTop: target.scrollTop };
@@ -802,10 +776,7 @@ export function TreeView(props: TreeViewProps) {
     const box = scroller.current, before = held.current, element = before ? elements.current.get(before.key) : undefined;
     // At the very top the owner wants the newest rows; a different scroll position means the view was moved on purpose
     // (a scroll, a reveal, the keyboard), and the opening placement holds its own row until the owner steers.
-    if (box && before && element && before.scrollTop > 0 && box.scrollTop === before.scrollTop && (settled.current || !placed.current)) {
-      const delta = element.getBoundingClientRect().top - readingTop() - before.offset;
-      if (Math.abs(delta) >= 1) box.scrollTop += delta;
-    }
+    if (box && before && element && before.scrollTop > 0 && box.scrollTop === before.scrollTop && (settled.current || !placed.current)) restoreHeld(box, before, element);
     remembering();
   };
   useLayoutEffect(holding);
@@ -914,19 +885,8 @@ export function TreeView(props: TreeViewProps) {
     setNextTarget(null); setNextRevealId(null); setNextPulse(false); setNoUnseen(false); nextScroll.current = null;
     return () => noticeStore.dismiss('tree-no-unseen');
   }, [route.project_id, route.session_id]);
-  useEffect(() => {
-    if (graph || covered) return;
-    const shortcut = (event: globalThis.KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.key.toLowerCase() !== 'n') return;
-      if (event.target instanceof Element && event.target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[role="dialog"],[role="alertdialog"]')) return;
-      event.preventDefault();
-      if (!event.repeat) nextCallbacks.current();
-    };
-    window.addEventListener('keydown', shortcut);
-    return () => window.removeEventListener('keydown', shortcut);
-  }, [graph, covered]);
-  const edgeCallbacks = useRef({ updateEdge, revealSelected, holding });
-  edgeCallbacks.current = { updateEdge, revealSelected, holding };
+  const edgeCallbacks = useRef({ updateEdge, holding });
+  edgeCallbacks.current = { updateEdge, holding };
   const topicKeys = JSON.stringify(sections.map(section => section.topic.key));
   useEffect(() => {
     const box = scroller.current;
@@ -941,20 +901,6 @@ export function TreeView(props: TreeViewProps) {
     box.querySelectorAll('.tree-topic').forEach(header => observer.observe(header));
     return () => observer.disconnect();
   }, [hasRows, graph, topicKeys]);
-  useEffect(() => {
-    if (covered) return;
-    const shortcut = (event: globalThis.KeyboardEvent) => {
-      if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
-        event.preventDefault(); edgeCallbacks.current.revealSelected();
-      }
-      if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'e'
-        && !(event.target instanceof Element && event.target.closest('[role="dialog"],[role="alertdialog"]'))) {
-        event.preventDefault(); setRecentOpen(true);
-      }
-    };
-    window.addEventListener('keydown', shortcut, true);
-    return () => window.removeEventListener('keydown', shortcut, true);
-  }, [graph, covered]);
 
   // ------------------------------------------------------------ rows
   const running = bar?.running ?? false;
@@ -978,16 +924,16 @@ export function TreeView(props: TreeViewProps) {
         if (item.status !== 'replaced') list.push({ icon: 'ph ph-arrow-counter-clockwise', title: 'Back to Open (o)', run: act('reopen') });
       }
     }
-    list.push({ icon: '', glyph: <HideIcon hidden={row.hidden} />, title: row.hidden ? 'Unhide (x)' : 'Hide (x)', run: () => hideItem(row) });
+    list.push({ icon: '', glyph: <HideIcon hidden={row.hidden} />, title: row.hidden ? 'Unhide (h)' : 'Hide (h)', run: () => hideItem(row) });
     list.push({ icon: 'ph ph-trash', title: 'Remove (⌫)', run: () => onRemove({ kind: 'item', item: target }) });
     return list;
   };
   const topicActions = (row: Extract<Row, { kind: 'topic' }>): TopicAction[] => {
     const id = row.topic.id;
-    if (archivedMode) return [{ icon: 'ph ph-arrow-counter-clockwise', label: 'Restore', title: 'Restore topic (e)', run: () => lifecycle.restore(id), archive: true }];
+    if (archivedMode) return [{ icon: 'ph ph-arrow-counter-clockwise', label: 'Restore', title: 'Restore topic', run: () => lifecycle.restore(id), archive: true }];
     const remove = { icon: 'ph ph-trash', label: 'Remove', title: 'Remove topic (⌫)', run: () => onRemove({ kind: 'topic', session: route, topic_id: id }) };
     // Archive is always offered: open items stay as they are and unsent messages are cancelled (ADR-0090).
-    const archive = { icon: 'ph ph-archive', label: 'Archive', title: 'Archive topic (e)', run: () => lifecycle.archive(id), archive: true };
+    const archive = { icon: 'ph ph-archive', label: 'Archive', title: 'Archive topic', run: () => lifecycle.archive(id), archive: true };
     // While a topic reply is on its way to the agent, the topic takes no new reply or continuation.
     if (row.delivery) return [archive, remove];
     return [
@@ -1032,7 +978,7 @@ export function TreeView(props: TreeViewProps) {
         : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={focusDisabled} closedReason={session ? sessionAnswerBlocked(session) : undefined}
         changeMarker={changes?.markers.get(row.key)} nextUnseen={nextTarget?.id === row.key} nextUnseenPulse={nextPulse && nextTarget?.id === row.key}
         note={row.collapsed ? collapsedNote(row.collapsed) : null}
-        actions={itemActions(row)} answer={answering === row.key ? answerControl : null} fix={fixOf(row)}
+        actions={itemActions(row)} fix={fixOf(row)}
         unfolded={isUnfolded(row.key)} onUnfold={unfold}
         onFocusBranch={focusBranch} branchFocused={focusedId === row.key} names={names}
         onPeekHover={(id, event) => { const handlers = peek?.chipProps({ ...route, item_id: id });
@@ -1048,7 +994,7 @@ export function TreeView(props: TreeViewProps) {
   // Stopped deliveries answered on a row the owner can see; the recovery banner lists the rest
   // (none in the graph, which has no rows; a filtered-out or folded row is not here).
   const inline: ReadonlySet<string> = new Set(graph && !loading ? [] : rows.flatMap(row => row.delivery?.stuck ? [row.delivery.stuck.input.id] : []));
-  const filtersShown = !archivedMode;
+  const filtersShown = !archivedMode && (props.filterOpen ?? true);
   const counts = model?.counts ?? { all: 0, waiting: 0, open: 0, progress: 0, closed: 0 };
   const graphShown = !!graph && !loading;
   const filterBar = <FilterBar chips={model?.chips ?? chipsOf([])} counts={counts}
@@ -1087,12 +1033,13 @@ export function TreeView(props: TreeViewProps) {
   const selectedTag = !graph && <div className="tree-selected-slot" role="group" aria-label="Selected item navigation">
     {selectedEdge && selectedId && session?.items[selectedId] && <button type="button" className="tree-selected-edge" data-edge={selectedEdge}
       aria-label={`${selectedEdge === 'above' ? '↑' : '↓'} Selected: ${session.items[selectedId]!.question}`}
-      title={`Reveal selected item · ⌘J · ${session.items[selectedId]!.question}`} onClick={() => revealSelected(true)}>
+      title={`Back to the selected item ( . ) · ${session.items[selectedId]!.question}`} onClick={() => revealSelected(true)}>
       <span>{selectedEdge === 'above' ? '↑' : '↓'} Selected:</span>{' '}
       <span className="tree-selected-label">{names.get(selectedId)}</span></button>}
   </div>;
 
-  return <section className="tree-column" aria-label="Session tree" data-session-status={state.status} data-kbd={kbd || undefined}
+  // data-session-busy: "true" while the session is loading or a lifecycle change (close, reopen, rename, archive) saves.
+  return <section className="tree-column" aria-label="Session tree" data-session-status={state.status} data-session-busy={String(lifecycle.busy || !session)} data-kbd={kbd || undefined}
     onKeyDownCapture={event => {
       // Window capture has already positioned the selection for Cmd+J. That
       // same event must not cancel the reveal before its preview reflows.
@@ -1103,9 +1050,6 @@ export function TreeView(props: TreeViewProps) {
     onPointerDownCapture={releaseReveal} onWheelCapture={releaseReveal}
     onMouseDownCapture={() => { if (kbd) setKbd(false); }}>
     <span role="status" className="tree-unseen-announcement">{noUnseen ? 'No unseen items.' : ''}</span>
-    {bar && !archivedMode && <SessionBar bar={bar} busy={lifecycle.busy || !session} onClose={lifecycle.session}
-      onRename={session ? lifecycle.rename : undefined}
-      dispatch={<DispatchChip actions={actions} onDetails={() => setSending(true)} />} />}
     {/* The filter control ends this row, so it needs no row of its own. Over a loaded graph it sits in the graph's legend row instead. */}
     {filtersShown && !graphShown && <div className="tree-recent">
       {session && !graph && <><RecentTrail session={session} entries={view?.recent_items}
@@ -1113,10 +1057,9 @@ export function TreeView(props: TreeViewProps) {
       <button type="button" className="btn btn-ghost" title="Recent (⌘E)" onClick={() => setRecentOpen(true)}>Recent</button></>}
       {filterBar}
     </div>}
-    {session && recentOpen && <RecentDialog session={session} entries={view?.recent_items}
+    {session && recentOpen && lift(<RecentDialog session={session} entries={view?.recent_items}
       seen={seen}
-      onReveal={id => select(id, false)} onClose={() => setRecentOpen(false)} />}
-    {sending && <DispatchDialog store={actions.session} actions={actions} agent={bar?.agent ?? 'the agent'} onClose={() => setSending(false)} />}
+      onReveal={id => { if (covered && props.onOpenItem) props.onOpenItem(id); else select(id, false); }} onClose={() => setRecentOpen(false)} />)}
     {model && !graph && (!!query || !model.chips.has('all')) && <Banner icon={query ? 'ph ph-magnifying-glass' : 'ph ph-funnel'} actions={<><span aria-hidden="true">·</span><button type="button" className="btn btn-ghost" disabled={nav.writing || nav.pendingOperationId !== null} onClick={query ? onClearSearch : onClearFilters}>{query ? 'Clear search' : 'Clear filters'}</button></>}>
       Showing {model.searchCount} of {model.itemCount} items{query ? ` matching “${query}”` : ''}{model.hiddenCount > 0 ? ` (${model.hiddenCount} hidden)` : ''}{!model.chips.has('all') ? ' in the statuses you picked' : ''}</Banner>}
     {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>
@@ -1142,8 +1085,8 @@ export function TreeView(props: TreeViewProps) {
     </div>}
     {session && <AgentBin session={session} actions={actions} onRemove={onRemove} />}
     {lifecycle.dialog}
-    {continuing && <ContinuePicker topicName={session?.topics[continuing]?.name ?? 'this topic'} targets={continueTargets(route, summaries)}
+    {continuing && lift(<ContinuePicker topicName={session?.topics[continuing]?.name ?? 'this topic'} targets={continueTargets(route, summaries)}
       onCancel={() => setContinuing(null)}
-      onPick={target => { setContinuing(null); openContinueTopic({ source: route, topicId: continuing, target }); }} />}
+      onPick={target => { setContinuing(null); openContinueTopic({ source: route, topicId: continuing, target }); }} />)}
   </section>;
 }

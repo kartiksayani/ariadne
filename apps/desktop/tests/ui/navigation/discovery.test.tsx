@@ -69,13 +69,18 @@ describe('explicit discovery registration and binding', () => {
     const context = setup(); await context.store.start();
     render(<NavigationWorkspace store={context.store} discovery={context.controller} onRemoveTarget={() => {}} adapterChoices={[adapter]} renderSession={() => null} />);
     expect(context.opens).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Discover host sessions' }));
+    // Discover sessions is an item of the Projects page's "…" menu (SPEC 14.1), once the page is ready.
+    await waitFor(() => expect(context.store.getSnapshot().status).toBe('ready'));
+    fireEvent.click(screen.getByRole('button', { name: 'Register a project, discover sessions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Discover sessions/ }));
     await screen.findByText('Discovered conversation'); expect(context.mutations).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Register this project' }));
-    expect(screen.getByLabelText('Project root')).toHaveValue(root); expect(context.mutations).toHaveLength(0);
-    await act(async () => { fireEvent.click(screen.getAllByRole('button', { name: 'Register project' }).at(-1)!); });
+    expect(screen.getByLabelText('Folder')).toHaveValue(root); expect(context.mutations).toHaveLength(0);
+    await act(async () => { fireEvent.click(screen.getAllByRole('button', { name: /^Register project/ }).at(-1)!); });
     expect(context.mutations[0].command).toMatchObject({ command: 'project_register', params: { canonical_root: root } });
-    expect(context.store.getSnapshot().preferences?.global.selected_navigation).toEqual({ kind: 'project', project_id: demo.project_id });
+    // The registered project's page opens; a page is a view, so the saved selection stays as it was.
+    expect(context.store.getSnapshot().page).toEqual({ kind: 'page', page: 'sessions', projectId: demo.project_id });
+    expect(context.store.getSnapshot().preferences?.global.selected_navigation).toEqual({ kind: 'projects' });
     expect(context.mutations.some(request => request.command.command === 'binding_connect')).toBe(false);
     await waitFor(() => expect(context.opens.mock.calls.at(-1)).toEqual([false]));
   });

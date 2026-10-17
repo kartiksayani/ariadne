@@ -2,7 +2,7 @@
 .shell {
   position: relative;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   width: 100%;
   height: 100%;
   overflow: hidden;
@@ -11,7 +11,7 @@
   color: var(--color-text);
   font-family: var(--font-body);
   font-size: calc(14px * var(--text-scale));
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
 /* macOS full screen (ui/shell/fullscreen.ts): the system menu bar slides down over the top
@@ -20,292 +20,11 @@
   padding-top: 28px;
 }
 
-/* — top bar slot: the old header and tab bar stack in it — */
+/* — top bar slot: the 40px top bar (ui/topbar/TopBar.tsx) — */
 .shell-top {
   display: flex;
   flex-direction: column;
   min-width: 0;
-}
-
-/* — header — */
-.shell-header {
-  box-sizing: border-box;
-  flex: none;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-  padding: 0 14px;
-  border-bottom: 1px solid var(--color-divider);
-}
-
-.shell-brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: none;
-}
-
-.shell-brand > .shell-brand-mark {
-  width: 20px;
-  height: 20px;
-  flex: none;
-  color: var(--color-accent, currentColor);
-}
-
-.shell-brand > span {
-  font-size: calc(15px * var(--text-scale));
-  font-weight: 500;
-  letter-spacing: -0.01em;
-}
-
-.shell-context {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  font-size: calc(12.5px * var(--text-scale));
-  color: color-mix(in srgb, var(--color-text) 64%, transparent);
-}
-
-.shell-demo,
-.shell-session-text {
-  flex: none;
-}
-
-.shell-session-text {
-  white-space: nowrap;
-}
-
-.shell-connection {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-}
-
-.shell-connection-dot {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-
-.shell-connection-text {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.shell-spacer {
-  flex: 1;
-}
-
-.shell-search {
-  position: relative;
-  display: flex;
-  align-items: center;
-  width: 280px;
-  flex: none;
-}
-
-.shell-search > i {
-  position: absolute;
-  left: 10px;
-  font-size: calc(14px * var(--text-scale));
-  pointer-events: none;
-  color: color-mix(in srgb, var(--color-text) 55%, transparent);
-}
-
-.shell-search > .input {
-  min-height: 32px;
-  height: 32px;
-  padding-left: 30px;
-  padding-right: 30px;
-  font-size: calc(13px * var(--text-scale));
-}
-
-.shell-search-key {
-  position: absolute;
-  right: 8px;
-  display: inline-grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: calc(11px * var(--text-scale));
-  pointer-events: none;
-  color: color-mix(in srgb, var(--color-text) 60%, transparent);
-  box-shadow: inset 0 0 0 1px var(--color-divider);
-}
-
-.shell-views {
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  flex: none;
-  border-radius: var(--radius-md);
-  box-shadow: inset 0 0 0 1px var(--color-divider);
-}
-
-.shell-view {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 6px;
-  font-family: inherit;
-  font-size: calc(12.5px * var(--text-scale));
-  font-weight: 500;
-  cursor: pointer;
-  background: transparent;
-  color: color-mix(in srgb, var(--color-text) 68%, transparent);
-}
-
-.shell-view-on {
-  background: color-mix(in srgb, var(--color-text) 10%, transparent);
-  color: var(--color-text);
-}
-
-.shell-view > i {
-  font-size: calc(14px * var(--text-scale));
-}
-
-.shell-icon {
-  width: 32px;
-  height: 32px;
-}
-
-.shell-icon > i {
-  font-size: calc(16px * var(--text-scale));
-}
-
-/* Text choices sit above the chrome without changing its height. */
-.shell-text-size {
-  position: relative;
-}
-
-.shell-text-size-menu {
-  position: absolute;
-  top: 38px;
-  right: 0;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px;
-  min-width: 140px;
-  border-radius: var(--radius-md);
-  background: var(--a-card);
-  box-shadow: var(--a-pop);
-}
-
-.shell-text-size-menu .shell-view {
-  justify-content: flex-start;
-  white-space: nowrap;
-}
-
-/* — tab bar — */
-.shell-tabs {
-  box-sizing: border-box;
-  flex: none;
-  height: 38px;
-  display: flex;
-  align-items: stretch;
-  gap: 2px;
-  min-width: 0;
-  padding: 0 10px;
-  overflow: auto hidden;
-  background: var(--a-side);
-  border-bottom: 1px solid var(--color-divider);
-}
-
-.shell-tab {
-  position: relative;
-  flex: none;
-  display: flex;
-  align-items: center;
-  background: transparent;
-}
-
-.shell-tab-on {
-  background: var(--a-bg);
-}
-
-.shell-tab-open {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  height: 100%;
-  padding-left: 12px;
-  border: 0;
-  background: transparent;
-  font-family: inherit;
-  font-size: calc(12.5px * var(--text-scale));
-  white-space: nowrap;
-  cursor: pointer;
-  color: color-mix(in srgb, var(--color-text) 72%, transparent);
-}
-
-.shell-tab-on > .shell-tab-open {
-  color: var(--color-text);
-}
-
-.shell-tab-project {
-  color: color-mix(in srgb, var(--color-text) 60%, transparent);
-}
-
-.shell-tab-separator {
-  color: color-mix(in srgb, var(--color-text) 35%, transparent);
-}
-
-.shell-tab-label {
-  font-weight: 500;
-}
-
-.shell-tab-sub {
-  color: color-mix(in srgb, var(--color-text) 58%, transparent);
-}
-
-.shell-tab-close {
-  width: 22px;
-  height: 22px;
-  margin-right: 6px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  cursor: pointer;
-  color: color-mix(in srgb, var(--color-text) 58%, transparent);
-}
-
-.shell-tab-close:hover {
-  color: var(--color-text);
-  background: color-mix(in srgb, var(--color-text) 9%, transparent);
-}
-
-.shell-tab-close > i {
-  font-size: calc(12px * var(--text-scale));
-}
-
-.shell-tab-bar {
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: 0;
-  height: 2px;
-  border-radius: 1px;
-  background: transparent;
-}
-
-.shell-tab-on > .shell-tab-bar {
-  background: var(--color-accent);
 }
 
 /* — body — */
@@ -326,17 +45,8 @@
   overflow: auto hidden;
 }
 
-.shell-waiting {
-  grid-column: 1;
-  grid-row: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-}
-
 .shell-center {
-  grid-column: 2;
+  grid-column: 1;
   grid-row: 1;
   position: relative;
   container: shell-center / inline-size;
@@ -359,7 +69,7 @@
 }
 
 .shell-detail {
-  grid-column: 3;
+  grid-column: 2;
   grid-row: 1;
   position: relative;
   display: flex;
@@ -370,11 +80,92 @@
   border-left: 1px solid var(--color-divider);
 }
 
+/* The column's content: resize edge, head and scroll area. The column leaves the dock's height free below it (set by
+   DetailsColumn from the dock inset), so its composer sits above the floating dock. */
+.shell-detail-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Folded: the content keeps its open width (set inline), so scroll positions and typed text survive, but out of sight; the
+   rail is all that shows in the 36px column. */
+.shell-detail-folded {
+  overflow: hidden;
+
+  /* The board draws the divider as an inset shadow, so its 36px rail has 36px of centring room; a border would take 1px of it
+     and put every glyph 1px right of the board's. */
+  border-left: 0;
+  box-shadow: inset 1px 0 0 var(--color-divider);
+}
+
+.shell-detail-folded > .shell-detail-body {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* The rail: one button, the whole strip. The » pointing back, the item's status, then "Details" set upright on its side. */
+.shell-detail-rail {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-height: 0;
+  padding: 8px 0 0;
+  border: 0;
+  font: inherit;
+  background: transparent;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  cursor: pointer;
+}
+
+.shell-detail-rail:hover,
+.shell-detail-rail:focus-visible {
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+  color: var(--color-text);
+}
+
+.shell-detail-rail > i {
+  font-size: calc(15px * var(--text-scale));
+}
+
+/* The » sits in a 26px square, in full text colour (the board draws it so). */
+.shell-detail-rail > i:first-child {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  color: var(--color-text);
+}
+
+/* The board's New diamond (SPEC 3.6): 7px, radius 1.5, in the attention colour. */
+.shell-detail-rail-new {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 1.5px;
+  background: var(--attention);
+  transform: rotate(45deg);
+}
+
+.shell-detail-rail-label {
+  font-size: calc(12px * var(--text-scale));
+  writing-mode: vertical-rl;
+}
+
+/* The bigger view stops where the dock starts, so its composer is never under it. */
 .shell-conversation {
   position: absolute;
   top: 0;
   right: 0;
-  bottom: 0;
+  bottom: var(--dock-inset, 0);
   z-index: 3;
   display: flex;
   min-width: 0;
@@ -409,8 +200,8 @@
   top: 0;
   bottom: 0;
   left: -4px;
-  z-index: 2;
-  width: 7px;
+  z-index: 12;
+  width: 8px;
   cursor: col-resize;
   outline: none;
   touch-action: none;
@@ -511,28 +302,12 @@
   padding: 10px 18px 24px;
 }
 
-/* — footer — */
-.shell-footer {
-  box-sizing: border-box;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-  padding: 0 14px;
-  overflow: hidden;
-  white-space: nowrap;
-  font-size: calc(11.5px * var(--text-scale));
-  border-top: 1px solid var(--color-divider);
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+/* Details keeps room under the floating dock until the Details column (C9) owns it: its last lines and its
+   composer stay above the dock. */
+.shell-body-viewport .shell-detail-scroll {
+  padding-bottom: calc(var(--dock-inset, 0px) + 24px);
 }
 
-.shell-key {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.shell-summary {
-  margin-left: auto;
+.shell-body-viewport .detail-dock {
+  bottom: var(--dock-inset, 0);
 }

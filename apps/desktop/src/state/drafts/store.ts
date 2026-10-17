@@ -1,11 +1,12 @@
 import { itemRemoved } from '../../selectors/removed';
 import { useEffect, useSyncExternalStore } from 'react';
 import type { MutationReceipt, OwnerDraft, OwnerMutationRequest, PreferencesPatchEntry, PreferencesSnapshot, SessionRef } from '../../generated/core';
-import type { Item, InputKind, SavedReceipt, Session } from '../../generated/domain/models';
+import type { Attempt, Item, InputKind, SavedReceipt, Session } from '../../generated/domain/models';
 import { immutable, type Immutable } from '../../data/session-store';
 import { CoreFailure, ServiceFailure, type RendererService } from '../../data/service';
 import { OwnFailure } from '../../data/plain';
 import type { PreferencesWriteCoordination } from '../navigation/store';
+import { ownerReplied } from '../../selectors/waiting/replied';
 
 /** A reply to a whole topic (target item_id null). */
 export const TOPIC_REPLY: InputKind = 'topic_reply';
@@ -19,11 +20,14 @@ export interface DraftEntry {
   readonly error: Failure | null;
   readonly receipt: Immutable<SavedReceipt> | null;
   readonly rejected: boolean;
+  /** An owner send is awaiting the stopped-agent choice. Shared across every view. */
+  readonly holding?: boolean;
   /** What a saved input carried; the draft itself is cleared once the receipt arrives. */
   readonly sent?: { readonly text: string; readonly selected_option_id: string | null } | null;
 }
 /** What a draft says when the same words are already queued or on their way. */
 export const ALREADY_WAITING = 'This same message is already waiting to be sent. Delete it first if you want to change it.';
+export const ANSWER_WAITING = 'This question already has an answer on its way.';
 export interface DraftState {
   readonly entries: Readonly<Record<string, DraftEntry>>;
   readonly ready: boolean;
@@ -46,6 +50,35 @@ const sameMessage = (a: Immutable<OwnerDraft>, b: Immutable<OwnerDraft>) => same
   && a.target.item_id === b.target.item_id && a.target.topic_id === b.target.topic_id && a.intent === b.intent
   && a.text === b.text && (!!a.text || a.selected_option_id === b.selected_option_id);
 
+/**
+ * The input a saved receipt points to was cancelled or skipped ("Cancel message", "Mark as done", "Stop waiting"): the
+ * receipt no longer stands and the question waits on the owner again. A skipped one may still have reached the agent
+ * (`receivedCopy`).
+ */
+export function receiptWithdrawn(entry: DraftEntry | undefined, session: Immutable<Session>): boolean {
+  const receipt = entry?.receipt?.data;
+  const state = receipt?.kind === 'input_submit' ? session.inputs[receipt.input_id]?.state : undefined;
+  return state === 'cancelled' || state === 'skipped';
+}
+
+/**
+ * An attempt the agent may have had: accepted, uncertain ("Checking whether it was delivered", "Couldn't deliver"), only
+ * prepared, or carrying a host turn. Only a definite rejection proves it never got there.
+ */
+const mayHaveReached = (attempt: Immutable<Attempt>): boolean => attempt.acceptance !== 'rejected';
+/**
+ * An answer to this same question that some attempt may have delivered to the agent, then cancelled or skipped ("Stop
+ * waiting", "Mark as done"), carried these same words and choice: sending them again may give the agent a second copy, so
+ * the owner confirms first ("Send again?", as a received message's "Send again" does).
+ */
+export function receivedCopy(draft: Immutable<OwnerDraft>, session: Immutable<Session>): boolean {
+  const text = draft.text.trim();
+  if (draft.intent !== 'answer' || !draft.target.item_id || !text && !draft.selected_option_id) return false;
+  return Object.values(session.inputs).some(input => !!input && input.kind === 'answer' && (input.state === 'cancelled' || input.state === 'skipped')
+    && input.target.item_id === draft.target.item_id && input.payload.target_snapshot.question_revision === draft.question_revision
+    && input.payload.text.trim() === text && input.payload.selected_option_id === draft.selected_option_id && input.attempts.some(mayHaveReached));
+}
+
 export function ownerActions(item: Immutable<Item>): OwnerIntent[] {
   return ['bring', ...(item.status === 'waiting_on_me' ? ['answer' as const] : []), 'reply', 'note', 'followup', 'drop',
     ...(terminal(item) && item.status !== 'replaced' ? ['reopen' as const] : [])];
@@ -62,14 +95,17 @@ const words = new Set<InputKind>(['reply', 'note', 'followup']);
  * Sending them again would deliver them twice. The kind is not compared: Edit can move a queued note or follow-up into
  * the reply box. An attempted draft is excluded: it is that message's own exact retry.
  */
-function alreadyWaiting(draft: Immutable<OwnerDraft>, session: Immutable<Session>): boolean {
-  if (draft.submission_attempted || !typed.has(draft.intent) || (!draft.text.trim() && !draft.selected_option_id)) return false;
-  return Object.values(session.inputs).some(input => !!input && (input.state === 'queued' || input.state === 'in_flight')
-    && input.target.topic_id === draft.target.topic_id && input.target.item_id === draft.target.item_id
-    && input.payload.text === draft.text && input.payload.selected_option_id === draft.selected_option_id);
+function alreadyWaiting(draft: Immutable<OwnerDraft>, session: Immutable<Session>): string | null {
+  if (draft.submission_attempted || !typed.has(draft.intent) || (!draft.text.trim() && !draft.selected_option_id)) return null;
+  const inputs = Object.values(session.inputs).filter(input => !!input && input.target.topic_id === draft.target.topic_id && input.target.item_id === draft.target.item_id);
+  // One answer per question: an answer to the same question round that is on its way, or stuck, blocks a second one, whatever its words.
+  if (draft.intent === 'answer' && inputs.some(input => input!.kind === 'answer' && ['queued', 'in_flight', 'needs_attention'].includes(input!.state)
+    && input!.payload.target_snapshot.question_revision === draft.question_revision)) return ANSWER_WAITING;
+  return inputs.some(input => (input!.state === 'queued' || input!.state === 'in_flight')
+    && input!.payload.text === draft.text && input!.payload.selected_option_id === draft.selected_option_id) ? ALREADY_WAITING : null;
 }
 const sendBlocked = (draft: Immutable<OwnerDraft>, session: Immutable<Session>): string | null =>
-  contentBlocked(draft) ?? (alreadyWaiting(draft, session) ? ALREADY_WAITING : null);
+  contentBlocked(draft) ?? alreadyWaiting(draft, session);
 /** A reply to a whole topic: the topic is there and open, the binding is current, and there is text. */
 function topicBlocked(draft: Immutable<OwnerDraft>, session: Immutable<Session>): string | null {
   const topic = session.topics[draft.target.topic_id];
@@ -92,6 +128,7 @@ export function blockedDraft(draft: Immutable<OwnerDraft>, session: Immutable<Se
   if (item.revision !== draft.target_revision || item.question_revision !== draft.question_revision) return 'This question changed. Read it again before sending.';
   if (!ownerActions(item).includes(draft.intent as OwnerIntent)) return "You can't do that on this item right now.";
   if (draft.intent === 'answer') {
+    if (!draft.submission_attempted && ownerReplied(session, item)) return ANSWER_WAITING;
     if (item.recipient_binding_id !== draft.binding_id) return 'This question was asked by a different agent connection.';
     const round = item.current_round_id ? session.rounds[item.current_round_id] : null;
     if (!round || round.closed_at !== null || round.question_revision !== item.question_revision) return "The agent isn't waiting for an answer to this any more.";
@@ -111,6 +148,7 @@ export class OwnerDraftStore {
   private readonly deferredPreferences: PreferencesPatchEntry[][] = [];
   private readonly pendingInputs = new Map<string, OwnerMutationRequest>();
   private readonly flights = new Map<string, Promise<boolean>>();
+  private readonly holds = new Map<string, symbol>();
   private loadFlight: Promise<void> | null = null;
   /** `service` is public so owner controls reach the session's write barrier (sessionActionsFor). */
   constructor(readonly service: RendererService, private readonly operationId: () => string = () => crypto.randomUUID(),
@@ -227,12 +265,13 @@ export class OwnerDraftStore {
   /** Like edit; resolves true once the change is saved, false when the draft is locked or the save failed. */
   editSaved(id: string, change: Pick<Partial<OwnerDraft>, 'text' | 'selected_option_id'>): Promise<boolean> {
     const entry = this.state.entries[id];
-    if (!entry || entry.saving || entry.uncertain || entry.receipt || this.state.preferenceUncertain) return Promise.resolve(false);
+    if (!entry || entry.holding || entry.saving || entry.uncertain || entry.receipt || this.state.preferenceUncertain) return Promise.resolve(false);
     const draft = { ...structuredClone(entry.draft), ...change } as OwnerDraft;
     this.entry(id, { draft: immutable(draft), error: null }); return this.save([{ kind: 'upsert_draft', draft }]);
   }
   review(id: string, session: Immutable<Session>): void {
     const entry = this.state.entries[id], itemId = entry?.draft.target.item_id, item = itemId ? session.items[itemId] : null;
+    if (entry?.holding) return;
     // A topic reply follows the current binding; it has no question to re-base on.
     const topic = entry && itemId === null ? session.topics[entry.draft.target.topic_id] : null;
     if (entry && topic && sameSession(entry.draft.session, { project_id: session.project_id, session_id: session.id }) && !entry.saving && !entry.uncertain
@@ -252,16 +291,27 @@ export class OwnerDraftStore {
     const entry = this.state.entries[id], itemId = entry?.draft.target.item_id, item = itemId ? session.items[itemId] : null;
     if (!entry || !item || !session.active_binding_id || session.active_binding_id === entry.draft.binding_id
       || !sameSession(entry.draft.session, { project_id: session.project_id, session_id: session.id })
-      || entry.saving || entry.uncertain || entry.receipt || this.state.preferenceUncertain
+      || entry.holding || entry.saving || entry.uncertain || entry.receipt || this.state.preferenceUncertain
       || item.revision !== entry.draft.target_revision || item.question_revision !== entry.draft.question_revision) return;
     const draft: OwnerDraft = { ...structuredClone(entry.draft), binding_id: session.active_binding_id };
     this.entry(id, { draft: immutable(draft), error: null }); void this.save([{ kind: 'upsert_draft', draft }]);
   }
   another(id: string, session: Immutable<Session>): void {
     const entry = this.state.entries[id]; if (!entry?.receipt) return;
+    const withdrawn = receiptWithdrawn(entry, session), itemId = entry.draft.target.item_id;
+    const item = itemId ? session.items[itemId] : undefined, sameQuestion = item?.question_revision === entry.draft.question_revision;
+    if (entry.draft.intent === 'answer' && itemId && sameQuestion && !withdrawn) return;
     const entries = { ...this.state.entries }; delete entries[id]; this.publish({ entries: Object.freeze(entries) });
-    if (entry.draft.target.item_id) this.begin(session, entry.draft.target.item_id, entry.draft.intent as OwnerIntent, true);
-    else if (entry.draft.intent === TOPIC_REPLY) this.beginTopic(session, entry.draft.target.topic_id, true);
+    const next = itemId ? this.begin(session, itemId, entry.draft.intent as OwnerIntent, true)
+      : entry.draft.intent === TOPIC_REPLY ? this.beginTopic(session, entry.draft.target.topic_id, true) : null;
+    // A withdrawn answer to the same question goes back in its cards, as "Put back" would: the owner's words and choice
+    // are never lost. Only a choice still offered is kept. Its own input will never be sent; when the agent already had
+    // it, sending the same words again asks first (`receivedCopy`, useSubmit).
+    const input = entry.receipt.data.kind === 'input_submit' ? session.inputs[entry.receipt.data.input_id] : undefined;
+    if (!next || !withdrawn || entry.draft.intent !== 'answer' || !sameQuestion || !input) return;
+    const option = input.payload.selected_option_id;
+    const selected = option && item?.options.some(value => value.id === option) ? option : null;
+    if (input.payload.text || selected) void this.editSaved(next, { text: input.payload.text, selected_option_id: selected });
   }
   prepareRevised(id: string, session: Immutable<Session>): void {
     const previous = this.state.entries[id];
@@ -378,10 +428,43 @@ export class OwnerDraftStore {
    */
   submit(id: string, as?: OwnerIntent): Promise<boolean> {
     const flight = this.flights.get(id); if (flight) return flight;
-    const entry = this.state.entries[id]; if (!entry || entry.saving || entry.receipt || this.state.preferenceUncertain) return Promise.resolve(false);
+    const entry = this.state.entries[id]; if (!entry || entry.holding || entry.saving || entry.receipt || this.state.preferenceUncertain) return Promise.resolve(false);
+    // Recovered/revised copies cannot bypass the question lock with another operation ID.
+    if (entry.draft.intent === 'answer' && Object.values(this.state.entries).some(other => other !== entry
+      && other.draft.intent === 'answer' && sameSession(other.draft.session, entry.draft.session)
+      && other.draft.target.item_id === entry.draft.target.item_id && other.draft.question_revision === entry.draft.question_revision
+      && (other.holding || other.saving || other.uncertain && !other.rejected || !!other.receipt))) return Promise.resolve(false);
     this.entry(id, { saving: true, error: null });
     const next = this.send(id, as).finally(() => { this.flights.delete(id); this.entry(id, { saving: false }); });
     this.flights.set(id, next); return next;
+  }
+  /** Reserve the first Send while its Queue/Cancel dialog is open. Tokens fence stale dialog callbacks. */
+  reserve(id: string): symbol | null {
+    const entry = this.state.entries[id];
+    if (!entry || entry.holding || entry.saving || entry.uncertain || entry.receipt || this.state.preferenceUncertain) return null;
+    const token = Symbol(); this.holds.set(id, token); this.entry(id, { holding: true }); return token;
+  }
+  release(id: string, token: symbol): boolean {
+    if (this.holds.get(id) !== token) return false;
+    this.holds.delete(id); this.entry(id, { holding: false }); return true;
+  }
+  /**
+   * Read-only reconciliation for an unknown result. It never issues input_submit. Core commits an input and its receipt
+   * together, so a fresh read without the receipt means it was not sent: the entry becomes a definite failure, whose
+   * "Try sending again" replays the same operation (one op_id, so never a second answer).
+   */
+  async check(id: string): Promise<boolean> {
+    const entry = this.state.entries[id];
+    if (!entry || entry.saving || !entry.uncertain) return false;
+    try {
+      const snapshot = await this.service.query({ session: entry.draft.session, request: { command: 'session_get', params: {} } });
+      if (snapshot.freshness !== 'fresh') return false;
+      await this.reconcile(snapshot.session);
+      const now = this.state.entries[id];
+      if (now?.receipt) return true;
+      if (now?.uncertain && !now.rejected && !now.saving) this.entry(id, { rejected: true });
+      return false;
+    } catch { return false; }
   }
   private async send(id: string, as?: OwnerIntent): Promise<boolean> {
     try {

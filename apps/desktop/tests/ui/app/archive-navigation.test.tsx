@@ -21,7 +21,7 @@ it('keeps the sole topic archive notice actionable through queued navigation and
   await goToSession(route);
   await waitFor(() => {
     expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-    expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+    expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
   });
   fireEvent.click(document.querySelector(`[role="treeitem"][data-item-id="${item.id}"]`)!);
   await screen.findByRole('article', { name: `Detail of ${item.question}` });
@@ -59,9 +59,13 @@ it('keeps the sole topic archive notice actionable through queued navigation and
   try {
     fireEvent.click(screen.getByRole('button', { name: 'Switch to light' }));
     await waitFor(() => expect(writing).toBe(true));
-    const tab = screen.getByRole('navigation', { name: 'Projects and sessions' }).querySelector<HTMLButtonElement>('[data-session-tab][aria-current="page"]')!;
-    expect(tab.disabled).toBe(false);
-    fireEvent.click(tab);
+    // Choosing the session already shown, from the top bar's switcher, queues a navigation behind the held write.
+    const switcher = document.querySelector<HTMLButtonElement>('[data-popover-trigger="switcher"]')!;
+    expect(switcher.disabled).toBe(false);
+    fireEvent.click(switcher);
+    const current = within(await screen.findByRole('dialog', { name: 'Switch session or project' }))
+      .getAllByRole('option').find(option => option.getAttribute('aria-selected') === 'true')!;
+    fireEvent.click(current);
     await screen.findByText('Opening the session…');
     assertNotice();
     const captures = transport.queries.filter(query => query.request.command === 'preferences_get').length;

@@ -1,0 +1,140 @@
+/* All sessions. Values follow the Claude Design board (SPEC 5.14); the actions column is wide enough for four buttons. */
+.sl-group {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sl-ghead {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 2px;
+}
+
+.sl-ghead > i {
+  font-size: calc(14px * var(--text-scale));
+  color: var(--a-acc-text);
+}
+
+.sl-gname {
+  margin: 0;
+  font-family: inherit;
+  font-size: calc(13.5px * var(--text-scale));
+  font-weight: 500;
+  letter-spacing: normal;
+  line-height: inherit;
+}
+
+.sl-gpath {
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.sl-box {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--a-card);
+  box-shadow: 0 0 0 1px var(--color-divider);
+}
+
+.sl-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) 100px minmax(0, 1fr) 56px 92px;
+  column-gap: 14px;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 8px 0 14px;
+  font-size: calc(12.5px * var(--text-scale));
+}
+
+.sl-narrow .sl-row { grid-template-columns: minmax(180px, 1fr) minmax(0, 1.1fr) 56px 92px; }
+
+.sl-row + .sl-row { box-shadow: inset 0 1px 0 var(--color-divider); }
+
+.sl-current { background: color-mix(in srgb, var(--color-accent) 6%, var(--a-card)); }
+
+.sl-who {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.sl-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: calc(13px * var(--text-scale));
+  font-weight: 500;
+  color: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sl-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.sl-name-closed { color: color-mix(in srgb, var(--color-text) 70%, transparent); }
+
+.sl-agent {
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.sl-status {
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sl-wait { display: flex; }
+
+.sl-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1px;
+}
+
+.sl-act { font-size: calc(15px * var(--text-scale)); }
+
+.sl-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 18px 16px;
+  font-size: calc(13px * var(--text-scale));
+  line-height: 1.55;
+}
+
+.sl-empty-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.sl-empty-title > i {
+  font-size: calc(15px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.sl-empty-text {
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+  text-wrap: pretty;
+}
+
+.sl-name:focus-visible { outline-offset: 1px; }

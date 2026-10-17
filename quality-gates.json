@@ -20,6 +20,7 @@
     "crates/*/src/dto.rs",
     "apps/desktop/vite.config.ts",
     "apps/desktop/src/data/index.ts",
+    "apps/desktop/src/ui/pages/page-types.ts",
     "apps/desktop/wdio.native.conf.mjs",
     "apps/desktop/src-tauri/build.rs",
     "apps/desktop/src-tauri/src/native/mod.rs",

@@ -306,25 +306,32 @@ describe('tree remove triggers', () => {
     await navigation.start();
     const store = navigation.opened.open(route); await store.refresh();
     const actions = new SessionActionControllers(service).forSession(store), targets: RemoveTarget[] = [];
-    const tree = <TreeView navigation={navigation} store={store} actions={actions} drafts={new OwnerDraftStore(service)} query="" reveal={null} selectedId={null}
+    const drafts = new OwnerDraftStore(service);
+    // ⌫ and Delete act on the selected item, so a test chooses which item is selected.
+    const tree = (selectedId: string | null) => <TreeView navigation={navigation} store={store} actions={actions} drafts={drafts} query="" reveal={null} selectedId={selectedId}
       detailOpen={false} summaries={[]}
       onSelected={() => {}} onDismissReveal={() => {}} onResume={() => {}} onAct={() => {}}
       onClearFilters={() => {}} onShowArchive={() => {}} onRemove={target => { targets.push(target); }} />;
-    render(queue ? <RemovalContext.Provider value={queue}>{tree}</RemovalContext.Provider> : tree);
-    return { targets };
+    const wrap = (selectedId: string | null) => queue ? <RemovalContext.Provider value={queue}>{tree(selectedId)}</RemovalContext.Provider> : tree(selectedId);
+    const view = render(wrap(null));
+    return { targets, select: (selectedId: string | null) => view.rerender(wrap(selectedId)) };
   }
   const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`);
 
-  it('asks for the item from its trash, ⌫ and Delete, and for the topic from its Remove and ⌫', async () => {
-    const { targets } = await mount();
+  it('asks for the item from its trash, ⌫ and Delete on the selected item, and for the topic from its Remove', async () => {
+    const { targets, select } = await mount();
     fireEvent.click(within(row('1.1')!).getByRole('button', { name: 'Remove (⌫)' }));
+    // ⌫ and Delete remove the selected item only (SPEC 6.1): another row's ⌫ does nothing.
     fireEvent.keyDown(row('2')!, { key: 'Delete' });
-    fireEvent.keyDown(row('4')!, { key: 'Backspace' });
+    expect(targets).toEqual([itemTarget('1.1')]);
+    select('2'); fireEvent.keyDown(row('2')!, { key: 'Delete' });
+    select('4'); fireEvent.keyDown(row('4')!, { key: 'Backspace' });
     const topic = screen.getByRole('treeitem', { name: /Delivery decisions/ });
+    // A topic has no ⌫ key; its band's Remove asks.
     fireEvent.keyDown(topic, { key: 'Backspace' });
+    expect(targets).toEqual([itemTarget('1.1'), itemTarget('2'), itemTarget('4')]);
     fireEvent.click(within(topic).getByRole('button', { name: 'Remove' }));
-    expect(targets).toEqual([itemTarget('1.1'), itemTarget('2'), itemTarget('4'),
-      { kind: 'topic', session: route, topic_id: topicId }, { kind: 'topic', session: route, topic_id: topicId }]);
+    expect(targets).toEqual([itemTarget('1.1'), itemTarget('2'), itemTarget('4'), { kind: 'topic', session: route, topic_id: topicId }]);
   });
 
   it('drops the rows of a pending removal and brings them back on Undo', async () => {

@@ -6,10 +6,10 @@ afterEach(() => { document.body.innerHTML = ''; });
 
 describe('native history failure evidence', () => {
   it('reports conversation history, pending navigation state and owner-input lock', () => {
-    document.body.innerHTML = `<header class="shell-header"><button title="Change theme" aria-label="Change theme" disabled></button></header>
+    document.body.innerHTML = `<div class="shell-top"><header class="tb"><button title="Switch to light" aria-label="Switch to light" disabled></button>
+        <div role="search"><input aria-label="Search the Map" disabled value="needle"><div role="status">Search preview · save pending</div></div></header></div>
       <div class="nav-banner" role="alert"><p>Preferences revision changed</p></div>
       <button disabled>Refreshing…</button><button>Check again</button>
-      <input data-shell-search disabled value="needle"><p role="status">Search preview · save pending</p>
       <div role="treeitem" data-item-id="1.1" aria-selected="true"></div>
       <div class="detail-box" data-owner-input="1"><textarea disabled>abc</textarea>
         <div class="detail-box-row"><button class="btn btn-primary" disabled>Send reply</button></div><p role="status">Save completion is unknown.</p></div>`;
@@ -18,7 +18,7 @@ describe('native history failure evidence', () => {
     expect(facts.navigation.banners).toEqual([{ role: 'alert', text: 'Preferences revision changed' }]);
     expect(facts.navigation.stateButtons).toEqual([{ text: 'Refreshing…', disabled: true, ariaPressed: null },
       { text: 'Check again', disabled: false, ariaPressed: null }]);
-    expect(facts.navigation.disabledHeaderButtons).toEqual(['Change theme']);
+    expect(facts.navigation.disabledHeaderButtons).toEqual(['Switch to light']);
     expect(facts.search).toMatchObject({ present: true, disabled: true, value: 'needle', statusLabel: 'Search preview · save pending' });
     expect(facts.selected.treeItemIds).toEqual(['1.1']);
     expect(facts.ownerInput).toMatchObject({ present: true, itemId: '1' });

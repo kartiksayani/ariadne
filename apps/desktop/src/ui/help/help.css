@@ -1,0 +1,284 @@
+/* Help behind "?": two tabs. Values follow the Claude Design board (SPEC 5.16). */
+.hlp {
+  /* Branch swatch lightness and chroma, step 2 of each tint (SPEC 3.3): dark by default, light under [data-theme="light"]. */
+  --sw-l: 0.264;
+  --sw-c: 0.026;
+  --sw-el: 0.54;
+  --sw-ec: 0.065;
+
+  position: absolute;
+  top: 44px;
+  right: 8px;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 660px;
+  max-width: calc(100% - 16px);
+  max-height: calc(100% - 56px);
+  padding: 4px 14px 16px;
+  overflow: auto;
+  scrollbar-width: thin;
+  border-radius: 9px;
+  background: var(--a-card);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-divider);
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.45;
+  color: var(--color-text);
+  outline: none;
+}
+
+[data-theme="light"] .hlp {
+  --sw-l: 0.946;
+  --sw-c: 0.02;
+  --sw-el: 0.71;
+  --sw-ec: 0.07;
+}
+
+.hlp-narrow { width: calc(100% - 16px); }
+
+.hlp-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex: none;
+  align-items: stretch;
+  gap: 18px;
+  height: 40px;
+  background: var(--a-card);
+  box-shadow: inset 0 -1px 0 var(--color-divider);
+}
+
+.hlp-tabs {
+  display: flex;
+  flex: 1;
+  align-items: stretch;
+  gap: 18px;
+}
+
+.hlp-tab {
+  display: flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: calc(13px * var(--text-scale));
+  font-weight: 500;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+  cursor: pointer;
+}
+
+.hlp-tab:hover { color: var(--color-text); }
+
+.hlp-tab[aria-selected="true"] {
+  color: var(--color-text);
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+
+.hlp-close {
+  display: grid;
+  flex: none;
+  align-self: center;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  cursor: pointer;
+}
+
+.hlp-close:hover { background: color-mix(in srgb, var(--color-text) 8%, transparent); }
+
+.hlp-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.hlp-h {
+  margin: 0;
+  font-family: inherit;
+  line-height: inherit;
+}
+
+.hlp-keys {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 28px;
+}
+
+.hlp-group,
+.hlp-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.hlp-sec { gap: 8px; }
+
+.hlp-key {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.hlp-caps {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 3px;
+  width: 62px;
+}
+
+.hlp-text {
+  flex: 1;
+  min-width: 0;
+  padding-top: 1px;
+  text-wrap: pretty;
+}
+
+.hlp-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
+  color: color-mix(in srgb, var(--color-text) 76%, transparent);
+  text-wrap: pretty;
+}
+
+.hlp-info > i {
+  flex: none;
+  margin-top: 2px;
+}
+
+.hlp-markers {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.hlp-markers > .hlp-text { padding-top: 0; }
+
+.hlp-pill {
+  display: inline-flex;
+  align-items: center;
+  place-self: start;
+  gap: 5px;
+  height: 17px;
+  margin-top: 1px;
+  padding: 0 7px 0 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-size: calc(10.5px * var(--text-scale));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+.hlp-new {
+  background: var(--attention);
+  color: var(--a-bg);
+}
+
+.hlp-changed {
+  color: var(--attention);
+  box-shadow: inset 0 0 0 1.25px var(--attention);
+}
+
+.hlp-diamond {
+  width: 5px;
+  height: 5px;
+  border-radius: 1px;
+  background: currentcolor;
+  transform: rotate(45deg);
+}
+
+.hlp-diamond-line {
+  width: 6px;
+  height: 6px;
+  border: 1.25px solid currentcolor;
+  background: transparent;
+}
+
+.hlp-diamonds {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0 0 4px;
+}
+
+.hlp-dm {
+  width: 7px;
+  height: 7px;
+  border-radius: 1.5px;
+  transform: rotate(45deg);
+}
+
+.hlp-dm-solid { background: var(--attention); }
+.hlp-dm-line { border: 1.5px solid var(--attention); }
+
+.hlp-statuses {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 20px;
+}
+
+.hlp-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hlp-status > i {
+  flex: none;
+  margin-top: 2px;
+  font-size: calc(14px * var(--text-scale));
+}
+
+.hlp-status > span {
+  min-width: 0;
+  text-wrap: pretty;
+}
+
+.hlp-status-name { font-weight: 500; }
+.hlp-status-text { color: color-mix(in srgb, var(--color-text) 66%, transparent); }
+
+.hlp-branches {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hlp-swatches {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.hlp-sw {
+  width: 18px;
+  height: 14px;
+  border-right: 2px solid oklch(var(--sw-el) calc(var(--sw-ec) * var(--m)) var(--h));
+  border-radius: 3px;
+  background: oklch(var(--sw-l) calc(var(--sw-c) * var(--m)) var(--h));
+}
+
+.hlp-branch-text {
+  color: color-mix(in srgb, var(--color-text) 76%, transparent);
+  text-wrap: pretty;
+}
+
+.hlp-tab:focus-visible { outline-offset: -2px; }
+
+/* The panel takes focus when it opens (so Esc and the tabs work), and draws no ring of its own; the tabs keep theirs. */
+.product-app .hlp:focus-visible { outline: none; }

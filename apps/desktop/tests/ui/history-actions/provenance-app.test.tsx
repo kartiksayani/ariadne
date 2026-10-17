@@ -35,7 +35,7 @@ it.each(['registered lookup', 'source capture', 'navigation capture'] as const)(
     });
     render(<DesktopApp service={createDesktopService(transport)} />);
     const sourceButton = await screen.findByRole<HTMLButtonElement>('button', { name: 'Source item' });
-    await waitFor(() => expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false'));
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false'));
     const detail = sourceButton.closest<HTMLElement>('.copied-provenance')!;
     fireEvent.click(sourceButton);
     const fallback = await within(detail).findByRole('status');
@@ -55,13 +55,13 @@ it.each(['registered lookup', 'source capture', 'navigation capture'] as const)(
     expect(screen.getByRole('button', { name: 'Source item' })).toBe(sourceButton);
   }, 10_000);
 
-it.each(['waiting card', 'Back history'] as const)('reports an unavailable %s link without changing selection or leaving Opening', async caller => {
+it.each(['dock path', 'Back history'] as const)('reports an unavailable %s link without changing selection or leaving Opening', async caller => {
   const transport = new AppTransport();
   transport.preferences.global.selected_navigation = { kind: 'session', session: route };
   transport.preferences.sessions = [{ ...transport.view(), selected_item_id: '1' }];
   await act(async () => { render(<DesktopApp service={createDesktopService(transport)} />); });
   await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
-  await waitFor(() => expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false'));
+  await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false'));
   if (caller === 'Back history') {
     await act(async () => { fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1.1"]')!); });
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
@@ -76,11 +76,11 @@ it.each(['waiting card', 'Back history'] as const)('reports an unavailable %s li
   });
   if (caller === 'Back history') fireEvent.click(screen.getByLabelText('Back', { selector: 'button' }));
   else {
-    const card = await waitFor(() => {
-      const card = document.querySelector<HTMLElement>('[data-waiting-item="2"]');
-      expect(card).not.toBeNull(); return card!;
-    });
-    fireEvent.click(within(card).getByRole('button', { name: 'Details' }));
+    // The dock's question title opens its question in Details.
+    const dock = screen.getByRole('region', { name: 'Answer dock' });
+    fireEvent.click(await within(dock).findByRole('button', { name: /^\d+ (more )?waiting$/ }));
+    await waitFor(() => expect(dock.querySelector('.answer-dock-current [data-owner-input="2"]')).not.toBeNull());
+    fireEvent.click(dock.querySelector<HTMLButtonElement>('.dock-question-open')!);
   }
   await screen.findByText('This session could not be opened. Check that its project folder is available, then try again.');
   expect(screen.queryByText(/couldn’t read or save/)).toBeNull();
@@ -98,7 +98,7 @@ it('discards a delayed unavailable-source failure after Projects supersedes its 
   transport.preferences.sessions = [{ ...transport.view(), selected_item_id: '1' }];
   await act(async () => { render(<DesktopApp service={createDesktopService(transport)} />); });
   const source = await screen.findByRole('button', { name: 'Source item' });
-  await waitFor(() => expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false'));
+  await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false'));
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
   const invoke = transport.invoke.bind(transport);
@@ -114,9 +114,13 @@ it('discards a delayed unavailable-source failure after Projects supersedes its 
     fireEvent.click(source);
     await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
     expect(screen.getByText('Opening the session…')).toBeTruthy();
-    fireEvent.click(within(screen.getByLabelText('Projects and sessions')).getByRole('button', { name: 'Projects' }));
+    // Projects is a page link in the switcher (not a saved selection): it shows at once and cancels the queued handoff.
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-popover-trigger="switcher"]')!);
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Switch session or project' })).getByRole('button', { name: 'Projects' }));
     await act(async () => { await vi.advanceTimersByTimeAsync(0); release(); await vi.advanceTimersByTimeAsync(0); });
-    expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'projects' });
+    expect(screen.getByRole('heading', { name: 'Projects', level: 1 })).toBeTruthy();
+    // The page is not saved: the selection stays on the session it was on, and the handoff never lands.
+    expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
     expect(screen.queryByText(/Opening|Full copied history|couldn’t read or save|could not be opened/)).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
     expect(notices.getSnapshot()).toEqual([]);

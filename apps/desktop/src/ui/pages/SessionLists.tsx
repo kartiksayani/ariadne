@@ -1,58 +1,27 @@
-// Project page (1ac) and All sessions (1z), ported from Ariadne.dc.html:225-263.
+// All sessions and a project's page (SPEC 5.14, 15.2): the rows' Rename, Close and Reopen go through the session's
+// lifecycle (C3, SessionRowAction); Archive and Restore keep their receipts and Undo here (useSessionArchive).
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Immutable, SessionStore } from '../../data/session-store';
 import type { SessionRef } from '../../generated/core';
-import type { ProjectSummary, Session, SessionSummary } from '../../generated/domain/models';
-import { useNavigation, type NavigationStore } from '../../state/navigation/store';
+import type { ProjectSummary, SessionSummary } from '../../generated/domain/models';
+import type { NavigationStore } from '../../state/navigation/store';
 import type { SessionActionControllers } from '../../components/bindings/actions';
-import { RemoveDialog } from '../dialogs/RemoveDialog';
-import type { RemoveHandler, RemoveSubject, RemoveTarget } from '../dialogs/remove';
-import { ownerName, sessionPhrase, sessionWhen } from '../shell/model';
-import { RenameButton, SessionRename, saveSessionLabel } from '../shared/SessionRename';
-import { CopySessionId } from '../shared/CopySessionId';
-import type { RendererService } from '../../data/service';
+import { ownerDescription, ownerName, sessionPhrase, sessionWhen } from '../shell/model';
 import { plainFailure } from '../../data/plain';
-import { useSupervisorHealth } from '../../components/bindings/health';
 import '../../components/bindings/controls.css';
-import { agentOf, cardDispatch, continuationLinks, projectName, projectRemoval, routeOf, runOf, sessionCardText, sessionKey, sessionRemoval, topicChips, type TopicChip } from './model';
+import { agentOf, sessionKey } from './model';
 import { notices } from './notices';
-import { ArchiveSessionDialog, CloseSessionDialog, DispatchDialog } from './SessionDialogs';
+import { ArchiveSessionDialog, DispatchDialog } from './SessionDialogs';
 import { closeImpact } from '../../components/history-actions/selectors';
 import { waitForLifecycleReady } from '../shared/lifecycleReady';
 import { isViewConflict } from '../shared/conflictNotice';
+import { SessionsList } from './SessionsList';
+import { SessionRowAction, type RowAct } from './SessionRowAction';
+import type { PageBack, PageSession } from './page-types';
+import { inTab, sessionGroups, type SessionsTabValue } from '../../components/navigation/pageData';
 import './pages.css';
 
-export interface SessionGroup {
-  readonly project: Immutable<ProjectSummary>;
-  /** All sessions: an "Open project" link beside the name. */
-  readonly openLink: boolean;
-  /** Under the group header, e.g. the connect-session setup card. */
-  readonly extra?: ReactNode;
-  /** Beside "Remove project", e.g. Connect existing session. */
-  readonly tools?: ReactNode;
-}
-export interface SessionListsProps {
-  readonly navigation: NavigationStore;
-  readonly actions: SessionActionControllers;
-  readonly groups: readonly SessionGroup[];
-  readonly sessions: readonly Immutable<SessionSummary>[];
-  readonly snapshots: ReadonlyMap<string, Immutable<Session>>;
-  readonly openTabs: ReadonlySet<string>;
-  readonly now: number;
-  readonly disabled: boolean;
-  readonly navigationDisabled?: boolean;
-  /** Project page: "← Projects". */
-  readonly onBack?: () => void;
-  /** All sessions: the title and subtitle. */
-  readonly overview?: { readonly sub: string };
-  readonly onOpenProject: (projectId: string) => void;
-  readonly onOpenSession: (route: SessionRef) => void;
-  readonly onRemove: RemoveHandler;
-  readonly children?: ReactNode;
-}
-
-type Dialog = { kind: 'dispatch' | 'close' | 'archive'; store: SessionStore; agent: string; when: string; name: string | null; summary?: Immutable<SessionSummary>; onSaved?: () => void }
-  | { kind: 'remove'; subject: RemoveSubject; target: RemoveTarget };
+type Dialog = { kind: 'dispatch' | 'archive'; store: SessionStore; agent: string; summary?: Immutable<SessionSummary>; onSaved?: () => void };
 
 const sessionFailure = (summary: Immutable<SessionSummary>, now: number, error: unknown, fallback?: string) =>
   `For ${sessionPhrase(summary, agentOf(summary), sessionWhen(Date.parse(summary.created_at), now))}: ${plainFailure(error, fallback)}`;
@@ -77,38 +46,28 @@ function watchArchiveNotice(store: SessionStore, navigation: NavigationStore, id
   const stopNotices = notices.subscribe(() => { if (!notices.getSnapshot().some(notice => notice.id === id)) stop(); });
 }
 
-export function Chip({ chip }: { readonly chip: TopicChip }) {
-  return <span className="pw-topic-chip" title={chip.full} style={{ color: chip.color }}><i className={chip.icon} aria-hidden="true" />{chip.name}
-    {chip.counts && <span className="pw-topic-chip-counts">{chip.counts}</span>}</span>;
+export interface SessionArchiveOptions {
+  readonly navigation: NavigationStore;
+  readonly actions: SessionActionControllers;
+  readonly now: number;
+  readonly disabled: boolean;
+}
+export interface SessionArchive {
+  /** The key of the session whose change is running. */
+  readonly busy: string | null;
+  readonly archive: (summary: Immutable<SessionSummary>) => Promise<boolean>;
+  /** Restores an archived session (closed, or reopened with `reopen`); says so in a notice. */
+  readonly restore: (summary: Immutable<SessionSummary>, reopen?: boolean) => Promise<boolean>;
+  readonly dialogs: ReactNode;
 }
 
-/** The card's sending state as a button that opens the sending and connection dialog. */
-function CardRun({ summary, service, onClick }: { readonly summary: Immutable<SessionSummary>; readonly service: RendererService; readonly onClick: () => void }) {
-  const binding = summary.active_binding;
-  const run = runOf(cardDispatch(summary, useSupervisorHealth(service, binding?.id, binding?.generation)));
-  return <button type="button" className="pw-run dispatch-card" data-dispatch={run.dispatch.kind} style={{ color: run.runColor }}
-    title="Sending and connection" onClick={onClick}>
-    <span className="pw-dot" style={{ background: run.runDot, boxShadow: run.runRing }} />{run.run}</button>;
-}
-
-export function SessionLists(props: SessionListsProps) {
-  const { navigation, actions, groups, sessions, snapshots, openTabs, now, disabled, navigationDisabled = disabled, onBack, overview, onOpenProject, onOpenSession, onRemove, children } = props;
+/** Archive and restore a listed session: confirm when needed, then a receipt with Undo that outlives the page. */
+export function useSessionArchive({ navigation, actions, now, disabled }: SessionArchiveOptions): SessionArchive {
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const lifecycleBusy = useRef(false);
   const waiting = useRef<{ cancel: () => void } | null>(null);
-  const renameWaits = useRef(new Set<{ cancel: () => void }>());
-  useEffect(() => () => { waiting.current?.cancel(); renameWaits.current.forEach(attempt => attempt.cancel()); }, []);
+  useEffect(() => () => { waiting.current?.cancel(); }, []);
   const [busy, setBusy] = useState<string | null>(null);
-  /** The key of the card whose name is being edited. */
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const state = useNavigation(navigation);
-  const expanded = state.preferences?.global.session_archive_expanded_project_ids ?? [];
-  const fold = (projectId: string) => {
-    if (!state.preferences || disabled) return;
-    const ids = expanded.includes(projectId) ? expanded.filter(id => id !== projectId) : [...expanded, projectId];
-    void navigation.saveLayout({ session_archive_expanded_project_ids: ids }, state.preferences.revision);
-  };
-  const links = continuationLinks([...snapshots.values()]);
   const announceRestored = (summary: Immutable<SessionSummary>, reopen: boolean) => {
     const name = ownerName(summary), subject = name ? `“${name}”` : sessionPhrase(summary, agentOf(summary), sessionWhen(Date.parse(summary.created_at), now));
     notices.dismiss(`session-archive:${summary.project_id}:${summary.session_id}`);
@@ -144,9 +103,9 @@ export function SessionLists(props: SessionListsProps) {
     watchArchiveNotice(controller.session, navigation, id, () => { used = true; });
     void navigation.refresh();
   };
-  const lifecycle = async (summary: Immutable<SessionSummary>, kind: 'session_close' | 'session_reopen' | 'session_archive' | 'session_restore', reopen = false,
+  const lifecycle = async (summary: Immutable<SessionSummary>, kind: 'session_archive' | 'session_restore', reopen = false,
     onFailure?: (error: unknown, fallback?: string) => void): Promise<boolean> => {
-    const route = routeOf(summary), key = sessionKey(summary);
+    const route: SessionRef = { project_id: summary.project_id, session_id: summary.session_id }, key = sessionKey(summary);
     const report = onFailure ?? ((error: unknown, fallback?: string) => failed(summary, now, error, fallback));
     if (lifecycleBusy.current || disabled) {
       report(null, kind === 'session_restore'
@@ -166,16 +125,14 @@ export function SessionLists(props: SessionListsProps) {
       if (!readiness.ok) { if (readiness.error) report(null, readiness.error); return false; }
       const session = readiness.session;
       if (kind === 'session_restore' && session.archived_at == null) { notices.dismiss(`session-archive:${summary.project_id}:${summary.session_id}`); return true; }
-      const agent = sessionCardText(summary, null, now).agent, when = sessionWhen(Date.parse(summary.created_at), now);
-      // Close is one confirmation in plain words; Reopen runs at once.
-      if (kind === 'session_close') { setDialog({ kind: 'close', store, agent, when, name: ownerName(session) }); return false; }
+      const agent = agentOf(summary);
       if (kind === 'session_archive') {
         const impact = closeImpact(session);
-        if (session.state === 'active' || impact.questions + impact.unsent + impact.delivering) { setDialog({ kind: 'archive', store, agent, when, name: ownerName(session), summary }); return false; }
+        if (session.state === 'active' || impact.questions + impact.unsent + impact.delivering) { setDialog({ kind: 'archive', store, agent, summary }); return false; }
       }
       const done = await controller.execute({ command: kind, api_version: 1, op_id: '', params: { expected_revision: session.revision, ...(kind === 'session_restore' && reopen ? { reopen: true } : {}) } }, session.revision);
       if (!done) {
-        if (controller.getSnapshot().pending) setDialog({ kind: kind === 'session_archive' ? 'archive' : 'dispatch', store, agent, when, name: ownerName(session), summary,
+        if (controller.getSnapshot().pending) setDialog({ kind: kind === 'session_archive' ? 'archive' : 'dispatch', store, agent, summary,
           onSaved: kind === 'session_restore' ? () => { setDialog(null); announceRestored(summary, reopen); void navigation.refresh(); } : undefined });
         if (onFailure || !controller.getSnapshot().pending && !isViewConflict(controller.getSnapshot().error)) report(controller.getSnapshot().error ?? new Error('The session could not be changed.'));
       }
@@ -186,113 +143,83 @@ export function SessionLists(props: SessionListsProps) {
     } catch (error: unknown) { report(error); return false; }
     finally { waiting.current = null; lifecycleBusy.current = false; if (!attempt.cancelled) setBusy(null); }
   };
-  const dispatch = (summary: Immutable<SessionSummary>) => {
-    const route = routeOf(summary), store = navigation.opened.open(route);
-    setDialog({ kind: 'dispatch', store, agent: sessionCardText(summary, null, now).agent, when: sessionWhen(Date.parse(summary.created_at), now), name: ownerName(summary) });
-  };
-  /** Saves the owner's name and description through the session's write barrier; the error in plain words, or null once saved. */
-  const rename = async (summary: Immutable<SessionSummary>, name: string, description: string) => {
-    let cancel!: () => void;
-    const cancellation = new Promise<boolean>(resolve => { cancel = () => { attempt.cancelled = true; resolve(false); }; });
-    const attempt = { cancelled: false, cancellation, cancel };
-    renameWaits.current.add(attempt);
-    try {
-      const controller = actions.forSession(navigation.opened.open(routeOf(summary)));
-      const readiness = await waitForLifecycleReady(controller, attempt, true);
-      if (!readiness.ok) return readiness.error ?? 'The name could not be saved. Try again.';
-      const failure = await saveSessionLabel(controller, readiness.session.revision, name, description);
-      await navigation.refresh();
-      if (failure === null && !attempt.cancelled) setRenaming(null);
-      return failure;
-    } catch (error: unknown) { return plainFailure(error, 'The name could not be saved. Try again.'); }
-    finally { renameWaits.current.delete(attempt); }
-  };
-  const removeSession = (summary: Immutable<SessionSummary>) => {
-    const counts = sessionRemoval(snapshots.get(sessionKey(summary)) ?? null, links.shared);
-    setDialog({ kind: 'remove', target: { kind: 'session', session: routeOf(summary) },
-      subject: { kind: 'session', agent: sessionCardText(summary, null, now).agent, when: sessionWhen(Date.parse(summary.created_at), now),
-        name: ownerName(summary), ...counts } });
-  };
-  const removeProject = (project: Immutable<ProjectSummary>) => {
-    const own = sessions.filter(session => session.project_id === project.project_id);
-    const counts = projectRemoval(own.flatMap(session => snapshots.get(sessionKey(session)) ?? []));
-    setDialog({ kind: 'remove', target: { kind: 'project', project_id: project.project_id },
-      subject: { kind: 'project', name: projectName(project), path: project.canonical_root, sessions: own.length, ...counts } });
-  };
-  const card = (summary: Immutable<SessionSummary>) => {
-    const key = sessionKey(summary), snapshot = snapshots.get(key) ?? null, text = sessionCardText(summary, snapshot, now, summary.active_binding?.host_location ?? null);
-    const chips = snapshot ? topicChips(snapshot, links.movedOn) : [], open = openTabs.has(key), route = routeOf(summary);
-    const off = disabled || busy !== null, editing = renaming === key, archived = summary.archived_at != null;
-    return <div key={key} className="pw-session-card" style={{ background: text.background }} data-session-card={summary.session_id}>
-      <div className="pw-session-row">
-        <i className="ph ph-terminal-window pw-session-icon" aria-hidden="true" />
-        {editing
-          ? <div className="pw-session-text"><SessionRename layout="card" naming={summary} onSave={(name, description) => rename(summary, name, description)}
-            onCancel={() => setRenaming(null)} /></div>
-          : <div className="pw-session-text"><span className="pw-session-title" style={{ color: text.titleColor }}>{text.title}</span>
-            {text.description && <span className="pw-session-description" style={{ color: text.titleColor }}>{text.description}</span>}
-            {text.secondary && <span className="pw-session-secondary">{text.secondary}</span>}
-            <span className="pw-session-meta">{text.meta}</span></div>}
-        <CardRun summary={summary} service={actions.service} onClick={() => dispatch(summary)} />
-        <span className="pw-session-actions">
-          <CopySessionId sessionId={summary.session_id} className="btn btn-ghost pw-card-button" />
-          {archived
-            ? <><button type="button" className="btn btn-secondary pw-card-button" disabled={navigationDisabled} onClick={() => onOpenSession(route)}>
-              <i className="ph ph-arrow-right" aria-hidden="true" />{open ? 'Go to tab' : 'Open in a tab'}</button>
-              <button type="button" className="btn btn-secondary pw-card-button" disabled={off} title="Restore this session; it stays closed." onClick={() => { void lifecycle(summary, 'session_restore'); }}>
-                <i className="ph ph-arrow-counter-clockwise" aria-hidden="true" />Restore</button></>
-            : text.closed
-            ? <button type="button" className="btn btn-secondary pw-card-button" disabled={off} onClick={() => { void lifecycle(summary, 'session_reopen'); }}>
-              <i className="ph ph-arrow-counter-clockwise" aria-hidden="true" />Reopen</button>
-            : <>
-              <button type="button" className={`btn ${open ? 'btn-secondary' : 'btn-primary'} pw-card-button`} disabled={navigationDisabled} data-session-id={summary.session_id}
-                onClick={() => onOpenSession(route)}>
-                <i className={open ? 'ph ph-arrow-right' : 'ph ph-plus'} aria-hidden="true" />{open ? 'Go to tab' : 'Open in a tab'}</button>
-              <button type="button" className="btn btn-ghost pw-card-button" disabled={off} title="Mark this session Closed in Ariadne. The agent process isn’t touched."
-                onClick={() => { void lifecycle(summary, 'session_close'); }}><i className="ph ph-x-circle" aria-hidden="true" />Close session</button>
-            </>}
-          {!archived && <button type="button" className="btn btn-ghost pw-card-button" disabled={off} onClick={() => { void lifecycle(summary, 'session_archive'); }}>
-            <i className="ph ph-archive" aria-hidden="true" />Archive</button>}
-          <RenameButton className="btn btn-ghost pw-card-button" disabled={editing || disabled} onClick={() => setRenaming(key)} />
-          <button type="button" className="btn btn-ghost pw-card-button" onClick={() => removeSession(summary)}><i className="ph ph-trash" aria-hidden="true" />Remove</button>
-        </span>
-      </div>
-      {chips.length > 0 && <div className="pw-topic-chips">{chips.map(chip => <Chip key={chip.id} chip={chip} />)}</div>}
-    </div>;
-  };
-  return <div className="pw-page pw-session-lists">
-    {onBack && <div><button type="button" className="btn btn-ghost pw-back" onClick={onBack}><i className="ph ph-arrow-left" aria-hidden="true" />Projects</button></div>}
-    {overview && <div className="pw-page-title"><h1 className="pw-page-name">All sessions</h1><span className="pw-page-sub">{overview.sub}</span></div>}
-    {groups.map(({ project, openLink, extra, tools }) => {
-      const own = sessions.filter(session => session.project_id === project.project_id);
-      const active = own.filter(session => session.archived_at == null && session.state !== 'closed'), closed = own.filter(session => session.archived_at == null && session.state === 'closed');
-      const archived = own.filter(session => session.archived_at != null), unfolded = expanded.includes(project.project_id);
-      return <section key={project.project_id} className="pw-session-group" aria-label={projectName(project)}>
-        <div className="pw-group-head">
-          <i className="ph ph-folder-simple pw-group-icon" aria-hidden="true" />
-          {overview ? <h2 className="pw-group-name">{projectName(project)}</h2> : <h1 className="pw-group-name">{projectName(project)}</h1>}
-          <span className="pw-group-path">{project.canonical_root}</span>
-          {openLink && <button type="button" className="btn btn-ghost pw-group-link" onClick={() => onOpenProject(project.project_id)}>Open project</button>}
-          <span className="pw-group-tools">{tools}
-            <button type="button" className="btn btn-ghost pw-group-remove" onClick={() => removeProject(project)}><i className="ph ph-trash" aria-hidden="true" />Remove project</button></span>
-        </div>
-        {extra}
-        {project.availability === 'unavailable' && <div className="pw-page-note">This project’s folder is unavailable. Check local access, then refresh.</div>}
-        {active.length > 0 && <><h3 className="pw-group-label">{`Active sessions · ${active.length}`}</h3>{active.map(card)}</>}
-        {closed.length > 0 && <><h3 className="pw-group-label pw-group-label-closed">{`Closed · ${closed.length}`}</h3>{closed.map(card)}</>}
-        {archived.length > 0 && <><h3 className="pw-group-label pw-group-label-closed"><button type="button" className="btn btn-ghost pw-archive-fold"
-          aria-expanded={unfolded} disabled={disabled} onClick={() => fold(project.project_id)}>
-          <i className={`ph ${unfolded ? 'ph-caret-down' : 'ph-caret-right'}`} aria-hidden="true" />{`Archived · ${archived.length}`}</button></h3>
-          {unfolded && archived.map(card)}</>}
-      </section>;
-    })}
-    {children}
+  const dialogs = <>
     {dialog?.kind === 'dispatch' && <DispatchDialog store={dialog.store} actions={actions.forSession(dialog.store)} agent={dialog.agent} onSaved={dialog.onSaved}
-      onClose={() => { setDialog(null); void navigation.refresh(); }} />}
-    {dialog?.kind === 'close' && <CloseSessionDialog store={dialog.store} actions={actions.forSession(dialog.store)} agent={dialog.agent} when={dialog.when} name={dialog.name}
       onClose={() => { setDialog(null); void navigation.refresh(); }} />}
     {dialog?.kind === 'archive' && <ArchiveSessionDialog store={dialog.store} actions={actions.forSession(dialog.store)}
       agent={dialog.agent} onClose={() => setDialog(null)} onSaved={wasActive => announceArchive(dialog.summary!, wasActive, actions.forSession(dialog.store))} />}
-    {dialog?.kind === 'remove' && <RemoveDialog subject={dialog.subject} onCancel={() => setDialog(null)} onConfirm={() => onRemove(dialog.target, dialog.subject)} />}
-  </div>;
+  </>;
+  return { busy, archive: summary => lifecycle(summary, 'session_archive'), restore: (summary, reopen = false) => lifecycle(summary, 'session_restore', reopen), dialogs };
+}
+
+/**
+ * A row action ends with the row's buttons changing (a closed row turns its Close off). When that leaves focus on nothing,
+ * it goes to the row's name button, so the keyboard owner stays in the row. Focus the owner moved on their own is left alone.
+ */
+function keepFocusOnRow(sessionId: string) {
+  const active = document.activeElement;
+  if (active && active !== document.body && !(active instanceof HTMLButtonElement && active.disabled)) return;
+  document.querySelector<HTMLElement>(`button[data-session-id="${CSS.escape(sessionId)}"]`)?.focus();
+}
+
+export interface SessionListsProps {
+  readonly navigation: NavigationStore;
+  readonly actions: SessionActionControllers;
+  /** All sessions: every project; a project's page: that one. */
+  readonly projects: readonly Immutable<ProjectSummary>[];
+  readonly sessions: readonly Immutable<SessionSummary>[];
+  /** A project's page: its name is the title, and there are no tabs. */
+  readonly single?: boolean;
+  readonly currentSession?: SessionRef | null;
+  readonly now: number;
+  readonly narrow: boolean;
+  /** A change is running (a save, a Refresh): Rename, Close and Archive wait. */
+  readonly disabled: boolean;
+  /** Opening a session waits only for a Refresh or the first load, not for an owner write; it queues behind the write. */
+  readonly navigationDisabled?: boolean;
+  readonly back?: PageBack;
+  readonly onOpenArchive?: () => void;
+  readonly onOpenSession: (route: SessionRef) => void;
+  /** Under the page head, above the sessions: the connect-session setup card. */
+  readonly notes?: ReactNode;
+  /** Under the list, inside the page column: catalogue notes, the connect-existing link. */
+  readonly children?: ReactNode;
+}
+
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+
+export function SessionLists({ navigation, actions, projects, sessions, single = false, currentSession, now, narrow, disabled, navigationDisabled = disabled, back, onOpenArchive, onOpenSession, notes, children }: SessionListsProps) {
+  const [tab, setTab] = useState<SessionsTabValue>('all');
+  const [acting, setActing] = useState<{ summary: Immutable<SessionSummary>; act: RowAct } | null>(null);
+  const archive = useSessionArchive({ navigation, actions, now, disabled });
+  const listed = sessions.filter(summary => projects.some(project => project.project_id === summary.project_id));
+  const summaryOf = (row: PageSession<SessionRef>) => listed.find(summary => sessionKey(summary) === sessionKey(row.route));
+  const act = (kind: RowAct) => (row: PageSession<SessionRef>) => {
+    const summary = summaryOf(row);
+    if (!summary || disabled || acting || archive.busy) return;
+    setActing({ summary, act: kind });
+  };
+  const open = listed.filter(summary => summary.archived_at == null);
+  const shownTab = single ? 'all' : tab;
+  const project = single ? projects[0] : undefined;
+  const title = project ? project.project?.display_name ?? 'Unavailable project' : 'All sessions';
+  // "6 sessions in 3 projects": the projects the listed sessions are in, not every registered one (SPEC 14.2).
+  const sub = single ? (open.length ? plural(open.length, 'session') : 'No sessions')
+    : `${plural(open.length, 'session')} in ${plural(new Set(open.map(summary => summary.project_id)).size, 'project')}`;
+  const counts = { open: listed.filter(summary => inTab(summary, 'open')).length, closed: listed.filter(summary => inTab(summary, 'closed')).length, all: open.length };
+  const store = acting ? navigation.opened.open({ project_id: acting.summary.project_id, session_id: acting.summary.session_id }) : null;
+  return <>
+    <SessionsList<SessionRef> narrow={narrow} back={back} title={title} sub={sub}
+      tabs={single ? undefined : { value: tab, counts, onChange: setTab }}
+      groups={sessionGroups(projects, listed, shownTab, now, currentSession, single, onOpenArchive)}
+      // While navigation is held (a Refresh) a row opens nothing; during a save it queues. Rename, Close and Archive wait for both.
+      onOpen={row => { if (!navigationDisabled) onOpenSession(row.route); }} onRename={act('rename')} onClose={act('close')}
+      onArchive={row => { const summary = summaryOf(row); if (summary && !acting) void archive.archive(summary); }}
+      notes={notes}>{children}</SessionsList>
+    {acting && store && <SessionRowAction key={`${sessionKey(acting.summary)}:${acting.act}`} actions={actions.forSession(store)} act={acting.act}
+      naming={{ name: ownerName(acting.summary) ?? '', description: ownerDescription(acting.summary) ?? '',
+        unnamedAs: acting.summary.title }}
+      onDone={() => { const id = acting.summary.session_id; setActing(null); void navigation.refresh().then(() => keepFocusOnRow(id)); }} />}
+    {archive.dialogs}
+  </>;
 }

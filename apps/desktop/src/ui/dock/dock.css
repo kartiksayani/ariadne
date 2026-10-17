@@ -1,0 +1,593 @@
+/* The answer dock (board screen 2, §5.2). It floats over the Map and Details; they keep its height as bottom room.
+   The shell's .shell-dock layer anchors it (ui/shell/Shell.tsx). The window less the top bar (40) and the Map's
+   room above the dock (56) is its tallest. */
+.answer-dock {
+  container: dock / inline-size;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 96px);
+  font-size: calc(12.5px * var(--text-scale));
+  color: var(--color-text);
+  background: var(--a-side);
+  border-top: 1.5px solid var(--color-divider);
+}
+
+.answer-dock[data-waiting] {
+  border-top-color: var(--st-waiting);
+}
+
+.answer-dock[data-open] {
+  max-height: min(60vh, calc(100vh - 96px));
+  box-shadow: 0 -12px 30px color-mix(in srgb, var(--st-waiting) 10%, transparent);
+}
+
+.answer-dock[data-open][data-sized] {
+  max-height: calc(100vh - 96px);
+}
+
+.answer-dock-grip {
+  position: absolute;
+  top: -5px;
+  right: 0;
+  left: 0;
+  z-index: 5;
+  height: 11px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.answer-dock-grip > span {
+  position: absolute;
+  top: 7px;
+  left: calc(50% - 17px);
+  width: 34px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--a-edge-strong);
+}
+
+.answer-dock-grip:focus-visible {
+  outline: 2px solid var(--color-accent);
+}
+
+.answer-dock-line,
+.answer-dock-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  min-width: 0;
+}
+
+/* The board's line is 40px with its 1.5px top rule inside it; the dock's rule is drawn 1px, so the line holds 39. */
+.answer-dock-line {
+  gap: 10px;
+  height: 39px;
+  padding: 0 8px 0 12px;
+}
+
+.answer-dock-head {
+  gap: 8px;
+  height: 38px;
+  padding: 0 8px 0 14px;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.dock-spacer {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.dock-pill,
+.dock-sent,
+.dock-others,
+.dock-draft,
+.dock-icon,
+.dock-link {
+  border: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  cursor: pointer;
+}
+
+.dock-pill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px 0 6px;
+  border-radius: 999px;
+  font-size: calc(12px * var(--text-scale));
+  font-weight: 500;
+  color: var(--a-bg);
+  background: var(--a-acc-text);
+}
+
+.dock-line-text {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dock-line-quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+
+.dock-line-quiet > i {
+  font-size: calc(15px * var(--text-scale));
+  color: var(--st-waiting);
+}
+
+.dock-line-quiet > .dock-done {
+  color: var(--st-done);
+}
+
+.dock-sent,
+.dock-others,
+.dock-draft {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  font-size: calc(12px * var(--text-scale));
+  white-space: nowrap;
+}
+
+/* The board's chip is its icon and text, with no room around them. The 22px button keeps that room as hit area: the
+   padding is cancelled by the margin, so the row lays out as the board's does. */
+.dock-sent {
+  height: 22px;
+  padding: 0 8px 0 6px;
+  margin: 0 -8px 0 -6px;
+  color: var(--st-agent);
+}
+
+.dock-others {
+  height: 22px;
+  padding: 0 8px 0 6px;
+  border-radius: 999px;
+  color: var(--a-acc-text);
+  box-shadow: inset 0 0 0 1px var(--st-waiting);
+}
+
+.dock-others[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.dock-draft {
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.dock-icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+
+.dock-icon:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.dock-icon:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+}
+
+.dock-icon > i {
+  font-size: calc(15px * var(--text-scale));
+}
+
+.dock-small {
+  width: 22px;
+  height: 22px;
+}
+
+.dock-small > i {
+  font-size: calc(13px * var(--text-scale));
+}
+
+.dock-head-icon {
+  flex: none;
+  font-size: calc(15px * var(--text-scale));
+  color: var(--st-waiting);
+}
+
+.dock-head-title {
+  flex: none;
+  font-weight: 500;
+  color: var(--a-acc-text);
+}
+
+.dock-pager {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.dock-path {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 2px 5px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* A segment is its "›" and its name: the board's "›" belongs to the segment it leads into. */
+.dock-crumb {
+  display: inline-flex;
+  flex: 0 100 auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 6ch;
+}
+
+.dock-crumb:last-child {
+  flex-shrink: 1;
+}
+
+/* "…" keeps its own width: the 6ch floor is for named segments. */
+.dock-crumb[data-more] {
+  flex: none;
+  min-width: 0;
+}
+
+.dock-crumb-sep {
+  flex: none;
+  opacity: 0.55;
+}
+
+.dock-link,
+.dock-crumb-text {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dock-link:hover {
+  text-decoration: underline;
+}
+
+.dock-age {
+  flex: none;
+}
+
+.dock-narrow {
+  display: none;
+}
+
+@container dock (width < 1000px) {
+  .dock-wide {
+    display: none;
+  }
+
+  .dock-narrow {
+    display: inline;
+  }
+}
+
+.answer-dock-current {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.answer-dock-current > .detail-answer-slot {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.answer-dock-current .answer {
+  flex: 1 1 auto;
+}
+
+/* A failed answer's other recovery actions sit under the bar, on its inset. */
+.answer-dock-current > .detail-answer-slot > .stuck-note {
+  padding: 0 10px 10px 14px;
+}
+
+.dock-question {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 7px;
+  max-height: 150px;
+  padding: 0 14px 8px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+@container dock (width < 1000px) {
+  .dock-question {
+    max-height: 118px;
+  }
+}
+
+.answer-dock[data-sized] .dock-question {
+  flex-shrink: 1;
+  min-height: 40px;
+  max-height: var(--dock-question-max, 150px);
+}
+
+.dock-question-title {
+  margin: 0;
+  font-size: calc(15px * var(--text-scale));
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+/* The title opens its question, like a path segment does; at rest it reads as plain text. */
+.dock-question-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  text-wrap: inherit;
+  color: inherit;
+  background: none;
+  cursor: pointer;
+}
+
+.dock-question-open:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.dock-question-ask {
+  margin: 0;
+  font-size: calc(14px * var(--text-scale));
+  color: var(--a-acc-text);
+}
+
+.dock-question-body {
+  margin: 0;
+  font-size: calc(13.5px * var(--text-scale));
+  line-height: 1.55;
+  text-wrap: pretty;
+  color: color-mix(in srgb, var(--color-text) 80%, transparent);
+}
+
+/* 6px over the dock's top edge (the board's): the dock's 1.5px rule is drawn 1px, so measured from its padding box that is 7px.
+   Its top stops 54px under the window's top (the board's "popMax": the window less the top bar, the dock and 20px). */
+.dock-popover {
+  position: absolute;
+  right: 10px;
+  bottom: calc(100% + 7px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 400px;
+  max-width: calc(100% - 20px);
+  max-height: max(160px, calc(100vh - 60px - var(--dock-inset, 0px)));
+  padding: 8px;
+  overflow: auto;
+  scrollbar-width: thin;
+  border-radius: 8px;
+  background: var(--a-card);
+  box-shadow: var(--shadow-md);
+}
+
+.dock-popover-left {
+  right: auto;
+  left: 10px;
+}
+
+.dock-popover-title {
+  padding: 4px 6px 6px;
+  font-size: calc(11px * var(--text-scale));
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.dock-kept {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 6px;
+}
+
+.dock-kept-open {
+  text-align: left;
+}
+
+.dock-kept-open:disabled {
+  cursor: default;
+}
+
+.dock-kept-words {
+  font: inherit;
+  resize: none;
+}
+
+.dock-kept-note {
+  margin: 0;
+  padding: 0 6px;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.dock-sent-row > p {
+  margin: 0 6px;
+}
+
+/* The board's list is a flat column 2px apart: a session's name, then its questions as 6px/8px rows. */
+.dock-other-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dock-other-group > h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 6px 2px;
+  font-size: calc(12.5px * var(--text-scale));
+  font-weight: 500;
+  letter-spacing: normal;
+  line-height: inherit;
+}
+
+.dock-other-group > h3 > i {
+  font-size: calc(14px * var(--text-scale));
+}
+
+.dock-other-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.dock-other-row[data-open] {
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
+}
+
+.dock-other-row > .detail-answer-slot {
+  padding: 0;
+}
+
+.dock-other-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: none;
+  cursor: pointer;
+}
+
+.dock-other-head > i:first-child {
+  margin-top: 2px;
+  color: var(--st-waiting);
+}
+
+.dock-other-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.45;
+}
+
+.dock-other-age {
+  flex: none;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.dock-other-head > i:last-child {
+  flex: none;
+  margin-top: 3px;
+  font-size: calc(11px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.dock-others-foot {
+  margin: 0;
+  padding: 6px 6px 2px;
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.45;
+  text-wrap: pretty;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+/* The open row's answer: cards inset 21px under the question's icon, then a hint and a 26px Send. */
+.dock-other-row .answer-list .answer-options {
+  gap: 5px;
+  padding-left: 21px;
+  overflow: visible;
+}
+
+.question-delivery .answer-bar {
+  min-height: 0;
+  padding: 4px 6px;
+  box-shadow: none;
+}
+
+.dock-other-row .answer-list .answer-option {
+  gap: 8px;
+}
+
+.dock-other-row .answer-list .answer-key {
+  font-size: calc(11px * var(--text-scale));
+}
+
+.dock-other-row .answer-list .answer-label {
+  font-size: inherit;
+  line-height: 1.4;
+}
+
+.dock-other-row .answer-list .answer-consequence {
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--color-text) 64%, transparent);
+}
+
+.dock-other-row .answer-list .answer-body { gap: 1px; }
+
+.dock-other-row .answer-list .answer-recommended > i { font-size: calc(10px * var(--text-scale)); }
+
+/* The board's check is the row's own size, 2px down. */
+.dock-other-row .answer-list .answer-check {
+  margin-top: 2px;
+  font-size: inherit;
+}
+
+/* The board's hint and Send sit in the cards' column: 5px under the last card, inset 21px like the cards. */
+.dock-other-row .answer-list .answer-bar {
+  margin-top: 5px;
+  margin-left: 21px;
+  padding: 2px 0 0;
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--color-text) 68%, transparent);
+}
+
+.dock-other-row .answer-list .answer-bar-icon { font-size: calc(13px * var(--text-scale)); }
+
+.dock-other-row .answer-list .answer-send {
+  padding: 0 10px;
+  font-size: calc(12px * var(--text-scale));
+}
+
+.question-sent-words {
+  margin: 2px 6px 0;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.45;
+  white-space: pre-wrap;
+  color: color-mix(in srgb, var(--color-text) 80%, transparent);
+}

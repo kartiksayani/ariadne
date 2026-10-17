@@ -77,7 +77,8 @@ for (const theme of ['light', 'dark'] as const) test(`N wraps unread Map targets
     await expect(child).toHaveAttribute('aria-selected', 'true');
     await expect(child.getByRole('img', { name: 'New to you' })).toHaveCount(0);
     // Typing N in the search box leaves the last landed target alone.
-    const search = page.getByRole('textbox', { name: 'Search questions and outcomes' });
+    await page.getByRole('button', { name: 'Search the Map' }).click();
+    const search = page.getByRole('textbox', { name: 'Search the Map' });
     await search.focus(); await page.keyboard.press('n');
     await expect(child).toHaveAttribute('data-next-unseen', 'true');
   } finally { await server.close(); }
@@ -89,13 +90,14 @@ async function openTree(page: Page, origin: string, query = '') {
   await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
   await page.setViewportSize({ width: 1000, height: 700 });
   await page.goto(`${origin}/tests/e2e/tree-layout/fixture.html${query}`);
-  await page.locator('[data-shell-tab="projects"]').click();
-  await page.locator('.pw-project-open').first().click();
+  // No tabs: the switcher's All sessions lists the session (as tests/ui/app/open.ts `goToSession`).
+  await page.locator('[data-popover-trigger="switcher"]').click();
+  await page.getByRole('dialog', { name: 'Switch session or project' }).getByRole('button', { name: 'All sessions' }).click();
   const session = page.locator('button[data-session-id]').first();
   await expect(session).toBeEnabled(); await session.click();
-  await expect(page.locator('.tree-session-bar').getByRole('button', { name: 'Session actions' })).toBeEnabled();
+  await expect(page.locator('[data-popover-trigger="connection"]')).toBeVisible();
   await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-status', 'ready');
-  await expect(page.locator('.tree-session-bar')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-busy', 'false');
 }
 
 async function expectRevealedRow(row: Locator) {
@@ -185,7 +187,7 @@ for (const theme of ['light', 'dark']) test(`Getting around keeps breadcrumbs an
     await page.keyboard.down('Meta'); await root.hover();
     const peek = page.getByRole('dialog', { name: /^Peek:/ });
     await expect(peek).toBeVisible(); await page.keyboard.up('Meta');
-    const peekBox = (await peek.boundingBox())!, topBar = (await page.locator('.shell-header').boundingBox())!;
+    const peekBox = (await peek.boundingBox())!, topBar = (await page.locator('.shell-top').boundingBox())!;
     expect(peekBox.y).toBeGreaterThanOrEqual(topBar.y + topBar.height);
     expect(peekBox.x).toBeGreaterThanOrEqual(0);
     expect(peekBox.x + peekBox.width).toBeLessThanOrEqual(1000);
@@ -416,25 +418,33 @@ test('counts paragraph, list and code text lines exactly, and unfolds links only
   } finally { await server.close(); }
 });
 
-test('keeps the session menu inside a narrow column with Restore and a long name', async ({ page }) => {
+test('keeps the connection card inside a narrow window with Restore and a long name', async ({ page }) => {
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
     logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
   try {
     await server.listen();
     const address = (server.httpServer as Server).address();
     if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    // 900px is the narrow top bar (below 1100); the archived session's long name must give way, not push the controls out.
+    // An archived session is not listed on All sessions, so the fixture starts on it (the saved selection), as the vitest card tests do.
     const origin = `http://127.0.0.1:${address.port}`;
     await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
-    await page.setViewportSize({ width: 1600, height: 960 });
-    await page.goto(`${origin}/tests/e2e/tree-layout/fixture.html?bar`);
+    await page.setViewportSize({ width: 900, height: 700 });
+    await page.goto(`${origin}/tests/e2e/tree-layout/fixture.html?card`);
+    await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-status', 'ready');
     await page.evaluate(async () => { await document.fonts.ready; });
-    const bar = page.locator('.tree-session-bar'), more = bar.getByRole('button', { name: 'Session actions' });
-    await expect(bar.getByRole('button', { name: 'Restore session' })).toBeVisible();
-    const bounds = (await bar.boundingBox())!, menu = (await more.boundingBox())!;
-    expect(menu.x + menu.width).toBeLessThanOrEqual(bounds.x + bounds.width);
+    const bar = page.locator('.shell-top'), dot = page.locator('[data-popover-trigger="connection"]');
+    const bounds = (await bar.boundingBox())!, control = (await dot.boundingBox())!;
+    expect(control.x).toBeGreaterThanOrEqual(bounds.x);
+    expect(control.x + control.width).toBeLessThanOrEqual(bounds.x + bounds.width);
     expect(await bar.evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(Math.ceil(bounds.width));
-    await more.click();
-    await expect(page.getByRole('menuitem', { name: 'Copy ID' })).toBeVisible();
+    await dot.click();
+    const card = page.locator('.cc');
+    await expect(card.getByRole('button', { name: 'Restore session' })).toBeVisible();
+    await expect(card.getByRole('button', { name: 'Copy session ID' })).toBeVisible();
+    const box = (await card.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(900);
   } finally { await server.close(); }
 });
 
@@ -577,9 +587,9 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
     await expectRevealedRow(root);
     await scroller.evaluate(element => { element.scrollTop = element.scrollHeight; });
     await expect(marker).toBeVisible();
-    // The shortcut works while the session's other panel has focus.
+    // The shortcut (`.`, SPEC 6.1; ⌘J is gone) works while the session's other panel has focus.
     await page.locator('.item-detail').getByRole('button', { name: 'Copy reference' }).focus();
-    await page.keyboard.press('Meta+j');
+    await page.keyboard.press('.');
     await expect(marker).toHaveCount(0);
     await expectRevealedRow(root);
     // Nearest keyboard reveal also clears the actual sticky header, without centering the row.
@@ -599,5 +609,119 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
     await scroller.evaluate(element => { element.scrollTop = 0; });
     await expectReservedMarker('below', 'Another item');
     await expectRevealedRow(last);
+  } finally { await server.close(); }
+});
+
+/** Opens the tree with Details beside it and one row scrolled to the reading edge; returns how to read where rows sit. */
+async function readingSetup(page: Page, origin: string) {
+  await openTree(page, origin);
+  await page.evaluate(async () => { await document.fonts.ready; });
+  const close = page.getByRole('button', { name: 'Close detail' });
+  if (await close.count()) await close.click();
+  const scroller = page.locator('.tree-scroll'), anchored = page.locator('.tree-item[data-item-id="7"]');
+  await anchored.evaluate(element => {
+    const box = element.closest('.tree-scroll')!;
+    const header = element.closest('.tree-topic-group')!.querySelector('.tree-topic')!;
+    box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top - header.getBoundingClientRect().height;
+  });
+  const settle = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await settle();
+  await anchored.locator('.tree-question').click();
+  await expect(page.locator('.item-detail')).toBeVisible();
+  await settle();
+  await expect(anchored).toBeInViewport();
+  // Where a row sits below the sticky topic bar, which may wrap to another line when the Map narrows. The row the owner is
+  // reading is the first one that reaches below the bar, as the Tree itself keeps it (or the one named).
+  const reading = (id?: string) => scroller.evaluate((box, wanted) => {
+    const edge = box.getBoundingClientRect().top;
+    let bar = 0;
+    for (const header of box.querySelectorAll('.tree-topic')) {
+      const rect = header.getBoundingClientRect();
+      if (rect.top <= edge && rect.bottom > edge) bar = Math.max(bar, rect.bottom - edge);
+    }
+    const rows = [...box.querySelectorAll<HTMLElement>('.tree-item')];
+    const row = wanted ? rows.find(element => element.dataset.itemId === wanted)! : rows.find(element => element.getBoundingClientRect().bottom > edge + bar + 1)!;
+    return { id: row.dataset.itemId!, top: row.getBoundingClientRect().top - edge - bar };
+  }, id);
+  /** Runs a change to the column; the Map's width changes, and the row the owner was reading stays where it was. */
+  const holds = async (change: () => Promise<void>) => {
+    const width = (await scroller.boundingBox())!.width, before = await reading();
+    await change();
+    await settle();
+    await expect.poll(async () => (await scroller.boundingBox())!.width).not.toBe(width);
+    await expect.poll(async () => Math.abs((await reading(before.id)).top - before.top)).toBeLessThanOrEqual(3);
+    // The body never scrolls sideways.
+    expect(await page.locator('.shell-body').evaluate(element => element.scrollLeft + element.scrollWidth - element.clientWidth)).toBe(0);
+    return (await scroller.boundingBox())!.width;
+  };
+  return { holds, edge: page.getByRole('separator', { name: 'Resize detail panel' }) };
+}
+
+test('keeps the Map still while Details folds, unfolds and narrows the Map by its edge', async ({ page }) => {
+  const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+    logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+  try {
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    const { holds, edge } = await readingSetup(page, `http://127.0.0.1:${address.port}`);
+    const widths = [await holds(() => page.getByRole('button', { name: 'Fold Details' }).click())];
+    widths.push(await holds(() => page.getByRole('button', { name: 'Show Details' }).click()));
+    await edge.focus();
+    const handle = (await edge.boundingBox())!, x = handle.x + handle.width / 2, y = handle.y + handle.height / 2;
+    widths.push(await holds(async () => { await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x - 90, y, { steps: 5 }); await page.mouse.up(); }));
+    await edge.focus();
+    widths.push(await holds(() => page.keyboard.press('End')));
+    expect(new Set(widths).size).toBe(widths.length);
+  } finally { await server.close(); }
+});
+
+// Widening the Map back (End, then Home) reflows the rows so that another topic's sticky bar, wrapped to a different height,
+// sits at the reading edge until the row is back; the Tree's hold (ui/tree/TreeView.tsx `holding`) settles against the bar
+// the row ends under.
+test('keeps the Map still while Details widens the Map back across the topic bar unwrapping', async ({ page }) => {
+  const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+    logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+  try {
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    const { holds, edge } = await readingSetup(page, `http://127.0.0.1:${address.port}`);
+    await edge.focus();
+    await holds(() => page.keyboard.press('End'));
+    await holds(() => page.keyboard.press('Home'));
+  } finally { await server.close(); }
+});
+
+// The Map never moves on its own (alpha.19 Details decision): every way the Map's width changes, in both directions, leaves
+// the row the owner was reading where it was below the sticky topic bar, and the body never scrolls sideways. One row per
+// trigger; `before` brings the column to where the trigger starts (not measured).
+const widthTriggers: ReadonlyArray<readonly [name: string, before: (page: Page, edge: Locator) => Promise<void>, change: (page: Page, edge: Locator) => Promise<void>]> = [
+  ['fold widens the Map', async () => {}, page => page.getByRole('button', { name: 'Fold Details' }).click()],
+  ['unfold narrows the Map', page => page.getByRole('button', { name: 'Fold Details' }).click(), page => page.getByRole('button', { name: 'Show Details' }).click()],
+  ['dragging the edge left narrows the Map', async () => {}, (page, edge) => dragEdge(page, edge, -90)],
+  ['dragging the edge right widens the Map', async (page, edge) => { await edge.focus(); await page.keyboard.press('End'); }, (page, edge) => dragEdge(page, edge, 120)],
+  ['End narrows the Map to its least', async () => {}, async (page, edge) => { await edge.focus(); await page.keyboard.press('End'); }],
+  ['Home widens the Map back, unwrapping the topic bar', async (page, edge) => { await edge.focus(); await page.keyboard.press('End'); },
+    async (page, edge) => { await edge.focus(); await page.keyboard.press('Home'); }],
+  ['a narrower window narrows the Map', async () => {}, page => page.setViewportSize({ width: 900, height: 700 })],
+  ['a wider window widens the Map, across the Details breakpoint', async () => {}, page => page.setViewportSize({ width: 1280, height: 700 })],
+];
+async function dragEdge(page: Page, edge: Locator, dx: number) {
+  const handle = (await edge.boundingBox())!, x = handle.x + handle.width / 2, y = handle.y + handle.height / 2;
+  await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + dx, y, { steps: 5 }); await page.mouse.up();
+}
+for (const [name, before, change] of widthTriggers) test(`keeps the reading row still when ${name}`, async ({ page }) => {
+  const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+    logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+  try {
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    const { holds, edge } = await readingSetup(page, `http://127.0.0.1:${address.port}`);
+    await before(page, edge);
+    // Let the column's own change land before the measured one starts.
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await holds(() => change(page, edge));
   } finally { await server.close(); }
 });

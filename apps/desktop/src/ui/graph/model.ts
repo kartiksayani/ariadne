@@ -14,23 +14,14 @@ import { hiddenGroupKey, hiddenGroupsFor, hiddenItems } from '../tree/hidden';
 import { connectedItems } from '../../selectors/related';
 import { ackTarget } from '../../selectors/ack';
 import { hasStatusFilter } from '../../selectors/tree/folds';
+import { STATUS, statusKey, type StatusKey } from '../shared/status';
 
-export type GraphStatus = 'open' | 'waiting' | 'agent' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
+export type GraphStatus = StatusKey;
 
 /** Status icons and labels of the handoff's Status Badge. */
-export const statusVisual: Readonly<Record<GraphStatus, { readonly label: string; readonly icon: string }>> = {
-  open: { label: 'Open', icon: 'ph ph-circle' },
-  waiting: { label: 'Waiting on me', icon: 'ph-fill ph-question' },
-  agent: { label: 'Waiting on agent', icon: 'ph ph-hourglass-medium' },
-  progress: { label: 'In progress', icon: 'ph ph-circle-half' },
-  decided: { label: 'Decided', icon: 'ph ph-check-circle' },
-  done: { label: 'Done', icon: 'ph-fill ph-check-circle' },
-  dropped: { label: 'Dropped', icon: 'ph ph-x-circle' },
-  replaced: { label: 'Replaced', icon: 'ph ph-arrow-circle-right' },
-};
+export const statusVisual = STATUS;
 
-export const graphStatus = (status: DisplayStatus): GraphStatus =>
-  status === 'waiting_on_me' ? 'waiting' : status === 'waiting_on_agent' ? 'agent' : status === 'in_progress' ? 'progress' : status;
+export const graphStatus = (status: DisplayStatus): GraphStatus => statusKey[status];
 
 const closedStatuses: ReadonlySet<Item['status']> = new Set(['decided', 'done', 'dropped', 'replaced']);
 export const isClosed = (status: Item['status']): boolean => closedStatuses.has(status);
@@ -120,14 +111,14 @@ export interface GraphInput {
   readonly tight: boolean;
 }
 
-/** "1 waiting on you · 1 waiting on agent · 1 open · 8 closed" over every item of the topic (Ariadne.dc.html:1909). */
+/** Status counts over every item of the topic, including local reply delivery. */
 export function topicCounts(items: readonly Immutable<Item>[], session?: Immutable<Session>): string {
   const shown = (item: Immutable<Item>): DisplayStatus => session ? displayStatus(session, item) : item.status;
   const count = (status: DisplayStatus) => items.filter(item => shown(item) === status).length;
   const closed = items.filter(item => isClosed(item.status)).length;
   const ack = session ? items.filter(item => ackTarget(session, item)).length : 0;
   const waiting = session ? items.filter(item => waitingOnOwner(session, item)).length : count('waiting_on_me');
-  return [[waiting, 'waiting on you'], [count('waiting_on_agent'), 'waiting on agent'], [ack, 'to ack'],
+  return [[waiting, 'waiting on you'], [count('sent'), 'sent'], [count('queued'), 'queued'], [ack, 'to ack'],
     [count('open'), 'open'], [count('in_progress'), 'in progress'], [closed, 'closed']]
     .filter(([n]) => n).map(([n, words]) => `${n} ${words}`).join(' · ');
 }

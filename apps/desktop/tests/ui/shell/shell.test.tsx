@@ -1,58 +1,59 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { Shell as SlotShell } from '../../../src/ui/shell/Shell';
-import { Header, type HeaderProps } from '../../../src/ui/shell/Header';
-import { TabBar, type TabBarProps } from '../../../src/ui/shell/TabBar';
-import { Footer } from '../../../src/ui/shell/Footer';
+import { TopBar } from '../../../src/ui/topbar/TopBar';
+import type { TopBarProps } from '../../../src/ui/topbar/model';
 import { DetailsColumn } from '../../../src/ui/shell/DetailsColumn';
+import { DetailsColumnProvider } from '../../../src/state/details/column';
 import { resolveTheme, useAppliedTheme } from '../../../src/ui/shell/theme';
-import { tabModels, type ConversationFooterState } from '../../../src/ui/shell/model';
-import { WaitingFrame } from '../../../src/ui/waiting/WaitingColumn';
+import { DockInsetProvider } from '../../../src/ui/shell/dockInset';
 import { ItemHistoryContext } from '../../../src/ui/shell/itemHistory';
 import { notices } from '../../../src/ui/pages/notices';
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); delete document.documentElement.dataset.theme; });
+const jsdomWidth = window.innerWidth;
+// Details is 400 wide in a window of 1100 or more (state/details/column.ts); a body without a measured width is a wide one.
+beforeEach(() => { setWindow(1280); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); delete document.documentElement.dataset.theme; setWindow(jsdomWidth); });
 
-/** Today's chrome (header, tabs, Waiting, detail, footer) through the shell's slots, as NavigationWorkspace builds it. */
+/** The chrome (top bar, detail) and the floating dock through the shell's slots, as NavigationWorkspace builds it. */
 interface ShellProps {
-  readonly header: HeaderProps;
-  readonly tabs: TabBarProps;
+  readonly header: TopBarProps;
   readonly body: {
-    readonly waiting: ReactNode; readonly center: ReactNode; readonly conversation?: ReactNode; readonly detail?: ReactNode; readonly detailPath?: ReactNode;
+    readonly dock?: ReactNode; readonly dockHeight?: number; readonly center: ReactNode; readonly conversation?: ReactNode; readonly detail?: ReactNode; readonly detailPath?: ReactNode;
     readonly onCloseDetail?: () => void; readonly onRemove?: () => void; readonly hidden?: boolean; readonly hiddenNotice?: string; readonly onHide?: () => void;
-    readonly detailWidth?: number | null; readonly onResizeDetail?: (width: number) => void; readonly waitingFolded?: boolean; readonly onFoldWaiting?: (folded: boolean) => void;
+    readonly detailWidth?: number | null; readonly onResizeDetail?: (width: number) => void;
   };
-  readonly summary: string;
-  readonly conversationFooter?: ConversationFooterState;
   readonly overlay?: ReactNode;
 }
-function Shell({ header, tabs, body, summary, conversationFooter, overlay }: ShellProps) {
-  return <SlotShell topBar={<><Header {...header} /><TabBar {...tabs} /></>} main={body.center}
+function Shell({ header, body, overlay }: ShellProps) {
+  return <DetailsColumnProvider saved={body.detailWidth} onSave={body.onResizeDetail}><DockInsetProvider height={body.dockHeight ?? 0}><SlotShell topBar={<TopBar {...header} />} main={body.center}
     side={body.detail ? <DetailsColumn path={body.detailPath} onClose={body.onCloseDetail} onRemove={body.onRemove} hidden={body.hidden} hiddenNotice={body.hiddenNotice}
-      onHide={body.onHide} onResize={body.onResizeDetail}>{body.detail}</DetailsColumn> : undefined}
-    footer={<Footer summary={summary} conversation={body.conversation ? conversationFooter ?? { question: false } : undefined} />}
-    legacy={{ waiting: body.waiting, conversation: body.conversation, sideWidth: body.detailWidth, waitingFolded: body.waitingFolded, onFoldWaiting: body.onFoldWaiting }}
-    overlay={overlay} />;
+      onHide={body.onHide}>{body.detail}</DetailsColumn> : undefined}
+    dock={body.dock} legacy={{ conversation: body.conversation }}
+    overlay={overlay} /></DockInsetProvider></DetailsColumnProvider>;
 }
-
-const now = new Date(2026, 9, 7, 15, 30).getTime();
 function props(patch: Partial<ShellProps> = {}): ShellProps {
-  const sessions = [{ id: 's1', project: 'search', agent: 'claude-code', createdAt: new Date(2026, 9, 7, 14, 2).getTime(), endedAt: null, running: true, on: true }];
   return {
-    header: { text: { sessionText: 'search · started 14:02', connText: 'Connected · claude-code', connColor: 'var(--st-done)' }, query: '', views: null,
-      theme: 'dark' },
-    tabs: { tabs: tabModels({ selection: 'session', sessions, projectCount: 1 }, now), onSelect: vi.fn(), onClose: vi.fn() },
-    body: { waiting: <p>Waiting column</p>, center: <p>Centre column</p> },
-    summary: '10 items · 3 waiting on you · 2 in progress · 4 open',
+    header: { narrow: false, project: 'search', sessionName: 'Cache review', otherWaiting: 0, switcherOpen: false, onSwitcherToggle: vi.fn(),
+      connection: { kind: 'live', agent: 'Claude Code' }, connectionOpen: false, onConnectionToggle: vi.fn(), connectionCard: <p>Agent connected</p>,
+      search: { active: false, query: '', onOpen: vi.fn(), onQuery: vi.fn(), onClear: vi.fn() }, view: 'tree', onView: vi.fn(),
+      filter: { active: false, count: 0, onToggle: vi.fn() }, recent: { active: false, onToggle: vi.fn() }, archive: { active: false, onOpen: vi.fn() },
+      textSize: 100, onTextSizeChange: vi.fn(), theme: 'dark', onToggleTheme: vi.fn(), help: { open: false, onToggle: vi.fn() } },
+    body: { dock: <p>Answer dock</p>, center: <p>Centre column</p> },
     ...patch,
   };
 }
 
+/** The window is as wide as the body here: the Details column sizes itself from the window, the body lays out from its own width. */
+function setWindow(width: number) {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
+}
 function measureBody(initialWidth: number): (width: number) => void {
   let resize: ((width: number) => void) | undefined;
+  setWindow(initialWidth);
   vi.stubGlobal('ResizeObserver', class {
     constructor(private readonly receive: ResizeObserverCallback) {}
     observe() {
@@ -61,29 +62,27 @@ function measureBody(initialWidth: number): (width: number) => void {
     }
     disconnect() {}
   });
-  return width => act(() => resize?.(width));
+  return width => act(() => { setWindow(width); window.dispatchEvent(new Event('resize')); resize?.(width); });
 }
 
 describe('Paperwhite shell', () => {
   it('bounds Conversation to the viewport while the covered Map and detail retain their grid and mounted state', () => {
     measureBody(900);
-    const value = props({ body: { waiting: <WaitingFrame count="2" />, center: <input aria-label="Map draft" defaultValue="Preserved" />,
-      detail: <p>Dock content</p>, onFoldWaiting: vi.fn() } });
+    const value = props({ body: { dock: <p>Answer dock</p>, center: <input aria-label="Map draft" defaultValue="Preserved" />,
+      detail: <p>Dock content</p> } });
     const { rerender } = render(<Shell {...value} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (2)' }));
     const grid = document.querySelector<HTMLElement>('.shell-body')!, center = screen.getByRole('main');
     const draft = screen.getByRole<HTMLInputElement>('textbox', { name: 'Map draft' });
     const detail = screen.getByRole('complementary', { name: 'Item detail' });
     const columns = grid.style.gridTemplateColumns;
-    // The retained Map's minimum columns extend to 1000px in this 900px viewport.
-    expect(columns).toBe('300px minmax(380px,1fr) 320px');
+    expect(columns).toBe('minmax(560px,1fr) 340px');
     fireEvent.change(draft, { target: { value: 'Still here' } });
     rerender(<Shell {...value} body={{ ...value.body, conversation: <p>Conversation content</p> }} />);
     const overlay = screen.getByText('Conversation content').parentElement!;
     expect(overlay.className).toBe('shell-conversation');
     expect(overlay.parentElement?.className).toBe('shell-body-viewport');
     expect(overlay.previousElementSibling).toBe(grid);
-    expect(overlay.style.left).toBe('300px');
+    expect(overlay.style.left).toBe('0px');
     expect(grid.style.gridTemplateColumns).toBe(columns);
     expect(grid.querySelector('.shell-center')).toBe(center);
     expect(grid.querySelector('.shell-detail')).toBe(detail);
@@ -108,47 +107,27 @@ describe('Paperwhite shell', () => {
     expect(center.hasAttribute('inert')).toBe(false);
   });
 
-  it('moves the Conversation edge with the actual Waiting fold and peek as the viewport resizes', () => {
-    const resizeWindow = measureBody(900), fold = vi.fn();
-    const value = props({ body: { waiting: <WaitingFrame count="2" />, center: <p>Map</p>, detail: <p>Dock</p>,
-      conversation: <p>Conversation content</p>, onFoldWaiting: fold } });
+  it('keeps Conversation at the Map edge as the viewport and floating dock change', () => {
+    const resizeWindow = measureBody(900);
+    const value = props({ body: { dock: <p>Answer dock</p>, dockHeight: 40, center: <p>Map</p>, detail: <p>Details</p>,
+      conversation: <p>Conversation content</p> } });
     const { rerender } = render(<Shell {...value} />);
     const overlay = document.querySelector<HTMLElement>('.shell-conversation')!;
-    expect(overlay.style.left).toBe('44px');
-    fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (2)' }));
-    expect(overlay.style.left).toBe('300px');
-    expect(fold).not.toHaveBeenCalled();
+    expect(overlay.style.left).toBe('0px');
     resizeWindow(1400);
-    expect(overlay.style.left).toBe('300px');
-    rerender(<Shell {...value} body={{ ...value.body, waitingFolded: true }} />);
-    expect(overlay.style.left).toBe('44px');
+    expect(overlay.style.left).toBe('0px');
+    rerender(<Shell {...value} body={{ ...value.body, dockHeight: 280 }} />);
+    expect(overlay.style.left).toBe('0px');
     resizeWindow(900);
-    expect(overlay.style.left).toBe('44px');
+    expect(overlay.style.left).toBe('0px');
   });
 
-  it('shows only Conversation shortcuts and hides pinned question keys when no question is pinned', () => {
-    const value = props({ body: { waiting: null, center: <p>Map</p>, conversation: <p>Conversation</p> },
-      conversationFooter: { question: true } });
-    const { rerender } = render(<Shell {...value} />);
-    const footer = document.querySelector('.shell-footer')!;
-    const keys = () => [...footer.querySelectorAll('.pw-keycap')].map(key => key.textContent);
-    expect(keys()).toEqual(['esc', '↑↓', 'a', 'r', '1–9', '⌥1–9', '⌥0', '⌘↵', 'b d o', 'Space']);
-    expect(footer.textContent).toContain('escBack to Map');
-    expect(footer.textContent).toContain('↑↓messages');
-    expect(footer.textContent).toContain('⌘↵send');
-    expect(footer.textContent).toContain('aack / answer');
-    expect(footer.textContent).toContain('rreply');
-    expect(footer.textContent).toContain('b d oitem actions');
-    rerender(<Shell {...value} conversationFooter={{ question: false }} />);
-    expect(keys()).toEqual(['esc', '↑↓', 'a', 'r', '⌘↵', 'b d o', 'Space']);
-    rerender(<Shell {...value} conversationFooter={undefined} />);
-    expect(keys()).toEqual(['esc', '↑↓', 'a', 'r', '⌘↵', 'b d o', 'Space']);
-    rerender(<Shell {...value} body={{ ...value.body, conversation: undefined }} />);
-    expect(keys()).toContain('g');
-    expect(keys()).toContain('←→');
-    expect(keys()).toContain('b r d z o');
-    expect(keys()).not.toContain('r');
-    expect(footer.textContent).toContain('⌘↵reply only');
+  it('keeps the switcher and Help available while a conversation is open', () => {
+    const switcher = vi.fn(), help = vi.fn(), value = props();
+    render(<Shell {...value} header={{ ...value.header, onSwitcherToggle: switcher, help: { open: false, onToggle: help } }} body={{ ...value.body, conversation: <p>Conversation</p> }} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Switch session or project/ })); expect(switcher).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Help: keys and markers' })); expect(help).toHaveBeenCalledOnce();
+    expect(screen.getByText('Conversation')).toBeTruthy();
   });
 
   it('bounds the overlay in a named centre container while its content owns scrolling', () => {
@@ -180,7 +159,7 @@ describe('Paperwhite shell', () => {
   it('keeps one notification region above the centre while adjacent panes change, and preserves input focus', () => {
     vi.useFakeTimers();
     try {
-      const value = props({ body: { waiting: <p>Waiting column</p>, center: <input aria-label="Centre draft" defaultValue="Draft" />,
+      const value = props({ body: { center: <input aria-label="Centre draft" defaultValue="Draft" />,
         detail: <p>Detail</p> } });
       const { rerender } = render(<Shell {...value} />);
       const center = screen.getByRole('main'), region = screen.getByRole('region', { name: 'Notifications' });
@@ -188,7 +167,7 @@ describe('Paperwhite shell', () => {
       const draft = screen.getByRole<HTMLInputElement>('textbox', { name: 'Centre draft' });
       expect(region.parentElement).toBe(anchor);
       expect(anchor.parentElement?.className).toBe('shell-body-viewport');
-      expect(anchor.style.left).toBe('300px');
+      expect(anchor.style.left).toBe('0px');
       expect(anchor.style.right).toBe('400px');
       const scroll = center.querySelector('.shell-center-content')!;
       expect(scroll.contains(draft)).toBe(true);
@@ -196,11 +175,11 @@ describe('Paperwhite shell', () => {
       act(() => { draft.focus(); notices.push({ id: 'shell-anchor', icon: 'ph ph-check', text: 'Reference copied.' }); vi.advanceTimersByTime(300); });
       expect(within(region).getByText('Reference copied.')).toBeTruthy();
       expect(document.activeElement).toBe(draft);
-      rerender(<Shell {...value} body={{ ...value.body, waitingFolded: true, detailWidth: 976 }} />);
+      rerender(<Shell {...value} body={{ ...value.body, detailWidth: 700 }} />);
       expect(screen.getAllByRole('region', { name: 'Notifications' })).toEqual([region]);
       expect(region.parentElement).toBe(anchor);
-      expect(anchor.style.left).toBe('44px');
-      expect(anchor.style.right).toBe('976px');
+      expect(anchor.style.left).toBe('0px');
+      expect(anchor.style.right).toBe('700px');
       expect(center.querySelector('.shell-center-content')).toBe(scroll);
       expect(document.activeElement).toBe(draft);
       act(() => { notices.dismiss('shell-anchor'); });
@@ -213,7 +192,7 @@ describe('Paperwhite shell', () => {
   it('keeps notification actions visible, keyboard reachable and clickable above Conversation', () => {
     vi.useFakeTimers();
     try {
-      const undo = vi.fn(), value = props({ body: { waiting: null, center: <p>Map</p>, detail: <p>Dock</p> } });
+      const undo = vi.fn(), value = props({ body: { center: <p>Map</p>, detail: <p>Dock</p> } });
       const { rerender } = render(<Shell {...value} />);
       const region = screen.getByRole('region', { name: 'Notifications' });
       act(() => { notices.push({ id: 'conversation-undo', icon: 'ph ph-check', text: 'Item removed.', actions: [{ label: 'Undo', run: undo }] }); vi.advanceTimersByTime(300); });
@@ -233,16 +212,15 @@ describe('Paperwhite shell', () => {
     } finally { notices.clear(); vi.useRealTimers(); }
   });
 
-  it('hides and unhides from the detail header next to Remove, and explains the key in the footer', () => {
+  it('hides and unhides from the detail header next to Remove', () => {
     const hide = vi.fn();
-    const value = props({ body: { waiting: null, center: null, detail: <p>Detail</p>, onHide: hide } });
+    const value = props({ body: { center: null, detail: <p>Detail</p>, onHide: hide } });
     const { rerender } = render(<Shell {...value} />);
     const button = screen.getByRole('button', { name: 'Hide item' });
-    expect(button.title).toBe('Hide (x)');
+    expect(button.title).toBe('Hide (h)');
     expect(button.querySelector('svg path[d="m3 3 18 18"]')).not.toBeNull();
     expect(button.nextElementSibling?.getAttribute('aria-label')).toBe('Remove item');
     fireEvent.click(button); expect(hide).toHaveBeenCalledOnce();
-    expect(document.querySelector('.shell-footer')?.textContent).toContain('xhide / unhide');
     rerender(<Shell {...value} body={{ ...value.body, hidden: true }} />);
     const unhide = screen.getByRole('button', { name: 'Unhide item' });
     expect(unhide.title).toBe('Unhide');
@@ -254,7 +232,7 @@ describe('Paperwhite shell', () => {
 
   it('puts accessible Back/Forward icons before the detail breadcrumb, with shortcut tooltips and disabled endpoints', () => {
     const back = vi.fn(() => true), forward = vi.fn(() => true);
-    const value = props({ body: { waiting: null, center: null, detail: <p>Detail</p>, detailPath: <span>Topic / #2</span> } });
+    const value = props({ body: { center: null, detail: <p>Detail</p>, detailPath: <span>Topic / #2</span> } });
     const { rerender } = render(<ItemHistoryContext.Provider value={{ canBack: true, canForward: false, back, forward }}><Shell {...value} /></ItemHistoryContext.Provider>);
     const button = screen.getByRole<HTMLButtonElement>('button', { name: 'Back' });
     expect(button.title).toBe('Back (⌘[)'); expect(button.querySelector('.ph-arrow-left')).not.toBeNull();
@@ -268,275 +246,174 @@ describe('Paperwhite shell', () => {
     fireEvent.click(next); expect(forward).toHaveBeenCalledOnce();
   });
 
-  it('renders header, tabs, body and footer from props', () => {
-    const value = props(); render(<Shell {...value} />);
-    expect(document.querySelector('.shell-session-text')?.textContent).toBe('search · started 14:02');
-    expect(document.querySelector('.shell-connection-text')?.textContent).toBe('Connected · claude-code');
-    const search = screen.getByRole<HTMLInputElement>('textbox', { name: 'Search questions and outcomes' });
-    expect(search.readOnly).toBe(true); expect(search.dataset.shellSearch).toBe('');
-    expect(screen.queryByRole('group', { name: 'View' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Switch to light' }).querySelector('.ph-sun')).not.toBeNull();
-    expect(screen.queryByRole('button', { name: 'Messages (m)' })).toBeNull();
-    const tabs = screen.getByRole('navigation', { name: 'Projects and sessions' });
-    expect(within(tabs).getByRole('button', { name: 'Projects' }).dataset.shellTab).toBe('projects');
-    const session = within(tabs).getByRole('button', { name: 'claude-code Today 14:02' });
-    expect(session.getAttribute('aria-current')).toBe('page'); expect(session.dataset.sessionTab).toBe('s1');
-    fireEvent.click(session); expect(value.tabs.onSelect).toHaveBeenCalledWith('s1');
-    fireEvent.click(within(tabs).getByRole('button', { name: 'Close claude-code Today 14:02 tab' })); expect(value.tabs.onClose).toHaveBeenCalledWith('s1');
-    expect(screen.getByText('Waiting column')).toBeTruthy();
+  it('renders the current session, connection card and body from props', () => {
+    const toggle = vi.fn(), value = props();
+    const { rerender } = render(<Shell {...value} header={{ ...value.header, onConnectionToggle: toggle }} />);
+    expect(screen.getByRole('button', { name: /^Switch session or project/ }).textContent).toContain('Cache review');
+    expect(screen.queryByText('Agent connected')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^Live\. Connected/ })); expect(toggle).toHaveBeenCalledOnce();
+    rerender(<Shell {...value} header={{ ...value.header, connectionOpen: true }} />);
+    expect(screen.getByText('Agent connected')).toBeTruthy();
+    expect(screen.getByText('Answer dock')).toBeTruthy();
     expect(screen.getByRole('main').textContent).toBe('Centre column');
-    expect((document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns).toBe('300px minmax(560px,1fr)');
+    expect(document.querySelector<HTMLElement>('.shell-body')!.style.gridTemplateColumns).toBe('minmax(0px,1fr)');
     expect(screen.queryByRole('complementary', { name: 'Item detail' })).toBeNull();
-    expect(document.querySelector('.shell-summary')?.textContent).toBe('10 items · 3 waiting on you · 2 in progress · 4 open');
-    expect([...document.querySelectorAll('.shell-footer .pw-keycap')].map(key => key.textContent)).toContain('esc');
-    const footer = document.querySelector('.shell-footer')!;
-    expect(footer.textContent).toContain('⌥1–9send choice + note');
-    expect(footer.textContent).toContain('⌥0focus own words');
-    expect(footer.textContent).toContain('⌘↵reply only');
-    expect([...document.querySelectorAll('.shell-footer .pw-keycap')].map(key => key.textContent)).not.toContain('m');
+  });
+
+  it('wires filter, Recent, Archive and waiting-page controls', () => {
+    const filter = vi.fn(), recent = vi.fn(), archive = vi.fn(), waiting = vi.fn(), value = props();
+    render(<Shell {...value} header={{ ...value.header, variant: 'page', filter: { active: true, count: 1, onToggle: filter }, recent: { active: false, onToggle: recent },
+      archive: { active: false, onOpen: archive }, waitingHere: 3, onWaitingHere: waiting, otherWaiting: 2 }} />);
+    const filterButton = screen.getByRole('button', { name: 'Filter by status, 1 status picked' });
+    expect(filterButton.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(filterButton); expect(filter).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Recent' })); expect(recent).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Archive' })); expect(archive).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: '3 waiting in this session' })); expect(waiting).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: /^Switch session or project/ }).getAttribute('aria-label')).toContain('2 questions waiting in other sessions');
   });
 
   it('wires views, search, theme and the detail column', () => {
     const select = vi.fn(), query = vi.fn(), theme = vi.fn(), close = vi.fn(), remove = vi.fn();
     render(<Shell {...props({
-      header: { text: { sessionText: 's', connText: 'c', connColor: 'var(--st-open)' }, demo: true, query: 'needle', onQueryChange: query,
-        views: [{ label: 'Tree', icon: 'ph ph-tree-view', title: 'Tree (g)', on: true, onSelect: select }, { label: 'Graph', icon: 'ph ph-graph', title: 'Graph (g)', on: false }],
-        theme: 'light', onToggleTheme: theme },
-      body: { waiting: null, center: null, detail: <section><p>Detail body</p></section>, onCloseDetail: close, onRemove: remove },
+      header: { ...props().header, sessionName: 's', search: { active: true, query: 'needle', onOpen: vi.fn(), onQuery: query, onClear: vi.fn() },
+        onView: select, theme: 'light', onToggleTheme: theme },
+      body: { center: null, detail: <section><p>Detail body</p></section>, onCloseDetail: close, onRemove: remove },
     })} />);
-    expect(screen.getByText('Demo')).toBeTruthy();
     const views = screen.getByRole('group', { name: 'View' });
     expect(within(views).getByRole('button', { name: 'Tree' }).getAttribute('aria-pressed')).toBe('true');
-    fireEvent.click(within(views).getByRole('button', { name: 'Tree' })); expect(select).toHaveBeenCalled();
-    fireEvent.change(screen.getByRole('textbox', { name: 'Search questions and outcomes' }), { target: { value: 'next' } }); expect(query).toHaveBeenCalledWith('next');
+    fireEvent.click(within(views).getByRole('button', { name: 'Graph' })); expect(select).toHaveBeenCalledWith('graph');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search the Map' }), { target: { value: 'next' } }); expect(query).toHaveBeenCalledWith('next');
     fireEvent.click(screen.getByRole('button', { name: 'Switch to dark' })); expect(theme).toHaveBeenCalled();
     const detail = screen.getByRole('complementary', { name: 'Item detail' });
     expect(detail.querySelector('.shell-detail-scroll')?.textContent).toBe('Detail body');
     fireEvent.click(within(detail).getByRole('button', { name: 'Remove item' })); expect(remove).toHaveBeenCalled();
     fireEvent.click(within(detail).getByRole('button', { name: 'Close detail' })); expect(close).toHaveBeenCalled();
-    expect((document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns).toBe('300px minmax(560px,1fr) 400px');
+    expect((document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns).toBe('minmax(560px,1fr) 400px');
   });
 
-  it('folds the Waiting column to a strip with its count and saves the owner choice', () => {
-    const fold = vi.fn();
-    const { rerender } = render(<Shell {...props({ body: { waiting: <WaitingFrame count="3"><p>Card</p></WaitingFrame>, center: null, onFoldWaiting: fold } })} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Hide Waiting on me' }));
-    expect(fold).toHaveBeenCalledWith(true);
-    rerender(<Shell {...props({ body: { waiting: <WaitingFrame count="3"><p>Card</p></WaitingFrame>, center: null, onFoldWaiting: fold, waitingFolded: true } })} />);
-    expect((document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns).toBe('44px minmax(560px,1fr)');
-    // The list stays mounted but hidden; the strip keeps the count in view.
-    expect((screen.getByText('Card').closest('.waiting-scroll') as HTMLElement).hidden).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (3)' }));
-    expect(fold).toHaveBeenLastCalledWith(false);
-  });
-
-  it('draws an icon on both the Hide and the Show button of the Waiting column', () => {
-    // Phosphor ships as a bundled subset; a class outside it renders an empty square.
-    const icons = readFileSync(resolve(__dirname, '../../../public/icons/phosphor.css'), 'utf8');
-    const glyph = (button: HTMLElement) => button.querySelector('i')!.className.split(' ').find(name => name !== 'ph')!;
-    const { rerender } = render(<Shell {...props({ body: { waiting: <WaitingFrame count="3" />, center: null, onFoldWaiting: vi.fn() } })} />);
-    const hide = screen.getByRole('button', { name: 'Hide Waiting on me' });
-    expect(hide.className).toContain('btn-icon');
-    expect(icons).toContain(`.ph.${glyph(hide)}::before`);
-    rerender(<Shell {...props({ body: { waiting: <WaitingFrame count="3" />, center: null, onFoldWaiting: vi.fn(), waitingFolded: true } })} />);
-    expect(icons).toContain(`.ph.${glyph(screen.getByRole('button', { name: 'Show Waiting on me (3)' }))}::before`);
-  });
-
-  it('folds the Waiting column by itself in a window too narrow for every column, and the owner can still open it', () => {
-    vi.stubGlobal('ResizeObserver', class {
-      constructor(private readonly receive: ResizeObserverCallback) {}
-      observe() { this.receive([{ contentRect: { width: 1200 } } as ResizeObserverEntry], this as unknown as ResizeObserver); }
-      disconnect() {}
-    });
-    const fold = vi.fn();
-    render(<Shell {...props({ body: { waiting: <WaitingFrame count="2" />, center: null, detail: <p>Detail</p>, onFoldWaiting: fold } })} />);
-    const grid = () => (document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns;
-    expect(grid()).toBe('44px minmax(560px,1fr) 400px');
-    fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (2)' }));
-    // Opening it in a narrow window is not saved as the owner's fold; the panel narrows first.
-    expect(fold).not.toHaveBeenCalled();
-    expect(grid()).toBe('300px minmax(380px,1fr) 400px');
-    fireEvent.click(screen.getByRole('button', { name: 'Hide Waiting on me' }));
-    expect(fold).toHaveBeenCalledWith(true);
-  });
-
-  it.each([undefined, 400, 2000])('keeps a tree beside every pane width when Waiting opens in a 1200px window (detail width: %s)', detailWidth => {
+  it('floats the dock outside both columns, reserves its height and preserves the mounted Map draft', () => {
     measureBody(1200);
-    const resize = vi.fn(), fold = vi.fn();
-    render(<Shell {...props({ body: { waiting: <WaitingFrame count="2" />, center: <p>Centre column</p>, detail: <p>Detail</p>,
-      detailWidth, onResizeDetail: resize, onFoldWaiting: fold } })} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (2)' }));
-    const shown = Math.min(detailWidth ?? 400, 520);
-    expect((document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns)
-      .toBe(`300px minmax(380px,1fr) ${shown}px`);
-    expect(screen.getByRole('separator', { name: 'Resize detail panel' }).getAttribute('aria-valuenow')).toBe(String(shown));
-    expect(resize).not.toHaveBeenCalled(); expect(fold).not.toHaveBeenCalled();
+    const value = props({ body: { dock: <section aria-label="Answer dock">Folded question</section>, dockHeight: 40,
+      center: <input aria-label="Map draft" defaultValue="Keep these words" />, detail: <p>Details</p> } });
+    const { rerender } = render(<Shell {...value} />);
+    const grid = document.querySelector<HTMLElement>('.shell-body')!;
+    const viewport = grid.parentElement!, draft = screen.getByRole('textbox', { name: 'Map draft' });
+    const columns = grid.style.gridTemplateColumns;
+    expect(columns).toBe('minmax(560px,1fr) 400px');
+    expect(screen.getByRole('region', { name: 'Answer dock' }).parentElement?.parentElement).toBe(viewport);
+    expect(grid.contains(screen.getByRole('region', { name: 'Answer dock' }))).toBe(false);
+    expect(viewport.style.getPropertyValue('--dock-inset')).toBe('40px');
+    draft.focus();
+    rerender(<Shell {...value} body={{ ...value.body, dock: <section aria-label="Answer dock">Open question and choices</section>, dockHeight: 280 }} />);
+    expect(viewport.style.getPropertyValue('--dock-inset')).toBe('280px');
+    expect(grid.style.gridTemplateColumns).toBe(columns);
+    expect(screen.getByRole('textbox', { name: 'Map draft' })).toBe(draft);
+    expect(document.activeElement).toBe(draft);
+    expect((draft as HTMLInputElement).value).toBe('Keep these words');
+    // A page has no dock: no room is kept for one.
+    rerender(<Shell {...value} body={{ ...value.body, dock: undefined, dockHeight: 280 }} />);
+    expect(viewport.style.getPropertyValue('--dock-inset')).toBe('0px');
+    expect(grid.style.gridTemplateColumns).toBe(columns);
   });
 
+  // The resize edge through the slot shell (C9: the range follows the window; tests/ui/shell/details-column.test.tsx
+  // tables every step). These keep the dock's protections: one write per settled change, the Map's minimum, the dock
+  // out of the grid.
   it('resizes the detail panel from its left edge by pointer and keys, inside the bounds, and saves the width', () => {
     vi.useFakeTimers();
     try {
       const resize = vi.fn();
-      const { rerender } = render(<Shell {...props({ body: { waiting: null, center: null, detail: <p>Detail</p>, onResizeDetail: resize } })} />);
+      const { rerender } = render(<Shell {...props({ body: { center: null, detail: <p>Detail</p>, onResizeDetail: resize } })} />);
       const edge = screen.getByRole('separator', { name: 'Resize detail panel' });
       expect(edge.getAttribute('aria-valuenow')).toBe('400');
       fireEvent.pointerDown(edge, { button: 0, clientX: 1000, pointerId: 1 });
       fireEvent.pointerMove(edge, { clientX: 880, pointerId: 1 });
-      expect((document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns).toBe('300px minmax(560px,1fr) 520px');
+      expect((document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns).toBe('minmax(560px,1fr) 520px');
       fireEvent.pointerUp(edge, { clientX: 880, pointerId: 1 });
-      expect(resize).toHaveBeenCalledWith(520);
-      rerender(<Shell {...props({ body: { waiting: null, center: null, detail: <p>Detail</p>, onResizeDetail: resize, detailWidth: 520 } })} />);
+      act(() => { vi.advanceTimersByTime(600); });
+      expect(resize).toHaveBeenCalledExactlyOnceWith(520);
+      rerender(<Shell {...props({ body: { center: null, detail: <p>Detail</p>, onResizeDetail: resize, detailWidth: 520 } })} />);
       // Dragging past the bounds stops at them.
       fireEvent.pointerDown(edge, { button: 0, clientX: 1000, pointerId: 1 });
       fireEvent.pointerMove(edge, { clientX: 1900, pointerId: 1 });
       fireEvent.pointerUp(edge, { pointerId: 1 });
+      act(() => { vi.advanceTimersByTime(600); });
       expect(resize).toHaveBeenLastCalledWith(320);
+      rerender(<Shell {...props({ body: { center: null, detail: <p>Detail</p>, onResizeDetail: resize, detailWidth: 320 } })} />);
       // Keys step it and save once they settle.
       resize.mockClear();
       fireEvent.keyDown(edge, { key: 'ArrowLeft' }); fireEvent.keyDown(edge, { key: 'ArrowLeft' });
-      expect(edge.getAttribute('aria-valuenow')).toBe('552');
+      expect(edge.getAttribute('aria-valuenow')).toBe('352');
       expect(resize).not.toHaveBeenCalled();
       act(() => { vi.advanceTimersByTime(600); });
-      expect(resize).toHaveBeenCalledOnce(); expect(resize).toHaveBeenCalledWith(552);
+      expect(resize).toHaveBeenCalledExactlyOnceWith(352);
       fireEvent.doubleClick(edge);
+      act(() => { vi.advanceTimersByTime(600); });
       expect(resize).toHaveBeenLastCalledWith(400);
     } finally { vi.useRealTimers(); }
   });
 
-  it('drags beyond the open Waiting limit, folds it automatically, and fits the saved width when the window shrinks', () => {
-    const windowWidth = measureBody(2000), resize = vi.fn(), fold = vi.fn();
-    const value = props({ body: { waiting: <WaitingFrame count="2" />, center: null, detail: <p>Detail</p>,
-      onResizeDetail: resize, onFoldWaiting: fold } });
-    const { rerender } = render(<Shell {...value} />);
-    const edge = screen.getByRole('separator', { name: 'Resize detail panel' });
-    const grid = () => (document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns;
-    expect(grid()).toBe('300px minmax(560px,1fr) 400px');
-    expect(edge.getAttribute('aria-valuemax')).toBe('1576');
-    fireEvent.pointerDown(edge, { button: 0, clientX: 1600, pointerId: 1 });
-    fireEvent.pointerMove(edge, { clientX: 300, pointerId: 1 });
-    expect(grid()).toBe('44px minmax(380px,1fr) 1576px');
-    expect(screen.getByRole('button', { name: 'Show Waiting on me (2)' })).toBeTruthy();
-    expect(fold).not.toHaveBeenCalled();
-    fireEvent.pointerUp(edge, { pointerId: 1 });
-    expect(resize).toHaveBeenCalledExactlyOnceWith(1576);
-    rerender(<Shell {...value} body={{ ...value.body, detailWidth: 1576 }} />);
-    windowWidth(1200);
-    expect(grid()).toBe('44px minmax(380px,1fr) 776px');
-    expect(edge.getAttribute('aria-valuenow')).toBe('776');
-    expect(edge.getAttribute('aria-valuemax')).toBe('776');
-    windowWidth(2000);
-    expect(grid()).toBe('44px minmax(380px,1fr) 1576px');
-    expect(resize).toHaveBeenCalledOnce();
-  });
-
-  it('widens the detail panel to 976px in a 1400px window and restores the default tree and Waiting layout on reset', () => {
-    measureBody(1400);
-    const resize = vi.fn(), fold = vi.fn();
-    const value = props({ body: { waiting: <WaitingFrame count="2" />, center: <p>Centre column</p>, detail: <p>Detail</p>,
-      onResizeDetail: resize, onFoldWaiting: fold } });
-    const { rerender } = render(<Shell {...value} />);
-    const edge = screen.getByRole('separator', { name: 'Resize detail panel' });
-    const grid = () => (document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns;
-    expect(grid()).toBe('300px minmax(560px,1fr) 400px');
-    expect(edge.getAttribute('aria-valuemax')).toBe('976');
-    fireEvent.pointerDown(edge, { button: 0, clientX: 1000, pointerId: 1 });
-    fireEvent.pointerMove(edge, { clientX: 900, pointerId: 1 });
-    expect(grid()).toBe('300px minmax(560px,1fr) 500px');
-    fireEvent.pointerMove(edge, { clientX: 850, pointerId: 1 });
-    expect(grid()).toBe('44px minmax(560px,1fr) 550px');
-    fireEvent.pointerMove(edge, { clientX: 0, pointerId: 1 });
-    expect(grid()).toBe('44px minmax(380px,1fr) 976px');
-    expect(screen.getByRole('main').textContent).toBe('Centre column');
-    expect(screen.getByRole('button', { name: 'Show Waiting on me (2)' })).toBeTruthy();
-    expect(fold).not.toHaveBeenCalled();
-    fireEvent.pointerUp(edge, { pointerId: 1 });
-    expect(resize).toHaveBeenCalledExactlyOnceWith(976);
-    rerender(<Shell {...value} body={{ ...value.body, detailWidth: 976 }} />);
-    fireEvent.keyDown(edge, { key: 'ArrowRight' });
-    expect(grid()).toBe('44px minmax(396px,1fr) 960px');
-    fireEvent.keyDown(edge, { key: 'End' });
-    expect(grid()).toBe('44px minmax(380px,1fr) 976px');
-    fireEvent.blur(edge);
-    expect(resize).toHaveBeenLastCalledWith(976);
-    fireEvent.doubleClick(edge);
-    expect(resize).toHaveBeenLastCalledWith(400);
-    rerender(<Shell {...value} body={{ ...value.body, detailWidth: 400 }} />);
-    expect(grid()).toBe('300px minmax(560px,1fr) 400px');
-    expect(screen.getByRole('button', { name: 'Hide Waiting on me' })).toBeTruthy();
-  });
-
-  it('steps past the open Waiting limit and reaches the available width with End, while retaining minimum and default widths', () => {
+  it('clamps a saved wide pane on window resize without writing a new preference or moving the dock into the grid', () => {
     vi.useFakeTimers();
     try {
-      measureBody(2000);
-      const resize = vi.fn();
-      const value = props({ body: { waiting: null, center: null, detail: <p>Detail</p>, detailWidth: 1140, onResizeDetail: resize } });
-      const { rerender } = render(<Shell {...value} />);
+      const resizeWindow = measureBody(3400), resize = vi.fn();
+      render(<Shell {...props({ body: { dock: <section aria-label="Answer dock">Question</section>, dockHeight: 180,
+        center: <p>Map</p>, detail: <p>Details</p>, detailWidth: 2000, onResizeDetail: resize } })} />);
+      const grid = document.querySelector<HTMLElement>('.shell-body')!;
       const edge = screen.getByRole('separator', { name: 'Resize detail panel' });
-      const grid = () => (document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns;
-      expect(grid()).toBe('300px minmax(560px,1fr) 1140px');
-      fireEvent.keyDown(edge, { key: 'ArrowLeft' });
-      expect(grid()).toBe('44px minmax(560px,1fr) 1156px');
-      fireEvent.keyDown(edge, { key: 'End' });
-      expect(grid()).toBe('44px minmax(380px,1fr) 1576px');
+      expect(grid.style.gridTemplateColumns).toBe('minmax(560px,1fr) 2000px');
+      resizeWindow(2000);
+      // At its widest (the window less 480), Details still leaves the Map 480px.
+      expect(grid.style.gridTemplateColumns).toBe('minmax(480px,1fr) 1520px');
+      expect(edge.getAttribute('aria-valuemax')).toBe('1520');
+      resizeWindow(1200);
+      expect(grid.style.gridTemplateColumns).toBe('minmax(480px,1fr) 720px');
+      expect(edge.getAttribute('aria-valuenow')).toBe('720');
+      resizeWindow(3400);
+      expect(grid.style.gridTemplateColumns).toBe('minmax(560px,1fr) 2000px');
       act(() => { vi.advanceTimersByTime(600); });
-      expect(resize).toHaveBeenCalledExactlyOnceWith(1576);
-      rerender(<Shell {...value} body={{ ...value.body, detailWidth: 1576 }} />);
+      expect(resize).not.toHaveBeenCalled();
+      expect(grid.contains(screen.getByRole('region', { name: 'Answer dock' }))).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('uses the available width with End, preserves the Map minimum and resets the saved width', () => {
+    vi.useFakeTimers();
+    try {
+      measureBody(1400);
+      const resize = vi.fn();
+      const value = props({ body: { dock: <p>Question</p>, dockHeight: 40, center: <p>Map</p>, detail: <p>Details</p>, onResizeDetail: resize } });
+      const { rerender } = render(<Shell {...value} />);
+      const grid = document.querySelector<HTMLElement>('.shell-body')!;
+      const edge = screen.getByRole('separator', { name: 'Resize detail panel' });
+      expect(edge.getAttribute('aria-valuemax')).toBe('920');
       fireEvent.keyDown(edge, { key: 'End' });
+      expect(grid.style.gridTemplateColumns).toBe('minmax(480px,1fr) 920px');
+      act(() => { vi.advanceTimersByTime(600); });
+      expect(resize).toHaveBeenCalledExactlyOnceWith(920);
+      rerender(<Shell {...value} body={{ ...value.body, detailWidth: 920 }} />);
       fireEvent.keyDown(edge, { key: 'ArrowRight' });
-      expect(edge.getAttribute('aria-valuenow')).toBe('1560');
+      expect(edge.getAttribute('aria-valuenow')).toBe('904');
+      act(() => { vi.advanceTimersByTime(600); });
+      expect(resize).toHaveBeenLastCalledWith(904);
       fireEvent.keyDown(edge, { key: 'Home' });
-      expect(grid()).toBe('300px minmax(560px,1fr) 320px');
+      expect(grid.style.gridTemplateColumns).toBe('minmax(560px,1fr) 320px');
       act(() => { vi.advanceTimersByTime(600); });
       expect(resize).toHaveBeenLastCalledWith(320);
       fireEvent.doubleClick(edge);
+      act(() => { vi.advanceTimersByTime(600); });
       expect(resize).toHaveBeenLastCalledWith(400);
       rerender(<Shell {...value} body={{ ...value.body, detailWidth: 400 }} />);
-      expect(grid()).toBe('300px minmax(560px,1fr) 400px');
+      expect(grid.style.gridTemplateColumns).toBe('minmax(560px,1fr) 400px');
     } finally { vi.useRealTimers(); }
   });
 
-  it('keeps Waiting open while resizing after the owner peeks', () => {
-    measureBody(2000);
-    const resize = vi.fn(), fold = vi.fn();
-    render(<Shell {...props({ body: { waiting: <WaitingFrame count="2" />, center: null, detail: <p>Detail</p>,
-      detailWidth: 1576, onResizeDetail: resize, onFoldWaiting: fold } })} />);
-    const edge = screen.getByRole('separator', { name: 'Resize detail panel' });
-    const grid = () => (document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns;
-    expect(grid()).toBe('44px minmax(380px,1fr) 1576px');
-    expect(edge.getAttribute('aria-valuemax')).toBe('1576');
-    fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (2)' }));
-    expect(grid()).toBe('300px minmax(380px,1fr) 1320px');
-    expect(edge.getAttribute('aria-valuemax')).toBe('1320');
-    fireEvent.keyDown(edge, { key: 'End' });
-    expect(grid()).toBe('300px minmax(380px,1fr) 1320px');
-    expect(fold).not.toHaveBeenCalled();
-    fireEvent.blur(edge);
-    expect(resize).toHaveBeenCalledExactlyOnceWith(1320);
-  });
-
-  it('clamps a saved wide pane when Waiting opens and the window shrinks, then restores it without saving the clamp', () => {
-    const windowWidth = measureBody(3400), resize = vi.fn(), fold = vi.fn();
-    render(<Shell {...props({ body: { waiting: <WaitingFrame count="2" />, center: <p>Centre column</p>, detail: <p>Detail</p>,
-      detailWidth: 2000, onResizeDetail: resize, onFoldWaiting: fold } })} />);
-    const grid = () => (document.querySelector('.shell-body') as HTMLElement).style.gridTemplateColumns;
-    expect(grid()).toBe('300px minmax(560px,1fr) 2000px');
-    windowWidth(2000);
-    expect(grid()).toBe('44px minmax(380px,1fr) 1576px');
-    fireEvent.click(screen.getByRole('button', { name: 'Show Waiting on me (2)' }));
-    expect(grid()).toBe('300px minmax(380px,1fr) 1320px');
-    windowWidth(1400);
-    expect(grid()).toBe('300px minmax(380px,1fr) 720px');
-    windowWidth(3400);
-    expect(grid()).toBe('300px minmax(560px,1fr) 2000px');
-    expect(resize).not.toHaveBeenCalled(); expect(fold).not.toHaveBeenCalled();
-  });
-
   it('disables chrome controls while navigation writes', () => {
-    render(<Shell {...props({ header: { ...props().header, onQueryChange: vi.fn(), onToggleTheme: vi.fn(), disabled: true },
-      tabs: { ...props().tabs, disabled: true } })} />);
-    expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Search questions and outcomes' }).disabled).toBe(true);
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Projects' }).disabled).toBe(true);
+    render(<Shell {...props({ header: { ...props().header, disabled: true } })} />);
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Search the Map' }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: /^Switch session or project/ }).disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Switch to light' }).disabled).toBe(true);
   });
 });
 

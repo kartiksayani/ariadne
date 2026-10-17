@@ -6,7 +6,7 @@ import type { DisplayStatus } from '../waiting/replied';
 export const FILTER_STATUSES: readonly ItemStatus[] = ['waiting_on_me', 'open', 'in_progress', 'decided', 'done', 'dropped', 'replaced'];
 export const hasStatusFilter = (statuses: readonly ItemStatus[]) => statuses.length > 0 && !FILTER_STATUSES.every(status => statuses.includes(status));
 export const matchesStatus = (statuses: readonly ItemStatus[], status: DisplayStatus) =>
-  !hasStatusFilter(statuses) || statuses.includes(status === 'waiting_on_agent' ? 'in_progress' : status);
+  !hasStatusFilter(statuses) || statuses.includes(status === 'sent' || status === 'queued' ? 'in_progress' : status);
 
 /** Only visible filters scope temporary folds; the retired saved topic filter is ignored. */
 export function filterSignature(filters: Immutable<SessionPreferences['filters']>, search = filters.search): string {

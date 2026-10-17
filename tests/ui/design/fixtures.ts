@@ -80,57 +80,27 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
   const project = ['project', 'archive', 'sessions', 'session', 'projects', 'projectpage', 'first', 'continue', 'notrunning'].includes(spec.scenario), blank = spec.state === 'empty' || spec.state === 'loading';
   const topics = project ? [...data.EARLIER_TOPICS, ...data.TOPICS, ...data.ARCHIVED_TOPICS, ...data.OTHER_TOPICS]
     : review ? [...data.TOPICS, data.REVIEW_TOPIC] : data.TOPICS;
-  const items: ProtoItem[] = blank ? [] : structuredClone(project ? [...data.EARLIER_ITEMS, ...data.ITEMS, ...data.ARCHIVED_ITEMS, ...data.OTHER_ITEMS]
+  // An empty Map is this session's: the questions waiting in the project's other sessions are still there (final 15.3).
+  const others = blank && spec.state === 'empty' && project;
+  const items: ProtoItem[] = blank ? structuredClone(others ? data.OTHER_ITEMS : []) : structuredClone(project ? [...data.EARLIER_ITEMS, ...data.ITEMS, ...data.ARCHIVED_ITEMS, ...data.OTHER_ITEMS]
     : review ? [...data.ITEMS, ...data.REVIEW_ITEMS, ...(thread ? data.THREAD_KIDS : [])] : data.ITEMS);
-  const msgs: ProtoMessage[] = blank ? [] : structuredClone(project ? [...data.EARLIER_MSGS, ...data.SYNC_MSGS, ...data.MSGS]
+  const msgs: ProtoMessage[] = blank ? structuredClone(others ? data.SYNC_MSGS : []) : structuredClone(project ? [...data.EARLIER_MSGS, ...data.SYNC_MSGS, ...data.MSGS]
     : review ? [...data.MSGS, ...data.REVIEW_MSGS, ...(thread ? data.THREAD_MSGS : [])] : data.MSGS);
   // The thread scenario: the backoff finding on its third round (Ariadne.dc.html:914).
   if (thread && !blank) Object.assign(items.find(item => item.id === '4.1')!, structuredClone(data.THREAD_PATCH));
-  if (spec.conversationOptions !== undefined) {
-    const item = items.find(item => item.id === spec.selected)!;
-    item.q = 'Should retry backoff keep a short first window and a longer second window so the agent has time to recover while the owner can still follow the result and decide what to do next, including when delivery is interrupted and another attempt needs enough time to finish without making the owner wait through an unexplained pause?';
-    item.ask = 'Which retry window should we use? Pick a choice or add your own words. '
-      + 'Consider how long the agent needs to recover, how quickly the owner needs an answer, and what should happen when delivery is interrupted. '
-      + 'Keep the full question available while you compare the four choices and explain the timing you prefer.';
-    item.options = Array.from({ length: spec.conversationOptions }, (_, index) => ({ id: `window-${index + 1}`, rec: index === 0,
-      label: ['Keep the current window', 'Use a shorter window', 'Use a longer window', 'Choose per attempt'][index],
-      consequence: ['Keep the timing already reviewed.', 'Recover sooner after a short failure.', 'Allow more time for the agent to recover.', 'Adjust the timing to each delivery attempt.'][index] }));
-    if (spec.shortQuestion) { item.q = 'Keep the retry window?'; item.ask = 'Which retry window should we use?'; }
-  }
-  if (spec.answerOptions !== undefined) {
-    const item = items.find(item => item.id === spec.selected)!;
-    item.q = 'How should we share the examples with the readers?';
-    item.ask = 'The examples are ready for a final read. Compare the choices before deciding.\n\n'
-      + 'Keep the `example.com` links and the short code samples together so readers can follow the explanation.\n\n'
-      + '- Read the introduction and check the examples.\n- Check the captions and the list of changes.\n- Add a note if a reader needs more context.\n\n'
-      + 'The conversation keeps the full explanation available while you consider the choices. '.repeat(8);
-    item.options = Array.from({ length: spec.answerOptions }, (_, index) => ({ id: `choice-${index + 1}`, rec: index === 0,
-      label: index === 0 ? 'Share the complete examples after checking the introduction and captions'
-        : `Choice ${index + 1}: share a shorter collection after reading the examples together`,
-      consequence: 'Readers get the introduction, examples and captions in one place. '
-        + 'Each example includes a short explanation and a link to example.com for the sample material. '.repeat(8)
-        + 'The final paragraph explains what to read next.' }));
-  }
   if (spec.dockState) {
     const item = items.find(item => item.id === spec.selected)!;
     item.q = 'How should we share the examples with the readers?';
     item.short = 'Share the examples';
-    item.status = spec.dockState === 'question' ? 'waiting' : 'open';
-    item.type = spec.dockState === 'question' ? 'question' : 'decision';
-    item.ask = spec.dockState === 'question' ? 'Choose how to share the examples, or write a reply.' : undefined;
-    item.options = spec.dockState === 'question' ? [
-      { id: 'complete', label: 'Share the complete examples', consequence: 'Readers see the introduction and captions together.', rec: true },
-      { id: 'short', label: 'Share a shorter collection', consequence: 'Readers begin with a few examples.' },
-    ] : [];
+    item.status = 'open';
+    item.type = 'decision';
+    item.ask = undefined;
+    item.options = [];
     item.note = undefined; item.outcome = ''; item.why = ''; item.links = [];
     const messageIndex = msgs.findIndex(message => message.number === item.created);
     msgs[messageIndex] = { ...msgs[messageIndex],
       excerpt: 'The examples are ready to share. Read the introduction, check the captions, and keep the sample links with the explanation.\n\n'
         + 'Each example includes a short explanation for readers. The conversation keeps that context available while you consider the next step.\n\n'.repeat(12) };
-  }
-  for (const id of spec.hiddenItems ?? []) {
-    const item = items.find(item => item.id === id)!;
-    if (id !== spec.selected) item.q = 'Review the shared examples';
   }
   let clock = 15 * 60 + 6;
   if (spec.state === 'clear') {
@@ -302,7 +272,7 @@ export function buildFixture(spec: FrameSpec, data: PrototypeData): DesignFixtur
       const waiting = status === 'waiting_on_me' ? messageTimes.get(proto.waitingSince ?? -1) ?? created : null;
       return [proto.id, { id: proto.id, ordinal: siblings.indexOf(proto) + 1, topic_id: topicIds.get(proto.topic)!, parent: proto.parent, question: proto.q,
         short: proto.short,
-        type: proto.type, status, ...(spec.dockState && spec.dockState !== 'question' && proto.id === spec.selected ? { ack_to: 'decided' as const } : {}),
+        type: proto.type, status, ...(spec.dockState && proto.id === spec.selected ? { ack_to: 'decided' as const } : {}),
         owner: proto.owner === 'me' ? { kind: 'me' } : proto.owner === 'agent' ? { kind: 'agent', binding_id: bindingId } : { kind: 'other', name: proto.owner },
         revision: 1 + proto.updated.length, question_revision: roundIds.length || 1, next_child: protoItems.filter(item => item.parent === proto.id).length + 1,
         ask: proto.ask || null, note: proto.note || null,
@@ -401,7 +371,7 @@ export function buildFixture(spec: FrameSpec, data: PrototypeData): DesignFixtur
       const below = descendants(item.id);
       if (below.length && !(closedStatus.has(item.status) && below.every(value => closedStatus.has(value.status)))) ids.add(item.id);
     }
-    for (const id of [spec.selected, spec.answering]) for (let parent = id && session.items[id]?.parent; parent; parent = session.items[parent]?.parent) ids.add(parent);
+    for (let parent = spec.selected && session.items[spec.selected]?.parent; parent; parent = session.items[parent]?.parent) ids.add(parent);
     return [...ids];
   };
   const transport = new DesignTransport(sessions, projects, summaries, spec.state === 'loading' ? route : null);
@@ -415,7 +385,7 @@ export function buildFixture(spec: FrameSpec, data: PrototypeData): DesignFixtur
       // The reveal scenario filters to Waiting (Ariadne.dc.html:938); the harness then reveals the selection through a route.
       filters: { search: '', statuses: current && spec.scenario === 'reveal' ? ['waiting_on_me'] : [], owners: [], topic_id: null, archived: current && spec.scenario === 'archive', hide_later: false },
       scroll: null,
-      ...(current && (spec.hiddenItems ?? spec.foldedItems) ? { hidden_item_ids: [...(spec.hiddenItems ?? spec.foldedItems!)] } : {}) };
+      ...(current && spec.foldedItems ? { hidden_item_ids: [...spec.foldedItems] } : {}) };
   });
   // 1y continues t5 from yesterday's codex session here; 1ad answers 5.3 in that session, whose agent isn't running (Ariadne.dc.html:955-957).
   const topicIn = (session: string, proto: string) => {
@@ -438,12 +408,51 @@ export class DesignTransport extends AppTransport {
   }
   override async invoke<T>(name: string, args: { request: OwnerQueryRequest | OwnerMutationRequest }): Promise<T> {
     const { request } = args;
-    if ('command' in request) return super.invoke(name, args);
+    if ('command' in request) return request.command.command === 'input_submit' ? this.submit(name, args) : super.invoke(name, args);
     assertOwnerWire(request);
     this.queries.push(structuredClone(request));
     // The loading frame: the session read never completes.
     if (request.request.command === 'session_get' && request.session?.session_id === this.hang?.session_id) return new Promise<T>(() => {});
     return { api_version: 1, ok: true, data: { kind: name, data: structuredClone(this.answer(request)) } } as T;
+  }
+  /** The session's running agent is connected and idle, not mid-turn (final frames: a new answer is sent, not queued behind it). */
+  idle(sessionId: string): void {
+    const presence = this.summaries.find(summary => summary.session_id === sessionId)?.active_binding?.presence;
+    if (presence) (presence as { execution_state: string }).execution_state = 'idle';
+  }
+  /**
+   * A Send in a frame (final 2.4). AppTransport copies the session's own queued input and owner message, which a
+   * frame's world may not have: it lends the demo's for the copy, then stamps the new input with this session's
+   * binding, the question's revision and the frame clock, so it reads "Sent at <now>".
+   */
+  private async submit<T>(name: string, args: { request: OwnerQueryRequest | OwnerMutationRequest }): Promise<T> {
+    const request = args.request as OwnerMutationRequest, session = this.sessions.get(request.session!.session_id)!;
+    const lentInput = Object.values(session.inputs).some(value => value?.state === 'queued') ? null
+      : { ...structuredClone(Object.values((demo as unknown as Session).inputs).find(value => value?.state === 'queued')!), id: 'design-lent-input' };
+    const lentMessage = session.messages.some(value => value.kind === 'owner_input') ? null
+      : { ...structuredClone((demo as unknown as Session).messages.find(value => value.kind === 'owner_input')!), id: 'design-lent-message', number: 0 };
+    if (lentInput) session.inputs[lentInput.id] = lentInput;
+    if (lentMessage) session.messages.push(lentMessage);
+    // The app reads the session only once the new input is stamped and the loans are gone: a read of the half-made
+    // copy would put the question back in the dock and end its Sent hold.
+    const emit = this.emit;
+    this.emit = () => {};
+    let result: { ok: boolean; data?: { data: { input_id: string } } };
+    try {
+      result = await super.invoke(name, args);
+    } finally {
+      this.emit = emit;
+      if (lentInput) delete session.inputs[lentInput.id];
+      if (lentMessage) session.messages.splice(session.messages.indexOf(lentMessage), 1);
+    }
+    const input = result.ok ? session.inputs[result.data!.data.input_id] : undefined;
+    const item = input?.target.item_id ? session.items[input.target.item_id] : undefined;
+    if (input) {
+      Object.assign(input, { state: 'queued', binding_id: session.active_binding_id, attempts: [], active_attempt_id: null, created_at: new Date(Date.now()).toISOString() });
+      if (item) input.payload.target_snapshot = { ...input.payload.target_snapshot, question_revision: item.question_revision, item_question: item.question };
+    }
+    this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+    return result as T;
   }
   private answer(request: OwnerQueryRequest): unknown {
     const query = request.request;

@@ -3,6 +3,7 @@
 // inside while it is open; Esc cancels and Enter confirms (README, Dialogs).
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { dialogControls } from '../../components/accessibility/dialog-focus';
+import { focusReturnTarget } from '../parts/parts';
 import './dialogs.css';
 
 export interface DialogProps {
@@ -17,21 +18,19 @@ export interface DialogProps {
 }
 
 const interactive = 'button,a[href],input,select,textarea,[contenteditable="true"]';
+/** How long after opening a backdrop click still counts as part of the opening click (a slow double-click). */
+const SETTLE_MS = 500;
 
 export function Dialog({ label, width, role = 'dialog', onCancel, onConfirm, children }: DialogProps) {
   const element = useRef<HTMLDivElement>(null);
-  // Capture before the opening action's menu unmounts; its trigger survives the clicked item.
-  const [previous] = useState(() => {
-    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const menu = focused?.closest('[role="menu"]');
-    const trigger = menu?.id ? [...document.querySelectorAll<HTMLElement>('[aria-haspopup="menu"][aria-controls]')]
-      .find(control => control.getAttribute('aria-controls') === menu.id) : null;
-    return trigger ?? focused;
-  });
+  // Capture before the opening action's menu or popover unmounts; its trigger survives the clicked item.
+  const [previous] = useState(focusReturnTarget);
   const cancel = useRef(onCancel);
   cancel.current = onCancel;
+  const opened = useRef(Date.now());
   useEffect(() => {
     const dialog = element.current;
+    opened.current = Date.now();
     if (!dialog) return undefined;
     dialog.focus();
     const contain = (event: FocusEvent) => {
@@ -46,7 +45,8 @@ export function Dialog({ label, width, role = 'dialog', onCancel, onConfirm, chi
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel.current(); return; }
     if (event.key === 'Enter' && onConfirm && !(event.target instanceof Element && event.target.closest(interactive))) {
-      event.preventDefault(); event.stopPropagation(); onConfirm(); return;
+      // A held ↵ that repeats onto the dialog (the key that opened it) confirms nothing: only a fresh press does.
+      event.preventDefault(); event.stopPropagation(); if (!event.repeat) onConfirm(); return;
     }
     if (event.key !== 'Tab') return;
     const controls = dialogControls(event.currentTarget), first = controls[0], last = controls.at(-1);
@@ -54,7 +54,9 @@ export function Dialog({ label, width, role = 'dialog', onCancel, onConfirm, chi
     if (event.shiftKey && (document.activeElement === first || document.activeElement === event.currentTarget)) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   };
-  return <div className="pw-overlay" onClick={() => cancel.current()}>
+  // A press on the backdrop cancels, unless it is the rest of the click that opened the dialog: a double-click's second
+  // click (detail 2+), or any click in the first moments after opening, would otherwise close it at once, unseen.
+  return <div className="pw-overlay" onClick={event => { if (event.detail < 2 && Date.now() - opened.current >= SETTLE_MS) cancel.current(); }}>
     <div ref={element} className="dialog pw-dialog" role={role} aria-modal="true" aria-label={label} tabIndex={-1}
       style={{ width: `min(${width}px, 100%)` }} onClick={event => event.stopPropagation()} onKeyDown={keys}>{children}</div>
   </div>;

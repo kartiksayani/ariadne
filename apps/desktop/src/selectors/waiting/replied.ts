@@ -1,12 +1,11 @@
-// "Waiting on agent": a question the owner already replied to is the agent's
-// turn, not the owner's. It reads Waiting on agent (row badge, detail header,
-// filter chips and counts) until the agent acts on the reply, and it leaves the
-// "Waiting on me" queue and counts.
+// An answered question leaves the owner's queue. Its delivery evidence tells
+// whether the reply is still queued locally or has been sent to the agent.
 import type { Item, ItemStatus, Session } from '../../generated/domain/models';
 import type { Immutable } from '../../data';
+import { deliveryEvidence } from './delivery';
 
-/** The status the owner sees: the item's status, or Waiting on agent once the owner replied. */
-export type DisplayStatus = ItemStatus | 'waiting_on_agent';
+/** Local delivery projections never change the persisted item status. */
+export type DisplayStatus = ItemStatus | 'sent' | 'queued';
 
 // Handled replies count for Open/InProgress Ack items, never a still-waiting ask.
 // A handled Bring/Reopen requests an ask; it does not answer that ask.
@@ -45,5 +44,16 @@ export function currentQuestionReplied(session: Immutable<Session>, item: Immuta
 export const ownerReplied = (session: Immutable<Session>, item: Immutable<Item>): boolean =>
   item.status === 'waiting_on_me' && currentQuestionReplied(session, item);
 
-export const displayStatus = (session: Immutable<Session>, item: Immutable<Item>): DisplayStatus =>
-  ownerReplied(session, item) ? 'waiting_on_agent' : item.status;
+export function displayStatus(session: Immutable<Session>, item: Immutable<Item>): DisplayStatus {
+  if (!ownerReplied(session, item)) return item.status;
+  const input = Object.values(session.inputs).filter(input => !!input && input.target.item_id === item.id
+    && (input.state === 'queued' || input.state === 'in_flight')
+    && input.payload.target_snapshot.question_revision === item.question_revision
+    && (!input.answer_id || !session.answers.some(answer => answer.supersedes_answer_id === input.answer_id)))
+    .sort((a, b) => b!.seq - a!.seq)[0];
+  // A standing answer remains Sent until the agent changes the item itself.
+  if (!input) return 'sent';
+  const binding = session.bindings[input.binding_id];
+  const evidence = deliveryEvidence(input, binding ? { ...binding, presence: null } : null, session.operation_receipts);
+  return ['sending', 'sent', 'received', 'published', 'waiting_result'].includes(evidence.kind) ? 'sent' : 'queued';
+}

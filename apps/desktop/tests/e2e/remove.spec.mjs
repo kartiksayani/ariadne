@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { admissions, cliRequest, snapshot } from './scripted-provider.mjs';
 import { json } from '../../../../scripts/run-native-e2e.mjs';
-import { openSession } from './session-button.mjs';
+import { goToPage, openSession, sessionReady } from './session-button.mjs';
+import { topicAction } from './history-actions.spec.mjs';
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const exists = async path => { try { await stat(path); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; } };
@@ -28,11 +29,8 @@ async function dismissNote(matches, description) {
   }, `No note read ${description}`);
   await click(await note.$('button[aria-label="Dismiss"]'));
 }
-async function projectPage(projectId) {
-  await click(await browser.$('button[data-shell-tab="projects"]'));
-  await click(await browser.$(`.pw-project-card[data-project-id="${projectId}"] .pw-project-open`));
-  await (await browser.$('.pw-session-lists')).waitForDisplayed();
-}
+// A session row of All sessions, found by its name button.
+const sessionRow = sessionId => browser.$(`//button[@data-session-id="${sessionId}"]/ancestor::div[contains(@class, "sl-row")]`);
 
 // Runs last in the delivery phase, on the discovery target that
 // history-actions left behind. It removes an item, a topic, the session and
@@ -75,10 +73,12 @@ export async function runRemoveAcceptance(configuration) {
   await wait(async () => Object.values((await readJson(sessionPath)).items).filter(value => value.topic_id === topic.id).length === 2, 'The second guarded root was not saved');
 
   // Item: ⌫ on the row asks first, the row goes at once, and the command waits out the Undo window.
-  await click(await browser.$('button[data-shell-tab="all_sessions"]'));
   await openSession(sessionId);
+  await sessionReady();
   const row = `.tree-rows [role="treeitem"][data-item-id="${item.id}"]`;
-  await (await browser.$(row)).waitForDisplayed();
+  // Item keys act on the selected item: select the row (a click), then press ⌫ on it.
+  await (await browser.$(row)).waitForDisplayed(); await click(await browser.$(row));
+  await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === item.id, 'Selecting the row did not open its detail');
   await browser.execute(selector => document.querySelector(selector).focus(), row);
   await browser.keys('Backspace');
   await confirm('Remove item');
@@ -90,32 +90,44 @@ export async function runRemoveAcceptance(configuration) {
   const afterItem = await readJson(sessionPath);
   assert.ok(Object.values(afterItem.inputs).some(input => input.kind === 'removed'), 'Item remove did not queue the agent notice');
 
-  // Topic: ⌫ on the focused band, same deferred command.
-  const band = await topicBand(topicName); await band.waitForDisplayed();
-  await browser.execute(element => element.focus(), band);
-  // The band also offers Remove during delivery; this step proves its keyboard path.
-  await browser.keys('Backspace');
+  // Topic: the band's Remove, same deferred command. ⌫ no longer removes a topic (SPEC 6.1: it acts on the selected item
+  // only), so the band's own button is the path; it shows while the band holds focus.
+  await topicAction(topicName, 'Remove');
   await confirm('Remove topic');
   await wait(async () => !(await topicBand(topicName).isExisting()), 'The removed topic stayed in the tree');
   await wait(async () => !(await readJson(sessionPath)).topics[topic.id], 'Topic remove did not run after the Undo window', 30000);
 
-  // Session: the project page card; Ariadne only, so the command runs on Dismiss.
-  await projectPage(projectId);
-  const card = `[data-session-card="${sessionId}"]`;
-  await click(await browser.$(card).$('button=Remove'));
+  // Session: only an archived session is removed for good, from the Archive page's "…". Archive it from All sessions first.
+  // Ariadne only, so the command runs on Dismiss.
+  await goToPage('All sessions');
+  await (await sessionRow(sessionId)).waitForDisplayed();
+  await click(await (await sessionRow(sessionId)).$('button[aria-label^="Archive "]'));
+  const archiving = await browser.$('[role="dialog"]');
+  await click(await archiving.$('button=Archive session'));
+  await wait(async () => (await readJson(sessionPath)).archived_at !== null, 'The session was not archived on disk');
+  // The dialog's close refreshes the catalogue that the Archive page lists.
+  await wait(async () => !(await archiving.isExisting()), 'The archive confirmation did not close');
+  await goToPage('Archive');
+  const archived = '[role="region"][aria-label="Archive"] .ar-sec[aria-label^="Sessions"] .ar-row';
+  await (await browser.$(archived)).waitForDisplayed();
+  await click(await browser.$(archived).$('button[aria-label^="More for "]'));
+  await click(await browser.$('[role="menuitem"]*=Remove from Ariadne'));
   await confirm('Remove session');
-  await wait(async () => !(await browser.$(card).isExisting()), 'The removed session card stayed listed');
+  await wait(async () => !(await browser.$(archived).isExisting()), 'The removed session row stayed listed');
   assert.ok(await exists(sessionPath), 'Session remove ran before Dismiss');
   await dismissNote(text => /^Removed the .+ session from .+\.$/.test(text), 'the session removal');
   await wait(async () => !(await exists(sessionPath)),'Session remove did not delete the session file after Dismiss');
 
-  // Project: the Projects page card trash.
-  await click(await browser.$('button[data-shell-tab="projects"]'));
-  const projectCard = `.pw-project-card[data-project-id="${projectId}"]`;
-  const projectName = await browser.$(projectCard).$('.pw-project-name').getText();
-  await click(await browser.$(projectCard).$('button[aria-label="Remove project"]'));
-  await confirm('Remove project');
-  await wait(async () => !(await browser.$(projectCard).isExisting()), 'The removed project card stayed listed');
+  // Project: its card's "…" on the Projects page; the card is named by its folder.
+  await goToPage('Projects');
+  const projectName = basename(configuration.discovery.projectRoot);
+  const projectMore = `button[aria-label="More for ${projectName}: remove project"]`;
+  await click(await browser.$(projectMore));
+  await click(await browser.$('[role="menuitem"]*=Remove project'));
+  const removing = await browser.$('[role="dialog"]');
+  await click(await removing.$('button=Remove project'));
+  await wait(async () => !(await removing.isExisting()), 'Remove project confirmation did not close');
+  await wait(async () => !(await browser.$(projectMore).isExisting()), 'The removed project card stayed listed');
   assert.ok(await exists(store), 'Project remove ran before Dismiss');
   await dismissNote(text => text === `Removed ${projectName}.`, `“Removed ${projectName}.”`);
   await wait(async () => !(await exists(store)),'Project remove did not delete the project store after Dismiss');

@@ -8,15 +8,25 @@ import { AppTransport, route } from '../../../apps/desktop/tests/ui/app/transpor
 import { ItemRow, type RowAction } from '../../../apps/desktop/src/ui/tree/ItemRow';
 import { immutable } from '../../../apps/desktop/src/data';
 import type { ItemRow as Row } from '../../../apps/desktop/src/ui/tree/model';
-import { SessionBar } from '../../../apps/desktop/src/ui/tree/SessionBar';
+import { Shell } from '../../../apps/desktop/src/ui/shell/Shell';
+import { DetailsColumn } from '../../../apps/desktop/src/ui/shell/DetailsColumn';
+import { DockInsetProvider } from '../../../apps/desktop/src/ui/shell/dockInset';
+import { DetailsColumnProvider } from '../../../apps/desktop/src/state/details/column';
+import '../../../apps/desktop/src/ui/detail/detail.css';
 
 // The ordinary App over its real stores; only the native transport is replaced.
 // Item 1 carries a long finding (it must fold to four lines), item 5 a paragraph that
 // wraps over a few lines (hover must not rewrap it), the rest keep their short text.
 class TreeLayoutTransport extends AppTransport {
-  constructor({ gettingAround = false, changes = false } = {}) {
+  constructor({ gettingAround = false, changes = false, card = false } = {}) {
     super();
-    const items = this.sessions.get(route.session_id)!.items;
+    const session = this.sessions.get(route.session_id)!;
+    if (card) { // An archived session with a long name: the top bar and its connection card must still fit a narrow window.
+      session.name = 'A long session name that needs to fit in a narrow window';
+      session.state = 'closed'; session.closed_at = session.updated_at; session.archived_at = session.updated_at;
+      this.preferences.global.selected_navigation = { kind: 'session', session: route };
+    }
+    const items = session.items;
     items['1']!.question = 'A long item title with enough words to span several lines in a narrow tree. '.repeat(5);
     for (let n = 9; n <= 18; n++) items[String(n)] = { ...items['8']!, id: String(n), ordinal: n, question: `Another item ${n}`, outcome: 'A short result.' };
     items['9']!.outcome = Array.from({ length: 6 }, (_, index) => `Body line ${index + 1}`).join('\n');
@@ -83,10 +93,26 @@ function ActionGridFixture() {
   </>;
 }
 
+/**
+ * The Details column in the real shell, under a stand-in dock of the height in the query (`?details&dock=200`): a long
+ * conversation that scrolls above a pinned composer, as the item detail lays them out.
+ */
+function DetailsFixture({ dock, bigger }: { dock: number; bigger: boolean }) {
+  const messages = Array.from({ length: 40 }, (_, index) => <p key={index} className="fixture-message">Message {index + 1} in a long conversation.</p>);
+  return <DockInsetProvider height={dock}><DetailsColumnProvider saved={null}>
+    <Shell topBar={<div style={{ height: 40 }} />} main={<p>Map</p>}
+      legacy={{ conversation: bigger ? <div className="item-conversation" style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+        <div className="detail-body" style={{ flex: 1, minHeight: 0 }}>{messages}</div>
+        <div className="detail-dock" data-testid="bigger-composer"><textarea aria-label="Reply in the bigger view" rows={2} /></div></div> : undefined }}
+      side={<DetailsColumn path={<span>Topic / item</span>} rail={<i className="ph ph-check-circle" />}>
+        <div className="item-detail"><div className="detail-body">{messages}</div>
+          <div className="detail-dock"><textarea aria-label="Reply" rows={2} /><button type="button">Send</button></div></div>
+      </DetailsColumn>}
+      dock={dock ? <div data-testid="dock" style={{ height: dock, background: 'rgb(200 60 60 / 85%)' }} /> : undefined} />
+  </DetailsColumnProvider></DockInsetProvider>;
+}
+
 const query = new URLSearchParams(window.location.search);
-createRoot(document.getElementById('root')!).render(query.has('grid') ? <ActionGridFixture /> : query.has('bar')
-  ? <div className="tree-column" style={{ width: 220 }}><SessionBar busy={false} onClose={() => {}} bar={{
-    sessionId: route.session_id, title: 'A long session name that needs to fit in a narrow column', secondary: null,
-    description: null, named: true, agent: 'codex', where: 'iTerm', meta: '12 topics', running: false,
-    connection: 'not_running', closed: true, archived: true,
-  }} /></div> : <DesktopApp service={createDesktopService(new TreeLayoutTransport({ gettingAround: query.has('nav'), changes: query.has('changes') }))} />);
+createRoot(document.getElementById('root')!).render(query.has('details') ? <DetailsFixture dock={Number(query.get('dock') ?? 0)} bigger={query.has('bigger')} />
+  : query.has('grid') ? <ActionGridFixture />
+  : <DesktopApp service={createDesktopService(new TreeLayoutTransport({ gettingAround: query.has('nav'), changes: query.has('changes'), card: query.has('card') }))} />);

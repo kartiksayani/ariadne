@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDesktopService } from '../../../src/data/service';
 import { OpenSessions } from '../../../src/data/session-store';
 import { SessionActionControllers } from '../../../src/components/bindings/actions';
-import { useSessionLifecycle } from '../../../src/ui/shared/useSessionLifecycle';
+import { useSessionLifecycle, type SessionLifecycle } from '../../../src/ui/shared/useSessionLifecycle';
 import { notices } from '../../../src/ui/pages/notices';
 import { copyText } from '../../../src/ui/shared/clipboard';
 import { route } from '../app/transport';
@@ -25,11 +25,23 @@ async function setup(change?: (transport: HistoryTransport) => void) {
 }
 
 describe('session lifecycle names', () => {
-  it('runs Close, Reopen and Restore through the session action, and topic actions through archive and restore', async () => {
-    const { result } = (await setup()).hook, lifecycle = result.current;
-    for (const action of [lifecycle.close, lifecycle.reopen, lifecycle.restoreSession]) expect(action).toBe(lifecycle.session);
+  // Close, Reopen and Restore are the session action held to the standing each is offered for; the guard itself is
+  // pinned in session-lifecycle-owner.test.tsx.
+  it('runs topic actions through archive and restore', async () => {
+    const lifecycle = (await setup()).hook.result.current;
     expect(lifecycle.archiveTopic).toBe(lifecycle.archive);
     expect(lifecycle.restoreTopic).toBe(lifecycle.restore);
+  });
+  it.each([
+    ['Close', 'active', (lifecycle: SessionLifecycle) => lifecycle.close, undefined],
+    ['Reopen', 'closed', (lifecycle: SessionLifecycle) => lifecycle.reopen, (transport: HistoryTransport) => { transport.source.state = 'closed'; }],
+  ] as const)('%s on a %s session opens the session action’s review, as the toggle does', async (_name, _state, pick, change) => {
+    const { result } = (await setup(change)).hook;
+    await act(async () => { pick(result.current)(); });
+    expect(result.current.reviewing).toBe(true);
+    const toggled = (await setup(change)).hook;
+    await act(async () => { toggled.result.current.session(); });
+    expect(toggled.result.current.reviewing).toBe(true);
   });
   it.each([
     ['active', () => {}],

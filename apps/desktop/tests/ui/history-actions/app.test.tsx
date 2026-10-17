@@ -12,14 +12,16 @@ async function openSource() {
   await goToSession(route); await screen.findByRole('tree', { name: 'Session items' });
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
     });
 }
-it.each(['Cancel', 'Escape', 'Close session'])('returns focus to Session actions after %s through an asynchronous lifecycle review', async finish => {
+it.each(['Cancel', 'Escape', 'Close session'])('returns focus to the connection button after %s through an asynchronous lifecycle review', async finish => {
   const transport = new HistoryTransport(), user = userEvent.setup();
   render(<DesktopApp service={createDesktopService(transport)} />); await openSource();
-  const trigger = screen.getByRole('button', { name: 'Session actions' });
+  // Close session is on the top bar's connection card (SPEC 5.12), opened from the connection button.
+  const trigger = document.querySelector<HTMLButtonElement>('[data-popover-trigger="connection"]')!;
   await user.click(trigger);
+  const card = await waitFor(() => { const found = document.querySelector<HTMLElement>('.cc'); expect(found).not.toBeNull(); return found!; });
   let release!: () => void;
   const refresh = new Promise<void>(resolve => { release = resolve; });
   const invoke = transport.invoke.bind(transport);
@@ -31,10 +33,10 @@ it.each(['Cancel', 'Escape', 'Close session'])('returns focus to Session actions
   ++transport.source.revision;
   act(() => { transport.emit('ariadne://session_changed', { session_id: route.session_id, revision: transport.source.revision }); });
   expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('stale');
-  const close = screen.getByRole('menuitem', { name: 'Close session' });
+  const close = within(card).getByRole('button', { name: 'Close session' });
   close.focus(); expect(document.activeElement).toBe(close);
   await user.click(close);
-  expect(screen.queryByRole('menu')).toBeNull();
+  expect(document.querySelector('.cc')).toBeNull();
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(document.activeElement).toBe(trigger);
   await act(async () => { release(); });

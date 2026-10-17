@@ -1,15 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  agentName, bodyLayout, clock, DETAIL_MAX, DETAIL_MIN, dayWord, footerSummary, glow, headerText, hostApp, sessionRange, sessionWhen, tabModels, themeToggle, type SessionFacts,
+  agentName, bodyLayout, clock, DETAIL_MAX, DETAIL_MIN, dayWord, hostApp, sessionWhen, sessionLabel, sessionPhrase, ownerName, ownerDescription, themeToggle,
 } from '../../../src/ui/shell/model';
 
 const now = new Date(2026, 9, 7, 15, 30).getTime();
 const at = (daysAgo: number, hours: number, minutes: number) => new Date(2026, 9, 7 - daysAgo, hours, minutes).getTime();
-const facts = (patch: Partial<SessionFacts> = {}): SessionFacts => ({
-  projectName: 'search-service', createdAt: at(0, 14, 2), messageCount: 128, agent: 'claude-code', connection: 'connected',
-  lastMessage: { number: 128, createdAt: at(0, 15, 4) }, ...patch,
-});
-
 describe('shell model', () => {
   it('names agents and formats times as the handoff writes them', () => {
     expect(agentName('claude_code_mod')).toBe('claude-code');
@@ -22,154 +17,75 @@ describe('shell model', () => {
     expect(dayWord(at(0, 9, 5), now)).toBe('');
     expect(dayWord(at(1, 9, 5), now)).toBe('Yesterday');
     expect(dayWord(at(3, 9, 5), now)).toBe(new Date(at(3, 9, 5)).toLocaleDateString('en-GB', { weekday: 'short' }));
-    expect(dayWord(at(9, 9, 5), now)).toBe(new Date(at(9, 9, 5)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }));
+    // The board writes "28 Sep"; newer ICU writes "28 Sept" for en-GB, so the expected words use the board's three letters.
+    expect(dayWord(at(9, 9, 5), now)).toBe(new Date(at(9, 9, 5)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }).replace('Sept', 'Sep'));
     expect(sessionWhen(at(0, 14, 2), now)).toBe('Today 14:02');
     expect(sessionWhen(at(1, 14, 2), now)).toBe('Yesterday');
     expect(sessionWhen(at(3, 14, 2), now)).toBe('3 days ago');
     expect(sessionWhen(at(8, 14, 2), now)).toBe('Last week');
-    expect(sessionWhen(at(20, 14, 2), now)).toBe(new Date(at(20, 14, 2)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }));
-    expect(sessionRange(at(0, 14, 2), null, true, now)).toBe('Today 14:02 – now');
-    expect(sessionRange(at(1, 16, 40), at(1, 17, 25), false, now)).toBe('Yesterday 16:40 – 17:25');
-    expect(sessionRange(at(3, 10, 0), at(3, 11, 0), false, now)).toBe('3 days ago · 10:00 – 11:00');
+    expect(sessionWhen(at(20, 14, 2), now)).toBe(new Date(at(20, 14, 2)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }).replace('Sept', 'Sep'));
   });
 
-  it('builds the Projects and All sessions header lines', () => {
-    expect(headerText({ kind: 'projects', projectCount: 3, runningAgents: 2 }, now))
-      .toEqual({ sessionText: '3 projects', connText: '2 agents running', connColor: 'var(--st-done)' });
-    expect(headerText({ kind: 'projects', projectCount: 1, runningAgents: 0, projectPath: '~/code/search' }, now))
-      .toEqual({ sessionText: '~/code/search', connText: '0 agents running', connColor: 'var(--st-open)' });
-    expect(headerText({ kind: 'all_sessions', openTabs: 1, openProjects: 2 }, now))
-      .toEqual({ sessionText: '1 session open', connText: 'across 2 projects', connColor: 'var(--st-open)' });
+  it('uses the owner name and description when set, with agent fallbacks for unnamed sessions', () => {
+    expect(ownerName({ name: '  Cache review  ' })).toBe('Cache review');
+    expect(ownerName({ name: '  ' })).toBeNull();
+    expect(ownerDescription({ description: '  Review cache lifetime. ' })).toBe('Review cache lifetime.');
+    expect(ownerDescription(undefined)).toBeNull();
+    expect(sessionLabel({ name: 'Cache review', description: 'Review TTL' }, 'claude-code · iTerm')).toEqual({
+      named: true, title: 'Cache review', secondary: 'claude-code · iTerm', description: 'Review TTL',
+    });
+    expect(sessionLabel(null, 'codex')).toEqual({ named: false, title: 'codex', secondary: null, description: null });
+    expect(sessionPhrase({ name: 'Cache review' }, 'codex', 'Today')).toBe('the “Cache review” session');
+    expect(sessionPhrase(null, 'codex', 'Yesterday')).toBe('the codex session from yesterday');
   });
 
-  it('builds every session connection state', () => {
-    const session = (value: SessionFacts | null, fallbackAgent: string | null = null) => headerText({ kind: 'session', facts: value, fallbackAgent }, now);
-    expect(session(null, 'claude-code')).toEqual({ sessionText: 'Opening session…', connText: 'Connecting to claude-code…', connColor: 'var(--st-progress)' });
-    expect(session(facts({ connection: 'loading', agent: null }))).toEqual({ sessionText: 'Opening session…', connText: 'Not connected', connColor: 'var(--st-open)' });
-    expect(session(facts())).toEqual({ sessionText: 'search-service · started 14:02 · 128 messages',
-      connText: 'Connected · claude-code · last message #128 at 15:04', connColor: 'var(--st-done)' });
-    expect(session(facts({ where: 'iTerm', lastMessage: null })).connText).toBe('Connected · claude-code in iTerm');
-    expect(session(facts({ connection: 'reconnecting' }))).toMatchObject({ connText: 'Reconnecting to claude-code… · last synced 15:04', connColor: 'var(--st-progress)' });
-    expect(session(facts({ connection: 'reconnecting', lastMessage: null })).connText).toBe('Reconnecting to claude-code… · last synced –');
-    expect(session(facts({ connection: 'not_running', createdAt: at(1, 16, 40), messageCount: 0, lastMessage: { number: 42, createdAt: at(1, 17, 25) } })))
-      .toEqual({ sessionText: 'search-service · started Yesterday', connText: 'claude-code isn’t running · last message claude-code #42, yesterday 17:25', connColor: 'var(--st-open)' });
-    expect(session(facts({ connection: 'not_running', lastMessage: null })).connText).toBe('claude-code isn’t running');
-    expect(session(facts({ connection: 'not_running', lastMessage: { number: 3, createdAt: at(0, 15, 0) } })).connText)
-      .toBe('claude-code isn’t running · last message claude-code #3, 15:00');
-    expect(session(facts({ connection: 'none' })).connText).toBe('Not connected');
-    expect(session(facts({ agent: null })).connText).toBe('Not connected');
-  });
-
-  it('builds the tab strip with project prefixes only across several projects', () => {
-    const sessions = [
-      { id: 'a', project: 'search', agent: 'claude-code', createdAt: at(0, 14, 2), endedAt: null, running: true, on: true },
-      { id: 'b', project: 'sync', agent: null, where: 'iTerm', createdAt: null, endedAt: null, running: false, on: false },
-    ];
-    const [projects, all, first, second] = tabModels({ selection: 'session', sessions, projectCount: 2 }, now);
-    expect(projects).toMatchObject({ id: 'projects', label: 'Projects', sub: '', title: 'All projects', on: false, closable: false });
-    expect(all).toMatchObject({ id: 'all_sessions', label: 'All sessions', sub: '2', icon: 'ph ph-squares-four' });
-    expect(first).toMatchObject({ label: 'claude-code', sub: 'Today 14:02', project: 'search', icon: 'ph-fill ph-circle', iconColor: 'var(--st-done)',
-      title: 'search · claude-code · Today 14:02 – now · agent running', on: true, closable: true });
-    expect(second).toMatchObject({ label: 'No agent', sub: '', icon: 'ph ph-circle', title: 'sync · No agent · iTerm · agent not running' });
-    const single = tabModels({ selection: 'all_sessions', sessions: [], projectCount: 1 }, now);
-    expect(single.map(tab => [tab.id, tab.on, tab.sub])).toEqual([['projects', false, ''], ['all_sessions', true, '']]);
-    expect(tabModels({ selection: 'session', sessions: sessions.slice(0, 1), projectCount: 1 }, now)[2].project).toBeNull();
-  });
-
-  it('builds the footer, body grid, theme toggle and status glow', () => {
-    expect(footerSummary(null)).toBe('');
-    expect(footerSummary({ items: 10, waiting: 3, inProgress: 2, open: 4, archivedTopics: 0 })).toBe('10 items · 3 waiting on you · 2 in progress · 4 open');
-    expect(footerSummary({ items: 10, waiting: 3, inProgress: 2, open: 4, archivedTopics: 1 })).toContain(' · 1 archived topics');
-    expect(bodyLayout({ width: null, detail: false }).columns).toBe('300px minmax(560px,1fr)');
-    expect(bodyLayout({ width: 1600, detail: true }).columns).toBe('300px minmax(560px,1fr) 400px');
+  it('builds the body grid and theme toggle', () => {
+    expect(bodyLayout({ width: null, detail: false }).columns).toBe('minmax(0px,1fr)');
+    expect(bodyLayout({ width: 1600, detail: true }).columns).toBe('minmax(560px,1fr) 400px');
     expect(themeToggle('dark')).toEqual({ icon: 'ph ph-sun', title: 'Switch to light', next: 'light' });
-    expect(themeToggle('light')).toEqual({ icon: 'ph ph-moon', title: 'Switch to dark', next: 'dark' });
-    expect(glow('var(--st-done)')).toBe('0 0 0 3px color-mix(in srgb, var(--st-done) 22%, transparent)');
-  });
+    expect(themeToggle('light')).toEqual({ icon: 'ph ph-moon', title: 'Switch to dark', next: 'dark' });  });
 
   it('sizes the detail panel to the owner width inside its bounds', () => {
-    expect(bodyLayout({ width: 1600, detail: true, detailWidth: 520 }).columns).toBe('300px minmax(560px,1fr) 520px');
+    expect(bodyLayout({ width: 1600, detail: true, detailWidth: 520 }).columns).toBe('minmax(560px,1fr) 520px');
     expect(bodyLayout({ width: 4000, detail: true, detailWidth: 5000 }).detailWidth).toBe(DETAIL_MAX);
     expect(bodyLayout({ width: 2400, detail: true, detailWidth: 10 }).detailWidth).toBe(DETAIL_MIN);
     // The resize limit leaves a usable tree even when the owner widens the panel.
-    expect(bodyLayout({ width: 1500, detail: true }).detailMax).toBe(1500 - 300 - 380);
+    expect(bodyLayout({ width: 1500, detail: true }).detailMax).toBe(1500 - 380);
   });
 
-  it('fits wide saved detail widths to the window while preserving the Waiting rules', () => {
-    const saved = { detail: true, detailWidth: 2000 };
-    expect(bodyLayout({ ...saved, width: 3000 })).toMatchObject({ detailWidth: 2000, folded: false, narrow: false,
-      columns: '300px minmax(560px,1fr) 2000px' });
-    expect(bodyLayout({ ...saved, width: 2000 })).toMatchObject({ detailWidth: 1576, detailMax: 1576, folded: true, auto: true,
-      columns: '44px minmax(380px,1fr) 1576px' });
-    expect(bodyLayout({ ...saved, width: 1200 })).toMatchObject({ detailWidth: 776, folded: true,
-      columns: '44px minmax(380px,1fr) 776px' });
-    expect(bodyLayout({ ...saved, width: 2000, peek: true })).toMatchObject({ detailWidth: 1320, folded: false,
-      columns: '300px minmax(380px,1fr) 1320px' });
-    expect(bodyLayout({ ...saved, width: 3000, folded: true })).toMatchObject({ detailWidth: 2000, folded: true, auto: false });
-    for (const detailWidth of [320, 400, 520, 720]) {
-      expect(bodyLayout({ width: 2000, detail: true, detailWidth })).toMatchObject({ detailWidth, folded: false });
+  it.each([
+    { width: 3000, detailWidth: 2000, detailMax: 2400, minimum: 560 },
+    { width: 2000, detailWidth: 1620, detailMax: 1620, minimum: 380 },
+    { width: 1200, detailWidth: 820, detailMax: 820, minimum: 380 },
+    { width: 900, detailWidth: 520, detailMax: 520, minimum: 380 },
+  ])('fits the saved pane to $width pixels while keeping room for the Map', ({ width, detailWidth, detailMax, minimum }) => {
+    expect(bodyLayout({ width, detail: true, detailWidth: 2000 })).toEqual({
+      detailWidth, detailMax, columns: `minmax(${minimum}px,1fr) ${detailWidth}px`,
+    });
+    expect(minimum + detailWidth).toBeLessThanOrEqual(width);
+  });
+
+  it('retains the same two columns as Details widens, with no Waiting width or fold transition', () => {
+    for (const detailWidth of [320, 400, 540, 541, 720, 900, 1020]) {
+      const minimum = Math.min(560, 1400 - detailWidth);
+      expect(bodyLayout({ width: 1400, detail: true, detailWidth })).toEqual({
+        detailWidth, detailMax: 1020, columns: `minmax(${minimum}px,1fr) ${detailWidth}px`,
+      });
     }
+    expect(bodyLayout({ width: 1400, detail: true, detailWidth: 2400 })).toEqual({
+      detailWidth: 1020, detailMax: 1020, columns: 'minmax(380px,1fr) 1020px',
+    });
   });
 
-  it('shrinks a wide pane before the tree when Waiting opens', () => {
-    const saved = { detail: true, detailWidth: 2000, peek: true };
-    for (const width of [1400, 1600, 2000]) {
-      const layout = bodyLayout({ ...saved, width });
-      const available = width - 300 - 380;
-      expect(layout).toMatchObject({ detailWidth: available, detailMax: available, folded: false,
-        columns: `300px minmax(380px,1fr) ${available}px` });
-    }
-    expect(bodyLayout({ ...saved, width: 3400 })).toMatchObject({ detailWidth: 2000, narrow: false,
-      columns: `300px minmax(560px,1fr) 2000px` });
+  it.each([null, 200, 700, 1200, 3000])('gives the Map the full body with no Details at width %s', width => {
+    expect(bodyLayout({ width, detail: false }).columns).toBe('minmax(0px,1fr)');
   });
 
-  it.each([undefined, 320, 400, 2000])('keeps the tree usable with Waiting open at the minimum window width (detail width: %s)', detailWidth => {
-    const layout = bodyLayout({ width: 1300, detail: true, detailWidth, peek: true });
-    const shown = Math.min(detailWidth ?? 400, 620);
-    expect(layout).toMatchObject({ folded: false, narrow: detailWidth === 2000, detailWidth: shown, detailMax: 620,
-      columns: `300px minmax(${detailWidth === 2000 ? 380 : 560}px,1fr) ${shown}px` });
-    expect(300 + (detailWidth === 2000 ? 380 : 560) + shown).toBeLessThanOrEqual(1300);
-  });
-
-  it('can squeeze the centre when Waiting opens without a detail pane', () => {
-    expect(bodyLayout({ width: 700, detail: false, peek: true })).toMatchObject({ folded: false, narrow: true,
-      columns: '300px minmax(0,1fr)' });
-  });
-
-  it('lets a widened detail panel use most of a 1400px window while keeping the default layout unchanged', () => {
-    const window = { width: 1400, detail: true };
-    expect(bodyLayout(window)).toMatchObject({ folded: false, narrow: false, detailMax: 720,
-      columns: '300px minmax(560px,1fr) 400px' });
-    expect(bodyLayout({ ...window, detailWidth: 540 }).columns).toBe('300px minmax(560px,1fr) 540px');
-    expect(bodyLayout({ ...window, detailWidth: 541 })).toMatchObject({ folded: true, auto: true,
-      columns: '44px minmax(560px,1fr) 541px' });
-    expect(bodyLayout({ ...window, detailWidth: 900 }).columns).toBe('44px minmax(456px,1fr) 900px');
-    expect(bodyLayout({ ...window, detailWidth: 2400 })).toMatchObject({ detailWidth: 976, detailMax: 976,
-      columns: '44px minmax(380px,1fr) 976px' });
-    expect(bodyLayout({ ...window, width: 1260 })).toMatchObject({ folded: false, narrow: false });
-    expect(bodyLayout({ ...window, width: 1259 })).toMatchObject({ folded: true, narrow: true });
-    expect(bodyLayout({ ...window, width: 950 }).columns).toBe('44px minmax(560px,1fr) 346px');
-    expect(bodyLayout({ ...window, detail: false, folded: true }).columns).toBe('44px minmax(560px,1fr)');
-  });
-
-  it('folds the Waiting column and narrows the detail panel so the body never scrolls sideways', () => {
-    const total = (columns: string) => columns.split(' ').filter(part => part.endsWith('px') && !part.startsWith('minmax')).map(parseFloat)
-      .reduce((sum, value) => sum + value, 0) + Number(columns.match(/minmax\((\d+)px/)![1]);
-    // A 1200px body cannot fit 300px Waiting, 560px tree and 400px detail.
-    const tight = bodyLayout({ width: 1200, detail: true });
-    expect(tight).toMatchObject({ folded: true, auto: true, narrow: true });
-    expect(tight.columns).toBe(`44px minmax(560px,1fr) 400px`);
-    expect(total(tight.columns)).toBeLessThanOrEqual(1200);
-    // An owner-wide detail panel narrows to fit.
-    const wide = bodyLayout({ width: 1200, detail: true, detailWidth: 900 });
-    expect(wide.detailWidth).toBe(1200 - 44 - 380);
-    expect(total(wide.columns)).toBeLessThanOrEqual(1200);
-    // The owner can still open it; the panel shrinks to preserve a usable tree.
-    const peek = bodyLayout({ width: 1200, detail: true, peek: true });
-    expect(peek).toMatchObject({ folded: false, narrow: true });
-    expect(peek.columns).toBe('300px minmax(380px,1fr) 400px');
-    // The owner's own fold holds at any width and is not "auto".
-    expect(bodyLayout({ width: 2000, detail: false, folded: true })).toMatchObject({ folded: true, auto: false, columns: '44px minmax(560px,1fr)' });
-    expect(bodyLayout({ width: 1300, detail: true }).folded).toBe(false);
+  it('uses the pane minimum in a very narrow window without inventing a third column', () => {
+    // The pane minimum is the narrow Details minimum, 280 (C9, state/details/column.ts); 320 is only the least saved width.
+    expect(bodyLayout({ width: 600, detail: true, detailWidth: 2000 })).toEqual({
+      detailWidth: 280, detailMax: 280, columns: 'minmax(320px,1fr) 280px',
+    });
+    expect(bodyLayout({ width: 300, detail: true }).columns).toBe('minmax(20px,1fr) 280px');
   });
 });

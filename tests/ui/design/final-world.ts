@@ -138,6 +138,18 @@ export const sessions: readonly WSession[] = [
   { id: 's6', project: 'api', name: 'rate limits', agent: 'codex', where: 'Codex app', range: 'Today 14:00 – 20:00', running: false, status: 'active', status_line: 'Not running · 1 queued' }
 ];
 
+/** The Archive (SPEC 14.3): archived sessions, with the counts their rows show, and one archived topic of `s2`. */
+export interface WArchivedSession {
+  readonly id: string; readonly project: string; readonly name: string; readonly agent: 'claude-code' | 'codex';
+  readonly topics: number; readonly items: number; readonly archived: string;
+}
+export const archivedSessions: readonly WArchivedSession[] = [
+  { id: 'x1', project: 'api', name: 'March incident notes', agent: 'claude-code', topics: 4, items: 31, archived: '2026-10-03T16:00:00.000Z' },
+  { id: 'x2', project: 'web', name: 'editor spike', agent: 'codex', topics: 2, items: 9, archived: '2026-09-28T16:00:00.000Z' },
+  { id: 'x3', project: 'site', name: 'landing copy', agent: 'claude-code', topics: 1, items: 6, archived: '2026-09-12T16:00:00.000Z' }
+];
+export const archivedTopic = { session: 's2', name: 'Old cache metrics', short: 'old metrics', items: 6, archived: '19:40' } as const;
+
 /** Questions waiting in other sessions (the board's OQ and OGROUPS): the switcher's "3 in other sessions". */
 export interface WOther { readonly k: string; readonly session: string; readonly q: string; readonly short: string; readonly raised: string; readonly options: readonly WOption[] }
 export const others: readonly WOther[] = [

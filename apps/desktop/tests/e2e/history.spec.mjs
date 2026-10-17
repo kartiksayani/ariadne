@@ -6,7 +6,7 @@ import { historyFailureFacts, withFailureEvidence } from './history-evidence.mjs
 import { folded, ownerReplyTarget, waitForOwnerReplyTarget } from './owner-reply.mjs';
 import { admissions, assertSlimEnvelope, awaitConnected, cliRequest, completeTurn, journeyResultRequest, snapshot } from './scripted-provider.mjs';
 import { openSessionButton } from './session-button.mjs';
-import { goToPeekItem } from './tree.spec.mjs';
+import { goToPeekItem, search } from './tree.spec.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
@@ -80,33 +80,36 @@ async function apply(history, operations, revisions = {}, frozen = null) {
   return { request: value, receipt: result.value };
 }
 async function open(history, itemId = '1') {
-  const catalogue = await browser.$('button[data-shell-tab="all_sessions"]'); await catalogue.waitForEnabled(); await catalogue.scrollIntoView(); await catalogue.click();
-  const selectedCatalogue = async () => (await preferencesSnapshot()).global.selected_navigation.kind === 'all_sessions'
-    && await catalogue.getAttribute('aria-current') === 'page' && await catalogue.isEnabled();
-  await wait(async () => await selectedCatalogue() || await navigationUpdated(), 'History catalogue navigation did not finish or refresh its changed view');
-  if (!await selectedCatalogue()) {
+  // The session is reached from the switcher's All sessions page; pages are not saved, so the saved session proves it finished.
+  const selectedSession = async () => {
+    const selected = (await preferencesSnapshot()).global.selected_navigation;
+    return selected.kind === 'session' && selected.session.session_id === history.sessionId;
+  };
+  const choose = async () => {
+    const session = await openSessionButton(history.sessionId); await session.scrollIntoView(); await session.click();
+    await wait(async () => await selectedSession() || await navigationUpdated(), 'History session navigation did not finish or refresh its changed view');
+  };
+  await choose();
+  if (!await selectedSession()) {
     assert.equal(navigationRecovered, false, 'Only one fresh history navigation choice is allowed per native launch');
     navigationRecovered = true;
     const refreshed = { sessionId: history.sessionId, message: updatedNavigation,
       preferences: await preferencesSnapshot(), body: await browser.$('body').getText() };
     // The changed view refreshes itself; navigation still needs a deliberate fresh owner choice.
-    await catalogue.waitForEnabled(); await catalogue.scrollIntoView(); await catalogue.click();
-    await wait(selectedCatalogue, 'Fresh history catalogue choice did not persist after automatic refresh');
+    await choose();
+    await wait(selectedSession, 'Fresh history session choice did not persist after automatic refresh');
     await writeFile(join(evidence(), 'history-navigation-recovery.json'), JSON.stringify({ refreshed, recovered: await preferencesSnapshot() }, null, 2));
   }
-  const session = await openSessionButton(history.sessionId); await session.scrollIntoView(); await session.click();
-  await wait(async () => {
-    const selected = (await preferencesSnapshot()).global.selected_navigation;
-    return selected.kind === 'session' && selected.session.session_id === history.sessionId && await catalogue.isEnabled();
-  }, 'History session navigation did not finish its saved preference update');
+  await wait(async () => await browser.$('.tree-column').getAttribute('data-session-status') === 'ready'
+    && await browser.$('.tree-column').getAttribute('data-session-busy') === 'false', 'History session did not finish loading its Map');
   const target = await row(itemId); await target.waitForDisplayed(); await target.scrollIntoView(); await target.click();
   await waitForHistoryItem((await snapshot(history)).items[itemId]);
 }
 async function selectParent(item) {
-  await (await browser.$('[data-shell-search]')).waitForEnabled();
+  await (await search()).waitForEnabled();
   const parent = await row('1'); await parent.waitForDisplayed(); await parent.scrollIntoView(); await parent.click();
   await waitForHistoryItem(item);
-  await (await browser.$('[data-shell-search]')).waitForEnabled();
+  await (await search()).waitForEnabled();
 }
 async function seed(configuration) {
   const selected = configuration.history;
@@ -146,19 +149,20 @@ export async function waitForHistoryControl(control, label) {
 async function answer(history, ordinal, text) {
   // The preceding CLI ask/result is complete; wait for its exact target before opening or reviewing a draft.
   await waitForOwnerReplyTarget(history, ownerReplyTarget(await snapshot(history), history.itemId));
-  const another = await browser.$(ownerInput('1')).$('button=Write another input');
-  if (await another.isExisting()) { await another.waitForEnabled(); await another.scrollIntoView(); await another.click(); }
-  // The answer slot locks a draft written against an older question until "Review this question" updates it.
-  const editor = await browser.$(`${ownerInput('1')} textarea`);
+  // Details answers the selected waiting item with the answer cards: odd rounds have one option card (pick it, then Send); even
+  // rounds have no options, so the words box is open at once (type, then Send).
+  const odd = ordinal % 2 === 1;
+  const editor = await browser.$(odd ? `${ownerInput('1')} [data-answer-option="0"]` : `${ownerInput('1')} textarea`);
   await failureEvidence(`owner-input-editor-round-${ordinal}`, async () => {
     try { await editor.waitForDisplayed(); } catch (error) { await browser.saveScreenshot(join(evidence(), `owner-input-editor-round-${ordinal}.png`)); throw error; }
   }, { ordinal, text });
+  // The answer slot locks a draft written against an older question until "Review this question" updates it.
   await wait(async () => await editor.isEnabled() || await reviewCurrentTarget(), 'The answer editor neither enabled nor offered Review this question');
   await editor.waitForEnabled();
   // Odd rounds send the chosen option alone; even rounds send a reply in the owner's own words.
-  if (ordinal % 2) { const choice = await browser.$(ownerInput('1')).$(`button*=${option(ordinal).label}`); await waitForHistoryControl(choice, `round ${ordinal} choice`); await choice.scrollIntoView(); await choice.click(); }
+  if (odd) { await waitForHistoryControl(editor, `round ${ordinal} choice`); assert.ok((await editor.getText()).includes(option(ordinal).label)); await editor.scrollIntoView(); await editor.click(); }
   else { await editor.scrollIntoView(); await editor.setValue(text); }
-  const send = await browser.$(`${ownerInput('1')} ${ordinal % 2 ? '.answer-send' : '.answer-reply-send'}`); await failureEvidence(`owner-input-send-${ordinal}`, () => waitForHistoryControl(send, `round ${ordinal} Send`)); await send.scrollIntoView(); await send.click();
+  const send = await browser.$(`${ownerInput('1')} button[data-answer-send]`); await failureEvidence(`owner-input-send-${ordinal}`, () => waitForHistoryControl(send, `round ${ordinal} Send`)); await send.scrollIntoView(); await send.click();
   await wait(async () => inputs(await snapshot(history)).length === ordinal && (await admissions(history)).length === ordinal,
     'A genuine native round answer did not persist and reach its isolated host');
 }
@@ -293,7 +297,7 @@ async function conversation(history, saved, paged) {
     await parent.scrollIntoView();
     const fold = await parent.$('button[aria-label="Expand or collapse"]'); await fold.waitForEnabled(); await fold.click();
   }
-  await (await browser.$('[data-shell-search]')).waitForEnabled();
+  await (await search()).waitForEnabled();
   const child = await row('1.1'); await child.waitForDisplayed(); await child.scrollIntoView(); await child.click();
   await waitForHistoryItem(saved.items['1.1']);
   const childMessageIds = await proveConversationMessages(saved, '1.1');

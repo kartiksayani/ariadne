@@ -1,14 +1,19 @@
-// The detail panel's "Your answer": the shared Answer Control in its full
-// variant (ui/answer/AnswerControl.tsx), sent through `useSubmit` so the tree,
-// the Waiting cards and the detail all answer the same way. The slot adds the
-// keyboard focus requests and the saved-input states of the draft store.
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+// One question's answer, wherever it shows: the dock, Details, the peek and other sessions. The answer cards
+// (ui/answer/AnswerControl.tsx), sent through `useSubmit`, so every place answers the same way and shares one draft and
+// one send lock. After Send the same cards stay, sealed, with the delivery bar (ui/answer/QuestionDelivery.tsx).
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { plainFailure } from '../../data/plain';
-import { useOwnerDrafts, type DraftEntry, type DraftState, type OwnerDraftStore } from '../../state/drafts/store';
-import { AnswerControl, defaultSelection } from '../answer/AnswerControl';
+import { receiptWithdrawn, useOwnerDrafts, type DraftEntry, type DraftState, type OwnerDraftStore } from '../../state/drafts/store';
+import { AnswerControl, defaultSelection, type AnswerBar } from '../answer/AnswerControl';
 import { useSubmit, type OwnerFocusRequest, type PendingSubmission } from '../answer/useSubmit';
+import { ownerReplied } from '../../selectors/waiting/replied';
+import { answerStanding, useQuestionDelivery } from '../answer/QuestionDelivery';
 import { sessionEnded, sessionAnswerBlocked } from '../../selectors/sessionClosed';
+import { copyText } from '../shared/clipboard';
+import { waitingAge } from '../dock/model';
+import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 
 /** The handoff's wording for a saved draft written against an older item revision or binding. */
 export const changedText ='This item changed. Review the current question and options; your text is retained.';
@@ -24,8 +29,12 @@ export interface AnswerSlotProps {
   readonly drafts: OwnerDraftStore;
   readonly store: SessionStore;
   readonly itemId: string;
-  readonly compactOptions?: boolean;
-  readonly prompt?: ReactNode;
+  /** Where the cards sit: the dock (3 columns), Details (one column), Details' bigger view, the peek, or the other-sessions list. */
+  readonly layout?: 'dock' | 'details' | 'wide' | 'compact' | 'list';
+  /** The idle bar text in place of the default hint. */
+  readonly hint?: string;
+  /** "? Waiting on you … Waiting 34 min" above the cards (Details, peek). */
+  readonly head?: boolean;
   /** Why the detail model blocks answering (closed session, reconnecting), if it does. */
   readonly blocked?: string | null;
   readonly focusRequest?: OwnerFocusRequest;
@@ -40,7 +49,11 @@ export interface AnswerSlotProps {
   readonly marked?: boolean;
 }
 
-export function AnswerSlot({ drafts, store, itemId, compactOptions = false, prompt, blocked, focusRequest, onFocusRequestConsumed, onEscape, onAgentNotRunning, onSent, marked = true }: AnswerSlotProps) {
+const barButton = (label: string, icon: string, onClick: () => void, options: { primary?: boolean; disabled?: boolean; title?: string } = {}) =>
+  <button type="button" key={label} className="answer-bar-button" data-primary={options.primary || undefined} disabled={options.disabled} title={options.title}
+    onClick={event => { event.stopPropagation(); onClick(); }}><i className={icon} aria-hidden="true" />{label}</button>;
+
+export function AnswerSlot({ drafts, store, itemId, layout = 'details', hint, head = false, blocked, focusRequest, onFocusRequestConsumed, onEscape, onAgentNotRunning, onSent, marked = true }: AnswerSlotProps) {
   const mark = marked ? itemId : undefined;
   const root = useRef<HTMLDivElement>(null), handled = useRef<number | null>(null);
   const [shortcutStatus, setShortcutStatus] = useState<string | null>(null);
@@ -50,6 +63,7 @@ export function AnswerSlot({ drafts, store, itemId, compactOptions = false, prom
   const live = current.status === 'ready' && !current.error;
   const presence = session?.active_binding_id ? current.presence[session.active_binding_id] ?? null : null;
   const submit = useSubmit({ drafts, session, current: live, itemId, intent: 'answer', onAgentNotRunning, onSaved: onSent, presence });
+  const delivery = useQuestionDelivery({ drafts, store, itemId });
   const { entry } = submit;
   const error = answerSlotError(state, entry);
   useEffect(() => { setShortcutStatus(null); }, [itemId, store]);
@@ -77,7 +91,9 @@ export function AnswerSlot({ drafts, store, itemId, compactOptions = false, prom
       return;
     }
     if (focusRequest.ownWords) {
-      root.current?.querySelector<HTMLTextAreaElement>('textarea:not(:disabled)')?.focus();
+      const own = root.current?.querySelector<HTMLButtonElement>('[data-answer-own]:not(:disabled)');
+      if (own && live) own.click();
+      else root.current?.querySelector<HTMLTextAreaElement>('textarea:not(:disabled)')?.focus();
       return;
     }
     const buttons = root.current?.querySelectorAll<HTMLButtonElement>('[data-answer-option]');
@@ -92,37 +108,68 @@ export function AnswerSlot({ drafts, store, itemId, compactOptions = false, prom
   if (!item) return null;
   // data-owner-input marks every owner input of the detail (this slot and the action box) for native tests.
   if (!state.ready || !entry) return <div className="detail-answer-slot" data-owner-input={mark} role="status">Loading saved drafts…{error && <p role="alert">{error}</p>}</div>;
-  const preferences = state.preferenceUncertain && <button type="button" className="btn btn-secondary" onClick={submit.retryPreferences}>Try saving your draft again</button>;
-  // Saved: the input is queued; the stepper above follows it once the session shows it.
-  if (entry.receipt?.data.kind === 'input_submit') return <div className="detail-answer-slot" data-owner-input={mark}>
-    <p role="status">Saved · Queue position #{entry.receipt.data.input_seq}</p>
-    {ended && <p role="status">{sessionAnswerBlocked(session!)}</p>}
-    {shortcutStatus && <p role="alert">{shortcutStatus}</p>}
-    <div className="detail-actions"><button type="button" className="btn btn-secondary" disabled={ended || state.preferenceUncertain || entry.saving || !live} onClick={submit.another}>Write another input</button></div>
-    {error && <p className="detail-error" role="alert">{error}</p>}
-    {preferences}
-  </div>;
-  const draft = entry.draft, options = item.options;
-  // The frozen choice of an attempted answer, else the draft's or the recommended one.
-  const selected = entry.uncertain ? options.findIndex(option => option.id === draft.selected_option_id) : defaultSelection(options, draft.selected_option_id);
+  const preferences = state.preferenceUncertain && <div className="answer-preferences">
+    <p>Saving your draft could not be confirmed. Sending waits until it is.</p>
+    <button type="button" className="btn btn-secondary" onClick={submit.retryPreferences}>Try saving your draft again</button></div>;
+  const options = item.options, draft = entry.draft;
+  const heading = head && item.status === 'waiting_on_me' && <div className="answer-head">
+    <i className="ph-fill ph-question" aria-hidden="true" /><span className="answer-head-title">Waiting on you</span>
+    {item.waiting_since && <span className="answer-head-age">Waiting {waitingAge(Date.parse(item.waiting_since), Date.now())}</span>}</div>;
+  // Sent: the same cards stay, sealed, with the delivery bar. An answer already on its way locks every place.
+  // The owner's own unknown or failed send is reconciled here first, even when another input (a note) left the queue.
+  const recovering = !entry.receipt && (entry.uncertain || !!entry.error && !entry.saving && !answerStanding(session, itemId));
+  // A cancelled or skipped answer's receipt no longer stands: the cards open at once, before `another` swaps the draft.
+  const delivered = !recovering && (entry.receipt?.data.kind === 'input_submit' && !(session && receiptWithdrawn(entry, session)) || entry.saving && !entry.uncertain
+    || !!session && (ownerReplied(session, item) || answerStanding(session, itemId)));
+  if (delivered && delivery.bar) {
+    const content = delivery.content;
+    return <div ref={root} className="detail-answer-slot" data-owner-input={mark}>
+      {heading}
+      <AnswerControl layout={layout} options={options} label="Answer" selected={defaultSelection(options, content?.selected_option_id)} draft={content?.text ?? ''}
+        bar={delivery.bar} onSelect={() => {}} onDraft={() => {}} onSendOption={() => {}} onSendText={() => {}} onEscape={onEscape} />
+      {delivery.extra}
+      {ended && <p role="status">{sessionAnswerBlocked(session!)}</p>}
+      {shortcutStatus && <p role="alert">{shortcutStatus}</p>}
+      {preferences}
+    </div>;
+  }
+  // An attempted answer keeps its choice; recommendations never choose for the owner.
+  const selected = defaultSelection(options, draft.selected_option_id);
   const review = { label: 'Review this question', onAction: () => { setShortcutStatus(null); submit.review(); } };
+  const words = [options[selected]?.label, draft.text].filter(Boolean).join('\n\n');
+  const copy = barButton('Copy', 'ph ph-copy', () => { void copyText(words).catch(() => {}); }, { title: 'Copy your answer' });
+  const busy = entry.saving || state.preferenceUncertain;
+  const bar: AnswerBar | null = entry.uncertain && !entry.rejected
+    ? { icon: 'ph-fill ph-question', tone: 'accent', text: 'Ariadne isn’t sure this was sent. Check before sending again; your words are kept.', narrow: 'Not sure it was sent. Words kept.',
+      actions: <>{copy}{barButton('Check delivery', 'ph ph-arrows-clockwise', () => { void submit.retry(); }, { primary: true, disabled: busy })}</> }
+    : entry.uncertain
+      ? { icon: 'ph ph-warning-circle', tone: 'danger', text: 'Not sent. Your words are kept.',
+        actions: <>{copy}{barButton('Edit and send again', 'ph ph-pencil-simple', submit.prepareRevised, { disabled: ended || busy })}
+          {barButton('Try sending again', 'ph ph-arrow-clockwise', () => { void submit.retry(); }, { primary: true, disabled: ended || busy, title: 'Send the same answer again, once' })}</> }
+      : entry.error
+        ? { icon: 'ph ph-warning-circle', tone: 'danger', text: 'Not sent. Your words are kept.',
+          actions: <>{copy}{barButton('Retry', 'ph ph-arrow-clockwise', () => { void submit.retry(); }, { primary: true, disabled: busy || !!submit.blocked || submit.changed, title: 'Send again ( ↵ )' })}</> }
+        : null;
+  // Words the agent already had (a refill after "Stop waiting") go again only after the same "Send again?" as the message's
+  // own Send again. Its clicks and keys stay off the cards and the Map; a held ↵ that repeats onto it confirms nothing.
+  const resend = submit.resend && createPortal(<div onClick={event => event.stopPropagation()}
+    onKeyDownCapture={event => { if (event.repeat) { event.preventDefault(); event.stopPropagation(); } }} onKeyDown={event => event.stopPropagation()}>
+    <ConfirmDialog title="Send again?" body={`${submit.agent} may already have this message. Send it again anyway?`} confirmLabel="Send again"
+      busy={submit.resend.disabled} onCancel={submit.resend.cancel} onConfirm={submit.resend.confirm} /></div>, document.body);
   return <div ref={root} className="detail-answer-slot" data-owner-input={mark}>
+    {heading}
     {shortcutStatus && <p role="alert">{shortcutStatus}</p>}
-    <AnswerControl variant="chat" compactOptions={compactOptions} prompt={prompt} options={options} selected={selected} draft={draft.text} label="Answer"
+    <AnswerControl layout={layout} options={options} selected={selected} draft={draft.text} label="Answer" bar={bar}
+      hint={submit.copy ? `${submit.agent} may already have this answer. Sending it again asks first.` : hint}
       locked={submit.locked || submit.changed || ended} frozen={!live}
       warn={submit.changed && !entry.uncertain ? changedText : undefined} warnAction={submit.changed && !entry.uncertain ? review : undefined}
       blocked={ended ? sessionAnswerBlocked(session!) : entry.uncertain || submit.changed ? undefined : submit.blocked ?? blocked ?? undefined}
-      onSelect={index => { const option = options[index]; if (option) submit.select(option.id); }}
+      onSelect={index => { const option = options[index]; if (index === -1) submit.select(null); else if (option) submit.select(option.id); }}
       onDraft={submit.write} onSendOption={(index, note) => { const option = options[index]; if (option) submit.sendOption(option.id, note); }}
       onSendText={submit.sendText} onEscape={onEscape} />
-    {entry.uncertain && <div className="detail-answer-retry">
-      <p role="status">{entry.rejected ? 'This reply was rejected before it was saved.' : 'Ariadne isn’t sure this reply was saved.'} Retry it to confirm; your text is kept.</p>
-      <div className="detail-actions">
-        <button type="button" className="btn btn-secondary" disabled={ended || entry.saving || state.preferenceUncertain} onClick={() => { void submit.retry(); }}>Try sending again</button>
-        {entry.rejected && <button type="button" className="btn btn-secondary" disabled={ended || entry.saving || state.preferenceUncertain} onClick={submit.prepareRevised}>Edit and send again</button>}
-      </div>
-    </div>}
+    {/* The one alert: why it failed, under the bar that offers the way on. */}
     {error && <p className="detail-error" role="alert">{error}</p>}
     {preferences}
+    {resend}
   </div>;
 }

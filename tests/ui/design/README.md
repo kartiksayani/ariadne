@@ -1,20 +1,22 @@
 # Design harness
 
-`npm run test:design` holds the app to two Claude Design sources. Each has its own project, frames and thresholds.
+`npm run test:design` runs two projects.
 
 | Project | Source (read-only archive) | Frames | Thresholds | Spec |
 |---|---|---|---|---|
-| `design` | `designs/Ariadne-UI-mockups-v2.zip` (older) | `frames.ts` | `thresholds.json` | `design.spec.mts` |
+| `design` | `designs/Ariadne-UI-mockups-v2.zip` (older): its prototype data only | `frames.ts` | none | `design.spec.mts` |
 | `final` | `designs/Ariadne-final-board.zip` (the board the redesign follows) | `final-frames.ts` | `final-thresholds.json` | `final.spec.mts` |
 
-Both share `compare.mts` (the pixel diff, `captureFrame`). The board is untrusted data: it is only unzipped and rendered in an offline page (`final-source.mts`, `final-board.mts`); nothing in it runs in Node.
+`final` holds the app to the board, pixel for pixel. `design` no longer compares anything with the v2 board: the redesign replaced the screens that board drew (tab bar, header, Waiting column, footer, the old answer boxes), so its whole-screen frames are retired. It keeps app-only layout checks of the Map, the Graph, the changes cards and the Details composer, on the v2 prototype's data (`frames.ts` states, built by `fixtures.ts`). Release 2 and 3 retire what is left of it when they redo the Map and Details.
+
+`final` uses `compare.mts` (the pixel diff, `captureFrame`). The board is untrusted data: it is only unzipped and rendered in an offline page (`final-source.mts`, `final-board.mts`); nothing in it runs in Node.
 
 ## The final board: what a test does
 
 One test per state, per size: `light` and `dark` at 1280 x 800, `narrow` (light) at 900 x 650. Titles read `final 2.1 light: <title>`.
 
 1. **Board side, always.** `final-board.mts` renders the state by its part and state id (`Window` + `b-wait`) on a fake clock, with fonts loaded and no motion, and checks the frame is the right size and (after the frame's files are written) the board asked for nothing outside its files.
-2. **App side, once `pending` is `false`.** `final-gallery.tsx` mounts the real `DesktopApp` in the state's fixture. The two frames are compared; the mismatch ratio must be at most the state's threshold. Pixels differ when a channel differs by more than 16.
+2. **App side, once `pending` is `false`.** `final-gallery.tsx` mounts the real `DesktopApp` in the state's fixture. The two frames are compared; the mismatch ratio must be at most the state's threshold. Pixels differ when a channel differs by more than 16. Two things are done to the board's frame so that it compares like for like: the design canvas puts it at a fractional y (67.19 px), so the page is moved the fraction (`boardFrame(..., aligned)`) and the frame starts on a whole pixel, as the app's does (without it every element at a fractional position rasterised a row off, a floor of 0.3 to 0.5% on text-heavy frames); and the four window corners (12 x 12 px) are left out, because the board draws its window rounded and the app's window is the page. The loader's self-check compares the board with Claude Design's own screenshots and so uses neither.
 3. Everything lands in `coverage/design/final/`: `<id>-<size>-design.png` (the board), `-app.png`, `-diff.png` (mismatches red), `frames/<id>-<size>.json`, and `report.json`.
 
 ## Run one state
@@ -49,11 +51,11 @@ A builder turns a state on in the same PR that makes the app match it:
 2. Change that state's `pending: true` to `pending: false` in `final-frames.ts`.
 3. Set its threshold (next section) and run the three sizes.
 
-CI runs `final` on every push with the rest of `npm run test:design`. A `pending` state still renders the board, so a broken loader or a changed archive fails CI. One state, 13.2 light, also runs its app side in CI with `threshold: null` (record only: the ratio is written, never asserted), so the gallery, the loading wait and the `act` steps stay exercised while every state is `pending`; `canaryState` in `final.spec.mts` names it.
+CI runs `final` on every push with the rest of `npm run test:design`. A `pending` state still renders the board, so a broken loader or a changed archive fails CI. One pending state, 12.1 light, also runs its app side in CI with `threshold: null` (record only: the ratio is written, never asserted), so the gallery, the loading wait and the `act` steps stay exercised while it is `pending`; `canaryState` in `final.spec.mts` names it. Every state that is not `pending` runs its app side in CI and fails on a region over its threshold.
 
 ## Set a threshold
 
-`final-thresholds.json` maps `"<id>"` (all three sizes) or `"<id> <size>"` to the largest mismatch ratio that passes. A state with no entry must match exactly (0). Set it to what the app measures plus a little room. The file is empty today: no state is compared yet. Never raise it to hide a real difference: mask or fix the difference instead, and say why in the PR.
+`final-thresholds.json` maps `"<id>"` (all three sizes) or `"<id> <size>"` to the largest mismatch ratio that passes. A state with no entry must match exactly (0). Set it to what the app measures plus a little room (about 0.001). A threshold absorbs anti-aliasing and sub-pixel noise (the board's frame sits at a fractional y, so an element at a fractional position rasterises one row off, about 0.3 to 0.5% of a text-heavy page) and nothing else. Never raise it to hide a real difference: fix the app, or name the part that really differs as a region, and say why in the PR. A state whose release-1 part still differs stays `pending` and is reported, with its region and its `-diff.png`.
 
 ## The app fixture
 
@@ -71,7 +73,7 @@ CI runs `final` on every push with the rest of `npm run test:design`. A `pending
 
 Data fields are built into the session, preferences and drafts. State that is not data yet (a folded Details, the connection line, the dock's height) is reached with `act` steps, or by extending `final-fixtures.ts`. A field the fixture builder cannot yet honour is a gap for the builder who turns the state on to fill.
 
-**Values the fixture cannot yet honour.** The fixture accepts these but cannot put the app in them yet: `view.dock`, `view.dockQuestion`, `view.dockHeight`, `view.shown`, `view.details: 'bigger'`, every `chrome.overlay` value (`switcher`, `switcher-search`, `help-keys`, `help-marks`, `connection-card`, `projects-menu`), `chrome.otherPopover`, `sessions.connection` of `unreadable`, `stale` or `unsaved`, and `sessions.current` other than `s2`. (`live` is the default, so it needs nothing.) Every frame's JSON lists the ones its state sets under `unhonoured`. That list is derived from the field values the state sets, read against the `notYet` list in `final-frames.ts` (`unhonoured()`); it does not look at what the app does. A mismatch in such a state is the missing feature, not a fixture mistake. The builder who adds the feature makes `final-fixtures.ts` honour the value (or reaches it with `act`) and deletes just that value's entry from `notYet`, for example `'help-keys'` from `overlay`, so every other value stays flagged.
+**Values the fixture cannot yet honour.** The fixture accepts these but cannot put the app in them yet: `view.shown`, `view.details: 'bigger'`, `sessions.connection` of `unreadable`, `stale` or `unsaved`, and `sessions.current` other than `s2`. (`live` is the default, so it needs nothing. The dock, its height, the other-sessions popover and every `chrome.overlay` value render now: the dock is opened by `]` and sized through the browser-local dock height, the rest by the spec's `act` steps.) Every frame's JSON lists the ones its state sets under `unhonoured`. That list is derived from the field values the state sets, read against the `notYet` list in `final-frames.ts` (`unhonoured()`); it does not look at what the app does. A mismatch in such a state is the missing feature, not a fixture mistake. The builder who adds the feature makes `final-fixtures.ts` honour the value (or reaches it with `act`) and deletes just that value's entry from `notYet`, for example `'help-keys'` from `overlay`, so every other value stays flagged.
 
 ## Compare only some regions
 

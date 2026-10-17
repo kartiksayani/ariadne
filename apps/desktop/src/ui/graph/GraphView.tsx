@@ -8,6 +8,7 @@ import { useSession, type Immutable, type SessionStore } from '../../data/sessio
 import type { RegisteredRoutes, RevealedItem } from '../../data/routes';
 import { plainFailure } from '../../data/plain';
 import { ackTitle } from '../shared/ack';
+import { statusColor } from '../shared/status';
 import { useWorkspaceKeys } from '../keys';
 import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
@@ -79,7 +80,7 @@ const Node = memo(function Node({ node, focusable, onOpen, onCollapse }: NodePro
     data-item-id={node.item.id} data-row={node.item.id} style={{ left: node.x, top: node.y }}
     onClick={() => onOpen(node)}>
     <div className="graph-node-head">
-      <i className={`graph-node-icon ${visual.icon}`} role="img" aria-label={visual.label} title={visual.label} style={{ color: `var(--st-${node.status})` }} />
+      <i className={`graph-node-icon ${visual.icon}`} role="img" aria-label={visual.label} title={visual.label} style={{ color: statusColor(node.status) }} />
       <span className="graph-node-title">{node.short}</span>
       {node.ack && <span className="graph-node-ack" title={`${ackTitle(node.ack, node.item.status)} · open details`}>{ackTitle(node.ack, node.item.status)}</span>}
       {node.collapsed && <span className="graph-node-below" title={belowTitle}>{node.below > 0 ? `+${node.below}` : `${node.hiddenBelow} hidden`}</span>}

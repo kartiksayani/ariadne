@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { frameIds, graphFrame } from '../../../../../tests/ui/design/frames';
@@ -16,13 +16,16 @@ it('refuses handoff frames without a fixture', () => {
 it.each(frameIds)('mounts DesktopApp in design frame %s through the real stores', async id => {
   const fixture = designFixture(id, data), spec = fixture.spec;
   render(<DesktopApp service={createDesktopService(fixture.transport)} />);
-  await waitFor(() => expect(document.querySelector('.shell-summary')?.textContent).toMatch(/^\d+ items/));
+  // The top bar's switcher names the session once the stores have loaded; there is no footer summary any more.
+  await waitFor(() => expect(document.querySelector('.tb-switch')?.textContent).toBeTruthy());
   expect(document.documentElement.dataset.theme).toBe(spec.theme);
   if (!fixture.route) { await screen.findByRole('heading', { level: 1 }); return; }
   if (spec.state === 'loading') { expect(await screen.findAllByText(/^Reading the session…/)).not.toHaveLength(0); return; }
   if (spec.scenario === 'archive') {
-    await screen.findByRole('heading', { name: 'Archived topics' });
-    await waitFor(() => expect(document.querySelectorAll('.pw-archive-card').length).toBeGreaterThan(0));
+    // Archive is a page now (SPEC 5.14), reached from the top bar; a saved view never holds it.
+    fireEvent.click(await screen.findByRole('button', { name: 'Archive' }));
+    await screen.findByRole('heading', { name: 'Archive' });
+    await waitFor(() => expect(document.querySelectorAll('.ar-row').length).toBeGreaterThan(0));
     return;
   }
   await screen.findByRole('region', { name: 'Session tree' });

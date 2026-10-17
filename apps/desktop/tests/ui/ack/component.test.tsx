@@ -62,7 +62,7 @@ async function mount(transport = new AckTransport()) {
   await screen.findByRole('region', { name: 'Session tree' });
   await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-      expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+      expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
     });
   return transport;
 }
@@ -159,6 +159,8 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
 
   it('explains keyboard Ack during a view save and allows it once the view is saved', async () => {
     const transport = await mount();
+    // Keys act on the selected item.
+    fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     let release!: () => void, saving = false;
     const gate = new Promise<void>(resolve => { release = resolve; });
     const invoke = transport.invoke.bind(transport);
@@ -189,21 +191,24 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     const gate = new Promise<void>(resolve => { release = resolve; });
     const invoke = transport.invoke.bind(transport);
     vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
-      if ('command' in args.request && args.request.command.command === 'session_label_set') { saving = true; await gate; throw new Error('Lost save response'); }
+      if ('command' in args.request && args.request.command.command === 'session_close') { saving = true; await gate; throw new Error('Lost save response'); }
       return invoke(name, args);
     });
     if (source === 'graph') { fireEvent.keyDown(row(), { key: 'g' }); await screen.findByText('One graph per topic'); }
-    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
-    fireEvent.change(screen.getByLabelText('Session name'), { target: { value: 'Pending session name' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    // The other change is Close session (the connection card): it asks first, then saves while its review stays open.
+    fireEvent.click(document.querySelector<HTMLElement>('[data-popover-trigger="connection"]')!);
+    fireEvent.click(await within(await waitFor(() => document.querySelector<HTMLElement>('.cc')!)).findByRole('button', { name: 'Close session' }));
+    const review = await screen.findByRole('dialog', { name: /^Close / });
+    fireEvent.click(within(review).getByRole('button', { name: 'Close session' }));
     await waitFor(() => expect(saving).toBe(true));
     const host = () => source === 'detail' ? detail() : row();
+    // While the save runs its review owns the keys, so `a` reaches nothing and nothing is acknowledged.
     host().focus(); fireEvent.keyDown(host(), { key: 'a' });
-    expect(await screen.findByText('Another change is being saved. Wait for it, then try Ack again.')).toBeTruthy();
     expect(acks(transport)).toHaveLength(0);
     await act(async () => { release(); });
-    await screen.findByText('Ariadne isn’t sure your last change was saved. Check again before renaming this session.');
+    await within(review).findByText(/Ariadne isn’t sure your last change was saved/);
+    fireEvent.click(within(review).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Close / })).toBeNull());
     host().focus(); fireEvent.keyDown(host(), { key: 'a' });
     expect(await screen.findByText('Ariadne isn’t sure your last change was saved. Check again before trying Ack.')).toBeTruthy();
     expect(acks(transport)).toHaveLength(0);
@@ -238,7 +243,11 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     expect(button.classList.contains('tree-action-ack')).toBe(true);
     expect(screen.getByText('Ack all (1)')).toBeTruthy();
     expect(within(row('2')).queryByRole('button', { name: /^Ack/ })).toBeNull();
-    expect(document.querySelector('.shell-footer')?.textContent).toContain('ack / answer');
+    // The footer's key legend is gone; Help (?) lists the Ack key under the selected item's keys.
+    fireEvent.keyDown(row(), { key: '?', shiftKey: true });
+    const keys = await screen.findByRole('region', { name: 'On the selected item' });
+    expect(within(keys).getByText('Ack')).toBeTruthy();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
     expect(css).toMatch(/\.tree-actions\s*\{[^}]*visibility:\s*hidden/s);
     expect(button.closest('.tree-action-grid')).not.toBeNull();
@@ -270,7 +279,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
 
   it('keeps a hidden Ack item hidden and counted, and acknowledges from the dock without unhiding it', async () => {
     const transport = await mount();
-    fireEvent.click(within(row()).getByRole('button', { name: 'Hide (x)' }));
+    fireEvent.click(within(row()).getByRole('button', { name: 'Hide (h)' }));
     await waitFor(() => expect(row()).toBeNull());
     expect(screen.getByText('Ack all (1)')).toBeTruthy();
     const view = () => transport.preferences.sessions.find(value => value.session.session_id === route.session_id)!;
@@ -359,7 +368,10 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
   it.each(['tree', 'detail', 'graph'] as const)('uses a to Ack from %s without opening an answer', async source => {
     const transport = await mount();
     let target = row();
-    if (source === 'detail') { fireEvent.click(target); target = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' }); }
+    // `a` acts on the selected item, so the item is selected first (the Map row stays the focus owner).
+    fireEvent.click(target);
+    const opened = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
+    if (source === 'detail') target = opened;
     if (source === 'graph') { fireEvent.keyDown(target, { key: 'g' }); await screen.findByText('One graph per topic'); target = row(); }
     await act(async () => { target.focus(); fireEvent.keyDown(target, { key: 'a' }); });
     await waitFor(() => expect(acks(transport)).toHaveLength(1));
@@ -369,8 +381,12 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
 
   it('keeps a as answer on a waiting question and leaves typing alone', async () => {
     const transport = await mount();
+    // `a` acts on the selected item: select the question, then ask to answer it.
+    fireEvent.click(row('2')); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     row('2').focus(); fireEvent.keyDown(row('2'), { key: 'a' });
-    await waitFor(() => expect(row('2').querySelector('.tree-answer')).not.toBeNull());
+    const waiting = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
+    expect(within(waiting).getByRole('group', { name: 'Answer' })).toBeDefined();
+    expect(row('2').querySelector('.tree-answer')).toBeNull();
     expect(acks(transport)).toHaveLength(0);
     fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     const words = within(detail()).getByRole('textbox');

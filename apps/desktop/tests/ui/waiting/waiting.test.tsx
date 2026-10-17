@@ -10,11 +10,12 @@ import { deliveryEvidence } from '../../../src/selectors/waiting/delivery';
 import { sentRows, waitingRows } from '../../../src/selectors/waiting/rows';
 import { WaitingStore } from '../../../src/selectors/waiting/store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
-import { WaitingColumn } from '../../../src/ui/waiting/WaitingColumn';
-import { LinkOpener } from '../../../src/ui/shared/MarkdownText';
-import { RemovalContext, RemovalQueue } from '../../../src/ui/remove/queue';
-import { removeSubject } from '../../../src/ui/remove/model';
-import { NoticeStore } from '../../../src/ui/pages/notices';
+import { AnswerDock, OtherSessionQuestions } from '../../../src/ui/dock/AnswerDock';
+import { StuckNote } from '../../../src/ui/answer/StuckNote';
+import { stuckInput } from '../../../src/selectors/waiting/stuck';
+import { SessionActionControllers } from '../../../src/components/bindings/actions';
+import { AppTransport, secondId } from '../app/transport';
+import { answerWords } from '../answer/words';
 
 const route = { project_id: demo.project_id, session_id: demo.id };
 function fixture(): { session: Session; project: ProjectSummary; summary: SessionSummary } {
@@ -74,7 +75,7 @@ const stores: WaitingStore[] = [], sessions: OpenSessions[] = [];
 function setup() {
   const transport = new Transport(), service = createDesktopService(transport), opened = new OpenSessions(service);
   const store = new WaitingStore(service, opened); stores.push(store); sessions.push(opened);
-  // The column's answer drafts: one preferences read with no saved drafts.
+  // Shared answer drafts: one preferences read with no saved drafts.
   const drafts = () => {
     transport.push('preferences_get', { api_version: 1, ok: true, data: { kind: 'preferences_get', data: { schema_version: 1, revision: 1,
       global: { theme: 'system', selected_navigation: { kind: 'projects' }, window: null, pinned: false, notification_watermark: null }, sessions: [], later: [], drafts: [] } } } as unknown as QueryEnvelope);
@@ -88,8 +89,7 @@ function withOptions(session = mutableSession()): Session {
     { id: 'no', label: 'Change the design', consequence: 'Review a new contract.', recommended: false }];
   return session;
 }
-const sentRow = (text: string) => screen.getAllByRole('button').find(element => element.classList.contains('waiting-sent') && element.textContent?.includes(text))!;
-afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); sessions.splice(0).forEach(opened => opened.closeAll()); vi.useRealTimers(); });
+afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); stores.splice(0).forEach(store => store.stop()); sessions.splice(0).forEach(opened => opened.closeAll()); vi.useRealTimers(); });
 
 describe('current Waiting and immutable Sent selection', () => {
   it.each(['closed', 'archived'] as const)('excludes %s sessions from waiting without changing their questions', state => {
@@ -117,15 +117,8 @@ describe('current Waiting and immutable Sent selection', () => {
     const drafts = loadDrafts(); await drafts.load();
     const entry = drafts.begin(seed, '2', 'answer')!;
     drafts.edit(entry, { text: 'Keep this draft', selected_option_id: 'yes' });
-    render(<WaitingColumn store={store} drafts={drafts} revealItem={vi.fn()} openSession={vi.fn()} />);
-    expect(document.querySelector('[data-waiting-item="2"]')).toBeNull();
     expect(store.getSnapshot().waiting).toEqual([]);
-    expect(document.querySelector('.waiting-count')!.textContent).toBe('0');
-    expect(screen.queryByText(/questions? from closed sessions/)).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Show' })).toBeNull();
-    expect(screen.queryByRole('button', { name: /Send answer|Send “Keep the design”/ })).toBeNull();
-    expect(screen.queryByRole('textbox')).toBeNull();
-    expect(screen.getByRole('region', { name: 'Waiting questions' }).textContent).not.toContain(seed.items['2']!.question);
+    expect(store.getSnapshot().waiting).toHaveLength(0);
     expect(store.getSnapshot().sessions[0].session.items['2']!.status).toBe('waiting_on_me');
     expect(store.getSnapshot().sessions[0].session.items['2']!.question).toBe(seed.items['2']!.question);
     expect(drafts.find(route, '2', 'answer')?.draft.text).toBe('Keep this draft');
@@ -139,11 +132,7 @@ describe('current Waiting and immutable Sent selection', () => {
     if (state === 'archived') seed.archived_at = seed.updated_at;
     transport.capture(seed); await store.start();
     const drafts = loadDrafts(); await drafts.load();
-    render(<WaitingColumn store={store} drafts={drafts} revealItem={vi.fn()} openSession={vi.fn()} />);
     expect(store.getSnapshot().waiting).toEqual([]);
-    expect(screen.queryByText(/questions? from closed sessions/)).toBeNull();
-    expect(document.querySelector('[data-closed-question="2"]')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Show' })).toBeNull();
   });
   it.each(['bring', 'reopen'] as const)('a handled %s requests an ask without answering it', kind => {
     const seed = fixture(), old = seed.session.inputs[inputId('71')]!;
@@ -160,15 +149,14 @@ describe('current Waiting and immutable Sent selection', () => {
     expect(waitingRows([seed]).map(row => row.item.id)).toEqual(['2']);
   });
   it('keeps the question answerable after the agent explains an owner follow-up', async () => {
-    const { store, transport, drafts } = setup(), seed = withOptions(), reply = seed.inputs[inputId('71')]!;
+    const { store, transport } = setup(), seed = withOptions(), reply = seed.inputs[inputId('71')]!;
     reply.kind = 'reply'; reply.payload.intent = 'reply'; reply.payload.text = 'What does B mean?';
     const agentReply = structuredClone(seed.messages.find(message => message.author === 'agent')!);
     agentReply.id = inputId('99'); agentReply.item_id = '2'; agentReply.kind = 'reply'; agentReply.body = 'B means changing the design.';
     seed.messages.push(agentReply);
     transport.capture(seed); await store.start();
-    render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
-    expect(document.querySelector('[data-waiting-item="2"]')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Send answer' })).toBeTruthy();
+    expect(store.getSnapshot().waiting.map(row => row.item.id)).toEqual(['2']);
+    expect(store.getSnapshot().waiting[0].item.options).toEqual(seed.items['2']!.options);
   });
   it('keeps a new ask beside the old sent answer and its complete original payload', () => {
     const seed = fixture(), session = seed.session as Session;
@@ -405,291 +393,7 @@ describe('registered global capture', () => {
   });
 });
 
-describe('source-backed Waiting and Sent panel', () => {
-  it('keeps the full Sent question in one navigation control without a nested name chip', async () => {
-    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
-    const revealItem = vi.fn();
-    render(<WaitingColumn store={store} drafts={drafts()} revealItem={revealItem} openSession={vi.fn()} />);
-    const sent = store.getSnapshot().sent.find(row => row.route?.item_id === '3')!;
-    const element = document.querySelector<HTMLElement>(`[data-sent-input="${sent.input.id}"]`)!;
-    expect(element.querySelector('.waiting-sent-question')?.textContent).toBe(sent.input.payload.target_snapshot.item_question);
-    expect(element.querySelector('.waiting-sent-question button')).toBeNull();
-    fireEvent.click(element);
-    expect(revealItem).toHaveBeenCalledWith(sent.route);
-    revealItem.mockClear();
-    fireEvent.keyDown(element, { key: 'Enter' });
-    expect(revealItem).toHaveBeenCalledWith(sent.route);
-  });
-  it.each(['item', 'topic', 'session', 'project'] as const)('hides Sent during %s removal and restores the same row on Undo without sending', async kind => {
-    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
-    const session = store.getSnapshot().sessions[0]!.session;
-    const item = session.items['3']!, topic = session.topics[item.topic_id]!;
-    const target = kind === 'item' ? { kind, item: { ...route, item_id: item.id } }
-      : kind === 'topic' ? { kind, session: route, topic_id: topic.id }
-      : kind === 'session' ? { kind, session: route } : { kind, project_id: route.project_id };
-    const subject = target.kind === 'item' || target.kind === 'topic' ? removeSubject(session, target)!
-      : target.kind === 'session' ? { kind: 'session' as const, name: 'Sample session', agent: 'the agent', when: 'Today', topics: 2, items: 9, shared: 0, waiting: 1 }
-      : { kind: 'project' as const, name: 'Sample project', path: '/tmp/sample-project', sessions: 1, topics: 2, items: 9, waiting: 1 };
-    const notices = new NoticeStore(), queue = new RemovalQueue({ service: createDesktopService(transport), notices, read: async () => session });
-    render(<RemovalContext.Provider value={queue}><WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} /></RemovalContext.Provider>);
-    const input = store.getSnapshot().sent.find(row => row.route?.item_id === item.id)!.input;
-    const sent = () => document.querySelector(`[data-sent-input="${input.id}"]`);
-    const before = sent()!;
-    expect(before).toBeTruthy();
-    const calls = transport.calls.length;
-    let operation!: string;
-    act(() => { operation = queue.schedule(target, subject); });
-    expect(sent()).toBeNull();
-    act(() => { queue.undo(operation); });
-    expect(sent()?.textContent).toBe(before.textContent);
-    expect(transport.calls.slice(calls).some(call => /remove/.test(call.name))).toBe(false);
-  });
-
-  it('keeps the card control and its focus through qualified presence heartbeats without recapturing the queue', async () => {
-    const { store, transport, drafts } = setup(), seed = withOptions(), summary = fixture().summary;
-    summary.active_binding!.presence = null;
-    const queued = seed.inputs[inputId('76')]!; queued.state = 'queued'; queued.active_attempt_id = null;
-    // Nothing ahead of it on the binding: its note follows the agent's presence.
-    seed.inputs[inputId('72')]!.state = 'handled';
-    transport.push('project_list', projectPage()); transport.push('session_list', sessionPage([summary])); transport.push('session_get', loaded(seed));
-    await store.start(); const answers = drafts();
-    render(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} />);
-    await act(async () => { await answers.load(); });
-    const option = screen.getByTitle('Press 2 to select, ⌥2 to send'); option.focus();
-    const before = store.getSnapshot(), reads = transport.calls.length;
-    const row = sentRow(queued.payload.target_snapshot.item_question!);
-    expect(row.textContent).toContain('demo.local hasn’t picked it up yet');
-    const active = summary.active_binding!, observation = { ...structuredClone(binding.presence!), freshness: 'fresh' as const,
-      generation: active.generation, connection_state: 'connected' as const, execution_state: 'running' as const };
-    for (const [index, execution] of ['running', 'idle', 'running'].entries()) {
-      await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation,
-        observation: { ...observation, execution_state: execution as 'running' | 'idle', last_seen_at: `2026-10-05T02:05:0${index}.000Z` } }); });
-      expect(screen.getByTitle('Press 2 to select, ⌥2 to send')).toBe(option); expect(document.activeElement).toBe(option);
-      expect(store.getSnapshot().status).toBe('ready'); expect(store.getSnapshot().waiting).toBe(before.waiting);
-      expect(store.getSnapshot().sent).toBe(before.sent); expect(store.getSnapshot().counts).toBe(before.counts);
-      expect(row.textContent).toContain(execution === 'running' ? 'Waiting for demo.local to finish what it’s doing' : 'demo.local hasn’t picked it up yet');
-      expect(transport.calls).toHaveLength(reads);
-    }
-    fireEvent.keyDown(option, { key: '2' });
-    expect(option.getAttribute('aria-pressed')).toBe('true'); expect(screen.getByRole('button', { name: 'Send answer' })).toBeTruthy();
-  });
-  it('fences an old question immediately after a durable revision hint until the complete new question is captured', async () => {
-    const { store, transport, drafts } = setup(); transport.capture(withOptions()); await store.start(); const answers = drafts();
-    render(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} />);
-    await act(async () => { await answers.load(); });
-    const send = () => screen.getByRole('button', { name: 'Send answer' });
-    expect(send().hasAttribute('disabled')).toBe(false);
-    const changed = withOptions(), summary = fixture().summary;
-    changed.revision++; summary.revision = changed.revision;
-    changed.items['2']!.question_revision++; changed.items['2']!.question = 'The revised current question';
-    const pending = deferred<QueryEnvelope>();
-    transport.push('project_list', pending.promise); transport.push('session_list', sessionPage([summary]), sessionPage([summary]), sessionPage([summary]));
-    transport.push('session_get', loaded(changed), loaded(changed));
-    await act(async () => { transport.emit('ariadne://session_changed', { session_id: demo.id, revision: changed.revision }); });
-    expect(store.getSnapshot().status).toBe('stale'); expect(held(send())).toBe(true);
-    expect(screen.getByText(/Refresh is pending/)).toBeTruthy();
-    const active = summary.active_binding!;
-    await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation,
-      observation: { ...structuredClone(binding.presence!), generation: active.generation, last_seen_at: '2026-10-05T02:05:00.000Z' } }); });
-    expect(store.getSnapshot().status).toBe('stale'); expect(held(send())).toBe(true);
-    await act(async () => { pending.resolve(projectPage()); await store.refresh(); });
-    expect(store.getSnapshot().status).toBe('ready'); expect(screen.getByText(changed.items['2']!.question)).toBeTruthy();
-    // The untouched draft follows the new question; no review is asked for.
-    expect(screen.queryByText(/This item changed/)).toBeNull();
-    expect(Object.values(answers.getSnapshot().entries).map(entry => entry.draft.question_revision)).toEqual([2]);
-  });
-  it('renders live scoped session presence when catalogue summaries have no observation', async () => {
-    const { store, transport, opened, drafts } = setup(), seed = mutableSession();
-    const summary = fixture().summary; summary.active_binding!.presence = null;
-    const queued = seed.inputs[inputId('76')]!;
-    queued.state = 'queued'; queued.active_attempt_id = null; seed.inputs[inputId('72')]!.state = 'handled';
-    transport.push('project_list', projectPage()); transport.push('session_list', sessionPage([summary])); transport.push('session_get', loaded(seed));
-    await store.start(); render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
-    const row = sentRow(queued.payload.target_snapshot.item_question!), saved = 'demo.local hasn’t picked it up yet';
-    expect(row.textContent).toContain(saved);
-    const active = summary.active_binding!, running = { ...structuredClone(binding.presence!), freshness: 'fresh' as const,
-      generation: active.generation, connection_state: 'connected' as const, execution_state: 'running' as const };
-    await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation, observation: running }); });
-    expect(row.textContent).toContain('Waiting for demo.local to finish what it’s doing');
-    expect(opened.open(route).getSnapshot().presence[active.id].execution_state).toBe('running');
-    expect(store.getSnapshot().sessions[0].summary.active_binding!.presence).toBeNull();
-    for (const observation of [
-      { ...running, freshness: 'stale' as const }, { ...running, freshness: 'unknown' as const },
-      { ...running, execution_state: 'unknown' as const },
-    ]) {
-      await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation, observation }); });
-      expect(row.textContent).toContain(saved);
-      expect(row.textContent).not.toContain('Idle');
-    }
-    await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: inputId('99'),
-      observation: { ...running, generation: inputId('99') } }); });
-    expect(row.textContent).toContain(saved);
-    const captured = store.getSnapshot(); store.stop();
-    await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation, observation: running }); });
-    expect(store.getSnapshot()).toBe(captured);
-  });
-  it.each((['open', 'in_progress'] as const).flatMap(status => (['open', 'in_progress', 'done'] as const).map(target => ({ status, target }))))(
-    'keeps a waiting-card reference $status while Ack points to $target', async ({ status, target }) => {
-      const { store, transport, drafts } = setup(), seed = mutableSession(), report = seed.items['1.1']!;
-      report.status = status; report.ack_to = target; report.ask = null;
-      seed.items['2']!.question = 'Read [retry limits](item:1.1).';
-      transport.capture(seed); await store.start();
-      render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
-      const link = await screen.findByRole('link', { name: 'retry limits' });
-      expect(link.title).toContain(status === 'open' ? ' · Open' : ' · In progress');
-      expect(document.querySelector('[data-waiting-item="1.1"]')).toBeNull();
-      expect(document.querySelector('[data-waiting-item="2"]')).not.toBeNull();
-      expect(document.querySelector('.waiting-count')?.textContent).toBe('1');
-    });
-
-  it('opens references from the waiting question in that card’s session without opening the card itself', async () => {
-    const { store, transport, drafts } = setup(), seed = mutableSession();
-    seed.items['2']!.question = 'Read [receipt follow-up](item:1.1) or [missing follow-up](item:99).';
-    seed.items['1.1']!.short = 'Receipt test';
-    transport.push('project_list', projectPage()); transport.push('session_list', sessionPage()); transport.push('session_get', loaded(seed));
-    await store.start();
-    const reveal = vi.fn(), external = vi.fn();
-    render(<LinkOpener.Provider value={external}><WaitingColumn store={store} drafts={drafts()} revealItem={reveal} openSession={vi.fn()} /></LinkOpener.Provider>);
-    const link = await screen.findByRole('link', { name: 'receipt follow-up' });
-    expect(link.title).toBe(`${seed.items['1.1']!.question} · Open`);
-    fireEvent.click(link); fireEvent.keyDown(link, { key: 'Enter' });
-    expect(reveal.mock.calls).toEqual([[{ ...route, item_id: '1.1' }], [{ ...route, item_id: '1.1' }]]);
-    expect(screen.queryByRole('link', { name: 'missing follow-up' })).toBeNull();
-    expect(screen.getByText('(item not found)')).toBeTruthy();
-    expect(external).not.toHaveBeenCalled();
-  });
-
-  it('distinguishes colliding ancestor labels across the visible Waiting cards', async () => {
-    const { store, transport, drafts } = setup(), seed = mutableSession();
-    const first = seed.items['1']!, second = seed.items['4']!, child = seed.items['2']!;
-    first.short = second.short = 'Count cache reads';
-    first.question = 'Count cache reads using Redis for this rollout?';
-    second.question = 'Count cache reads using Postgres for this rollout?';
-    second.topic_id = first.topic_id; child.parent = first.id; child.topic_id = first.topic_id;
-    seed.items['other-waiting'] = { ...structuredClone(child), id: 'other-waiting', parent: second.id, question: 'Which cache expiry should we use?' };
-    transport.capture(seed); await store.start();
-    render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
-    expect(document.querySelector('[data-waiting-item="2"] .waiting-path')!.textContent).toContain('Redis · Count cache reads');
-    expect(document.querySelector('[data-waiting-item="other-waiting"] .waiting-path')!.textContent).toContain('Postgres · Count cache reads');
-  });
-
-  it('routes waiting/current and original Sent targets, including a topic-only input', async () => {
-    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
-    const reveal = vi.fn(), open = vi.fn();
-    render(<WaitingColumn store={store} drafts={drafts()} revealItem={reveal} openSession={open} />);
-    expect(screen.getByText('Waiting on me')).toBeTruthy(); expect(screen.getByText('Oldest first')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Details' })); expect(reveal).toHaveBeenCalledWith({ ...route, item_id: '2' });
-    expect(screen.getByText(/^Waiting .* · asked in #\d+$/)).toBeTruthy();
-    // The topic-only input opens the registered session, never an invented item.
-    fireEvent.keyDown(sentRow('Continued context'), { key: 'Enter' }); expect(open).toHaveBeenCalledWith(route);
-    fireEvent.click(sentRow('Implement receipt lookup')); expect(reveal).toHaveBeenLastCalledWith({ ...route, item_id: '3' });
-    expect(document.querySelector('.waiting-sent-label')?.textContent).toBe('Sent· waiting for the agent to pick up');
-    const questions = screen.getByRole('region', { name: 'Waiting questions' });
-    const sent = screen.getByRole('region', { name: 'Sent · waiting for the agent to pick up' });
-    expect(questions.querySelectorAll('[data-waiting-item]')).toHaveLength(1);
-    expect(questions.querySelector('[data-sent-input]')).toBeNull();
-    expect(sent.querySelector('[data-waiting-item]')).toBeNull();
-    expect([...sent.querySelectorAll<HTMLElement>('[data-sent-input]')].map(row => row.dataset.sentInput)).toEqual(store.getSnapshot().sent.map(row => row.id));
-    expect(screen.queryByRole('textbox')).toBeNull();
-  });
-  it('shows incomplete data and the frozen Sent label instead of a false all-clear state', async () => {
-    const { store, transport, drafts } = setup(), seed = mutableSession();
-    const followup = seed.inputs[inputId('74')]!; followup.kind = 'answer'; followup.payload.selected_option_id = 'frozen';
-    followup.payload.target_snapshot.options = [{ id: 'frozen', label: 'Old choice', consequence: 'Old consequence', recommended: false }];
-    const sessions = sessionPage(); if (sessions.ok && sessions.data.kind === 'session_list') {
-      sessions.data.data.counts.completeness = 'partial'; sessions.data.data.counts.unavailable_session_ids = [inputId('99')];
-    }
-    const projects = projectPage(); if (projects.ok && projects.data.kind === 'project_list' && sessions.ok && sessions.data.kind === 'session_list') projects.data.data.counts = structuredClone(sessions.data.data.counts);
-    transport.push('project_list', projects); transport.push('session_list', sessions); transport.push('session_get', loaded(seed)); await store.start();
-    render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
-    expect(screen.getByText(/Queue counts are incomplete/)).toBeTruthy();
-    expect(screen.getByText('Some sessions couldn’t be read.')).toBeTruthy();
-    expect(screen.queryByText(inputId('99'), { exact: false })).toBeNull();
-    expect(document.querySelector('.waiting-notice')!.textContent).not.toContain(inputId('99'));
-    expect(screen.queryByText('Nothing waiting on you')).toBeNull();
-    const stopped = sentRow('Replace the old retry question');
-    expect(stopped.textContent).toMatch(/You sent “Old choice”/);
-    expect(stopped.textContent).toMatch(/Couldn’t deliver “Old choice”\. /);
-  });
-  it('deletes a queued Sent message from its row without opening it; a drop request has no words, so no Edit', async () => {
-    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
-    const open = vi.fn(), reveal = vi.fn();
-    render(<WaitingColumn store={store} drafts={drafts()} revealItem={reveal} openSession={open} />);
-    const row = sentRow('Record retry limits');
-    expect(row.textContent).toContain('Queued behind your message on “Implement receipt lookup”');
-    // Not sent yet: Delete (input 76 is a drop request, which has no text to edit), never Cancel message.
-    expect(within(row).queryByRole('button', { name: 'Edit message' })).toBeNull();
-    expect(within(row).queryByRole('button', { name: 'Cancel message' })).toBeNull();
-    const remove = within(row).getByRole('button', { name: 'Delete message' });
-    expect(remove.title).toBe('Delete message');
-    expect(remove.textContent).toBe('');
-    expect(remove.querySelector('.ph-trash')).toBeTruthy();
-    fireEvent.keyDown(remove, { key: 'Enter' });
-    expect(reveal).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
-    fireEvent.click(remove);
-    const cancel = transport.calls.find(call => call.name === 'input_cancel')!.request as { command: { params: unknown } };
-    expect(cancel.command.params).toEqual({ input_id: inputId('76'), expected_revision: demo.revision });
-    expect(reveal).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
-  });
-  it('says why a queued Sent message is not sending while the supervisor backs off, and clears once it runs again', async () => {
-    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
-    render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
-    const row = () => sentRow('Record retry limits'), binding = (demo as unknown as Session).bindings[(demo as unknown as Session).active_binding_id!]!;
-    await waitFor(() => expect(transport.listeners.get('ariadne://supervisor_health')?.size).toBe(1));
-    const health = { binding_id: binding.id, generation: binding.generation, state: 'backing_off' as const, reason: 'codex exited', retry_in_seconds: 30,
-      updated_at: new Date().toISOString() };
-    act(() => { transport.emit('ariadne://supervisor_health', health); });
-    await waitFor(() => expect(row().textContent).toMatch(/Not sending: codex exited · retrying in \d+s/));
-    act(() => { transport.emit('ariadne://supervisor_health', { ...health, state: 'running', reason: null, retry_in_seconds: null, updated_at: new Date(Date.now() + 1_000).toISOString() }); });
-    await waitFor(() => expect(row().textContent).toContain('Queued behind your message on “Implement receipt lookup”'));
-  });
-  it('cancels an in-flight message before the agent receives it, keeping its delivery line', async () => {
-    const { store, transport, drafts } = setup(), seed = fixture().session as Session;
-    const attempt = seed.inputs[inputId('72')]!.attempts[0]!;
-    attempt.acceptance = 'prepared'; attempt.host_turn_id = null; attempt.turn_state = 'unknown';
-    transport.capture(seed); await store.start();
-    const open = vi.fn(), reveal = vi.fn();
-    render(<WaitingColumn store={store} drafts={drafts()} revealItem={reveal} openSession={open} />);
-    const row = sentRow('Implement receipt lookup');
-    expect(row.querySelector('.waiting-sent-line')).toBeTruthy();
-    expect(row.querySelector('[data-stuck="sent"]')).toBeTruthy();
-    // On its way: it can be called back, not edited or deleted.
-    expect(within(row).queryByRole('button', { name: 'Edit' })).toBeNull(); expect(within(row).queryByRole('button', { name: 'Delete' })).toBeNull();
-    fireEvent.click(within(row).getByRole('button', { name: 'Cancel message' }));
-    const cancel = transport.calls.find(call => call.name === 'input_cancel')!.request as { command: { params: unknown } };
-    expect(cancel.command.params).toEqual({ input_id: inputId('72'), expected_revision: demo.revision });
-    expect(reveal).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
-  });
-  it('hides Cancel message after the agent receives an in-flight message', async () => {
-    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
-    render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
-    const row = sentRow('Implement receipt lookup');
-    expect(row.querySelector('.waiting-sent-line')).toBeTruthy();
-    expect(within(row).queryByRole('button', { name: 'Cancel message' })).toBeNull();
-  });
-  it('retries a stopped Sent message in one click, as the owner’s word that the agent is idle', async () => {
-    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
-    render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
-    const row = sentRow('Replace the old retry question');
-    expect(row.textContent).toContain('Couldn’t deliver “Followup request for item 7. Preserve…”. Ariadne isn’t sure it reached demo.local.');
-    fireEvent.click(within(row).getByRole('button', { name: 'Retry' }));
-    const resolve = transport.calls.find(call => call.name === 'input_resolve')!.request as { command: { params: Record<string, unknown> } };
-    expect(resolve.command.params).toMatchObject({ input_id: inputId('74'), attempt_id: inputId('63'), decision: 'resend', reason: '',
-      evidence: { source: 'owner_attestation', owner_attested_idle: true } });
-  });
-  it('marks a stopped Sent message done in one click, and cancels it too', async () => {
-    const { store, transport, drafts } = setup(); transport.capture(); await store.start();
-    const reveal = vi.fn();
-    render(<WaitingColumn store={store} drafts={drafts()} revealItem={reveal} openSession={vi.fn()} />);
-    const row = sentRow('Replace the old retry question');
-    fireEvent.click(within(row).getByRole('button', { name: 'Mark as done' }));
-    const skip = transport.calls.find(call => call.name === 'input_resolve')!.request as { command: { params: Record<string, unknown> } };
-    expect(skip.command.params).toMatchObject({ input_id: inputId('74'), attempt_id: inputId('63'), decision: 'skip', reason: '',
-      evidence: { source: 'owner_attestation', owner_attested_idle: true } });
-    expect(reveal).not.toHaveBeenCalled();
-    // Core (rule B) cancels any message that hasn't settled, a stopped one included.
-    expect(within(row).getByRole('button', { name: 'Cancel message' })).toBeTruthy();
-  });
+describe('waiting episode selection', () => {
   it('leaves the questions of an archived topic out of Waiting on me, and brings them back on restore', () => {
     const seed = fixture(), session = seed.session as Session, topic = session.topics[session.items['2']!.topic_id]!;
     expect(waitingRows([seed]).map(row => row.item.id)).toEqual(['2']);
@@ -706,112 +410,373 @@ describe('source-backed Waiting and Sent panel', () => {
     reply.state = 'cancelled';
     expect(waitingRows([seed]).map(row => row.item.id)).toEqual(['2']);
   });
-  it('keeps a failed answer to the still-open question on its Waiting card, with the owner’s fix', async () => {
-    const { store, transport, drafts } = setup(), seed = withOptions(), failed = seed.inputs[inputId('74')]!;
-    failed.kind = 'answer'; failed.target = { ...failed.target, item_id: '2' }; failed.payload.selected_option_id = 'yes';
-    failed.payload.target_snapshot = { ...failed.payload.target_snapshot, question_revision: seed.items['2']!.question_revision, options: seed.items['2']!.options };
-    // The agent turned it down: a failed delivery, not an uncertain one.
-    const tried = failed.attempts.find(value => value.id === failed.active_attempt_id)!; tried.acceptance = 'rejected'; tried.error = null;
-    transport.capture(seed); await store.start();
-    const answers = drafts();
-    const value = { store, drafts: answers, revealItem: vi.fn(), openSession: vi.fn(), selected: { ...route, item_id: '2' } };
-    const view = render(<WaitingColumn {...value} />);
-    // The failed answer leaves it Waiting on me: one card, carrying the failed delivery, and no Sent row.
-    const cards = [...document.querySelectorAll('.waiting-card')].filter(card => card.textContent?.includes('Keep the design'));
-    expect(cards).toHaveLength(1);
-    expect(cards[0]!.textContent).toContain('Couldn’t deliver “Keep the design”');
-    expect(screen.getAllByRole('button').some(element => element.classList.contains('waiting-sent') && element.textContent?.includes('Keep the design'))).toBe(false);
-    const card = cards[0] as HTMLElement;
-    expect(card.getAttribute('aria-current')).toBe('true');
-    const warningRing = card.style.boxShadow;
-    expect(warningRing).toContain('var(--a-warn)');
-    view.rerender(<WaitingColumn {...value} conversationOpen />);
-    expect(card.style.boxShadow).toContain('var(--color-text)');
-    expect(card.style.boxShadow).not.toContain('var(--a-warn)');
-    expect(card.textContent).toContain('Couldn’t deliver “Keep the design”');
-    view.rerender(<WaitingColumn {...value} />);
-    expect(card.style.boxShadow).toBe(warningRing);
+});
+
+
+async function dockUI(configure: (transport: AppTransport) => void = () => {}) {
+  const transport = new AppTransport();
+  withOptions(transport.sessions.get(route.session_id)!);
+  configure(transport);
+  const service = createDesktopService(transport), opened = new OpenSessions(service), waiting = new WaitingStore(service, opened);
+  stores.push(waiting); sessions.push(opened);
+  await waiting.start();
+  const drafts = new OwnerDraftStore(service); await drafts.load();
+  const current = opened.open(route);
+  const view = render(<AnswerDock store={current} waiting={waiting} drafts={drafts} />);
+  return { transport, opened, waiting, drafts, current, view };
+}
+const dock = () => screen.getByRole('region', { name: 'Answer dock' });
+const openDock = () => fireEvent.click(within(dock()).getByRole('button', { name: /^\d+ waiting$/ }));
+const pager = () => dock().querySelector('.dock-pager [aria-live]')?.textContent;
+const option = (index: number) => dock().querySelector<HTMLButtonElement>(`[data-answer-option="${index}"]`)!;
+const send = () => dock().querySelector<HTMLButtonElement>('[data-answer-send]')!;
+function answerInput(session: Session, suffix: string) {
+  const value = session.inputs[inputId(suffix)]!;
+  value.kind = 'answer'; value.payload.intent = 'answer';
+  return value;
+}
+function otherSession(transport: AppTransport) {
+  const second = structuredClone(transport.sessions.get(route.session_id)!);
+  second.id = secondId; second.title = 'Separate session'; second.items['2']!.question = 'Other session decision';
+  transport.sessions.set(secondId, second);
+  return second;
+}
+
+describe('source-backed answer dock', () => {
+  it('starts as a folded current-session count and stays folded when a new question arrives', async () => {
+    const { transport, current, drafts } = await dockUI();
+    expect(within(dock()).getByRole('button', { name: '1 waiting' })).toBeTruthy();
+    expect(dock().hasAttribute('data-open')).toBe(false);
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(Object.keys(drafts.getSnapshot().entries)).toHaveLength(0);
+    const seed = transport.sessions.get(route.session_id)!;
+    seed.items['10'] = { ...structuredClone(seed.items['2']!), id: '10', ordinal: 10, question: 'A newly arrived decision' };
+    seed.revision++;
+    await act(async () => { await current.refresh(); });
+    expect(within(dock()).getByRole('button', { name: '2 waiting' })).toBeTruthy();
+    expect(dock().hasAttribute('data-open')).toBe(false);
+    expect(screen.queryByRole('textbox')).toBeNull();
   });
-  it('warns on the card that sending is paused, with Resume', async () => {
-    const { store, transport, drafts } = setup(), seed = mutableSession();
-    seed.bindings[seed.active_binding_id!]!.owner_paused = true;
-    transport.capture(seed); await store.start();
-    render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
-    const note = document.querySelector('.waiting-card [data-dispatch-note="paused"]')!;
-    expect(note.textContent).toContain('Sending is paused — your message waits here until you resume.');
-    fireEvent.click(within(note as HTMLElement).getByRole('button', { name: 'Resume' }));
-    expect(transport.calls.some(call => call.name === 'binding_resume')).toBe(true);
+
+  it('opens the oldest question explicitly with no recommended option selected and pages locally', async () => {
+    const { transport } = await dockUI(transport => {
+      const seed = transport.sessions.get(route.session_id)!;
+      seed.items['10'] = { ...structuredClone(seed.items['2']!), id: '10', ordinal: 10, question: 'Later question', waiting_since: '2026-10-10T00:00:00Z' };
+    });
+    openDock();
+    await waitFor(() => expect(option(0)).toBeTruthy());
+    expect(option(0).getAttribute('aria-pressed')).toBe('false');
+    expect(option(1).getAttribute('aria-pressed')).toBe('false');
+    expect(send().disabled).toBe(true);
+    expect(pager()).toBe('1 of 2'); expect(dock().querySelector('[data-owner-input="2"]')).not.toBeNull();
+    fireEvent.click(within(dock()).getByRole('button', { name: 'Next question' }));
+    expect(pager()).toBe('2 of 2'); expect(dock().querySelector('[data-owner-input="10"]')).not.toBeNull();
+    expect(transport.queries.some(query => query.request.command === 'reveal_item')).toBe(false);
+    fireEvent.click(within(dock()).getByRole('button', { name: 'Fold the dock' }));
+    expect(screen.queryByRole('textbox')).toBeNull();
   });
-  it('keeps stale rows but blocks sending after a read failure', async () => {
-    const { store, transport, drafts } = setup(); transport.capture(withOptions()); await store.start(); const answers = drafts();
-    render(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} />);
-    await act(async () => { await answers.load(); });
-    expect(screen.getByRole('button', { name: 'Send answer' }).hasAttribute('disabled')).toBe(false);
+
+  it('groups other sessions behind an explicit control without selecting or navigating the Map', async () => {
+    const { transport } = await dockUI(otherSession);
+    expect(within(dock()).getByRole('button', { name: '1 waiting' })).toBeTruthy();
+    fireEvent.click(within(dock()).getByRole('button', { name: '1 in other sessions' }));
+    const others = document.querySelector<HTMLElement>('[aria-label="Questions in other sessions"]')!;
+    expect(within(others).getByRole('heading', { name: /Separate session/ })).toBeTruthy();
+    expect(within(others).getByText('Other session decision')).toBeTruthy();
+    expect(within(others).queryByText(transport.sessions.get(route.session_id)!.items['2']!.question)).toBeNull();
+    expect(dock().hasAttribute('data-open')).toBe(false);
+    expect(transport.queries.some(query => query.request.command === 'reveal_item')).toBe(false);
+    expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'all_sessions' });
+  });
+
+  it('sends an other-session answer to its original session and item without navigation', async () => {
+    const { transport } = await dockUI(otherSession);
+    fireEvent.click(within(dock()).getByRole('button', { name: '1 in other sessions' }));
+    fireEvent.click(dock().querySelector<HTMLElement>('.dock-other-head')!);
+    await waitFor(() => expect(option(0)?.disabled).toBe(false));
+    // The routing line: where this answer goes, before anything is sent.
+    expect(dock().querySelector('.dock-other-row .answer-bar')?.textContent).toMatch(/^Goes to .+ in “Separate session”, once\./);
+    fireEvent.click(option(0));
+    await waitFor(() => expect(send()?.disabled).toBe(false));
+    fireEvent.click(send());
+    await waitFor(() => expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(true));
+    expect(transport.mutations.find(request => request.command.command === 'input_submit')).toMatchObject({
+      session: { ...route, session_id: secondId }, command: { params: { target: { item_id: '2' }, selected_option_id: 'yes' } },
+    });
+    expect(transport.queries.some(query => query.request.command === 'reveal_item')).toBe(false);
+  });
+
+  it('keeps option identity and focus through qualified presence heartbeats without recapturing the queue', async () => {
+    const { transport, waiting, current } = await dockUI(); openDock();
+    await waitFor(() => expect(option(1)?.disabled).toBe(false));
+    const button = option(1); button.focus();
+    const before = waiting.getSnapshot(), reads = transport.queries.length;
+    const active = current.getSnapshot().snapshot!.session.bindings[demo.active_binding_id!]!;
+    for (const [index, execution] of ['running', 'idle', 'running'].entries()) {
+      await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation,
+        observation: { ...structuredClone(binding.presence!), generation: active.generation, freshness: 'fresh', connection_state: 'connected',
+          execution_state: execution as 'running' | 'idle', last_seen_at: `2026-10-05T02:05:0${index}.000Z` } }); });
+      expect(option(1)).toBe(button); expect(document.activeElement).toBe(button);
+      expect(waiting.getSnapshot().waiting).toBe(before.waiting);
+      expect(waiting.getSnapshot().sent).toBe(before.sent); expect(waiting.getSnapshot().counts).toBe(before.counts);
+      expect(current.getSnapshot().presence[active.id].execution_state).toBe(execution);
+      expect(transport.queries).toHaveLength(reads);
+    }
+  });
+
+  it('fences an old question after a durable hint until its complete replacement is read', async () => {
+    const { transport, current, drafts } = await dockUI(); openDock();
+    await waitFor(() => expect(option(0)?.disabled).toBe(false));
+    const seed = transport.sessions.get(route.session_id)!;
+    const gate = deferred<void>(), invoke = transport.invoke.bind(transport);
+    const spy = vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'session_get') await gate.promise;
+      return invoke(name, args);
+    });
+    seed.revision++; seed.items['2']!.question_revision++; seed.items['2']!.revision++;
+    seed.items['2']!.question = 'The revised current question';
+    seed.rounds[seed.items['2']!.current_round_id!]!.question_revision = seed.items['2']!.question_revision;
+    try {
+      await act(async () => { transport.emit('ariadne://session_changed', { session_id: seed.id, revision: seed.revision }); });
+      expect(current.getSnapshot().status).toBe('stale'); expect(held(option(0))).toBe(true);
+      fireEvent.click(option(0)); fireEvent.click(send());
+      expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(false);
+      await act(async () => { gate.resolve(); await current.refresh(); });
+      await waitFor(() => expect(current.getSnapshot().status).toBe('ready'));
+      expect(dock().querySelector('.dock-question-title')?.textContent).toContain('The revised current question');
+      expect(held(option(0))).toBe(false);
+      expect(screen.queryByText(/This item changed/)).toBeNull();
+      expect(Object.values(drafts.getSnapshot().entries).every(entry => entry.draft.question_revision === 2)).toBe(true);
+    } finally { gate.resolve(); spy.mockRestore(); }
+  });
+
+  it('keeps the last question and typed words while a session read fails, and blocks sending', async () => {
+    const { transport, current } = await dockUI(); openDock();
+    await waitFor(() => expect(option(0)?.disabled).toBe(false));
+    const text = answerWords(dock());
+    fireEvent.change(text, { target: { value: 'Keep these words' } });
+    await waitFor(() => expect(send().disabled).toBe(false));
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      if (name === 'session_get') throw new Error('Unavailable');
+      return invoke(name, args);
+    });
+    await act(async () => { await current.refresh(); });
+    expect(held(send())).toBe(true);
+    expect((text as HTMLTextAreaElement).value).toBe('Keep these words');
+    expect(within(dock()).getByText('The session is unavailable or stale. Refresh before sending.')).toBeTruthy();
+    fireEvent.click(send());
+    expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(false);
+  });
+
+  it('keeps a refused answer in place with its choice frozen and one Try sending again of the same operation', async () => {
+    const { transport } = await dockUI(); openDock();
+    await waitFor(() => expect(option(1)?.disabled).toBe(false));
+    const invoke = transport.invoke.bind(transport), refused: string[] = [];
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+      const request = args.request;
+      if (!refused.length && 'command' in request && request.command.command === 'input_submit') {
+        refused.push(request.command.op_id);
+        return { api_version: 1, ok: false, error: { ...error, code: 'queue_full', message: 'The queue is full.' } };
+      }
+      return invoke(name, args);
+    });
+    const question = dock().querySelector('.dock-question-title')?.textContent;
+    fireEvent.click(option(1));
+    await waitFor(() => expect(send().disabled).toBe(false));
+    fireEvent.click(send());
+    const again = await within(dock()).findByRole('button', { name: 'Try sending again' });
+    expect(within(dock()).getByText('Not sent. Your words are kept.')).toBeTruthy();
+    // The same question, the same pick, nothing else to choose until the owner acts.
+    expect(dock().querySelector('.dock-question-title')?.textContent).toBe(question);
+    expect(option(1).getAttribute('aria-pressed')).toBe('true');
+    expect(option(0).disabled).toBe(true);
+    expect(dock().querySelector('[data-answer-send]')).toBeNull();
+    fireEvent.click(again);
+    await waitFor(() => expect(transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(1));
+    expect(transport.mutations.find(request => request.command.command === 'input_submit')!.command.op_id).toBe(refused[0]);
+  });
+
+  it('keeps "1 of 2" and the sent question in place on screen during the Sent hold', async () => {
+    const { transport } = await dockUI(transport => {
+      const session = transport.sessions.get(route.session_id)!;
+      session.items['10'] = { ...structuredClone(session.items['2']!), id: '10', question: 'A later waiting question', waiting_since: '2026-10-05T03:00:00.000Z' };
+    });
+    fireEvent.click(within(dock()).getByRole('button', { name: '2 waiting' }));
+    await waitFor(() => expect(option(0)?.disabled).toBe(false));
+    expect(pager()).toBe('1 of 2');
+    const question = dock().querySelector('.dock-question-title')?.textContent;
+    fireEvent.click(option(0));
+    await waitFor(() => expect(send().disabled).toBe(false));
+    fireEvent.click(send());
+    await waitFor(() => expect(transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(1));
+    await within(dock()).findByRole('button', { name: 'Undo' });
+    expect(pager()).toBe('1 of 2');
+    expect(dock().querySelector('.dock-question-title')?.textContent).toBe(question);
+  });
+
+  it.each(['busy', 'disconnected'] as const)('says when a queued answer goes: agent %s', async state => {
+    const { transport, current } = await dockUI(transport => {
+      if (state === 'disconnected') { const session = transport.sessions.get(route.session_id)!; session.bindings[session.active_binding_id!]!.connection_state = 'disconnected'; }
+    });
+    if (state === 'busy') {
+      const active = current.getSnapshot().snapshot!.session.bindings[demo.active_binding_id!]!;
+      await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: active.id, generation: active.generation,
+        observation: { ...structuredClone(binding.presence!), generation: active.generation, freshness: 'fresh', connection_state: 'connected',
+          execution_state: 'running', last_seen_at: '2026-10-05T02:05:00.000Z' } }); });
+    }
+    openDock();
+    await waitFor(() => expect(option(0)?.disabled).toBe(false));
+    fireEvent.click(option(0));
+    await waitFor(() => expect(send().disabled).toBe(false));
+    fireEvent.click(send());
+    await waitFor(() => expect(transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(1));
+    expect(await within(dock()).findByText(new RegExp(`^Queued at \\d\\d:\\d\\d\\. It goes when the agent is ${state === 'busy' ? 'free' : 'running'}\\.$`))).toBeTruthy();
+  });
+
+  it('puts why a delivery failed and its one Retry in the bar, and leaves the note its other actions', async () => {
+    const { transport } = await dockUI(transport => {
+      const session = transport.sessions.get(route.session_id)!, failed = answerInput(session, '74'), item = session.items['2']!;
+      failed.target = { topic_id: item.topic_id, item_id: '2' };
+      failed.payload = { ...failed.payload, selected_option_id: item.options[1]!.id, text: 'Keep it short.',
+        target_snapshot: { ...failed.payload.target_snapshot, question_revision: item.question_revision } };
+      const attempt = failed.attempts.find(value => value.id === failed.active_attempt_id)!;
+      Object.assign(attempt, { acceptance: 'rejected', error: null });
+    });
+    openDock();
+    const retry = await within(dock()).findByRole('button', { name: 'Retry' });
+    const bar = retry.closest('.answer-bar')!;
+    expect(bar.querySelector('.answer-bar-text')?.textContent).toMatch(/^Not sent: .+ didn’t take it\. Your answer is kept\./);
+    expect(within(bar as HTMLElement).getByRole('button', { name: 'Copy' })).toBeTruthy();
+    // The note below keeps Mark as done, Cancel and More options, with no second Retry and no second reason.
+    const note = dock().querySelector<HTMLElement>('.stuck-note')!;
+    expect(within(note).queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(within(note).getByRole('button', { name: 'Mark as done' })).toBeTruthy();
+    expect(note.textContent).not.toMatch(/Couldn’t deliver/);
+    expect(option(1).getAttribute('aria-pressed')).toBe('true');
+    // A double click is one replay.
+    fireEvent.click(retry); fireEvent.click(retry);
+    const resolves = () => transport.mutations.filter(request => request.command.command === 'input_resolve');
+    await waitFor(() => expect(resolves()).toHaveLength(1));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 100)); });
+    expect(resolves()).toHaveLength(1);
+    expect(resolves()[0]).toMatchObject({ command: { params: { input_id: inputId('74'), decision: 'resend' } } });
+    expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(false);
+  });
+
+  it('locks sending and offers reconciliation when a draft preference write is uncertain', async () => {
+    const { transport } = await dockUI(); openDock();
+    await waitFor(() => expect(option(0)?.disabled).toBe(false));
+    const invoke = transport.invoke.bind(transport);
+    vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => name === 'preferences_patch'
+      ? { api_version: 1, ok: false, error: { ...error, code: 'commit_uncertain' } }
+      : invoke(name, args));
+    fireEvent.click(option(0));
+    expect(await screen.findByRole('button', { name: 'Try saving your draft again' })).toBeTruthy();
+    expect(send().disabled).toBe(true);
+    expect(transport.mutations.some(request => request.command.command === 'input_submit')).toBe(false);
+  });
+
+  it('explains an incomplete other-session refresh while retaining the last questions', async () => {
+    const { store, transport, drafts } = setup(); transport.capture(withOptions()); await store.start();
+    render(<OtherSessionQuestions waiting={store} drafts={drafts()} currentSession="another-session" />);
     transport.push('project_list', { api_version: 1, ok: false, error });
     await act(async () => { await store.refresh(); });
-    expect(held(screen.getByRole('button', { name: 'Send answer' }))).toBe(true);
-    expect(screen.getByText('Ariadne couldn’t read or save its data. Try again.')).toBeTruthy(); expect(screen.queryByText(error.hint)).toBeNull();
-    expect(screen.getByRole('button', { name: 'Details' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Refresh queue' })).toBeTruthy();
+    expect(screen.getByText('Some sessions could not be read. Showing the last questions.')).toBeTruthy();
+    expect(screen.getByText(demo.items['2'].question)).toBeTruthy();
+    expect(screen.queryByText(error.hint)).toBeNull();
   });
-  it('shows the empty state, the loading skeleton and the selected ring', async () => {
-    const { store, transport, drafts } = setup(), seed = mutableSession(); seed.items['2']!.status = 'in_progress';
-    const answers = drafts();
-    const view = render(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} />);
-    expect(screen.getAllByLabelText('Loading waiting questions')).toHaveLength(2); expect(screen.getByText('–')).toBeTruthy();
-    transport.capture(seed); await act(async () => { await store.start(); });
-    expect(screen.getByText('Nothing waiting on you')).toBeTruthy(); expect(screen.getByText('New questions from the agent will appear here.')).toBeTruthy();
-    expect(screen.getByText('0')).toBeTruthy();
-    view.unmount();
+
+  it('keeps persisted original answer words and delivery in the Sent summary without a saved draft receipt', async () => {
+    const { transport } = await dockUI(transport => {
+      const seed = transport.sessions.get(route.session_id)!, value = answerInput(seed, '76');
+      value.payload.text = '  exact original words  '; value.payload.selected_option_id = 'old';
+      value.payload.target_snapshot.options = [{ id: 'old', label: 'Original choice', consequence: 'Old consequence', recommended: false }];
+      seed.items['4']!.options = [{ id: 'new', label: 'Current choice', consequence: '', recommended: false }];
+    });
+    fireEvent.click(within(dock()).getByRole('button', { name: /^\d+ sent/ }));
+    const sent = document.querySelector<HTMLElement>('[aria-label="Sent answers"]')!;
+    const delivery = [...sent.querySelectorAll<HTMLElement>('.question-delivery')].find(element => element.textContent?.includes('exact original words'))!;
+    expect(delivery.querySelector('.question-sent-words')!.textContent).toBe('Original choice\n\n  exact original words  ');
+    expect(within(delivery).getByRole('button', { name: 'Undo' })).toBeTruthy();
+    expect(transport.preferences.drafts).toEqual([]);
   });
-  it('keeps Sent empty separately and preserves question and message keys on refresh', async () => {
-    const { store, transport, drafts } = setup(), seed = mutableSession();
-    for (const input of Object.values(seed.inputs)) if (input) input.state = 'cancelled';
-    transport.capture(seed); await store.start();
-    render(<WaitingColumn store={store} drafts={drafts()} revealItem={vi.fn()} openSession={vi.fn()} />);
-    const questions = screen.getByRole('region', { name: 'Waiting questions' });
-    const sent = screen.getByRole('region', { name: 'Sent · waiting for the agent to pick up' });
-    expect(within(sent).getByText('No messages waiting for pickup.')).toBeTruthy();
-    expect(within(questions).queryByText('No messages waiting for pickup.')).toBeNull();
-    expect(sent.classList.contains('waiting-sent-section-empty')).toBe(true);
-    expect(document.querySelector('.waiting-count')!.textContent).toBe('1');
-    const card = questions.querySelector('[data-waiting-item="2"]')!;
-    const waitingId = store.getSnapshot().waiting[0].id;
-    seed.inputs[inputId('76')]!.state = 'queued';
-    seed.revision++;
-    const summary = fixture().summary; summary.revision = seed.revision;
-    const capture = () => {
-      transport.push('project_list', projectPage()); transport.push('session_list', sessionPage([summary])); transport.push('session_get', loaded(seed));
-    };
-    capture(); await act(() => store.refresh());
-    const row = sent.querySelector(`[data-sent-input="${inputId('76')}"]`)!;
-    expect(sent.classList.contains('waiting-sent-section-empty')).toBe(false);
-    expect(within(sent).queryByText('No messages waiting for pickup.')).toBeNull();
-    expect(questions.querySelector('[data-waiting-item="2"]')).toBe(card);
-    expect(store.getSnapshot().waiting[0].id).toBe(waitingId);
-    capture(); await act(() => store.refresh());
-    expect(sent.querySelector(`[data-sent-input="${inputId('76')}"]`)).toBe(row);
-    expect(questions.querySelector('[data-waiting-item="2"]')).toBe(card);
-    expect(document.querySelector('.waiting-count')!.textContent).toBe('1');
+
+  it('checks an uncertain persisted delivery without retrying or submitting another answer', async () => {
+    const { transport, current } = await dockUI(transport => { answerInput(transport.sessions.get(route.session_id)!, '74'); });
+    fireEvent.click(within(dock()).getByRole('button', { name: /^\d+ sent/ }));
+    const sent = document.querySelector<HTMLElement>('[aria-label="Sent answers"]')!;
+    const delivery = [...sent.querySelectorAll<HTMLElement>('.question-delivery')].find(element => element.textContent?.includes('Followup request'))!;
+    expect(within(delivery).getByText('Checking delivery. Your answer is kept.')).toBeTruthy();
+    expect(within(delivery).queryByRole('button', { name: 'Retry' })).toBeNull();
+    const reads = transport.queries.length;
+    fireEvent.click(within(delivery).getByRole('button', { name: 'Check delivery' }));
+    await waitFor(() => expect(current.getSnapshot().status).toBe('ready'));
+    expect(transport.queries.length).toBeGreaterThan(reads);
+    expect(transport.mutations.filter(request => ['input_submit', 'input_resolve'].includes(request.command.command))).toEqual([]);
   });
-  it('rings the selected card and offers preference reconciliation', async () => {
-    const { store, transport, drafts } = setup(), seed = withOptions();
-    seed.items['2']!.question = 'Which delivery window should we use for the receipt rollout?';
-    seed.items['2']!.short = 'Delivery window';
-    transport.capture(seed); await store.start(); const answers = drafts();
-    const view = render(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} />);
-    await act(async () => { await answers.load(); });
-    const card = document.querySelector<HTMLElement>('[data-waiting-item="2"]')!;
-    expect(within(card).getByRole('group', { name: `Answer ${seed.items['2']!.question}` })).toBeTruthy();
-    expect(within(card).queryByRole('group', { name: 'Answer Delivery window' })).toBeNull();
-    expect(within(card).queryByRole('group', { name: 'Answer #2' })).toBeNull();
-    expect(document.querySelector('[data-waiting-item="2"]')?.getAttribute('aria-current')).toBeNull();
-    view.rerender(<WaitingColumn store={store} drafts={answers} revealItem={vi.fn()} openSession={vi.fn()} selected={{ ...route, item_id: '2' }} />);
-    expect(document.querySelector('[data-waiting-item="2"]')?.getAttribute('aria-current')).toBe('true');
-    // A preference write that cannot be confirmed locks the drafts until it is retried.
-    drafts(); transport.push('preferences_patch', { api_version: 1, ok: false, error: { ...error, code: 'commit_uncertain' } });
-    fireEvent.click(screen.getByTitle('Press 2 to select, ⌥2 to send'));
-    expect(await screen.findByRole('button', { name: 'Try saving your draft again' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Send answer' }).hasAttribute('disabled')).toBe(true);
+});
+
+// The dock changes where answers live; generic recovery still uses these shared
+// controls and preserves the original input/session rather than the visible question.
+describe('shared original-input recovery', () => {
+  async function recovery(seed = mutableSession(), suffix = '74') {
+    const { store, transport, opened } = setup(); transport.capture(seed); await store.start();
+    const service = createDesktopService(transport), actions = new SessionActionControllers(service).forSession(opened.open(route));
+    const session = opened.open(route).getSnapshot().snapshot!.session, value = session.inputs[inputId(suffix)]!;
+    render(<StuckNote actions={actions} input={value} stuck={stuckInput(session, value)!} />);
+    return { store, transport, value };
+  }
+  it('retains original item and topic-only Sent targets as canonical routes', () => {
+    const sent = sentRows([fixture()]);
+    expect(sent.find(row => row.input.id === inputId('72'))!.route).toEqual({ ...route, item_id: '3' });
+    expect(sent.find(row => row.input.id === inputId('77'))).toMatchObject({ route: null, session: route });
+    expect(sent.find(row => row.input.id === inputId('74'))!.input.payload.target_snapshot.item_question).toBe('Replace the old retry question');
+  });
+  it('deletes an unclaimed queued original input with its original revision and no item rerouting', async () => {
+    const { transport } = await recovery(mutableSession(), '76');
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Cancel message' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    const request = transport.calls.find(call => call.name === 'input_cancel')!.request;
+    expect(request).toMatchObject({ session: route, command: { params: { input_id: inputId('76'), expected_revision: demo.revision } } });
+  });
+  it('cancels a prepared input before receipt using its original route', async () => {
+    const seed = mutableSession(), attempt = seed.inputs[inputId('72')]!.attempts[0]!;
+    attempt.acceptance = 'prepared'; attempt.host_turn_id = null; attempt.turn_state = 'unknown';
+    const { transport } = await recovery(seed, '72');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel message' }));
+    expect(transport.calls.find(call => call.name === 'input_cancel')!.request).toMatchObject({ session: route,
+      command: { params: { input_id: inputId('72'), expected_revision: demo.revision } } });
+  });
+  it('offers no cancellation after the agent receives the input', async () => {
+    await recovery(mutableSession(), '72');
+    expect(screen.queryByRole('button', { name: 'Cancel message' })).toBeNull();
+  });
+  it('retries a definitely rejected delivery with owner-idle evidence on its original input', async () => {
+    const seed = mutableSession(), failed = seed.inputs[inputId('74')]!;
+    failed.attempts.find(value => value.id === failed.active_attempt_id)!.acceptance = 'rejected';
+    const { transport } = await recovery(seed);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(transport.calls.find(call => call.name === 'input_resolve')!.request).toMatchObject({ session: route, command: { params: {
+      input_id: inputId('74'), attempt_id: inputId('63'), decision: 'resend', reason: '',
+      evidence: { source: 'owner_attestation', owner_attested_idle: true },
+    } } });
+  });
+  it('resumes a paused original binding through the shared recovery control', async () => {
+    const seed = mutableSession(); seed.bindings[seed.active_binding_id!]!.owner_paused = true;
+    const { transport } = await recovery(seed, '76');
+    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(transport.calls.find(call => call.name === 'binding_resume')!.request).toMatchObject({ session: route,
+      command: { params: { binding_id: seed.active_binding_id } } });
+  });
+  it('marks an uncertain original input done with explicit owner-idle evidence', async () => {
+    const { transport } = await recovery();
+    fireEvent.click(screen.getByRole('button', { name: 'Mark as done' }));
+    expect(transport.calls.find(call => call.name === 'input_resolve')!.request).toMatchObject({ session: route, command: { params: {
+      input_id: inputId('74'), attempt_id: inputId('63'), decision: 'skip', reason: '',
+      evidence: { source: 'owner_attestation', owner_attested_idle: true },
+    } } });
+    expect(screen.getByRole('button', { name: 'Cancel message' })).toBeTruthy();
   });
 });

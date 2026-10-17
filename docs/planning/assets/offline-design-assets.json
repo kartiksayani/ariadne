@@ -91,6 +91,7 @@
   "app_glyphs": [
     {"weight":"regular","class":"ph-caret-double-left","unicode":"U+E128"},
     {"weight":"regular","class":"ph-caret-double-right","unicode":"U+E12A"},
+    {"weight":"regular","class":"ph-caret-up","unicode":"U+E13C"},
     {"weight":"regular","class":"ph-info","unicode":"U+E2CE"},
     {"weight":"regular","class":"ph-link","unicode":"U+E2E2"},
     {"weight":"regular","class":"ph-pause","unicode":"U+E39E"},

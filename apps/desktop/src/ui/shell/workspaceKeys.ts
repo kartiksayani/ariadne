@@ -1,70 +1,67 @@
-import type { KeyboardEvent } from 'react';
+// The App's share of the keys (C4, converted to intents for C5). Keys that only make sense where focus is
+// (Esc, the option digits) stay key handlers; every other workspace key asks for an intent (ui/keys.ts
+// `keyIntents`), and the App answers the ones that act on the current view's selected item.
 import type { ItemRoute } from '../../generated/core';
 import type { OwnerFocusRequest } from '../answer/useSubmit';
 import type { RemoveTarget } from '../dialogs/remove';
-import type { WorkspaceHandlers, WorkspaceIntent } from '../keys';
+import type { Intent, IntentHandler } from '../intents';
+import { intentKeyHandlers, type WorkspaceHandlers } from '../keys';
 
 export type TreeRemoveTarget = Extract<RemoveTarget, { kind: 'item' | 'topic' }>;
 export interface FocusedItem { readonly item: { readonly id: string; readonly status: string; readonly topic_id: string }; readonly target: ItemRoute }
-/** The App's share of the workspace keymap: actions on the focused or selected item, views and Esc. */
-export function workspaceKeys(app: {
+export interface ItemIntentApp {
   readonly store: boolean;
-  readonly focused: (event: KeyboardEvent<HTMLDivElement>) => FocusedItem | null;
-  readonly oldestWaiting: () => ItemRoute | undefined;
+  /** A page (Projects, All sessions, Archive) shows: the Map's selection is hidden behind it, so item keys and Esc do nothing. */
+  readonly onPage: boolean;
+  readonly toggleFilters: () => void;
+  /** The current view's selected item: the conversation's item in the bigger view, else the Map's selection. Never the row under the pointer. */
+  readonly focused: () => FocusedItem | null;
   readonly focusOwner: (target: ItemRoute, intent: OwnerFocusRequest['intent'], optionIndex?: number) => void;
-  readonly quickAnswer: (target: ItemRoute, index?: number) => boolean;
   readonly ack: (target: ItemRoute, repeat: boolean) => boolean;
   readonly queueBring: (target: ItemRoute) => Promise<void>;
   readonly toggleHidden: (target: ItemRoute) => boolean;
   readonly toggleLater: (target: ItemRoute, itemId: string) => boolean;
-  readonly archiveTopic: (topicId: string) => boolean;
   readonly toggleGraph: () => void;
   readonly closeDetail: () => void;
   readonly closeConversation?: () => void;
   readonly clearFilters?: () => void;
   readonly askRemove: (target: TreeRemoveTarget) => boolean;
-}): WorkspaceHandlers<HTMLDivElement> {
-  const closed = ['done', 'decided', 'dropped'];
-  const onItem = (act: (focused: FocusedItem, intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => boolean | void) =>
-    (intent: WorkspaceIntent, event: KeyboardEvent<HTMLDivElement>) => { const focused = app.focused(event); return focused ? act(focused, intent, event) : false; };
-  const search = () => {
-    if (!app.store || app.closeConversation) return false;
-    document.querySelector<HTMLInputElement>('[data-shell-search]')?.focus(); return true;
-  };
+}
+
+/** The App root's keys: every intent key, plus Esc and the option digits. */
+export function workspaceKeys(app: Pick<ItemIntentApp, 'focused' | 'focusOwner' | 'closeDetail' | 'closeConversation' | 'clearFilters' | 'onPage'>): WorkspaceHandlers<HTMLDivElement> {
   return {
-    search,
-    // Esc closes the answer box first (the editor stops it), then detail, then clears filters.
-    escape: () => { if (app.closeConversation) { app.closeConversation(); return true; } app.closeDetail(); app.clearFilters?.(); return false; },
-    answer: (_intent, event) => {
-      const focused = app.focused(event);
-      if (focused && app.ack(focused.target, event.repeat)) return true;
-      const question = focused && focused.item.status === 'waiting_on_me' ? focused.target : app.closeConversation ? undefined : app.oldestWaiting();
-      if (!question) return false;
-      app.focusOwner({ ...question }, 'answer'); return true;
+    ...intentKeyHandlers<HTMLDivElement>(),
+    // Esc closes the answer box first (the editor stops it), then detail, then clears filters. On a page it is not the Map's.
+    escape: () => { if (app.onPage) return false; if (app.closeConversation) { app.closeConversation(); return true; } app.closeDetail(); app.clearFilters?.(); return false; },
+    choose: intent => {
+      const focused = app.focused();
+      if (!focused || focused.item.status !== 'waiting_on_me' || intent.kind !== 'choose') return false;
+      app.focusOwner(focused.target, 'answer', intent.index); return true;
     },
-    bring: onItem(({ target }, _intent, event) => { if (!event.repeat) void app.queueBring(target); return true; }),
-    respond: onItem(({ item, target }) => {
+  };
+}
+
+/**
+ * The intents the App answers: those that act on the current view's selected item, and the view toggles it owns.
+ * Hide, Later, Remove and Graph wait while the bigger view covers the Map, as they did before (the top bar owns Search).
+ */
+export function itemIntents(app: ItemIntentApp): Partial<Record<Intent, IntentHandler>> {
+  const closed = ['done', 'decided', 'dropped'];
+  const onItem = (act: (focused: FocusedItem, repeat: boolean) => boolean) =>
+    ({ repeat }: { readonly repeat: boolean }) => { const focused = app.focused(); return focused ? act(focused, repeat) : false; };
+  return {
+    'filter.toggle': () => { if (!app.store) return false; app.toggleFilters(); return true; },
+    'view.toggleGraph': () => { if (!app.store || app.closeConversation) return false; app.toggleGraph(); return true; },
+    'item.ack': onItem(({ target }, repeat) => app.ack(target, repeat)),
+    'item.bring': onItem(({ target }, repeat) => { if (!repeat) void app.queueBring(target); return true; }),
+    'item.respond': onItem(({ item, target }) => {
       app.focusOwner(target, [...closed, 'replaced'].includes(item.status) ? 'followup' : item.status === 'in_progress' ? 'note' : 'reply'); return true;
     }),
-    drop: onItem(({ target }) => { app.focusOwner(target, 'drop'); return true; }),
-    reopen: onItem(({ item, target }) => { if (!closed.includes(item.status)) return false; app.focusOwner(target, 'reopen'); return true; }),
-    choose: onItem(({ item, target }, intent) => {
-      if (item.status !== 'waiting_on_me' || intent.kind !== 'choose') return false;
-      app.focusOwner(target, 'answer', intent.index); return true;
-    }),
-    'choose-send': onItem(({ item, target }, intent) => item.status === 'waiting_on_me' && intent.kind === 'choose-send' && app.quickAnswer(target, intent.index)),
-    'answer-words': onItem(({ item, target }) => item.status === 'waiting_on_me' && app.quickAnswer(target)),
-    hide: onItem(({ target }, _intent, event) => !app.closeConversation && (event.repeat ? true : app.toggleHidden(target))),
-    later: onItem(({ item, target }) => !app.closeConversation && app.toggleLater(target, item.id)),
-    archive: onItem(({ item }) => !app.closeConversation && app.archiveTopic(item.topic_id)),
-    graph: () => { if (!app.store || app.closeConversation) return false; app.toggleGraph(); return true; },
-    // The Waiting column's own fold button owns the fold (saved layout, narrow-window peek); the key presses it.
-    waiting: () => {
-      const control = document.querySelector<HTMLButtonElement>('[data-shortcut-waiting-fold]');
-      if (!control || control.disabled) return false;
-      control.click(); return true;
-    },
-    // ⌫/Delete away from a row: ask to remove the focused or selected item (rows handle their own).
-    remove: onItem(({ target }) => !app.closeConversation && app.askRemove({ kind: 'item', item: target })),
+    'item.drop': onItem(({ target }) => { app.focusOwner(target, 'drop'); return true; }),
+    'item.reopen': onItem(({ item, target }) => { if (!closed.includes(item.status)) return false; app.focusOwner(target, 'reopen'); return true; }),
+    'item.hide': onItem(({ target }, repeat) => !app.closeConversation && (repeat ? true : app.toggleHidden(target))),
+    'item.later': onItem(({ item, target }) => !app.closeConversation && app.toggleLater(target, item.id)),
+    'item.remove': onItem(({ target }) => !app.closeConversation && app.askRemove({ kind: 'item', item: target })),
   };
 }

@@ -23,13 +23,17 @@ async function keyDown(element: Element, key: string, metaKey = false) {
 }
 // Use the controls' explicit labels/text instead of recomputing accessible names
 // for every button in the full session tree on each history/readiness check.
-const control = (name: string) => name === 'Back' || name === 'Forward'
-  ? screen.getByLabelText<HTMLButtonElement>(name, { selector: 'button' })
-  : screen.getByText<HTMLButtonElement>(name, { selector: 'button', exact: true });
+const control = (name: string) => screen.getByLabelText<HTMLButtonElement>(name, { selector: 'button' });
+/** The top bar's search: a button until the owner opens it, then a box (`.tb-search-input`) that finds in place. */
+async function searchBox() {
+  if (!document.querySelector('.tb-search-input')) await click(screen.getByLabelText('Search the Map', { selector: 'button' }));
+  return document.querySelector<HTMLInputElement>('.tb-search-input')!;
+}
 function ready() {
-  expect(screen.getByLabelText('Session actions', { selector: 'button' })).toBeTruthy();
+  // The connection dot opens the card that replaced the Session actions menu.
+  expect(document.querySelector('[data-popover-trigger="connection"]')).toBeTruthy();
   expect(screen.getByLabelText('Session tree', { selector: 'section' }).getAttribute('data-session-status')).toBe('ready');
-  expect(screen.getByLabelText('Session').getAttribute('aria-busy')).toBe('false');
+  expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
 }
 async function openSession(id = route.session_id) {
   await goToSession({ ...route, session_id: id }, click);
@@ -71,6 +75,12 @@ async function readAt(top: number) {
 function outsideTree(id: string) {
   const rectangle = treeRow(id).getBoundingClientRect();
   expect(rectangle.top < 0 || rectangle.bottom > 400).toBe(true);
+}
+/** Opens the dock's first waiting question and follows its title, the question itself (as a Waiting card did). */
+async function fromDock() {
+  const dock = screen.getByRole('region', { name: 'Answer dock' });
+  if (!dock.hasAttribute('data-open')) await click(within(dock).getByRole('button', { name: /^\d+ (more )?waiting$/ }));
+  await click(dock.querySelector<HTMLButtonElement>('.dock-question-open')!);
 }
 function inTree(id: string) {
   const rectangle = treeRow(id).getBoundingClientRect();
@@ -233,7 +243,7 @@ describe('composed item navigation', { timeout: 10_000 }, () => {
     await click(control('Back')); await selected('1.1');
   });
 
-  it('records graph keyboard selection, Waiting and native routes through the same effective selection', async () => {
+  it('records graph keyboard selection, dock and native routes through the same effective selection', async () => {
     const transport = await setup(); await openSession(); await pick('4');
     await click(control('Graph')); screen.getAllByRole('tree', { name: / graph$/ }); ready();
     const graphRow = document.querySelector<HTMLElement>('.graph-node[data-item-id="4"]')!;
@@ -241,19 +251,19 @@ describe('composed item navigation', { timeout: 10_000 }, () => {
     expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)?.selected_item_id).toBe('5');
     ready();
     await keyDown(document.body, '[', true); await selected('4');
-    await click(document.querySelector('[data-waiting-item="2"]')!); await selected('2');
+    await fromDock(); await selected('2');
     await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '8' }); }); await selected('8');
     await keyDown(document.body, '[', true); await selected('2');
     await keyDown(document.body, '[', true); await selected('4');
     await keyDown(document.body, ']', true); await selected('2');
   });
 
-  it('keeps history isolated between session views and retains it when returning to an existing tab', async () => {
+  it('keeps history isolated between session views and retains it when returning to an existing session', async () => {
     const transport = await setup(); await openSession(); await pick('1'); await pick('4');
     await openSession(secondId);
     expect(screen.queryByLabelText('Back', { selector: 'button' })).toBeNull();
-    const tab = [...document.querySelectorAll<HTMLButtonElement>('[data-session-tab]')].find(button => button.dataset.sessionTab?.includes(route.session_id))!;
-    expect(tab.disabled).toBe(false); await click(tab); selected('4');
+    // No tabs: returning to the session is the same click on its row in All sessions (open.ts waits until it is enabled).
+    await openSession(); selected('4');
     await click(control('Back')); await selected('1');
     expect(transport.preferences.sessions.find(view => view.session.session_id === secondId)?.selected_item_id).toBeNull();
   });
@@ -279,7 +289,7 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
     await click(screen.getByRole('button', { name: 'Close detail' }));
     // Opening the session reveals its saved selection. An owner search edit
     // dismisses that temporary reveal; restore the query before asking Graph to reveal it again.
-    const search = screen.getByLabelText<HTMLInputElement>('Search questions and outcomes');
+    const search = await searchBox();
     await act(async () => { fireEvent.change(search, { target: { value: `${saved.filters.search} ` } }); });
     await act(async () => { fireEvent.change(search, { target: { value: saved.filters.search } }); });
     await click(control('Graph'));
@@ -297,8 +307,9 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
     expect(target()!.getAttribute('aria-selected')).toBe('true');
     expect(document.activeElement).toBe(target());
     const rectangle = target()!.getBoundingClientRect();
+    // Centred in the room above the 40px dock line: (300 − 40) / 2.
     expect(rectangle.left + rectangle.width / 2).toBe(200);
-    expect(rectangle.top + rectangle.height / 2).toBe(150);
+    expect(rectangle.top + rectangle.height / 2).toBe(130);
     expect(document.querySelector('.graph-node[data-item-id="1"]')!.getAttribute('aria-expanded')).toBe('true');
     expect(screen.queryByLabelText('Item detail')).toBeNull();
     const current = transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!;
@@ -306,7 +317,7 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
     expect(current.expanded_item_ids).toEqual(saved.expanded_item_ids);
     expect(current.hidden_item_ids).toEqual(saved.hidden_item_ids);
     expect(current.selected_item_id).toBe('1.1');
-    expect(screen.getByLabelText<HTMLInputElement>('Search questions and outcomes').value).toBe(saved.filters.search);
+    expect((await searchBox()).value).toBe(saved.filters.search);
     if (cause !== 'collapsed ancestor') {
       expect(screen.getByText('Showing an item outside your current filters.')).toBeTruthy();
       await click(screen.getByRole('button', { name: 'Resume filtered view' }));
@@ -368,13 +379,13 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
     outsideTree('8');
   });
 
-  it.each(['card', 'Details'] as const)('brings a Waiting target into view through its %s, including the already-selected target', async entry => {
+  it('brings a waiting question into view from the dock path, including the already-selected target', async () => {
     treeGeometry(); await setup(); await openSession(); await pick('2');
-    const card = document.querySelector<HTMLElement>('[data-waiting-item="2"]')!;
-    const open = () => click(entry === 'card' ? card : within(card).getByRole('button', { name: 'Details' }));
     for (let attempt = 0; attempt < 2; ++attempt) {
+      // Details answers the selected question, so the dock holds it once Details closes.
+      await click(screen.getByRole('button', { name: 'Close detail' }));
       await readAt(600); outsideTree('2');
-      await open(); selected('2');
+      await fromDock(); selected('2');
       expect(treeScroll().scrollTop).toBeLessThan(600);
       inTree('2');
       expect(treeRow('2').getBoundingClientRect().top).toBe(8);
@@ -420,27 +431,27 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
 
   it('reveals Back and Forward targets while preserving the current search', async () => {
     treeGeometry(); const transport = await setup(); await openSession(); await pick('2'); await pick('8');
-    await act(async () => { fireEvent.change(screen.getByLabelText('Search questions and outcomes'), { target: { value: 'receipt' } }); });
+    await act(async () => { fireEvent.change(await searchBox(), { target: { value: 'receipt' } }); });
     await readAt(600); outsideTree('8');
     await click(control('Back')); selected('2'); inTree('2');
     await readAt(600);
     await click(control('Forward')); selected('8'); inTree('8');
-    expect(screen.getByLabelText<HTMLInputElement>('Search questions and outcomes').value).toBe('receipt');
+    expect((await searchBox()).value).toBe('receipt');
     expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!.selected_item_id).toBe('8');
   });
 
   it('keeps a clicked search-result tree row stationary through the composed controls', async () => {
     treeGeometry(); await setup(); await openSession();
-    await act(async () => { fireEvent.change(screen.getByLabelText('Search questions and outcomes'), { target: { value: 'receipt' } }); });
+    await act(async () => { fireEvent.change(await searchBox(), { target: { value: 'receipt' } }); });
     expect(screen.getByText(/items matching “receipt”/)).toBeTruthy();
     await readAt(600); outsideTree('1.1');
     await pick('1.1');
     expect(treeScroll().scrollTop).toBe(600);
     outsideTree('1.1');
-    expect(screen.getByLabelText<HTMLInputElement>('Search questions and outcomes').value).toBe('receipt');
+    expect((await searchBox()).value).toBe('receipt');
   });
 
-  it('keeps Waiting, linked and history reveals working after opening an archived saved selection', async () => {
+  it('keeps dock, linked and history reveals working after opening an archived saved selection', async () => {
     treeGeometry();
     const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
     transport.preferences.sessions[0]!.selected_item_id = '8';
@@ -449,7 +460,7 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
     await setup(transport); await openSession();
     expect(treeRow('8')).toBeNull();
     await readAt(600);
-    await click(document.querySelector('[data-waiting-item="2"]')!);
+    await fromDock();
     selected('2'); inTree('2');
     expect(document.activeElement).toBe(treeRow('2'));
     await readAt(600);
@@ -480,13 +491,15 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
       await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '8' }); });
       selected('8'); inTree('8');
       expect(treeScroll().scrollTop).toBeGreaterThan(150);
-      expect(treeRow('8').getBoundingClientRect().bottom).toBe(392);
+      // 8px above the 40px dock line that floats over the Map's bottom.
+      expect(treeRow('8').getBoundingClientRect().bottom).toBe(352);
     }
   });
 
-  it.each(['⌘J', 'edge marker'] as const)('reveals the offscreen selection through %s', async entry => {
+  // ⌘J is gone (SPEC 7 "Removed"); the . key (Back to the selected item, SPEC 6.1) replaces it.
+  it.each(['.', 'edge marker'] as const)('reveals the offscreen selection through %s', async entry => {
     treeGeometry(); await setup(); await openSession(); await pick('8'); await readAt(150); outsideTree('8');
-    if (entry === '⌘J') await keyDown(document.body, 'j', true);
+    if (entry === '.') await keyDown(document.body, '.');
     else await click(screen.getByRole('button', { name: /^↓ Selected:/ }));
     selected('8'); inTree('8');
     expect(treeScroll().scrollTop).toBeGreaterThan(150);
