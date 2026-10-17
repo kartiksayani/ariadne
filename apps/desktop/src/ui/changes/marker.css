@@ -1,0 +1,64 @@
+/* New / Changed (SPEC 3.7): a pill with a diamond before the word, or the diamond alone. */
+.change-marker {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  box-sizing: border-box;
+  color: var(--attention);
+  white-space: nowrap;
+}
+
+.change-marker > i {
+  flex: none;
+  box-sizing: border-box;
+  transform: rotate(45deg);
+}
+
+.change-marker[data-form="pill"] {
+  gap: 4px;
+  height: 17px;
+  padding: 0 7px 0 6px;
+  border-radius: 999px;
+  font-size: calc(10.5px * var(--text-scale));
+  font-weight: 600;
+}
+
+.change-marker[data-form="pill"][data-kind="new"] {
+  background: var(--attention);
+  color: var(--a-bg);
+}
+
+.change-marker[data-form="pill"][data-kind="changed"] {
+  box-shadow: inset 0 0 0 1.25px var(--attention);
+}
+
+.change-marker[data-form="pill"] > i {
+  width: 5px;
+  height: 5px;
+  border-radius: 1px;
+}
+
+.change-marker[data-form="diamond"] > i {
+  width: 7px;
+  height: 7px;
+  border-radius: 1.5px;
+}
+
+.change-marker[data-form="pill"][data-kind="new"] > i {
+  background: currentcolor;
+}
+
+.change-marker[data-form="pill"][data-kind="changed"] > i {
+  width: 6px;
+  height: 6px;
+  border: 1.25px solid currentcolor;
+  border-radius: 1px;
+}
+
+.change-marker[data-form="diamond"][data-kind="new"] > i {
+  background: var(--attention);
+}
+
+.change-marker[data-form="diamond"][data-kind="changed"] > i {
+  border: 1.5px solid var(--attention);
+}
