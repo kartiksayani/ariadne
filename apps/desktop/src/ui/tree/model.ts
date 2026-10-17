@@ -19,8 +19,7 @@ import { displayStatus, type DisplayStatus } from '../../selectors/waiting/repli
 import { closedSessionQuestion, sessionEnded, waitingOnOwner } from '../../selectors/sessionClosed';
 import { continuedLabel } from '../shared/continued';
 import { hiddenGroupKey, hiddenGroupsFor, hiddenItems } from './hidden';
-import { branchHue } from './branch';
-import { withBoxes } from './boxes';
+import { columnX, COLUMN_STEP, withBoxes, type Box } from './boxes';
 import { agentRunning, connectionOf, type Connection } from '../shared/connection';
 import { connectedItems } from '../../selectors/related';
 import { ackTarget } from '../../selectors/ack';
@@ -249,7 +248,10 @@ export interface ItemRow {
   readonly collapsed: { readonly waiting: number; readonly open: number; readonly progress: number; readonly closed: number } | null;
   readonly delivery: Delivery | null;
   readonly badge: string;
-  readonly hue?: number;
+  /** The branch's hue slot (0-4): its top item's ordinal round the five hues. Children inherit it. */
+  readonly branch: number;
+  /** This row's slice of every box around it (the box pass). */
+  readonly boxes: readonly Box[];
 }
 /** Why a run of siblings is left out of the Map: outside the focus, not matching the filter, or hidden by the owner. */
 export type StripReason = 'hidden' | 'filter' | 'focus';
@@ -271,6 +273,10 @@ export interface StripRow {
   readonly waiting: number;
   readonly expanded: boolean;
   readonly guides: readonly Guide[];
+  /** The boxes of the ancestors this strip sits in (none for a top-level strip). */
+  readonly boxes: readonly Box[];
+  /** The branch's hue slot, or null for a top-level strip, which sits in no branch. */
+  readonly branch: number | null;
   readonly delivery: null;
 }
 export type Row = TopicRow | ItemRow | StripRow;
@@ -416,7 +422,7 @@ export function treeModel(input: TreeInput): TreeModel {
   const kids = (id: string | null) => indexes.childrenByParent.get(id) ?? [];
   const rootsOf = (topicId: string) => kids(null).filter(item => item.topic_id === topicId);
 
-  const built: (Omit<TopicRow, 'guides'> | Omit<ItemRow, 'guides'> | Omit<StripRow, 'guides'>)[] = [];
+  const built: (Omit<TopicRow, 'guides'> | Omit<ItemRow, 'guides' | 'boxes' | 'branch'> | Omit<StripRow, 'guides' | 'boxes' | 'branch'>)[] = [];
   for (const topic of topics) {
     const roots = rootsOf(topic.id);
     // A topic with no items yet (or none left) still shows its band; filters hide topics without a match.
@@ -507,19 +513,20 @@ export function treeModel(input: TreeInput): TreeModel {
     for (const parentAt of [...parents[at], at]) {
       const parent = built[parentAt], end = lastChild.get(parentAt);
       if (end === undefined || at > end) continue;
-      const x = 20 + parent.depth * 24;
-      guides.push({ kind: 'line', x, on: false, width: 24, fromBullet: at === parentAt, toBullet: at === end });
+      const x = columnX(parent.depth), width = COLUMN_STEP;
+      // Only the on guides (the accent thread to the selection) are drawn: the tinted boxes carry the rest of the structure.
+      guides.push({ kind: 'line', x, on: false, width, fromBullet: at === parentAt, toBullet: at === end });
       const child = at !== parentAt && row.depth === parent.depth + 1;
-      if (child) guides.push({ kind: 'elbow', x, on: false, width: 24 });
+      if (child) guides.push({ kind: 'elbow', x, on: false, width });
       const chainIndex = chainAt.indexOf(parentAt), next = chainAt[chainIndex + 1];
       if (threaded && chainIndex >= 0 && next !== undefined && at <= next) {
-        guides.push({ kind: 'line', x, on: true, width: 24, fromBullet: at === parentAt, toBullet: at === next });
-        if (at === next) guides.push({ kind: 'elbow', x, on: true, width: 24 });
+        guides.push({ kind: 'line', x, on: true, width, fromBullet: at === parentAt, toBullet: at === next });
+        if (at === next) guides.push({ kind: 'elbow', x, on: true, width });
       }
     }
-    return { ...row, guides, ...(row.kind === 'item' && row.depth === 1 ? { hue: branchHue(row.key) } : {}) } as Row;
+    return { ...row, guides } as Row;
   });
-  // The box pass is the last step; it changes nothing yet.
+  // The box pass is the last step: each row's branch slot and its slice of every box around it.
   const rows = withBoxes(withGuides);
 
   // hasReveal (Ariadne.dc.html:2169): only a reveal raises the banner, not a plain selection.

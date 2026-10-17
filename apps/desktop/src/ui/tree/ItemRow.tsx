@@ -17,6 +17,7 @@ import { closed, outcomeShown, visual, type ChangeMarker, type ItemRow as Row } 
 import { useMapSearch } from './mapSearch';
 import { measurePreviewLines } from './clamp';
 import { Guides } from './Guides';
+import { Boxes, branchStyle } from './BoxSlices';
 import { Strip } from './Strip';
 
 export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly disabled?: boolean; readonly persistent?: boolean }
@@ -136,12 +137,13 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
   const persistent = actions.filter(action => action.persistent), hover = actions.filter(action => !action.persistent);
   return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={row.depth + 1} aria-selected={selected} aria-disabled={disabled || undefined}
     aria-expanded={row.hasKids ? row.expanded : undefined} tabIndex={focused ? 0 : -1} className={`tree-row tree-item ${row.depth === 1 ? 'tree-item-root' : 'tree-item-child'}${row.hidden ? ' tree-item-hidden' : ''}`}
-    data-open={unfolded || undefined} data-item-id={item.id} data-row={row.key}
+    data-open={unfolded || undefined} data-item-id={item.id} data-row={row.key} data-branch={row.branch}
     data-next-unseen={nextUnseen || undefined} data-next-unseen-pulse={nextUnseenPulse || undefined}
-    style={{ paddingLeft: 12 + row.depth * 24 }} onFocus={event => { if (event.target === event.currentTarget) onFocus(row.key); }}
+    style={branchStyle(row.branch, row.depth)} onFocus={event => { if (event.target === event.currentTarget) onFocus(row.key); }}
     onKeyDown={onKeyDown} onClick={() => onSelect(item.id)} onMouseEnter={event => onPeekHover?.(item.id, event)}
     onMouseMove={event => onPeekHover?.(item.id, event)} onMouseLeave={() => onPeekLeave?.()}>
-    {row.hue !== undefined && <span aria-hidden="true" className="tree-top-colour" style={{ background: `hsl(${row.hue} 48% 58%)` }} />}
+    <Boxes boxes={row.boxes} />
+    {selected && <span aria-hidden="true" className="tree-selected-box" />}
     <Guides guides={row.guides} />
     {row.hasKids
       ? <button type="button" className="tree-chevron" tabIndex={-1} aria-label="Expand or collapse"

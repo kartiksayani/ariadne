@@ -1,32 +1,26 @@
 /* Item rows (the Map look piece owns this file). Rules that tests read from tree.css (.tree-item, .tree-item-root,
    .tree-question, .tree-line, the clamp rules, .tree-collapsed, .tree-related) stay there until their tests move. The end
    cluster's slots, the floating hover bar and the search hits are the Tree core's layout contract, in tree.css. */
-.tree-item:hover {
-  background: color-mix(in srgb, var(--color-text) 4%, transparent);
-}
 
-.tree-item[aria-selected="true"] {
-  background: color-mix(in srgb, var(--color-text) 7%, transparent);
-}
-
-.tree-guide {
+/* Hover and selection are paint behind the row's content: a row's height never depends on them. */
+.tree-item:hover::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 2px calc(12px + (var(--depth) - 1) * 6px) 2px calc(var(--tree-x) - 12px);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
   pointer-events: none;
-  position: absolute;
-  top: 0;
-  bottom: -1px;
 }
 
-.tree-guide[data-from-bullet] { top: var(--tree-bullet-y); }
-
-.tree-guide[data-to-bullet] {
-  bottom: auto;
-  height: var(--tree-bullet-y);
-}
-
-.tree-elbow {
+/* The selected row's inner box (SPEC 3.4): a 10% accent wash, a 1.5px ring and a small shadow. */
+.tree-selected-box {
   position: absolute;
-  top: 0;
-  height: var(--tree-bullet-y);
+  z-index: -1;
+  inset: 3px calc(12px + (var(--depth) - 1) * 6px) 3px calc(var(--tree-x) - 10px);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--a-card));
+  box-shadow: 0 0 0 1.5px var(--color-accent), var(--shadow-sm);
   pointer-events: none;
 }
 
@@ -39,15 +33,6 @@
   border: 1px solid var(--a-guide);
   border-radius: 50%;
   background: var(--a-bg);
-}
-
-.tree-top-colour {
-  position: absolute;
-  top: 25px;
-  left: 4px;
-  width: 3px;
-  height: 13px;
-  border-radius: 2px;
 }
 
 .tree-heading {
@@ -255,6 +240,9 @@
 .tree-hidden-group {
   --tree-bullet-y: 20px;
 
+  isolation: isolate;
+  padding-right: calc(18px + (var(--depth) - 1) * 6px);
+  padding-left: calc(var(--tree-x) - 9px);
   display: flex;
   align-items: center;
   gap: 8px;

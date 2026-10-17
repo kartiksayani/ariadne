@@ -118,6 +118,7 @@
 
 .tree-row {
   --tree-bullet-y: 23px;
+  --tree-x: calc(20px + 22px * var(--depth, 0)); /* X(k): the column of a depth's chevron or icon */
 
   position: relative;
   cursor: pointer;
@@ -227,22 +228,23 @@
   margin: 2px 0;
 }
 
-/* Item row. */
+/* Item row. Its padding is fixed per depth (SPEC 3.4 with the opening rows' values): whether a box opens or closes at a
+   row never changes its height, which depends only on its text and the Map's width. The tinted boxes are slices behind it
+   (tree-rows.css), so the row is its own stacking context. */
 .tree-item {
+  --tree-pad-top: 10px;
+  --tree-bullet-y: calc(var(--tree-pad-top) + 11px);
+
   display: flex;
+  isolation: isolate;
   align-items: flex-start;
   gap: 6px;
-  padding-top: 12px;
-  padding-right: 14px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--color-divider);
+  padding: var(--tree-pad-top) calc(18px + (var(--depth) - 1) * 6px) 13px calc(var(--tree-x) - 9px);
 }
 
-/* Extra room before a root keeps its descendants together without breaking guide lines. */
+/* A top item sits a little lower than its children's rows. */
 .tree-item-root {
-  --tree-bullet-y: 31px;
-
-  padding-top: 20px;
+  --tree-pad-top: 13px;
 }
 
 /* Titles and options remain fully readable. */

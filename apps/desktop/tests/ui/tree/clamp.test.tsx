@@ -47,7 +47,7 @@ function geometry(rects: (node: Node) => DOMRect[], lineHeight = () => 21) {
 function mount(body: string, extra: Partial<ItemRowProps> = {}) {
   const item = { ...new AppTransport().sessions.get(route.session_id)!.items['1']!, status: 'open' as const, outcome: body };
   const row: Row = { kind: 'item', key: 'item:1', item, status: 'open', ack: null, depth: 1, hasKids: false, expanded: false,
-    context: false, guides: [], later: false, hidden: false, segments: [{ text: 'Complete question', hit: false }], matches: [],
+    context: false, guides: [], boxes: [], branch: 0, later: false, hidden: false, segments: [{ text: 'Complete question', hit: false }], matches: [],
     replacedBy: null, relatedCount: 0, collapsed: null, delivery: null, badge: 'Open' };
   const onSelect = vi.fn(), openItem = vi.fn(), openLink = vi.fn();
   function Harness() {

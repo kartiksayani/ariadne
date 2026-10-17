@@ -2,6 +2,7 @@
 // folded branch's chip. The Map look piece gives both one dashed style.
 import type { KeyboardEvent } from 'react';
 import { Guides } from './Guides';
+import { Boxes, branchStyle } from './BoxSlices';
 import type { StripRow } from './model';
 
 export type StripProps =
@@ -32,9 +33,10 @@ export function Strip(props: StripProps) {
   const hidden = row.reason === 'hidden';
   return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={row.depth + 1}
     aria-expanded={hidden ? row.expanded : undefined} tabIndex={focused ? 0 : -1} className="tree-row tree-hidden-group"
-    data-row={row.key} data-strip={row.reason} style={{ paddingLeft: 12 + row.depth * 24 }}
+    data-row={row.key} data-strip={row.reason} data-branch={row.branch ?? undefined} style={branchStyle(row.branch, row.depth)}
     onFocus={event => { if (event.target === event.currentTarget) onFocus(row.key); }} onKeyDown={onKeyDown}
     onClick={hidden ? () => onToggle(row) : undefined}>
+    <Boxes boxes={row.boxes} />
     <Guides guides={row.guides} />
     {hidden && <span className="tree-chevron"><i className={row.expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} /></span>}
     <span>{row.reason === 'hidden' ? `${row.count} ${row.count === 1 ? 'item' : 'items'} hidden`

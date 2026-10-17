@@ -18,8 +18,3 @@ export const BRANCH_HUES: ReadonlyArray<{ readonly name: string; readonly hue: n
 export function branchSlot(rootOrdinal: number): number {
   return (((rootOrdinal - 1) % BRANCH_HUES.length) + BRANCH_HUES.length) % BRANCH_HUES.length;
 }
-
-/** Stable per-root decorative hue in degrees, from a string hash of the root's key; selection and status also have shape/text cues. */
-export function branchHue(key: string): number {
-  return [...key].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 0) * 139 % 360;
-}

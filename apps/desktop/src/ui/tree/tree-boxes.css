@@ -1,0 +1,140 @@
+/* Branch tints, the box slices and the thread (SPEC 3.3 and 3.4). The Map's five branch hues and five depth steps are
+   tokens; a row sets `--branch-h`, `--branch-c` (the hue's chroma multiplier) and `--depth` itself (ui/tree/BoxSlices.tsx),
+   so a branch keeps its hue whatever is added, removed or reloaded around it. */
+[data-theme="light"] {
+  --tree-halo: oklch(99.5% 0.003 85deg);
+  --tree-fw-l-1: 0.968;
+  --tree-fw-l-2: 0.946;
+  --tree-fw-l-3: 0.924;
+  --tree-fw-l-4: 0.902;
+  --tree-fw-l-5: 0.88;
+  --tree-fw-c-1: 0.014;
+  --tree-fw-c-2: 0.02;
+  --tree-fw-c-3: 0.026;
+  --tree-fw-c-4: 0.032;
+  --tree-fw-c-5: 0.038;
+  --tree-fe-l-1: 0.74;
+  --tree-fe-l-2: 0.71;
+  --tree-fe-l-3: 0.68;
+  --tree-fe-l-4: 0.65;
+  --tree-fe-l-5: 0.62;
+  --tree-fe-c: 0.07;
+  --tree-ink-l: 0.42;
+  --tree-ink-c: 0.06;
+}
+
+[data-theme="dark"] {
+  --tree-halo: oklch(16.5% 0.006 80deg);
+  --tree-fw-l-1: 0.236;
+  --tree-fw-l-2: 0.264;
+  --tree-fw-l-3: 0.292;
+  --tree-fw-l-4: 0.32;
+  --tree-fw-l-5: 0.348;
+  --tree-fw-c-1: 0.022;
+  --tree-fw-c-2: 0.026;
+  --tree-fw-c-3: 0.031;
+  --tree-fw-c-4: 0.036;
+  --tree-fw-c-5: 0.041;
+  --tree-fe-l-1: 0.5;
+  --tree-fe-l-2: 0.54;
+  --tree-fe-l-3: 0.58;
+  --tree-fe-l-4: 0.62;
+  --tree-fe-l-5: 0.66;
+  --tree-fe-c: 0.065;
+  --tree-ink-l: 0.86;
+  --tree-ink-c: 0.045;
+}
+
+/* One slice of one box on one row, painted behind the row's content (the row isolates its stacking context). Its column
+   is X(k) - 15 and its right edge is inset 8 + (k - 1) * 6, so deeper boxes are narrower on the right. */
+.tree-box {
+  --box-fill: oklch(var(--box-l) calc(var(--box-c) * var(--branch-c, 1)) var(--branch-h, 80));
+  --box-edge: oklch(var(--edge-l) calc(var(--tree-fe-c) * var(--branch-c, 1)) var(--branch-h, 80));
+
+  position: absolute;
+  z-index: -1;
+  inset: 0 calc(8px + (var(--k) - 1) * 6px) 0 calc(5px + 22px * var(--k));
+  border-right: 2px solid var(--box-edge);
+  background: var(--box-fill);
+  pointer-events: none;
+}
+
+.tree-box[data-step="1"] {
+  --box-l: var(--tree-fw-l-1);
+  --box-c: var(--tree-fw-c-1);
+  --edge-l: var(--tree-fe-l-1);
+}
+
+.tree-box[data-step="2"] {
+  --box-l: var(--tree-fw-l-2);
+  --box-c: var(--tree-fw-c-2);
+  --edge-l: var(--tree-fe-l-2);
+}
+
+.tree-box[data-step="3"] {
+  --box-l: var(--tree-fw-l-3);
+  --box-c: var(--tree-fw-c-3);
+  --edge-l: var(--tree-fe-l-3);
+}
+
+.tree-box[data-step="4"] {
+  --box-l: var(--tree-fw-l-4);
+  --box-c: var(--tree-fw-c-4);
+  --edge-l: var(--tree-fe-l-4);
+}
+
+.tree-box[data-step="5"] {
+  --box-l: var(--tree-fw-l-5);
+  --box-c: var(--tree-fw-c-5);
+  --edge-l: var(--tree-fe-l-5);
+}
+
+/* A box's first row rounds the top and keeps 3px clear of the box above; its last row rounds the bottom, and each outer
+   box closing on the same row ends a little lower so every edge shows. */
+.tree-box[data-first] {
+  top: 3px;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+}
+
+.tree-box[data-last] {
+  bottom: calc(3px + 3px * min(var(--outer), 3));
+  border-bottom-left-radius: 6px;
+  border-bottom-right-radius: 6px;
+}
+
+/* The thread: from the topic down to the selected item, a 3px accent line over a 7px halo so it reads over the tints.
+   The elbow turns into the row's chevron or icon with a round corner (radius 7, halo radius 9). */
+.tree-thread {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  bottom: -1px;
+  width: 3px;
+  background: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--tree-halo);
+  pointer-events: none;
+}
+
+.tree-thread[data-from-bullet] { top: var(--tree-bullet-y); }
+
+.tree-thread-elbow {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  height: calc(var(--tree-bullet-y) + 1.5px);
+  border-bottom: 3px solid var(--color-accent);
+  border-left: 3px solid var(--color-accent);
+  border-bottom-left-radius: 7px;
+  pointer-events: none;
+}
+
+.tree-thread-elbow::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 -5px -5px;
+  border-bottom: 7px solid var(--tree-halo);
+  border-left: 7px solid var(--tree-halo);
+  border-bottom-left-radius: 9px;
+}

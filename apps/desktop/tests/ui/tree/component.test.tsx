@@ -2264,11 +2264,14 @@ describe('item details in the tree', () => {
     expect(groups[1]!.lastElementChild).toBe(row('8'));
     expect(row('1').classList.contains('tree-item-root')).toBe(true);
     expect(row('1.1').classList.contains('tree-item-child')).toBe(true);
-    expect(row('1.1').querySelector('.tree-elbow')).not.toBeNull();
+    // Each row sits in one box slice per level: a child inside its top item's box and its own, the tint carried by the branch.
+    const slices = (id: string) => [...row(id).querySelectorAll<HTMLElement>('.tree-box')].map(box => `${box.dataset.step}${box.hasAttribute('data-first') ? 'f' : ''}`);
+    expect(slices('1')).toEqual(['1f']);
+    expect(slices('1.1')).toEqual(['1', '2f']);
+    expect(row('1.1').dataset.branch).toBe(row('1').dataset.branch);
+    expect(row('1.1').style.getPropertyValue('--depth')).toBe('2');
     const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
     expect(css).toMatch(/\.tree-topic\s*\{[^}]*position: sticky;[^}]*top: 0;[^}]*background: var\(--a-side\)/s);
-    expect(css).toMatch(/\.tree-item\s*\{[^}]*padding-top: 12px;[^}]*padding-bottom: 14px;[^}]*border-bottom: 1px solid var\(--color-divider\)/s);
-    expect(css).toMatch(/\.tree-item-root\s*\{[^}]*padding-top: 20px/s);
     expect(css).toMatch(/scroll-padding-top: var\(--tree-header-height, 0\)/);
   });
 

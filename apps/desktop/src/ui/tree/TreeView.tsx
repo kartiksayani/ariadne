@@ -60,6 +60,7 @@ import { AckAll } from '../navigation/AckAll';
 import { ackAllItems } from '../navigation/ackAllController';
 import './tree.css';
 import './tree-rows.css';
+import './tree-boxes.css';
 import './tree-band.css';
 import './tree-filter.css';
 

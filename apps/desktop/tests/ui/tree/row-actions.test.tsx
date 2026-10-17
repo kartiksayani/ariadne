@@ -15,7 +15,7 @@ function itemProps(actions: readonly RowAction[]): ItemRowProps {
   const item = immutable({ ...template, question: 'Choose the orchard planting order', status: 'open' as const,
     outcome: 'Plant the pear trees first.', ask: null, note: null });
   return { row: { kind: 'item', key: item.id, item, status: 'open', ack: null, depth: 1, hasKids: false,
-    expanded: false, context: false, guides: [], later: false, hidden: false, segments: [{ text: item.question, hit: false }], matches: [],
+    expanded: false, context: false, guides: [], boxes: [], branch: 0, later: false, hidden: false, segments: [{ text: item.question, hit: false }], matches: [],
     replacedBy: null, relatedCount: 2, collapsed: null, delivery: null, badge: 'Open' },
   selected: false, focused: true, note: null, actions, unfolded: false,
   onUnfold: vi.fn(), remember: vi.fn(), onFocus: vi.fn(), onKeyDown: vi.fn(), onSelect: vi.fn(),

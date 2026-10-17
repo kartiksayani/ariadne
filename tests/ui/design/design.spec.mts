@@ -341,49 +341,34 @@ for (const { map: frame } of mapSizes) test(`The Back-to pill floats inside the 
   for (const button of boxes.buttons) expect(button.right).toBeLessThanOrEqual(boxes.crumbs.right + 0.5);
 });
 
-/** The selected path and the plain guide must each run as one line from the topic band through its cards to the items. */
-async function railRuns(page: Page) {
+/** The accent thread (the only line the Map draws) runs as one line from the topic band down to the selected item's row. */
+async function threadRuns(page: Page) {
   await page.locator('.tree-scroll').evaluate(element => { element.scrollTop = 0; });
   await settle(page);
   return page.locator('.tree-topic-group').first().evaluate(group => {
     const origin = group.getBoundingClientRect(), topic = group.querySelector('.tree-topic')!.getBoundingClientRect();
-    const lines = [...group.querySelectorAll<HTMLElement>('.tree-guide')].map(line => ({ rect: line.getBoundingClientRect(), on: line.style.width === '1.5px' }))
-      .filter(line => Math.abs(line.rect.left - origin.left - 20) < 1.5 && line.rect.height > 0);
-    const runs = (on: boolean) => {
-      const merged: number[][] = [];
-      for (const [top, bottom] of lines.filter(line => line.on === on).map(line => [line.rect.top, line.rect.bottom]).sort((a, b) => a[0] - b[0])) {
-        const last = merged.at(-1);
-        if (last && top <= last[1] + 1.5) last[1] = Math.max(last[1], bottom); else merged.push([top, bottom]);
-      }
-      return merged;
-    };
-    const cards = group.querySelector('.topic-changes')?.getBoundingClientRect(), first = group.querySelector('[data-item-id]')?.getBoundingClientRect();
-    return { off: runs(false), on: runs(true), topic: { top: topic.top, bottom: topic.bottom }, first: first ? { top: first.top, bottom: first.bottom } : null,
-      cardsLeft: cards ? cards.left - origin.left : null, cardsHeight: cards?.height ?? 0 };
+    const lines = [...group.querySelectorAll<HTMLElement>('.tree-thread, .tree-thread-elbow')].map(line => line.getBoundingClientRect())
+      .filter(rect => rect.height > 0 && Math.abs(rect.left + 1.5 - origin.left - 20) < 1.5);
+    const merged: number[][] = [];
+    for (const [top, bottom] of lines.map(rect => [rect.top, rect.bottom]).sort((a, b) => a[0] - b[0])) {
+      const last = merged.at(-1);
+      if (last && top <= last[1] + 1.5) last[1] = Math.max(last[1], bottom); else merged.push([top, bottom]);
+    }
+    const selected = group.querySelector('[aria-selected="true"]')?.getBoundingClientRect();
+    return { runs: merged, topic: { top: topic.top, bottom: topic.bottom }, selected: selected ? { top: selected.top, bottom: selected.bottom } : null };
   });
 }
-for (const { name, frame, theme, act } of [
-  { name: 'brief open, no since cards', frame: 'map-thread', theme: 'dark', act: async () => {} },
-  { name: 'brief open, no since cards', frame: 'map-thread', theme: 'light', act: async () => {} },
-  { name: 'brief open, no since cards at 900', frame: 'map-thread-small', theme: 'dark', act: async () => {} },
-  { name: 'brief collapsed', frame: 'map-thread', theme: 'dark', act: async (page: Page) => { await page.getByRole('button', { name: 'Topic brief', exact: true }).first().click(); } },
-  { name: 'long brief with since cards', frame: 'map-brief-long', theme: 'dark', act: async (page: Page) => { await page.getByRole('button', { name: /^Since you were here ·/ }).click(); } },
-  { name: 'long brief with since cards', frame: 'map-brief-long', theme: 'light', act: async (page: Page) => { await page.getByRole('button', { name: /^Since you were here ·/ }).click(); } },
-  { name: 'long brief collapsed at 900', frame: 'map-brief-long-small', theme: 'dark', act: async (page: Page) => { await page.getByRole('button', { name: 'Topic brief', exact: true }).click(); } },
-] as const) test(`The thread is one unbroken line through the topic cards: ${name} (${frame}, ${theme})`, async ({ page, origin }, testInfo) => {
-  await openApp(page, origin, { ...frameSpec(frame), theme });
-  await act(page);
-  const runs = await railRuns(page);
-  expect(runs.off, 'the plain guide is one line from the band to the last item').toHaveLength(1);
-  expect(runs.on, 'the accent thread is one line from the band to the selected path').toHaveLength(1);
-  for (const run of [runs.off[0]!, runs.on[0]!]) {
-    expect(run[0], 'it starts inside the band').toBeLessThanOrEqual(runs.topic.bottom);
-    expect(run[1], 'it reaches the first item').toBeGreaterThanOrEqual(runs.first!.top);
-  }
-  expect(runs.cardsHeight).toBeGreaterThan(0);
-  expect(runs.cardsLeft!, 'the cards sit clear of the rail').toBeGreaterThanOrEqual(24);
-  await testInfo.attach(`thread-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
-});
+for (const { frame, theme } of [{ frame: 'map-thread', theme: 'dark' }, { frame: 'map-thread', theme: 'light' }, { frame: 'map-thread-small', theme: 'dark' }] as const) {
+  test(`The thread is one unbroken line from the band to the selected item: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+    await openApp(page, origin, { ...frameSpec(frame), theme });
+    const { runs, topic, selected } = await threadRuns(page);
+    expect(selected, 'a row is selected').not.toBeNull();
+    expect(runs, 'one accent line from the band').toHaveLength(1);
+    expect(runs[0]![0], 'it starts inside the band').toBeLessThanOrEqual(topic.bottom);
+    expect(runs[0]![1], 'it runs on below the band, into the branch of the selected row').toBeGreaterThan(topic.bottom + 10);
+    await testInfo.attach(`thread-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+  });
+}
 
 for (const { map: frame } of mapSizes) test(`A folded topic draws no rail below its band: ${frame}`, async ({ page, origin }) => {
   await openApp(page, origin, frameSpec(frame));
@@ -393,7 +378,7 @@ for (const { map: frame } of mapSizes) test(`A folded topic draws no rail below 
   await expect(group.locator('.tree-topic-cards')).toHaveCount(0);
   const below = await group.evaluate(element => {
     const band = element.querySelector('.tree-topic')!.getBoundingClientRect();
-    return [...element.querySelectorAll('.tree-guide')].filter(line => line.getBoundingClientRect().height > 0 && line.getBoundingClientRect().bottom > band.bottom + 2).length;
+    return [...element.querySelectorAll('.tree-thread, .tree-thread-elbow')].filter(line => line.getBoundingClientRect().height > 0 && line.getBoundingClientRect().bottom > band.bottom + 2).length;
   });
   expect(below).toBe(0);
 });
@@ -504,43 +489,6 @@ for (const frame of ['graph-hidden', 'graph-hidden-small'] as const) for (const 
   });
 }
 
-/** Focus leaves from the sticky Unfocus copy when the focused row is not on screen: its topic folded. (A search no longer
- * takes a row off screen, SPEC §4, so it is no longer a way here; tests/ui/tree/component.test.tsx pins that the row stays.) */
-for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) for (const state of ['folded'] as const) {
-  test(`The sticky Unfocus is whole and clear of the path row when the focused row is under a ${state} topic: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
-    await openApp(page, origin, { ...frameSpec(frame), theme });
-    const roots = page.locator('.tree-item-root:has(.tree-chevron)'), first = roots.first();
-    const topic = page.locator('.tree-topic-group').first().locator('.tree-topic');
-    await first.getByRole('button', { name: /^Focus on / }).click();
-    await expect(first.getByRole('button', { name: /^Unfocus / })).toBeVisible();
-    await topic.locator('.tree-chevron').dispatchEvent('click');
-    await settle(page);
-    const copy = page.getByRole('navigation', { name: 'Map ancestors' }).getByRole('button', { name: /^Unfocus / });
-    await expect(copy, 'the exit stays in the path row').toBeVisible();
-    await expect(copy).toHaveText('Unfocus');
-    const facts = await page.evaluate(() => {
-      const box = (element: Element) => element.getBoundingClientRect();
-      const copy = document.querySelector('.tree-path .tree-focus-action')!, path = document.querySelector('.tree-path')!, bar = document.querySelector('.tree-breadcrumb')!;
-      const others = [...document.querySelectorAll('.tree-breadcrumb button:not(.tree-focus-action), .tree-back')].map(element => ({ name: element.textContent, rect: box(element) }));
-      const centre = document.elementFromPoint(box(copy).left + box(copy).width / 2, box(copy).top + box(copy).height / 2);
-      return { copy: box(copy), path: box(path), bar: box(bar), others, covers: !!centre?.closest('.tree-focus-action'), width: innerWidth, height: innerHeight,
-        clipped: copy.scrollWidth > copy.clientWidth };
-    });
-    expect(facts.copy.left).toBeGreaterThanOrEqual(facts.bar.left - 0.5); expect(facts.copy.right).toBeLessThanOrEqual(facts.bar.right + 0.5);
-    expect(facts.copy.top).toBeGreaterThanOrEqual(facts.path.top - 0.5); expect(facts.copy.bottom).toBeLessThanOrEqual(facts.path.bottom + 0.5);
-    expect(facts.copy.right).toBeLessThanOrEqual(facts.width); expect(facts.copy.bottom).toBeLessThanOrEqual(facts.height);
-    expect(facts.clipped, 'the word is not cut off').toBe(false);
-    expect(facts.covers, 'nothing paints over it').toBe(true);
-    for (const other of facts.others) {
-      const apart = other.rect.right <= facts.copy.left + 0.5 || other.rect.left >= facts.copy.right - 0.5 || other.rect.bottom <= facts.copy.top || other.rect.top >= facts.copy.bottom;
-      expect(apart, `${other.name} does not overlap Unfocus`).toBe(true);
-    }
-    await page.screenshot({ path: testInfo.outputPath(`fix1-unfocus-${state}-${frame}-${theme}.png`), animations: 'disabled' });
-    await copy.click();
-    await expect(copy).toHaveCount(0);
-  });
-}
-
 test.describe.configure({ mode: 'parallel' });
 
 for (const width of [1920, 1600, 1280]) for (const acceptedFailure of [false, true]) {
@@ -600,8 +548,9 @@ for (const theme of ['light', 'dark'] as const) test(`Map names and top-line sta
   await openApp(page, origin, { ...frameSpec('1a'), theme });
   const root = page.locator('.tree-item.tree-item-root').first(), child = page.locator('.tree-item.tree-item-child').first();
   await expect(page.locator('.tree-id')).toHaveCount(0);
-  await expect(root.locator('.tree-top-colour')).toHaveCount(1);
-  await expect(child.locator('.tree-top-colour')).toHaveCount(0);
+  // A top item opens one box of its own; a child sits inside its top item's box and opens a second one. No stripe.
+  await expect(root.locator('.tree-box')).toHaveCount(1);
+  await expect(child.locator('.tree-box')).toHaveCount(2);
   // The status is the end cluster's badge slot, level with the title's first line (alpha.20 C4).
   const title = root.locator('.tree-question'), status = root.locator('.tree-end > .tree-end-badge');
   await expect(status).toBeVisible();
