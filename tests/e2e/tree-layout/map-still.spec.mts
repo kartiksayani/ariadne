@@ -56,6 +56,18 @@ const press = async (control: Locator) => {
   await control.page().mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 };
 
+/** Selects the reading row (its Details opens, then closes again, so the Map is as wide as before). Focus acts on it. */
+const selectReading = async (page: Page) => {
+  await press(row(page, '10').locator('.tree-question'));
+  const close = page.getByRole('button', { name: 'Close detail' });
+  await expect(close).toBeVisible();
+  await close.click();
+  await settle(page);
+  await page.mouse.move(2, 690);
+};
+const bandButton = (page: Page, name: string | RegExp) => band(page).getByRole('button', { name });
+const moreActions = (page: Page) => bandButton(page, /^More actions for/);
+
 // [name, kind, subject (a row that must be in view, or null), before, change, done]
 type Trigger = readonly [name: string, kind: 'still' | 'held', subject: string | null, before: (page: Page) => Promise<void>,
   change: (page: Page) => Promise<void>, done: (page: Page) => Promise<void>];
@@ -93,6 +105,30 @@ const triggers: readonly Trigger[] = [
     page => page.getByRole('button', { name: 'Show them' }).click(), page => expect(row(page, '1.1')).toHaveCount(1)],
   ['Show more on the reading row', 'held', '10', nothing, page => press(row(page, '10').getByRole('button', { name: 'Show more' })),
     page => expect(row(page, '10').getByRole('button', { name: 'Show less' })).toHaveCount(1)],
+  // The band (alpha.20 W3): its buttons, menu and popovers float or swap in place; none changes a row.
+  ['Focus is turned on', 'held', null, selectReading, page => press(bandButton(page, 'Focus')),
+    page => expect(bandButton(page, /^Unfocus/)).toBeVisible()],
+  ['Focus is turned off', 'held', null, async page => { await selectReading(page); await press(bandButton(page, 'Focus')); await expect(bandButton(page, /^Unfocus/)).toBeVisible(); },
+    page => press(bandButton(page, /^Unfocus/)), page => expect(bandButton(page, 'Focus')).toBeVisible()],
+  ['the Next label changes while stepping', 'still', '11', nothing, page => press(bandButton(page, 'Next unseen')),
+    page => expect(bandButton(page, /^Next unseen, 1 of 2/)).toBeVisible()],
+  ['the "…" menu opens', 'still', null, nothing, page => press(moreActions(page)), page => expect(page.getByRole('menu')).toBeVisible()],
+  ['Open the bin from the "…" menu', 'held', null, nothing, async page => {
+    await press(moreActions(page));
+    await page.getByRole('menuitem', { name: /^Open the bin/ }).click();
+  }, page => expect(page.getByRole('button', { name: /^Removed by agent/ })).toHaveAttribute('aria-expanded', 'true')],
+  ['a topic reply opens under the band', 'held', null, nothing, async page => {
+    await press(moreActions(page));
+    await page.getByRole('menuitem', { name: /^Reply to topic/ }).click();
+  }, page => expect(page.getByRole('textbox', { name: 'Reply to this topic' })).toBeVisible()],
+  ['the Ack all popover opens', 'still', null, nothing, page => press(bandButton(page, /^Ack all/)),
+    page => expect(page.getByRole('dialog', { name: /^Acknowledge results in/ })).toBeVisible()],
+  ['the Ack all popover is cancelled', 'still', null, async page => { await press(bandButton(page, /^Ack all/)); },
+    page => page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click(), page => expect(page.getByRole('dialog')).toHaveCount(0)],
+  ['Ack all is undone', 'still', null, async page => {
+    await press(bandButton(page, /^Ack all/));
+    await page.getByRole('dialog').getByRole('button', { name: 'Ack all' }).click();
+  }, page => press(bandButton(page, 'Undo Ack all')), page => expect(bandButton(page, /^Ack all \(/)).toBeVisible()],
 ];
 
 async function open(page: Page, origin: string) {

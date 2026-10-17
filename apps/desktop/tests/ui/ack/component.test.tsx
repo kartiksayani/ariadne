@@ -6,14 +6,18 @@ import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import type { ContinuePreview, OwnerMutationRequest, OwnerQueryRequest } from '../../../src/generated/core';
 import type { ItemStatus } from '../../../src/generated/domain/models';
-import { ackTarget } from '../../../src/ui/shared/ack';
+import { ackTarget, flushAckHold } from '../../../src/ui/shared/ack';
 import { currentQuestionReplied, ownerReplied } from '../../../src/selectors/waiting/replied';
 import { continueGroups } from '../../../src/ui/pages/model';
-import { AppTransport, route } from '../app/transport';
+import { AppTransport, route, secondId } from '../app/transport';
 import { goToSession } from '../app/open';
 import { notices } from '../../../src/ui/pages/notices';
 
-afterEach(() => { cleanup(); notices.clear(); vi.restoreAllMocks(); });
+// A held Ack outlives its view by design, so a test drains it before the next one starts: no timer or notice leaks across tests.
+afterEach(async () => { await act(async () => { await flushAckHold(route.session_id); }); cleanup(); notices.clear(); vi.restoreAllMocks(); });
+/** An Ack waits 6 s for its Undo (pinned in hold.test.tsx). These tests are about what an Ack does, so the window is over here:
+ * whatever is held saves now, as it does when the owner leaves the session. */
+const holdOver = () => act(async () => { await flushAckHold(route.session_id); });
 
 class AckTransport extends AppTransport {
   refuse = false;
@@ -139,6 +143,8 @@ describe('local acknowledgement', () => {
     await mount(transport);
     fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await act(async () => { detail().focus(); fireEvent.keyDown(detail(), { key: 'a' }); });
+    expect(acks(transport)).toHaveLength(0);   // held, with its Undo
+    await holdOver();
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe(target === 'in_progress' ? 'progress' : 'open'));
     await waitFor(() => expect(within(detail()).queryByRole('button', { name: /^Ack/ })).toBeNull());
     expect(acks(transport)).toHaveLength(1);
@@ -182,6 +188,7 @@ describe('local acknowledgement', () => {
     await act(async () => { release(); });
     await waitFor(() => expect(within(row()).getByRole<HTMLButtonElement>('button', { name: 'Ack → Done' }).disabled).toBe(false));
     await act(async () => { fireEvent.keyDown(row(), { key: 'a' }); });
+    await holdOver();
     await waitFor(() => expect(acks(transport)).toHaveLength(1));
   });
 
@@ -227,6 +234,7 @@ describe('local acknowledgement', () => {
     expect(linked.textContent).toContain('Open');
     fireEvent.click(linked); fireEvent.click(screen.getByRole('button', { name: 'Go to' })); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await act(async () => { fireEvent.click(within(detail()).getByRole('button', { name: 'Ack → Done' })); });
+    await holdOver();
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe('done'));
     expect(acks(transport)).toHaveLength(1);
     fireEvent.click(row('1')); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
@@ -268,6 +276,7 @@ describe('local acknowledgement', () => {
     expect(within(detail()).getByText(`Ack → ${label}`)).toBeTruthy();
     expect(within(detail()).getByRole('button', { name: /^Reply/ })).toBeTruthy();
     await act(async () => { fireEvent.click(button); });
+    await holdOver();
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe(target));
     expect(acks(transport)).toHaveLength(1);
     expect(acks(transport)[0]).toMatchObject({ session: route, command: { api_version: 1, params: { item_id: '1.1', expected_revision: revision } } });
@@ -293,13 +302,14 @@ describe('local acknowledgement', () => {
     expect(button.closest('.detail-dock')).not.toBeNull();
     expect(detail().querySelectorAll('.detail-chat')).toHaveLength(1);
     await act(async () => { fireEvent.click(button); });
+    await holdOver();
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe('done'));
     expect(view().hidden_item_ids).toContain('1.1');
     expect(row().classList.contains('tree-item-hidden')).toBe(true);
     expect(screen.queryByText('Ack all (1)')).toBeNull();
   });
 
-  it.each(['tree', 'detail', 'key'] as const)('keeps one %s Ack click through a stale-store wait and uses the refreshed revision', async source => {
+  it.each(['tree', 'detail', 'key'] as const)('refuses a held %s Ack whose proposal moved on during a stale-store wait, then acks the refreshed one once', async source => {
     class RefreshTransport extends AckTransport {
       hold: Promise<void> | null = null;
       override async invoke<T>(name: string, args: { request: OwnerQueryRequest | OwnerMutationRequest }): Promise<T> {
@@ -314,15 +324,26 @@ describe('local acknowledgement', () => {
     const session = transport.sessions.get(route.session_id)!, item = session.items['1.1']!;
     ++session.revision; ++item.revision;
     act(() => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
-    if (source === 'key') { detail().focus(); fireEvent.keyDown(detail(), { key: 'a' }); }
-    else {
-      const button = within(source === 'detail' ? detail() : row()).getByRole<HTMLButtonElement>('button', { name: 'Ack → Done' });
-      expect(button.disabled).toBe(false);
-      fireEvent.click(button);
-    }
+    const press = () => {
+      if (source === 'key') { detail().focus(); fireEvent.keyDown(detail(), { key: 'a' }); }
+      else {
+        const button = within(source === 'detail' ? detail() : row()).getByRole<HTMLButtonElement>('button', { name: 'Ack → Done' });
+        expect(button.disabled).toBe(false);
+        fireEvent.click(button);
+      }
+    };
+    press();
     expect(acks(transport)).toHaveLength(0);
     const revision = item.revision;
     await act(async () => { transport.hold = null; release(); });
+    // The hold's save reads the refreshed item: its revision is not the one the owner reviewed, so nothing is saved.
+    await holdOver();
+    expect(acks(transport)).toHaveLength(0);
+    expect(await screen.findByText('Not acked: it changed')).toBeTruthy();
+    expect(item.ack_to).toBe('done');
+    // The refreshed proposal is acked by a fresh click, at its refreshed revision, once.
+    await waitFor(() => expect(within(source === 'detail' ? detail() : row()).getByRole<HTMLButtonElement>('button', { name: 'Ack → Done' }).disabled).toBe(false));
+    press(); await holdOver();
     await waitFor(() => expect(acks(transport)).toHaveLength(1));
     expect(acks(transport)[0].command).toMatchObject({ params: { expected_revision: revision } });
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe('done'));
@@ -349,6 +370,7 @@ describe('local acknowledgement', () => {
     const earlierId = earlier.id;
     await mount(transport); fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await act(async () => { fireEvent.click(within(detail()).getByRole('button', { name: 'Ack → Done' })); });
+    await holdOver();
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe('done'));
     expect(session.inputs[earlierId]!.state).toBe('queued');
     expect(within(row()).getByRole('button', { name: 'Back to Open (o)' })).toBeTruthy();
@@ -376,6 +398,7 @@ describe('local acknowledgement', () => {
     if (source === 'detail') target = opened;
     if (source === 'graph') { fireEvent.keyDown(target, { key: 'g' }); await screen.findByRole('group', { name: 'Graph legend' }); target = row(); }
     await act(async () => { target.focus(); fireEvent.keyDown(target, { key: 'a' }); });
+    await holdOver();
     await waitFor(() => expect(acks(transport)).toHaveLength(1));
     expect(transport.mutations.some(value => value.command.command === 'input_submit')).toBe(false);
     expect(transport.sessions.get(route.session_id)!.items['1.1']!.status).toBe('done');
@@ -403,6 +426,7 @@ describe('local acknowledgement', () => {
     fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     expect(acks(transport)).toHaveLength(0);
     await act(async () => { fireEvent.click(within(detail()).getByRole('button', { name: 'Ack → Done' })); });
+    await holdOver();
     await waitFor(() => expect(acks(transport)).toHaveLength(1));
   });
 
@@ -411,10 +435,12 @@ describe('local acknowledgement', () => {
     if (source === 'detail') { fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' }); }
     const host = source === 'detail' ? detail() : row();
     await act(async () => { fireEvent.click(within(host).getByRole('button', { name: 'Ack → Done' })); });
+    await holdOver();
     expect(await screen.findByText('This item can’t be acknowledged now. Check its current status and any question waiting for you.')).toBeTruthy();
     expect(screen.queryByText('Ack predicate no longer holds.')).toBeNull();
     transport.refuse = false;
     await act(async () => { fireEvent.click(within(source === 'detail' ? detail() : row()).getByRole('button', { name: 'Ack → Done' })); });
+    await holdOver();
     await waitFor(() => expect(acks(transport)).toHaveLength(2));
     expect(transport.sessions.get(route.session_id)!.items['1.1']!.status).toBe('done');
   });
@@ -423,6 +449,7 @@ describe('local acknowledgement', () => {
     const transport = new AckTransport(); transport.refuse = true; await mount(transport);
     fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await act(async () => { fireEvent.click(within(source === 'tree' ? row() : detail()).getByRole('button', { name: 'Ack → Done' })); });
+    await holdOver();
     expect(await screen.findByText(refusal)).toBeTruthy();
     fireEvent.click(row('2')); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     await waitFor(() => expect(screen.queryByText(refusal)).toBeNull());
@@ -435,6 +462,7 @@ describe('local acknowledgement', () => {
     fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     for (const [index, host] of [row(), detail()].entries()) {
       await act(async () => { fireEvent.click(within(host).getByRole('button', { name: 'Ack → Done' })); });
+      await holdOver();
       await waitFor(() => expect(acks(transport)).toHaveLength(index + 1));
       expect(await screen.findByText(refusal, { selector: '.pw-note-text' })).toBeTruthy();
     }
@@ -443,23 +471,27 @@ describe('local acknowledgement', () => {
       .toEqual([JSON.stringify(['item-ack', route.project_id, route.session_id, '1.1'])]);
     transport.refuse = false;
     await act(async () => { fireEvent.click(within(source === 'tree' ? row() : detail()).getByRole('button', { name: 'Ack → Done' })); });
+    await holdOver();
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe('done'));
     expect(screen.queryByText(refusal)).toBeNull();
     expect(acks(transport)).toHaveLength(3);
   });
 
-  it('does not restore a delayed refusal after the owner selects another item', async () => {
+  it('still reports a refusal that arrives after the owner selected another item: a failed Ack is never lost silently', async () => {
     const transport = new AckTransport(); transport.refuse = true;
     let release!: () => void;
     transport.ackWait = new Promise(resolve => { release = resolve; });
     await mount(transport);
     fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     fireEvent.click(within(row()).getByRole('button', { name: 'Ack → Done' }));
+    const saving = flushAckHold(route.session_id);   // the window is over; the write waits on the gate
     await waitFor(() => expect(acks(transport)).toHaveLength(1));
     fireEvent.click(row('2')); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
-    await act(async () => { release(); });
+    await act(async () => { release(); await saving; });
     await waitFor(() => expect(within(row()).getByRole<HTMLButtonElement>('button', { name: 'Ack → Done' }).disabled).toBe(false));
-    expect(screen.queryByText(refusal)).toBeNull();
+    // The item stays to ack and the owner is told, wherever they are looking now.
+    expect(await screen.findByText(refusal)).toBeTruthy();
+    expect(transport.sessions.get(route.session_id)!.items['1.1']!.ack_to).toBe('done');
   });
 
   it.each(['detail', 'graph'] as const)('clears a keyboard Ack refusal from %s on selection changes and on a button Ack success', async source => {
@@ -467,7 +499,7 @@ describe('local acknowledgement', () => {
     fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     if (source === 'graph') { fireEvent.keyDown(row(), { key: 'g' }); await screen.findByRole('group', { name: 'Graph legend' }); }
     const host = () => source === 'detail' ? detail() : row();
-    const pressAck = async () => { await act(async () => { host().focus(); fireEvent.keyDown(host(), { key: 'a' }); }); };
+    const pressAck = async () => { await act(async () => { host().focus(); fireEvent.keyDown(host(), { key: 'a' }); }); await holdOver(); };
     await pressAck();
     expect(await screen.findByText(refusal, { selector: '.pw-note-text' })).toBeTruthy();
     expect(notices.getSnapshot().find(notice => notice.text === refusal)?.id)
@@ -480,23 +512,25 @@ describe('local acknowledgement', () => {
     expect(await screen.findByText(refusal, { selector: '.pw-note-text' })).toBeTruthy();
     transport.refuse = false;
     await act(async () => { fireEvent.click(within(source === 'detail' ? row() : detail()).getByRole('button', { name: 'Ack → Done' })); });
+    await holdOver();
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe('done'));
     expect(screen.queryByText(refusal)).toBeNull();
     expect(acks(transport)).toHaveLength(3);
   });
 
-  it('ignores a delayed keyboard Ack refusal after selecting another item', async () => {
+  it('still reports a keyboard Ack refusal that arrives after selecting another item', async () => {
     const transport = new AckTransport(); transport.refuse = true;
     let release!: () => void;
     transport.ackWait = new Promise(resolve => { release = resolve; });
     await mount(transport);
     fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await act(async () => { detail().focus(); fireEvent.keyDown(detail(), { key: 'a' }); });
+    const saving = flushAckHold(route.session_id);   // the window is over; the write waits on the gate
     await waitFor(() => expect(acks(transport)).toHaveLength(1));
     fireEvent.click(row('2')); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
-    await act(async () => { release(); });
+    await act(async () => { release(); await saving; });
     await waitFor(() => expect(within(row()).getByRole<HTMLButtonElement>('button', { name: 'Ack → Done' }).disabled).toBe(false));
-    expect(screen.queryByText(refusal)).toBeNull();
+    expect(await screen.findByText(refusal)).toBeTruthy();
   });
 
   it('removes the app keyboard Ack refusal when the workspace unmounts', async () => {
@@ -504,6 +538,7 @@ describe('local acknowledgement', () => {
     await mount(transport);
     fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await act(async () => { detail().focus(); fireEvent.keyDown(detail(), { key: 'a' }); });
+    await holdOver();
     expect(await screen.findByText(refusal, { selector: '.pw-note-text' })).toBeTruthy();
     cleanup();
     expect(notices.getSnapshot().some(notice => notice.id === JSON.stringify(['item-ack', route.project_id, route.session_id, '1.1']))).toBe(false);
@@ -516,11 +551,77 @@ describe('local acknowledgement', () => {
     session.topics[topicId] = { ...structuredClone(template), id: topicId, name: 'Archived notes', archived_at: null, order: 99 };
     await mount(transport);
     await act(async () => { fireEvent.click(within(row()).getByRole('button', { name: 'Ack → Done' })); });
+    await holdOver();
     expect(await screen.findByText(refusal)).toBeTruthy();
     const band = screen.getByText('Archived notes', { selector: '.tree-topic-name' }).closest('[role="treeitem"]') as HTMLElement;
-    await act(async () => { fireEvent.click(within(band).getByRole('button', { name: 'Archive' })); });
+    fireEvent.click(within(band).getByRole('button', { name: /^More actions for/ }));
+    await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: /^Archive topic/ })); });
     expect(await screen.findByText('This changed while you were working. Look at it as it is now, then try again.')).toBeTruthy();
     expect(screen.getByText(refusal)).toBeTruthy();
+  });
+});
+
+describe('the Ack hold in the app (D11)', () => {
+  const selectItem = async () => { fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' }); };
+  const ackButton = () => within(detail()).getByRole('button', { name: 'Ack → Done' });
+
+  it('Details shows "Acked · Undo" in place of its Ack button, and Undo writes nothing', async () => {
+    const transport = await mount(); await selectItem();
+    await act(async () => { fireEvent.click(ackButton()); });
+    expect(within(detail()).queryByRole('button', { name: 'Ack → Done' })).toBeNull();
+    const undo = within(detail()).getByRole('button', { name: 'Undo Ack' });
+    expect(undo.textContent).toBe('Acked · Undo');
+    fireEvent.click(undo);
+    expect(ackButton()).toBeTruthy();
+    await holdOver();
+    expect(acks(transport)).toHaveLength(0);
+    expect(transport.sessions.get(route.session_id)!.items['1.1']!.ack_to).toBe('done');
+  });
+
+  it('writes one Ack however many times the owner presses Ack, a, or the Details button while it is held', async () => {
+    const transport = await mount(); await selectItem();
+    await act(async () => { fireEvent.click(within(row()).getByRole('button', { name: 'Ack → Done' })); });
+    await act(async () => { detail().focus(); fireEvent.keyDown(detail(), { key: 'a' }); fireEvent.keyDown(detail(), { key: 'a' }); });
+    await holdOver();
+    await waitFor(() => expect(detail().getAttribute('data-status')).toBe('done'));
+    await holdOver();
+    expect(acks(transport)).toHaveLength(1);
+  });
+
+  it('a Tree to Graph switch does not flush a held Ack', async () => {
+    const transport = await mount(); await selectItem();
+    await act(async () => { fireEvent.click(within(row()).getByRole('button', { name: 'Ack → Done' })); });
+    fireEvent.keyDown(row(), { key: 'g' }); await screen.findByRole('group', { name: 'Graph legend' });
+    await act(async () => { await new Promise(done => setTimeout(done, 150)); });
+    expect(acks(transport)).toHaveLength(0);
+    await holdOver();
+    await waitFor(() => expect(acks(transport)).toHaveLength(1));
+  });
+
+  it('switching to another session saves the held Ack at once, once', async () => {
+    const transport = await mount(); await selectItem();
+    await act(async () => { fireEvent.click(within(row()).getByRole('button', { name: 'Ack → Done' })); });
+    expect(acks(transport)).toHaveLength(0);
+    await goToSession({ project_id: route.project_id, session_id: secondId });
+    await waitFor(() => expect(acks(transport)).toHaveLength(1));
+    expect(transport.sessions.get(route.session_id)!.items['1.1']!.status).toBe('done');
+  });
+
+  it('an Ack from the Graph with no row or Details showing it says so in a notice whose Undo writes nothing', async () => {
+    const transport = await mount(); await selectItem();
+    fireEvent.keyDown(row(), { key: 'g' }); await screen.findByRole('group', { name: 'Graph legend' });
+    fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
+    await waitFor(() => expect(screen.queryByLabelText(/^Detail of /)).toBeNull());
+    await act(async () => { row().focus(); fireEvent.keyDown(row(), { key: 'a' }); });
+    const notice = await waitFor(() => {
+      const found = notices.getSnapshot().find(entry => entry.text.startsWith('Acked'));
+      expect(found).toBeTruthy(); return found!;
+    });
+    expect(notice.actions?.map(action => action.label)).toEqual(['Undo']);
+    act(() => { notice.actions![0]!.run(); });
+    await holdOver();
+    expect(acks(transport)).toHaveLength(0);
+    expect(notices.getSnapshot().some(entry => entry.text.startsWith('Acked'))).toBe(false);
   });
 });
 

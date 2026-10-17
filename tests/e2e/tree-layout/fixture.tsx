@@ -70,6 +70,8 @@ class TreeLayoutTransport extends AppTransport {
       items['12']!.revision = 2;
       items['12']!.changes = [{ revision: 2, at: later, cause_message_id: items['12']!.created_message_id, before: { status: 'in_progress' } }];
       items['12']!.type = 'finding'; items['12']!.ack_to = 'done'; items['12']!.ask = null;
+      // The agent removed an item from this topic: its bin (the "…" menu's Open the bin) holds it.
+      items['41'] = { ...items['18']!, id: '41', ordinal: 41, question: 'Removed by the agent', removed_at: later };
       this.preferences.seen = [{ session: route, since: baseline, items: [], topics: [] }];
       this.preferences.sessions[0]!.expanded_item_ids = ['2', '3'];
     }

@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useSessionActions, type SessionActions } from '../../components/bindings/actions';
 import type { Immutable } from '../../data/session-store';
@@ -22,7 +22,7 @@ function AckAllReview({ anchor, label, topicName, items, error, onConfirm, onCan
   readonly onConfirm: () => void;
   readonly onCancel: () => void;
 }) {
-  const panel = useRef<HTMLDivElement>(null), confirm = useRef<HTMLButtonElement>(null), id = useId();
+  const panel = useRef<HTMLDivElement>(null), confirm = useRef<HTMLButtonElement>(null);
   const cancel = useRef(onCancel);
   cancel.current = onCancel;
   useLayoutEffect(() => {
@@ -59,8 +59,8 @@ function AckAllReview({ anchor, label, topicName, items, error, onConfirm, onCan
     if (event.key === 'Escape') { event.preventDefault(); cancel.current(); }
   };
   const host = anchor?.closest('.product-app') ?? document.body;
-  return createPortal(<div ref={panel} className="ack-all-review" role="dialog" aria-labelledby={`${id}-title`} aria-label={label} onKeyDown={keys}>
-    <h2 id={`${id}-title`} className="ack-all-title">Ack {items.length} results in “{topicName}”?</h2>
+  return createPortal(<div ref={panel} className="ack-all-review" role="dialog" aria-label={label} onKeyDown={keys}>
+    <h2 className="ack-all-title">Ack {items.length} results in “{topicName}”?</h2>
     <p className="ack-all-text">They stay in the Map, marked as read. Questions and open items aren’t touched.</p>
     <ul className="ack-all-list">{items.map(item => <li key={item.id}>
       <StatusBadge status={statusKey[item.status]} variant="icon" size={12} /><span className="ack-all-name">{shortLabel(item)}</span></li>)}</ul>
