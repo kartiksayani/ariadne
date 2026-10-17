@@ -42,7 +42,7 @@ test('history failure evidence finds the docked follow-up send control', t => {
 });
 
 test('history topic actions use their accessible names and the all-closed prompt stays outside the sticky band', async t => {
-  const dom = new JSDOM(`<section class="tree-column" aria-label="Session tree" data-session-status="stale"><div class="tree-session-bar" aria-busy="true"></div><div class="tree-rows"><div class="tree-topic" role="treeitem" aria-label="Native topic" data-topic-id="topic" tabindex="0">
+  const dom = new JSDOM(`<section class="tree-column" aria-label="Session tree" data-session-status="stale" data-session-busy="true"><div class="tree-rows"><div class="tree-topic" role="treeitem" aria-label="Native topic" data-topic-id="topic" tabindex="0">
     <button aria-label="Continue here"><i></i></button><button aria-label="Archive"><i></i></button></div>
     <div class="tree-topic-content"><div class="tree-prompt"><button>Archive topic</button></div></div>
     <div data-topic-id="other"></div><div class="tree-topic-content"><div class="tree-prompt"><button>Archive other topic</button></div></div></div></section>`);
@@ -66,7 +66,7 @@ test('history topic actions use their accessible names and the all-closed prompt
       dom.window.document.querySelector('.tree-column').setAttribute('data-session-status', 'ready');
       admitted.push(await condition());
       assert.deepEqual(clicked, ['Continue here', 'Archive'], 'A busy session must also wait before clicking its archive prompt');
-      dom.window.document.querySelector('.tree-session-bar').setAttribute('aria-busy', 'false');
+      dom.window.document.querySelector('.tree-column').setAttribute('data-session-busy', 'false');
       admitted.push(await condition());
       assert.equal(admitted.at(-1), true);
     },
