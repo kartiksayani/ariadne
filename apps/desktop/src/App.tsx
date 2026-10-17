@@ -112,8 +112,8 @@ function SessionCenter({ application, view, graph, reveal, ...props }: CenterPro
     topicContent={session ? topicId => <TopicChanges session={session} topicId={topicId} navigation={application.navigation}
       onOpenItem={props.onOpenItem} /> : undefined}
     notices={notice || recovering ? <div className="tree-notices">{notice}{recovering && <RecoveryPanel actions={actions} />}</div> : null}
-    graph={graph ? <NavigationGraph navigation={application.navigation} store={view.store} query={props.query}
-      tight={props.detailOpen} reveal={reveal} onReveal={props.onSelected} /> : null} />;
+    graph={graph ? <NavigationGraph navigation={application.navigation} store={view.store}
+      reveal={reveal} onReveal={props.onSelected} /> : null} />;
 }
 function Workspace({ application }: { application: Application }) {
   const navigation = application.navigation, state = useNavigation(navigation);

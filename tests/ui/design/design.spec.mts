@@ -440,10 +440,10 @@ for (const size of [{ width: 1280, height: 800 }, { width: 900, height: 650 }] a
   });
 }
 
-/** Graph cards and stubs never overlap one another. */
+/** Graph nodes never overlap one another. */
 async function noOverlap(page: Page) {
   const overlaps = await page.locator('.graph-canvas').evaluateAll(canvases => canvases.flatMap(canvas => {
-    const boxes = [...canvas.querySelectorAll('.graph-node, .graph-stub')].map(element => ({ name: element.getAttribute('data-item-id') ?? element.getAttribute('data-stub'), rect: element.getBoundingClientRect() }));
+    const boxes = [...canvas.querySelectorAll('.graph-node')].map(element => ({ name: element.getAttribute('data-item-id'), rect: element.getBoundingClientRect() }));
     return boxes.flatMap((a, i) => boxes.slice(i + 1).filter(b => Math.min(a.rect.right, b.rect.right) - Math.max(a.rect.left, b.rect.left) > 1
       && Math.min(a.rect.bottom, b.rect.bottom) - Math.max(a.rect.top, b.rect.top) > 1).map(b => `${a.name} x ${b.name}`));
   }));
@@ -451,48 +451,28 @@ async function noOverlap(page: Page) {
 }
 
 for (const frame of ['graph-hidden', 'graph-hidden-small'] as const) for (const theme of ['dark', 'light'] as const) {
-  test(`The Graph folds hidden items into one small stub that opens and folds: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+  test(`The Graph draws no hidden item but the selected route, with no stub and no overlap: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
     await openApp(page, origin, { ...frameSpec(frame), theme });
-    const stubs = page.locator('.graph-stub');
-    expect(await stubs.count()).toBeGreaterThan(0);
-    await expect(page.locator('.graph-node.is-hidden'), 'hidden items are not drawn as cards').toHaveCount(0);
-    const size = await stubs.first().evaluate(stub => {
-      const rect = stub.getBoundingClientRect(), card = document.querySelector('.graph-node')!.getBoundingClientRect();
-      return { stubWidth: rect.width, stubHeight: rect.height, cardWidth: card.width, cardHeight: card.height };
-    });
-    expect(size.stubHeight, 'much smaller than a card').toBeLessThan(size.cardHeight / 2);
-    expect(size.stubWidth).toBeLessThan(size.cardWidth * 0.75);
+    await expect(page.locator('.graph-stub')).toHaveCount(0);
+    const selected = (await page.locator('.graph-node[aria-selected="true"]').getAttribute('data-item-id'))!;
+    const route = selected.split('.').map((_part, index, parts) => parts.slice(0, index + 1).join('.'));
+    const hidden = await page.locator('.graph-node.is-hidden').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-item-id')!));
+    for (const id of hidden) expect(route, `${id} is hidden and drawn only on the selected route`).toContain(id);
     await noOverlap(page);
-    const folded = await page.locator('.graph-node').count();
-    await stubs.first().scrollIntoViewIfNeeded();
-    await expect(stubs.first()).toHaveAttribute('aria-expanded', 'false');
-    await stubs.first().click();
-    await expect(stubs.first()).toHaveAttribute('aria-expanded', 'true');
-    expect(await page.locator('.graph-node').count()).toBeGreaterThan(folded);
-    expect(await page.locator('.graph-node.is-hidden').count()).toBeGreaterThan(0);
-    await noOverlap(page);
-    await testInfo.attach(`graph-stub-open-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
-    // The stub is a button: Enter folds again.
-    await stubs.first().focus(); await page.keyboard.press('Enter');
-    await expect(stubs.first()).toHaveAttribute('aria-expanded', 'false');
-    await expect(page.locator('.graph-node.is-hidden')).toHaveCount(0);
-    expect(await page.locator('.graph-node').count()).toBe(folded);
-    await testInfo.attach(`graph-stub-folded-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+    await testInfo.attach(`graph-hidden-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
   });
 }
 
 for (const frame of ['graph-hidden', 'graph-hidden-small'] as const) for (const theme of ['dark', 'light'] as const) {
-  test(`The hidden-items stub shows a whole focus ring under keyboard focus: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+  test(`A node reached by keys shows its whole selection ring: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
     await openApp(page, origin, { ...frameSpec(frame), theme });
-    const stub = page.locator('.graph-stub').first();
-    // The Graph's own keyboard moves (up and down in layout order) reach the stub and scroll it into view themselves.
+    // The Graph's own keyboard moves (up and down in layout order) scroll the target into view themselves.
     await page.locator('.graph-node[aria-selected="true"]').focus();
-    const reached = () => stub.evaluate(element => element === document.activeElement);
-    for (const key of ['ArrowDown', 'ArrowUp'] as const) for (let step = 0; step < 40 && !(await reached()); step++) { await page.keyboard.press(key); await page.waitForTimeout(40); }
-    await expect(stub).toBeFocused();
-    expect(await stub.evaluate(element => element.matches(':focus-visible')), 'keyboard focus shows the ring').toBe(true);
+    for (let step = 0; step < 6; step++) { await page.keyboard.press('ArrowDown'); await page.waitForTimeout(40); }
+    const target = page.locator('.graph-node[aria-selected="true"]');
+    await expect(target).toBeFocused();
     await settle(page);
-    const ring = await stub.evaluate(element => {
+    const ring = await target.evaluate(element => {
       const style = getComputedStyle(element), rect = element.getBoundingClientRect();
       const width = parseFloat(style.outlineWidth) || 0, offset = parseFloat(style.outlineOffset) || 0;
       const grow = style.outlineStyle === 'none' ? 0 : width + Math.max(offset, 0);
@@ -507,9 +487,9 @@ for (const frame of ['graph-hidden', 'graph-hidden-small'] as const) for (const 
       }
       return { style: style.outlineStyle, width, shadow: style.boxShadow, drawn, clips, view: { width: innerWidth, height: innerHeight } };
     });
-    await page.screenshot({ path: testInfo.outputPath(`fix1-graph-stub-focus-${frame}-${theme}.png`), animations: 'disabled' });
-    const box = (await stub.boundingBox())!;
-    await page.screenshot({ path: testInfo.outputPath(`fix1-graph-stub-focus-zoom-${frame}-${theme}.png`), animations: 'disabled',
+    await page.screenshot({ path: testInfo.outputPath(`graph-node-focus-${frame}-${theme}.png`), animations: 'disabled' });
+    const box = (await target.boundingBox())!;
+    await page.screenshot({ path: testInfo.outputPath(`graph-node-focus-zoom-${frame}-${theme}.png`), animations: 'disabled',
       clip: { x: Math.max(0, box.x - 40), y: Math.max(0, box.y - 30), width: Math.min(box.width + 80, page.viewportSize()!.width), height: box.height + 60 } });
     expect(ring.style === 'none' ? ring.shadow : ring.style, 'a focus indicator is drawn').not.toBe('none');
     for (const clip of ring.clips) {

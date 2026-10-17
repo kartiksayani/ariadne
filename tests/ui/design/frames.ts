@@ -54,7 +54,7 @@ const specs: readonly FrameSpec[] = [
   { ...base, width: 900, height: 650, id: 'map-brief-long-small', selected: '3.1', changes: 'long' },
   { ...base, ...narrow, id: 'map-thread', selected: '1.3.1.2' },
   { ...base, width: 900, height: 650, id: 'map-thread-small', selected: '1.3.1.2' },
-  // The Graph with hidden siblings folded into a stub (the Tree's "N items hidden" rule).
+  // The Graph over a view with hidden items: only the selected route's hidden items are drawn (SPEC 1.3).
   { ...base, ...narrow, id: 'graph-hidden', view: 'graph', selected: '1.3.1.2', foldedItems: ['1.1', '1.4', '2.2'] },
   { ...base, width: 900, height: 650, id: 'graph-hidden-small', view: 'graph', selected: '1.3.1.2', foldedItems: ['1.1', '1.4', '2.2'] },
 ];

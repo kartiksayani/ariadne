@@ -4,7 +4,7 @@ import demo from '../../../fixtures/domain/demo/session.json';
 import type { Session } from '../../../apps/desktop/src/generated/domain/models';
 import type { SessionPreferences } from '../../../apps/desktop/src/generated/core';
 import { OpenSessions } from '../../../apps/desktop/src/data/session-store';
-import { RegisteredRoutes } from '../../../apps/desktop/src/data/routes';
+import { RegisteredRoutes, type RevealedItem } from '../../../apps/desktop/src/data/routes';
 import { createDesktopService, type DesktopTransport } from '../../../apps/desktop/src/data/service';
 import { GraphView } from '../../../apps/desktop/src/ui/graph/GraphView';
 
@@ -12,7 +12,7 @@ declare global {
   interface Window { __graphEvidence: { mountMs: number[]; updateMs: number[]; saved: SessionPreferences[] } }
 }
 
-// Twenty ordered trees of 100 items in one topic; a long replacement runs from
+// Twenty ordered trees of 100 items in one topic; a long related link runs from
 // the first tree to the last. Only the transport is doubled.
 function graphSession(): Session {
   const session = structuredClone(demo) as Session, template = session.items['1']!;
@@ -21,10 +21,10 @@ function graphSession(): Session {
     for (let child = 0; child < 100; child++) {
       const id = child ? `${root}.${child}` : String(root);
       session.items[id] = { ...structuredClone(template), id, parent: child ? String(root) : null,
-        ordinal: child || root, question: `Graph question ${id}`, status: 'open', replaced_by: null };
+        ordinal: child || root, question: `Graph question ${id}`, status: 'open', replaced_by: null, related: [] };
     }
   }
-  session.items['1.1']!.status = 'replaced'; session.items['1.1']!.replaced_by = '20.99';
+  session.items['1.1']!.related = ['20.99'];
   return session;
 }
 
@@ -49,14 +49,17 @@ window.__graphEvidence = { mountMs: [], updateMs: [], saved: [] };
 
 function Fixture() {
   const [view, setView] = useState(initial), [detail, setDetail] = useState<string | null>(null);
+  const [reveal, setReveal] = useState<RevealedItem | null>(null);
   return <>
     <button type="button" onClick={() => setView(previous => ({ ...previous, selected_item_id: '15.50' }))}>Select off-screen item</button>
+    {/* A link, waiting card or Tree selection elsewhere: the navigation's reveal, which the Graph centres. */}
+    <button type="button" onClick={() => { void routes.revealItem({ ...route, item_id: '15.50' }).then(setReveal); }}>Reveal off-screen item</button>
     {detail && <p role="status">Detail {detail}</p>}
     <div style={{ display: 'flex', flexDirection: 'column', height: 600 }}>
       <Profiler id="graph-view" onRender={(_id, phase, duration) => {
         window.__graphEvidence[phase === 'mount' ? 'mountMs' : 'updateMs'].push(duration);
       }}>
-        <GraphView store={store} routes={routes} view={view} later={later} reveal={null} tight={false} sessionLabel={null}
+        <GraphView store={store} routes={routes} view={view} later={later} reveal={reveal}
           saveView={async next => { window.__graphEvidence.saved.push(next); setView(next); return true; }}
           onReveal={(result, openDetail) => { if (openDetail && result.kind === 'item') setDetail(result.route.item_id); }} />
       </Profiler>

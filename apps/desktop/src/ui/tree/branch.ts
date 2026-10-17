@@ -10,6 +10,15 @@ export const BRANCH_HUES: ReadonlyArray<{ readonly name: string; readonly hue: n
   { name: 'rose', hue: 355, chroma: 0.85 },
 ];
 
+/**
+ * A branch's slot in BRANCH_HUES: its top item's ordinal, counted from one, round the five hues. Core hands top-item
+ * ordinals out from the session's `next_root` counter, which only ever counts up (removal and emptying the bin leave it
+ * alone), so adding, removing and reloading never shift another branch's slot.
+ */
+export function branchSlot(rootOrdinal: number): number {
+  return (((rootOrdinal - 1) % BRANCH_HUES.length) + BRANCH_HUES.length) % BRANCH_HUES.length;
+}
+
 /** Stable per-root decorative hue in degrees, from a string hash of the root's key; selection and status also have shape/text cues. */
 export function branchHue(key: string): number {
   return [...key].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 0) * 139 % 360;

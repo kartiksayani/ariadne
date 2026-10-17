@@ -93,10 +93,11 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
       expect(within(detail()).getByText(hint)).toBeTruthy();
       expect(within(detail()).getByRole('button', { name: hint }).title).toBe(hint);
       expect(detail().querySelector<HTMLElement>('.detail-outcome .detail-label')?.style.color).toBe(`var(--st-${colour})`);
-      fireEvent.keyDown(row(), { key: 'g' }); await screen.findByText('One graph per topic');
+      fireEvent.keyDown(row(), { key: 'g' }); await screen.findByRole('group', { name: 'Graph legend' });
       expect(within(row()).getByRole('img', { name: label })).toBeTruthy();
       expect(row().querySelector<HTMLElement>('.graph-node-icon')?.style.color).toBe(`var(--st-${colour})`);
-      expect(within(row()).getByText(hint)).toBeTruthy();
+      // A Graph node is icon, name and marker only (SPEC 1.3); the Ack hint lives in the Tree and Details.
+      expect(within(row()).queryByText(hint)).toBeNull();
       expect(acks(transport)).toHaveLength(0);
     });
 
@@ -126,8 +127,8 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
         expect(!!within(host).queryByText(/^Ack →/)).toBe(available);
       }
       expect(!!screen.queryByText('Ack all (1)')).toBe(available);
-      fireEvent.keyDown(row(), { key: 'g' }); await screen.findByText('One graph per topic');
-      expect(!!within(row()).queryByText(/^Ack →/)).toBe(available);
+      fireEvent.keyDown(row(), { key: 'g' }); await screen.findByRole('group', { name: 'Graph legend' });
+      expect(within(row()).queryByText(/^Ack →/)).toBeNull();
       expect(acks(transport)).toHaveLength(0);
     });
 
@@ -194,7 +195,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
       if ('command' in args.request && args.request.command.command === 'session_close') { saving = true; await gate; throw new Error('Lost save response'); }
       return invoke(name, args);
     });
-    if (source === 'graph') { fireEvent.keyDown(row(), { key: 'g' }); await screen.findByText('One graph per topic'); }
+    if (source === 'graph') { fireEvent.keyDown(row(), { key: 'g' }); await screen.findByRole('group', { name: 'Graph legend' }); }
     // The other change is Close session (the connection card): it asks first, then saves while its review stays open.
     fireEvent.click(document.querySelector<HTMLElement>('[data-popover-trigger="connection"]')!);
     fireEvent.click(await within(await waitFor(() => document.querySelector<HTMLElement>('.cc')!)).findByRole('button', { name: 'Close session' }));
@@ -372,7 +373,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     fireEvent.click(target);
     const opened = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     if (source === 'detail') target = opened;
-    if (source === 'graph') { fireEvent.keyDown(target, { key: 'g' }); await screen.findByText('One graph per topic'); target = row(); }
+    if (source === 'graph') { fireEvent.keyDown(target, { key: 'g' }); await screen.findByRole('group', { name: 'Graph legend' }); target = row(); }
     await act(async () => { target.focus(); fireEvent.keyDown(target, { key: 'a' }); });
     await waitFor(() => expect(acks(transport)).toHaveLength(1));
     expect(transport.mutations.some(value => value.command.command === 'input_submit')).toBe(false);
@@ -394,17 +395,14 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     expect(acks(transport)).toHaveLength(0);
   });
 
-  it('shows a small graph marker that opens detail, where Ack can be applied', async () => {
+  it('opens detail from a graph node, where Ack can be applied', async () => {
     const transport = await mount();
-    fireEvent.keyDown(row(), { key: 'g' }); await screen.findByText('One graph per topic');
-    const marker = within(row()).getByText('Ack → Done');
-    expect(marker.classList.contains('graph-node-ack')).toBe(true);
-    expect(marker.title).toContain('Ack → Done');
-    expect(within(row('2')).queryByText('Ack → Decided')).toBeNull();
-    fireEvent.click(marker); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
+    fireEvent.keyDown(row(), { key: 'g' }); await screen.findByRole('group', { name: 'Graph legend' });
+    expect(row().classList.contains('graph-node')).toBe(true);
+    fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     expect(acks(transport)).toHaveLength(0);
     await act(async () => { fireEvent.click(within(detail()).getByRole('button', { name: 'Ack → Done' })); });
-    await waitFor(() => expect(within(row()).queryByText('Ack → Done')).toBeNull());
+    await waitFor(() => expect(acks(transport)).toHaveLength(1));
   });
 
   it.each(['tree', 'detail'] as const)('surfaces a plain refusal from %s and permits another attempt', async source => {
@@ -466,7 +464,7 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
   it.each(['detail', 'graph'] as const)('clears a keyboard Ack refusal from %s on selection changes and on a button Ack success', async source => {
     const transport = new AckTransport(); transport.refuse = true; await mount(transport);
     fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
-    if (source === 'graph') { fireEvent.keyDown(row(), { key: 'g' }); await screen.findByText('One graph per topic'); }
+    if (source === 'graph') { fireEvent.keyDown(row(), { key: 'g' }); await screen.findByRole('group', { name: 'Graph legend' }); }
     const host = () => source === 'detail' ? detail() : row();
     const pressAck = async () => { await act(async () => { host().focus(); fireEvent.keyDown(host(), { key: 'a' }); }); };
     await pressAck();
