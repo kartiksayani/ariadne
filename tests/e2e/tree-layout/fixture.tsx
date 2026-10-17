@@ -113,8 +113,27 @@ class TreeLayoutTransport extends AppTransport {
     if (change === 'settle') { items['2']!.status = 'done'; ++items['2']!.revision; }
     // An Ack landing from elsewhere (the Graph has no Ack button): the item takes its target status and is no longer to ack.
     if (change.startsWith('ack:')) { const item = items[change.slice(4)]!; item.status = item.ack_to ?? item.status; item.ack_to = null; ++item.revision; }
+    // The hold at every scroll position (D24): a first row above everything, and a named row leaving or removed.
+    if (change === 'add-top') items['0'] = { ...items['1.1']!, id: '0', parent: null, ordinal: 0, question: 'A new item at the very top' };
+    const [verb, id] = change.split(':');
+    if (verb === 'leave' && id) { items[id]!.status = 'in_progress'; ++items[id]!.revision; }
+    if (verb === 'grow' && id) { items[id]!.question = 'A longer title the agent rewrote, wrapping over a few lines of the Map. '.repeat(4); ++items[id]!.revision; }
+    if (verb === 'remove' && id) { items[id]!.removed_at = session.updated_at; ++items[id]!.revision; }
+    // The agent writes more on a row: its result runs six lines longer.
+    if (verb === 'write' && id) { items[id]!.outcome += '\n' + Array.from({ length: 6 }, (_, index) => `More line ${index + 1}`).join('\n'); ++items[id]!.revision; }
     ++session.revision;
     this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+  }
+  /** A newer revision is announced but the read still returns this one: the "out of date" notice opens above the Map. */
+  stale() {
+    const session = this.sessions.get(route.session_id)!;
+    this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision + 1 });
+  }
+  /** A saved status filter lands, as the desktop's other window or a restore writes it. */
+  filter(statuses: string[]) {
+    this.preferences.sessions.find(value => value.session.session_id === route.session_id)!.filters.statuses = statuses as never;
+    ++this.preferences.revision;
+    this.emit('ariadne://preferences_changed', { revision: this.preferences.revision });
   }
   /** The owner's reading of an item lands from elsewhere (the dock or Details' 1 s dwell): its marker clears. */
   seen(itemId: string) {

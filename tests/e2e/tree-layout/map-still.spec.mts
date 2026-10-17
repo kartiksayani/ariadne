@@ -174,13 +174,11 @@ for (const under of [4, 17, 40]) test(`Show more keeps the clicked row's window 
 
 for (const [name, kind, subject, before, change, done] of triggers) test(`the Map stays still when ${name}`, async ({ page }) => {
   // The closed-session notice pushes the Map down; the Tree hold piece holds viewport y through its scroller observer.
-  test.fixme(name === 'a session ends', 'needs the Tree hold (redesign/a20-hold)');
   await serve(async origin => {
     await open(page, origin);
     await before(page);
     await settle(page);
-    const rows = await placed(page), read = await reading(page), scrollTop = await page.locator('.tree-scroll').evaluate(box => box.scrollTop);
-    expect(scrollTop, 'the reading row is scrolled, so the hold applies').toBeGreaterThan(0);
+    const rows = await placed(page), read = await reading(page);
     expect(read.key).toBe('10');
     if (subject) expect(rows.map(value => value.key), `${subject} is in view`).toContain(subject);
     await change(page);
@@ -313,14 +311,6 @@ const filterTriggers: readonly FilterTrigger[] = [
     change: page => agent(page, 'settle'), done: (page, view) => expect(page.locator(cellOf(view, '38'))).toHaveCount(0) },
 ];
 
-// The Tree rows that fail until the Tree hold (D24, branch redesign/a20-hold) keeps the reading row's window place at every
-// scroll position, including a row opening above the Map. The Graph's hold is already in; all its rows pass.
-const waitsForTreeHold: Readonly<Record<Spot, readonly string[]>> = {
-  top: ['the chip row opens', 'the reading row leaves To ack after its Ack'],
-  middle: ['the chip row opens', 'the chip row closes', 'Clear empties the chips and closes the row', 'the reading row leaves To ack after its Ack'],
-  bottom: ['the chip row opens', 'a dependency settles and an item leaves Blocked'],
-};
-
 test.describe('the filter row never moves the Map', () => {
   // Each row opens a window, so a missing control fails fast instead of waiting for the suite's long limit.
   test.describe.configure({ timeout: 90_000 });
@@ -337,7 +327,6 @@ test.describe('the filter row never moves the Map', () => {
 
   for (const view of views) for (const spot of spots) for (const trigger of filterTriggers) {
     test(`${view}, scrolled to the ${spot}: ${trigger.name}`, async ({ page }) => {
-      test.fixme(view === 'Tree' && waitsForTreeHold[spot].includes(trigger.name), 'waits for the Tree hold (D24, redesign/a20-hold)');
       await prepare(page, origin, view);
       await trigger.before(page);
       await scrollTo(page, view, spot);
@@ -370,3 +359,185 @@ test.describe('the filter row never moves the Map', () => {
     });
   }
 });
+
+// ------------------------------------------------------------------- D24: the hold at every scroll position
+// Measured in window coordinates (map-viewport.mts): some triggers move the scroller itself. The reading row is the selected
+// row while it is on screen, else the first item row whole below the sticky band. When it goes (filtered out, hidden or
+// removed), the nearest surviving row below it, else above it, keeps its own window place.
+// The boundaries: at `scrollTop = 0`, content at or above the reading row that shrinks lets the rows below rise into the gap
+// (`rise`: no top spacer); at the bottom a shrink keeps the scroll extent with a spacer, which an owner scroll trims.
+type Where = 'top' | 'middle' | 'bottom';
+type Expectation = 'held' | 'rise';
+// [name, where, expectation, before, change (given the reading row), done]
+type Hold = readonly [name: string, where: Where, expectation: Expectation, before: (page: Page) => Promise<void>,
+  change: (page: Page, reading: string) => Promise<void>, done: (page: Page, reading: string) => Promise<void>];
+const scroller = (page: Page) => page.locator('.tree-scroll');
+const goTo = (page: Page, where: Where) => where === 'middle' ? Promise.resolve()
+  : scroller(page).evaluate((box, to) => { box.scrollTop = to === 'top' ? 0 : box.scrollHeight; }, where);
+/** Every item row in Map order, and the reading row: the selected row while on screen, else the first whole below the band. */
+const readingRow = (page: Page) => scroller(page).evaluate(box => {
+  const edge = box.getBoundingClientRect();
+  let bar = 0;
+  for (const header of box.querySelectorAll('.tree-topic')) {
+    const rect = header.getBoundingClientRect();
+    if (rect.top <= edge.top && rect.bottom > edge.top) bar = Math.max(bar, rect.bottom - edge.top);
+  }
+  const rows = [...box.querySelectorAll<HTMLElement>('.tree-item')];
+  const shown = (element: HTMLElement) => { const top = element.getBoundingClientRect().top; return top >= edge.top + bar - 1 && top < edge.bottom; };
+  const reading = rows.find(element => element.getAttribute('aria-selected') === 'true' && shown(element)) ?? rows.find(shown)!;
+  return { key: reading.dataset.row!, keys: rows.map(element => element.dataset.row!) };
+});
+const windowTop = async (page: Page, key: string) => (await viewportPlace(page, `.tree-item[data-row="${key}"]`))?.y ?? null;
+const scrollTopOf = (page: Page) => scroller(page).evaluate(box => box.scrollTop);
+const filter = (page: Page, statuses: string[]) =>
+  page.evaluate(value => (window as unknown as { treeLayout: { filter(statuses: string[]): void } }).treeLayout.filter(value), statuses);
+const hide = async (page: Page, id: string) => { await point(page, id); await press(row(page, id).getByRole('button', { name: /^Hide/ })); };
+// In the Open view item 1 shows only as 1.1's context, so 1.1 leaving takes it along.
+const leave = (page: Page, reading: string) => agent(page, `leave:${reading === '1' ? '1.1' : reading}`);
+const goes = (page: Page, reading: string) => expect(row(page, reading)).toHaveCount(0);
+/** Item 12 is selected with Details closed, below the first row in view, and the owner has scrolled a little since. */
+const selectTwelve = async (page: Page) => {
+  await press(row(page, '12').getByText('Another item 12'));
+  const close = page.getByRole('button', { name: 'Close detail' });
+  if (await close.count()) await close.click();
+  await expect(row(page, '12')).toHaveAttribute('aria-selected', 'true');
+  await page.mouse.wheel(0, 20);
+  await settle(page);
+};
+const everywhere = (name: string, expectation: (where: Where) => Expectation, before: Hold[3], change: Hold[4], done: Hold[5]): Hold[] =>
+  (['top', 'middle', 'bottom'] as const).map(where => [name, where, expectation(where), before, change, done]);
+const held = (): Expectation => 'held', risesAtTop = (where: Where): Expectation => where === 'top' ? 'rise' : 'held';
+const holds: readonly Hold[] = [
+  ...everywhere('a new agent row lands above the reading row', held, nothing, page => agent(page, 'add-top'),
+    page => expect(row(page, '0')).toHaveCount(1)),
+  ...everywhere('the reading row leaves the filter on its own', risesAtTop, page => filter(page, ['open']), leave, goes),
+  ...everywhere('the owner hides the reading row', risesAtTop, nothing, hide, goes),
+  ...everywhere('the agent removes the reading row', risesAtTop, nothing, (page, reading) => agent(page, `remove:${reading}`), goes),
+  // Rows above the reading row go or come back. While the "Showing N of M" banner shows a status filter, it opens or closes
+  // above the Map too, so the scroller itself moves (D13); the chip row's own rows are the filter row block's.
+  ...everywhere('a saved filter lands', held, nothing, page => filter(page, ['open']),
+    page => expect(row(page, '5')).toHaveCount(0)),
+  ...everywhere('a saved filter clears', risesAtTop, page => filter(page, ['open']), page => filter(page, []),
+    page => expect(row(page, '5')).toHaveCount(1)),
+  ['a row below the reading row goes and the scroll range shrinks', 'bottom', 'held', nothing, page => agent(page, 'remove:18'),
+    page => expect(row(page, '18')).toHaveCount(0)],
+  ['the selected row is the reading row: a row above it grows', 'middle', 'held', selectTwelve, page => agent(page, 'grow:11'),
+    page => expect(row(page, '11')).toContainText('A longer title')],
+];
+
+const served = async (page: Page, run: () => Promise<void>) => {
+  const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+    logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+  try {
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    await open(page, `http://127.0.0.1:${address.port}`);
+    await run();
+  } finally { await server.close(); }
+};
+
+for (const [name, where, expectation, before, change, done] of holds) {
+  const label = expectation === 'rise' ? `top boundary: ${name}, so the rows below rise` : `${name} at the ${where}`;
+  test(`the Map holds when ${label}`, ({ page }) => served(page, async () => {
+    await before(page);
+    await settle(page);
+    await goTo(page, where);
+    await settle(page);
+    if (where === 'top') expect(await scrollTopOf(page)).toBe(0);
+    if (where === 'bottom') expect(await scroller(page).evaluate(box => box.scrollHeight - box.clientHeight - box.scrollTop)).toBeLessThan(1);
+    const read = await readingRow(page), was = new Map<string, number>();
+    for (const key of read.keys) was.set(key, (await windowTop(page, key))!);
+    await change(page, read.key);
+    await done(page, read.key);
+    await settle(page);
+    const present = new Set(await page.locator('.tree-item').evaluateAll(rows => rows.map(element => (element as HTMLElement).dataset.row!)));
+    const index = read.keys.indexOf(read.key);
+    const survivor = present.has(read.key) ? read.key
+      : read.keys.slice(index + 1).find(key => present.has(key)) ?? read.keys.slice(0, index).reverse().find(key => present.has(key))!;
+    if (expectation === 'held') {
+      await expect.poll(async () => Math.abs((await windowTop(page, survivor))! - was.get(survivor)!), `${survivor} keeps its window place`)
+        .toBeLessThanOrEqual(3);
+    } else {
+      expect(await scrollTopOf(page)).toBe(0);
+      const now = (await windowTop(page, survivor))!;
+      expect(now, `${survivor} never moves down`).toBeLessThanOrEqual(was.get(survivor)! + 0.5);
+      if (survivor !== read.key) expect(now, `${survivor} rises no higher than the row it replaces`).toBeGreaterThanOrEqual(was.get(read.key)! - 3);
+    }
+  }));
+}
+
+test('the Map holds at the bottom: an owner scroll trims the spacer and moves the Map only as far as it scrolls', ({ page }) => served(page, async () => {
+  await goTo(page, 'bottom');
+  await settle(page);
+  /** The scroll range, and the blank the rows container keeps below its last topic (the spacer). */
+  const extent = () => scroller(page).evaluate(box => {
+    const rows = box.querySelector('.tree-rows')!;
+    return { height: box.scrollHeight, blank: Math.round(rows.getBoundingClientRect().bottom - rows.lastElementChild!.getBoundingClientRect().bottom) };
+  });
+  expect((await extent()).blank).toBe(0);
+  const read = await readingRow(page), y = (await windowTop(page, read.key))!;
+  await agent(page, 'remove:18');
+  await expect(row(page, '18')).toHaveCount(0);
+  await settle(page);
+  await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - y), 'the shrink holds').toBeLessThanOrEqual(3);
+  const kept = await extent();
+  expect(kept.blank, 'a spacer keeps the scroll extent').toBeGreaterThan(0);
+  const box = (await scroller(page).boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -40);
+  await expect.poll(async () => Math.round((await windowTop(page, read.key))! - y), 'the Map moves as far as the owner scrolled').toBe(40);
+  await page.mouse.wheel(0, -600);
+  await expect.poll(async () => Math.round((await windowTop(page, read.key))! - y)).toBeGreaterThan(300);
+  // Once the blank end has left the view the spacer is gone, and the scroll range gives its room back.
+  await expect.poll(async () => (await extent()).blank).toBe(0);
+  expect((await extent()).height).toBe(kept.height - kept.blank);
+}));
+
+// A row taller than the window, clipped at the top, is the only row on screen: it is the reading row (the next row starts
+// below the window), so the agent writing more on it never slides what the owner reads.
+test('the Map holds when a tall clipped row grows while it is the only row on screen', ({ page }) => served(page, async () => {
+  await page.setViewportSize({ width: 1000, height: 460 });
+  await goTo(page, 'top');
+  await settle(page);
+  // The result's Show more (with the 3-line clamp the long question has its own, first).
+  await row(page, '1').getByRole('button', { name: 'Show more' }).last().click();
+  await expect(row(page, '1').getByRole('button', { name: 'Show less' }).first()).toBeVisible();
+  await row(page, '1').evaluate(element => {
+    const box = element.closest('.tree-scroll')!;
+    box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top + 60;
+  });
+  await settle(page);
+  const clipped = await row(page, '1').evaluate(element => {
+    const box = element.closest('.tree-scroll')!.getBoundingClientRect(), rect = element.getBoundingClientRect();
+    return rect.top < box.top && rect.bottom > box.bottom;
+  });
+  expect(clipped, '1 is clipped at the top and runs past the window').toBe(true);
+  await expect(row(page, '1')).not.toHaveAttribute('aria-selected', 'true');
+  const y = (await windowTop(page, '1'))!;
+  await agent(page, 'write:1');
+  await expect(row(page, '1')).toContainText('More line 6');
+  await settle(page);
+  await expect.poll(async () => Math.abs((await windowTop(page, '1'))! - y), '1 keeps its window place').toBeLessThanOrEqual(3);
+}));
+
+// A short Map (its rows end above the window's bottom) still holds growth above the reading row and a scroller move:
+// a bottom spacer makes the scroll room, and no more than that, so no blank band can be scrolled to.
+const stale = (page: Page) => page.evaluate(() => (window as unknown as { treeLayout: { stale(): void } }).treeLayout.stale());
+const shortMap: readonly (readonly [name: string, change: (page: Page) => Promise<void>, done: (page: Page) => Promise<void>])[] = [
+  ['a row is added above', page => agent(page, 'add-top'), page => expect(row(page, '0')).toHaveCount(1)],
+  ['a notice opens above', stale, page => expect(page.getByText('Showing last valid data')).toBeVisible()],
+];
+for (const [name, change, done] of shortMap) test(`the Map holds on a short Map when ${name}`, ({ page }) => served(page, async () => {
+  await page.setViewportSize({ width: 1000, height: 4400 });
+  await goTo(page, 'top');
+  await settle(page);
+  const short = await scroller(page).evaluate(box => box.getBoundingClientRect().bottom - box.querySelector('.tree-rows')!.getBoundingClientRect().bottom);
+  expect(short, 'the rows end well above the window\'s bottom').toBeGreaterThan(300);
+  const read = await readingRow(page), y = (await windowTop(page, read.key))!;
+  await change(page);
+  await done(page);
+  await settle(page);
+  await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - y), `${read.key} keeps its window place`).toBeLessThanOrEqual(3);
+  expect(await scroller(page).evaluate(box => box.scrollHeight - box.clientHeight - box.scrollTop), 'no spare room below').toBeLessThan(1);
+}));

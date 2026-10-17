@@ -2526,7 +2526,8 @@ describe('scrolling the tree', () => {
       expect(within(slot).getAllByRole('button').map(button => button.textContent)).toEqual(['Level 1', 'Level 2', 'Level 3']);
       predecessorGrowth = 20;
       act(() => callbacks.find(callback => [...callback.targets].some(target => target.matches('.tree-rows')) && !callback.targets.has(box))!.run());
-      expect(row('deep-4').getBoundingClientRect().top).toBe(188);
+      // D24: the first whole row is the reading row, so the clipped predecessor growing at its end moves nothing in view.
+      expect(row('deep-4').getBoundingClientRect().top).toBe(168);
       expect(within(slot).getAllByRole('button').map(button => button.textContent)).toEqual(['Level 1', 'Level 2', 'Level 3']);
       // An item hidden by the pinned topic is not the first fully visible row.
       box.scrollTop += 40; fireEvent.scroll(box);
@@ -2618,17 +2619,19 @@ describe('scrolling the tree', () => {
       act(() => callbacks.find(callback => [...callback.targets].some(target => target.matches('.tree-rows')) && !callback.targets.has(scroller()))!.run());
       expect(row('8').getBoundingClientRect().top).toBe(68);
       const top = scroller().scrollTop;
+      // The owner's press releases the reveal; 8 is the selected row on screen, so it is the reading row (D24) and holds.
       fireEvent.pointerDown(row('8'));
       shrink = 90;
       act(() => callbacks.find(callback => [...callback.targets].some(target => target.matches('.tree-rows')) && !callback.targets.has(scroller()))!.run());
-      expect(scroller().scrollTop).toBe(top);
-      expect(row('8').getBoundingClientRect().top).toBe(58);
+      expect(scroller().scrollTop).toBe(top - 10);
+      expect(row('8').getBoundingClientRect().top).toBe(68);
+      // Scrolled 20 px up, 8 is still on screen and still held, now at its new place.
       fireEvent.wheel(scroller());
       scroller().scrollTop -= 20; fireEvent.scroll(scroller());
       shrink = 95;
       act(() => callbacks.find(callback => [...callback.targets].some(target => target.matches('.tree-rows')) && !callback.targets.has(scroller()))!.run());
-      expect(scroller().scrollTop).toBe(top - 20);
-      expect(row('8').getBoundingClientRect().top).toBe(73);
+      expect(scroller().scrollTop).toBe(top - 35);
+      expect(row('8').getBoundingClientRect().top).toBe(88);
     } finally { vi.unstubAllGlobals(); }
   });
 
@@ -2663,7 +2666,8 @@ describe('scrolling the tree', () => {
       await mount({ props: { selectedId: '2' } });
       scroller().scrollTop = 190; fireEvent.scroll(scroller());
       noBackPill();
-      headerHeight = 60; act(() => callbacks.find(callback => callback.targets.has(scroller()))!.run());
+      // The edge observer watches the scroller and the topic headers.
+      headerHeight = 60; act(() => callbacks.find(callback => callback.targets.has(scroller()) && [...callback.targets].some(target => target.matches('.tree-topic')))!.run());
       expect(backPill('above')).toBeTruthy();
       expect(scroller().scrollTop).toBe(190);
     } finally { vi.unstubAllGlobals(); }
@@ -3083,7 +3087,8 @@ describe('scrolling the tree', () => {
       expect(row(next).getBoundingClientRect().top).toBe(nextOffset);
     });
 
-    it('lets new rows show when the tree is at the very top, and never undoes the owner’s own scrolling', async () => {
+    // D24: the hold applies at the very top too. Here the first row is the reading row and the rows growing are below it.
+    it('at the very top holds the first row while rows below it grow, and never undoes the owner’s own scrolling', async () => {
       growing();
       const view = await mount();
       grow = 300; view.rerender({});
