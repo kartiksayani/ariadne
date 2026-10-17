@@ -377,7 +377,9 @@ const mapRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '3.1m': [...box('topic band', [0, 40, 880, 62], [0, 40, 560, 113], MAP), wideOnly('first row', [0, 102, 880, 66], 0.01)],
   '3.6m': box('topic band', [0, 40, 1244, 42], [0, 40, 864, 62], MAP),
   '4.1': box('topic band', [0, 40, 880, 62], [0, 40, 560, 113], MAP),
-  '4.3': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 62], MAP), ...box('Ack all popover', [930, 86, 340, 187], [549, 106, 341, 187], TEXT),
+  // ALPHA20-REPLAN §3a D10: the band is two fixed lines in the app and one when wide on the board, so the Ack all popover that hangs from it
+  // sits 20px lower at 1280 and only the narrow frame (both two lines) compares it.
+  '4.3': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 62], MAP), { name: 'Ack all popover (narrow)', rect: [549, 106, 341, 187], variants: NARROW, threshold: TEXT[1] },
     ...box('first row', [0, 82, 925, 66], [0, 102, 545, 66], MAP)],
   '4.4': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 62], MAP), ...box('first row', [0, 82, 1280, 66], [0, 102, 900, 66], MAP)],
   '5.1': [...box('topic band', [0, 40, 1280, 62], [0, 40, 900, 62], MAP), ...box('first row', [0, 102, 1280, 66], [0, 102, 900, 66], MAP)],
@@ -391,13 +393,16 @@ const mapRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
     ...box('first row (right of the popover)', [556, 82, 724, 66], [556, 102, 344, 66], MAP)],
   '5.6': box('topic band', [0, 40, 880, 93], [0, 40, 560, 145], MAP),
   '5.7': [...box('topic band', [0, 40, 880, 93], [0, 40, 560, 145], MAP), wideOnly('first row', [0, 133, 880, 66], 0.01)],
-  '8.2': [...box('filter row', [0, 40, 1280, 40], [0, 40, 900, 40], TEXT), ...box('topic band', [0, 80, 1280, 42], [0, 80, 900, 62], MAP)],
+  // The filter row is compared through its first two chips ("Waiting on me 2", "To ack 3"). From the third on the app's world differs: "Open 8" where the
+  // board counts 5 (the three findings to ack count as open in the app), and the app's Blocked chip moves every chip after it (at 900 it wraps the row, so the narrow region stops above the second row).
+  '8.2': [...box('filter row (first two chips)', [0, 40, 212, 40], [0, 40, 212, 34], TEXT), ...box('topic band', [0, 80, 1280, 42], [0, 80, 900, 62], MAP)],
   '8.3': [...box('topic band (left of the popover)', [0, 40, 800, 42], [0, 40, 562, 62], MAP), ...box('Recent popover', [802, 44, 340, 430], [566, 44, 300, 430], TEXT),
     ...box('first row (left of the popover)', [0, 82, 800, 66], [0, 102, 562, 66], MAP)],
   // The band only (ends above the first strip). The board draws no "N outside the focus" strips in 8.4; the app keeps them, with "· N waiting",
   // so no question outside the focus goes unseen: an approved deviation (ALPHA20-REPLAN §3a). It sits below this region, so none is masked here.
   '8.4': box('topic band', [0, 40, 880, 62], [0, 40, 560, 82], MAP),
-  '8.5': [...box('topic band', [0, 40, 880, 62], [0, 40, 560, 114], MAP), ...box('Back to selected pill', [318, 712, 244, 40], [158, 562, 244, 40], MAP),
+  '8.5': [...box('topic band', [0, 40, 880, 62], [0, 40, 560, 114], MAP), // The pill's inside only: its rounded corners show the Map's rows behind it, which differ by D1 (row padding) and the scroll that follows.
+    ...box('Back to selected pill', [336, 718, 208, 26], [176, 568, 208, 26], MAP),
     wideOnly('first row', [0, 102, 880, 66], 0.01)],
   '9.2': [...box('topic band', [0, 40, 1280, 62], [0, 40, 900, 62], MAP), ...box('first row', [0, 102, 1280, 66], [0, 102, 900, 66], MAP)],
   // The "…" menu, from its first row ("Reply to topic"); the band is compared left of the menu.
@@ -415,8 +420,15 @@ const BAND_TITLE_HEIGHT = 30;
 const titleLineOnly = (region: FrameRegion): FrameRegion => region.name.startsWith('topic band') && region.rect[3] > BAND_TITLE_HEIGHT
   ? { ...region, rect: [region.rect[0], region.rect[1], region.rect[2], BAND_TITLE_HEIGHT] } : region;
 
+/**
+ * (a) The first row is left out of every Map state: ALPHA20-REPLAN §3a D1 (the app drops the board's +7/+4 per-box row padding, so the row's text sits
+ * 3 to 4px higher than the board's) and, at 1280, D10 (the band is two lines in the app, one on the board, so the row starts 20px lower). The rows'
+ * looks go to the side-by-side PNGs.
+ */
+const withoutFirstRow = (region: FrameRegion): boolean => !region.name.startsWith('first row');
+
 export const finalStates: readonly FinalState[] = [...stateList.map(state => regionsById[state.id] ? { ...state, regions: regionsById[state.id]! } : state),
-  ...mapStateList.map(state => ({ ...state, regions: mapRegionsById[state.id]!.map(titleLineOnly) }))];
+  ...mapStateList.map(state => ({ ...state, regions: mapRegionsById[state.id]!.filter(withoutFirstRow).map(titleLineOnly) }))];
 
 export const finalIds: readonly string[] = finalStates.map(state => state.id);
 
