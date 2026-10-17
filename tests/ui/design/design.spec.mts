@@ -118,12 +118,8 @@ async function changesFit(surface: Locator) {
   }
 }
 
-/** The band's changes slot (W3) hosts ChangesOpener; until it is merged nothing opens What changed in the app. Flip this then. */
-const BAND_HOST_LANDED = true;
-
 /** Opens the band's What changed popover (D18) over the Map and returns it. */
 async function openChanges(page: Page) {
-  test.fixme(!BAND_HOST_LANDED, 'needs W3 band host');
   await page.getByRole('button', { name: /new|changed|changes since/ }).first().click();
   const popover = page.getByRole('dialog', { name: 'What changed', exact: true });
   await expect(popover).toBeVisible();

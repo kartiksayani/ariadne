@@ -11,7 +11,6 @@ import { TreeView } from '../../src/ui/tree/TreeView';
 import { AppTransport, route, secondId } from './app/transport';
 import { goToPage, goToSession } from './app/open';
 import { page as historyPage, projections } from './history/fixtures';
-import { BAND_HOST_LANDED } from './changes/band-host';
 
 vi.mock('react-dom/client', async importOriginal => {
   const actual = await importOriginal<typeof ReactDOM>();
@@ -60,7 +59,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 // These composed journeys include independent seen saves under default file parallelism.
 describe('ordinary desktop composition', () => {
-  it.skipIf(!BAND_HOST_LANDED)('keeps the New tag and Since card through a long peek: peeking never marks an item seen', async () => {
+  it('keeps the New tag and Since card through a long peek: peeking never marks an item seen', async () => {
     const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!, target = session.items['1.1']!;
     const baseline = new Date(Date.now() - 60_000).toISOString();
     target.created_at = new Date(Date.now() - 30_000).toISOString(); target.changes = []; target.short = 'New receipt branch';

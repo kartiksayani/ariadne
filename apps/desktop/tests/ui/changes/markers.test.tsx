@@ -7,7 +7,6 @@ import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { AppTransport, route } from '../app/transport';
 import { goToSession } from '../app/open';
-import { BAND_HOST_LANDED } from './band-host';
 
 beforeEach(() => { localStorage.clear(); });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); delete (document as { visibilityState?: unknown }).visibilityState; localStorage.clear(); });
@@ -17,11 +16,10 @@ const viewOf = (transport: AppTransport) => transport.preferences.sessions.find(
 /** Item ids carried by mark_seen saves so far, in the order they were sent. */
 const marked = (transport: AppTransport) => transport.mutations.flatMap(request => request.command.command === 'preferences_patch'
   ? request.command.params.entries.flatMap(entry => entry.kind === 'mark_seen' ? entry.items.map(item => item.item_id) : []) : []);
-const withBand = it.skipIf(!BAND_HOST_LANDED);
 /** What the band says is unseen in the topic: the markers still on the Map, counted. */
 const band = () => screen.queryByRole('button', { name: /new|changed|changes since|All caught up/ })?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 /** The band's count, checked once the band is on screen. */
-const bandReads = (pattern: RegExp, negate = false) => { if (BAND_HOST_LANDED) (negate ? expect(band()).not : expect(band())).toMatch(pattern); };
+const bandReads = (pattern: RegExp, negate = false) => { (negate ? expect(band()).not : expect(band())).toMatch(pattern); };
 const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
 
 async function open() {
@@ -37,7 +35,7 @@ async function open() {
   await goToSession(route);
   await screen.findByRole('region', { name: 'Session tree' });
   await waitFor(() => expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready'));
-  await waitFor(() => { if (BAND_HOST_LANDED) expect(band()).toMatch(/1 new 1 changed/); else expect(row(CHANGED_ID)).not.toBeNull(); });
+  await waitFor(() => expect(band()).toMatch(/1 new 1 changed/));
   vi.useFakeTimers();
   return transport;
 }
@@ -63,7 +61,7 @@ describe('what leaves a marker alone', () => {
     ['pressing n, again and again', async () => { const map = screen.getByRole('region', { name: 'Session tree' }); for (let step = 0; step < 4; step++) fireEvent.keyDown(map, { key: 'n' }); await wait(2000); }],
     ['searching for a marked item', async () => { await search('receipt'); await wait(2000); }],
     ['opening Recent', async () => { fireEvent.click(screen.getByRole('button', { name: 'Recent' })); await wait(2000); }],
-    ...BAND_HOST_LANDED ? [['opening What changed', async () => { fireEvent.click(screen.getByRole('button', { name: /new/ })); await wait(2000); }] satisfies [string, () => Promise<void>]] : [],
+    ['opening What changed', async () => { fireEvent.click(screen.getByRole('button', { name: /new/ })); await wait(2000); }],
     ['choosing a status filter', async () => { filter(); await wait(2000); }],
     ['acking another item', async () => { fireEvent.click(within(row(ACK_ID)).getByRole('button', { name: 'Ack → Done' })); await wait(2000); }],
   ])('%s', async (_name, trigger) => {
@@ -94,7 +92,7 @@ describe('what clears a marker', () => {
     expect(marked(transport)).toContain(CHANGED_ID);
     bandReads(/1 new/); bandReads(/changed/, true);
   });
-  withBand('the row’s own button in What changed, and only that row', async () => {
+  it('the row’s own button in What changed, and only that row', async () => {
     const transport = await open();
     fireEvent.click(screen.getByRole('button', { name: /new/ }));
     fireEvent.click(screen.getAllByRole('button', { name: /^Mark .* seen$/ })[0]!);
@@ -102,7 +100,7 @@ describe('what clears a marker', () => {
     expect(marked(transport).length).toBe(1);
     expect(band()).toMatch(/1 (new|changed)$|1 (new|changed) since/);
   });
-  withBand('Mark all caught up, after its Undo window', async () => {
+  it('Mark all caught up, after its Undo window', async () => {
     const transport = await open();
     fireEvent.click(screen.getByRole('button', { name: /new/ }));
     fireEvent.click(screen.getByRole('button', { name: /Mark all caught up/ }));
