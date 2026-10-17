@@ -24,7 +24,8 @@ export function FilterRow({ counts, picked, shown, total, disabled, onChip, onCl
     <div className="tree-filter-chips">
       {CHIP_ORDER.filter(chip => counts[chip] > 0 || picked.includes(chip)).map(chip => {
         const view = CHIP_VIEW[chip], on = picked.includes(chip);
-        return <button key={chip} type="button" className="tree-filter-chip" aria-pressed={on} disabled={disabled} onClick={() => onChip(chip)}>
+        return <button key={chip} type="button" className="tree-filter-chip" aria-pressed={on} aria-label={`${view.label} ${counts[chip]}`}
+          disabled={disabled} onClick={() => onChip(chip)}>
           <i className={view.icon} style={{ color: view.color }} aria-hidden="true" />
           <span>{view.label}</span><span className="tree-filter-count">{counts[chip]}</span>
         </button>;

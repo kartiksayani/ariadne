@@ -46,6 +46,7 @@ afterEach(async () => {
   await disposeTrees();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  localStorage.clear();
   if (vi.isFakeTimers()) vi.clearAllTimers();
   vi.useRealTimers();
 });
@@ -86,12 +87,13 @@ const topicRow = (name: string) => screen.getByRole('treeitem', { name });
 const ids = () => [...document.querySelectorAll('[role="treeitem"][data-item-id]')].map(element => element.getAttribute('data-item-id'));
 const viewOf = (transport: AppTransport) => transport.preferences.sessions.find(value => value.session.session_id === route.session_id)!;
 const patches = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'preferences_patch');
-const filterButton = () => within(screen.getByRole('group', { name: 'Filter items' })).getByRole('button', { name: /^Filter/ });
-const chip = (label: string) => {
-  if (filterButton().getAttribute('aria-expanded') !== 'true') fireEvent.click(filterButton());
-  return within(screen.getByRole('menu', { name: /^Filter/ })).getByRole(label === 'All' ? 'menuitem' : 'menuitemcheckbox', { name: new RegExp(`^${label === 'All' ? 'Show all' : label}`) });
-};
-const statusSelected = (label: string) => label === 'All' ? !filterButton().hasAttribute('data-active') : chip(label).getAttribute('aria-checked') === 'true';
+// The chip row (SPEC §6.10) sits above the Map: one toggle button per status, "<label> <count>", and a Clear while any is picked.
+const filterRow = () => screen.getByRole('group', { name: 'Filter items' });
+const chip = (label: string) => within(filterRow()).getByRole('button', { name: new RegExp(`^${label}\\s*\\d+$`) });
+const chipShown = (label: string) => within(filterRow()).queryByRole('button', { name: new RegExp(`^${label}\\s*\\d+$`) }) !== null;
+const chipPicked = (label: string) => chip(label).getAttribute('aria-pressed') === 'true';
+const chipCount = (label: string) => Number(chip(label).getAttribute('aria-label')!.replace(`${label} `, ''));
+const clearChips = () => fireEvent.click(within(filterRow()).getByRole('button', { name: 'Clear' }));
 // The tree has no session menu any more (SPEC §2.1): a session is renamed from its All sessions row, which mounts
 // SessionRowAction on the session's own actions. These tests mount that same action beside the tree.
 function RenameHost({ actions }: { readonly actions: ReturnType<SessionActionControllers['forSession']> }) {
@@ -551,15 +553,19 @@ describe('session tree rows', () => {
   });
 
   it('keeps closed questions in the tree with their status and a quiet chip, excluding waiting counts', async () => {
-    await mount({ configure: transport => { transport.sessions.get(route.session_id)!.state = 'closed'; } });
+    const closedSession = (transport: AppTransport) => { transport.sessions.get(route.session_id)!.state = 'closed'; };
+    await mount({ configure: closedSession });
     const question = row('2');
     expect(within(question).getByText('Session closed').title).toBe(sessionClosedReason);
     expect(within(question).getByText('Waiting on me')).toBeTruthy();
     expect(screen.queryByText(/\d+ waiting on you/)).toBeNull();
-    fireEvent.click(filterButton());
-    expect(screen.getByRole('menuitemcheckbox', { name: /^Waiting on me/ }).textContent).not.toMatch(/[1-9]/);
-    fireEvent.click(chip('Waiting on me'));
-    await waitFor(() => expect(ids()).toEqual([]));
+    // Nothing counts as waiting once the session is closed, so the chip has no count to show.
+    expect(chipShown('Waiting on me')).toBe(false);
+    cleanup();
+    // A saved Waiting on me filter still shows its chip, at zero, and matches nothing.
+    await mount({ configure: transport => { closedSession(transport); viewOf(transport).filters.statuses = ['waiting_on_me']; } });
+    expect(chipCount('Waiting on me')).toBe(0);
+    expect(ids()).toEqual([]);
     expect(screen.getByText('No items match these filters.')).toBeTruthy();
   });
   it('counts declarations and backlinks once, with a visible muted marker that keeps its reserved room when selected or hovered', async () => {
@@ -818,8 +824,8 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     // The session's name, run state, Pause and Close moved to the top bar and its connection card (SPEC 2.1, 5.12).
     expect(document.querySelector('.tree-session-title')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Session actions' })).toBeNull();
-    expect(chip('All').textContent).toContain('9'); expect(chip('Open').textContent).toContain('3');
-    expect(chip('Closed').textContent).toContain('4'); expect(statusSelected('All')).toBe(true);
+    expect(chipCount('Open')).toBe(3); expect(chipCount('Done') + chipCount('Decided') + chipCount('Replaced')).toBe(3);
+    expect(within(filterRow()).getByText('Pick a status')).toBeTruthy();
     expect(row('1').querySelector('.tree-outcome')).not.toBeNull();
     expect(within(topicRow('Continued context')).getByText(/^Continued from/)).toBeTruthy();
   });
@@ -985,18 +991,18 @@ describe('session tree filters', () => {
         fireEvent.click(open); fireEvent.click(progress);
       });
       await waitFor(() => expect(navigation.getSnapshot().writing).toBe(true));
-      expect(statusSelected('Open')).toBe(true); expect(statusSelected('In progress')).toBe(true);
+      expect(chipPicked('Open')).toBe(true); expect(chipPicked('In progress')).toBe(true);
       expect(chip('Open').hasAttribute('disabled')).toBe(false);
       await act(async () => { release(); });
       await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'in_progress']));
       await waitFor(() => expect(navigation.getSnapshot().writing).toBe(false));
       expect(viewOf(transport).expanded_item_ids).not.toContain('1');
-      expect(statusSelected('Open')).toBe(true); expect(statusSelected('In progress')).toBe(true);
+      expect(chipPicked('Open')).toBe(true); expect(chipPicked('In progress')).toBe(true);
       expect(notices.getSnapshot().some(notice => notice.id === 'tree-view-save-failed')).toBe(false);
       expect(screen.queryByText('Ariadne isn’t sure that view change was saved. Try it again.')).toBeNull();
     } finally { release(); }
   });
-  it('queues rapid status toggles while keeping the menu enabled and focused during writes', async () => {
+  it('queues rapid status toggles while keeping the chips enabled and focused during writes', async () => {
     const { transport, navigation } = await mount();
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
@@ -1010,13 +1016,13 @@ describe('session tree filters', () => {
     expect(chip('In progress').hasAttribute('disabled')).toBe(false);
     expect(document.activeElement).toBe(open);
     fireEvent.click(chip('In progress'));
-    expect(statusSelected('Open')).toBe(true);
-    expect(statusSelected('In progress')).toBe(true);
+    expect(chipPicked('Open')).toBe(true);
+    expect(chipPicked('In progress')).toBe(true);
     await act(async () => { release(); });
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'in_progress']));
     await waitFor(() => expect(navigation.getSnapshot().writing).toBe(false));
-    expect(statusSelected('Open')).toBe(true);
-    expect(statusSelected('In progress')).toBe(true);
+    expect(chipPicked('Open')).toBe(true);
+    expect(chipPicked('In progress')).toBe(true);
     expect(patches(transport)).toHaveLength(2);
   });
   // The search finds in place (SPEC §4): its count goes to the top bar through onSearchStatus, never to a Map banner.
@@ -1035,15 +1041,15 @@ describe('session tree filters', () => {
     const status = vi.fn(), clear = vi.fn();
     const view = await mount({ configure: value => { viewOf(value).filters.statuses = ['open']; },
       props: { query: 'receipt', onClearSearch: clear, onSearchStatus: status } });
-    expect(screen.getByText('Showing 3 of 9 items in the statuses you picked')).toBeTruthy();
+    expect(within(filterRow()).getByText('Showing 3 of 9 items')).toBeTruthy();
     // Only the open "Add the receipt lookup test" counts; the in-progress match is outside the statuses.
     expect(searchCount(status)).toBe('1 of 1');
     expect(screen.queryByRole('button', { name: 'Clear search' })).toBeNull();
     view.rerender({ query: '' });
     expect(clear).not.toHaveBeenCalled();
     expect(viewOf(view.transport).filters.statuses).toEqual(['open']);
-    expect(statusSelected('Open')).toBe(true);
-    expect(screen.getByText('Showing 3 of 9 items in the statuses you picked')).toBeTruthy();
+    expect(chipPicked('Open')).toBe(true);
+    expect(within(filterRow()).getByText('Showing 3 of 9 items')).toBeTruthy();
   });
   it('excludes archived sessions from Ack buttons and topic counts', async () => {
     await mount({ configure: transport => {
@@ -1069,21 +1075,21 @@ describe('session tree filters', () => {
     const { transport } = await mount({ configure: value => {
       viewOf(value).filters.statuses = ['done', 'open', 'waiting_on_me', 'replaced', 'decided', 'in_progress', 'dropped', 'open', 'done'];
     } });
-    expect(statusSelected('All')).toBe(true);
-    for (const label of ['Waiting on me', 'Open', 'In progress', 'Closed']) {
-      expect(statusSelected(label)).toBe(false);
-    }
+    // No chip is picked: the row asks for one, shows no summary and offers no Clear.
+    for (const label of ['Waiting on me', 'Open', 'In progress', 'Done']) expect(chipPicked(label)).toBe(false);
+    expect(within(filterRow()).getByText('Pick a status')).toBeTruthy();
+    expect(within(filterRow()).queryByRole('button', { name: 'Clear' })).toBeNull();
     expect(ids()).toHaveLength(9);
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
-    expect(statusSelected('Open')).toBe(true);
-    expect(statusSelected('All')).toBe(false);
+    expect(chipPicked('Open')).toBe(true);
+    expect(within(filterRow()).queryByText('Pick a status')).toBeNull();
     expect(ids()).toEqual(['1', '1.1', '4', '8']);
   });
-  it('keeps a saved partial Closed group narrow when another chip is added', async () => {
+  it('keeps a saved single Done chip narrow when another chip is added', async () => {
     const { transport } = await mount({ configure: value => { viewOf(value).filters.statuses = ['done']; } });
-    expect(statusSelected('Closed')).toBe(true);
-    expect(statusSelected('All')).toBe(false);
+    expect(chipPicked('Done')).toBe(true);
+    expect(chipPicked('Decided')).toBe(false);
     expect(ids()).toEqual(['1']);
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'done']));
@@ -1091,7 +1097,7 @@ describe('session tree filters', () => {
   });
   it('toggles multiple chips, keeps counts independent, and restores the saved combination', async () => {
     const { transport, navigation, rerender } = await mount();
-    const labels = ['All', 'Waiting on me', 'Open', 'In progress', 'Closed'];
+    const labels = ['Waiting on me', 'Open', 'In progress', 'Done'];
     const counts = labels.map(label => chip(label).textContent);
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
@@ -1099,10 +1105,9 @@ describe('session tree filters', () => {
     chip('In progress').focus();
     await userEvent.keyboard('{Enter}');
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'in_progress']));
-    expect(statusSelected('Open')).toBe(true);
-    expect(statusSelected('In progress')).toBe(true);
-    expect(statusSelected('All')).toBe(false);
-    expect(statusSelected('Closed')).toBe(false);
+    expect(chipPicked('Open')).toBe(true);
+    expect(chipPicked('In progress')).toBe(true);
+    expect(chipPicked('Done')).toBe(false);
     expect(ids()).toEqual(['1', '1.1', '3', '4', '8']);
     expect(labels.map(label => chip(label).textContent)).toEqual(counts);
     // A search narrows neither the rows nor the chip counts.
@@ -1111,47 +1116,53 @@ describe('session tree filters', () => {
     expect(labels.map(label => chip(label).textContent)).toEqual(counts);
     cleanup(); navigation.stop();
     await mount({ transport });
-    expect(statusSelected('Open')).toBe(true);
-    expect(statusSelected('In progress')).toBe(true);
+    expect(chipPicked('Open')).toBe(true);
+    expect(chipPicked('In progress')).toBe(true);
     expect(ids()).toEqual(['1', '1.1', '3', '4', '8']);
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['in_progress']));
     expect(ids()).toEqual(['3']);
     fireEvent.click(chip('In progress'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
-    expect(statusSelected('All')).toBe(true);
+    expect(within(filterRow()).getByText('Pick a status')).toBeTruthy();
     expect(ids()).toHaveLength(9);
   });
-  it('collapses every selected status to All and clears a combination with All', async () => {
-    const { transport } = await mount();
+  it('picks chips one by one, combines them, and Clear empties the saved and the local chips and closes the row', async () => {
+    const closeFilter = vi.fn(), { transport } = await mount({ props: { onCloseFilter: closeFilter },
+      configure: value => { value.sessions.get(route.session_id)!.items['1.1']!.ack_to = 'done'; } });
     for (const [label, expected] of [
       ['Waiting on me', ['waiting_on_me']], ['Open', ['waiting_on_me', 'open']],
-      ['In progress', ['waiting_on_me', 'open', 'in_progress']], ['Closed', []],
+      ['In progress', ['waiting_on_me', 'open', 'in_progress']], ['Done', ['waiting_on_me', 'open', 'in_progress', 'done']],
     ] as const) {
       fireEvent.click(chip(label));
       await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(expected));
     }
-    expect(statusSelected('All')).toBe(true);
-    for (const label of ['Waiting on me', 'Open', 'In progress', 'Closed']) {
-      expect(statusSelected(label)).toBe(false);
-    }
-    expect(ids()).toHaveLength(9);
-    fireEvent.click(chip('Closed'));
-    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['decided', 'done', 'dropped', 'replaced']));
-    fireEvent.click(chip('Open'));
-    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'decided', 'done', 'dropped', 'replaced']));
-    fireEvent.click(chip('All'));
+    // A local chip joins the saved ones; it lives in this browser, never in the saved view.
+    fireEvent.click(chip('To ack'));
+    await waitFor(() => expect(chipPicked('To ack')).toBe(true));
+    expect(JSON.parse(localStorage.getItem('ariadne.map.filter.v1')!)).toEqual({ [route.session_id]: ['toack'] });
+    expect(viewOf(transport).filters.statuses).toEqual(['waiting_on_me', 'open', 'in_progress', 'done']);
+    clearChips();
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
-    expect(statusSelected('All')).toBe(true);
+    expect(localStorage.getItem('ariadne.map.filter.v1')).toBe('{}');
+    expect(closeFilter).toHaveBeenCalledTimes(1);
+    for (const label of ['Waiting on me', 'Open', 'In progress', 'Done', 'To ack']) if (chipShown(label)) expect(chipPicked(label)).toBe(false);
+    expect(ids()).toHaveLength(9);
+  });
+  it('leaves the other scope filters alone when Clear empties the chips', async () => {
+    const { transport } = await mount({ configure: value => { viewOf(value).filters.statuses = ['open']; viewOf(value).filters.hide_later = true; } });
+    clearChips();
+    await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
+    expect(viewOf(transport).filters.hide_later).toBe(true);
   });
   it('keeps chip counts under a search, marks its hits in place and keeps the topic dropdown out of every layout', async () => {
     const { transport, rerender } = await mount();
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
     expect(ids()).toEqual(['1', '1.1', '4', '8']);
-    const counts = ['All', 'Open'].map(label => chip(label).textContent);
+    const counts = ['Waiting on me', 'Open'].map(label => chip(label).textContent);
     rerender({ query: 'receipt' });
-    expect(['All', 'Open'].map(label => chip(label).textContent)).toEqual(counts);
+    expect(['Waiting on me', 'Open'].map(label => chip(label).textContent)).toEqual(counts);
     expect(ids()).toEqual(['1', '1.1', '4', '8']);
     expect(row('1.1').querySelector('.tree-hit')?.textContent?.toLowerCase()).toBe('receipt');
     for (const props of [{}, { detailOpen: true }]) {
@@ -1159,23 +1170,21 @@ describe('session tree filters', () => {
       expect(screen.queryByRole('combobox', { name: 'Topic' })).toBeNull();
     }
   });
-  it('shows a single filter icon and names its selected statuses with a dot', async () => {
+  it('names the picked statuses by pressed chips and a summary, and shows no menu', async () => {
     const { transport } = await mount();
-    expect(filterButton().getAttribute('aria-label')).toBe('Filter');
-    expect(filterButton().querySelector('.tree-filter-dot')).toBeNull();
     expect(screen.queryByRole('menu')).toBeNull();
+    expect(within(filterRow()).queryByText(/^Showing /)).toBeNull();
     fireEvent.click(chip('Open'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
     fireEvent.click(chip('In progress'));
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open', 'in_progress']));
-    expect(filterButton().getAttribute('aria-label')).toBe('Filter: Open, In progress');
-    expect(filterButton().getAttribute('data-active')).toBe('true');
-    expect(filterButton().querySelector('.tree-filter-dot')).not.toBeNull();
+    expect(chipPicked('Open')).toBe(true); expect(chipPicked('In progress')).toBe(true);
+    expect(within(filterRow()).getByText('Showing 4 of 9 items')).toBeTruthy();
     expect(ids()).toEqual(['1', '1.1', '3', '4', '8']);
-    fireEvent.click(chip('All'));
+    clearChips();
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
-    expect(filterButton().getAttribute('aria-label')).toBe('Filter');
-    expect(document.activeElement).toBe(filterButton());
+    expect(chipPicked('Open')).toBe(false);
+    expect(within(filterRow()).getByText('Pick a status')).toBeTruthy();
     expect(screen.queryByRole('menu')).toBeNull();
   });
   it.each(['status', 'search'] as const)('keeps item and topic folds shared with the normal view under %s filtering', async mode => {
@@ -1183,7 +1192,6 @@ describe('session tree filters', () => {
     if (mode === 'status') {
       fireEvent.click(chip('Open'));
       await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual(['open']));
-      fireEvent.keyDown(chip('Open'), { key: 'Escape' });
     } else rerender({ query: 'receipt' });
     expect(ids()).toContain('1.1');
     row('1').focus(); fireEvent.keyDown(row('1'), { key: 'ArrowLeft' });
@@ -1201,7 +1209,7 @@ describe('session tree filters', () => {
     fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Expand or collapse topic' }));
     await waitFor(() => expect(ids()).not.toContain('1'));
     if (mode === 'status') {
-      fireEvent.click(chip('All'));
+      clearChips();
       await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
     } else rerender({ query: '' });
     expect(ids()).not.toContain('1');
@@ -1227,8 +1235,8 @@ describe('session tree filters', () => {
       session.items['2']!.status = 'open'; session.items['3']!.status = 'open';
     } });
     expect(screen.getByText('No items match these filters.')).toBeTruthy();
-    expect(statusSelected('Waiting on me')).toBe(true);
-    expect(statusSelected('In progress')).toBe(true);
+    expect(chipPicked('Waiting on me')).toBe(true);
+    expect(chipPicked('In progress')).toBe(true);
   });
   it('shows a reveal outside the filters, keeps its ancestry open and resumes the filtered view', async () => {
     const { transport, store, calls, rerender } = await mount({ configure: transport => {
@@ -1250,7 +1258,7 @@ describe('session tree filters', () => {
     const { transport } = await mount();
     transport.failNext = 'preferences_patch';
     fireEvent.click(chip('Open'));
-    await waitFor(() => expect((chip('All') as HTMLButtonElement).disabled).toBe(true));
+    await waitFor(() => expect((chip('In progress') as HTMLButtonElement).disabled).toBe(true));
     expect(row('4').getAttribute('aria-disabled')).toBe('true');
   });
 });
@@ -1544,7 +1552,7 @@ describe('stopped deliveries in the tree', () => {
     await waitFor(() => expect(ids()).toEqual(['1', '1.1', '4', '8']));
     await waitFor(() => expect(banner()).not.toBeNull());
     expect(within(banner()!).getByText('A message needs your decision')).toBeTruthy();
-    fireEvent.click(chip('All'));
+    clearChips();
     await waitFor(() => expect(banner()).toBeNull());
   });
 });
@@ -2661,7 +2669,7 @@ describe('scrolling the tree', () => {
         fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' }));
         break;
       case 'status chip':
-        fireEvent.click(chip('All'));
+        fireEvent.click(chip('Open'));
         break;
       case 'Resume filtered view':
         fireEvent.click(screen.getByRole('button', { name: 'Resume filtered view' }));
