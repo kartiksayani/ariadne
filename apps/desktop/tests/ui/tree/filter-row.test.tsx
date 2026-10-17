@@ -10,7 +10,8 @@ afterEach(() => { cleanup(); localStorage.clear(); });
 const none = Object.fromEntries(CHIP_ORDER.map(chip => [chip, 0])) as Record<Chip, number>;
 function row(props: Partial<Parameters<typeof FilterRow>[0]> = {}) {
   const onChip = vi.fn(), onClear = vi.fn();
-  render(<FilterRow counts={{ ...none, waiting: 2, open: 3 }} picked={[]} shown={5} total={20} disabled={false} onChip={onChip} onClear={onClear} {...props} />);
+  render(<FilterRow counts={{ ...none, waiting: 2, open: 3 }} picked={[]} active={!!props.picked?.length} shown={5} total={20} disabled={false}
+    onChip={onChip} onClear={onClear} {...props} />);
   const group = screen.getByRole('group', { name: 'Filter items' });
   return { group, onChip, onClear, // The chips carry "<status> <count>" as their name; Clear is named by its text.
     names: () => within(group).getAllByRole('button').flatMap(button => button.getAttribute('aria-label') ?? []) };
@@ -45,6 +46,14 @@ describe('the chip row', () => {
     expect(within(group).queryByText('Pick a status')).toBeNull();
     expect(within(group).getByRole('status').textContent).toContain('Showing 7 of 20 items');
     expect(within(group).getByText('7 of 20').getAttribute('aria-hidden')).toBe('true');
+    fireEvent.click(within(group).getByRole('button', { name: 'Clear' }));
+    expect(onClear).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([['owners'], ['hide later'], ['a leftover saved status']])('shows the summary and Clear when the filter is active with no chip picked (%s)', () => {
+    const { group, onClear } = row({ picked: [], active: true, shown: 4, total: 20 });
+    expect(within(group).queryByText('Pick a status')).toBeNull();
+    expect(within(group).getByRole('status').textContent).toContain('Showing 4 of 20 items');
     fireEvent.click(within(group).getByRole('button', { name: 'Clear' }));
     expect(onClear).toHaveBeenCalledTimes(1);
   });
@@ -101,6 +110,34 @@ describe('the local chips store (D15)', () => {
     act(() => result.current.set(['blocked']));
     expect(result.current.chips).toEqual(['blocked']);
     expect(stored()).toEqual({ s1: ['blocked'] });
+  });
+
+  it('keeps a refused write for this page: the pick shows, and stays, until reload', () => {
+    const refuse = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError'); });
+    const { result } = renderHook(() => ({ a: useLocalChips('refused'), b: useLocalChips('refused'), other: useLocalChips('s2') }));
+    act(() => result.current.a.set(['sent']));
+    expect(refuse).toHaveBeenCalled();
+    expect(result.current.a.chips).toEqual(['sent']);
+    expect(result.current.b.chips).toEqual(['sent']);
+    expect(result.current.other.chips).toEqual([]);
+    act(() => result.current.a.set(['sent', 'later']));
+    expect(result.current.b.chips).toEqual(['sent', 'later']);
+    act(() => result.current.a.set([]));
+    expect(result.current.b.chips).toEqual([]);
+    expect(localStorage.getItem(LOCAL_CHIPS_KEY)).toBeNull();
+    refuse.mockRestore();
+  });
+
+  it('keeps a refused clear: the stored pick does not come back, and the next accepted write takes over', () => {
+    const { result } = renderHook(() => useLocalChips('refused-clear'));
+    act(() => result.current.set(['blocked']));
+    const refuse = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError'); });
+    act(() => result.current.set([]));
+    expect(result.current.chips).toEqual([]);
+    refuse.mockRestore();
+    act(() => result.current.set(['later']));
+    expect(result.current.chips).toEqual(['later']);
+    expect(stored()).toEqual({ 'refused-clear': ['later'] });
   });
 
   it('keeps the 50 most recently changed sessions and drops the oldest', () => {

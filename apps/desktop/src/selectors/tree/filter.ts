@@ -40,20 +40,20 @@ export function savedChips(statuses: readonly ItemStatus[]): readonly Chip[] {
 }
 
 /** Every picked chip, saved or local, in board order. */
-export function pickedChips(scope: FilterScope): readonly Chip[] {
+export function pickedChips(scope: Pick<FilterScope, 'view' | 'local'>): readonly Chip[] {
   const saved = savedChips(scope.view.filters.statuses);
   return CHIP_ORDER.filter(chip => saved.includes(chip) || (isLocalChip(chip) && scope.local.includes(chip)));
 }
 
-/** Pick or drop one saved chip without changing the saved shape. Dropping the last one saves no filter. A legacy `dropped`
- * stays until Clear. */
+/** Pick or drop one saved chip without changing the saved shape. Dropping the last chip saves no filter. A legacy `dropped`
+ * rides along with the chips but never stays alone: it has no chip, so alone it would filter with nothing to clear. */
 export function toggleSavedChip(statuses: readonly ItemStatus[], chip: Chip): ItemStatus[] {
   const status = SAVED[chip];
   if (!status) return [...statuses];
   const next = new Set(hasStatusFilter(statuses) ? statuses : []);
   if (next.has(status)) next.delete(status); else next.add(status);
   const ordered = FILTER_STATUSES.filter(value => next.has(value));
-  return ordered.length === FILTER_STATUSES.length ? [] : ordered;
+  return ordered.length === FILTER_STATUSES.length || ordered.every(value => value === 'dropped') ? [] : ordered;
 }
 
 export function toggleLocalChip(local: readonly LocalChip[], chip: LocalChip): LocalChip[] {
@@ -113,14 +113,27 @@ export function chipCounts(scope: FilterScope): Record<Chip, number> {
   return counts;
 }
 
+// A legacy saved `dropped` still matches (D14); Clear removes it.
+const droppedSaved = (statuses: readonly ItemStatus[]) => hasStatusFilter(statuses) && statuses.includes('dropped');
+
+/** Whether anything narrows the Map: a picked chip, a leftover saved `dropped`, saved owners or hide-later. The chip row's
+ * Clear and the top bar's badge follow this, so no filter can be active without a way to see and clear it. */
+export function filterActive(scope: Pick<FilterScope, 'view' | 'local'>): boolean {
+  const { owners, hide_later: hideLater, statuses } = scope.view.filters;
+  return pickedChips(scope).length > 0 || droppedSaved(statuses) || owners.length > 0 || hideLater;
+}
+
+/** The top bar's funnel badge: the picked chips, or 1 when the filter is active with no chip to show for it. */
+export function filterCount(scope: Pick<FilterScope, 'view' | 'local'>): number {
+  return pickedChips(scope).length || (filterActive(scope) ? 1 : 0);
+}
+
 /** The scope's filter: picked chips combine with OR; nothing picked matches everything inside the owners and hide-later. */
 export function filterOf(scope: FilterScope): TreeFilter {
-  const { owners, hide_later: hideLater } = scope.view.filters;
-  const picked = pickedChips(scope), saved = scope.view.filters.statuses, tests = picked.map(chip => predicate(scope, chip));
-  // A legacy saved `dropped` still matches (D14); Clear removes it.
-  const dropped = hasStatusFilter(saved) && saved.includes('dropped');
+  const picked = pickedChips(scope), tests = picked.map(chip => predicate(scope, chip));
+  const dropped = droppedSaved(scope.view.filters.statuses);
   return {
-    active: tests.length > 0 || dropped || owners.length > 0 || hideLater,
+    active: filterActive(scope),
     matches: item => inside(scope, item)
       && (!tests.length && !dropped || tests.some(test => test(item)) || dropped && displayStatus(scope.session, item) === 'dropped'),
   };
@@ -158,12 +171,13 @@ export function loadLocalChips(sessionId: string): LocalChip[] {
   return [...read().get(sessionId) ?? []];
 }
 
-/** Keeps the 50 most recently changed sessions. Storage that refuses the write loses only this preference. */
-export function saveLocalChips(sessionId: string, chips: readonly LocalChip[]): void {
+/** Keeps the 50 most recently changed sessions. Returns false when storage refuses the write; the caller then keeps the
+ * pick in memory, where it lasts until reload. */
+export function saveLocalChips(sessionId: string, chips: readonly LocalChip[]): boolean {
   const map = read();
   map.delete(sessionId);
   const valid = LOCAL_CHIPS.filter(chip => chips.includes(chip));
   if (valid.length) map.set(sessionId, valid);
   const kept = [...map].slice(-SESSIONS_KEPT);
-  try { localStorage.setItem(LOCAL_CHIPS_KEY, JSON.stringify(Object.fromEntries(kept))); } catch { /* the pick lasts until reload */ }
+  try { localStorage.setItem(LOCAL_CHIPS_KEY, JSON.stringify(Object.fromEntries(kept))); return true; } catch { return false; }
 }

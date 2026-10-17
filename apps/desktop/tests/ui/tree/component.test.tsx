@@ -1149,11 +1149,30 @@ describe('session tree filters', () => {
     for (const label of ['Waiting on me', 'Open', 'In progress', 'Done', 'To ack']) if (chipShown(label)) expect(chipPicked(label)).toBe(false);
     expect(ids()).toHaveLength(9);
   });
-  it('leaves the other scope filters alone when Clear empties the chips', async () => {
-    const { transport } = await mount({ configure: value => { viewOf(value).filters.statuses = ['open']; viewOf(value).filters.hide_later = true; } });
+  it('Clear also empties the saved owners and hide-later (no chip stands for them), and leaves the search and the archive alone', async () => {
+    const { transport } = await mount({ configure: value => {
+      const filters = viewOf(value).filters;
+      filters.statuses = ['open']; filters.hide_later = true; filters.owners = [{ kind: 'me' }]; filters.search = 'receipt';
+    } });
     clearChips();
     await waitFor(() => expect(viewOf(transport).filters.statuses).toEqual([]));
-    expect(viewOf(transport).filters.hide_later).toBe(true);
+    expect(viewOf(transport).filters.hide_later).toBe(false);
+    expect(viewOf(transport).filters.owners).toEqual([]);
+    expect(viewOf(transport).filters.search).toBe('receipt');
+    expect(viewOf(transport).filters.archived).toBe(false);
+  });
+  it.each<[string, (filters: ReturnType<typeof viewOf>['filters']) => void]>([
+    ['a leftover saved Dropped', filters => { filters.statuses = ['dropped']; }],
+    ['saved owners', filters => { filters.owners = [{ kind: 'me' }]; }],
+    ['hide-later', filters => { filters.hide_later = true; }],
+  ])('shows the summary and Clear when only %s filters the Map, and Clear lifts it', async (_name, set) => {
+    const { transport } = await mount({ configure: value => { set(viewOf(value).filters); } });
+    expect(within(filterRow()).queryByText('Pick a status')).toBeNull();
+    expect(within(filterRow()).getByRole('status').textContent).toMatch(/Showing \d+ of \d+ items/);
+    clearChips();
+    await waitFor(() => expect(viewOf(transport).filters).toMatchObject({ statuses: [], owners: [], hide_later: false }));
+    await waitFor(() => expect(within(filterRow()).getByText('Pick a status')).toBeTruthy());
+    expect(ids()).toHaveLength(9);
   });
   it('keeps chip counts under a search, marks its hits in place and keeps the topic dropdown out of every layout', async () => {
     const { transport, rerender } = await mount();

@@ -5,7 +5,7 @@ import { useReadingSeen } from './state/preferences/reading';
 import { waitForLifecycleReady } from './ui/shared/lifecycleReady';
 import { itemRemoved } from './selectors/removed';
 import { hasStatusFilter } from './selectors/tree/folds';
-import { savedChips, type LocalChip } from './selectors/tree/filter';
+import { filterCount, type LocalChip } from './selectors/tree/filter';
 import { useLocalChips } from './ui/tree/useLocalChips';
 import { AgentRemovalNotices } from './ui/remove/AgentRemovalNotices';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -118,7 +118,7 @@ function SessionCenter({ application, view, graph, reveal, ...props }: CenterPro
       onOpenItem={props.onOpenItem} /> : undefined}
     notices={notice || recovering ? <div className="tree-notices">{notice}{recovering && <RecoveryPanel actions={actions} />}</div> : null}
     graph={graph ? <NavigationGraph navigation={application.navigation} store={view.store}
-      reveal={reveal} onReveal={props.onSelected} /> : null} />;
+      reveal={reveal} onReveal={props.onSelected} onClearFilters={props.onClearFilters} /> : null} />;
 }
 function Workspace({ application }: { application: Application }) {
   const navigation = application.navigation, state = useNavigation(navigation);
@@ -598,7 +598,7 @@ function Workspace({ application }: { application: Application }) {
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
       onRemoveTarget={removeTarget} waitingStore={application.waiting}
       chrome={{ query, searchStatus, graph: graph && !archived, onView: store ? showView : undefined, theme: shown, searchBlocked: conversationOpen,
-        filter: store ? { active: filterOpen, count: (view ? savedChips(view.filters.statuses).length : 0) + localChips.chips.length, onToggle: () => setFilterOpen(value => !value) } : undefined,
+        filter: store ? { active: filterOpen, count: view ? filterCount({ view, local: localChips.chips }) : localChips.chips.length, onToggle: () => setFilterOpen(value => !value) } : undefined,
         onRecent: store ? () => { dispatchIntent('recent.open'); } : undefined,
         textSize: shownTextSize, onTextSizeChange: changeTextSize,
         // A search highlights in place (SPEC §6.9): typing keeps every row, including a temporary reveal's.

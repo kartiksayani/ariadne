@@ -38,6 +38,8 @@ export interface GraphViewProps {
   readonly preferencesBusy?: boolean;
   /** The session's local filter chips (To ack, Sent, Blocked, Later), picked in the chip row. */
   readonly local?: readonly LocalChip[];
+  /** The same Clear the chip row and the Tree's empty state use; shown when the filter leaves no topic to draw. */
+  readonly onClearFilters?: () => void;
   readonly saveView: (view: SessionPreferences) => Promise<boolean>;
   /** Selection reached the item; `openDetail` is false for ↑/↓ moves and folds. */
   readonly onReveal: (result: RevealedItem, openDetail: boolean) => void;
@@ -133,7 +135,7 @@ const topicTops = (graph: SessionGraph) => new Map(graph.topics.map(topic => [to
 const NO_LINES: ReturnType<typeof relatedLines> = { paths: [], related: new Set() };
 const NO_LOCAL: readonly LocalChip[] = [];
 
-export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal, markers, preferencesBusy = false, saveView, onReveal }: GraphViewProps) {
+export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal, markers, preferencesBusy = false, saveView, onReveal, onClearFilters }: GraphViewProps) {
   const state = useSession(store), raw = state.snapshot?.session, hidden = useHidden();
   const session = useMemo(() => raw && visibleSession(raw, state.route, hidden), [raw, state.route, hidden]);
   const scroller = useRef<HTMLDivElement>(null), dockInset = useDockInset();
@@ -485,6 +487,10 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
         </div>
         <div ref={spacer} data-testid="graph-spacer" aria-hidden="true" />
       </>}
+      {graph && !drawn && graph.filtering && onClearFilters && <div className="tree-no-match">
+        <div className="tree-no-match-title">No items match these filters.</div>
+        <button type="button" className="btn btn-secondary" onClick={onClearFilters}>Clear filters</button>
+      </div>}
     </div>
     <Legend drawn={drawn} />
   </div>;

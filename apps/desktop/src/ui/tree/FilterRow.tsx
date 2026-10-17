@@ -16,8 +16,10 @@ const CHIP_VIEW: Readonly<Record<Chip, { readonly label: string; readonly icon: 
   replaced: { label: STATUS.replaced.label, icon: STATUS.replaced.icon, color: 'var(--st-replaced)' },
 };
 
-export function FilterRow({ counts, picked, shown, total, disabled, onChip, onClear }: {
-  counts: Readonly<Record<Chip, number>>; picked: readonly Chip[]; shown: number; total: number;
+/** `active` is the filter itself (picked chips, owners, hide-later or a leftover saved status), so Clear shows whenever the
+ * Map is filtered, even with no chip picked. */
+export function FilterRow({ counts, picked, active, shown, total, disabled, onChip, onClear }: {
+  counts: Readonly<Record<Chip, number>>; picked: readonly Chip[]; active: boolean; shown: number; total: number;
   disabled: boolean; onChip: (chip: Chip) => void; onClear: () => void;
 }) {
   return <div className="tree-filter-row" role="group" aria-label="Filter items">
@@ -32,7 +34,7 @@ export function FilterRow({ counts, picked, shown, total, disabled, onChip, onCl
       })}
     </div>
     <div className="tree-filter-end">
-      {picked.length === 0 ? <span className="tree-filter-hint">Pick a status</span> : <>
+      {!active ? <span className="tree-filter-hint">Pick a status</span> : <>
         <span className="tree-filter-summary" role="status">
           <span className="tree-filter-wide">Showing {shown} of {total} items</span>
           <span className="tree-filter-narrow" aria-hidden="true">{shown} of {total}</span>

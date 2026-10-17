@@ -5,7 +5,7 @@ import type { ItemStatus, Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
 import { isBlocked } from '../../../src/selectors/tree/blocked';
 import {
-  CHIP_ORDER, chipCounts, filterOf, filterSignature, loadLocalChips, pickedChips, saveLocalChips, toggleLocalChip, toggleSavedChip,
+  CHIP_ORDER, chipCounts, filterActive, filterCount, filterOf, filterSignature, loadLocalChips, pickedChips, saveLocalChips, toggleLocalChip, toggleSavedChip,
   type Chip, type FilterScope, type LocalChip,
 } from '../../../src/selectors/tree/filter';
 import { displayStatus } from '../../../src/selectors/waiting/replied';
@@ -112,6 +112,22 @@ describe('chip predicates (D14)', () => {
     expect(filterOf(scope(session, {}, ['later'])).active).toBe(true);
     expect(filterOf(scope(session, { statuses: ['dropped'] })).active).toBe(true);
   });
+  it.each<[string, Partial<SessionPreferences['filters']>, LocalChip[], boolean, number]>([
+    ['nothing', {}, [], false, 0],
+    ['a saved chip', { statuses: ['open', 'done'] }, [], true, 2],
+    ['a local chip', {}, ['sent'], true, 1],
+    ['a saved chip and a local chip', { statuses: ['open'] }, ['later'], true, 2],
+    ['a leftover dropped alone', { statuses: ['dropped'] }, [], true, 1],
+    ['a chip beside a leftover dropped', { statuses: ['open', 'dropped'] }, [], true, 1],
+    ['saved owners alone', { owners: [{ kind: 'me' }] }, [], true, 1],
+    ['hide-later alone', { hide_later: true }, [], true, 1],
+    ['a complete saved set', { statuses: ['waiting_on_me', 'open', 'in_progress', 'decided', 'done', 'dropped', 'replaced'] }, [], false, 0],
+  ])('the funnel badge and Clear follow the filter: %s', (_name, filters, local, active, count) => {
+    const value = scope(seed(), filters, local);
+    expect(filterActive(value)).toBe(active);
+    expect(filterActive(value)).toBe(filterOf(value).active);
+    expect(filterCount(value)).toBe(count);
+  });
 });
 
 describe('chip counts', () => {
@@ -210,6 +226,19 @@ describe('saved and local toggles', () => {
     expect(toggleSavedChip(['dropped'], 'open')).toEqual(['open', 'dropped']);
     expect(toggleSavedChip(['open'], 'blocked')).toEqual(['open']);
   });
+  it.each<[string, ItemStatus[], Chip]>([
+    ['unpicking Replaced from an alpha.19 Closed save leaves nothing hidden', ['dropped', 'replaced'], 'replaced'],
+    ['the last visible chip of a legacy save', ['done', 'dropped'], 'done'],
+    ['the only picked chip beside a leftover dropped', ['open', 'dropped'], 'open'],
+  ])('never leaves a lone dropped behind: %s', (_name, statuses, chip) => {
+    expect(toggleSavedChip(statuses, chip)).toEqual([]);
+  });
+  it('unpicks a whole alpha.19 Closed save, chip by chip, down to no filter', () => {
+    let statuses: ItemStatus[] = ['decided', 'done', 'dropped', 'replaced'];
+    for (const chip of ['decided', 'done', 'replaced'] as const) statuses = toggleSavedChip(statuses, chip);
+    expect(statuses).toEqual([]);
+    expect(filterOf(scope(seed(), { statuses })).active).toBe(false);
+  });
   it('treats a complete saved set as no filter when toggling', () => {
     expect(toggleSavedChip(['waiting_on_me', 'open', 'in_progress', 'decided', 'done', 'dropped', 'replaced'], 'open')).toEqual(['open']);
   });
@@ -273,6 +302,6 @@ describe('local chips storage (D15)', () => {
   it('survives a storage that refuses the write', () => {
     const original = Storage.prototype.setItem;
     Storage.prototype.setItem = () => { throw new Error('quota'); };
-    try { expect(() => saveLocalChips('a', ['sent'])).not.toThrow(); } finally { Storage.prototype.setItem = original; }
+    try { expect(saveLocalChips('a', ['sent'])).toBe(false); } finally { Storage.prototype.setItem = original; }
   });
 });

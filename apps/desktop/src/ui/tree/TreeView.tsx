@@ -36,7 +36,7 @@ import { InlineRecovery } from '../../components/recovery/RecoveryPanel';
 import { Banner } from './Banner';
 import { FilterRow } from './FilterRow';
 import { useLocalChips } from './useLocalChips';
-import { chipCounts, filterOf, filterSignature, isLocalChip, pickedChips, summaryCounts, toggleLocalChip, toggleSavedChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
+import { chipCounts, filterActive, filterOf, filterSignature, isLocalChip, pickedChips, summaryCounts, toggleLocalChip, toggleSavedChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
 import { useSessionLifecycleFor } from '../shared/SessionLifecycleOwner';
 import { ItemRefs } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
@@ -494,12 +494,16 @@ export function TreeView(props: TreeViewProps) {
     if (isLocalChip(chip)) localChips.set(toggleLocalChip(localChips.chips, chip));
     else void saveView(next => { next.filters.statuses = toggleSavedChip(next.filters.statuses, chip); });
   };
-  // Clear empties the saved statuses and the local chips, leaves the other scope filters alone, and closes the row.
+  // Clear empties everything that makes the filter active (the saved statuses, the local chips, the saved owners and
+  // hide-later, which have no chip) so the row never offers a Clear that leaves the filter on. Search and the archive stay.
   const clearChips = () => {
     setNextRevealId(null);
     onDismissReveal();
     localChips.set([]);
-    if (view?.filters.statuses.length) void saveView(next => { next.filters.statuses = []; });
+    const filters = view?.filters;
+    if (filters && (filters.statuses.length || filters.owners.length || filters.hide_later)) {
+      void saveView(next => { next.filters.statuses = []; next.filters.owners = []; next.filters.hide_later = false; });
+    }
     props.onCloseFilter?.();
   };
   const resume = () => {
@@ -1098,9 +1102,9 @@ export function TreeView(props: TreeViewProps) {
   const inline: ReadonlySet<string> = new Set(graph && !loading ? [] : rows.flatMap(row => row.delivery?.stuck ? [row.delivery.stuck.input.id] : []));
   const filtersShown = !archivedMode && (props.filterOpen ?? true);
   const graphShown = !!graph && !loading;
-  const chips = useMemo(() => scope && filtersShown ? { counts: chipCounts(scope), picked: pickedChips(scope), ...summaryCounts(scope) } : null,
+  const chips = useMemo(() => scope && filtersShown ? { counts: chipCounts(scope), picked: pickedChips(scope), active: filterActive(scope), ...summaryCounts(scope) } : null,
     [scope, filtersShown]);
-  const filterRow = chips && <FilterRow counts={chips.counts} picked={chips.picked} shown={chips.shown} total={chips.total}
+  const filterRow = chips && <FilterRow counts={chips.counts} picked={chips.picked} active={chips.active} shown={chips.shown} total={chips.total}
     disabled={nav.pendingOperationId !== null && !nav.writing} onChip={setChip} onClear={clearChips} />;
   let body: ReactNode;
   if (loading) {

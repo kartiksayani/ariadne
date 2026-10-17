@@ -11,9 +11,9 @@ import { useLocalChips } from '../tree/useLocalChips';
 
 // Composition reuses navigation's preferences revision and registered router,
 // like the tree; it does not own a second preferences writer.
-export function NavigationGraph({ navigation, store, reveal, onReveal }: {
+export function NavigationGraph({ navigation, store, reveal, onReveal, onClearFilters }: {
   navigation: NavigationStore; store: SessionStore;
-  reveal?: RevealedItem | null;
+  reveal?: RevealedItem | null; onClearFilters?: () => void;
   onReveal: (result: RevealedItem, openDetail: boolean) => void;
 }) {
   const state = useNavigation(navigation), session = useSession(store).snapshot?.session, route = store.getSnapshot().route;
@@ -51,5 +51,5 @@ export function NavigationGraph({ navigation, store, reveal, onReveal }: {
   };
   return <GraphView store={store} routes={navigation.routes} view={view} later={later} local={local} reveal={reveal === undefined ? state.reveal : reveal}
     markers={markers} preferencesBusy={state.writing || state.pendingOperationId !== null}
-    saveView={saveView} onReveal={onReveal} />;
+    saveView={saveView} onReveal={onReveal} onClearFilters={onClearFilters} />;
 }
