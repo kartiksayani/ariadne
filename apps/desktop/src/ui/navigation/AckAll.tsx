@@ -6,11 +6,10 @@ import type { Item } from '../../generated/domain/models';
 import { useAckHeld } from '../shared/ack';
 import { shortLabel } from '../shared/short';
 import { StatusBadge } from '../shared/StatusBadge';
-import { statusKey } from '../shared/status';
 import { ackAllFor } from './ackAllController';
 import './navigation.css';
 
-const WIDTH = 340, EDGE = 8, RIGHT_INSET = 10, GAP = 6;
+const WIDTH = 340, EDGE = 8, RIGHT_INSET = 10, GAP = 4;
 
 /** The review popover under the band (SPEC 4.3). It leaves the Map's flow, closes on scroll and never covers the band. */
 function AckAllReview({ anchor, label, topicName, items, error, onConfirm, onCancel }: {
@@ -63,7 +62,7 @@ function AckAllReview({ anchor, label, topicName, items, error, onConfirm, onCan
     <h2 className="ack-all-title">Ack {items.length} results in “{topicName}”?</h2>
     <p className="ack-all-text">They stay in the Map, marked as read. Questions and open items aren’t touched.</p>
     <ul className="ack-all-list">{items.map(item => <li key={item.id}>
-      <StatusBadge status={statusKey[item.status]} variant="icon" size={12} /><span className="ack-all-name">{shortLabel(item)}</span></li>)}</ul>
+      <StatusBadge status="done" variant="icon" size={12} /><span className="ack-all-name">{shortLabel(item)}</span></li>)}</ul>
     {error && <p className="ack-all-error" role="alert">{error}</p>}
     <div className="ack-all-actions">
       <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>

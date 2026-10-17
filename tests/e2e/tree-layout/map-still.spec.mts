@@ -14,13 +14,15 @@ import { viewportPlace } from '../map-viewport.mts';
 interface Placed { readonly key: string; readonly top: number; readonly height: number; readonly text: number; readonly pinned: boolean }
 const mapTop = (page: Page) => page.locator('.tree-scroll').evaluate(box => box.getBoundingClientRect().top);
 
-/** Every row and band in view: where it sits, how tall it is and how wide its text runs. */
+/** Every row and band in view: where it sits, how tall it is and how wide its text runs. A band's one-line name is not measured: it
+ * shares its line with Ack all, Focus, Continue and "…" (SPEC 2.2), so it ends in "…" earlier or later as they come and go, and the
+ * band's height and place hold all the same (D10). */
 const placed = (page: Page): Promise<Placed[]> => page.locator('.tree-scroll').evaluate(box => {
   const edge = box.getBoundingClientRect();
   return [...box.querySelectorAll<HTMLElement>('.tree-item, .tree-topic')].flatMap(row => {
     const rect = row.getBoundingClientRect();
     if (rect.bottom <= edge.top || rect.top >= edge.bottom) return [];
-    const text = row.querySelector('.tree-question, .tree-topic-name')?.getBoundingClientRect().width ?? 0;
+    const text = row.querySelector('.tree-question')?.getBoundingClientRect().width ?? 0;
     // Viewport coordinates: a bar inserted above the Map counts as movement.
     return [{ key: row.dataset.row!, top: Math.round(rect.top * 2) / 2, height: Math.round(rect.height * 2) / 2, text: Math.round(text * 2) / 2,
       pinned: row.classList.contains('tree-topic') && rect.top <= edge.top + 0.5 }];

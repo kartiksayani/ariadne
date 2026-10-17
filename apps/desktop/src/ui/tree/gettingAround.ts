@@ -17,13 +17,3 @@ export function branchItems(session: Immutable<Session>, root: string): Readonly
   }
   return ids;
 }
-
-/** The nearest three ancestors keep deep locations useful without a long path. */
-export function breadcrumbItems(session: Immutable<Session>, itemId: string): readonly string[] {
-  const ids: string[] = [], seen = new Set<string>([itemId]);
-  let parent = session.items[itemId]?.parent;
-  while (parent && !seen.has(parent)) {
-    seen.add(parent); ids.unshift(parent); parent = session.items[parent]?.parent;
-  }
-  return ids.slice(-3);
-}

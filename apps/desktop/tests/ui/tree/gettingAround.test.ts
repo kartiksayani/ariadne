@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AppTransport, route } from '../app/transport';
-import { branchItems, breadcrumbItems } from '../../../src/ui/tree/gettingAround';
+import { branchItems } from '../../../src/ui/tree/gettingAround';
 import { shimTree } from './shimTree';
 import { workspaceIntent } from '../../../src/ui/keys';
 
@@ -23,13 +23,11 @@ describe('Map getting around selectors', () => {
     expect(session).toEqual(before);
   });
 
-  it('shows at most three nearest ancestor levels, in reading order, and terminates on a corrupt cycle', () => {
+  it('collects a branch once and terminates on a corrupt cycle', () => {
     const session = new AppTransport().sessions.get(route.session_id)!;
     for (let index = 0; index < 5; index++) session.items[`deep-${index}`] = { ...session.items['1']!, id: `deep-${index}`, parent: index ? `deep-${index - 1}` : null };
-    expect(breadcrumbItems(session, 'deep-4')).toEqual(['deep-1', 'deep-2', 'deep-3']);
-    expect(breadcrumbItems(session, 'deep-0')).toEqual([]);
+    expect(branchItems(session, 'deep-0').size).toBe(5);
     session.items['deep-0']!.parent = 'deep-4';
-    expect(breadcrumbItems(session, 'deep-4')).toEqual(['deep-1', 'deep-2', 'deep-3']);
     expect(branchItems(session, 'deep-0').size).toBe(5);
   });
 

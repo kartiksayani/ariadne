@@ -31,12 +31,16 @@ describe('Next unseen (D21)', () => {
 
 describe('Focus button (D9)', () => {
   const cases = [
-    { name: 'nothing selected, nothing focused', focusedName: null, canFocus: false, busy: false, disabled: true, label: 'Focus', title: 'Select an item to focus' },
     { name: 'an item selected', focusedName: null, canFocus: true, busy: false, disabled: false, label: 'Focus', title: 'Focus on the selected item and its branch ( ⇧F )' },
     { name: 'focused', focusedName: 'Cache', canFocus: true, busy: false, disabled: false, label: 'Unfocus “Cache”', title: 'Show the whole Map again ( ⇧F )' },
     { name: 'focused with the selection gone', focusedName: 'Cache', canFocus: false, busy: false, disabled: false, label: 'Unfocus “Cache”', title: 'Show the whole Map again ( ⇧F )' },
     { name: 'a view change being saved', focusedName: null, canFocus: true, busy: true, disabled: true, label: 'Focus', title: 'Focus on the selected item and its branch ( ⇧F )' },
   ] as const;
+  it('is not drawn at all while nothing is focused and nothing is selected', () => {
+    const { container } = render(<FocusButton focusedName={null} canFocus={false} busy={false} onToggle={vi.fn()} />);
+    expect(container.childElementCount).toBe(0);
+    expect(screen.queryByRole('button', { name: /Focus/ })).toBeNull();
+  });
   it.each(cases)('$name', ({ focusedName, canFocus, busy, disabled, label, title }) => {
     const toggle = vi.fn();
     render(<FocusButton focusedName={focusedName} canFocus={canFocus} busy={busy} onToggle={toggle} />);
@@ -81,6 +85,7 @@ describe('the "…" menu (D12)', () => {
     expect(within(menu).getAllByRole('menuitem').map(item => labels.find(label => item.textContent!.startsWith(label))))
       .toEqual(labels);
     expect(within(menu).queryByText(/Continue here/)).toBeNull();
+    expect(within(menu).getByText('Write to the agent about the whole topic, in Details')).toBeTruthy();
     expect(within(menu).getByText('2 removed · Restore or empty')).toBeTruthy();
     expect(within(menu).getByText('It and its 25 items, with 5 seconds to undo')).toBeTruthy();
   });
@@ -125,13 +130,19 @@ describe('the band row (D10)', () => {
     expect(wide.parentElement!.textContent).toBe('1 waiting on you');
     expect(wide.classList.contains('tree-wide-only')).toBe(true);
   });
-  it('puts the tally, the changes opener, Next and Ack all on one counts line, in that order, and the buttons in the head', () => {
+  it('puts the tally, the changes opener and Next on the counts line, and Ack all, Focus, Continue and the menu on the title line, in that order', () => {
     render(<TopicRow row={row()} {...props} ackAll={<button type="button">Ack all (2)</button>}
       slots={{ changes: <span>opener</span>, next: <button type="button">Next</button>, focus: <button type="button">Focus</button>,
         continue: <button type="button">Continue</button>, menu: <button type="button">More</button> }} />);
     const line = screen.getByTestId('band-counts'), head = screen.getByTestId('band-head');
-    expect([...line.children].map(child => child.getAttribute('data-testid') === 'band-tally' ? 'tally' : child.textContent)).toEqual(['tally', 'opener', 'Next', 'Ack all (2)']);
-    expect(within(head).getAllByRole('button').map(button => button.textContent)).toEqual(['', 'Focus', 'Continue', 'More']);
+    expect([...line.children].map(child => child.getAttribute('data-testid') === 'band-tally' ? 'tally' : child.textContent)).toEqual(['tally', 'opener', 'Next']);
+    expect(within(head).getAllByRole('button').map(button => button.textContent)).toEqual(['', 'Ack all (2)', 'Focus', 'Continue', 'More']);
+  });
+  it('keeps the title line to one row of buttons after the name, with Ack all before Focus', () => {
+    render(<TopicRow row={row()} {...props} ackAll={<button type="button">Ack all (2)</button>} slots={{ focus: <button type="button">Focus</button> }} />);
+    const head = screen.getByTestId('band-head');
+    expect(within(head).getByRole('button', { name: 'Ack all (2)' }).nextElementSibling?.textContent).toBe('Focus');
+    expect(within(screen.getByTestId('band-counts')).queryByRole('button', { name: /Ack all/ })).toBeNull();
   });
   it('never rewrites the to-ack count (the "one by one" wording is gone)', () => {
     const value = { ...row(), counts: topicCounts(['open', 'open', 'open'], 3) };

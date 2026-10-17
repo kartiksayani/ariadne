@@ -340,24 +340,23 @@ for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as 
   });
 }
 
-for (const { map: frame } of mapSizes) test(`The Back-to pill floats inside the Map, clear of the path row and the ancestors: ${frame}`, async ({ page, origin }) => {
+for (const { map: frame } of mapSizes) test(`The Back-to pill floats inside the Map, clear of the topic band, with no path row above the Map: ${frame}`, async ({ page, origin }) => {
   await openApp(page, origin, frameSpec(frame));
   await page.locator('.tree-scroll').evaluate(element => { element.scrollTop = element.scrollHeight; });
   await settle(page);
   const tag = page.locator('.tree-scroll-shell > .tree-back');
   await expect(tag).toBeVisible();
+  // The sticky band and the thread show the path (SPEC 2.2): nothing sits between the chips and the Map.
+  await expect(page.getByRole('navigation', { name: 'Map ancestors' })).toHaveCount(0);
   const boxes = await page.evaluate(() => {
     const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
-    const crumbs = [...document.querySelectorAll('.tree-breadcrumb button')].map(button => button.getBoundingClientRect());
-    return { path: box('.tree-path'), crumbs: box('.tree-breadcrumb'), tag: box('.tree-back'), buttons: crumbs, scroller: box('.tree-scroll') };
+    return { band: box('.tree-topic'), tag: box('.tree-back'), shell: box('.tree-scroll-shell'), scroller: box('.tree-scroll') };
   });
-  // The pill sits over the rows, below the path row, inside the Map's width; the ancestors keep the whole path row.
-  expect(boxes.tag.top).toBeGreaterThanOrEqual(boxes.path.bottom - 0.5);
+  // The scroller starts at the shell's top, and the pill sits over the rows, below the band, inside the Map's width.
+  expect(boxes.scroller.top).toBeCloseTo(boxes.shell.top, 0);
+  expect(boxes.tag.top).toBeGreaterThanOrEqual(boxes.band.bottom - 0.5);
   expect(boxes.tag.left).toBeGreaterThanOrEqual(boxes.scroller.left - 0.5);
   expect(boxes.tag.right).toBeLessThanOrEqual(boxes.scroller.right + 0.5);
-  expect(boxes.path.height).toBeLessThanOrEqual(28.5);
-  expect(boxes.path.bottom).toBeLessThanOrEqual(boxes.scroller.top + 0.5);
-  for (const button of boxes.buttons) expect(button.right).toBeLessThanOrEqual(boxes.crumbs.right + 0.5);
 });
 
 /** The accent thread (the only line the Map draws) runs as one line from the topic band down to the selected item's row. */

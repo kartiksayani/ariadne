@@ -324,8 +324,9 @@ export function topicCounts(statuses: readonly DisplayStatus[], ackCount = 0, en
   ].filter((value): value is Count => !!value);
 }
 
-/** "5 inside", plus " · 1 waiting" when questions wait inside, for folded descendants (D7). */
+/** The folded descendants' chip (D7, SPEC 3.3): "4 closed inside" when every one is closed; else "5 inside", plus " · 1 waiting" when questions wait. */
 export function collapsedNote(collapsed: NonNullable<ItemRow['collapsed']>): string {
+  if (collapsed.inside > 0 && collapsed.closed === collapsed.inside) return `${collapsed.inside} closed inside`;
   return `${collapsed.inside} inside${collapsed.waiting ? ` · ${collapsed.waiting} waiting` : ''}`;
 }
 

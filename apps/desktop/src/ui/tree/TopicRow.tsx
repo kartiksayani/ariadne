@@ -7,7 +7,8 @@ import { Guides } from './Guides';
 
 export interface TopicAction { readonly icon: string; readonly label: string; readonly title: string; readonly run: () => void; readonly archive?: boolean }
 
-/** The band's slots, in their fixed order: counts, changes, next, ackAll, focus, continue, menu. `ackAll` is its own prop below.
+/** The band's slots, in their fixed order: counts, changes and next on the counts line; ackAll, focus, continue and menu on the title
+ * line (SPEC §2.2). `ackAll` is its own prop below.
  * An absent slot renders nothing; `counts` falls back to the counts of the row. */
 export interface BandSlots {
   /** Replaces the row's counts. */
@@ -36,7 +37,7 @@ export interface TopicRowProps {
   readonly reply?: ReactNode;
   /** A stopped delivery's inline fix (ui/answer/StuckNote), below the sticky status. */
   readonly fix?: ReactNode;
-  /** The Ack all slot. */
+  /** The Ack all slot, on the title line before Focus. */
   readonly ackAll?: ReactNode;
   readonly slots?: BandSlots;
 }
@@ -58,18 +59,18 @@ export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onK
       <button type="button" className="tree-chevron" tabIndex={-1} aria-label="Expand or collapse topic"
         onClick={event => { event.stopPropagation(); onToggle(topic.id); }}><i className={row.expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} /></button>
       <span className="tree-topic-name" data-earlier={row.earlier || undefined} title={topic.name}>{topic.name}</span>
-      {row.chip && <span className="tree-session-chip" title={row.chip.title}><i className="ph ph-clock-counter-clockwise" />{row.chip.label}</span>}
+      {row.chip && <span className="tree-session-chip" title={row.chip.title}><i className="ph ph-clock-counter-clockwise" /><span className="tree-session-chip-label">{row.chip.label}</span></span>}
       {actions.length > 0 && <span className="tree-topic-end">
         <span className="tree-topic-actions">{actions.map(action => <button key={action.label} type="button" tabIndex={-1}
           className="tree-topic-action" title={action.title} aria-label={action.label} data-shortcut-archive-topic={action.archive ? topic.id : undefined}
           onClick={event => { event.stopPropagation(); action.run(); }}><i className={action.icon} /></button>)}</span>
       </span>}
-      {slots.focus}{slots.continue}{slots.menu}
+      {ackAll}{slots.focus}{slots.continue}{slots.menu}
     </div>
-    {(counts.length > 0 || slots.counts || slots.changes || slots.next || ackAll) && <div className="tree-topic-counts" data-testid="band-counts">
+    {(counts.length > 0 || slots.counts || slots.changes || slots.next) && <div className="tree-topic-counts" data-testid="band-counts">
       {(slots.counts || counts.length > 0) && <span className="tree-topic-tally" data-testid="band-tally">{slots.counts ?? counts.map(count => <span key={count.text} className="tree-count">
         <i className={count.icon} style={{ color: count.color }} />{countText(count.text)}</span>)}</span>}
-      {slots.changes}{slots.next}{ackAll}</div>}
+      {slots.changes}{slots.next}</div>}
     {row.delivery && <div className="tree-topic-line tree-topic-status" style={{ color: row.delivery.color }}><i className={row.delivery.icon} /><span>{row.delivery.text}</span></div>}
   </div>
   {(fix || prompt || reply) && <div className="tree-topic-content"><Guides guides={row.guides.filter(guide => guide.kind === 'line').map(guide => ({ ...guide, fromBullet: false }))} />

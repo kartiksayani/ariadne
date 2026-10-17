@@ -5,7 +5,7 @@ import { render, screen } from '@testing-library/react';
 import { Strip } from '../../../src/ui/tree/Strip';
 import { immutable } from '../../../src/data';
 import type { Item } from '../../../src/generated/domain/models';
-import { parentKey, stripKey, type Row, type StripRow } from '../../../src/ui/tree/model';
+import { collapsedNote, parentKey, stripKey, type Row, type StripRow } from '../../../src/ui/tree/model';
 import { AppTransport, route } from '../app/transport';
 import { shimTree, type ShimInput } from './shimTree';
 
@@ -126,4 +126,18 @@ describe('strip icons', () => {
       render(<Strip variant="row" row={row} focused={false} remember={() => {}} onFocus={() => {}} onKeyDown={() => {}} onToggle={() => {}} />);
       expect(screen.getByTitle(title).querySelector('i')!.classList.contains(icon)).toBe(true);
     });
+});
+
+describe('the folded-branch chip text (SPEC 3.3)', () => {
+  const counts = (inside: number, waiting: number, closed: number) => ({ inside, waiting, open: 0, progress: 0, closed });
+  it.each([
+    ['every item inside is closed', counts(4, 0, 4), '4 closed inside'],
+    ['one closed item inside', counts(1, 0, 1), '1 closed inside'],
+    ['some closed, some open', counts(5, 0, 3), '5 inside'],
+    ['questions wait inside', counts(5, 2, 3), '5 inside · 2 waiting'],
+    ['only questions, none closed', counts(1, 1, 0), '1 inside · 1 waiting'],
+    ['nothing inside', counts(0, 0, 0), '0 inside'],
+  ])('%s', (_name, value, text) => {
+    expect(collapsedNote(value)).toBe(text);
+  });
 });

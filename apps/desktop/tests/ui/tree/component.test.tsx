@@ -214,7 +214,7 @@ describe('session tree rows', () => {
     act(() => { removal.undo(operation); });
   });
 
-  it('uses shared active-item names for Selected, breadcrumbs and Focus', async () => {
+  it('uses shared active-item names for Selected and Focus', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const box = document.querySelector<HTMLElement>('.tree-scroll');
       if (this === box) return new DOMRect(0, 0, 300, 400);
@@ -237,8 +237,7 @@ describe('session tree rows', () => {
     expect(screen.queryByRole('button', { name: /^Focus on / })).toBeNull();
     const box = document.querySelector<HTMLElement>('.tree-scroll')!; box.scrollTop = 100; fireEvent.scroll(box);
     expect(backPill('above').querySelector('.tree-back-label')!.textContent).toBe(`Back to “${name}”`);
-    const crumbs = within(screen.getByRole('navigation', { name: 'Map ancestors' }));
-    expect(crumbs.getByRole('button', { name }).textContent).toBe(name);
+    expect(screen.queryByRole('navigation', { name: 'Map ancestors' })).toBeNull();
   });
 
   it('draws no Focus button on a row: Focus lives in the band, and there is nothing on a row to tab through', async () => {
@@ -302,7 +301,8 @@ describe('session tree rows', () => {
     expect(view.navigation.getSnapshot().writing).toBe(true);
     expect(focusButton().disabled).toBe(false);
     fireEvent.click(focusButton());
-    expect(focusButton().textContent).toBe('Focus');
+    // Nothing is selected, so once Focus is off the band draws no Focus button.
+    expect(screen.queryByRole('button', { name: /Focus/ })).toBeNull();
     await act(async () => { release(); await saving; });
     await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
   });
@@ -2361,7 +2361,7 @@ describe('item details in the tree', () => {
 });
 
 describe('scrolling the tree', () => {
-  it('keeps a breadcrumb reveal below the pinned header when its chain shortens and an edge callback precedes reflow correction', async () => {
+  it('keeps a Back-to reveal below the pinned header when a late clamp shortens rows and an edge callback precedes reflow correction', async () => {
     let shrink = 0;
     const callbacks: { run: () => void; targets: Set<Element> }[] = [];
     vi.stubGlobal('ResizeObserver', class {
@@ -2382,7 +2382,7 @@ describe('scrolling the tree', () => {
       return rectangle.call(this);
     });
     try {
-      const view = await mount({ configure: transport => {
+      await mount({ props: { selectedId: 'deep-1' }, configure: transport => {
         const session = transport.sessions.get(route.session_id)!, saved = viewOf(transport);
         for (let level = 0; level < 5; level++) {
           const id = `deep-${level}`;
@@ -2390,21 +2390,18 @@ describe('scrolling the tree', () => {
           saved.expanded_item_ids.push(id);
         }
       } });
-      const box = scroller(), slot = screen.getByRole('navigation', { name: 'Map ancestors' });
+      const box = scroller();
       box.scrollTop = ids().indexOf('deep-4') * 200 - 70; fireEvent.scroll(box);
-      expect(within(slot).getAllByRole('button').map(button => button.textContent)).toEqual(['Level 1', 'Level 2', 'Level 3']);
-      fireEvent.click(within(slot).getByRole('button', { name: 'Level 1' }));
-      await waitFor(() => expect(view.calls.selected.at(-1)).toMatchObject({ kind: 'item', route: { item_id: 'deep-1' } }));
+      // The selected row went past the top: Back to it reveals it below the pinned header.
+      backToSelected();
       expect(row('deep-1').getBoundingClientRect().top).toBe(168);
-      expect(within(slot).getAllByRole('button')).toHaveLength(2);
-      // A late preview clamp runs after the breadcrumb changed; the edge observer
+      // A late preview clamp runs after the reveal; the edge observer
       // may see that new geometry before the observer that repairs the reading anchor.
       shrink = 108;
       act(() => callbacks.find(callback => callback.targets.has(box) && [...callback.targets].some(target => target.matches('.tree-rows')))!.run());
       act(() => callbacks.find(callback => !callback.targets.has(box) && [...callback.targets].some(target => target.matches('.tree-rows')))!.run());
       expect(row('deep-1').getBoundingClientRect().top).toBe(168);
       expect(row('deep-1').getBoundingClientRect().bottom).toBeLessThanOrEqual(box.getBoundingClientRect().bottom);
-      expect(within(slot).getAllByRole('button')).toHaveLength(2);
       // Back to the selected item, asked while the tree holds a reveal.
       backToSelected();
       shrink = 140;
@@ -2412,28 +2409,6 @@ describe('scrolling the tree', () => {
       act(() => callbacks.find(callback => !callback.targets.has(box) && [...callback.targets].some(target => target.matches('.tree-rows')))!.run());
       expect(row('deep-1').getBoundingClientRect().top).toBe(168);
     } finally { vi.unstubAllGlobals(); }
-  });
-
-  it('keeps ancestor names in a permanent slot outside rows and reveals the chosen ancestor', async () => {
-    layout();
-    const view = await mount({ configure: transport => {
-      const session = transport.sessions.get(route.session_id)!, saved = viewOf(transport);
-      for (let level = 0; level < 5; level++) {
-        const id = `deep-${level}`;
-        session.items[id] = { ...session.items['1.1']!, id, ordinal: 100 + level, parent: level ? `deep-${level - 1}` : '1', question: `Level ${level}`, short: `Level ${level}` };
-        saved.expanded_item_ids.push(id);
-      }
-    } });
-    const slot = screen.getByRole('navigation', { name: 'Map ancestors' });
-    expect(document.querySelector('.tree-scroll')!.contains(slot)).toBe(false);
-    const box = scroller();
-    box.scrollTop = ids().indexOf('deep-4') * 100; fireEvent.scroll(box);
-    expect(within(slot).getAllByRole('button').map(button => button.textContent)).toEqual(['Level 1', 'Level 2', 'Level 3']);
-    const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
-    expect(css).toMatch(/\.tree-breadcrumb\s*\{[^}]*height: 28px/);
-    fireEvent.click(within(slot).getByRole('button', { name: 'Level 2' }));
-    await waitFor(() => expect(view.calls.selected.at(-1)).toMatchObject({ kind: 'item', route: { item_id: 'deep-2' } }));
-    expect(screen.getByRole('navigation', { name: 'Map ancestors' })).toBe(slot);
   });
 
   it('returns keyboard focus to the selected row when Enter activates its tag', async () => {
@@ -2445,9 +2420,8 @@ describe('scrolling the tree', () => {
     expect(row('8').getBoundingClientRect().top).toBeGreaterThanOrEqual(8);
   });
 
-  it('names ancestors of the first fully visible row below pinned chrome, skipping a clipped predecessor after reflow', async () => {
+  it('holds the first whole row below pinned chrome when its clipped predecessor grows after reflow', async () => {
     let predecessorGrowth = 0;
-    let viewportHeight = 400;
     const callbacks: { run: () => void; targets: Set<Element> }[] = [];
     vi.stubGlobal('ResizeObserver', class {
       targets = new Set<Element>();
@@ -2458,7 +2432,7 @@ describe('scrolling the tree', () => {
     const rectangle = HTMLElement.prototype.getBoundingClientRect;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const box = document.querySelector<HTMLElement>('.tree-scroll');
-      if (this === box) return new DOMRect(0, 100, 300, viewportHeight);
+      if (this === box) return new DOMRect(0, 100, 300, 400);
       if (this.matches('.tree-topic')) return new DOMRect(0, 100, 300, 60);
       const id = this.getAttribute('data-item-id'), at = id ? ids().indexOf(id) : -1;
       if (at >= 0 && this.getAttribute('role') === 'treeitem') {
@@ -2475,24 +2449,14 @@ describe('scrolling the tree', () => {
           saved.expanded_item_ids.push(id);
         }
       } });
-      const box = scroller(), slot = screen.getByRole('navigation', { name: 'Map ancestors' });
+      const box = scroller();
       box.scrollTop = ids().indexOf('deep-4') * 100 - 68; fireEvent.scroll(box);
       expect(row('deep-3').getBoundingClientRect().bottom).toBe(168);
       expect(row('deep-4').getBoundingClientRect().top).toBe(168);
-      expect(within(slot).getAllByRole('button').map(button => button.textContent)).toEqual(['Level 1', 'Level 2', 'Level 3']);
       predecessorGrowth = 20;
       act(() => callbacks.find(callback => [...callback.targets].some(target => target.matches('.tree-rows')) && !callback.targets.has(box))!.run());
       // D24: the first whole row is the reading row, so the clipped predecessor growing at its end moves nothing in view.
       expect(row('deep-4').getBoundingClientRect().top).toBe(168);
-      expect(within(slot).getAllByRole('button').map(button => button.textContent)).toEqual(['Level 1', 'Level 2', 'Level 3']);
-      // An item hidden by the pinned topic is not the first fully visible row.
-      box.scrollTop += 40; fireEvent.scroll(box);
-      expect(within(slot).queryAllByRole('button').map(button => button.textContent)).not.toEqual(['Level 1', 'Level 2', 'Level 3']);
-      // Neither is a row whose bottom is outside the window.
-      box.scrollTop -= 40; fireEvent.scroll(box);
-      viewportHeight = 100;
-      act(() => callbacks.find(callback => [...callback.targets].some(target => target.matches('.tree-rows')) && !callback.targets.has(box))!.run());
-      expect(within(slot).queryAllByRole('button')).toHaveLength(0);
     } finally { vi.unstubAllGlobals(); }
   });
   // A 400 px tree over rows 100 px apart that move with its scrollTop, scrolled 150 px down.
@@ -2787,7 +2751,6 @@ describe('scrolling the tree', () => {
     expect(marker().parentElement).toBe(document.querySelector('.tree-scroll-shell'));
     expect(scroller().contains(marker())).toBe(false);
     expect(marker().closest('[aria-label="Filter items"]')).toBeNull();
-    expect(marker().closest('.tree-path')).toBeNull();
     expect(document.querySelector('.tree-selected-slot')).toBeNull();
     expect(marker().querySelector('.tree-back-label')?.textContent).not.toBe('');
     expect(marker().querySelector('.tree-back-arrow')?.textContent).toBe(edge === 'above' ? '↑' : '↓');

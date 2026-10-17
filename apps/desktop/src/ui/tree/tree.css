@@ -490,14 +490,6 @@
   left: calc(-1em - 8px);
 }
 
-/* The path row keeps one height; it never covers or shifts rows. */
-.tree-path {
-  display: flex;
-  flex: none;
-  align-items: center;
-  min-width: 0;
-}
-
 /* "↑ Back to “name” ." (SPEC §5.8 8.5): floats centred over the Map, so it appearing or going never moves a row. Above:
    12px under the sticky band (TreeView keeps --tree-header-height on the shell); below: 14px above the floating dock. An
    opaque surface in every state, including the global button reset. */
@@ -526,7 +518,7 @@
   transform: translateX(-50%);
 }
 
-.tree-back[data-edge="above"] { top: calc(28px + var(--tree-header-height, 0px) + 12px); }
+.tree-back[data-edge="above"] { top: calc(var(--tree-header-height, 0px) + 12px); }
 .tree-back[data-edge="below"] { bottom: calc(var(--dock-inset, 0px) + 14px); }
 
 .tree-back-arrow {
@@ -544,42 +536,3 @@
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
-
-/* The fixed slot is outside the scroller: changing its names neither overlaps rows nor moves them. */
-.tree-breadcrumb {
-  display: flex;
-  flex: 1 1 0;
-  align-items: center;
-  gap: 4px;
-  height: 28px;
-  min-width: 0;
-  padding: 0 16px;
-  overflow: hidden;
-  white-space: nowrap;
-  font-size: calc(12px * var(--text-scale));
-}
-
-.tree-breadcrumb > span {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  gap: 4px;
-}
-
-.tree-breadcrumb button {
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  font: inherit;
-  font-size: calc(12px * var(--text-scale));
-  line-height: inherit;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  cursor: pointer;
-  color: var(--a-acc-text);
-  background: transparent;
-}
-
-.tree-breadcrumb button:hover { text-decoration: underline; }
