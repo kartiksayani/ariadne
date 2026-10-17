@@ -140,13 +140,6 @@
   font-size: calc(13px * var(--text-scale));
 }
 
-/* The topic's cards sit right of the rail (their left margin clears it); the wrapper's own height, margins
-   included, is what lets the rail run unbroken from the band down to the first item. */
-.tree-topic-cards {
-  position: relative;
-  display: flow-root;
-}
-
 .tree-topic-fix {
   padding-left: 26px;
 }
