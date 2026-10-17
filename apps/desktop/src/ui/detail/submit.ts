@@ -128,16 +128,16 @@ export function useDetailSubmit(drafts: OwnerDraftStore, store: SessionStore, it
         }
         const latest = store.getSnapshot();
         const sendingSession = latest.snapshot?.session;
-        if (!drafts.getSnapshot().ready || !sendingSession || latest.status !== 'ready' || latest.error
-            || (!attempt && sendingSession !== session)) {
+        if (!drafts.getSnapshot().ready || !sendingSession || latest.status !== 'ready' || latest.error) {
           setSendError(loadingError);
           return false;
         }
-        if (attempt && (sendingSession.items[itemId]?.question !== session?.items[itemId]?.question
-            || sendingSession.items[itemId]?.status !== session?.items[itemId]?.status
-            || sendingSession.items[itemId]?.outcome !== session?.items[itemId]?.outcome
-            || sendingSession.items[itemId]?.why !== session?.items[itemId]?.why
-            || sendingSession.active_binding_id !== session?.active_binding_id)) {
+        // The store can already hold a newer snapshot than the one on screen (a busy Mac renders it a moment late). The send
+        // goes against the newer one, unless what the owner saw of this item changed: then it waits, and says why until the
+        // owner's next send or review (a refusal the next snapshot cleared would leave the click a silent no-op).
+        const shown = session?.items[itemId], now = sendingSession.items[itemId];
+        if (sendingSession !== session && (now?.question !== shown?.question || now?.status !== shown?.status
+            || now?.outcome !== shown?.outcome || now?.why !== shown?.why || sendingSession.active_binding_id !== session?.active_binding_id)) {
           setSendError('This item changed. Review it before sending. Your text is kept.');
           return false;
         }

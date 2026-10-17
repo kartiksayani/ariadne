@@ -80,10 +80,14 @@ export function AnswerSlot({ drafts, store, itemId, layout = 'details', hint, he
       const target = focusRequest.answerTarget, choice = item?.options[focusRequest.optionIndex ?? -1];
       const sameTarget = target && item?.revision === target.revision && item.question_revision === target.questionRevision
         && session?.active_binding_id === target.bindingId && choice?.id === target.optionId;
-      const latest = store.getSnapshot();
-      if (!live || latest.status !== 'ready' || latest.error || latest.snapshot?.session !== session) {
+      // The store can already hold a newer snapshot than the one on screen (a busy Mac renders it a moment late): the key
+      // still sends unless this question or the binding moved on in it. A refusal stays until the owner's next key or review.
+      const latest = store.getSnapshot(), now = latest.snapshot?.session, newer = now?.items[itemId];
+      const moved = !!now && now !== session && (newer?.revision !== item?.revision || newer?.question_revision !== item?.question_revision
+        || now.active_binding_id !== session?.active_binding_id);
+      if (!live || latest.status !== 'ready' || latest.error || !now) {
         setShortcutStatus(loadingError);
-      } else if (!sameTarget || submit.changed) setShortcutStatus('This item changed. Review it before sending. Your note is kept.');
+      } else if (moved || !sameTarget || submit.changed) setShortcutStatus('This item changed. Review it before sending. Your note is kept.');
       else if (blocked || submit.blocked) setShortcutStatus(submit.blocked ?? blocked ?? null);
       else if (entry.receipt) setShortcutStatus('This reply has already been sent.');
       else if (submit.locked) setShortcutStatus('This reply is being saved or needs a retry. Your note is kept.');
