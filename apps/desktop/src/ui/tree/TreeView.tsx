@@ -33,6 +33,7 @@ import { TopicRow, type BandSlots, type TopicAction } from './TopicRow';
 import { ContinueButton } from './band/ContinueButton';
 import { FocusButton } from './band/FocusButton';
 import { NextUnseen } from './band/NextUnseen';
+import { ChangesOpener } from '../changes/ChangesOpener';
 import { TopicMenu } from './band/TopicMenu';
 import { TopicReply } from '../answer/TopicReply';
 import { StuckNote } from '../answer/StuckNote';
@@ -1019,6 +1020,8 @@ export function TreeView(props: TreeViewProps) {
       // While focused, the counts line says so, in the counts' place (D9).
       counts: focusedName ? <span className="tree-count tree-focused"><i className="ph ph-crosshair" aria-hidden="true" />
         Focused on “{focusedName}” · {focusedCount} item{focusedCount === 1 ? '' : 's'}</span> : undefined,
+      changes: <ChangesOpener session={session} topicId={id} seen={seen} navigation={navigation}
+        onOpenItem={itemId => { if (covered && props.onOpenItem) props.onOpenItem(itemId); else select(itemId, false); }} />,
       next: <NextUnseen position={at >= 0 ? at + 1 : null} total={unseen.length} onNext={() => nextCallbacks.current()} />,
       focus: <FocusButton focusedName={focusedName} canFocus={!!actingItem()} busy={focusDisabled} onToggle={() => { toggleSelectedFocus(); }} />,
       continue: row.topic.origin ? undefined
