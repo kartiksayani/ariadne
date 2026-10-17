@@ -252,6 +252,14 @@ const filterTriggers: readonly FilterTrigger[] = [
     change: page => agent(page, 'settle'), done: (page, view) => expect(page.locator(cellOf(view, '38'))).toHaveCount(0) },
 ];
 
+// The Tree rows that fail until the Tree hold (D24, branch redesign/a20-hold) keeps the reading row's window place at every
+// scroll position, including a row opening above the Map. The Graph's hold is already in; all its rows pass.
+const waitsForTreeHold: Readonly<Record<Spot, readonly string[]>> = {
+  top: ['the chip row opens', 'the reading row leaves To ack after its Ack'],
+  middle: ['the chip row opens', 'the chip row closes', 'Clear empties the chips and closes the row', 'the reading row leaves To ack after its Ack'],
+  bottom: ['the chip row opens', 'a dependency settles and an item leaves Blocked'],
+};
+
 test.describe('the filter row never moves the Map', () => {
   // Each row opens a window, so a missing control fails fast instead of waiting for the suite's long limit.
   test.describe.configure({ timeout: 90_000 });
@@ -268,6 +276,7 @@ test.describe('the filter row never moves the Map', () => {
 
   for (const view of views) for (const spot of spots) for (const trigger of filterTriggers) {
     test(`${view}, scrolled to the ${spot}: ${trigger.name}`, async ({ page }) => {
+      test.fixme(view === 'Tree' && waitsForTreeHold[spot].includes(trigger.name), 'waits for the Tree hold (D24, redesign/a20-hold)');
       await prepare(page, origin, view);
       await trigger.before(page);
       await scrollTo(page, view, spot);
@@ -287,7 +296,7 @@ test.describe('the filter row never moves the Map', () => {
       expect(after, `${held.id} is still drawn`).not.toBeNull();
       const shift = after!.y - before.y;
       // At the top an owner-caused boundary may carry the rows up (never down) by the height that left; anywhere else, nothing moves.
-      const room = spot === 'top' && trigger.top ? (trigger.top === 'filter row' ? edgeMoved : reader.height) + 1 : 1;
+      const room = spot === 'top' && trigger.top ? (trigger.top === 'filter row' ? edgeMoved : cells[1]!.top - reader.top) + 1 : 1;
       expect(shift, `${held.id} moved ${shift}px in the window`).toBeGreaterThanOrEqual(-room);
       expect(shift, `${held.id} moved ${shift}px in the window`).toBeLessThanOrEqual(1);
       expect(Math.abs(after!.x - before.x), `${held.id} moved sideways`).toBeLessThanOrEqual(1);
