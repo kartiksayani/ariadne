@@ -111,10 +111,11 @@
   "schema_version": 1,
   "status": {
     "updated_at": "2026-10-17T00:00:00Z",
-    "headline": "Alpha.18 released (v0.1.0-alpha.18, #164): quiet hook notices, and a busy store is retryable. It follows alpha.17 (#162, Map fixes), alpha.16 (#160, the item conversation view) and alpha.15 (#156–#159).",
+    "headline": "Alpha.19 released (v0.1.0-alpha.19, #169): the window, with a top bar, switcher and pages, an answer dock and a foldable Details. It follows alpha.18 (#164, quiet hook notices and a retryable busy store), alpha.17 (#162, Map fixes) and alpha.16 (#160, the item conversation view).",
     "notes": [
-      "Next: the alpha.18 follow-ups (P11.17–P11.27) go into alpha.19 or later. The hook notice and store follow-ups come first; they are small and have no redesign dependency.",
-      "The UI is being redesigned. Mockups are made in Claude Design, the owner approves them, and only then does it get built. The Map and window layout are chosen; the remaining rounds are answering plus conversation, what changed plus peek, and dialogs, notices and pages.",
+      "Next: alpha.20 \"The Map\" (P11.36–P11.44), plan approved by the owner on 2026-10-17. Two fixes are already built on branches and not merged: P11.35 (silent Send in Details under load) and P11.22 with P11.23 (fair store lock and a realistic contention test).",
+      "The remaining alpha.18 follow-ups (P11.17–P11.21, P11.24, P11.25, P11.27) are small and do not depend on the redesign; take them alongside the Map work. P11.26 (deflake the load-sensitive tests) is an alpha.20 must-do before the next merge.",
+      "The UI is being redesigned in three releases from the approved board: the window (alpha.19, released), the Map including what changed and peek (alpha.20), then dialogs, notices and pages, with connection states (release 3).",
       "Queued behind the redesign: the #162 follow-ups (P11.10–P11.14), the recovery edge cases from a failure table and the previous-release read test.",
       "Owner decision: no session-wide Conversation view and no host transcript reading. Chat with the agent stays in the terminal.",
       "Before merging a PR whose base is behind main, merge main into it and let push-triggered quality run on that head; the tree-equality check assumes this.",
@@ -3413,7 +3414,13 @@
       "checks": [
         "cargo test --workspace; the lock tests several times in a row."
       ],
-      "estimate_days": 1
+      "estimate_days": 1,
+      "active": true,
+      "progress": {
+        "state": "in_progress",
+        "prs": [],
+        "note": "Built on branch redesign/a20-lock (a01d22eb), not merged. Ships with alpha.20."
+      }
     },
     {
       "id": "P11.23",
@@ -3436,7 +3443,13 @@
       "checks": [
         "cargo test --workspace; the test passes 5 of 5 runs, including under moderate machine load."
       ],
-      "estimate_days": 1
+      "estimate_days": 1,
+      "active": true,
+      "progress": {
+        "state": "in_progress",
+        "prs": [],
+        "note": "Built on branch redesign/a20-lock (a01d22eb) with P11.22, not merged. Ships with alpha.20."
+      }
     },
     {
       "id": "P11.24",
@@ -3485,6 +3498,516 @@
       "estimate_days": 1
     },
     {
+      "id": "P11.28",
+      "title": "The window: top bar, switcher (⌘O) and pages",
+      "phase": "M11",
+      "depends_on": [],
+      "paths": [
+        "apps/desktop/src/*",
+        "apps/desktop/tests/*",
+        "tests/ui/design/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "The tabs, header and footer are gone. A top bar holds a switcher (⌘O) for projects, sessions and their waiting questions, and opens the pages Projects, All sessions and Archive.",
+        "All sessions rows offer Rename, Close and Archive. Archive rows open the session to read without restoring it, and an archived session's card says \"Restore session\".",
+        "A project page keeps \"Connect existing session\". First run offers \"Register a project\" before a Codex setup instruction can be copied."
+      ],
+      "checks": [
+        "npm run check; UI tests, design regions and the local native journey; two independent Opus reviews and a targeted re-review at the exact head."
+      ],
+      "estimate_days": 2,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/169"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          169
+        ],
+        "note": "Merged in #169. Released in v0.1.0-alpha.19."
+      }
+    },
+    {
+      "id": "P11.29",
+      "title": "Connection card",
+      "phase": "M11",
+      "depends_on": [
+        "P11.28"
+      ],
+      "paths": [
+        "apps/desktop/src/*",
+        "apps/desktop/tests/*",
+        "tests/ui/design/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "The \"Live\" chip opens a card with Sending…, Close session, Restore or Reopen session, and Copy session ID.",
+        "A failed copy reads \"Couldn't copy\". Copy instruction is hidden when there is no setup receipt."
+      ],
+      "checks": [
+        "npm run check; UI tests, design regions and the local native journey; independent review at the exact head."
+      ],
+      "estimate_days": 1,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/169"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          169
+        ],
+        "note": "Merged in #169. Released in v0.1.0-alpha.19."
+      }
+    },
+    {
+      "id": "P11.30",
+      "title": "Answer dock",
+      "phase": "M11",
+      "depends_on": [
+        "P11.28"
+      ],
+      "paths": [
+        "apps/desktop/src/*",
+        "apps/desktop/tests/*",
+        "tests/ui/design/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Questions waiting on the owner float in a dock over the Map and Details instead of a column. It opens with [, ] or the \"N waiting\" pill and can be dragged to any height; its height is saved outside the saved file.",
+        "Number keys pick an option; ↵ or ⌘↵ sends it, and ⌘↵ only when focus is in the dock. Clicking the question's title opens it in Details.",
+        "A busy agent's answer reads \"It goes when the agent is free\"."
+      ],
+      "checks": [
+        "npm run check; UI tests, design regions and the local native journey; independent review at the exact head."
+      ],
+      "estimate_days": 2,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/169"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          169
+        ],
+        "note": "Merged in #169. Released in v0.1.0-alpha.19."
+      }
+    },
+    {
+      "id": "P11.31",
+      "title": "Answers: undo window, failed-send recovery and replies after a handled answer",
+      "phase": "M11",
+      "depends_on": [
+        "P11.30"
+      ],
+      "paths": [
+        "apps/desktop/src/*",
+        "apps/desktop/tests/*",
+        "tests/ui/design/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "One answer per question. Undo works only while the answer is queued.",
+        "A failed send keeps the owner's words with Copy and Retry. Mark as done, Cancel message and More options stay available, so a stuck message is never a dead end.",
+        "After Cancel message, Mark as done or Stop waiting, the cards reopen with the owner's words and choice. If the agent may already have the answer, Send asks \"Send again?\" first.",
+        "After a handled answer, \"Add a reply\" (or r) adds more words through the existing send-once path."
+      ],
+      "checks": [
+        "npm run check; UI tests, design regions and the local native journey; two independent Opus reviews found 12 defects, each fixed with a failing-first test, and a targeted re-review said ship."
+      ],
+      "estimate_days": 2,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/169"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          169
+        ],
+        "note": "Merged in #169. Released in v0.1.0-alpha.19."
+      }
+    },
+    {
+      "id": "P11.32",
+      "title": "Foldable Details",
+      "phase": "M11",
+      "depends_on": [
+        "P11.28"
+      ],
+      "paths": [
+        "apps/desktop/src/*",
+        "apps/desktop/tests/*",
+        "tests/ui/design/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Details folds to a rail (» or the rail). Whether it is folded and its width are saved outside the saved file.",
+        "Opening an item (click, Enter, r, ⌘[ / ⌘]) unfolds it; moving through the Map with the arrow keys does not.",
+        "Nothing is marked seen while Details is folded, and the rail shows a marker when something is new.",
+        "The reading row stays put when Details folds, unfolds or is resized, tested as a table over fold, unfold, drag-resize and window resize."
+      ],
+      "checks": [
+        "npm run check; UI tests, design regions and the local native journey; independent review at the exact head."
+      ],
+      "estimate_days": 2,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/169"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          169
+        ],
+        "note": "Merged in #169. Released in v0.1.0-alpha.19."
+      }
+    },
+    {
+      "id": "P11.33",
+      "title": "Keys act on the selected item only; removed keys",
+      "phase": "M11",
+      "depends_on": [
+        "P11.28"
+      ],
+      "paths": [
+        "apps/desktop/src/*",
+        "apps/desktop/tests/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Keys act on the selected item only; on a page, item keys do nothing to the Map.",
+        "Removed: ⌥1–9 / ⌥0 quick-send, ⌘J (use . to return to the selected item), e, w, x and h / l folding. a only acknowledges; waiting questions open from the dock or the switcher."
+      ],
+      "checks": [
+        "npm run check; UI tests and the local native journey; independent review at the exact head."
+      ],
+      "estimate_days": 1,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/169"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          169
+        ],
+        "note": "Merged in #169. Released in v0.1.0-alpha.19."
+      }
+    },
+    {
+      "id": "P11.34",
+      "title": "Design harness regions for the approved board",
+      "phase": "M11",
+      "depends_on": [
+        "P11.28"
+      ],
+      "paths": [
+        "tests/ui/design/*",
+        "apps/desktop/tests/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "The design harness asserts 37 board states by region, at 0.1–0.6 %, against the final board (#167). The old v2 frames for Waiting and the dock are retired.",
+        "About 300 UI, e2e and native tests were migrated to the new chrome, keeping their assertions."
+      ],
+      "checks": [
+        "npm run test:design; UI tests and the local native journey."
+      ],
+      "estimate_days": 2,
+      "completion": {
+        "pr_url": "https://github.com/kartiksayani/ariadne/pull/169"
+      },
+      "progress": {
+        "state": "done",
+        "prs": [
+          169
+        ],
+        "note": "Merged in #169, after the board checks in #167. Released in v0.1.0-alpha.19."
+      }
+    },
+    {
+      "id": "P11.35",
+      "title": "Silent Send in Details under load",
+      "phase": "M11",
+      "depends_on": [],
+      "paths": [
+        "apps/desktop/src/ui/detail/submit.ts",
+        "apps/desktop/tests/ui/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Details Send is never a silent no-op. Today submit.ts refuses when the sending session differs from the rendered session and sets loadingError, and the next snapshot clears loadingError. The text is kept, Send stays enabled, nothing is saved and no message shows.",
+        "Fix: send against the latest snapshot (the changed-entry guard still protects stale drafts), or keep the error until the next edit or send.",
+        "A Vitest repro is written first and fails before the fix. The bug dates from alpha.8."
+      ],
+      "checks": [
+        "npm run check; the repro test; the native recovery journey several times in a row under load."
+      ],
+      "estimate_days": 1,
+      "active": true,
+      "progress": {
+        "state": "in_progress",
+        "prs": [],
+        "note": "Built on branch redesign/a20-sendfix (edd355c6), not merged. Found during the alpha.19 gate, where the native recovery journey failed once under load and passed 3 of 3 alone."
+      }
+    },
+    {
+      "id": "P11.36",
+      "title": "Alpha.20 P0: behaviour-preserving prep for the Map",
+      "phase": "M11",
+      "depends_on": [
+        "P11.28"
+      ],
+      "paths": [
+        "apps/desktop/src/ui/tree/*",
+        "apps/desktop/src/selectors/tree/*",
+        "apps/desktop/src/ui/graph/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Split tree.css into per-area files; strip the row kind; move the hue table to ui/tree/branch.ts; add a box-pass hook in the tree model; add band slot props; switch the Graph filter slot off.",
+        "No visible change. All existing tests and design regions pass unchanged."
+      ],
+      "checks": [
+        "npm run check; UI tests and design regions unchanged."
+      ],
+      "estimate_days": 1
+    },
+    {
+      "id": "P11.37",
+      "title": "Alpha.20 T: Tree core, search in place and a fixed end cluster",
+      "phase": "M11",
+      "depends_on": [
+        "P11.36"
+      ],
+      "paths": [
+        "apps/desktop/src/selectors/tree/*",
+        "apps/desktop/src/ui/tree/TreeView.tsx",
+        "apps/desktop/src/ui/tree/model.ts",
+        "apps/desktop/src/ui/tree/tree.css",
+        "apps/desktop/tests/ui/tree/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "TreeView.tsx and model.ts are shared seams: the P0 contracts (band slot props, box-pass hook) are how M1, M2 and M5 plug in, and their pieces merge in the order M5, M2, M1. tree.css here is the core file left after P0 splits out tree-rows.css, tree-band.css and tree-filter.css.",
+        "Search runs in place (M4) and leaves the tree model before the filter chips are built on it.",
+        "The leftover ⌘J retainedJump check in TreeView.tsx (about lines 1044–1046) is removed, because ⌘J is no longer a key.",
+        "A fixed end cluster holds markers, Ack and pills, so they never re-wrap a row. The topic band wraps by width.",
+        "The Map never moves on its own: every trigger (new agent rows above or below, marker clear, Ack or Undo, Show more, band changes, Details fold or resize, window resize, search step, \"Show them\", filter chip, peek open or close) leaves the reading row's screen position unchanged, tested as a table in the Tree and the Graph."
+      ],
+      "checks": [
+        "npm run check; the invariant table; UI tests and design regions; independent Opus review (Map-never-moves)."
+      ],
+      "estimate_days": 3
+    },
+    {
+      "id": "P11.38",
+      "title": "Alpha.20 M1: Map look",
+      "phase": "M11",
+      "depends_on": [
+        "P11.37"
+      ],
+      "paths": [
+        "apps/desktop/src/ui/tree/ItemRow.tsx",
+        "apps/desktop/src/ui/tree/boxes.ts",
+        "apps/desktop/src/ui/tree/branch.ts",
+        "apps/desktop/src/ui/tree/HoverBar.tsx",
+        "apps/desktop/src/ui/tree/tree-rows.css",
+        "apps/desktop/tests/ui/tree/item-row*",
+        "apps/desktop/tests/ui/tree/branch*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Thread and halo, branch hues by root ordinal, the six-slot hover bar, badges, one strip style, and Show more or less at 3 lines match the approved board.",
+        "A branch keeps its hue across adds, removes, Empty the bin and reloads, tested as a table. Hue is the root ordinal mod 5."
+      ],
+      "checks": [
+        "npm run check; UI tests; design regions for the Map states."
+      ],
+      "estimate_days": 2
+    },
+    {
+      "id": "P11.39",
+      "title": "Alpha.20 M2: Topic band",
+      "phase": "M11",
+      "depends_on": [
+        "P11.37"
+      ],
+      "paths": [
+        "apps/desktop/src/ui/tree/TopicRow.tsx",
+        "apps/desktop/src/ui/tree/TopicMenu.tsx",
+        "apps/desktop/src/ui/navigation/AckAll.tsx",
+        "apps/desktop/src/ui/tree/gettingAround.ts",
+        "apps/desktop/src/ui/tree/tree-band.css",
+        "apps/desktop/tests/ui/tree/topic*",
+        "apps/desktop/tests/ui/tree/gettingAround.test.ts"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "The topic band shows counts in words, the changes opener, Next unseen, Ack all, Focus or Unfocus, Continue and a \"…\" menu, as on the board.",
+        "The session chip stays in the band, and \"Reply to topic\" keeps its current behaviour."
+      ],
+      "checks": [
+        "npm run check; UI tests; design regions for the Map states."
+      ],
+      "estimate_days": 2
+    },
+    {
+      "id": "P11.40",
+      "title": "Alpha.20 M5: Filter chip row",
+      "phase": "M11",
+      "depends_on": [
+        "P11.37"
+      ],
+      "paths": [
+        "apps/desktop/src/ui/tree/FilterRow.tsx",
+        "apps/desktop/src/ui/tree/FilterBar.tsx",
+        "apps/desktop/src/ui/tree/chips.ts",
+        "apps/desktop/src/selectors/filter/*",
+        "apps/desktop/src/ui/tree/tree-filter.css",
+        "apps/desktop/tests/ui/tree/filter*",
+        "apps/desktop/tests/ui/tree/chips*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "A filter chip row replaces the filter button. Blocked is a Map-only display status: open, waiting or in-progress with an unsettled dependency.",
+        "Chips with no saved status (To ack, Sent, Blocked, Later, Dropped) are kept in browser local storage; the saved preferences file gets no new fields.",
+        "Drop and Later on waiting or in-progress items are offered only when core accepts them; otherwise they are greyed with the reason."
+      ],
+      "checks": [
+        "npm run check; UI tests; the saved preferences file is unchanged by chip use."
+      ],
+      "estimate_days": 2
+    },
+    {
+      "id": "P11.41",
+      "title": "Alpha.20 M3: Graph",
+      "phase": "M11",
+      "depends_on": [
+        "P11.36"
+      ],
+      "paths": [
+        "apps/desktop/src/ui/graph/*",
+        "apps/desktop/tests/ui/graph/*",
+        "tests/e2e/graph/*",
+        "apps/desktop/tests/e2e/graph.spec.mjs"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "Trunk, orthogonal edges, related lines on select or hover, a blue selected path and the legend match the board. Replacement arcs and hidden-item stubs are dropped (Hide and unhide live in the Tree and Details). A folded node keeps a quiet \"+N\" chip, so children never vanish unseen, and says \"N waiting\" when questions are inside.",
+        "An anchor keeps the view still under every trigger in the Map-never-moves table.",
+        "Under search, matches get the highlight tint and stepping scrolls without selecting. Several topics in one session stack as topic cards."
+      ],
+      "checks": [
+        "npm run check; UI tests; the Graph at 2000 items; the native Graph journey; independent Opus review of the anchor."
+      ],
+      "estimate_days": 3
+    },
+    {
+      "id": "P11.42",
+      "title": "Alpha.20 M6: Changes, markers and Back-to",
+      "phase": "M11",
+      "depends_on": [
+        "P11.37"
+      ],
+      "paths": [
+        "apps/desktop/src/ui/changes/*",
+        "apps/desktop/src/ui/navigation/Recent.tsx",
+        "apps/desktop/src/selectors/changes/*",
+        "apps/desktop/src/state/preferences/reading.ts",
+        "apps/desktop/tests/ui/changes/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "The Recent and What changed popovers, the marker styles and the Back-to pill (.) match the board.",
+        "Markers clear only after at least 1 s in Details or by the defined owner actions, never by peek, hover, search or scroll, tested as a table. Hovering to peek is not a Recent visit.",
+        "A single Ack shows Undo, then saves."
+      ],
+      "checks": [
+        "npm run check; UI tests; design regions for the Map states."
+      ],
+      "estimate_days": 2
+    },
+    {
+      "id": "P11.43",
+      "title": "Alpha.20 M7: Peek",
+      "phase": "M11",
+      "depends_on": [
+        "P11.36"
+      ],
+      "paths": [
+        "apps/desktop/src/ui/peek/*",
+        "apps/desktop/tests/ui/peek/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "A peek card with the board's timing closes on scroll. A card with focus or a picked option stays open when the pointer leaves.",
+        "Answering in place goes through the existing send-once lock: one send, and typed text kept on close or scroll-close. Peeking never marks an item seen.",
+        "Copy reference moves to the Details \"…\" menu."
+      ],
+      "checks": [
+        "npm run check; UI tests including a send-once test; independent Opus review (answering in place)."
+      ],
+      "estimate_days": 2
+    },
+    {
+      "id": "P11.44",
+      "title": "Alpha.20 V: Design regions for the Map states",
+      "phase": "M11",
+      "depends_on": [
+        "P11.38",
+        "P11.39",
+        "P11.40",
+        "P11.41",
+        "P11.42",
+        "P11.43"
+      ],
+      "paths": [
+        "tests/ui/design/*",
+        "apps/desktop/src/ui/*"
+      ],
+      "spec": [
+        "docs/delivery/HANDOFF.md"
+      ],
+      "acceptance": [
+        "The design harness asserts the Map states and the Map screens of the approved board by region. Visual fixes go in as the pieces land, with a second worker pairing on CSS fixes as in alpha.19."
+      ],
+      "checks": [
+        "npm run test:design; one full gate on the integrated head; Opus reviews split by area."
+      ],
+      "estimate_days": 3
+    },
+    {
       "id": "P11.26",
       "title": "Deflake the load-sensitive tests",
       "phase": "M11",
@@ -3493,7 +4016,9 @@
         "crates/ariadne-cli/tests/claude_installed_join.rs",
         "crates/ariadne-cli/tests/doctor.rs",
         "crates/ariadne-adapter-codex/*",
+        "apps/desktop/src-tauri/src/composition/*",
         "apps/desktop/tests/ui/*",
+        "apps/desktop/tests/e2e/*",
         "docs/delivery/HANDOFF.md"
       ],
       "spec": [
@@ -3501,7 +4026,9 @@
         "ORCHESTRATOR.md"
       ],
       "acceptance": [
-        "The alpha.18 load flakes listed in HANDOFF are fixed or have a deadline that no longer depends on machine load: claude_installed_join (deadline asserts), the two doctor.rs Codex tests, the Codex queue.rs version probe, owner-input.test.tsx, the App.test.tsx reveal test, the itemNavigation reveal tests and the tree component status-chip test.",
+        "Must be done in alpha.20: the Codex queue.rs version probe is a second occurrence, and the ORCHESTRATOR Flakes rule says a second occurrence is fixed before the next merge.",
+        "The load flakes listed in HANDOFF are fixed or have a deadline that no longer depends on machine load: claude_installed_join (deadline asserts), the two doctor.rs Codex tests, the Codex queue.rs version probe, owner-input.test.tsx, the App.test.tsx reveal test, the itemNavigation reveal tests and the tree component status-chip test.",
+        "The alpha.19 flakes are in scope too: the llvm-cov composition wake test (a held lease), the native recovery step (\"Sending…\" not displayed within 10 s under load), the native Graph step that compares Tree and Graph items, and the accessibility step whose first r press needed a retry (replace the retry with a readiness wait).",
         "No assertion is removed or relaxed to pass. The one exception is a native timing assertion that fails again: the owner ruling of 2026-10-06 (ORCHESTRATOR.md, Delivery feedback rules, on latency budgets) says to remove that assertion rather than change product code."
       ],
       "checks": [
