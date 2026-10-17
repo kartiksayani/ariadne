@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DockStore } from '../../../src/state/dock/store';
-import { dockPath } from '../../../src/ui/dock/model';
+import { compareOtherGroups, dockPath } from '../../../src/ui/dock/model';
 import { immutable } from '../../../src/data/session-store';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { Session } from '../../../src/generated/domain/models';
@@ -115,6 +115,14 @@ describe('dock view invariant: only owner actions open it; no Map side effects',
     dock.sync('session-a', questions.slice(1)); dock.sync('session-a', questions);
     vi.advanceTimersByTime(2700);
     expect(dock.getSnapshot().current?.id).toBe('q1'); dock.dispose();
+  });
+});
+
+describe('the other-sessions list', () => {
+  it('orders groups by project, then session name, not by who waited longest', () => {
+    const groups = [{ project: 'notes-web', name: 'flaky tests' }, { project: 'notes-api', name: 'schema review' }, { project: 'notes-api', name: 'auth rewrite' }];
+    expect([...groups].sort(compareOtherGroups).map(group => `${group.project} · ${group.name}`)).toEqual([
+      'notes-api · auth rewrite', 'notes-api · schema review', 'notes-web · flaky tests']);
   });
 });
 

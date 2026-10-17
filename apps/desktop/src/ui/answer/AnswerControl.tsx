@@ -186,7 +186,7 @@ export function AnswerControl({ options, layout = 'details', selected, draft, wa
       </span>
       {bar ? bar.actions : <button type="button" data-answer-send className="answer-send" {...gate(locked || !ready, frozen || !!blocked)}
         title={ready ? 'Send ( ↵ )' : 'Pick an option or write an answer first'} onClick={event => { event.stopPropagation(); sendAnswer(); }}>
-        <i className="ph ph-paper-plane-right" aria-hidden="true" /><span>Send</span>{ready && <kbd aria-hidden="true">↵</kbd>}
+        <i className="ph ph-paper-plane-right" aria-hidden="true" /><span>Send</span>{ready && !compact && <kbd aria-hidden="true">↵</kbd>}
       </button>}
     </div>
   </div>;
