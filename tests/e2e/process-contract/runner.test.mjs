@@ -74,12 +74,12 @@ test('discovery failure retains scoped view facts and an App screenshot without 
     async execute(read) { captures.push('view'); return read(); },
     async saveScreenshot(path) { captures.push('screenshot'); assert.equal(path, join(root, 'discovery-failure.png')); await writeFile(path, 'App-only screenshot fixture'); },
   };
-  await waitForDiscoveredCandidate({ async waitForDisplayed(options) { assert.deepEqual(options, { timeout: 20000 }); } });
+  await waitForDiscoveredCandidate({ async waitForDisplayed(options) { assert.deepEqual(options, { timeout: 60000 }); } });
   assert.deepEqual(captures, []); assert.deepEqual(await readdir(root), []);
   const failure = new Error('original candidate visibility assertion');
   let waits = 0;
   await assert.rejects(waitForDiscoveredCandidate({ async waitForDisplayed(options) {
-    ++waits; assert.deepEqual(options, { timeout: 20000 }); throw failure;
+    ++waits; assert.deepEqual(options, { timeout: 60000 }); throw failure;
   } }), error => error === failure);
   assert.equal(waits, 1); assert.deepEqual(captures, ['view', 'screenshot']);
   const facts = JSON.parse(await readFile(join(root, 'discovery-failure.json'), 'utf8'));
