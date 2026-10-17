@@ -3,6 +3,7 @@
     not(feature = "test-support"),
     doc = "The default library exposes no scripted fake:\n```compile_fail\nuse ariadne_agent_protocol::fake::ScriptedAdapter;\n```"
 )]
+pub mod deadline_scale;
 mod dto;
 pub mod host_location;
 pub mod host_version;

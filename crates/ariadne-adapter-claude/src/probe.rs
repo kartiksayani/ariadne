@@ -4,6 +4,7 @@ use crate::{
     normalization::error,
 };
 use ariadne_agent_protocol::{
+    deadline_scale,
     host_version::{accepted_range, classify_host_version},
     AdapterError, AdapterErrorCode, EndpointFingerprint, UtcMillis,
 };
@@ -61,7 +62,7 @@ pub fn read_cli_version(executable: &Path, deadline: Instant) -> Result<String, 
     absolute(executable)?;
     cli_version(
         executable,
-        deadline.min(Instant::now() + Duration::from_secs(5)),
+        deadline.min(Instant::now() + deadline_scale::scaled(Duration::from_secs(5))),
     )
 }
 
@@ -102,7 +103,8 @@ impl ClaudeOptions {
         received: Instant,
         deadline: Instant,
     ) -> Result<(ModEvidence, EndpointFingerprint), AdapterError> {
-        let deadline = deadline.min(Instant::now() + Duration::from_secs(5));
+        let deadline =
+            deadline.min(Instant::now() + deadline_scale::scaled(Duration::from_secs(5)));
         check_deadline(deadline)?;
         self.validate()?;
         let evidence = ModEvidence::received_at(identity, observed_at, received)?;

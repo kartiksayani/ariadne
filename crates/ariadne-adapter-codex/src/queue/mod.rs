@@ -3,7 +3,7 @@ mod observe;
 mod process;
 use crate::{
     history::HistoryScan,
-    transport::{error, ExecutableIdentity},
+    transport::{budget, error, ExecutableIdentity},
     CodexDaemonReader, CodexHistoryClient, CodexHostFacts, CodexOptions, QualifiedCodexThread,
 };
 use ariadne_agent_protocol::*;
@@ -147,7 +147,7 @@ impl Worker {
         })
     }
     pub(crate) fn submit(&self, request: SubmitRequest) -> AdapterFuture<'static, SubmitOutcome> {
-        self.submit_before(request, Instant::now() + Duration::from_secs(20))
+        self.submit_before(request, Instant::now() + budget(20))
     }
     fn submit_before(
         &self,
