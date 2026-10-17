@@ -1,28 +1,28 @@
+import { useMemo } from 'react';
 import { GraphView } from './GraphView';
-import { applyChange, sessionChip, type ViewChange } from './model';
+import { applyChange, type ViewChange } from './model';
 import type { SessionPreferences } from '../../generated/core';
-import { agentName, ownerName, sessionWhen } from '../shell/model';
-import { continuedLabel } from '../shared/continued';
 import { NavigationStore, useNavigation } from '../../state/navigation/store';
+import { useReadingSeen } from '../../state/preferences/reading';
 import { useSession, type SessionStore } from '../../data/session-store';
 import type { RevealedItem } from '../../data/routes';
+import { mapChanges } from '../tree/model';
 
 // Composition reuses navigation's preferences revision and registered router,
 // like the tree; it does not own a second preferences writer.
-export function NavigationGraph({ navigation, store, tight, query, reveal, onReveal, now = Date.now }: {
-  navigation: NavigationStore; store: SessionStore; tight: boolean;
-  query?: string;
+export function NavigationGraph({ navigation, store, reveal, onReveal }: {
+  navigation: NavigationStore; store: SessionStore;
   reveal?: RevealedItem | null;
-  onReveal: (result: RevealedItem, openDetail: boolean) => void; now?: () => number;
+  onReveal: (result: RevealedItem, openDetail: boolean) => void;
 }) {
   const state = useNavigation(navigation), session = useSession(store).snapshot?.session, route = store.getSnapshot().route;
   const preferences = state.preferences;
+  // The same New and Changed markers the Tree derives (ui/tree/model.ts), as diamonds on the nodes.
+  const seen = useReadingSeen(navigation.reading, preferences, route);
+  const markers = useMemo(() => session ? mapChanges(session, seen).markers : undefined, [session, seen]);
   const view = preferences?.sessions.find(value => value.session.project_id === route.project_id && value.session.session_id === route.session_id);
   if (!preferences || !view) return <p role="status">The saved view preferences are unavailable. Refresh registered navigation.</p>;
   const later = new Set(preferences.later.filter(item => item.project_id === route.project_id && item.session_id === route.session_id).map(item => item.item_id));
-  const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : null;
-  const label = session ? sessionChip(ownerName(session) ?? (binding ? agentName(binding.adapter_id) : null), sessionWhen(Date.parse(session.created_at), now())) : null;
-  const summaries = state.sessions?.sessions.items ?? [];
   const saveView = async (next: SessionPreferences) => {
     const before = new Set(view.expanded_item_ids), after = new Set(next.expanded_item_ids);
     const change: ViewChange = { selected: next.selected_item_id !== view.selected_item_id ? next.selected_item_id ?? undefined : undefined,
@@ -47,8 +47,7 @@ export function NavigationGraph({ navigation, store, tight, query, reveal, onRev
       // A competing writer refused admission; retry only after it finishes.
     }
   };
-  return <GraphView store={store} routes={navigation.routes} view={view} later={later} search={query} reveal={reveal === undefined ? state.reveal : reveal} tight={tight} sessionLabel={label}
-    continuedFrom={topic => topic.origin ? continuedLabel(topic.origin, summaries, now()) : null}
-    preferencesBusy={state.writing || state.pendingOperationId !== null}
+  return <GraphView store={store} routes={navigation.routes} view={view} later={later} reveal={reveal === undefined ? state.reveal : reveal}
+    markers={markers} preferencesBusy={state.writing || state.pendingOperationId !== null}
     saveView={saveView} onReveal={onReveal} />;
 }

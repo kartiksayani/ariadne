@@ -1,20 +1,25 @@
-// The session's Graph view (handoff README §7, frames 1d, 1f, 1aa), ported from
-// the Ariadne.dc.html graph template: a sticky legend with Reveal selected, then
-// one card per topic with 190×66 nodes, Bezier edges, "+N" and "−".
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
-import type { SessionPreferences } from '../../generated/core';
-import type { Topic } from '../../generated/domain/models';
+// The session's Graph (SPEC §5.1 state 1.3, §5.7 state 7.2, §5.9 state 9.9): topics stacked down one canvas, a trunk
+// joining each topic's top items, orthogonal branch edges, the selected path in blue, related lines for the selected
+// node and the one under the pointer, and a legend card that hangs 12px above the dock.
+//
+// The Graph never moves on its own: after every commit the node the owner is looking at (the selection when in view,
+// otherwise the first node in view) is put back where it was on screen. Only the owner's own moves (scrolling, keys,
+// a reveal, a search step, opening the Graph) take the view somewhere else.
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react';
+import type { ItemRoute, SessionPreferences } from '../../generated/core';
 import { useSession, type Immutable, type SessionStore } from '../../data/session-store';
 import type { RegisteredRoutes, RevealedItem } from '../../data/routes';
 import { plainFailure } from '../../data/plain';
-import { ackTitle } from '../shared/ack';
 import { statusColor } from '../shared/status';
 import { useWorkspaceKeys } from '../keys';
 import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
-import { GraphFilter } from '../tree/FilterBar';
-import { hiddenGroupsFor } from '../tree/hidden';
-import { applyChange, mergeChange, relatedEdgePath, sessionGraph, statusVisual, STUB_HEIGHT, STUB_WIDTH, type GraphNode, type GraphStub, type RelatedEdge, type TopicGraph, type ViewChange } from './model';
+import { GraphFilter, GraphFilterSlot } from '../tree/FilterBar';
+import { BRANCH_HUES } from '../tree/branch';
+import type { ChangeMarker } from '../tree/model';
+import { usePeek, type PeekNavigation } from '../peek/context';
+import { applyChange, graphColumn, mergeChange, relatedLines, sessionGraph, statusVisual, type GraphNode, type SessionGraph, type TopicGraph, type ViewChange } from './model';
+import { useMapSearch } from './search';
 import './graph.css';
 import { useFilterFolds } from '../shared/filterFolds';
 import { notices } from '../pages/notices';
@@ -26,26 +31,28 @@ export interface GraphViewProps {
   readonly routes: RegisteredRoutes;
   readonly view: Immutable<SessionPreferences>;
   readonly later: ReadonlySet<string>;
-  /** The current header search, before its debounced preference write. */
-  readonly search?: string;
   /** The navigation's current reveal (a link, waiting card or tree selection). */
   readonly reveal: RevealedItem | null;
-  /** Detail is open: the prototype's tighter grid. */
-  readonly tight: boolean;
-  /** Session chip shown on every topic card ("codex · yesterday"), or null. */
-  readonly sessionLabel: string | null;
-  /** "Continued from codex · yesterday" for a topic continued from another session; replaces the session chip. */
-  readonly continuedFrom?: (topic: Immutable<Topic>) => string | null;
+  /** New and Changed markers by item id (ui/tree/model.ts `mapChanges`): a diamond alone on the node (SPEC 9.9). */
+  readonly markers?: ReadonlyMap<string, ChangeMarker>;
   readonly preferencesBusy?: boolean;
   readonly saveView: (view: SessionPreferences) => Promise<boolean>;
-  /** Selection reached the item; `openDetail` is false for ↑/↓ moves and "−". */
+  /** Selection reached the item; `openDetail` is false for ↑/↓ moves and folds. */
   readonly onReveal: (result: RevealedItem, openDetail: boolean) => void;
 }
+
+/** The peek's hover API (contract C5); optional until the peek piece lands it. */
+type GraphPeek = PeekNavigation & Partial<{
+  hoverStart(route: ItemRoute, anchor: HTMLElement): void;
+  hoverEnd(): void;
+  toggle(route: ItemRoute, anchor: HTMLElement): void;
+  closeAll(): void;
+}>;
 
 /** Room kept beside a keyboard-reached target: its focus ring (2px outline + 2px offset) plus a little air. */
 const RING_ROOM = 8;
 /**
- * Scrolls `element` into the scroller: centred (Reveal selected, links) or just into view (Ariadne.dc.html:990).
+ * Scrolls `element` into the scroller: centred (opening, links) or just into view (keys, search steps).
  * The visible area ends above the floating dock (`bottomInset`), so a node under the dock counts as hidden.
  */
 function scrollToNode(scroller: HTMLElement, element: Element, center: boolean, bottomInset = 0) {
@@ -55,126 +62,100 @@ function scrollToNode(scroller: HTMLElement, element: Element, center: boolean, 
     scroller.scrollLeft += (b.left + b.width / 2) - (a.left + a.width / 2);
     return;
   }
-  scrollIntoViewIfHidden(scroller, element, { top: 48, bottom: 8, bottomInset });
-  // The same nearest-edge move across: a card or stub reached by key lands whole, with room for its 2px focus ring and
-  // 2px offset (the ring is clipped by this scroller). Nothing moves while the target and its ring are already in view.
+  scrollIntoViewIfHidden(scroller, element, { top: 8, bottom: 8, bottomInset });
+  // The same nearest-edge move across: a node reached by key lands whole, with room for its focus ring.
   if (b.left < a.left + RING_ROOM) scroller.scrollLeft -= a.left + RING_ROOM - b.left;
   else if (b.right > a.right - RING_ROOM) scroller.scrollLeft += Math.min(b.right - a.right + RING_ROOM, b.left - a.left - RING_ROOM);
 }
 
+const MARKER_TITLE: Readonly<Record<ChangeMarker, string>> = { new: 'New', changed: 'Changed' };
+
 interface NodeProps {
   readonly node: GraphNode;
+  readonly width: number;
   readonly focusable: boolean;
+  readonly related: boolean;
+  readonly match: boolean;
+  readonly current: boolean;
+  readonly marker: ChangeMarker | undefined;
   readonly onOpen: (node: GraphNode) => void;
-  readonly onCollapse: (node: GraphNode) => void;
 }
-const Node = memo(function Node({ node, focusable, onOpen, onCollapse }: NodeProps) {
-  const visual = statusVisual[node.status];
-  const className = ['graph-node', node.status === 'waiting' && 'is-waiting', node.onThread && 'is-thread', node.selected && 'is-selected',
-    node.closed && 'is-closed', node.dimmed && 'is-dimmed', node.hidden && 'is-hidden'].filter(Boolean).join(' ');
-  // Only what expanding can draw is counted; a branch of hidden items has its own stub and is named when nothing else is below.
-  const belowTitle = node.below > 0 ? `${node.below} items below, collapsed · click to open the next tier`
-    : `${node.hiddenBelow} ${node.hiddenBelow === 1 ? 'item' : 'items'} hidden below, collapsed · click to open the next tier`;
-  return <div className={className} role="treeitem" aria-selected={node.selected} aria-expanded={node.below ? !node.collapsed : undefined}
-    aria-label={`${node.short}: ${node.item.question}${node.hidden ? ' (hidden)' : ''}`} title={node.item.question} tabIndex={focusable ? 0 : -1}
-    data-item-id={node.item.id} data-row={node.item.id} style={{ left: node.x, top: node.y }}
-    onClick={() => onOpen(node)}>
-    <div className="graph-node-head">
-      <i className={`graph-node-icon ${visual.icon}`} role="img" aria-label={visual.label} title={visual.label} style={{ color: statusColor(node.status) }} />
-      <span className="graph-node-title">{node.short}</span>
-      {node.ack && <span className="graph-node-ack" title={`${ackTitle(node.ack, node.item.status)} · open details`}>{ackTitle(node.ack, node.item.status)}</span>}
-      {node.collapsed && <span className="graph-node-below" title={belowTitle}>{node.below > 0 ? `+${node.below}` : `${node.hiddenBelow} hidden`}</span>}
-      {node.canCollapse && <button type="button" className="graph-node-collapse" title="Collapse branches" aria-label="Collapse branches" tabIndex={-1}
-        onClick={(event: MouseEvent) => { event.stopPropagation(); onCollapse(node); }}><i className="ph ph-minus" aria-hidden="true" /></button>}
-    </div>
-    <div className="graph-node-question">{node.item.question}</div>
+const Node = memo(function Node({ node, width, focusable, related, match, current, marker, onOpen }: NodeProps) {
+  const visual = statusVisual[node.status], hue = BRANCH_HUES[node.branch]!;
+  const className = ['graph-node', node.selected && 'is-selected', node.onPath && 'is-path', related && 'is-related', node.closed && 'is-closed',
+    node.dimmed && 'is-dimmed', node.hidden && 'is-hidden', match && 'is-match', current && 'is-current-match'].filter(Boolean).join(' ');
+  const inside = node.folded ? `${node.inside} inside${node.waitingInside ? `, ${node.waitingInside} waiting on you` : ''}` : '';
+  // The branch hue is carried for the Map's shared look but not drawn: the board's Graph nodes are plain.
+  const style = { left: node.x, top: node.y, width, '--branch-hue': hue.hue, '--branch-chroma': hue.chroma } as CSSProperties;
+  return <div className={className} role="treeitem" aria-selected={node.selected} aria-expanded={node.folded ? false : node.canFold ? true : undefined}
+    aria-label={`${node.short}: ${node.item.question}${node.hidden ? ' (hidden)' : ''}${inside ? ` (folded, ${inside})` : ''}`} title={node.item.question}
+    tabIndex={focusable ? 0 : -1} data-item-id={node.item.id} data-row={node.item.id} data-branch={node.branch} data-marker={marker}
+    data-current-match={current || undefined} style={style} onClick={() => onOpen(node)}>
+    <i className={`graph-node-icon ${visual.icon}`} role="img" aria-label={visual.label} title={visual.label} style={{ color: statusColor(node.status) }} />
+    <span className="graph-node-name" data-peek-anchor="">{node.short}</span>
+    {node.folded && <span className="graph-node-inside" title={inside}>+{node.inside}
+      {node.waitingInside > 0 && <i className="ph-fill ph-question graph-node-waiting" aria-hidden="true" />}</span>}
+    {marker && <span className={`graph-node-marker is-${marker}`} role="img" aria-label={MARKER_TITLE[marker]} title={MARKER_TITLE[marker]} />}
   </div>;
 });
 
-/** The Map's "N items hidden" row, as a small stub: Enter or a click shows the hidden items, and again folds them. */
-const Stub = memo(function Stub({ stub, focusable, onToggle }: { readonly stub: GraphStub; readonly focusable: boolean; readonly onToggle: (stub: GraphStub) => void }) {
-  const label = `${stub.count} ${stub.count === 1 ? 'item' : 'items'} hidden${stub.waiting ? ', waiting on you' : ''}`;
-  return <button type="button" role="treeitem" className="graph-stub" aria-expanded={stub.expanded} aria-label={label}
-    title={`${label} · ${stub.expanded ? 'fold them again' : 'show them'}`} data-stub={stub.key} tabIndex={focusable ? 0 : -1}
-    style={{ left: stub.x, top: stub.y, width: STUB_WIDTH, height: STUB_HEIGHT }} onClick={() => onToggle(stub)}>
-    <i className={stub.expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} aria-hidden="true" />
-    <span className="graph-stub-text">{stub.count} hidden</span>
-    {stub.waiting && <i className="ph-fill ph-question graph-stub-waiting" aria-hidden="true" />}
-  </button>;
+interface TopicProps {
+  readonly graph: TopicGraph;
+  readonly width: number;
+  readonly focusId: string | null;
+  readonly related: ReadonlySet<string>;
+  readonly matches: ReadonlySet<string>;
+  readonly current: string | null;
+  readonly markers: ReadonlyMap<string, ChangeMarker> | undefined;
+  readonly onOpen: NodeProps['onOpen'];
+}
+const Topic = memo(function Topic({ graph, width, focusId, related, matches, current, markers, onOpen }: TopicProps) {
+  return <section className="graph-topic" role="tree" aria-label={`${graph.topic.name} graph`}
+    style={{ top: graph.top, width: graph.width, height: graph.height }}>
+    <h3 className="graph-topic-title" title={graph.topic.name}>{graph.topic.name}</h3>
+    <svg className="graph-edges" width={graph.width} height={graph.height} aria-hidden="true">
+      {graph.edges.map(edge => <path key={edge.id} data-edge={edge.id} d={edge.d} className="graph-edge" />)}
+    </svg>
+    {graph.nodes.map(node => <Node key={node.item.id} node={node} width={width} focusable={node.item.id === focusId}
+      related={related.has(node.item.id)} match={matches.has(node.item.id)} current={node.item.id === current}
+      marker={markers?.get(node.item.id)} onOpen={onOpen} />)}
+  </section>;
 });
 
-function TopicCard({ graph, sessionLabel, marker, focusId, onOpen, onCollapse, onToggleStub }: {
-  readonly graph: TopicGraph; readonly sessionLabel: string | null; readonly marker: string; readonly focusId: string | null;
-  readonly onOpen: NodeProps['onOpen']; readonly onCollapse: NodeProps['onCollapse']; readonly onToggleStub: (stub: GraphStub) => void;
-}) {
-  return <section className="graph-card" aria-label={graph.topic.name}>
-    <div className="graph-card-head">
-      <span className="graph-card-name">{graph.topic.name}</span>
-      {sessionLabel && <span className="graph-card-session"><i className="ph ph-clock-counter-clockwise" aria-hidden="true" />{sessionLabel}</span>}
-      <span className="graph-card-counts">{graph.counts}</span>
-    </div>
-    <div className="graph-canvas" role="tree" aria-label={`${graph.topic.name} graph`} style={{ width: graph.width, height: graph.height }}>
-      <svg className="graph-edges" width={graph.width} height={graph.height} aria-hidden="true">
-        <defs><marker id={marker} viewBox="0 0 8 8" refX="4" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M0 0 L8 4 L0 8 z" className="graph-arrow" /></marker></defs>
-        {graph.related.map(edge => <path key={edge.id} data-edge={edge.id} d={edge.d} className="graph-related" />)}
-        {graph.edges.map(edge => <path key={edge.id} data-edge={edge.id} d={edge.d} className={edge.on ? 'graph-edge is-on' : 'graph-edge'} />)}
-        {graph.replacements.map(arc => <g key={arc.id} data-edge={arc.id}>
-          <path d={arc.d} className="graph-replaced" markerEnd={`url(#${marker})`} />
-          <text x={arc.labelX} y={arc.labelY} textAnchor="middle" className="graph-replaced-label">replaced by</text>
-        </g>)}
-      </svg>
-      {graph.nodes.map(node => <Node key={node.item.id} node={node} focusable={node.item.id === focusId} onOpen={onOpen} onCollapse={onCollapse} />)}
-      {graph.stubs.map(stub => <Stub key={stub.key} stub={stub} focusable={stub.key === focusId} onToggle={onToggleStub} />)}
-    </div>
-  </section>;
+/** The legend card (SPEC 1.3): what the three lines mean, plus the Tree column's filter control when it is open. */
+function Legend({ drawn }: { readonly drawn: boolean }) {
+  // With nothing drawn the card stays only to keep the filter reachable.
+  const filter = useContext(GraphFilterSlot);
+  if (!drawn && !filter) return null;
+  return <div className="graph-legend" role="group" aria-label="Graph legend">
+    {drawn && <>
+      <span className="graph-legend-key"><span className="graph-legend-branch" aria-hidden="true" />Branch</span>
+      <span className="graph-legend-key"><span className="graph-legend-path" aria-hidden="true" />Path to the selected item</span>
+      <span className="graph-legend-key"><svg className="graph-legend-related" aria-hidden="true"><path className="graph-related" d="M0 3 H22" /></svg>Related</span>
+      <span className="graph-legend-note">Lines show for the selected item and the one under the pointer.</span>
+    </>}
+    <GraphFilter />
+  </div>;
 }
 
-/** Topic headers can wrap, so cross-topic connections use the mounted nodes' actual positions. */
-function CrossTopicLinks({ edges }: { readonly edges: readonly RelatedEdge[] }) {
-  const overlay = useRef<SVGSVGElement>(null);
-  const [paths, setPaths] = useState<readonly { id: string; d: string }[]>([]);
-  useLayoutEffect(() => {
-    const cards = overlay.current?.parentElement;
-    if (!cards) return;
-    const nodes = new Map<string, HTMLElement>();
-    const endpointCards = new Set<Element>();
-    for (const id of new Set(edges.flatMap(edge => [edge.from, edge.to]))) {
-      const node = cards.querySelector<HTMLElement>(`.graph-node[data-item-id="${CSS.escape(id)}"]`);
-      if (!node) continue;
-      nodes.set(id, node);
-      const card = node.closest('.graph-card');
-      if (card) endpointCards.add(card);
-    }
-    const measure = () => {
-      const bounds = cards.getBoundingClientRect();
-      const next = edges.flatMap(edge => {
-        const from = nodes.get(edge.from)?.getBoundingClientRect(), to = nodes.get(edge.to)?.getBoundingClientRect();
-        if (!from?.width || !from.height || !to?.width || !to.height) return [];
-        return [{ id: edge.id, d: relatedEdgePath({ x: from.left - bounds.left, y: from.top - bounds.top },
-          { x: to.left - bounds.left, y: to.top - bounds.top }) }];
-      });
-      setPaths(previous => previous.length === next.length && previous.every((path, i) => path.id === next[i].id && path.d === next[i].d) ? previous : next);
-    };
-    measure();
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
-    endpointCards.forEach(card => observer?.observe(card));
-    nodes.forEach(node => observer?.observe(node));
-    window.addEventListener('resize', measure);
-    return () => { observer?.disconnect(); window.removeEventListener('resize', measure); };
-  }, [edges]);
-  return <svg ref={overlay} className="graph-cross-related" aria-hidden="true">{paths.map(path => <path key={path.id} data-edge={path.id} d={path.d} className="graph-related" />)}</svg>;
-}
+/** Each topic's top in the canvas, by topic id. */
+const topicTops = (graph: SessionGraph) => new Map(graph.topics.map(topic => [topic.topic.id, topic.top]));
+const NO_LINES: ReturnType<typeof relatedLines> = { paths: [], related: new Set() };
 
-export function GraphView({ store, routes, view, later, search, reveal, tight, sessionLabel, continuedFrom, preferencesBusy = false, saveView, onReveal }: GraphViewProps) {
+export function GraphView({ store, routes, view, later, reveal, markers, preferencesBusy = false, saveView, onReveal }: GraphViewProps) {
   const state = useSession(store), raw = state.snapshot?.session, hidden = useHidden();
   const session = useMemo(() => raw && visibleSession(raw, state.route, hidden), [raw, state.route, hidden]);
-  const marker = useId().replace(/:/g, '');
   const scroller = useRef<HTMLDivElement>(null), dockInset = useDockInset();
+  const peek = usePeek() as GraphPeek | null, search = useMapSearch();
   const [localReveal, setLocalReveal] = useState<{ result: RevealedItem; external: RevealedItem | null } | null>(null);
   const [localSelection, setLocalSelection] = useState<{ id: string; external: RevealedItem | null } | null>(null);
   const [dismissedReveal, setDismissedReveal] = useState<RevealedItem | null>(null);
   const [focusedEntry, setFocusedEntry] = useState<{ id: string; selectedId: string | null } | null>(null);
+  const [hoverId, setHoverId] = useState<string | null>(null);
+  // The column is fitted to the Map's width when the Graph opens or the session changes, and then kept (model.ts graphColumn).
+  const [fit, setFit] = useState<{ store: SessionStore; column: number } | null>(null);
+  useLayoutEffect(() => { if (scroller.current) setFit({ store, column: graphColumn(scroller.current.clientWidth) }); }, [store]);
+  const column = fit?.store === store ? fit.column : null;
   // Optimistic view edits: `pending` waits for the current write, `inflight` is being written.
   const [pending, setPending] = useState<ViewChange | null>(null);
   const [inflight, setInflight] = useState<ViewChange | null>(null);
@@ -190,45 +171,63 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
   const offered = localReveal?.external === reveal ? localReveal.result : reveal;
   const currentReveal = offered === dismissedReveal ? null : offered;
   const itemReveal = currentReveal?.store === store && currentReveal.kind === 'item' ? currentReveal : null;
-  const shown = useMemo(() => {
-    const changed = applyChange(applyChange(view, inflight), pending);
-    return search === undefined || search === changed.filters.search ? changed : { ...changed, filters: { ...changed.filters, search } };
-  }, [view, inflight, pending, search]);
+  const shown = useMemo(() => applyChange(applyChange(view, inflight), pending), [view, inflight, pending]);
   const filterFolds = useFilterFolds(routes, shown.session, shown.filters);
   // An outside reveal wins immediately over an older selection whose preference write is still pending.
   const optimisticSelection = localSelection?.external === reveal && (pending?.selected || inflight?.selected) ? localSelection.id : null;
   const selectedId = optimisticSelection ?? itemReveal?.route.item_id ?? view.selected_item_id;
-  // Initialize during render so the first commit already contains the route. Later snapshots retain the owner's folds.
-  const [hiddenGroups, setHiddenGroups] = useState<{
-    store: SessionStore; selectedId: string | null; reveal: RevealedItem | null; open: ReadonlySet<string>;
-  } | null>(null);
-  let groupState = hiddenGroups;
-  if (session && (!groupState || groupState.store !== store || groupState.selectedId !== selectedId || groupState.reveal !== itemReveal)) {
-    const explicit = new Set(shown.hidden_item_ids ?? []);
-    const selectionChanged = !groupState || groupState.store !== store || groupState.selectedId !== selectedId;
-    const open = new Set(groupState?.store === store ? groupState.open : []);
-    if (selectionChanged && selectedId) hiddenGroupsFor(session, explicit, selectedId).forEach(key => open.add(key));
-    if (itemReveal && (selectionChanged || groupState?.reveal !== itemReveal)) hiddenGroupsFor(session, explicit, itemReveal.route.item_id).forEach(key => open.add(key));
-    groupState = { store, selectedId, reveal: itemReveal, open };
-    setHiddenGroups(groupState);
-  }
-  const openGroups = groupState?.open;
-  const graph = useMemo(() => session ? sessionGraph({ session, view: shown, later, selectedId, tight,
+  const graph = useMemo(() => session && column !== null ? sessionGraph({ session, view: shown, later, selectedId, column,
     temporaryExpandedItemIds: itemReveal?.temporaryExpandedItemIds ?? [], revealedItemId: itemReveal?.route.item_id ?? null,
-    filterCollapsedItemIds: filterFolds.items, expandedHiddenGroups: openGroups }) : null,
-  [session, shown, later, selectedId, tight, itemReveal, filterFolds.items, openGroups]);
-  const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: reveal });
-  latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: reveal };
+    filterCollapsedItemIds: filterFolds.items }) : null,
+  [session, shown, later, selectedId, column, itemReveal, filterFolds.items]);
+  const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: reveal, dockInset });
+  latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: reveal, dockInset };
 
-  const toggleStub = useCallback((stub: GraphStub) => {
-    if (currentReveal?.kind !== 'item' || currentReveal.route.item_id !== latest.current.selectedId) setDismissedReveal(currentReveal);
-    setHiddenGroups(groups => {
-      if (!groups) return groups;
-      const open = new Set(groups.open); if (stub.expanded) open.delete(stub.key); else open.add(stub.key);
-      return { ...groups, open };
-    });
-  }, [currentReveal]);
-  // Keep keyboard focus at the same layout position when any focused entry disappears.
+  // Related lines show for the selected node and the one under the pointer only (SPEC 1.3). They are drawn over the
+  // canvas from the laid-out positions, so hovering never rebuilds the 2,000-node model.
+  const lines = useMemo(() => graph && session ? relatedLines(graph, session, [selectedId, hoverId]) : NO_LINES,
+    [graph, session, selectedId, hoverId]);
+
+  // ------------------------------------------------------------ the anchor
+  /** The node the owner is looking at, where it sat in the scroller, and the scroll it was seen at. */
+  const held = useRef<{ readonly id: string; readonly x: number; readonly y: number; readonly top: number; readonly left: number } | null>(null);
+  const nodeElement = (id: string) => scroller.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(id)}"]`) ?? null;
+  const remember = () => {
+    const box = scroller.current, current = latest.current.graph;
+    if (!box || !current) { held.current = null; return; }
+    const frame = box.getBoundingClientRect(), bottom = frame.bottom - latest.current.dockInset;
+    const inView = (rect: DOMRect) => rect.bottom > frame.top && rect.top < bottom && rect.right > frame.left && rect.left < frame.right;
+    const selected = latest.current.selectedId;
+    let element = selected && current.nodes.has(selected) ? nodeElement(selected) : null;
+    if (element && !inView(element.getBoundingClientRect())) element = null;
+    const canvas = !element ? box.querySelector('.graph-canvas')?.getBoundingClientRect() : undefined;
+    if (canvas) {
+      // Layout order is top-then-left reading order (parents sit on their first child's lane), so the first node whose
+      // top is in view is the one the owner reads first.
+      const tops = topicTops(current);
+      for (const id of current.order) {
+        const node = current.nodes.get(id)!, top = canvas.top + (tops.get(node.topicId) ?? 0) + node.y, left = canvas.left + node.x;
+        if (top >= frame.top && top < bottom && left >= frame.left && left < frame.right) { element = nodeElement(id); break; }
+      }
+    }
+    const rect = element?.getBoundingClientRect();
+    held.current = element && rect ? { id: element.dataset.row!, x: rect.left - frame.left, y: rect.top - frame.top, top: box.scrollTop, left: box.scrollLeft } : null;
+  };
+  /** Puts the held node back; a node folded or removed away hands its place to its nearest drawn ancestor. */
+  const restore = () => {
+    const box = scroller.current, before = held.current;
+    // A different scroll position than the one the node was seen at is the owner's own move: keep it.
+    if (!box || !before || box.scrollTop !== before.top || box.scrollLeft !== before.left) return;
+    let element = nodeElement(before.id);
+    for (let id = session?.items[before.id]?.parent; !element && id; id = session?.items[id]?.parent) element = nodeElement(id);
+    if (!element) return;
+    const frame = box.getBoundingClientRect(), rect = element.getBoundingClientRect();
+    const dy = rect.top - frame.top - before.y, dx = rect.left - frame.left - before.x;
+    if (Math.abs(dy) >= 0.5) box.scrollTop += dy;
+    if (Math.abs(dx) >= 0.5) box.scrollLeft += dx;
+  };
+
+  // Keep keyboard focus at the same layout position when the focused node disappears.
   const focusedRow = useRef<string | null>(null);
   const previousOrder = useRef<readonly string[]>([]);
   useLayoutEffect(() => {
@@ -238,14 +237,13 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
     const id = focusedRow.current, active = document.activeElement;
     if (!id || order.includes(id) || (active && active !== document.body)) return;
     const index = before.indexOf(id), next = order[Math.min(Math.max(index, 0), order.length - 1)];
-    const target = next ? scroller.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(next)}"], [data-stub="${CSS.escape(next)}"]`) : null;
-    (target ?? scroller.current)?.focus({ preventScroll: true });
+    (next ? nodeElement(next) : scroller.current)?.focus({ preventScroll: true });
   }, [graph]);
 
   // A selection's reveal comes back through `reveal` and must not scroll again.
   const ownReveal = useRef<RevealedItem | null>(null);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
-  useLayoutEffect(() => { ++request.current; setLocalReveal(null); setPending(null); setInflight(null); setError(null); }, [store]);
+  useLayoutEffect(() => { ++request.current; setLocalReveal(null); setPending(null); setInflight(null); setError(null); held.current = null; }, [store]);
 
   // Writes one change at a time through navigation's preference writer; later edits merge into `pending`.
   useEffect(() => {
@@ -261,45 +259,37 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
 
   const change = useCallback((next: ViewChange) => setPending(previous => mergeChange(previous, next)), []);
   /** Select an item: show it now, save it, and tell the App (which opens detail when asked). */
-  const select = useCallback((id: string, options: { openDetail: boolean; expand?: boolean; center?: boolean }) => {
+  const select = useCallback((id: string, options: { openDetail: boolean; expand?: boolean }) => {
     setLocalSelection({ id, external: latest.current.external });
     setFocusedEntry({ id, selectedId: id });
     if (options.expand && latest.current.graph?.filtering) filterFolds.setFold('items', id, false);
     change({ selected: id, expansion: options.expand ? [{ kind: 'expand', id }] : [] });
-    if (!options.center) setScrollTarget({ id, center: false });
+    setScrollTarget({ id, center: false });
     const call = ++request.current, external = latest.current.external;
     void latest.current.routes.revealItem({ ...latest.current.view.session, item_id: id }).then(result => {
       if (!mounted.current || call !== request.current || external !== latest.current.external || !result) return;
       ownReveal.current = result;
-      // An undrawn target and its temporary route must arrive in the same commit.
-      if (options.center) setScrollTarget({ id, center: true, focus: true });
       setLocalReveal({ result, external }); latest.current.onReveal(result, options.openDetail);
     }).catch((failure: unknown) => { if (mounted.current && call === request.current && external === latest.current.external) setError(plainFailure(failure, 'This item could not be opened.')); });
   }, [change, filterFolds.setFold]);
-  // Clicking a node selects it and opens detail; a collapsed node also opens its next tier (Ariadne.dc.html:1564).
+  // Clicking a node selects it and opens detail; a folded node also opens its next tier.
   const open = useCallback((node: GraphNode) => {
-    select(node.item.id, { openDetail: true, expand: node.collapsed });
+    select(node.item.id, { openDetail: true, expand: node.folded });
   }, [select]);
-  // "−" collapses the branches; a selection inside moves to this node (Ariadne.dc.html:1569).
-  const collapse = useCallback((node: GraphNode) => {
-    const selected = latest.current.selectedId;
-    let inside = false;
-    for (let id = selected ? session?.items[selected]?.parent : null; id; id = session?.items[id]?.parent) if (id === node.item.id) inside = true;
-    if (inside) select(node.item.id, { openDetail: false });
+  /** ← on an unfolded node folds it, in the saved view (or the filter's own folds while filtering). */
+  const fold = (node: GraphNode) => {
     if (latest.current.graph?.filtering) filterFolds.setFold('items', node.item.id, true);
     change({ expansion: [{ kind: 'collapse', id: node.item.id }] });
     if (itemReveal?.temporaryExpandedItemIds.includes(node.item.id)) setDismissedReveal(currentReveal);
-  }, [change, select, session, itemReveal, currentReveal, filterFolds.setFold]);
+  };
 
-  // ↑/↓ move the selection in layout order, ←/→ fold and unfold, Enter opens detail (Ariadne.dc.html:1450-1497).
+  // ↑/↓ move the selection in layout order, ←/→ fold and unfold, Enter opens detail, Space peeks.
   const keys = useWorkspaceKeys<HTMLDivElement>({
     'move-down': () => move(1), 'move-up': () => move(-1), first: () => move(-Infinity), last: () => move(Infinity),
     unfold: () => {
-      const stub = focusedRow.current ? latest.current.graph?.stubs.get(focusedRow.current) : undefined;
-      if (stub) { if (!stub.expanded) toggleStub(stub); return true; }
       const { graph: current, selectedId: id } = latest.current, node = id ? current?.nodes.get(id) : undefined;
-      if (!current || !node || (!node.below && !node.hiddenBelow)) return !!node;
-      if (node.collapsed) {
+      if (!current || !node) return false;
+      if (node.folded) {
         if (current.filtering) filterFolds.setFold('items', node.item.id, false);
         change({ expansion: [{ kind: 'expand', id: node.item.id }] }); return true;
       }
@@ -308,15 +298,9 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
       return true;
     },
     fold: () => {
-      const stub = focusedRow.current ? latest.current.graph?.stubs.get(focusedRow.current) : undefined;
-      if (stub) {
-        if (stub.expanded) toggleStub(stub);
-        else if (stub.parent) select(stub.parent, { openDetail: false });
-        return true;
-      }
       const { graph: current, selectedId: id } = latest.current, node = id ? current?.nodes.get(id) : undefined;
       if (!current || !node) return false;
-      if (node.canCollapse) { collapse(node); return true; }
+      if (node.canFold) { fold(node); return true; }
       const parent = node.item.parent;
       if (parent && current.nodes.has(parent)) select(parent, { openDetail: false });
       return true;
@@ -326,6 +310,11 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
       if (!id || !latest.current.graph?.nodes.has(id)) return false;
       select(id, { openDetail: true }); return true;
     },
+    peek: () => {
+      const id = focusedRow.current ?? latest.current.selectedId, element = id ? nodeElement(id) : null;
+      if (!id || !element || !peek?.toggle) return false;
+      peek.toggle({ ...state.route, item_id: id }, element); return true;
+    },
   }, { scope: 'workspace' });
   function move(step: number): boolean {
     const order = latest.current.graph?.order ?? [];
@@ -333,24 +322,27 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
     const current = focusedRow.current && order.includes(focusedRow.current) ? focusedRow.current : latest.current.selectedId;
     const index = order.indexOf(current ?? '');
     const next = step === -Infinity ? 0 : step === Infinity ? order.length - 1 : Math.max(0, Math.min(order.length - 1, index + step));
-    const id = order[next];
-    if (latest.current.graph?.stubs.has(id)) {
-      setFocusedEntry({ id, selectedId: latest.current.selectedId }); setScrollTarget({ id, center: false, focus: true });
-    } else if (id !== current) select(id, { openDetail: false });
+    const id = order[next]!;
+    if (id !== current) select(id, { openDetail: false });
     return true;
   }
 
-  const revealSelected = () => {
-    const id = latest.current.selectedId;
-    if (!id || !session) return;
-    if (!latest.current.graph?.nodes.has(id)) select(id, { openDetail: false, center: true });
-    else setScrollTarget({ id, center: true, focus: true });
-  };
-  // Consume every cause against this commit's DOM, even when its target is absent.
-  // A later filter, snapshot or layout change must never revive a scroll request.
+  // A search step scrolls the current match into view; it selects nothing and closes a peek (SPEC 6.9, plan Q7).
+  const stepped = useRef(search.stepped);
+  useEffect(() => {
+    if (search.stepped === stepped.current) return;
+    stepped.current = search.stepped;
+    peek?.closeAll?.();
+    const id = search.current?.id;
+    if (id && latest.current.graph?.nodes.has(id)) setScrollTarget({ id, center: false });
+  }, [search.stepped, search.current, peek]);
+
+  // Every commit: hold the anchor through what changed, then carry out the owner's own scroll request, then remember.
+  // Consume every request against this commit's DOM, even when its target is absent; a later change never revives one.
   const opened = useRef<SessionStore | null>(null);
   const previousReveal = useRef<RevealedItem | null | undefined>(undefined);
   useLayoutEffect(() => {
+    restore();
     let target = scrollTarget;
     if (scrollTarget) setScrollTarget(null);
     if (previousReveal.current !== reveal) {
@@ -366,53 +358,59 @@ export function GraphView({ store, routes, view, later, search, reveal, tight, s
       if (!target && selectedId) target = { id: selectedId, center: true, focus: true };
     }
     const box = scroller.current;
-    const element = target ? box?.querySelector<HTMLElement>(`[data-row="${CSS.escape(target.id)}"], [data-stub="${CSS.escape(target.id)}"]`) : null;
+    const element = target ? nodeElement(target.id) : null;
     if (box && element && target) {
       scrollToNode(box, element, target.center, dockInset);
       if (target.focus || box.contains(document.activeElement)) element.focus({ preventScroll: true });
     } else if (initial) box?.focus({ preventScroll: true });
+    remember();
   });
+
+  // The pointer: one delegated handler for every node. Hover lights the node's related lines and asks for a peek.
+  const hovered = useRef<string | null>(null);
+  const pointerOver = (event: MouseEvent<HTMLDivElement>) => {
+    const element = event.target instanceof Element ? event.target.closest<HTMLElement>('.graph-node[data-row]') : null;
+    const id = element?.dataset.row ?? null;
+    if (!element || !id || id === hovered.current) return;
+    hovered.current = id; setHoverId(id);
+    peek?.hoverStart?.({ ...state.route, item_id: id }, element);
+  };
+  // A scroll or a search step makes the peek forget the node; resting on it again asks again (the same node is a no-op).
+  const pointerMove = (event: MouseEvent<HTMLDivElement>) => {
+    const element = event.target instanceof Element ? event.target.closest<HTMLElement>('.graph-node[data-row]') : null;
+    if (element?.dataset.row) peek?.hoverStart?.({ ...state.route, item_id: element.dataset.row }, element);
+  };
+  const pointerOut = (event: MouseEvent<HTMLDivElement>) => {
+    const element = event.target instanceof Element ? event.target.closest<HTMLElement>('.graph-node[data-row]') : null;
+    if (!element || (event.relatedTarget instanceof globalThis.Node && element.contains(event.relatedTarget))) return;
+    hovered.current = null; setHoverId(null);
+    peek?.hoverEnd?.();
+  };
 
   const focusId = focusedEntry && focusedEntry.selectedId === selectedId && graph?.order.includes(focusedEntry.id) ? focusedEntry.id
     : selectedId && graph?.nodes.has(selectedId) ? selectedId : graph?.order[0] ?? null;
-  const revealControl = <button type="button" className="btn btn-secondary graph-reveal" disabled={!selectedId || !session?.items[selectedId]} onClick={revealSelected}>
-    <i className="ph ph-crosshair-simple" aria-hidden="true" />Reveal selected</button>;
-  // Like the prototype, the graph and its legend show only when a topic has nodes (Ariadne.dc.html:2177).
+  const drawn = !!graph?.topics.length;
+  const current = search.current?.id ?? null;
   return <div className="graph-view">
-    <div ref={scroller} className="graph-scroll" tabIndex={-1}
+    <div ref={scroller} className="graph-scroll" tabIndex={-1} onScroll={remember}
       onFocus={event => {
-        const element = event.target instanceof Element ? event.target.closest('[data-row], [data-stub]') : null;
-        focusedRow.current = element?.getAttribute('data-row') ?? element?.getAttribute('data-stub') ?? null;
+        const element = event.target instanceof Element ? event.target.closest('[data-row]') : null;
+        focusedRow.current = element?.getAttribute('data-row') ?? null;
         if (focusedRow.current) setFocusedEntry({ id: focusedRow.current, selectedId: latest.current.selectedId });
       }}
       onBlur={event => {
         if (!(event.relatedTarget instanceof globalThis.Node) || !event.currentTarget.contains(event.relatedTarget)) focusedRow.current = null;
       }}
-      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
-      // A focused button keeps its own Enter and Space (Ariadne.dc.html:1471).
-      if (!(event.target instanceof HTMLButtonElement) || (event.target.hasAttribute('data-stub') && event.key !== 'Enter' && event.key !== ' ')) keys(event);
-    }}>
-      {!!graph?.topics.length && <><div className="graph-legend">
-        <span className="graph-legend-key" aria-label="Thread to the selected item" title="Thread to the selected item"><span className="graph-legend-thread" /><span className="graph-legend-label">Thread</span></span>
-        <span className="graph-legend-key" aria-label="Related to the selected item" title="Related to the selected item"><svg className="graph-legend-related" aria-hidden="true"><path className="graph-related" d="M0 3 H22" /></svg><span className="graph-legend-label">Related</span></span>
-        <span className="graph-legend-key" aria-label="Replaced by" title="Replaced by"><span className="graph-legend-replaced" /><span className="graph-legend-label">Replaced by</span></span>
-        <span className="graph-legend-key" aria-label="Waiting on me" title="Waiting on me"><span className="graph-legend-waiting" /><span className="graph-legend-label">Waiting on me</span></span>
-        <span className="graph-legend-key" aria-label="Closed" title="Closed"><span className="graph-legend-closed" /><span className="graph-legend-label">Closed</span></span>
-        <span className="graph-legend-note" title="One graph per topic">One graph per topic</span>
-        <div className="graph-legend-actions">
-          {revealControl}
-          <GraphFilter />
-        </div>
-      </div>
-      <div className="graph-cards">
-        {graph?.topics.map(topic => <TopicCard key={topic.topic.id} graph={topic} sessionLabel={continuedFrom?.(topic.topic) ?? sessionLabel} marker={`${marker}-${topic.topic.id}`}
-          focusId={focusId} onOpen={open} onCollapse={collapse} onToggleStub={toggleStub} />)}
-        {!!graph?.crossTopicRelated.length && <CrossTopicLinks edges={graph.crossTopicRelated} />}
-      </div></>}
-      {/* Filters and the selected item's exit remain reachable when no topic is drawn. */}
-      {!graph?.topics.length && (selectedId && session?.items[selectedId]
-        ? <div className="graph-legend graph-legend-bare"><div className="graph-legend-actions">{revealControl}<GraphFilter /></div></div>
-        : <GraphFilter wrap />)}
+      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => { if (!(event.target instanceof HTMLButtonElement)) keys(event); }}>
+      {graph && drawn && <div className="graph-canvas" style={{ width: graph.width, height: graph.height }} onMouseOver={pointerOver} onMouseMove={pointerMove} onMouseOut={pointerOut}>
+        {graph.topics.map(topic => <Topic key={topic.topic.id} graph={topic} width={graph.nodeWidth} focusId={focusId} related={lines.related}
+          matches={search.ids} current={current} markers={markers} onOpen={open} />)}
+        <svg className="graph-lines" width={graph.width} height={graph.height} aria-hidden="true">
+          {lines.paths.map(path => <path key={path.id} data-edge={path.id} d={path.d} className="graph-related" />)}
+          {graph.path && <path data-edge="path" d={graph.path} className="graph-path" />}
+        </svg>
+      </div>}
     </div>
+    <Legend drawn={drawn} />
   </div>;
 }

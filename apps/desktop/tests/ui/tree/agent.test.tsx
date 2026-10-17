@@ -65,11 +65,10 @@ describe('reply delivery in the tree and graph', () => {
     expect(row(model(replied(), ['waiting_on_me']), '2')).toBeUndefined();
     expect(row(model(replied(), ['in_progress']), '2')?.status).toBe('queued');
   });
-  it('shows the graph node as Queued with its topic count', () => {
+  it('shows the graph node as Queued', () => {
     const session = graphSession(), input = session.inputs[id('76')]!;
     input.target = { ...input.target, item_id: '1.1.1' }; input.kind = 'reply';
-    const graph = sessionGraph({ session: immutable(session), view: preferences({ expanded_item_ids: ['1', '1.1'] }), later: new Set(), selectedId: null, tight: false });
+    const graph = sessionGraph({ session: immutable(session), view: preferences({ expanded_item_ids: ['1', '1.1'] }), later: new Set(), selectedId: null });
     expect(graph.nodes.get('1.1.1')!.status).toBe('queued');
-    expect(graph.topics[0].counts).toBe('1 queued · 2 open · 1 in progress · 2 closed');
   });
 });

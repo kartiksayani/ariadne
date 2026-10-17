@@ -158,15 +158,11 @@ describe('removed work projections', () => {
       const counts = (snapshot: Immutable<Session>) => {
         const tree = treeModel({ session: snapshot, view, search: '', later: new Set(), collapsedTopics: new Set(), selectedId: null,
           revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(snapshot.updated_at) });
-        const graph = sessionGraph({ session: snapshot, view, later: new Set(), selectedId: null, tight: false });
-        return {
-          tree: tree.rows.flatMap(row => row.kind === 'topic' ? row.counts.map(count => count.text) : []),
-          graph: graph.topics.map(topic => topic.counts).join(' · '),
-        };
+        // The Graph carries no counts (SPEC 1.3: a topic title only).
+        return { tree: tree.rows.flatMap(row => row.kind === 'topic' ? row.counts.map(count => count.text) : []) };
       };
       expect(ackTarget(session, item)).toBe(choice);
       expect(counts(session).tree).toContain('2 to ack');
-      expect(counts(session).graph).toContain('2 to ack');
       const itemId = removal === 'item' ? item.id : removal === 'ancestor' ? item.parent! : null;
       if (itemId) session.items[itemId]!.removed_at = session.updated_at;
       else session.topics[topicA]!.removed_at = session.updated_at;
@@ -175,21 +171,14 @@ describe('removed work projections', () => {
       expect(ackTarget(binned, binned.items[item.id]!)).toBeNull();
       const removedCounts = counts(binned);
       expect(removedCounts.tree).not.toContain('2 to ack');
-      expect(removedCounts.graph).not.toContain('2 to ack');
-      if (removal === 'topic') {
-        expect(removedCounts.tree.some(count => count.includes('to ack'))).toBe(false);
-        expect(removedCounts.graph).not.toContain('to ack');
-      } else {
-        expect(removedCounts.tree).toContain('1 to ack');
-        expect(removedCounts.graph).toContain('1 to ack');
-      }
+      if (removal === 'topic') expect(removedCounts.tree.some(count => count.includes('to ack'))).toBe(false);
+      else expect(removedCounts.tree).toContain('1 to ack');
       expect(await restoreRemoved(value.actions, topicA, itemId)).toBeNull();
       const restored = value.store.getSnapshot().snapshot!.session;
       expect(restored.items[item.id]!.ack_to).toBe(choice);
       expect(ackTarget(restored, restored.items[item.id]!)).toBe(choice);
       const restoredCounts = counts(restored);
       expect(restoredCounts.tree).toContain('2 to ack');
-      expect(restoredCounts.graph).toContain('2 to ack');
     }
   });
 
@@ -228,11 +217,10 @@ describe('removed work projections', () => {
   it('excludes removed nodes, links, topics and waiting counts from the graph and related navigation', () => {
     const session = removedSession();
     session.items['2']!.related = ['1.1.1', '8']; session.items['1']!.related = ['2'];
-    const graph = sessionGraph({ session, view: preferences(), later: new Set(), selectedId: '2', tight: false });
+    const graph = sessionGraph({ session, view: preferences(), later: new Set(), selectedId: '2' });
     expect(graph.order).toEqual(['2', '3']);
     expect(graph.topics.map(topic => topic.topic.id)).toEqual([topicA]);
-    expect(graph.topics[0].counts).toBe('1 open · 1 closed');
-    expect(graph.topics[0].related).toEqual([]); expect(graph.crossTopicRelated).toEqual([]);
+    expect(graph.topics[0].edges.map(edge => edge.id)).toEqual([`trunk:${topicA}`, 'topic:2', 'topic:3']);
     expect(relatedItems(session, '2')).toEqual([]); expect(relatedItems(session, '1')).toEqual([]);
   });
 

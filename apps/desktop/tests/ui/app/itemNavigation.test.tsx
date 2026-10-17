@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { immutable } from '../../../src/data/session-store';
@@ -300,9 +300,9 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
     expect(target()).toBeNull();
     expect(screen.queryByText('Showing an item outside your current filters.')).toBeNull();
     const before = transport.queries.filter(query => query.request.command === 'reveal_item').length;
-    const reveal = screen.getByRole<HTMLButtonElement>('button', { name: 'Reveal selected' });
-    expect(reveal.disabled).toBe(false);
-    await click(reveal);
+    // The Graph has no Reveal selected button (SPEC 1.3); an outside route (a link, the dock, a native route) reveals it.
+    await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '1.1' }); });
+    await waitFor(() => expect(target()).not.toBeNull());
     expect(transport.queries.filter(query => query.request.command === 'reveal_item').slice(before)).toEqual([
       expect.objectContaining({ session: route, request: { command: 'reveal_item', params: { item_id: '1.1' } } }),
     ]);
@@ -314,7 +314,8 @@ describe('composed map reveal scrolling', { timeout: 10_000 }, () => {
     expect(rectangle.left + rectangle.width / 2).toBe(200);
     expect(rectangle.top + rectangle.height / 2).toBe(130);
     expect(document.querySelector('.graph-node[data-item-id="1"]')!.getAttribute('aria-expanded')).toBe('true');
-    expect(screen.queryByLabelText('Item detail')).toBeNull();
+    // A route goes to the item: Details opens on it.
+    expect(document.querySelector('[data-detail-item-id="1.1"]')).not.toBeNull();
     const current = transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!;
     expect(current.filters).toEqual(saved.filters);
     expect(current.expanded_item_ids).toEqual(saved.expanded_item_ids);
