@@ -18,7 +18,7 @@ import { useSupervisorHealth } from '../../components/bindings/health';
 import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { useIntents } from '../intents';
 import { notices as noticeStore } from '../pages/notices';
-import { chipsOf, closed, collapsedNote, mapChanges, nextMarkedItem, oldestWaiting, parentKey, sessionBar, stripOf, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row, type SearchReveal } from './model';
+import { closed, collapsedNote, mapChanges, nextMarkedItem, oldestWaiting, parentKey, sessionBar, stripOf, treeModel, type ItemRow as ItemRowModel, type Row, type SearchReveal } from './model';
 import { alsoMatching, matchCount, searchTerms, type MapMatch } from '../../selectors/tree/search';
 import { MapSearchContext, type MapSearch, type MapSearchStatus } from './mapSearch';
 import { Keycap } from '../parts/parts';
@@ -34,7 +34,9 @@ import { StuckNote } from '../answer/StuckNote';
 import { editQueued, inEditor } from '../answer/held';
 import { InlineRecovery } from '../../components/recovery/RecoveryPanel';
 import { Banner } from './Banner';
-import { FilterBar, GraphFilterSlot } from './FilterBar';
+import { FilterRow } from './FilterRow';
+import { useLocalChips } from './useLocalChips';
+import { chipCounts, filterSignature, isLocalChip, pickedChips, summaryCounts, toggleLocalChip, toggleSavedChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
 import { useSessionLifecycleFor } from '../shared/SessionLifecycleOwner';
 import { ItemRefs } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
@@ -71,6 +73,8 @@ export interface TreeViewProps {
   /** The header search as typed. */
   readonly query: string;
   readonly filterOpen?: boolean;
+  /** Clear in the chip row also closes it (SPEC 6.10). */
+  readonly onCloseFilter?: () => void;
   /** An item revealed from a link or the waiting panel; null once dismissed. */
   readonly reveal: RevealedItem | null;
   /** The latest Back/Forward reveal; retained alongside ordinary external reveals. */
@@ -145,7 +149,9 @@ export function TreeView(props: TreeViewProps) {
   // The graph has its own optimistic node edits; both mounted views use its saved
   // status scope while the tree's filter queue waits for persistence.
   // The composed graph reads saved statuses; both views must share the same fold scope during writes.
-  const filterFolds = useFilterFolds(navigation.routes, route, (graph ? savedView : view)?.filters);
+  const localChips = useLocalChips(route.session_id);
+  const foldView = graph ? savedView : view;
+  const filterFolds = useFilterFolds(navigation.routes, route, foldView ? filterSignature({ view: foldView, local: localChips.chips }) : undefined);
   const viewBusy = nav.writing || nav.pendingOperationId !== null;
   const focusDisabled = viewBusy && !navigation.isWritingRecent();
   const archivedMode = view?.filters.archived ?? false;
@@ -237,6 +243,9 @@ export function TreeView(props: TreeViewProps) {
   const health = useSupervisorHealth(actions.service, binding?.id, binding?.generation);
   const revealId = reveal?.kind === 'item' ? reveal.route.item_id : null;
   const temporary = reveal?.kind === 'item' ? reveal.temporaryExpandedItemIds : null;
+  // The one filter of the Map (D17): the saved chips in the view, the local chips beside it.
+  const scope = useMemo<FilterScope | null>(() => session && view ? { session, view, later, local: localChips.chips } : null,
+    [session, view, later, localChips.chips]);
   const model = useMemo(() => session && view ? treeModel({ session, view, search: query, searchShown, later, collapsedTopics: closedTopics, selectedId, revealId,
     filterCollapsedItemIds: filterFolds.items, filterCollapsedTopicIds: filterFolds.topics,
     attentionRevealId: nextRevealId, expandedHiddenGroups, temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute }) : null,
@@ -479,7 +488,16 @@ export function TreeView(props: TreeViewProps) {
   const setChip = (chip: Chip) => {
     setNextRevealId(null);
     onDismissReveal();
-    void saveView(next => { next.filters.statuses = toggleChip(next.filters.statuses, chip); });
+    if (isLocalChip(chip)) localChips.set(toggleLocalChip(localChips.chips, chip));
+    else void saveView(next => { next.filters.statuses = toggleSavedChip(next.filters.statuses, chip); });
+  };
+  // Clear empties the saved statuses and the local chips, leaves the other scope filters alone, and closes the row.
+  const clearChips = () => {
+    setNextRevealId(null);
+    onDismissReveal();
+    localChips.set([]);
+    if (view?.filters.statuses.length) void saveView(next => { next.filters.statuses = []; });
+    props.onCloseFilter?.();
   };
   const resume = () => {
     setNextRevealId(null);
@@ -1074,10 +1092,11 @@ export function TreeView(props: TreeViewProps) {
   // (none in the graph, which has no rows; a filtered-out or folded row is not here).
   const inline: ReadonlySet<string> = new Set(graph && !loading ? [] : rows.flatMap(row => row.delivery?.stuck ? [row.delivery.stuck.input.id] : []));
   const filtersShown = !archivedMode && (props.filterOpen ?? true);
-  const counts = model?.counts ?? { all: 0, waiting: 0, open: 0, progress: 0, closed: 0 };
   const graphShown = !!graph && !loading;
-  const filterBar = <FilterBar chips={model?.chips ?? chipsOf([])} counts={counts}
-    disabled={nav.pendingOperationId !== null && !nav.writing} dismissKey={route.session_id} onChip={setChip} />;
+  const chips = useMemo(() => scope && filtersShown ? { counts: chipCounts(scope), picked: pickedChips(scope), ...summaryCounts(scope) } : null,
+    [scope, filtersShown]);
+  const filterRow = chips && <FilterRow counts={chips.counts} picked={chips.picked} shown={chips.shown} total={chips.total}
+    disabled={nav.pendingOperationId !== null && !nav.writing} onChip={setChip} onClear={clearChips} />;
   let body: ReactNode;
   if (loading) {
     body = <div className="tree-loading" aria-busy="true">
@@ -1127,25 +1146,23 @@ export function TreeView(props: TreeViewProps) {
     onPointerDownCapture={releaseReveal} onWheelCapture={releaseReveal}
     onMouseDownCapture={() => { if (kbd) setKbd(false); }}>
     <span role="status" className="tree-unseen-announcement">{noUnseen ? 'No unseen items.' : ''}</span>
-    {/* The filter control ends this row, so it needs no row of its own. Over a loaded graph it sits in the graph's legend row instead. */}
+    {/* The chip row sits in flow above both the Tree and the Graph (D13); the hold keeps the reading row's viewport place when it opens or closes. */}
+    {filterRow}
     {filtersShown && !graphShown && <div className="tree-recent">
       {session && !graph && <><RecentTrail session={session} entries={view?.recent_items}
         nextWaiting={oldestWaiting(session)} onReveal={id => select(id, false)} />
       <button type="button" className="btn btn-ghost" title="Recent (⌘E)" onClick={() => setRecentOpen(true)}>Recent</button></>}
-      {filterBar}
     </div>}
     {session && recentOpen && lift(<RecentDialog session={session} entries={view?.recent_items}
       seen={seen}
       onReveal={id => { if (covered && props.onOpenItem) props.onOpenItem(id); else select(id, false); }} onClose={() => setRecentOpen(false)} />)}
-    {model && !graph && !model.chips.has('all') && <Banner icon="ph ph-funnel" actions={<><span aria-hidden="true">·</span><button type="button" className="btn btn-ghost" disabled={nav.writing || nav.pendingOperationId !== null} onClick={onClearFilters}>Clear filters</button></>}>
-      Showing {model.shownCount} of {model.itemCount} items{model.hiddenCount > 0 ? ` (${model.hiddenCount} hidden)` : ''} in the statuses you picked</Banner>}
     {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>
       Showing an item outside your current filters.</Banner>}
     {lifecycle.pending && <Banner icon="ph ph-warning" alert actions={<button type="button" className="btn btn-ghost" onClick={lifecycle.reconcile}>Check again</button>}>
       {lifecycle.pending}. Check whether your last change was saved before making another.</Banner>}
     <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
     {/* The graph keeps its own scroller (ui/graph/graph.css). */}
-    {graphShown ? <GraphFilterSlot.Provider value={filtersShown ? filterBar : null}>{graph}</GraphFilterSlot.Provider> : <div className="tree-scroll-shell">
+    {graphShown ? graph : <div className="tree-scroll-shell">
       {/* One fixed-height row outside the scroller: the ancestors of the first row in view. */}
       <div className="tree-path">
         <nav className="tree-breadcrumb" aria-label="Map ancestors">{breadcrumb.map((id, index) => <span key={id}>

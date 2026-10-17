@@ -2,7 +2,6 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ActionMenu } from '../../../src/ui/shared/ActionMenu';
-import { FilterBar } from '../../../src/ui/tree/FilterBar';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -58,26 +57,6 @@ it.each([false, true])('lets native Tab leave the menu with shift=%s', async shi
   trigger.focus(); await user.keyboard('{ArrowDown}'); await user.tab({ shift });
   expect(screen.queryByRole('menu')).toBeNull();
   expect(document.activeElement).toBe(shift ? trigger : screen.getByRole('button', { name: 'After' }));
-});
-
-it('keeps checkbox focus and menu open across pending status preference renders and WebKit blur', () => {
-  const onChip = vi.fn(), counts = { all: 4, waiting: 1, open: 1, progress: 1, closed: 1 };
-  const { rerender } = render(<FilterBar chips={new Set(['all'])} counts={counts} disabled={false} dismissKey="first" onChip={onChip} />);
-  const trigger = screen.getByRole('button', { name: 'Filter' });
-  trigger.focus(); fireEvent.keyDown(trigger, { key: 'ArrowDown' });
-  const waiting = screen.getByRole<HTMLButtonElement>('menuitemcheckbox', { name: /Waiting on me/ });
-  expect(document.activeElement).toBe(waiting);
-  fireEvent.mouseDown(waiting); fireEvent.blur(waiting, { relatedTarget: null }); fireEvent.click(waiting, { detail: 1 });
-  expect(onChip).toHaveBeenCalledExactlyOnceWith('waiting');
-  rerender(<FilterBar chips={new Set(['waiting'])} counts={counts} disabled={false} dismissKey="first" onChip={onChip} />);
-  expect(waiting.disabled).toBe(false); expect(waiting.getAttribute('aria-checked')).toBe('true');
-  expect(document.activeElement).toBe(waiting); expect(screen.getByRole('menu')).toBeTruthy();
-  fireEvent.keyDown(waiting, { key: 'ArrowDown' });
-  const open = screen.getByRole('menuitemcheckbox', { name: /Open/ });
-  expect(document.activeElement).toBe(open); fireEvent.click(open, { detail: 1 });
-  expect(onChip).toHaveBeenLastCalledWith('open');
-  rerender(<FilterBar chips={new Set(['open'])} counts={counts} disabled={false} dismissKey="second" onChip={onChip} />);
-  expect(screen.queryByRole('menu')).toBeNull();
 });
 
 it('opens outside clipped columns, fits the window edges and keeps pointer actions working after resize and scroll', async () => {

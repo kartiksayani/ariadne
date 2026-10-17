@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { STATUS, statusColor, statusKey } from '../../../src/ui/shared/status';
 import { graphStatus, statusVisual } from '../../../src/ui/graph/model';
-import { matchesStatus } from '../../../src/selectors/tree/folds';
 import { statusIn, topicCounts } from '../../../src/ui/tree/model';
 
 describe('delivery status visuals', () => {
@@ -14,9 +13,7 @@ describe('delivery status visuals', () => {
     expect(statusVisual[graphStatus('queued')]).toEqual(STATUS.queued);
   });
   it.each(['sent', 'queued'] as const)('keeps %s under the existing In progress filter', status => {
-    expect(matchesStatus(['in_progress'], status)).toBe(true);
     expect(statusIn(['in_progress'], status)).toBe(true);
-    expect(matchesStatus(['waiting_on_me'], status)).toBe(false);
     expect(statusIn(['waiting_on_me'], status)).toBe(false);
   });
   it('counts sent and queued independently before acknowledgment and canonical statuses', () => {

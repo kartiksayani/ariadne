@@ -84,24 +84,30 @@ function predicate(scope: FilterScope, chip: Chip): (item: Immutable<Item>) => b
 
 const sameOwners = (owners: readonly Immutable<ItemOwner>[], item: Immutable<Item>) => !owners.length || owners.some(owner => sameOwner(owner, item.owner));
 
-/** Today's scope outside the chips: the saved owners and hide-later (the archived rule picks topics, see `scoped`). */
+/** Today's scope outside the chips: the saved owners and hide-later. */
 const inside = (scope: FilterScope, item: Immutable<Item>) =>
   sameOwners(scope.view.filters.owners, item) && !(scope.view.filters.hide_later && scope.later.has(item.id));
 
-/** The items the counts and the "N of M" summary speak about: live items of the shown topics (archived or not), inside
- * the saved owners and hide-later. */
-function scoped(scope: FilterScope): readonly Immutable<Item>[] {
+/** The live items of the shown topics (archived or not). */
+function shownItems(scope: FilterScope): readonly Immutable<Item>[] {
   const { session, view } = scope;
   return activeItems(session).filter(item => {
     const topic = session.topics[item.topic_id];
-    return !!topic && !topic.removed_at && (view.filters.archived ? topic.archived_at !== null : topic.archived_at === null) && inside(scope, item);
+    return !!topic && !topic.removed_at && (view.filters.archived ? topic.archived_at !== null : topic.archived_at === null);
   });
+}
+const hiddenOf = (scope: FilterScope) => hiddenItems(scope.session, new Set(scope.view.hidden_item_ids ?? []));
+
+/** "Showing N of M items": the matching items over every item of the shown topics, hidden items left out of both. */
+export function summaryCounts(scope: FilterScope): { readonly shown: number; readonly total: number } {
+  const hidden = hiddenOf(scope), filter = filterOf(scope), live = shownItems(scope).filter(item => !hidden.has(item.id));
+  return { shown: live.filter(item => filter.matches(item)).length, total: live.length };
 }
 
 /** Counts inside today's scope; hidden items are left out, except in Waiting on me, which never loses a question (D14). */
 export function chipCounts(scope: FilterScope): Record<Chip, number> {
-  const hidden = hiddenItems(scope.session, new Set(scope.view.hidden_item_ids ?? []));
-  const items = scoped(scope), counts = {} as Record<Chip, number>;
+  const hidden = hiddenOf(scope);
+  const items = shownItems(scope).filter(item => inside(scope, item)), counts = {} as Record<Chip, number>;
   for (const chip of CHIP_ORDER) {
     const test = predicate(scope, chip);
     counts[chip] = items.filter(item => (chip === 'waiting' || !hidden.has(item.id)) && test(item)).length;
@@ -124,7 +130,7 @@ export function filterOf(scope: FilterScope): TreeFilter {
 
 /** Only visible filters scope temporary folds; the retired saved topic filter is ignored, and so is the search, which
  * never scopes rows (SPEC §6.9): folding while searching is an ordinary fold. */
-export function filterSignature(scope: FilterScope): string {
+export function filterSignature(scope: Pick<FilterScope, 'view' | 'local'>): string {
   const { statuses, owners, hide_later: hideLater, archived } = scope.view.filters;
   return JSON.stringify([hasStatusFilter(statuses) ? [...new Set(statuses)].sort() : [], owners.map(owner => JSON.stringify(owner)).sort(),
     hideLater, archived, [...new Set(scope.local)].sort()]);
@@ -132,13 +138,13 @@ export function filterSignature(scope: FilterScope): string {
 
 // ---------------------------------------------------------------- local chips (D15)
 
-const STORAGE_KEY = 'ariadne.map.filter.v1';
+export const LOCAL_CHIPS_KEY = 'ariadne.map.filter.v1';
 const SESSIONS_KEPT = 50;
 
 function read(): Map<string, LocalChip[]> {
   const map = new Map<string, LocalChip[]>();
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
+    const parsed: unknown = JSON.parse(localStorage.getItem(LOCAL_CHIPS_KEY) ?? '{}');
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return map;
     for (const [session, value] of Object.entries(parsed)) {
       if (!Array.isArray(value)) continue;
@@ -161,5 +167,5 @@ export function saveLocalChips(sessionId: string, chips: readonly LocalChip[]): 
   const valid = LOCAL_CHIPS.filter(chip => chips.includes(chip));
   if (valid.length) map.set(sessionId, valid);
   const kept = [...map].slice(-SESSIONS_KEPT);
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(Object.fromEntries(kept))); } catch { /* the pick lasts until reload */ }
+  try { localStorage.setItem(LOCAL_CHIPS_KEY, JSON.stringify(Object.fromEntries(kept))); } catch { /* the pick lasts until reload */ }
 }

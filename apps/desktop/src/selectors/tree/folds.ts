@@ -1,18 +1,7 @@
-import type { SessionPreferences } from '../../generated/core';
-import type { Immutable } from '../../data';
 import type { ItemStatus } from '../../generated/domain/models';
-import type { DisplayStatus } from '../waiting/replied';
 
 export const FILTER_STATUSES: readonly ItemStatus[] = ['waiting_on_me', 'open', 'in_progress', 'decided', 'done', 'dropped', 'replaced'];
 export const hasStatusFilter = (statuses: readonly ItemStatus[]) => statuses.length > 0 && !FILTER_STATUSES.every(status => statuses.includes(status));
-export const matchesStatus = (statuses: readonly ItemStatus[], status: DisplayStatus) =>
-  !hasStatusFilter(statuses) || statuses.includes(status === 'sent' || status === 'queued' ? 'in_progress' : status);
-
-/** Only visible filters scope temporary folds; the retired saved topic filter is ignored, and so is the search, which
- * never scopes rows (SPEC §6.9): folding while searching is an ordinary fold. */
-export function filterSignature(filters: Immutable<SessionPreferences['filters']>): string {
-  return JSON.stringify([hasStatusFilter(filters.statuses) ? [...new Set(filters.statuses)].sort() : [], filters.owners.map(owner => JSON.stringify(owner)).sort(), filters.hide_later, filters.archived]);
-}
 
 /** Saved folds yield to matching descendants, until folded explicitly under this filter. */
 export function matchExpansion(saved: readonly string[], temporary: readonly string[], ancestors: Iterable<string>,

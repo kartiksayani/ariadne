@@ -11,7 +11,6 @@ import { createDesktopService, type DesktopTransport } from '../../../src/data/s
 import { GraphView } from '../../../src/ui/graph/GraphView';
 import { MapSearchContext, NO_SEARCH, type MapSearch } from '../../../src/ui/tree/mapSearch';
 import { PeekContext, type PeekNavigation } from '../../../src/ui/peek/context';
-import { GraphFilterSlot } from '../../../src/ui/tree/FilterBar';
 import type { ChangeMarker } from '../../../src/ui/tree/model';
 import { graphSession, preferences, topicA } from './fixture';
 import { Notices, notices } from '../../../src/ui/pages/notices';
@@ -727,21 +726,16 @@ describe('session graph view', () => {
     await act(async () => {});
   });
 
-  it('seats the Tree column’s filter control at the end of the legend card, and keeps it reachable when no topic is drawn', async () => {
-    const slot = <button type="button">Filter</button>;
-    const value = await setup(), view = render(<GraphFilterSlot.Provider value={slot}><value.Composition /></GraphFilterSlot.Provider>);
+  it('keeps the legend card to the three lines: the filter is the chip row above the Map, so an empty Graph draws no card', async () => {
+    const value = await setup(), view = render(<value.Composition />);
     const legend = screen.getByRole('group', { name: 'Graph legend' });
-    expect(legend.lastElementChild!.textContent).toBe('Filter');
+    expect(within(legend).queryByRole('button')).toBeNull();
     expect(document.querySelectorAll('.graph-legend')).toHaveLength(1);
     view.unmount();
     const session = graphSession(); session.items = {};
-    const empty = await setup(session); render(<GraphFilterSlot.Provider value={slot}><empty.Composition /></GraphFilterSlot.Provider>);
-    expect(screen.getByRole('group', { name: 'Graph legend' }).textContent).toBe('Filter');
-    await act(async () => {});
-    cleanup();
-    // Nothing provided (archived sessions): no stray card.
-    render(<empty.Composition />);
+    const empty = await setup(session); render(<empty.Composition />);
     expect(document.querySelector('.graph-legend')).toBeNull();
+    await act(async () => {});
   });
 });
 

@@ -7,6 +7,7 @@ import { useReadingSeen } from '../../state/preferences/reading';
 import { useSession, type SessionStore } from '../../data/session-store';
 import type { RevealedItem } from '../../data/routes';
 import { mapChanges } from '../tree/model';
+import { useLocalChips } from '../tree/useLocalChips';
 
 // Composition reuses navigation's preferences revision and registered router,
 // like the tree; it does not own a second preferences writer.
@@ -16,6 +17,7 @@ export function NavigationGraph({ navigation, store, reveal, onReveal }: {
   onReveal: (result: RevealedItem, openDetail: boolean) => void;
 }) {
   const state = useNavigation(navigation), session = useSession(store).snapshot?.session, route = store.getSnapshot().route;
+  const local = useLocalChips(route.session_id).chips;
   const preferences = state.preferences;
   // The same New and Changed markers the Tree derives (ui/tree/model.ts), as diamonds on the nodes.
   const seen = useReadingSeen(navigation.reading, preferences, route);
@@ -47,7 +49,7 @@ export function NavigationGraph({ navigation, store, reveal, onReveal }: {
       // A competing writer refused admission; retry only after it finishes.
     }
   };
-  return <GraphView store={store} routes={navigation.routes} view={view} later={later} reveal={reveal === undefined ? state.reveal : reveal}
+  return <GraphView store={store} routes={navigation.routes} view={view} later={later} local={local} reveal={reveal === undefined ? state.reveal : reveal}
     markers={markers} preferencesBusy={state.writing || state.pendingOperationId !== null}
     saveView={saveView} onReveal={onReveal} />;
 }

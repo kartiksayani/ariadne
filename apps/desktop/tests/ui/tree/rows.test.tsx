@@ -3,7 +3,8 @@ import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { SessionPreferences } from '../../../src/generated/core';
 import type { Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
-import { initialExpansion, normalizeSearch, sentenceRows } from '../../../src/selectors/tree/rows';
+import { initialExpansion, normalizeSearch } from '../../../src/selectors/tree/rows';
+import { sentenceRows } from './scope';
 import { chipsOf, toggleChip, topicCounts, treeModel } from '../../../src/ui/tree/model';
 import { closedSessionQuestion, waitingOnOwner } from '../../../src/selectors/sessionClosed';
 import { displayStatus } from '../../../src/selectors/waiting/replied';
@@ -50,7 +51,10 @@ describe('saved status filter chips', () => {
       selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) });
     expect(model.rows.find(row => row.kind === 'item' && row.item.id === item.id)).toMatchObject({ status: 'sent', sessionClosed: false });
     expect(model.counts.waiting).toBe(0);
-    expect(sentenceRows(frozen, preferences, new Set()).rows.some(row => row.item.id === item.id)).toBe(true);
+    // Sent is its own chip (D14): the Graph's rows keep the item under Sent and no longer under In progress.
+    expect(sentenceRows(frozen, preferences, new Set()).rows.some(row => row.item.id === item.id)).toBe(false);
+    preferences.filters.statuses = [];
+    expect(sentenceRows(frozen, preferences, new Set(), [], null, new Set(), ['sent']).rows.some(row => row.item.id === item.id)).toBe(true);
   });
   it('places Ack counts after both waiting counts and before other statuses', () => {
     const statuses = ['open', 'sent', 'queued', 'done', 'waiting_on_me', 'in_progress'] as const;

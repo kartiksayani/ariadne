@@ -12,7 +12,7 @@ import { OpenSessions, type Immutable } from '../../../src/data/session-store';
 import { SessionActionControllers, type SessionActions } from '../../../src/components/bindings/actions';
 import { activeItems, activeTopics, heldInputs, itemRemoved, removedRoots, removedSubtree } from '../../../src/selectors/removed';
 import { ackTarget } from '../../../src/selectors/ack';
-import { sentenceRows } from '../../../src/selectors/tree/rows';
+import { sentenceRows } from '../tree/scope';
 import { relatedItems } from '../../../src/selectors/related';
 import { sentRows, waitingRows } from '../../../src/selectors/waiting/rows';
 import { sessionGraph } from '../../../src/ui/graph/model';
