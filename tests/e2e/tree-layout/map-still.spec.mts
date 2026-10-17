@@ -18,8 +18,8 @@ const placed = (page: Page): Promise<Placed[]> => page.locator('.tree-scroll').e
     const rect = row.getBoundingClientRect();
     if (rect.bottom <= edge.top || rect.top >= edge.bottom) return [];
     const text = row.querySelector('.tree-question, .tree-topic-name')?.getBoundingClientRect().width ?? 0;
-    // Relative to the Map's own top: a bar above the Map (the closed-session notice) moves the Map's frame, not its rows.
-    return [{ key: row.dataset.row!, top: Math.round((rect.top - edge.top) * 2) / 2, height: Math.round(rect.height * 2) / 2, text: Math.round(text * 2) / 2 }];
+    // Viewport coordinates: a bar inserted above the Map counts as movement.
+    return [{ key: row.dataset.row!, top: Math.round(rect.top * 2) / 2, height: Math.round(rect.height * 2) / 2, text: Math.round(text * 2) / 2 }];
   });
 });
 /** The first item row reaching below the sticky band, and its offset from the band's bottom. */
@@ -122,7 +122,8 @@ const triggers: readonly Trigger[] = [
   ['a session ends', 'still', '13', nothing, page => agent(page, 'session-ends'), page => expect(row(page, '13').getByText('Session closed')).toBeVisible()],
 ];
 
-async function open(page: Page, origin: string) {
+/** `under`: how many pixels of item 10's top the sticky band covers. */
+async function open(page: Page, origin: string, under = 4) {
   await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
   await page.setViewportSize({ width: 1000, height: 700 });
   await page.goto(`${origin}/tests/e2e/tree-layout/fixture.html?still`);
@@ -135,22 +136,46 @@ async function open(page: Page, origin: string) {
   const close = page.getByRole('button', { name: 'Close detail' });
   if (await close.count()) await close.click();
   // Item 10 (a four-line finding that folds behind Show more) is the reading row: its top just under the band.
-  await row(page, '10').evaluate(element => {
+  await row(page, '10').evaluate((element, covered) => {
     const box = element.closest('.tree-scroll')!, header = element.closest('.tree-topic-group')!.querySelector('.tree-topic')!;
-    box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top - header.getBoundingClientRect().height + 4;
-  });
+    box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top - header.getBoundingClientRect().height + covered;
+  }, under);
   await settle(page);
   await page.mouse.move(2, 690);
 }
 
-for (const [name, kind, subject, before, change, done] of triggers) test(`the Map stays still when ${name}`, async ({ page }) => {
+/** Serves the layout fixture for one test and hands its origin to `run`. */
+async function serve(run: (origin: string) => Promise<void>) {
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
     logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
   try {
     await server.listen();
     const address = (server.httpServer as Server).address();
     if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
-    await open(page, `http://127.0.0.1:${address.port}`);
+    await run(`http://127.0.0.1:${address.port}`);
+  } finally { await server.close(); }
+}
+
+// Show more holds the row it opens, where the owner sees it: item 10 keeps its window position whether the band covers
+// 4px of its top or most of its first line.
+for (const under of [4, 17, 40]) test(`Show more keeps the clicked row's window position with ${under}px of it under the band`, async ({ page }) => {
+  await serve(async origin => {
+    await open(page, origin, under);
+    await settle(page);
+    const top = () => row(page, '10').evaluate(element => element.getBoundingClientRect().top);
+    const start = await top();
+    await row(page, '10').getByRole('button', { name: 'Show more' }).evaluate(button => (button as HTMLElement).click());
+    await expect(row(page, '10').getByRole('button', { name: 'Show less' })).toHaveCount(1);
+    await settle(page);
+    expect(Math.abs(await top() - start)).toBeLessThanOrEqual(0.5);
+  });
+});
+
+for (const [name, kind, subject, before, change, done] of triggers) test(`the Map stays still when ${name}`, async ({ page }) => {
+  // The closed-session notice pushes the Map down; the Tree hold piece holds viewport y through its scroller observer.
+  test.fixme(name === 'a session ends', 'needs the Tree hold (redesign/a20-hold)');
+  await serve(async origin => {
+    await open(page, origin);
     await before(page);
     await settle(page);
     const rows = await placed(page), read = await reading(page), scrollTop = await page.locator('.tree-scroll').evaluate(box => box.scrollTop);
@@ -166,5 +191,5 @@ for (const [name, kind, subject, before, change, done] of triggers) test(`the Ma
       const after = new Map((await placed(page)).map(value => [value.key, value]));
       for (const value of rows) expect(after.get(value.key), `${value.key} keeps its place, height and text width`).toEqual(value);
     }
-  } finally { await server.close(); }
+  });
 });

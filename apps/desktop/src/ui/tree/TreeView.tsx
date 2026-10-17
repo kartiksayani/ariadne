@@ -670,6 +670,12 @@ export function TreeView(props: TreeViewProps) {
   const unfold = (id: string) => {
     // The hold stays: Show more above the reading row grows what is above it, and the row the owner reads stays put.
     settled.current = true;
+    // The row whose button this is holds its own window position through the height change, even when the band covers its top
+    // (otherwise the first whole row below becomes the one held, and this row moves). A row out of view leaves the hold as it is.
+    const box = scroller.current, element = elements.current.get(id), rect = element?.getBoundingClientRect();
+    if (box && rect && rect.bottom > readingTop() && rect.top < visibleBottom(box)) {
+      held.current = { key: id, offset: rect.top - readingTop(), top: rect.top - box.getBoundingClientRect().top, scrollTop: box.scrollTop };
+    }
     if (isUnfolded(id)) folding.current = id;
     toggleUnfolded(id);
   };
@@ -1022,7 +1028,8 @@ export function TreeView(props: TreeViewProps) {
     const inFlight = !!row.delivery && !row.delivery.failed && !isClosed;
     const slot = (action: string, applies: boolean, offer: { icon: string; title: string; run: () => void }): RowAction =>
       stopped ? { icon: offer.icon, title: `${action}: ${stopped}`, disabled: true, run: () => {} }
-        : applies && !inFlight ? offer : { icon: offer.icon, title: `${action}: not for ${statusLabel} items`, disabled: true, run: () => {} };
+        : !applies ? { icon: offer.icon, title: `${action}: not for ${statusLabel} items`, disabled: true, run: () => {} }
+        : inFlight ? { icon: offer.icon, title: `${action}: a message is on its way`, disabled: true, run: () => {} } : offer;
     const reply = item.status === 'waiting_on_me' ? { title: 'Answer (r)', intent: 'reply' as const } : isClosed ? { title: 'Follow up (r)', intent: 'followup' as const }
       : open ? { title: 'Reply (r)', intent: 'reply' as const } : { title: 'Add a note (r)', intent: 'note' as const };
     list.push(

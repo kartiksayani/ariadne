@@ -471,15 +471,21 @@ export function treeModel(input: TreeInput): TreeModel {
           collapsed, delivery: deliveryLine(session, { topicId: item.topic_id, itemId: item.id }, input.presence, input.health), badge: badgeLabel(item, parked, display(item)) });
         if (open) walk(children, depth + 1);
       };
-      // Each run of consecutive omitted siblings is one strip, in place; hidden siblings follow the others as one group.
-      let run: Immutable<Item>[] = [];
+      // Each run of consecutive omitted siblings with the same reason is one strip, in place; hidden siblings follow the
+      // others as one group. A focused root the filter excludes is its own "not matching" strip, not part of "outside the focus".
+      let run: Immutable<Item>[] = [], runReason: StripReason = 'filter';
       const flush = () => {
-        if (run.length) strip(run, run.some(value => omitted(value) === 'focus') ? 'focus' : 'filter', false);
+        if (run.length) strip(run, runReason, false);
         run = [];
       };
       const hiddenSiblings: Immutable<Item>[] = [];
       for (const item of list) {
-        if (omitted(item)) run.push(item);
+        const reason = omitted(item);
+        if (reason) {
+          if (run.length && reason !== runReason) flush();
+          runReason = reason;
+          run.push(item);
+        }
         else if (explicitHidden.has(item.id)) hiddenSiblings.push(item);
         else { flush(); emit(item); }
       }

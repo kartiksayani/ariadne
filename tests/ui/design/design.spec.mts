@@ -347,26 +347,39 @@ async function threadRuns(page: Page) {
   await settle(page);
   return page.locator('.tree-topic-group').first().evaluate(group => {
     const origin = group.getBoundingClientRect(), topic = group.querySelector('.tree-topic')!.getBoundingClientRect();
-    const lines = [...group.querySelectorAll<HTMLElement>('.tree-thread, .tree-thread-elbow')].map(line => line.getBoundingClientRect())
-      .filter(rect => rect.height > 0 && Math.abs(rect.left + 1.5 - origin.left - 20) < 1.5);
+    const everyLine = [...group.querySelectorAll<HTMLElement>('.tree-thread, .tree-thread-elbow')].map(line => line.getBoundingClientRect()).filter(rect => rect.height > 0);
+    const lines = everyLine.filter(rect => Math.abs(rect.left + 1.5 - origin.left - 20) < 1.5);
+    // The thread leaves the band's column at the ancestor where the selected path branches off, so a deep selection is reached
+    // along deeper columns: `reach` is the lowest point of the thread on any column.
+    const reach = Math.max(...everyLine.map(rect => rect.bottom));
     const merged: number[][] = [];
     for (const [top, bottom] of lines.map(rect => [rect.top, rect.bottom]).sort((a, b) => a[0] - b[0])) {
       const last = merged.at(-1);
       if (last && top <= last[1] + 1.5) last[1] = Math.max(last[1], bottom); else merged.push([top, bottom]);
     }
     const selected = group.querySelector('[aria-selected="true"]')?.getBoundingClientRect();
-    return { runs: merged, topic: { top: topic.top, bottom: topic.bottom }, selected: selected ? { top: selected.top, bottom: selected.bottom } : null };
+    return { runs: merged, reach, topic: { top: topic.top, bottom: topic.bottom }, selected: selected ? { top: selected.top, bottom: selected.bottom } : null };
   });
 }
-for (const { frame, theme } of [{ frame: 'map-thread', theme: 'dark' }, { frame: 'map-thread', theme: 'light' }, { frame: 'map-thread-small', theme: 'dark' }] as const) {
-  test(`The thread is one unbroken line from the band to the selected item: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+/** The thread must stay one line through the topic cards too: a collapsed brief and a long brief with its Since cards open. */
+for (const { name, frame, theme, act } of [
+  { name: 'brief open, no since cards', frame: 'map-thread', theme: 'dark', act: async () => {} },
+  { name: 'brief open, no since cards', frame: 'map-thread', theme: 'light', act: async () => {} },
+  { name: 'brief open, no since cards at 900', frame: 'map-thread-small', theme: 'dark', act: async () => {} },
+  { name: 'brief collapsed', frame: 'map-thread', theme: 'dark', act: async (page: Page) => { await page.getByRole('button', { name: 'Topic brief', exact: true }).first().click(); } },
+  { name: 'long brief with since cards', frame: 'map-brief-long', theme: 'dark', act: async (page: Page) => { await page.getByRole('button', { name: /^Since you were here ·/ }).click(); } },
+  { name: 'long brief with since cards', frame: 'map-brief-long', theme: 'light', act: async (page: Page) => { await page.getByRole('button', { name: /^Since you were here ·/ }).click(); } },
+  { name: 'long brief collapsed at 900', frame: 'map-brief-long-small', theme: 'dark', act: async (page: Page) => { await page.getByRole('button', { name: 'Topic brief', exact: true }).click(); } },
+] as const) {
+  test(`The thread is one unbroken line from the band to the selected item: ${name} (${frame}, ${theme})`, async ({ page, origin }, testInfo) => {
     await openApp(page, origin, { ...frameSpec(frame), theme });
-    const { runs, topic, selected } = await threadRuns(page);
+    await act(page);
+    const { runs, reach, topic, selected } = await threadRuns(page);
     expect(selected, 'a row is selected').not.toBeNull();
     expect(runs, 'one accent line from the band').toHaveLength(1);
     expect(runs[0]![0], 'it starts inside the band').toBeLessThanOrEqual(topic.bottom);
     expect(runs[0]![1], 'it runs on below the band, into the branch of the selected row').toBeGreaterThan(topic.bottom + 10);
-    await testInfo.attach(`thread-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
+    expect(reach, 'it reaches the selected row').toBeGreaterThanOrEqual(selected!.top);    await testInfo.attach(`thread-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
   });
 }
 

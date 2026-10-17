@@ -959,9 +959,20 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     expect(calls.acts.map(([intent, target]) => `${intent}:${target.item_id}`)).toEqual(['bring:1.1', 'later:1.1', 'reopen:5', 'followup:5']);
     expect(calls.removed).toBe(1);
     // The hover bar always has six slots (D4). A delivery on its way greys the agent's four and says why; Hide and Remove stay.
+    // The slot that would apply says a message is on its way; the others say the status they are not for.
     expect(within(row('3')).getAllByRole('button').map(button => button.getAttribute('aria-label')))
-      .toEqual(['Add a note: not for In progress items', 'Bring it up: not for In progress items', 'Later: not for In progress items', 'Drop: not for In progress items', 'Hide (h)', 'Remove (⌫)']);
+      .toEqual(['Add a note: a message is on its way', 'Bring it up: not for In progress items', 'Later: not for In progress items', 'Drop: not for In progress items', 'Hide (h)', 'Remove (⌫)']);
     for (const name of [/^Add a note/, /^Bring it up/, /^Later/, /^Drop/]) expect((within(row('3')).getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);    fireEvent.keyDown(row('1.1'), { key: 'b' }); expect(calls.acts).toHaveLength(4);
+  });
+  it('titles every greyed slot of an open row "a message is on its way", and a parked row\'s Unpark too', async () => {
+    // Item 4 is open with a queued drop on its way.
+    await mount();
+    expect(within(row('4')).getAllByRole('button').map(button => button.getAttribute('aria-label')))
+      .toEqual(['Reply: a message is on its way', 'Bring it up: a message is on its way', 'Later: a message is on its way', 'Drop: a message is on its way', 'Hide (h)', 'Remove (⌫)']);
+    cleanup();
+    await mount({ configure: transport => { transport.preferences.later = [{ ...route, item_id: '4' }]; } });
+    expect(within(row('4')).getAllByRole('button').map(button => button.getAttribute('aria-label')).slice(0, 4))
+      .toEqual(['Reply: a message is on its way', 'Bring it up: a message is on its way', 'Unpark: a message is on its way', 'Drop: a message is on its way']);
   });
 });
 
@@ -2102,6 +2113,24 @@ describe('item details in the tree', () => {
     fireEvent.click(more('1')!);
     expect(more('1')!.textContent).toBe('Show more');
     expect(row('1').querySelector('.tree-preview:not(.tree-question-block)')!.hasAttribute('data-open')).toBe(false);
+  });
+
+  it('unfolds a clamped row when a search step lands on it (D6), and only that row', async () => {
+    measure();
+    const status = vi.fn();
+    await mount({ configure: transport => {
+      longOutcome(transport);
+      transport.sessions.get(route.session_id)!.items['1']!.outcome = `${long}\nThe zebra is on the last line.`;
+    }, props: { query: 'zebra', onSearchStatus: status } });
+    expect(more('1')!.textContent).toBe('Show more');
+    const { onNext } = status.mock.calls.at(-1)![0] as { onNext: () => void };
+    act(() => { onNext(); });
+    expect(more('1')!.textContent).toBe('Show less');
+    expect(row('1').querySelector('.tree-preview:not(.tree-question-block)')!.hasAttribute('data-open')).toBe(true);
+    // Nothing is selected or opened by the step.
+    expect(row('1').getAttribute('aria-selected')).toBe('false');
+    // The unfold flag is saved per item; fold it again so the next test starts folded.
+    fireEvent.click(more('1')!);
   });
 
   it('folds a long title at three lines with its own Show more and keeps status beside it without item numbers', async () => {

@@ -67,6 +67,16 @@ describe('strips', () => {
     expect(strips(rows).map(row => [row.key, row.reason, row.count])).toEqual([[stripKey(topic, null, 'focus', '1'), 'focus', 2], [stripKey(topic, null, 'focus', '4'), 'focus', 4]]);
   });
 
+  it('splits a run when its reason changes: a focused root the filter excludes is its own "not matching" strip', () => {
+    const { view, topic, model, strips, order } = fixture();
+    // The filter matches roots 2 and 4 (decided) but not the focused root 3 (open).
+    view.filters.statuses = ['decided'];
+    const rows = model({ focusRootId: '3' }).rows;
+    expect(strips(rows).map(row => [row.key, row.reason, row.count])).toEqual([[stripKey(topic, null, 'focus', '1'), 'focus', 2],
+      [stripKey(topic, null, 'filter', '3'), 'filter', 1], [stripKey(topic, null, 'focus', '4'), 'focus', 4]]);
+    expect(order(rows)).toEqual([stripKey(topic, null, 'focus', '1'), stripKey(topic, null, 'filter', '3'), stripKey(topic, null, 'focus', '4')]);
+  });
+
   it('puts filter ahead of hidden, and leaves matching hidden siblings in the hidden group after the rest', () => {
     const { view, topic, model, strips, order } = fixture(['2', '3']);
     view.filters.statuses = ['open'];
