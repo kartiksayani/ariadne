@@ -168,9 +168,10 @@ for (const theme of ['light', 'dark']) test(`Getting around keeps breadcrumbs an
       const box = element.closest('.tree-scroll')!, viewport = box.getBoundingClientRect();
       const header = element.closest('.tree-topic-group')!.querySelector('.tree-topic')!.getBoundingClientRect();
       const top = Math.max(viewport.top, header.bottom), bottom = Math.min(viewport.bottom, window.innerHeight);
+      // The scroll position is a whole pixel and row heights are fractional: a row may sit a fraction under the band.
       return [...box.querySelectorAll<HTMLElement>('.tree-item')].find(row => {
         const bounds = row.getBoundingClientRect();
-        return bounds.top >= top && bounds.bottom <= bottom;
+        return bounds.top >= top - 1 && bounds.bottom <= bottom;
       })?.dataset.itemId;
     })).toBe('23');
     await expect(crumbs.getByRole('button')).toHaveText(['Rehearsal notes', 'Evidence check', 'Owner handoff']);
@@ -218,7 +219,7 @@ for (const theme of ['light', 'dark']) test(`Getting around keeps breadcrumbs an
   } finally { await server.close(); }
 });
 
-test('folds a long preview to four lines, never rewraps on hover and never scrolls on a click', async ({ page }) => {
+test('folds a long preview to three lines, never rewraps on hover and never scrolls on a click', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
@@ -229,21 +230,23 @@ test('folds a long preview to four lines, never rewraps on hover and never scrol
     if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
     await openTree(page, `http://127.0.0.1:${address.port}`);
 
-    // Separate four-line body clamp; titles stay readable.
+    // The body and a long title each fold to three lines, and one flag per item opens (and closes) both.
     const first = page.locator('.tree-item[data-item-id="1"]');
     const text = first.locator('.tree-outcome .tree-clamp'), line = await text.evaluate(element => parseFloat(getComputedStyle(element).lineHeight));
     const folded = (await text.boundingBox())!.height;
     // Fractional line heights can round either way in browser layout.
-    expect(folded).toBeLessThanOrEqual(line * 4 + 0.5); expect(folded).toBeGreaterThanOrEqual(line * 4 - 0.5);
-    await expect(first.getByRole('button', { name: 'Show more' })).toBeVisible();
+    expect(folded).toBeLessThanOrEqual(line * 3 + 0.5); expect(folded).toBeGreaterThanOrEqual(line * 3 - 0.5);
+    await expect(first.getByRole('button', { name: 'Show more' })).toHaveCount(2);
     const title = first.locator('.tree-question'), titleLine = await title.evaluate(element => parseFloat(getComputedStyle(element).lineHeight));
-    const titleHeight = (await title.boundingBox())!.height;
-    expect(titleHeight).toBeGreaterThan(titleLine * 2);
-    await first.getByRole('button', { name: 'Show more' }).click();
+    const clip = first.locator('.tree-question-block .tree-clamp'), titleHeight = (await clip.boundingBox())!.height;
+    // The title's text rectangles round on their own at the scaled size: one CSS pixel of slack, as for the scale check below.
+    expect(titleHeight).toBeLessThanOrEqual(titleLine * 3 + 1); expect(titleHeight).toBeGreaterThanOrEqual(titleLine * 3 - 1);
+    await first.getByRole('button', { name: 'Show more' }).last().click();
     expect((await text.boundingBox())!.height).toBeGreaterThan(line * 15);
-    expect((await title.boundingBox())!.height).toBe(titleHeight);
-    await first.getByRole('button', { name: 'Show less' }).click();
-    expect((await text.boundingBox())!.height).toBeLessThanOrEqual(line * 4 + 0.5);
+    expect((await clip.boundingBox())!.height).toBeGreaterThan(titleLine * 3 + 1);
+    await first.getByRole('button', { name: 'Show less' }).first().click();
+    expect((await text.boundingBox())!.height).toBeLessThanOrEqual(line * 3 + 0.5);
+    expect((await clip.boundingBox())!.height).toBeLessThanOrEqual(titleLine * 3 + 1);
 
     // Hovering a row keeps its text column and its line count exactly as they were.
     const wrapped = page.locator('.tree-item[data-item-id="5"]'), body = wrapped.locator('.tree-body'), outcome = wrapped.locator('.tree-outcome .tree-clamp');
@@ -293,7 +296,8 @@ test('folds a long preview to four lines, never rewraps on hover and never scrol
     const rootPadding = await first.evaluate(element => parseFloat(getComputedStyle(element).paddingTop));
     const child = page.locator('.tree-item[data-item-id="1.1"]');
     expect(rootPadding).toBeGreaterThan(await child.evaluate(element => parseFloat(getComputedStyle(element).paddingTop)));
-    await expect(first).toHaveCSS('border-bottom-width', '1px');
+    // A row's box is a slice behind it (D1), so a row carries no border of its own.
+    await expect(first).toHaveCSS('border-bottom-width', '0px');
     expect(errors).toEqual([]);
   } finally { await server.close(); }
 });
@@ -318,7 +322,8 @@ test('gives the title the row beside a fixed end cluster with all actions and ke
     expect(heading.width / bounds.width).toBeGreaterThanOrEqual(0.45);
     expect(heading.x + heading.width).toBeLessThanOrEqual(end.x);
     const actions = row.locator('.tree-action');
-    await expect(actions).toHaveCount(8);
+    // Six hover slots (D4) and Ack in its own.
+    await expect(actions).toHaveCount(7);
     await row.hover();
     expect((await title.boundingBox())!.width).toBe(text.width);
     expect((await title.boundingBox())!.height).toBe(text.height);
@@ -326,13 +331,16 @@ test('gives the title the row beside a fixed end cluster with all actions and ke
     for (const action of await actions.all()) {
       await expect(action).toBeVisible();
       const box = (await action.boundingBox())!;
-      expect(box.width).toBe(26); expect(box.height).toBe(24);
-      if (await action.evaluate(element => !!element.closest('.tree-actions'))) lines.add(box.y);
+      const inBar = await action.evaluate(element => !!element.closest('.tree-actions'));
+      // The six hover slots are 26 x 24; Ack, in its own slot, is 22 x 20.
+      expect(box.width).toBe(inBar ? 26 : 22); expect(box.height).toBe(inBar ? 24 : 20);
+      if (inBar) lines.add(box.y);
       const name = (await action.getAttribute('aria-label'))!;
       await action.click(); await expect(page.getByLabel('Last action')).toHaveText(name);
     }
-    // The hover bar is one floating line, left of the cluster; Ack keeps its own slot inside it.
+    // The hover bar is one floating line of six slots, left of the cluster; Ack keeps its own slot in the cluster.
     expect(lines.size).toBe(1);
+    await expect(row.locator('.tree-actions .tree-action')).toHaveCount(6);
     const bar = (await row.locator('.tree-actions').boundingBox())!;
     expect(bar.x + bar.width).toBeLessThanOrEqual(end.x);
     await row.locator('.tree-icon').click(); await page.mouse.move(0, 0);
@@ -395,9 +403,10 @@ test('counts paragraph, list and code text lines exactly, and unfolds links only
     await page.evaluate(async () => { await document.fonts.ready; });
     for (const scale of ['1', '1.5']) {
       await page.evaluate(value => document.documentElement.style.setProperty('--text-scale', value), scale);
-      for (const [id, count, kind] of [[11, 6, 'paragraph'], [12, 7, 'paragraph'], [13, 6, 'list'], [14, 7, 'list'], [15, 6, 'code'], [16, 7, 'code'], [17, 7, 'mixed']] as const) {
-        const row = page.locator(`.tree-item[data-item-id="${id}"]`), excerpt = row.locator('.tree-clamp');
-        await expect(row.getByRole('button', { name: 'Show more' })).toHaveCount(count === 7 ? 1 : 0);
+      // Three lines stay open; at four the clamp (three lines) would hide one, so it folds.
+      for (const [id, count, kind] of [[11, 3, 'paragraph'], [12, 4, 'paragraph'], [13, 3, 'list'], [14, 4, 'list'], [15, 3, 'code'], [16, 4, 'code'], [17, 4, 'mixed']] as const) {
+        const row = page.locator(`.tree-item[data-item-id="${id}"]`), excerpt = row.locator('.tree-outcome .tree-clamp');
+        await expect(row.getByRole('button', { name: 'Show more' })).toHaveCount(count === 4 ? 1 : 0);
         // Markdown's inline mode renders the single mixed paragraph as a span;
         // multi-paragraph bodies, lists and fenced code retain their block elements.
         await expect(excerpt.locator(kind === 'mixed' ? 'span.tree-clamp-content' : kind === 'paragraph' ? 'p' : kind === 'list' ? 'li' : 'pre')).toHaveCount(kind === 'code' || kind === 'mixed' ? 1 : count);
@@ -422,7 +431,7 @@ test('counts paragraph, list and code text lines exactly, and unfolds links only
             visible: lines.filter(rect => rect.bottom <= box.bottom + 0.5).length,
             cutLines: rectangles.filter(rect => rect.top < box.bottom - 0.5 && rect.bottom > box.bottom + 0.5).length,
           };
-        })).toEqual({ lines: count, visible: count === 7 ? 4 : 6, cutLines: 0 });
+        })).toEqual({ lines: count, visible: 3, cutLines: 0 });
       }
     }
     await page.evaluate(() => document.documentElement.style.setProperty('--text-scale', '1'));
@@ -472,7 +481,7 @@ test('keeps the connection card inside a narrow window with Restore and a long n
 });
 
 
-for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails, clamp threshold, floating Back-to pills and clear reveals in ${theme}`, async ({ page }) => {
+for (const theme of ['light', 'dark'] as const) test(`Map look: boxes, thread, clamp threshold, floating Back-to pills and clear reveals in ${theme}`, async ({ page }) => {
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
     logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
   try {
@@ -484,8 +493,11 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
     await page.evaluate(async () => { await document.fonts.ready; });
     const root = page.locator('.tree-item[data-item-id="1"]'), child = page.locator('.tree-item[data-item-id="1.1"]');
     await expect(page.locator('.tree-id')).toHaveCount(0);
-    await expect(root.locator('.tree-top-colour')).toHaveCount(1);
-    await expect(child.locator('.tree-top-colour')).toHaveCount(0);
+    // A branch has one hue, from its top item (D3); the top item opens one tinted box and its child a second (D1).
+    await expect(root).toHaveAttribute('data-branch', /^[0-4]$/);
+    expect(await child.getAttribute('data-branch')).toBe(await root.getAttribute('data-branch'));
+    await expect(root.locator('.tree-box')).toHaveCount(1);
+    await expect(child.locator('.tree-box')).toHaveCount(2);
     await expect(root.locator('.tree-end > .tree-end-badge')).toContainText('Done');
     const accent = await page.locator('.tree-topic-name').first().evaluate(element => {
       const probe = document.createElement('span');
@@ -497,39 +509,36 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
       probe.remove(); return { actual, expected, full };
     });
     expect(accent.actual).toBe(accent.expected);
-    expect(await root.locator('.tree-more').evaluate(element => getComputedStyle(element).color)).toBe(accent.full);
-    const stem = root.locator('.tree-guide[data-from-bullet][style*="left: 44px"]').first();
-    const end = child.locator('.tree-guide[data-to-bullet][style*="left: 44px"]').first();
-    const stemBox = (await stem.boundingBox())!, endBox = (await end.boundingBox())!;
-    const bullet = (await root.locator('.tree-chevron').boundingBox())!, childBullet = (await child.locator('.tree-chevron-space').boundingBox())!;
-    expect(stemBox.x).toBeCloseTo(bullet.x + bullet.width / 2, 0);
-    expect(stemBox.y).toBeCloseTo(bullet.y + bullet.height / 2, 0);
-    expect(stemBox.y + stemBox.height).toBeCloseTo(endBox.y, 0);
-    expect(endBox.y + endBox.height).toBeCloseTo(childBullet.y + childBullet.height / 2, 0);
+    expect(await root.locator('.tree-more').last().evaluate(element => getComputedStyle(element).color)).toBe(accent.full);
+    // Nothing is drawn until a row is selected: the thread is the Map's only line.
+    await expect(page.locator('.tree-thread, .tree-thread-elbow')).toHaveCount(0);
+    await child.locator('.tree-question').click();
+    await expect(child).toHaveAttribute('aria-selected', 'true');
+    // The accent thread runs down the root's column, turns into the selected child's bullet with an elbow, and no other row has one.
+    const childBullet = (await child.locator('.tree-chevron-space').boundingBox())!, elbow = (await child.locator('.tree-thread-elbow').boundingBox())!;
+    expect(elbow.y + elbow.height - 1.5).toBeCloseTo(childBullet.y + childBullet.height / 2, 0);
+    expect(await root.locator('.tree-thread').count()).toBeGreaterThan(0);
+    await expect(page.locator('.tree-item[data-item-id="3"]').locator('.tree-thread, .tree-thread-elbow')).toHaveCount(0);
     await root.locator('.tree-question').click();
     await expect(root).toHaveAttribute('aria-selected', 'true');
-    // The accent reaches the selection; the rails to unrelated siblings stay neutral.
-    expect(await root.locator('.tree-elbow').last().evaluate(element => element.getAttribute('style'))).toContain('var(--color-accent)');
-    const neutral = page.locator('.tree-item[data-item-id="3"] .tree-guide').first();
-    expect(await neutral.getAttribute('style')).toContain('var(--a-guide)');
 
-    for (const [id, lines] of [['9', 6], ['10', 7]] as const) {
+    for (const [id, lines] of [['9', 3], ['10', 4]] as const) {
       const row = page.locator(`.tree-item[data-item-id="${id}"]`);
       await row.evaluate(element => element.scrollIntoView({ block: 'center' }));
-      const body = row.locator('.tree-clamp');
+      const body = row.locator('.tree-outcome .tree-clamp');
       const line = await body.evaluate(element => parseFloat(getComputedStyle(element).lineHeight));
-      // Prove the fixture really contains six/seven body lines before testing the threshold.
+      // Prove the fixture really contains three/four body lines before testing the threshold.
       await expect(body.locator('br')).toHaveCount(lines - 1);
       expect((await body.textContent())!.split('\n')).toHaveLength(lines);
       await expect(body).toHaveCSS('white-space', 'normal');
-      if (lines === 6) {
+      if (lines === 3) {
         await expect(row.getByRole('button', { name: 'Show more' })).toHaveCount(0);
-        expect((await body.boundingBox())!.height).toBeCloseTo(line * 6, 0);
+        expect((await body.boundingBox())!.height).toBeCloseTo(line * 3, 0);
       } else {
         await expect(row.getByRole('button', { name: 'Show more' })).toBeVisible();
-        expect((await body.boundingBox())!.height).toBeCloseTo(line * 4, 0);
+        expect((await body.boundingBox())!.height).toBeCloseTo(line * 3, 0);
         await row.getByRole('button', { name: 'Show more' }).click();
-        expect((await body.boundingBox())!.height).toBeCloseTo(line * 7, 0);
+        expect((await body.boundingBox())!.height).toBeCloseTo(line * 4, 0);
         await row.getByRole('button', { name: 'Show less' }).click();
         // A closed preview tracks text scaling through its natural-content observer.
         for (const scale of [0.8, 1, 1.2]) {
@@ -537,8 +546,8 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
           const scaledLine = await body.evaluate(element => parseFloat(getComputedStyle(element).lineHeight));
           // Text rectangles and line boxes round independently at scaled font sizes.
           // Allow at most one CSS pixel for that rounding, while separately proving
-          // four complete text lines are visible and no glyph rectangle is clipped.
-          await expect.poll(async () => Math.abs((await body.boundingBox())!.height - scaledLine * 4)).toBeLessThanOrEqual(1);
+          // three complete text lines are visible and no glyph rectangle is clipped.
+          await expect.poll(async () => Math.abs((await body.boundingBox())!.height - scaledLine * 3)).toBeLessThanOrEqual(1);
           await expect.poll(() => body.evaluate(element => {
             const bottom = element.getBoundingClientRect().bottom, rectangles: DOMRect[] = [];
             const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), range = document.createRange();
@@ -551,7 +560,7 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
               visible: rectangles.filter(rect => rect.bottom <= bottom + 0.5).length,
               cutLines: rectangles.filter(rect => rect.top < bottom - 0.5 && rect.bottom > bottom + 0.5).length,
             };
-          })).toEqual({ visible: 4, cutLines: 0 });
+          })).toEqual({ visible: 3, cutLines: 0 });
         }
         await page.evaluate(() => document.documentElement.style.setProperty('--text-scale', '1'));
       }

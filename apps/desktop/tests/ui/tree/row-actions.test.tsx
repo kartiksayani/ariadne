@@ -5,8 +5,6 @@ import type { Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
 import { ItemRow, type ItemRowProps, type RowAction } from '../../../src/ui/tree/ItemRow';
 import { TopicRow, type TopicAction, type TopicRowProps } from '../../../src/ui/tree/TopicRow';
-import { ItemRefs } from '../../../src/ui/shared/MarkdownText';
-import { peekNames } from '../../../src/ui/peek/names';
 
 afterEach(cleanup);
 
@@ -15,7 +13,7 @@ function itemProps(actions: readonly RowAction[]): ItemRowProps {
   const item = immutable({ ...template, question: 'Choose the orchard planting order', status: 'open' as const,
     outcome: 'Plant the pear trees first.', ask: null, note: null });
   return { row: { kind: 'item', key: item.id, item, status: 'open', ack: null, depth: 1, hasKids: false,
-    expanded: false, context: false, guides: [], later: false, hidden: false, segments: [{ text: item.question, hit: false }], matches: [],
+    expanded: false, context: false, guides: [], boxes: [], branch: 0, later: false, hidden: false, segments: [{ text: item.question, hit: false }], matches: [],
     replacedBy: null, relatedCount: 2, collapsed: null, delivery: null, badge: 'Open' },
   selected: false, focused: true, note: null, actions, unfolded: false,
   onUnfold: vi.fn(), remember: vi.fn(), onFocus: vi.fn(), onKeyDown: vi.fn(), onSelect: vi.fn(),
@@ -32,42 +30,29 @@ function topicProps(actions: readonly TopicAction[]): TopicRowProps {
 }
 
 describe('compact row actions', () => {
-  it('reads cached names only for visible Focus buttons without looking up display status', () => {
-    const session = structuredClone(demo) as Session;
-    session.items['1']!.short = 'Shared name';
-    session.items['2']!.short = 'Shared name';
-    const names = peekNames(immutable(session)), get = vi.spyOn(names, 'get'), lookup = vi.fn();
-    const props = itemProps([]), onFocusBranch = vi.fn();
-    const show = (parent: string | null, focus = true) => <ItemRefs.Provider value={{ lookup, onOpenItem: vi.fn() }}>
-      <ItemRow {...props} row={{ ...props.row, item: { ...props.row.item, parent } }} names={names} onFocusBranch={focus ? onFocusBranch : undefined} />
-    </ItemRefs.Provider>;
-    const mounted = render(show(null));
-    const label = names.get('1')!;
-    expect(label).not.toBe('Shared name');
-    fireEvent.click(within(mounted.container).getByRole('button', { name: `Focus on ${label}` }));
-    expect(onFocusBranch).toHaveBeenCalledWith('1');
-    get.mockClear();
-    mounted.rerender(show('2'));
-    expect(within(mounted.container).queryByRole('button', { name: /^Focus on/ })).toBeNull();
-    mounted.rerender(show(null, false));
-    expect(get).not.toHaveBeenCalled();
-    expect(lookup).not.toHaveBeenCalled();
-    get.mockRestore();
+  it('has no Focus button and no double-click Focus: the topic band and ⇧F own Focus (D9)', () => {
+    const props = itemProps([]), mounted = render(<ItemRow {...props} row={{ ...props.row, item: { ...props.row.item, parent: null } }} />);
+    expect(within(mounted.container).queryByRole('button', { name: /^(Focus on|Unfocus)/ })).toBeNull();
+    fireEvent.doubleClick(mounted.container.querySelector('.tree-icon')!);
+    expect(within(mounted.container).queryByRole('button', { name: /^(Focus on|Unfocus)/ })).toBeNull();
   });
 
-  it('turns the focused item’s Focus button into Unfocus in the same place, and it leaves Focus', () => {
-    const session = structuredClone(demo) as Session;
-    const names = peekNames(immutable(session)), props = itemProps([]), onFocusBranch = vi.fn(), label = names.get('1')!;
-    const mounted = render(<ItemRefs.Provider value={{ lookup: vi.fn(), onOpenItem: vi.fn() }}>
-      <ItemRow {...props} row={{ ...props.row, item: { ...props.row.item, parent: null } }} names={names} onFocusBranch={onFocusBranch} branchFocused />
-    </ItemRefs.Provider>);
-    const button = within(mounted.container).getByRole('button', { name: `Unfocus ${label}` });
-    expect(button.textContent).toBe('Unfocus');
-    expect(button.className).toBe('tree-focus-action');
-    expect(button.tabIndex).toBe(-1);
-    expect(within(mounted.container).queryByRole('button', { name: /^Focus on/ })).toBeNull();
-    fireEvent.click(button);
-    expect(onFocusBranch).toHaveBeenCalledWith(null);
+  it('draws a held Ack over the area left of the Ack slot, hides the Ack button, and Undo cancels it', () => {
+    const undo = vi.fn(), ack = vi.fn(), props = itemProps([{ title: 'Ack → Done', icon: 'ph ph-check', persistent: true, run: ack }]);
+    const { container, rerender } = render(<ItemRow {...props} />);
+    const before = container.querySelector('.tree-ack-slot')!;
+    expect(within(before as HTMLElement).getByRole('button', { name: 'Ack → Done' })).toBeTruthy();
+    expect(container.querySelector('.tree-acked')).toBeNull();
+    rerender(<ItemRow {...props} acked onUndoAck={undo} />);
+    const held = within(container).getByRole('status');
+    expect(held.textContent).toBe('Acked·Undo');
+    // The Ack slot keeps its place (empty), so the row never rewraps; the notice is inside the end cluster, drawn over it.
+    expect(container.querySelector('.tree-ack-slot')?.childElementCount).toBe(0);
+    expect(held.closest('.tree-end')).not.toBeNull();
+    fireEvent.click(within(held).getByRole('button', { name: /^Undo Ack of/ }));
+    expect(undo).toHaveBeenCalledWith(props.row.item.id);
+    expect(props.onSelect).not.toHaveBeenCalled();
+    expect(ack).not.toHaveBeenCalled();
   });
 
   it('keeps every item action in its existing order with the same names, tab behavior and callbacks', () => {

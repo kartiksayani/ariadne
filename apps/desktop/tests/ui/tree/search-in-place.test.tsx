@@ -10,7 +10,7 @@ import { NavigationStore } from '../../../src/state/navigation/store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { SessionActionControllers } from '../../../src/components/bindings/actions';
 import { TreeView } from '../../../src/ui/tree/TreeView';
-import { treeModel } from '../../../src/ui/tree/model';
+import { shimTree } from './shimTree';
 import { useMapSearch, type MapSearch, type MapSearchStatus } from '../../../src/ui/tree/mapSearch';
 import { notices } from '../../../src/ui/pages/notices';
 import { immutable } from '../../../src/data';
@@ -145,7 +145,7 @@ describe('the model under a search', () => {
     configure(transport);
     const session = immutable(transport.sessions.get(route.session_id)!);
     const view = immutable(transport.preferences.sessions.find(value => value.session.session_id === route.session_id)!);
-    const model = (search: string) => treeModel({ session, view, search, later: new Set(), collapsedTopics: new Set(), selectedId: null, revealId: null,
+    const model = (search: string) => shimTree({ session, view, search, later: new Set(), collapsedTopics: new Set(), selectedId: null, revealId: null,
       temporaryExpanded: [], presence: null, summaries: [], now: now() });
     const keys = (search: string) => model(search).rows.map(row => row.key);
     for (const search of ['receipt', 'decision', 'zzz', 'retry limits']) {

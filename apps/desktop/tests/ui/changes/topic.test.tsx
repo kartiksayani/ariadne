@@ -117,7 +117,7 @@ describe('topic brief and shared catch-up', () => {
       value.navigation.markItemSeen(route, 'updated-0', 2);
       value.navigation.markItemSeen(route, 'updated-1', 2);
     });
-    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
     const confirmed = value.transport.preferences.seen![0];
     expect(confirmed.topics).toEqual([{ topic_id: value.topic.id, at: later }]);
     await act(async () => { await value.navigation.opened.get(route)!.refresh(); });
@@ -140,7 +140,7 @@ describe('topic brief and shared catch-up', () => {
     expect(value.transport.preferences.seen![0].items).toHaveLength(0);
     fireEvent.click(within(brief).getByRole('button', { name: 'Undo' }));
     expect(screen.getByText('2 changes while you were away')).toBeTruthy();
-    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
     expect(value.transport.preferences.seen![0].items).toHaveLength(0);
   });
   it('commits the bulk shortcut after five seconds and never hides a change arriving during Undo', async () => {
@@ -154,7 +154,7 @@ describe('topic brief and shared catch-up', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
     expect(screen.getByText('2 changes while you were away')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Mark all seen' }));
-    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
     expect(value.transport.preferences.seen![0].items).toHaveLength(2);
   });
@@ -173,7 +173,7 @@ describe('topic brief and shared catch-up', () => {
     expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
     expect(screen.getByText('2 changes while you were away')).toBeTruthy();
-    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
     expect(value.transport.preferences.seen![0].items).toHaveLength(0);
   });
   it('catches up a folded topic when the last unseen item is read elsewhere', async () => {
@@ -214,7 +214,7 @@ describe('topic brief and shared catch-up', () => {
     value.rerender(value.element());
     expect(screen.getByRole('button', { name: 'Undo' })).toBeTruthy();
     expect(screen.getByText('1 change while you were away')).toBeTruthy();
-    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
     const confirmed = value.transport.preferences.seen![0];
     expect(confirmed.items).toEqual([{ item_id: 'updated-0', revision: 2 }]);
     expect(confirmed.topics).toEqual([]);

@@ -4,7 +4,9 @@ import type { SessionPreferences } from '../../../src/generated/core';
 import type { Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
 import { initialExpansion, normalizeSearch, sentenceRows } from '../../../src/selectors/tree/rows';
-import { chipsOf, toggleChip, topicCounts, treeModel } from '../../../src/ui/tree/model';
+import { chipsOf, toggleChip, topicCounts } from '../../../src/ui/tree/model';
+import { branchSlot } from '../../../src/ui/tree/branch';
+import { shimTree } from './shimTree';
 import { closedSessionQuestion, waitingOnOwner } from '../../../src/selectors/sessionClosed';
 import { displayStatus } from '../../../src/selectors/waiting/replied';
 
@@ -21,7 +23,7 @@ describe('saved status filter chips', () => {
     session.state = 'closed';
     if (state === 'archived') session.archived_at = session.updated_at;
     const frozen = immutable(session);
-    const project = () => treeModel({ session: frozen, view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
+    const project = () => shimTree({ session: frozen, view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
       selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) });
     expect(project().rows.some(row => row.kind === 'item' && row.item.id === '2')).toBe(true);
     expect(project().counts.waiting).toBe(0);
@@ -46,7 +48,7 @@ describe('saved status filter chips', () => {
     expect(closedSessionQuestion(frozen, item)).toBe(false);
     expect(waitingOnOwner(frozen, item)).toBe(false);
     preferences.filters.statuses = ['in_progress'];
-    const model = treeModel({ session: frozen, view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
+    const model = shimTree({ session: frozen, view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
       selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) });
     expect(model.rows.find(row => row.kind === 'item' && row.item.id === item.id)).toMatchObject({ status: 'sent', sessionClosed: false });
     expect(model.counts.waiting).toBe(0);
@@ -100,7 +102,7 @@ describe('saved topic and explicit filter folds', () => {
 describe('canonical sentence tree projection', () => {
   // Search in place (SPEC §6.9): a search marks matching questions and outcomes on the rows; it never scopes them.
   const matching = (session: ReturnType<typeof immutable<Session>>, search: string) =>
-    treeModel({ session, view: { ...view(seed()), expanded_item_ids: ['1'] }, search, later: new Set(), collapsedTopics: new Set(), selectedId: null,
+    shimTree({ session, view: { ...view(seed()), expanded_item_ids: ['1'] }, search, later: new Set(), collapsedTopics: new Set(), selectedId: null,
       revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse('2026-10-07T12:00:00Z') })
       .rows.flatMap(row => row.kind === 'item' && row.matches.length ? [row.item.id] : []);
   // Full-width "OFFICE", a precomposed "café", and "CAFE" with a combining acute accent.
@@ -116,7 +118,7 @@ describe('canonical sentence tree projection', () => {
     session.items['5']!.affects = ['1'];
     session.items['6']!.depends_on = ['1'];
     session.items['2']!.affects = ['1'];
-    const rows = treeModel({ session: immutable(session), view: preferences, search: '', later: new Set(),
+    const rows = shimTree({ session: immutable(session), view: preferences, search: '', later: new Set(),
       collapsedTopics: new Set(), selectedId: null, revealId: null, temporaryExpanded: [], presence: null,
       summaries: [], now: Date.parse('2026-10-07T12:00:00Z') }).rows;
     expect(rows.find(row => row.kind === 'item' && row.item.id === '1')).toMatchObject({ relatedCount: 5 });
@@ -294,7 +296,7 @@ describe('continuous Map rails', () => {
   const model = (session: Session, selectedId: string | null = null, collapsed = false) => {
     const preferences = view(session);
     preferences.expanded_item_ids = collapsed ? [] : ['1', '1.1'];
-    return treeModel({ session: immutable(session), view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
+    return shimTree({ session: immutable(session), view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
       selectedId, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) }).rows;
   };
   it('joins the parent bullet to the last direct child, across intervening descendants', () => {
@@ -302,37 +304,38 @@ describe('continuous Map rails', () => {
     session.items['1.2'] = { ...session.items['1.1']!, id: '1.2', ordinal: 2 };
     session.items['1.1.1'] = { ...session.items['1.1']!, id: '1.1.1', parent: '1.1', ordinal: 1 };
     const rows = model(session), get = (key: string) => rows.find(row => row.key === key)!;
-    expect(get('1').guides).toContainEqual({ kind: 'line', x: 44, width: 24, on: false, fromBullet: true, toBullet: false });
-    expect(get('1.1').guides).toContainEqual({ kind: 'line', x: 44, width: 24, on: false, fromBullet: false, toBullet: false });
-    expect(get('1.1.1').guides).toContainEqual({ kind: 'line', x: 44, width: 24, on: false, fromBullet: false, toBullet: false });
-    expect(get('1.2').guides).toContainEqual({ kind: 'line', x: 44, width: 24, on: false, fromBullet: false, toBullet: true });
-    expect(get('1.2').guides).toContainEqual({ kind: 'elbow', x: 44, width: 24, on: false });
-    expect(get('2').guides.some(guide => guide.x === 44)).toBe(false);
+    expect(get('1').guides).toContainEqual({ kind: 'line', x: 42, width: 22, on: false, fromBullet: true, toBullet: false });
+    expect(get('1.1').guides).toContainEqual({ kind: 'line', x: 42, width: 22, on: false, fromBullet: false, toBullet: false });
+    expect(get('1.1.1').guides).toContainEqual({ kind: 'line', x: 42, width: 22, on: false, fromBullet: false, toBullet: false });
+    expect(get('1.2').guides).toContainEqual({ kind: 'line', x: 42, width: 22, on: false, fromBullet: false, toBullet: true });
+    expect(get('1.2').guides).toContainEqual({ kind: 'elbow', x: 42, width: 22, on: false });
+    expect(get('2').guides.some(guide => guide.x === 42)).toBe(false);
     const topic = get(session.items['1']!.topic_id);
     expect(topic.guides.some(guide => guide.fromBullet && guide.x === 20)).toBe(true);
   });
-  it('accents only the path to the selection, with decorative hues on roots only', () => {
+  it('accents only the path to the selection, and every row of a branch shares its top item’s hue slot', () => {
     const session = seed(), rows = model(session, '1.1');
     const root = rows.find(row => row.key === '1')!, child = rows.find(row => row.key === '1.1')!;
-    expect(root.guides.some(guide => guide.on && guide.fromBullet && guide.x === 44)).toBe(true);
-    expect(child.guides.some(guide => guide.on && guide.toBullet && guide.x === 44)).toBe(true);
+    expect(root.guides.some(guide => guide.on && guide.fromBullet && guide.x === 42)).toBe(true);
+    expect(child.guides.some(guide => guide.on && guide.toBullet && guide.x === 42)).toBe(true);
     expect(rows.find(row => row.key === '2')!.guides.some(guide => guide.on)).toBe(false);
-    for (const row of rows) if (row.kind === 'item') expect(row.hue !== undefined).toBe(row.depth === 1);
-    expect(model(session, '2').find(row => row.key === '1')).toMatchObject({ hue: root.kind === 'item' ? root.hue : undefined });
+    expect(root).toMatchObject({ branch: branchSlot(session.items['1']!.ordinal) });
+    expect(child).toMatchObject({ branch: branchSlot(session.items['1']!.ordinal) });
+    expect(model(session, '2').find(row => row.key === '1')).toMatchObject({ branch: root.kind === 'item' ? root.branch : undefined });
   });
   it('removes child stems when folded and retains continuous rails through hidden groups and filters', () => {
     const session = seed();
-    expect(model(session, null, true).find(row => row.key === '1')!.guides.some(guide => guide.x === 44)).toBe(false);
+    expect(model(session, null, true).find(row => row.key === '1')!.guides.some(guide => guide.x === 42)).toBe(false);
     const preferences = view(session); preferences.expanded_item_ids = ['1']; preferences.hidden_item_ids = ['1.1'];
-    const rows = treeModel({ session: immutable(session), view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
+    const rows = shimTree({ session: immutable(session), view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
       selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) }).rows;
-    const hidden = rows.find(row => row.kind === 'hidden')!;
-    expect(hidden.guides).toContainEqual({ kind: 'line', x: 44, width: 24, on: false, fromBullet: false, toBullet: true });
+    const hidden = rows.find(row => row.kind === 'strip')!;
+    expect(hidden.guides).toContainEqual({ kind: 'line', x: 42, width: 22, on: false, fromBullet: false, toBullet: true });
     // A status filter with the hidden selection revealed keeps the rail from its parent.
     preferences.filters.statuses = ['open'];
-    const filtered = treeModel({ session: immutable(session), view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
+    const filtered = shimTree({ session: immutable(session), view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
       selectedId: '1.1', revealId: '1.1', temporaryExpanded: ['1'], presence: null, summaries: [], now: Date.parse(session.updated_at) }).rows;
-    expect(filtered.find(row => row.key === '1')!.guides.some(guide => guide.fromBullet && guide.x === 44)).toBe(true);
+    expect(filtered.find(row => row.key === '1')!.guides.some(guide => guide.fromBullet && guide.x === 42)).toBe(true);
   });
   it('builds all rails for 2,000 items without DOM measurements', () => {
     const session = seed(), base = session.items['1']!; session.items = {};

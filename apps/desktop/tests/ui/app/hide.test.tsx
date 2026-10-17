@@ -7,7 +7,7 @@ import { AppTransport, route } from './transport';
 afterEach(cleanup);
 const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`);
 const saved = (transport: AppTransport) => transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!;
-const group = (count = 1) => screen.getByRole('treeitem', { name: new RegExp(`^${count} items? hidden`) });
+const group = (count = 1) => screen.getByRole('treeitem', { name: new RegExp(`^${count} hidden`) });
 const filterButton = () => {
   if (!screen.queryByRole('group', { name: 'Filter items' })) fireEvent.click(screen.getByRole('button', { name: 'Filter by status' }));
   return within(screen.getByRole('group', { name: 'Filter items' })).getByRole('button', { name: /^Filter/ });
@@ -176,7 +176,7 @@ describe('owner hide and unhide actions', () => {
     row('1')!.focus(); fireEvent.keyDown(row('1')!, { key: 'h' });
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([]));
     expect(row('1')!.classList.contains('tree-item-hidden')).toBe(false); expect(row('1.1')).not.toBeNull();
-    expect(screen.queryByRole('treeitem', { name: /^1 item hidden/ })).toBeNull();
+    expect(screen.queryByRole('treeitem', { name: /^1 hidden/ })).toBeNull();
     expect(JSON.stringify(transport.sessions.get(route.session_id))).toBe(sessionBefore);
     expect(transport.mutations.every(request => request.command.command === 'preferences_patch')).toBe(true);
   });
@@ -185,7 +185,7 @@ describe('owner hide and unhide actions', () => {
     const { transport } = await mount(); await hide('1.1');
     expect(row('1')).not.toBeNull(); expect(group().getAttribute('aria-level')).toBe('3');
     await hide('1'); await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['1.1', '1']));
-    expect(screen.getAllByRole('treeitem', { name: /^1 item hidden/ })).toHaveLength(1);
+    expect(screen.getAllByRole('treeitem', { name: /^1 hidden/ })).toHaveLength(1);
     fireEvent.click(group()); fireEvent.click(within(row('1')!).getByRole('button', { name: 'Unhide (h)' }));
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['1.1'])); await ready();
     expect(row('1')!.classList.contains('tree-item-hidden')).toBe(false); expect(row('1.1')).toBeNull();
@@ -213,7 +213,7 @@ describe('owner hide and unhide actions', () => {
     const { transport } = await mount(); const waitingBefore = chip('Waiting on me').textContent;
     await hide('2');
     expect(chip('Waiting on me').textContent).toBe(waitingBefore);
-    expect(within(group()).getByText('waiting on you')).toBeTruthy();
+    expect(within(group()).getByText('1 hidden · 1 waiting')).toBeTruthy();
     const dock = screen.getByRole('region', { name: 'Answer dock' }), current = () => dock.querySelector('.answer-dock-current [data-owner-input="2"]');
     fireEvent.click(within(dock).getByRole('button', { name: /^\d+ (more )?waiting$/ }));
     await waitFor(() => expect(dock.querySelector('.answer-dock-current')).not.toBeNull());

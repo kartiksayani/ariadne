@@ -34,10 +34,11 @@ export function hitSegments(text: string, terms: readonly string[]): readonly Se
 }
 
 const plural = (count: number, one: string, many: string) => count === 1 ? one : many;
-/** "Also matching: 1 in a hidden item, 4 inside collapsed items." or null when every match shows. */
-export function alsoMatching(hidden: number, collapsed: number): string | null {
+/** "Also matching: 1 in a hidden item, 4 inside collapsed items, 2 outside the focus." or null when every match shows. */
+export function alsoMatching(hidden: number, collapsed: number, outsideFocus = 0): string | null {
   const parts = [hidden ? `${hidden} ${plural(hidden, 'in a hidden item', 'in hidden items')}` : '',
-    collapsed ? `${collapsed} ${plural(collapsed, 'inside a collapsed item', 'inside collapsed items')}` : ''].filter(Boolean);
+    collapsed ? `${collapsed} ${plural(collapsed, 'inside a collapsed item', 'inside collapsed items')}` : '',
+    outsideFocus ? `${outsideFocus} outside the focus` : ''].filter(Boolean);
   return parts.length ? `Also matching: ${parts.join(', ')}.` : null;
 }
 

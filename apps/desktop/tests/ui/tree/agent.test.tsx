@@ -3,7 +3,8 @@ import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { SessionPreferences } from '../../../src/generated/core';
 import type { ItemStatus, Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
-import { oldestWaiting, treeModel, type ItemRow, type TopicRow } from '../../../src/ui/tree/model';
+import { oldestWaiting, type ItemRow, type TopicRow } from '../../../src/ui/tree/model';
+import { shimTree } from './shimTree';
 import { sessionGraph } from '../../../src/ui/graph/model';
 import { graphSession, preferences } from '../graph/fixture';
 
@@ -19,7 +20,7 @@ function replied(): Session {
   input.target = { ...input.target, item_id: '2' }; input.kind = 'reply';
   return session;
 }
-const model = (session: Session, statuses: ItemStatus[] = []) => treeModel({ session: immutable(session), view: view(session, statuses),
+const model = (session: Session, statuses: ItemStatus[] = []) => shimTree({ session: immutable(session), view: view(session, statuses),
   search: '', later: new Set(), collapsedTopics: new Set(), selectedId: null, revealId: null, temporaryExpanded: [], presence: null,
   summaries: [], now: Date.parse(session.created_at) });
 const row = (tree: ReturnType<typeof model>, itemId: string) => tree.rows.find((value): value is ItemRow => value.kind === 'item' && value.item.id === itemId);
@@ -28,7 +29,7 @@ const topic = (tree: ReturnType<typeof model>) => tree.rows.find((value): value 
 describe('an archived topic in the tree counts', () => {
   it('keeps a saved full status set equivalent to All, including collapsed descendants and topics', () => {
     const session = structuredClone(demo) as Session;
-    const project = (statuses: ItemStatus[]) => treeModel({ session: immutable(session), view: view(session, statuses),
+    const project = (statuses: ItemStatus[]) => shimTree({ session: immutable(session), view: view(session, statuses),
       search: '', later: new Set(), collapsedTopics: new Set([session.items['8']!.topic_id]), selectedId: null, revealId: null,
       temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.created_at) });
     const all = project([]), full = project(['done', 'open', 'waiting_on_me', 'replaced', 'decided', 'in_progress', 'dropped', 'open']);

@@ -145,8 +145,8 @@ describe('composed item navigation', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(mark).toHaveBeenCalledWith(route, 'updated-0', 2);
     await click(screen.getByRole('button', { name: 'Undo' }));
-    expect(within(treeRow('updated-0')).queryByRole('img', { name: 'Changed since you read it' })).toBeNull();
-    expect(within(treeRow('updated-1')).getByRole('img', { name: 'Changed since you read it' })).toBeTruthy();
+    expect(within(treeRow('updated-0')).queryByRole('img', { name: 'Changed' })).toBeNull();
+    expect(within(treeRow('updated-1')).getByRole('img', { name: 'Changed' })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Since you were here · 1 change/ })).toBeTruthy();
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(transport.preferences.seen![0].items).toEqual([{ item_id: 'updated-0', revision: 2 }]);
@@ -312,7 +312,7 @@ describe('composed map reveal scrolling', () => {
     await act(async () => { fireEvent.change(search, { target: { value: `${saved.filters.search} ` } }); });
     await act(async () => { fireEvent.change(search, { target: { value: saved.filters.search } }); });
     if (cause !== 'status') for (let toggle = 0; toggle < 2; toggle++) {
-      await click(screen.getByRole('treeitem', { name: /^1 item hidden/ }));
+      await click(screen.getByRole('treeitem', { name: /^1 hidden/ }));
     }
     await click(control('Graph'));
     const target = () => document.querySelector<HTMLElement>('.graph-node[data-item-id="1.1"]');

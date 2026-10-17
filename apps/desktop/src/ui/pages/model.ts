@@ -12,7 +12,7 @@ import { sessionEnded, waitingOnOwner } from '../../selectors/sessionClosed';
 export type VisualStatus = 'open' | 'waiting' | 'progress' | 'decided' | 'done' | 'dropped' | 'replaced';
 export const ICON: Readonly<Record<VisualStatus, string>> = {
   open: 'ph ph-circle', waiting: 'ph-fill ph-question', progress: 'ph ph-circle-half', decided: 'ph ph-check-circle',
-  done: 'ph-fill ph-check-circle', dropped: 'ph ph-x-circle', replaced: 'ph ph-arrow-circle-right',
+  done: 'ph-fill ph-check-circle', dropped: 'ph ph-x-circle', replaced: 'ph ph-arrows-clockwise',
 };
 export const visualStatus = (status: ItemStatus): VisualStatus => status === 'waiting_on_me' ? 'waiting' : status === 'in_progress' ? 'progress' : status;
 

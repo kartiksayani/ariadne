@@ -554,7 +554,9 @@ describe('session tree rows', () => {
     await mount({ configure: transport => { transport.sessions.get(route.session_id)!.state = 'closed'; } });
     const question = row('2');
     expect(within(question).getByText('Session closed').title).toBe(sessionClosedReason);
-    expect(within(question).getByText('Waiting on me')).toBeTruthy();
+    // The chip takes the status badge's slot (the cluster never widens); the row's status icon still says what it is.
+    expect(question.querySelector('.tree-end-badge')!.textContent).toBe('Session closed');
+    expect(within(question).queryByText('Waiting on me')).toBeNull();
     expect(screen.queryByText(/\d+ waiting on you/)).toBeNull();
     fireEvent.click(filterButton());
     expect(screen.getByRole('menuitemcheckbox', { name: /^Waiting on me/ }).textContent).not.toMatch(/[1-9]/);
@@ -844,7 +846,7 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' }));
     await waitFor(() => expect(viewOf(transport).expanded_item_ids).not.toContain('1'));
     expect(ids()).not.toContain('1.1');
-    expect(row('1').querySelector('.tree-collapsed')?.textContent).toBe('1 open inside');
+    expect(row('1').querySelector('.tree-collapsed')?.textContent).toBe('1 inside');
     row('1').focus(); fireEvent.keyDown(row('1'), { key: 'ArrowRight' });
     await waitFor(() => expect(ids()).toContain('1.1'));
     expect(viewOf(transport).expanded_item_ids).toContain('1');
@@ -948,7 +950,7 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     expect(cancels(transport)).toHaveLength(0);
   });
   it('offers the row actions for the item status and routes them to the workspace', async () => {
-    const { calls, transport } = await mount();
+    const { calls } = await mount();
     fireEvent.click(within(row('1.1')).getByRole('button', { name: 'Bring it up (b)' }));
     fireEvent.click(within(row('1.1')).getByRole('button', { name: 'Later (z)' }));
     fireEvent.click(within(row('5')).getByRole('button', { name: 'Back to Open (o)' }));
@@ -956,9 +958,21 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     fireEvent.click(within(row('1.1')).getByRole('button', { name: 'Remove (⌫)' }));
     expect(calls.acts.map(([intent, target]) => `${intent}:${target.item_id}`)).toEqual(['bring:1.1', 'later:1.1', 'reopen:5', 'followup:5']);
     expect(calls.removed).toBe(1);
-    // A delivery on its way still permits owner-only Hide and Remove.
-    expect(within(row('3')).getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual([`Focus on ${shortLabel(transport.sessions.get(route.session_id)!.items['3']!)}`, 'Hide (h)', 'Remove (⌫)']);
-    fireEvent.keyDown(row('1.1'), { key: 'b' }); expect(calls.acts).toHaveLength(4);
+    // The hover bar always has six slots (D4). A delivery on its way greys the agent's four and says why; Hide and Remove stay.
+    // The slot that would apply says a message is on its way; the others say the status they are not for.
+    expect(within(row('3')).getAllByRole('button').map(button => button.getAttribute('aria-label')))
+      .toEqual(['Add a note: a message is on its way', 'Bring it up: not for In progress items', 'Later: not for In progress items', 'Drop: not for In progress items', 'Hide (h)', 'Remove (⌫)']);
+    for (const name of [/^Add a note/, /^Bring it up/, /^Later/, /^Drop/]) expect((within(row('3')).getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);    fireEvent.keyDown(row('1.1'), { key: 'b' }); expect(calls.acts).toHaveLength(4);
+  });
+  it('titles every greyed slot of an open row "a message is on its way", and a parked row\'s Unpark too', async () => {
+    // Item 4 is open with a queued drop on its way.
+    await mount();
+    expect(within(row('4')).getAllByRole('button').map(button => button.getAttribute('aria-label')))
+      .toEqual(['Reply: a message is on its way', 'Bring it up: a message is on its way', 'Later: a message is on its way', 'Drop: a message is on its way', 'Hide (h)', 'Remove (⌫)']);
+    cleanup();
+    await mount({ configure: transport => { transport.preferences.later = [{ ...route, item_id: '4' }]; } });
+    expect(within(row('4')).getAllByRole('button').map(button => button.getAttribute('aria-label')).slice(0, 4))
+      .toEqual(['Reply: a message is on its way', 'Bring it up: a message is on its way', 'Unpark: a message is on its way', 'Drop: a message is on its way']);
   });
 });
 
@@ -2075,11 +2089,11 @@ describe('item details in the tree', () => {
   const longOutcome = (transport: AppTransport) => { transport.sessions.get(route.session_id)!.items['1']!.outcome = long; };
   const more = (id: string) => within(row(id)).queryByRole('button', { name: /^Show (more|less)$/ });
 
-  it('folds a long body to four lines with Show more and Show less, and none for short text', async () => {
+  it('folds a long body to three lines with Show more and Show less, and none for short text', async () => {
     measure();
     const { calls } = await mount({ configure: longOutcome });
-    const preview = row('1').querySelector<HTMLElement>('.tree-preview')!;
-    expect(preview.style.getPropertyValue('--tree-clamp')).toBe('4');
+    const preview = row('1').querySelector<HTMLElement>('.tree-preview:not(.tree-question-block)')!;
+    expect(preview.style.getPropertyValue('--tree-clamp')).toBe('3');
     expect(preview.hasAttribute('data-open')).toBe(false);
     // Short details and titles have no control.
     expect(more('5')).toBeNull(); expect(more('3')).toBeNull();
@@ -2098,25 +2112,47 @@ describe('item details in the tree', () => {
     expect(more('1')!.textContent).toBe('Show less');
     fireEvent.click(more('1')!);
     expect(more('1')!.textContent).toBe('Show more');
-    expect(row('1').querySelector('.tree-preview')!.hasAttribute('data-open')).toBe(false);
+    expect(row('1').querySelector('.tree-preview:not(.tree-question-block)')!.hasAttribute('data-open')).toBe(false);
   });
 
-  it('never clamps a title and keeps status beside it without item numbers', async () => {
+  it('unfolds a clamped row when a search step lands on it (D6), and only that row', async () => {
+    measure();
+    const status = vi.fn();
+    await mount({ configure: transport => {
+      longOutcome(transport);
+      transport.sessions.get(route.session_id)!.items['1']!.outcome = `${long}\nThe zebra is on the last line.`;
+    }, props: { query: 'zebra', onSearchStatus: status } });
+    expect(more('1')!.textContent).toBe('Show more');
+    const { onNext } = status.mock.calls.at(-1)![0] as { onNext: () => void };
+    act(() => { onNext(); });
+    expect(more('1')!.textContent).toBe('Show less');
+    expect(row('1').querySelector('.tree-preview:not(.tree-question-block)')!.hasAttribute('data-open')).toBe(true);
+    // Nothing is selected or opened by the step.
+    expect(row('1').getAttribute('aria-selected')).toBe('false');
+    // The unfold flag is saved per item; fold it again so the next test starts folded.
+    fireEvent.click(more('1')!);
+  });
+
+  it('folds a long title at three lines with its own Show more and keeps status beside it without item numbers', async () => {
     measure();
     await mount({ configure: transport => {
       const item = transport.sessions.get(route.session_id)!.items['4']!;
       item.question = 'A long title that needs more room. '.repeat(15); item.outcome = null;
     } });
-    expect(more('4')).toBeNull();
+    // A short title (row 3) has no control; a long one folds, and its one flag also governs the details.
+    expect(more('3')).toBeNull();
+    expect(more('4')!.textContent).toBe('Show more');
+    expect(row('4').querySelector('.tree-question-block')!.hasAttribute('data-clamped')).toBe(true);
     expect(row('4').querySelector('.tree-question.tree-clamp')).toBeNull();
     // The status sits in the end cluster's reserved badge slot, beside the title's first line, not in the heading.
     expect(row('4').querySelector('.tree-end > .tree-end-badge')?.textContent).toBe('Open');
-    expect(row('4').querySelector('.tree-heading')?.textContent).toBe(row('4').querySelector('.tree-question')?.textContent);
+    expect(row('4').querySelector('.tree-question')?.textContent).toBe('A long title that needs more room. '.repeat(15));
+    expect(row('4').querySelector('.tree-heading')!.contains(row('4').querySelector('.tree-question'))).toBe(true);
     expect(document.querySelector('.tree-id')).toBeNull();
     expect(row('4').textContent).not.toMatch(/#4|^4/);
   });
 
-  it('lets Show more and Show less steer after a deliberate reveal instead of restoring its old anchor', async () => {
+  it('holds the reading row when Show more and Show less change what is above it, after a deliberate reveal, instead of restoring its old anchor', async () => {
     measure();
     const observers: { run: () => void; targets: Set<Element> }[] = [];
     vi.stubGlobal('ResizeObserver', class {
@@ -2148,32 +2184,33 @@ describe('item details in the tree', () => {
       const scroll = box.scrollTop;
       const deliver = () => act(() => observers.filter(observer => !observer.targets.has(box)
         && [...observer.targets].some(target => target.matches('.tree-rows'))).forEach(observer => observer.run()));
+      // Show more above the reading row grows what is above it; the reading row (4) keeps its place and the Map scrolls by the growth.
       fireEvent.click(more('3')!);
       deliver();
-      expect(box.scrollTop).toBe(scroll);
-      expect(row('4').getBoundingClientRect().top).toBe(240);
+      expect(box.scrollTop).toBe(scroll + 200);
+      expect(row('4').getBoundingClientRect().top).toBe(40);
       fireEvent.click(more('3')!);
       deliver();
-      expect(row('3').getBoundingClientRect().top).toBe(20);
-      expect(row('4').getBoundingClientRect().top).toBe(120);
+      expect(row('4').getBoundingClientRect().top).toBe(40);
     } finally { vi.unstubAllGlobals(); }
   });
 
-  it.each([4, 5, 6, 7, 8])('clamps %s body lines only if at least three would be hidden', async lines => {
-    measure(node => node.parentElement?.closest('[data-item-id="4"]') ? lines : 1);
+  it.each([2, 3, 4, 5, 8])('clamps %s body lines only if at least one would be hidden', async lines => {
+    measure(node => node.parentElement?.closest('[data-item-id="4"] .tree-outcome') ? lines : 1);
     await mount({ configure: transport => { transport.sessions.get(route.session_id)!.items['4']!.outcome = 'Body with a measured height.'; } });
-    expect(!!more('4')).toBe(lines >= 7);
-    expect(row('4').querySelector('.tree-preview')!.hasAttribute('data-clamped')).toBe(lines >= 7);
-    if (lines >= 7) {
+    const details = () => row('4').querySelector('.tree-preview:not(.tree-question-block)')!;
+    expect(!!more('4')).toBe(lines >= 4);
+    expect(details().hasAttribute('data-clamped')).toBe(lines >= 4);
+    if (lines >= 4) {
       fireEvent.click(more('4')!);
-      expect(row('4').querySelector('.tree-preview')!.hasAttribute('data-clamped')).toBe(false);
+      expect(details().hasAttribute('data-clamped')).toBe(false);
       fireEvent.click(more('4')!);
-      expect(row('4').querySelector('.tree-preview')!.hasAttribute('data-clamped')).toBe(true);
+      expect(details().hasAttribute('data-clamped')).toBe(true);
     }
   });
 
-  it('remeasures real lines and the complete fourth-line boundary after the clipped text resizes', async () => {
-    let line = 21, lines = 7;
+  it('remeasures real lines and the complete third-line boundary after the clipped text resizes', async () => {
+    let line = 21, lines = 4;
     const observers: { run: () => void; targets: Set<Element> }[] = [];
     vi.stubGlobal('ResizeObserver', class {
       targets = new Set<Element>();
@@ -2181,14 +2218,14 @@ describe('item details in the tree', () => {
       observe(target: Element) { this.targets.add(target); }
       disconnect() { this.targets.clear(); }
     });
-    measure(node => node.parentElement?.closest('[data-item-id="4"]') ? lines : 1, () => line);
+    measure(node => node.parentElement?.closest('[data-item-id="4"] .tree-outcome') ? lines : 1, () => line);
     try {
       await mount({ configure: transport => { transport.sessions.get(route.session_id)!.items['4']!.outcome = 'Body with a measured height.'; } });
-      const excerpt = row('4').querySelector('.tree-clamp')!;
+      const excerpt = row('4').querySelector('.tree-outcome .tree-clamp')!;
       expect(more('4')).not.toBeNull();
-      lines = 6; line = 25.2; act(() => observers.find(observer => observer.targets.has(excerpt))!.run());
+      lines = 3; line = 25.2; act(() => observers.find(observer => observer.targets.has(excerpt))!.run());
       expect(more('4')).toBeNull();
-      expect(parseFloat(row('4').querySelector<HTMLElement>('.tree-preview')!.style.getPropertyValue('--tree-clamp-height'))).toBeCloseTo(100.8);
+      expect(parseFloat(row('4').querySelector<HTMLElement>('.tree-preview:not(.tree-question-block)')!.style.getPropertyValue('--tree-clamp-height'))).toBeCloseTo(75.6);
       const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
       expect(css).toContain('--tree-preview-line: calc(21px * var(--text-scale))');
       expect(css).toContain('max-height: var(--tree-clamp-height)');
@@ -2221,7 +2258,7 @@ describe('item details in the tree', () => {
     expect(more('1')!.textContent).toBe('Show less');
   });
 
-  it('tabs from a top-level row to its preview link and Show more while skipping the Focus action', async () => {
+  it('tabs from a top-level row to its preview link and Show more while skipping the hover bar', async () => {
     measure();
     await mount({ configure: transport => { transport.sessions.get(route.session_id)!.items['1']!.outcome = `[Read the evidence](https://example.com)\n${long}`; } });
     const link = within(row('1')).getByRole('link', { name: 'Read the evidence' });
@@ -2234,9 +2271,9 @@ describe('item details in the tree', () => {
     await userEvent.tab();
     expect(document.activeElement).toBe(more('1'));
     await userEvent.tab();
-    const focus = within(row('1')).getByRole('button', { name: /^Focus on / });
-    expect(focus.tabIndex).toBe(-1);
-    expect(document.activeElement).not.toBe(focus);
+    // The hover bar's buttons are never tab stops (only Ack is).
+    expect(document.activeElement?.closest('.tree-actions')).toBeNull();
+    for (const button of row('1').querySelectorAll<HTMLButtonElement>('.tree-actions button')) expect(button.tabIndex).toBe(-1);
   });
 
   it('preserves full Markdown structure and agent-written item links without selecting their row', async () => {
@@ -2264,11 +2301,14 @@ describe('item details in the tree', () => {
     expect(groups[1]!.lastElementChild).toBe(row('8'));
     expect(row('1').classList.contains('tree-item-root')).toBe(true);
     expect(row('1.1').classList.contains('tree-item-child')).toBe(true);
-    expect(row('1.1').querySelector('.tree-elbow')).not.toBeNull();
+    // Each row sits in one box slice per level: a child inside its top item's box and its own, the tint carried by the branch.
+    const slices = (id: string) => [...row(id).querySelectorAll<HTMLElement>('.tree-box')].map(box => `${box.dataset.step}${box.hasAttribute('data-first') ? 'f' : ''}`);
+    expect(slices('1')).toEqual(['1f']);
+    expect(slices('1.1')).toEqual(['1', '2f']);
+    expect(row('1.1').dataset.branch).toBe(row('1').dataset.branch);
+    expect(row('1.1').style.getPropertyValue('--depth')).toBe('2');
     const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
     expect(css).toMatch(/\.tree-topic\s*\{[^}]*position: sticky;[^}]*top: 0;[^}]*background: var\(--a-side\)/s);
-    expect(css).toMatch(/\.tree-item\s*\{[^}]*padding-top: 12px;[^}]*padding-bottom: 14px;[^}]*border-bottom: 1px solid var\(--color-divider\)/s);
-    expect(css).toMatch(/\.tree-item-root\s*\{[^}]*padding-top: 20px/s);
     expect(css).toMatch(/scroll-padding-top: var\(--tree-header-height, 0\)/);
   });
 

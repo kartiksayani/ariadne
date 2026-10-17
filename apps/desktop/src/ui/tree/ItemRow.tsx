@@ -13,19 +13,22 @@ import { ItemReference, Markdown, MarkdownHighlight } from '../shared/MarkdownTe
 import { shortLabel } from '../shared/short';
 import { StatusBadge } from '../shared/StatusBadge';
 import { SessionClosedChip } from '../shared/SessionClosedChip';
-import { closed, outcomeShown, visual, type ChangeMarker, type ItemRow as Row } from './model';
+import { closed, outcomeShown, visual, type ChangeMarker as MarkerKind, type ItemRow as Row } from './model';
 import { useMapSearch } from './mapSearch';
 import { measurePreviewLines } from './clamp';
 import { Guides } from './Guides';
+import { Boxes, branchStyle } from './BoxSlices';
 import { Strip } from './Strip';
+import { ChangeMarker } from '../changes/ChangeMarker';
 
 export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly disabled?: boolean; readonly persistent?: boolean }
 
 const neutral = (percent: number) => `color-mix(in srgb, var(--color-text) ${percent}%, transparent)`;
 
-/** Lines of an item's preview before "Show more" folds the rest away. */
-const CLAMP_LINES = 4;
-const MIN_HIDDEN_LINES = 3;
+/** Lines of an item's question or preview before "Show more" folds the rest away. */
+const CLAMP_LINES = 3;
+/** Folding must hide at least this many lines; a text one line over is shown whole. */
+const MIN_HIDDEN_LINES = 1;
 
 interface Preview { readonly node: ReactNode; /** The long text the clamp applies to, if any. */ readonly text: string | null }
 
@@ -63,13 +66,17 @@ function delivery(row: Row, fix: ReactNode): ReactNode {
   return <div className="tree-line tree-delivery" style={{ color: value.color }}><i className={value.icon} /><span>{value.text}</span></div>;
 }
 
-/** Clamp the body only when folding hides at least three lines. */
-function PreviewBlock({ value, open, onToggle }: { value: Preview | null; open: boolean; onToggle: () => void }) {
+/**
+ * Clamp a text block (the question, or the details under it) only when folding hides at least MIN_HIDDEN_LINES lines.
+ * The block holds one `.tree-clamp` that is measured; the item's one unfold flag opens every block of the row together.
+ */
+function ClampBlock({ text, open, onToggle, className = 'tree-preview', children }: {
+  text: string | null | undefined; open: boolean; onToggle: () => void; className?: string; children: ReactNode;
+}) {
   const fonts = useContext(TreeFonts);
   const box = useRef<HTMLDivElement>(null);
   const [clamp, setClamp] = useState({ lines: 0, height: 0 });
   const long = clamp.lines >= CLAMP_LINES + MIN_HIDDEN_LINES;
-  const text = value?.text;
   const measure = useCallback(() => {
     const excerpt = text == null ? null : box.current?.querySelector<HTMLElement>('.tree-clamp');
     const next = excerpt ? measurePreviewLines(excerpt, CLAMP_LINES) : { lines: 0, height: 0 };
@@ -84,10 +91,10 @@ function PreviewBlock({ value, open, onToggle }: { value: Preview | null; open: 
     if (content) observer?.observe(content);
     return () => { observer?.disconnect(); };
   }, [text, measure]);
-  return <div ref={box} className="tree-preview" data-open={open || undefined} data-clamped={long && !open || undefined}
+  return <div ref={box} className={className} data-open={open || undefined} data-clamped={long && !open || undefined}
     style={{ '--tree-clamp': CLAMP_LINES, '--tree-clamp-height': `${clamp.height}px` } as CSSProperties}
     onFocus={event => { if (long && !open && event.target.closest('.tree-clamp') && event.target.matches(':focus-visible')) onToggle(); }}>
-    {value?.node}
+    {children}
     {long && <button type="button" className="tree-more" aria-expanded={open}
       onClick={event => { event.stopPropagation(); onToggle(); }}>{open ? 'Show less' : 'Show more'}</button>}
   </div>;
@@ -97,7 +104,7 @@ export interface ItemRowProps {
   readonly row: Row;
   readonly selected: boolean;
   readonly focused: boolean;
-  readonly changeMarker?: ChangeMarker;
+  readonly changeMarker?: MarkerKind;
   /** The last N target keeps its outline after its brief arrival pulse. */
   readonly nextUnseen?: boolean;
   readonly nextUnseenPulse?: boolean;
@@ -108,7 +115,7 @@ export interface ItemRowProps {
   readonly actions: readonly RowAction[];
   /** A stopped delivery's inline fix (ui/answer/StuckNote); it takes the delivery line's place. */
   readonly fix?: ReactNode;
-  /** The long preview is shown in full ("Show less" offered) instead of folded to four lines. */
+  /** The long preview is shown in full ("Show less" offered) instead of folded to three lines. */
   readonly unfolded: boolean;
   readonly onUnfold: (id: string) => void;
   readonly remember: (key: string, element: HTMLDivElement | null) => void;
@@ -116,16 +123,14 @@ export interface ItemRowProps {
   readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
   readonly onSelect: (id: string) => void;
   readonly onToggle: (id: string) => void;
-  /** Enters Focus on a top-level item; null leaves it. */
-  readonly onFocusBranch?: (id: string | null) => void;
-  /** This top-level item is the one Focus is on: its button reads Unfocus. */
-  readonly branchFocused?: boolean;
-  readonly names?: ReadonlyMap<string, string>;
+  /** The item's Ack sits in its 6 s hold: the row shows "✓ Acked · Undo" over the area left of the Ack slot (D11). */
+  readonly acked?: boolean;
+  readonly onUndoAck?: (id: string) => void;
   readonly onPeekHover?: (id: string, event: MouseEvent<HTMLDivElement>) => void;
   readonly onPeekLeave?: () => void;
 }
 
-export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, note, actions, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, onFocusBranch, branchFocused = false, names, onPeekHover, onPeekLeave }: ItemRowProps) {
+export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, nextUnseenPulse, disabled = false, closedReason, note, actions, fix, unfolded, onUnfold, remember, onFocus, onKeyDown, onSelect, onToggle, acked = false, onUndoAck, onPeekHover, onPeekLeave }: ItemRowProps) {
   const item = row.item, status = visual(row.status);
   const details = preview(row);
   const muted = closed(item.status) || row.context || row.later || row.hidden;
@@ -136,48 +141,53 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
   const persistent = actions.filter(action => action.persistent), hover = actions.filter(action => !action.persistent);
   return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={row.depth + 1} aria-selected={selected} aria-disabled={disabled || undefined}
     aria-expanded={row.hasKids ? row.expanded : undefined} tabIndex={focused ? 0 : -1} className={`tree-row tree-item ${row.depth === 1 ? 'tree-item-root' : 'tree-item-child'}${row.hidden ? ' tree-item-hidden' : ''}`}
-    data-open={unfolded || undefined} data-item-id={item.id} data-row={row.key}
+    data-open={unfolded || undefined} data-item-id={item.id} data-row={row.key} data-branch={row.branch}
     data-next-unseen={nextUnseen || undefined} data-next-unseen-pulse={nextUnseenPulse || undefined}
-    style={{ paddingLeft: 12 + row.depth * 24 }} onFocus={event => { if (event.target === event.currentTarget) onFocus(row.key); }}
+    style={branchStyle(row.branch, row.depth)} onFocus={event => { if (event.target === event.currentTarget) onFocus(row.key); }}
     onKeyDown={onKeyDown} onClick={() => onSelect(item.id)} onMouseEnter={event => onPeekHover?.(item.id, event)}
     onMouseMove={event => onPeekHover?.(item.id, event)} onMouseLeave={() => onPeekLeave?.()}>
-    {row.hue !== undefined && <span aria-hidden="true" className="tree-top-colour" style={{ background: `hsl(${row.hue} 48% 58%)` }} />}
+    <Boxes boxes={row.boxes} />
+    {selected && <span aria-hidden="true" className="tree-selected-box" />}
     <Guides guides={row.guides} />
     {row.hasKids
       ? <button type="button" className="tree-chevron" tabIndex={-1} aria-label="Expand or collapse"
         onClick={event => { event.stopPropagation(); onToggle(item.id); }}><i className={row.expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} /></button>
       : <span className="tree-chevron-space" />}
-    <span className="tree-icon" onDoubleClick={event => { if (!disabled && !item.parent && onFocusBranch) { event.stopPropagation(); onFocusBranch(branchFocused ? null : item.id); } }}><StatusBadge status={status} variant="icon" /></span>
+    <span className="tree-icon"><StatusBadge status={status} variant="icon" /></span>
     <div className="tree-body">
-      <div className="tree-heading"><div className="tree-question" style={{ color: muted ? neutral(64) : 'var(--color-text)' }}>
-        {row.segments.map((segment, index) => <span key={index} className={segment.hit ? 'tree-hit' : undefined}
-          data-current={segment.hit && current === 'question' || undefined}>{segment.text}</span>)}
-      </div></div>
+      {/* One unfold flag opens the question and the details together; each folds at three lines when that hides a line. */}
+      <div className="tree-heading"><ClampBlock className="tree-preview tree-question-block" text={item.question} open={unfolded} onToggle={() => onUnfold(item.id)}>
+        <div className="tree-clamp"><div className="tree-question tree-clamp-content" style={{ color: muted ? neutral(64) : 'var(--color-text)' }}>
+          {row.segments.map((segment, index) => <span key={index} className={segment.hit ? 'tree-hit' : undefined}
+            data-current={segment.hit && current === 'question' || undefined}>{segment.text}</span>)}
+        </div></div>
+      </ClampBlock></div>
       <MarkdownHighlight.Provider value={row.matches.includes('outcome') ? { terms: search.terms, current: current === 'outcome' } : null}>
-        <PreviewBlock value={details} open={unfolded} onToggle={() => onUnfold(item.id)} />
+        <ClampBlock text={details?.text} open={unfolded} onToggle={() => onUnfold(item.id)}>{details?.node}</ClampBlock>
       </MarkdownHighlight.Provider>
-      {!item.parent && onFocusBranch && <button type="button" className="tree-focus-action" tabIndex={-1} disabled={disabled}
-        aria-label={`${branchFocused ? 'Unfocus' : 'Focus on'} ${names?.get(item.id) ?? shortLabel(item)}`}
-        onClick={event => { event.stopPropagation(); onFocusBranch(branchFocused ? null : item.id); }}>{branchFocused ? 'Unfocus' : 'Focus'}</button>}
       {delivery(row, fix)}
-      {note && <Strip variant="inside" text={note} onClick={() => onToggle(item.id)} />}
+      {note && <Strip variant="inside" text={note} depth={row.depth} onClick={() => onToggle(item.id)} />}
     </div>
     {/* The end cluster, in the board's order. Every slot keeps its width filled or empty (tree.css `.tree-end`). The hover
         bar floats left of it (absolute), so showing it never moves or rewraps anything. */}
     <div className="tree-end">
       {hover.length > 0 && <span className="tree-actions">{hover.map(actionButton)}</span>}
       <span className="tree-end-slot tree-end-marker" data-marker={changeMarker}>
-        {changeMarker && <span className={`tree-change-marker tree-change-${changeMarker}`} role="img"
-          aria-label={changeMarker === 'new' ? 'New to you' : 'Changed since you read it'} title={changeMarker === 'new' ? 'New to you' : 'Changed since you read it'}>
-          {changeMarker === 'new' ? 'New' : null}</span>}
+        {changeMarker && <ChangeMarker kind={changeMarker} />}
       </span>
-      {row.sessionClosed && <SessionClosedChip reason={closedReason} />}
-      <span className="tree-end-slot tree-end-badge"><StatusBadge status={status} label={row.badge} variant="text" /></span>
+      {/* A closed session's chip takes the badge's place and its width, so the cluster never widens. */}
+      <span className="tree-end-slot tree-end-badge">
+        {row.sessionClosed ? <SessionClosedChip reason={closedReason} /> : <StatusBadge status={status} label={row.badge} variant="text" />}
+      </span>
       <span className="tree-end-slot tree-end-related">
         {row.relatedCount > 0 && <span className="tree-related" role="img" aria-label={`${row.relatedCount} related item${row.relatedCount === 1 ? '' : 's'}`}
           title={`${row.relatedCount} related item${row.relatedCount === 1 ? '' : 's'}`}><i className="ph ph-link" aria-hidden="true" />{row.relatedCount}</span>}
       </span>
-      <span className="tree-end-slot tree-ack-slot">{persistent.map(actionButton)}</span>
+      <span className="tree-end-slot tree-ack-slot">{!acked && persistent.map(actionButton)}</span>
+      {/* The held Ack: drawn over the area left of the Ack slot, so the row never rewraps. */}
+      {acked && <span className="tree-acked" role="status"><i className="ph ph-check" aria-hidden="true" />Acked<span aria-hidden="true">·</span>
+        <button type="button" className="tree-acked-undo" aria-label={`Undo Ack of ${shortLabel(item)}`} tabIndex={-1}
+          onClick={event => { event.stopPropagation(); onUndoAck?.(item.id); }}>Undo</button></span>}
     </div>
   </div>;
 }

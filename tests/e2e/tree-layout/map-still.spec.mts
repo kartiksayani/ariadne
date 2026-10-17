@@ -18,6 +18,7 @@ const placed = (page: Page): Promise<Placed[]> => page.locator('.tree-scroll').e
     const rect = row.getBoundingClientRect();
     if (rect.bottom <= edge.top || rect.top >= edge.bottom) return [];
     const text = row.querySelector('.tree-question, .tree-topic-name')?.getBoundingClientRect().width ?? 0;
+    // Viewport coordinates: a bar inserted above the Map counts as movement.
     return [{ key: row.dataset.row!, top: Math.round(rect.top * 2) / 2, height: Math.round(rect.height * 2) / 2, text: Math.round(text * 2) / 2 }];
   });
 });
@@ -55,14 +56,16 @@ const press = async (control: Locator) => {
   const box = (await control.boundingBox())!;
   await control.page().mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 };
+/** A click on a control above the viewport, where the owner's click would land: the DOM click, with no scroll into view. */
+const click = (control: Locator) => control.evaluate(element => (element as HTMLElement).click());
 
 // [name, kind, subject (a row that must be in view, or null), before, change, done]
 type Trigger = readonly [name: string, kind: 'still' | 'held', subject: string | null, before: (page: Page) => Promise<void>,
   change: (page: Page) => Promise<void>, done: (page: Page) => Promise<void>];
 const nothing = async () => {};
 const triggers: readonly Trigger[] = [
-  ['a New marker clears', 'still', '11', nothing, page => seen(page, '11'), page => expect(row(page, '11').locator('.tree-change-marker')).toHaveCount(0)],
-  ['a Changed marker clears', 'still', '12', nothing, page => seen(page, '12'), page => expect(row(page, '12').locator('.tree-change-marker')).toHaveCount(0)],
+  ['a New marker clears', 'still', '11', nothing, page => seen(page, '11'), page => expect(row(page, '11').getByTestId('change-marker')).toHaveCount(0)],
+  ['a Changed marker clears', 'still', '12', nothing, page => seen(page, '12'), page => expect(row(page, '12').getByTestId('change-marker')).toHaveCount(0)],
   // The band's Ack all goes with the topic's only result to ack.
   ['an Ack lands: the row\'s Ack and the band\'s Ack all go', 'still', '12', nothing, page => agent(page, 'ack-lands'), async page => {
     await expect(row(page, '12').getByRole('button', { name: /^Ack/ })).toHaveCount(0);
@@ -93,9 +96,34 @@ const triggers: readonly Trigger[] = [
     page => page.getByRole('button', { name: 'Show them' }).click(), page => expect(row(page, '1.1')).toHaveCount(1)],
   ['Show more on the reading row', 'held', '10', nothing, page => press(row(page, '10').getByRole('button', { name: 'Show more' })),
     page => expect(row(page, '10').getByRole('button', { name: 'Show less' })).toHaveCount(1)],
+  // The rows below change what is above the reading row, which is out of view: the owner's click is a DOM click.
+  ['a child unfolds above the reading row', 'held', null, nothing, page => click(row(page, '1').getByRole('button', { name: 'Expand or collapse' })),
+    page => expect(row(page, '1.1')).toHaveCount(1)],
+  ['a child folds above the reading row', 'held', null, async page => {
+    await click(row(page, '1').getByRole('button', { name: 'Expand or collapse' }));
+    await expect(row(page, '1.1')).toHaveCount(1);
+  }, page => click(row(page, '1').getByRole('button', { name: 'Expand or collapse' })), page => expect(row(page, '1.1')).toHaveCount(0)],
+  ['an item above the reading row is hidden', 'held', null, nothing, page => click(row(page, '9').getByRole('button', { name: /^Hide/, includeHidden: true })),
+    page => expect(row(page, '9')).toHaveCount(0)],
+  // Item 1's long title and long finding each fold; one flag opens both.
+  ['Show more above the reading row', 'held', null, nothing, page => click(row(page, '1').getByRole('button', { name: 'Show more' }).last()),
+    page => expect(row(page, '1').getByRole('button', { name: 'Show less' })).toHaveCount(2)],
+  ['an item above the reading row grows to more lines', 'held', null, nothing, page => agent(page, 'grow-above'),
+    page => expect(row(page, '9').locator('.tree-question')).toContainText('renamed')],
+  // The Map crosses 560px: the Changed pill in the marker slot collapses to its diamond (a container query on the Map).
+  ['the Map narrows below 560px', 'held', null, async page => {
+    await expect.poll(async () => (await page.locator('.tree-scroll').boundingBox())!.width).toBeGreaterThanOrEqual(560);
+    await expect.poll(async () => (await row(page, '12').getByTestId('change-marker').boundingBox())!.width).toBeGreaterThan(20);
+  }, page => page.setViewportSize({ width: 540, height: 700 }), async page => {
+    await expect.poll(async () => (await page.locator('.tree-scroll').boundingBox())!.width).toBeLessThan(560);
+    await expect.poll(async () => (await row(page, '12').getByTestId('change-marker').boundingBox())!.width).toBeLessThanOrEqual(16);
+  }],
+  // The chip takes the status badge's slot and width: no row changes its width or height.
+  ['a session ends', 'still', '13', nothing, page => agent(page, 'session-ends'), page => expect(row(page, '13').getByText('Session closed')).toBeVisible()],
 ];
 
-async function open(page: Page, origin: string) {
+/** `under`: how many pixels of item 10's top the sticky band covers. */
+async function open(page: Page, origin: string, under = 4) {
   await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
   await page.setViewportSize({ width: 1000, height: 700 });
   await page.goto(`${origin}/tests/e2e/tree-layout/fixture.html?still`);
@@ -107,23 +135,47 @@ async function open(page: Page, origin: string) {
   await page.evaluate(async () => { await document.fonts.ready; });
   const close = page.getByRole('button', { name: 'Close detail' });
   if (await close.count()) await close.click();
-  // Item 10 (a seven-line finding that folds behind Show more) is the reading row: its top just under the band.
-  await row(page, '10').evaluate(element => {
+  // Item 10 (a four-line finding that folds behind Show more) is the reading row: its top just under the band.
+  await row(page, '10').evaluate((element, covered) => {
     const box = element.closest('.tree-scroll')!, header = element.closest('.tree-topic-group')!.querySelector('.tree-topic')!;
-    box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top - header.getBoundingClientRect().height + 4;
-  });
+    box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top - header.getBoundingClientRect().height + covered;
+  }, under);
   await settle(page);
   await page.mouse.move(2, 690);
 }
 
-for (const [name, kind, subject, before, change, done] of triggers) test(`the Map stays still when ${name}`, async ({ page }) => {
+/** Serves the layout fixture for one test and hands its origin to `run`. */
+async function serve(run: (origin: string) => Promise<void>) {
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
     logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
   try {
     await server.listen();
     const address = (server.httpServer as Server).address();
     if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
-    await open(page, `http://127.0.0.1:${address.port}`);
+    await run(`http://127.0.0.1:${address.port}`);
+  } finally { await server.close(); }
+}
+
+// Show more holds the row it opens, where the owner sees it: item 10 keeps its window position whether the band covers
+// 4px of its top or most of its first line.
+for (const under of [4, 17, 40]) test(`Show more keeps the clicked row's window position with ${under}px of it under the band`, async ({ page }) => {
+  await serve(async origin => {
+    await open(page, origin, under);
+    await settle(page);
+    const top = () => row(page, '10').evaluate(element => element.getBoundingClientRect().top);
+    const start = await top();
+    await row(page, '10').getByRole('button', { name: 'Show more' }).evaluate(button => (button as HTMLElement).click());
+    await expect(row(page, '10').getByRole('button', { name: 'Show less' })).toHaveCount(1);
+    await settle(page);
+    expect(Math.abs(await top() - start)).toBeLessThanOrEqual(0.5);
+  });
+});
+
+for (const [name, kind, subject, before, change, done] of triggers) test(`the Map stays still when ${name}`, async ({ page }) => {
+  // The closed-session notice pushes the Map down; the Tree hold piece holds viewport y through its scroller observer.
+  test.fixme(name === 'a session ends', 'needs the Tree hold (redesign/a20-hold)');
+  await serve(async origin => {
+    await open(page, origin);
     await before(page);
     await settle(page);
     const rows = await placed(page), read = await reading(page), scrollTop = await page.locator('.tree-scroll').evaluate(box => box.scrollTop);
@@ -139,5 +191,5 @@ for (const [name, kind, subject, before, change, done] of triggers) test(`the Ma
       const after = new Map((await placed(page)).map(value => [value.key, value]));
       for (const value of rows) expect(after.get(value.key), `${value.key} keeps its place, height and text width`).toEqual(value);
     }
-  } finally { await server.close(); }
+  });
 });
