@@ -152,6 +152,16 @@ export function useSessionArchive({ navigation, actions, now, disabled }: Sessio
   return { busy, archive: summary => lifecycle(summary, 'session_archive'), restore: (summary, reopen = false) => lifecycle(summary, 'session_restore', reopen), dialogs };
 }
 
+/**
+ * A row action ends with the row's buttons changing (a closed row turns its Close off). When that leaves focus on nothing,
+ * it goes to the row's name button, so the keyboard owner stays in the row. Focus the owner moved on their own is left alone.
+ */
+function keepFocusOnRow(sessionId: string) {
+  const active = document.activeElement;
+  if (active && active !== document.body && !(active instanceof HTMLButtonElement && active.disabled)) return;
+  document.querySelector<HTMLElement>(`button[data-session-id="${CSS.escape(sessionId)}"]`)?.focus();
+}
+
 export interface SessionListsProps {
   readonly navigation: NavigationStore;
   readonly actions: SessionActionControllers;
@@ -163,7 +173,10 @@ export interface SessionListsProps {
   readonly currentSession?: SessionRef | null;
   readonly now: number;
   readonly narrow: boolean;
+  /** A change is running (a save, a Refresh): Rename, Close and Archive wait. */
   readonly disabled: boolean;
+  /** Opening a session waits only for a Refresh or the first load, not for an owner write; it queues behind the write. */
+  readonly navigationDisabled?: boolean;
   readonly back?: PageBack;
   readonly onOpenArchive?: () => void;
   readonly onOpenSession: (route: SessionRef) => void;
@@ -175,7 +188,7 @@ export interface SessionListsProps {
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
-export function SessionLists({ navigation, actions, projects, sessions, single = false, currentSession, now, narrow, disabled, back, onOpenArchive, onOpenSession, notes, children }: SessionListsProps) {
+export function SessionLists({ navigation, actions, projects, sessions, single = false, currentSession, now, narrow, disabled, navigationDisabled = disabled, back, onOpenArchive, onOpenSession, notes, children }: SessionListsProps) {
   const [tab, setTab] = useState<SessionsTabValue>('all');
   const [acting, setActing] = useState<{ summary: Immutable<SessionSummary>; act: RowAct } | null>(null);
   const archive = useSessionArchive({ navigation, actions, now, disabled });
@@ -199,14 +212,14 @@ export function SessionLists({ navigation, actions, projects, sessions, single =
     <SessionsList<SessionRef> narrow={narrow} back={back} title={title} sub={sub}
       tabs={single ? undefined : { value: tab, counts, onChange: setTab }}
       groups={sessionGroups(projects, listed, shownTab, now, currentSession, single, onOpenArchive)}
-      // While navigation is held (a Refresh, a save) a row opens nothing, as Rename, Close and Archive wait too.
-      onOpen={row => { if (!disabled) onOpenSession(row.route); }} onRename={act('rename')} onClose={act('close')}
+      // While navigation is held (a Refresh) a row opens nothing; during a save it queues. Rename, Close and Archive wait for both.
+      onOpen={row => { if (!navigationDisabled) onOpenSession(row.route); }} onRename={act('rename')} onClose={act('close')}
       onArchive={row => { const summary = summaryOf(row); if (summary && !acting) void archive.archive(summary); }}
       notes={notes}>{children}</SessionsList>
     {acting && store && <SessionRowAction key={`${sessionKey(acting.summary)}:${acting.act}`} actions={actions.forSession(store)} act={acting.act}
       naming={{ name: ownerName(acting.summary) ?? '', description: ownerDescription(acting.summary) ?? '',
         unnamedAs: acting.summary.title }}
-      onDone={() => { setActing(null); void navigation.refresh(); }} />}
+      onDone={() => { const id = acting.summary.session_id; setActing(null); void navigation.refresh().then(() => keepFocusOnRow(id)); }} />}
     {archive.dialogs}
   </>;
 }

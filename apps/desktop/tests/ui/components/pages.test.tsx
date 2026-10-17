@@ -230,27 +230,45 @@ describe('Archive page', () => {
 
 describe('First run', () => {
   it('says what Ariadne is, gives three steps, and says it is waiting and sends nothing', () => {
-    render(<FirstRun command="/ariadne-connect" onCopyCommand={vi.fn()} onCopyInstruction={vi.fn()} />);
+    render(<FirstRun command="/ariadne-connect" onCopyCommand={vi.fn()} onCopyInstruction={vi.fn()} onRegister={vi.fn()} />);
     expect(screen.getByRole('heading', { name: 'No projects yet' })).toBeTruthy();
     expect(screen.getAllByRole('listitem')).toHaveLength(3);
     expect(screen.getByText('/ariadne-connect')).toBeTruthy();
     expect(screen.getByRole('status').textContent).toBe('Waiting for a session to connect. Connecting sends nothing to the model.');
   });
 
-  it('each Copy button reports, then says Copied for a moment', () => {
+  it('each Copy button reports, then says Copied for a moment once the write landed', async () => {
     vi.useFakeTimers();
     try {
-      const onCopyCommand = vi.fn(), onCopyInstruction = vi.fn();
-      render(<FirstRun command="/ariadne-connect" onCopyCommand={onCopyCommand} onCopyInstruction={onCopyInstruction} />);
-      fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+      const onCopyCommand = vi.fn(() => Promise.resolve(true)), onCopyInstruction = vi.fn(() => Promise.resolve(true));
+      render(<FirstRun command="/ariadne-connect" onCopyCommand={onCopyCommand} onCopyInstruction={onCopyInstruction} onRegister={vi.fn()} />);
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy' })); });
       expect(onCopyCommand).toHaveBeenCalledTimes(1);
       expect(screen.getByRole('button', { name: 'Copied' })).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Copy instruction' })).toBeTruthy();
-      fireEvent.click(screen.getByRole('button', { name: 'Copy instruction' }));
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy instruction' })); });
       expect(onCopyInstruction).toHaveBeenCalledTimes(1);
       act(() => { vi.advanceTimersByTime(2100); });
       expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy();
     } finally { vi.useRealTimers(); }
+  });
+
+  it('never says Copied for a copy that failed', async () => {
+    const onCopyCommand = vi.fn(() => Promise.resolve(false)), onCopyInstruction = vi.fn(() => Promise.reject(new Error('no clipboard')));
+    render(<FirstRun command="/ariadne-connect" onCopyCommand={onCopyCommand} onCopyInstruction={onCopyInstruction} onRegister={vi.fn()} />);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy instruction' })); });
+    expect(screen.getAllByRole('button', { name: 'Couldn’t copy' })).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Copied' })).toBeNull();
+  });
+
+  it('without a setup instruction the Codex step is labelled for what it does: it registers a project, and copies nothing', () => {
+    const onRegister = vi.fn();
+    render(<FirstRun command="/ariadne-connect" onCopyCommand={vi.fn(() => Promise.resolve(true))} onRegister={onRegister} />);
+    expect(screen.queryByRole('button', { name: 'Copy instruction' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Register a project' }));
+    expect(onRegister).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: 'Copied' })).toBeNull();
   });
 });
 

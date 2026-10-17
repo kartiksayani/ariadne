@@ -35,13 +35,14 @@ export async function runAccessibilityAcceptance(configuration) {
   };
   await select();
   const editor = '.item-detail .detail-dock [data-owner-input] textarea';
-  // A loaded Mac can deliver the key before the selection has settled, so press again while the row still holds focus.
+  // The key needs the session ready and idle and the detail's reply box mounted. Wait for those, then press once: a key the
+  // app loses must fail this step, not be pressed again until it happens to land.
+  await wait(async () => await browser.$('.tree-column').getAttribute('data-session-status') === 'ready'
+    && await browser.$('.tree-column').getAttribute('data-session-busy') === 'false' && await browser.$(editor).isExisting(),
+  'Session and reply box were not ready for the Reply shortcut');
+  await focus(row);
   await browser.keys('r');
-  await wait(async () => {
-    if (await active(editor)) return true;
-    await focus(row); await browser.keys('r');
-    return false;
-  }, 'Reply shortcut did not focus ordinary native editor');
+  await wait(() => active(editor), 'Reply shortcut did not focus ordinary native editor');
   const draft = `Native keyboard retained draft ${process.env.ARIADNE_E2E_NONCE}`;
   await (await browser.$(editor)).setValue(draft);
   await browser.keys('g');

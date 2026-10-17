@@ -48,6 +48,22 @@ describe('connection card session actions (were the session bar’s)', { timeout
     expect(document.querySelector('.tb')!.innerHTML).not.toContain(route.session_id);
   });
 
+  it('a clipboard that refuses never makes the card or the line say Copied', async () => {
+    vi.mocked(copyText).mockRejectedValue(new Error('no clipboard'));
+    await setup(value => { session(value).active_binding_id = null; });
+    const view = await openCard();
+    await act(async () => { fireEvent.click(view.getByRole('button', { name: 'Copy session ID' })); });
+    expect(view.getByRole('button', { name: 'Couldn’t copy' })).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'Copied' })).toBeNull();
+    fireEvent.keyDown(document.querySelector('.cc')!, { key: 'Escape' });
+    const line = await screen.findByRole('status', { name: 'Connection' });
+    fireEvent.click(within(line).getByRole('button', { name: 'How to connect' }));
+    await act(async () => { fireEvent.click(within(line).getByRole('button', { name: 'Copy' })); });
+    expect(within(line).getByRole('button', { name: 'Couldn’t copy' })).toBeTruthy();
+    expect(within(line).queryByRole('button', { name: 'Copied' })).toBeNull();
+    expect(copyText).toHaveBeenCalledWith('/ariadne-connect');
+  });
+
   it('Close session closes the card, asks once through the lifecycle review, then offers Reopen', async () => {
     const transport = await setup();
     const view = await openCard();

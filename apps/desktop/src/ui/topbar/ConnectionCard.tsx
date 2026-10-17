@@ -1,7 +1,7 @@
 // Where the agent stands for a session (SPEC 5.12): the card that opens from the connection dot, and the line above the
 // Map for a state that changes what I can do. Pure props in, callbacks out (contract C8).
 import { useEffect, useRef, useState } from 'react';
-import { OutlineButton, useCopied, usePopover, useRestoreFocus } from '../parts/parts';
+import { OutlineButton, copyIcon, copyLabel, useCopy, usePopover, useRestoreFocus } from '../parts/parts';
 import { connectionBadge, connectionCopy, connectionLine, cardActions, lineActions } from './connection';
 import type { ConnectionCardProps, ConnectionLineProps } from './model';
 import './connection.css';
@@ -19,7 +19,7 @@ function Mark({ view }: { readonly view: ConnectionCardProps['view'] }) {
 export function ConnectionCard({ view, actions, onDismiss }: ConnectionCardProps) {
   const panel = useRef<HTMLDivElement>(null);
   const copy = connectionCopy(view);
-  const [copied, markCopied] = useCopied();
+  const [copied, copyId] = useCopy();
   usePopover(true, () => onDismiss(), panel, '[data-popover-trigger="connection"]');
   useRestoreFocus(panel);
   useEffect(() => { panel.current?.focus(); }, []);
@@ -27,8 +27,8 @@ export function ConnectionCard({ view, actions, onDismiss }: ConnectionCardProps
     <div className="cc-title"><Mark view={view} />{copy.title}</div>
     {copy.lines.map(line => <div className="cc-line" key={line}>{line}</div>)}
     <div className="cc-actions">
-      {cardActions(view, actions).map(action => action.key === 'copy-id'
-        ? <OutlineButton key={action.key} icon={copied ? 'ph ph-check' : action.icon} onClick={() => { action.run(); markCopied(); }}>{copied ? 'Copied' : action.label}</OutlineButton>
+      {cardActions(view, actions).map(action => action.copy
+        ? <OutlineButton key={action.key} icon={copyIcon(copied, action.icon)} onClick={() => { copyId(action.copy!); }}>{copyLabel(copied, action.label)}</OutlineButton>
         : <OutlineButton key={action.key} icon={action.icon} onClick={() => { onDismiss(); action.run(); }}>{action.label}</OutlineButton>)}
     </div>
   </div>;
@@ -39,7 +39,7 @@ export function ConnectionLine({ view, actions, steps: control, command = '/aria
   const copy = connectionLine(view);
   const [own, setOwn] = useState(false);
   const steps = control?.open ?? own, toggleSteps = control?.onToggle ?? (() => setOwn(open => !open));
-  const [command1, markCommand] = useCopied(), [instruction, markInstruction] = useCopied();
+  const [command1, copyCommand] = useCopy(), [instruction, copyInstruction] = useCopy();
   if (!copy) return null;
   const connect = view.kind === 'none', onCopyInstruction = actions.onCopyInstruction;
   return <section className="cl" aria-label="Connection" role="status">
@@ -55,13 +55,13 @@ export function ConnectionLine({ view, actions, steps: control, command = '/aria
       <div className="cl-step">
         <span className="cl-num">1</span><span>In the Claude Code conversation for this project, run</span>
         <span className="cl-code">{command}</span>
-        <OutlineButton icon={command1 ? 'ph ph-check' : 'ph ph-copy'} className="cl-btn cl-copy" onClick={() => { actions.onCopyCommand?.(); markCommand(); }}>{command1 ? 'Copied' : 'Copy'}</OutlineButton>
+        {actions.onCopyCommand && <OutlineButton icon={copyIcon(command1)} className="cl-btn cl-copy" onClick={() => { copyCommand(actions.onCopyCommand!); }}>{copyLabel(command1, 'Copy')}</OutlineButton>}
       </div>
       {/* Copy instruction needs a setup receipt; without one the step says where the instruction comes from instead. */}
       {onCopyInstruction
         ? <div className="cl-step">
           <span className="cl-num">2</span><span>Using Codex? Paste the setup instruction into its thread once.</span>
-          <OutlineButton icon={instruction ? 'ph ph-check' : 'ph ph-copy'} className="cl-btn cl-copy" onClick={() => { onCopyInstruction(); markInstruction(); }}>{instruction ? 'Copied' : 'Copy instruction'}</OutlineButton>
+          <OutlineButton icon={copyIcon(instruction)} className="cl-btn cl-copy" onClick={() => { copyInstruction(onCopyInstruction); }}>{copyLabel(instruction, 'Copy instruction')}</OutlineButton>
         </div>
         : <div className="cl-step">
           <span className="cl-num">2</span><span>Using Codex? Choose “Connect existing session” on the project’s page; Ariadne then gives you the setup instruction to paste into its thread once.</span>

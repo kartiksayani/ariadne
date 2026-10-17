@@ -186,6 +186,18 @@ describe('renaming from All sessions', () => {
     await goToSession(route); await screen.findByRole('region', { name: 'Session tree' });
     expect(screen.getByRole('button', { name: /^Switch session or project/ }).textContent).toContain('Sync fixes');
   });
+  it.each(['', ' '])('saving with nothing changed (typed %j around the same words) closes the dialog without writing', async padding => {
+    const transport = new AppTransport(); transport.sessions.get(route.session_id)!.name = 'Sync fixes';
+    render(<DesktopApp service={createDesktopService(transport)} />);
+    fireEvent.click(await within(await list()).findByRole('button', { name: 'Rename Sync fixes' }));
+    const name = within(await dialog()).getByRole('textbox', { name: 'Name' });
+    expect((name as HTMLInputElement).value).toBe('Sync fixes');
+    fireEvent.change(name, { target: { value: `${padding}Sync fixes${padding}` } });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Save name/ })); });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull());
+    expect(names(transport)).toHaveLength(0);
+    expect(rowNames()).toContain('Sync fixes');
+  });
   it.each(['Cancel', 'Escape'])('leaves the saved name untouched after %s', async key => {
     const transport = setup();
     fireEvent.click(await within(await list()).findByRole('button', { name: 'Rename Notes review' }));

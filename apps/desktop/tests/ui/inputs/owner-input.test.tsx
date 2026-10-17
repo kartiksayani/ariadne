@@ -890,6 +890,28 @@ describe('owner input component and durable draft controller', () => {
     expect(value.session.inputs[uuid(70)]!.payload).toMatchObject({ text: frozen.text, selected_option_id: frozen.selected_option_id });
     expect(value.session.operation_receipts[frozen.op_id]![0]!.result.operation_id).toBe(frozen.op_id);
   });
+  it.each(['uncertain', 'malformed'] as const)('re-sends the frozen operation with the exact same op_id and body after %s receipt, across a restart and a changed question, when Core never recorded it', async outcome => {
+    const value = await setup(), view = value.render(); await answerReady(); value.outcome(outcome);
+    fireEvent.change(editor(), { target: { value: 'Exact untrimmed bytes  ' } }); fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByRole('button', { name: 'Check delivery' }); expect(value.prefs.drafts[0]?.submission_attempted).toBe(true);
+    const original = structuredClone(value.calls[0]), frozen = structuredClone(value.prefs.drafts[0]!); expect(editor().disabled).toBe(true);
+    const restored = await value.restart(); value.session.items['2']!.question_revision++; value.session.items['2']!.revision++; value.session.revision++;
+    await act(async () => { await value.store.refresh(); }); view.rerender(<AnswerSlot drafts={restored} store={value.store} itemId="2" onEscape={() => {}} />);
+    // Nothing is sent by the restart or the changed question. Check delivery only reads: with no receipt in Core it turns the
+    // answer into a definite "Not sent", and only the owner's explicit Try sending again replays the same operation.
+    expect(value.calls).toHaveLength(1); value.outcome('ok');
+    fireEvent.click(await screen.findByRole('button', { name: 'Check delivery' }));
+    const again = await screen.findByRole('button', { name: 'Try sending again' });
+    expect(value.calls).toHaveLength(1);
+    await waitFor(() => expect(again.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(again);
+    // The question changed, so the slot shows no sent bar for it; the proof is the second request and the cleared draft.
+    await waitFor(() => expect(value.calls).toHaveLength(2));
+    expect(value.calls).toHaveLength(2); expect(value.calls[1]).toEqual(original);
+    expect(value.calls[1]!.command.op_id).toBe(frozen.op_id);
+    expect(value.calls[1]!.command.command === 'input_submit' && value.calls[1]!.command.params.text).toBe('Exact untrimmed bytes  ');
+    await waitFor(() => expect(value.prefs.drafts).toEqual([]));
+  });
   it('keeps the typed text and chosen option when the agent-not-running dialog is cancelled; Queue saves the send', async () => {
     const value = await setup(), held: PendingSubmission[] = [];
     value.session.bindings[value.session.active_binding_id!]!.connection_state = 'disconnected'; value.session.revision++;

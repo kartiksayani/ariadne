@@ -23,17 +23,31 @@ export function OutlineButton({ icon, children, className = '', ...rest }: { rea
   return <button type="button" {...rest} className={`p-btn ${className}`.trim()}>{icon && <i className={icon} aria-hidden="true" />}{children}</button>;
 }
 
-/** The label flips to the copied word for a moment after a copy. */
-export function useCopied(ms = 2000): [boolean, () => void] {
-  const [copied, setCopied] = useState(false);
+export type CopyState = 'idle' | 'copied' | 'failed';
+/** What a copy button says after a copy: its own label, "Copied" once the write landed, or "Couldn't copy" when it did not. */
+export const copyLabel = (state: CopyState, label: string) => state === 'copied' ? 'Copied' : state === 'failed' ? 'Couldn’t copy' : label;
+export const copyIcon = (state: CopyState, icon = 'ph ph-copy') => state === 'copied' ? 'ph ph-check' : state === 'failed' ? 'ph ph-warning-circle' : icon;
+
+/**
+ * A copy button's state. `copy` runs the write and flips the label for a moment only after it resolved true: a write
+ * that failed (or resolved false) says "Couldn't copy", never "Copied". A newer press replaces an older one.
+ */
+export function useCopy(ms = 2000): [CopyState, (write: () => Promise<boolean>) => void] {
+  const [state, setState] = useState<CopyState>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (timer.current !== null) clearTimeout(timer.current); }, []);
-  const mark = useCallback(() => {
-    setCopied(true);
-    if (timer.current !== null) clearTimeout(timer.current);
-    timer.current = setTimeout(() => { timer.current = null; setCopied(false); }, ms);
+  const latest = useRef(0);
+  useEffect(() => () => { latest.current = -1; if (timer.current !== null) clearTimeout(timer.current); }, []);
+  const copy = useCallback((write: () => Promise<boolean>) => {
+    const mine = ++latest.current;
+    const settle = (landed: boolean) => {
+      if (latest.current !== mine) return;
+      setState(landed ? 'copied' : 'failed');
+      if (timer.current !== null) clearTimeout(timer.current);
+      timer.current = setTimeout(() => { timer.current = null; setState('idle'); }, ms);
+    };
+    try { write().then(settle, () => { settle(false); }); } catch { settle(false); }
   }, [ms]);
-  return [copied, mark];
+  return [state, copy];
 }
 
 /**

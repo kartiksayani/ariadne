@@ -46,6 +46,8 @@ interface SessionBarProps {
 
 const idleSubscribe = () => () => {};
 const idleSnapshot = () => null;
+/** Copies text; resolves to whether the write landed, so a button says "Copied" only after one did. */
+const copied = async (text: string) => { try { await copyText(text); return true; } catch { return false; } };
 
 /**
  * The top bar; with a session (the one shown, or the one a page returns to) it carries that session's connection.
@@ -70,8 +72,8 @@ export function WorkspaceTopBar({ bar, store: given, controllers, line, setup }:
     onReopen: lifecycle.state === 'closed' && !lifecycle.busy ? lifecycle.reopen : lifecycle.state === 'archived' && !lifecycle.busy ? lifecycle.restoreSession : undefined,
     onSending: binding && lifecycle.state === 'active' ? () => setSending(true) : undefined,
     onTryAgain: view.kind === 'stale' || view.kind === 'unreadable' ? () => { void store.refresh(); } : undefined,
-    onCopyCommand: () => { void copyText('/ariadne-connect').catch(() => {}); },
-    onCopyInstruction: setup && session && setup.sessionId === session.id ? () => { void copyText(setup.instruction).catch(() => {}); } : undefined,
+    onCopyCommand: () => copied('/ariadne-connect'),
+    onCopyInstruction: setup && session && setup.sessionId === session.id ? () => copied(setup.instruction) : undefined,
   };
   return <>
     <TopBar {...bar} connection={view} connectionOpen={open} onConnectionToggle={() => setOpen(value => !value)}

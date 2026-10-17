@@ -502,7 +502,7 @@ function Workspace({ application }: { application: Application }) {
   const hiddenNotice = hiddenParent ? selectedId && explicitHidden.has(selectedId)
     ? `Hidden, along with its parent “${hiddenParent}”.` : `Hidden with its parent “${hiddenParent}”` : undefined;
   const intentApp: ItemIntentApp = {
-    store: !!store, toggleFilters: () => setFilterOpen(value => !value), closeDetail, closeConversation: conversationOpen ? closeConversation : undefined, focusOwner, queueBring, ack: (target, repeat) => {
+    store: !!store, onPage: viewOf(state).kind !== 'session', toggleFilters: () => setFilterOpen(value => !value), closeDetail, closeConversation: conversationOpen ? closeConversation : undefined, focusOwner, queueBring, ack: (target, repeat) => {
       const store = navigation.opened.open(target), session = store.getSnapshot().snapshot?.session, item = session?.items[target.item_id];
       if (!session || !item || !ackTarget(session, item)) return false;
       const actions = application.actions.forSession(store);
@@ -526,6 +526,8 @@ function Workspace({ application }: { application: Application }) {
       return true;
     },
     focused: () => {
+      // While a page shows, the Map's selection is hidden behind it: item keys have nothing to act on.
+      if (viewOf(state).kind !== 'session') return null;
       const session = sessionState?.snapshot?.session;
       // The bigger view's item, even when the Map selected another one meanwhile.
       if (conversationOpen && conversation && route) {

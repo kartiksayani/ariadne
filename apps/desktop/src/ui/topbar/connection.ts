@@ -80,7 +80,8 @@ export function connectionLine(view: ConnectionView): LineCopy | null {
   }
 }
 
-export interface ConnAction { readonly key: string; readonly icon: string; readonly label: string; readonly run: () => void }
+/** `copy` is set on a copy button: it resolves to whether the write landed, and the button says so. */
+export interface ConnAction { readonly key: string; readonly icon: string; readonly label: string; readonly run: () => void; readonly copy?: () => Promise<boolean> }
 
 const make = (key: string, icon: string, label: string, run: (() => void) | undefined): ConnAction[] => run ? [{ key, icon, label, run }] : [];
 /** A closed session is reopened; an archived one (also closed) is restored, which is what its button does. */
@@ -103,7 +104,8 @@ export function cardActions(view: ConnectionView, a: ConnectionCardActions): Con
     unsaved: again,
   } satisfies Record<ConnectionKind, ConnAction[]>)[view.kind];
   const close = view.kind === 'closed' || view.kind === 'loading' ? [] : make('close', 'ph ph-x-circle', 'Close session', a.onClose);
-  return [...own, ...close, ...make('copy-id', 'ph ph-copy', 'Copy session ID', a.onCopyId)];
+  const copyId: ConnAction[] = a.onCopyId ? [{ key: 'copy-id', icon: 'ph ph-copy', label: 'Copy session ID', run: () => { void a.onCopyId?.(); }, copy: a.onCopyId }] : [];
+  return [...own, ...close, ...copyId];
 }
 
 /** The buttons of the line above the Map. */

@@ -34,7 +34,8 @@ function Group<R>({ group, narrow, props }: { readonly group: SessionGroupData<R
   return <section className="sl-group" aria-label={group.name}>
     <div className="sl-ghead"><i className="ph ph-folder-simple" aria-hidden="true" /><h2 className="sl-gname">{group.name}</h2><span className="sl-gpath">{group.path}</span></div>
     <div className={narrow ? 'sl-box sl-narrow' : 'sl-box'}>
-      {group.sessions.map((session, index) => <Row key={`${index}:${session.name}`} session={session} narrow={narrow} props={props} />)}
+      {/* Keyed by the session, not its place or name: a rename or a move keeps the row's buttons, and focus with them. */}
+      {group.sessions.map((session, index) => <Row key={session.id ?? `${index}:${session.name}`} session={session} narrow={narrow} props={props} />)}
       {group.sessions.length === 0 && group.empty && <div className="sl-empty">
         <span className="sl-empty-title"><i className="ph ph-terminal-window" aria-hidden="true" />{group.empty.title}</span>
         <span className="sl-empty-text">{group.empty.text}</span>

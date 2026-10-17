@@ -45,8 +45,8 @@ export interface SessionLifecycle {
   /** `archive` and `restore` under the names the top bar uses. */
   readonly archiveTopic: (topicId: string) => void;
   readonly restoreTopic: (topicId: string) => void;
-  /** Copies the session's connection reference and says so in a notice. */
-  readonly copySessionId: () => void;
+  /** Copies the session's connection reference and says so in a notice. Resolves to whether the write landed. */
+  readonly copySessionId: () => Promise<boolean>;
   readonly state: SessionLifecycleState;
   /** Rename against the latest ready session capture. */
   readonly rename: (name: string, description: string) => Promise<string | null>;
@@ -58,6 +58,8 @@ export interface SessionLifecycle {
   readonly dismiss: () => void;
   readonly busy: boolean;
   readonly error: string | null;
+  /** How many times `error` was set or cleared: a view compares it with the count it saw when it began, to react only to its own errors. */
+  readonly errorCount: number;
   /** A saved session action whose completion is unknown ("binding pause"), reconciled from the column. */
   readonly pending: string | null;
   readonly reconcile: () => void;
@@ -71,9 +73,9 @@ const idleSubscribe = () => noop;
 const idleSnapshot = () => null;
 /** No session: every control does nothing and the lifecycle reads busy. */
 const idle: SessionLifecycle = Object.freeze({
-  session: noop, close: noop, reopen: noop, restoreSession: noop, archiveTopic: noop, restoreTopic: noop, copySessionId: noop,
+  session: noop, close: noop, reopen: noop, restoreSession: noop, archiveTopic: noop, restoreTopic: noop, copySessionId: () => Promise.resolve(false),
   state: null, rename: () => Promise.resolve(loadingError), archive: noop, restore: noop, archived: null, undo: noop, dismiss: noop,
-  busy: true, error: null, pending: null, reconcile: noop, dialog: null, reviewing: false,
+  busy: true, error: null, errorCount: 0, pending: null, reconcile: noop, dialog: null, reviewing: false,
 });
 type SessionStanding = Exclude<SessionLifecycleState, null>;
 const standing = (session: { readonly archived_at?: string | null; readonly state: string }): SessionStanding =>
@@ -98,7 +100,11 @@ export function useSessionLifecycle(input: SessionActions | null): SessionLifecy
   /** The topic whose archive confirmation is open, with the failure of its last try. */
   const [confirming, setConfirming] = useState<{ readonly topicId: string; readonly error: string | null } | null>(null);
   const [archived, setArchived] = useState<Archived | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // `errorCount` rises on every set, so a view can tell an error its own action just raised from one left by an earlier action,
+  // even when both say the same words.
+  const [failure, setFailure] = useState<{ readonly message: string | null; readonly count: number }>({ message: null, count: 0 });
+  const error = failure.message, errorCount = failure.count;
+  const setError = (message: string | null) => { setFailure(previous => ({ message, count: previous.count + 1 })); };
   const [waiting, setWaiting] = useState(false);
   const [owner, setOwner] = useState(input);
   if (owner !== input) {
@@ -318,10 +324,10 @@ export function useSessionLifecycle(input: SessionActions | null): SessionLifecy
     archiveTopic: archive, restoreTopic: restore,
     copySessionId: () => {
       const attempt = ++copies.current;
-      void copySessionReference(actions.session.getSnapshot().route.session_id, () => copies.current === attempt);
+      return copySessionReference(actions.session.getSnapshot().route.session_id, () => copies.current === attempt);
     },
     state: !session ? null : session.archived_at != null ? 'archived' : session.state === 'closed' ? 'closed' : 'active',
-    rename, archive, restore, archived, undo, dismiss: () => setArchived(null), busy: disabled, error, dialog, reviewing: dialog !== null,
+    rename, archive, restore, archived, undo, dismiss: () => setArchived(null), busy: disabled, error, errorCount, dialog, reviewing: dialog !== null,
     pending: operation.pending && !review ? unconfirmedText(operation.pending.command.command) : null,
     reconcile: () => {
       if (operation.writing) return;
