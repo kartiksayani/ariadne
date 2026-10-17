@@ -16,6 +16,12 @@ declare global {
     __anchor: {
       details(width: number): void; select(id: string | null): void; expanded(ids: readonly string[]): void;
       add(id: string, parent: string | null): Promise<void>; search(query: string): void;
+      /** An agent changes an item's status; under a status filter the item may leave the Graph. */
+      status(id: string, status: Item['status']): Promise<void>;
+      /** The items disappear from the session (an answer, a hide or a removal): the Graph drops them. */
+      remove(ids: readonly string[]): Promise<void>;
+      /** The filter row above the Graph (the scroller itself moves down by its height). */
+      bar(open: boolean): void;
     };
   }
 }
@@ -49,11 +55,11 @@ const params = new URLSearchParams(location.search);
 const folded = new Set((params.get('folded') ?? '').split(',').filter(Boolean));
 const initial: SessionPreferences = { session: route, tab_open: true, tab_order: 0, selected_item_id: params.get('selected'),
   expanded_item_ids: ['1', '2', '3', '4', '5', '6', '7', '8', '4.1', '4.1.1'].filter(id => !folded.has(id)),
-  filters: { search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false }, scroll: null };
+  filters: { search: '', statuses: (params.get('filter') ?? '').split(',').filter(Boolean) as Item['status'][], owners: [], topic_id: null, archived: false, hide_later: false }, scroll: null };
 
 function Fixture() {
   const [view, setView] = useState(initial), [details, setDetails] = useState(Number(params.get('details') ?? 36));
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(''), [bar, setBar] = useState(params.get('bar') === '1');
   // The Map's search, as the Tree core computes it: every drawn question containing the query, in Map order.
   const search = useMemo((): MapSearch => {
     const ids = query ? Object.values(session.items).filter(value => value?.question.includes(query)).map(value => value!.id) : [];
@@ -72,11 +78,23 @@ function Fixture() {
         await store.refresh();
       },
       search: setQuery,
+      async status(id, status) {
+        session.items[id] = { ...session.items[id]!, status };
+        session.revision += 1;
+        await store.refresh();
+      },
+      async remove(ids) {
+        for (const id of ids) delete session.items[id];
+        session.revision += 1;
+        await store.refresh();
+      },
+      bar: setBar,
     };
   }, []);
   // The Map column beside Details, as the window lays them out (SPEC §2): the Graph's scroller fills what Details leaves.
   return <div style={{ display: 'flex', height: '100%' }}>
     <div style={{ display: 'flex', flex: 1, minWidth: 0, flexDirection: 'column' }}>
+      {bar && <div role="search" aria-label="Filter items" style={{ flex: 'none', height: 40, borderBottom: '1px solid var(--color-divider)' }} />}
       <MapSearchContext.Provider value={search}>
         <GraphView store={store} routes={routes} view={view} later={later} reveal={null}
           saveView={async next => { setView(next); return true; }} onReveal={() => {}} />

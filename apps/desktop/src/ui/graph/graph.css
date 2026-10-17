@@ -10,12 +10,13 @@
   min-height: 0;
 }
 
-/* The Graph adds the dock height to its canvas height, plus room for the legend card that hangs above the dock. */
+/* The Graph adds the dock height to its canvas height, plus room for the legend card that hangs above the dock:
+   GraphView measures the card (it wraps with the width) into --graph-legend-inset, its height plus its 12px lift. */
 .graph-scroll {
   position: relative;
   flex: 1;
   min-height: 0;
-  padding-bottom: calc(40px + var(--dock-inset, 0px));
+  padding-bottom: calc(max(40px, var(--graph-legend-inset, 0px)) + var(--dock-inset, 0px));
   overflow: auto;
   outline: none;
 }
@@ -172,6 +173,7 @@
   align-items: center;
   gap: 3px;
   font-size: calc(11px * var(--text-scale));
+  white-space: nowrap;
   color: color-mix(in srgb, var(--color-text) 55%, transparent);
 }
 
