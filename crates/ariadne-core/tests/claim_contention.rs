@@ -5,7 +5,7 @@ use ariadne_core::{
     apply::ApplyService,
     delivery::{DeliveryError, DeliveryService},
     inputs::InputService,
-    native::{retry_busy_read, NativeCoreService},
+    native::{retry_busy_read, AgentResolver, NativeCoreService},
     *,
 };
 use ariadne_domain::models::*;
@@ -276,9 +276,6 @@ fn pollers_and_readers_together_lose_no_read_and_claim_each_input_once() {
                     at,
                     |_| unreachable!("reads verify nothing"),
                 );
-                let context = QueryContext::owner(OwnerContext::from_trusted_entrypoint(
-                    OwnerScope::Session(route()),
-                ));
                 let request: QueryRequest = serde_json::from_value(serde_json::json!({
                     "command": "session_read",
                     "params": {"selection": {"view": "items", "filters": {"topic_id": null,
@@ -287,10 +284,18 @@ fn pollers_and_readers_together_lose_no_read_and_claim_each_input_once() {
                 }))
                 .unwrap();
                 while !done.load(Ordering::SeqCst) {
-                    // The agent CLI's read: the catalogue, then the query.
+                    // The agent CLI's read: resolve the binding from the
+                    // catalogue (a busy session fails the try), then the query.
                     let read = retry_busy_read(|| {
-                        core.registry().catalogue().map_err(CoreError::from)?;
-                        core.query(context.clone(), request.clone())
+                        let catalogue = core.registry().catalogue().map_err(CoreError::from)?;
+                        let context = AgentResolver::resolve_from_catalogue(
+                            &catalogue,
+                            id(3),
+                            shared.generation.clone(),
+                            None,
+                            None,
+                        )?;
+                        core.query(QueryContext::agent(context), request.clone())
                     });
                     reads.fetch_add(1, Ordering::SeqCst);
                     if let Err(error) = read {
@@ -303,10 +308,12 @@ fn pollers_and_readers_together_lose_no_read_and_claim_each_input_once() {
 
     // A long write (a large session) holds the lock past the store's 2 s lock
     // deadline: a read without the retry would fail with store_busy here.
+    let holding = Arc::new(AtomicBool::new(false));
     let holder = {
-        let shared = shared.clone();
+        let (shared, holding) = (shared.clone(), holding.clone());
         std::thread::spawn(move || {
             for hold in 0..2 {
+                holding.store(true, Ordering::SeqCst);
                 let _ = shared.store().transact(
                     &id(2),
                     &ReceiptActorScope::Owner {},
@@ -317,14 +324,23 @@ fn pollers_and_readers_together_lose_no_read_and_claim_each_input_once() {
                         Err::<SavedReceiptData, _>(())
                     },
                 );
+                holding.store(false, Ordering::SeqCst);
                 // Room for the queued writers between long holds.
                 std::thread::sleep(Duration::from_millis(1_000));
             }
         })
     };
+    // The owner queues inputs between the holds, spaced like a person typing,
+    // so no artificial burst of claims lands in a reader's one retry window.
+    while !holding.load(Ordering::SeqCst) {
+        std::thread::sleep(Duration::from_millis(1));
+    }
     for n in 0..INPUTS {
+        while holding.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
         queue(&shared, 1_000 + n);
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(Duration::from_millis(175));
     }
     holder.join().unwrap();
     let started = Instant::now();
