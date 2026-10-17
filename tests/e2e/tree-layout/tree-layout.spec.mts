@@ -113,6 +113,18 @@ async function expectRevealedRow(row: Locator) {
       fits: bounds.height > viewportBottom - usableTop - 16 || bounds.bottom <= viewportBottom + 0.5,
     };
   })).toEqual({ clearsHeader: true, fits: true });
+  // The row can clear the header while the reveal is still correcting its position (the held row is put back after
+  // each reflow). A scroll the test makes by hand in that window is undone by the correction, so wait until the
+  // scroller has been still for three animation frames before the caller goes on.
+  await row.evaluate(element => new Promise<void>(resolve => {
+    const scroller = element.closest('.tree-scroll')!;
+    let last = scroller.scrollTop, still = 0;
+    const frame = () => {
+      if (scroller.scrollTop !== last) { last = scroller.scrollTop; still = 0; } else if (++still >= 3) { resolve(); return; }
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  }));
 }
 
 async function expectSolidMarker(marker: Locator) {

@@ -19,6 +19,12 @@ use std::{
 pub(crate) const CAP: usize = 256;
 pub const LIFETIME: Duration = Duration::from_secs(90);
 
+/// Five seconds for one read-only Claude qualification; a debug test run may stretch it
+/// (`deadline_scale`).
+fn qualification_budget() -> Duration {
+    ariadne_agent_protocol::deadline_scale::scaled(Duration::from_secs(5))
+}
+
 /// Owned facts resolved by native registration. Never a deserialized authority.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AnnouncementBinding {
@@ -241,7 +247,7 @@ impl Discovery {
             CoreError::new(CoreErrorCode::CapacityExceeded, "Native discovery qualification is busy.", "Wait for the bounded read-only probes; no binding or delivery has been granted.")
         })?;
         let discovery = self.clone();
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + qualification_budget();
         runtime
             .spawn_blocking(move || {
                 // Dropping the caller future cannot admit unbounded blocking probes.
@@ -282,7 +288,7 @@ impl Discovery {
             &candidate,
             &options,
             slot,
-            deadline.min(Instant::now() + Duration::from_secs(5)),
+            deadline.min(Instant::now() + qualification_budget()),
             expected,
         )
     }

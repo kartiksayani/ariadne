@@ -306,7 +306,7 @@ impl ExecutableIdentity {
                     "Cannot bound Codex version probe.",
                 ));
             }
-            let deadline = deadline.min(Instant::now() + Duration::from_secs(5));
+            let deadline = deadline.min(Instant::now() + super::budget(5));
             let mut bytes = Vec::new();
             let mut buffer = [0; 1024];
             let mut status = None;

@@ -171,7 +171,7 @@ describe('renaming from All sessions', () => {
   const names = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'session_label_set');
   const dialog = () => screen.findByRole('dialog', { name: 'Name this session' });
   const rowNames = () => [...screen.getByRole('region', { name: 'All sessions' }).querySelectorAll('.sl-name')].map(button => button.textContent);
-  it('names a session in the Name dialog, and the row, the switcher and the top bar say it', { timeout: 15_000 }, async () => {
+  it('names a session in the Name dialog, and the row, the switcher and the top bar say it', async () => {
     const transport = setup();
     fireEvent.click(await within(await list()).findByRole('button', { name: 'Rename Notes review' }));
     const name = within(await dialog()).getByRole('textbox', { name: 'Name' });

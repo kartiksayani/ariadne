@@ -16,5 +16,7 @@ export const config = {
   }]],
   capabilities: [{ browserName: 'tauri', 'tauri:options': { application: binary, args: appArgs } }],
   connectionRetryTimeout: 60000, connectionRetryCount: 0,
-  waitforTimeout: 10000, specFileRetries: 0, mochaOpts: { timeout: 480000, parallel: false },
+  // waitForDisplayed, waitForEnabled and the like give up after this; they return the moment the element is ready,
+  // so a loaded machine gets time to draw it and a missing element still fails.
+  waitforTimeout: 30000, specFileRetries: 0, mochaOpts: { timeout: 480000, parallel: false },
 };

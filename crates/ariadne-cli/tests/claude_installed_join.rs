@@ -8,7 +8,7 @@ use ariadne_core::{
 use ariadne_domain::models::*;
 use ariadne_runtime::{
     activation::{registered_announcement_resolver, NativeActivation},
-    control::{ControlRoutes, ControlServer, CONTROL_TIMEOUT},
+    control::{ControlRoutes, ControlServer},
     discovery::Discovery,
     leases::DesktopOwner,
     providers::{ProjectRootResolver, ProviderFactory, ProviderInstructions},
@@ -28,6 +28,23 @@ use std::{
     },
     time::{Duration, Instant},
 };
+
+/// How long a test may wait for something that must happen. It is a hang guard, not a
+/// speed check: every wait returns the moment its condition holds.
+const HANG_GUARD: Duration = Duration::from_secs(60);
+
+/// A busy machine can make a debug helper slower than the 5 s control budget and the plugin's
+/// 8 s helper timeout. These tests stretch those budgets tenfold; the Node harness and the
+/// helper processes inherit the setting. Debug builds only; release budgets stay as written.
+fn stretch_budgets() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        std::env::set_var(
+            ariadne_agent_protocol::deadline_scale::DEADLINE_SCALE_ENV,
+            "10",
+        );
+    });
+}
 
 fn id(n: u64) -> UuidV4 {
     UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
@@ -83,6 +100,7 @@ impl Fixture {
         Self::with_announcement_barrier(false)
     }
     fn with_announcement_barrier(hold: bool) -> Self {
+        stretch_budgets();
         let home = tempfile::tempdir_in("/tmp").unwrap();
         let install = tempfile::tempdir_in("/tmp").unwrap();
         let root = tempfile::tempdir().unwrap();
@@ -263,9 +281,9 @@ impl Fixture {
         assert_eq!(started["commands"].as_array().unwrap().len(), 4);
         assert!(started["prompts"].as_array().unwrap().is_empty());
         // Readiness includes native qualification, route publication and an
-        // unchanged-operation retry. Its former 3s deadline was shorter than a
-        // single declared control request; bound this join by three requests.
-        let until = Instant::now() + CONTROL_TIMEOUT * 3;
+        // unchanged-operation retry. Each pass returns as soon as the summary is
+        // right; the guard only ends a join that never completes.
+        let until = Instant::now() + HANG_GUARD;
         let summary = "This conversation is connected to Ariadne. File your work as you go; the ariadne skill has the rest.\nThis resumes an earlier session: read reconnect.md in the ariadne skill first.";
         let connected = loop {
             let connected = self
@@ -348,7 +366,7 @@ impl Fixture {
         );
         assert!(connected["prompts"].as_array().unwrap().is_empty());
         self.sdk.command(json!({"action":"heartbeat"}));
-        let until = Instant::now() + Duration::from_secs(3);
+        let until = Instant::now() + HANG_GUARD;
         while self.saved().bindings.0[&binding].connection_state != ConnectionState::Connected {
             assert!(
                 Instant::now() < until,
@@ -425,7 +443,7 @@ impl Fixture {
                 .unwrap();
             drop(activation);
             self.owner.take();
-            let until = Instant::now() + Duration::from_secs(3);
+            let until = Instant::now() + HANG_GUARD;
             loop {
                 match DesktopOwner::acquire(&self.data) {
                     Ok(owner) => {
@@ -550,7 +568,7 @@ fn installed_existing_session_claim_callbacks_and_result_join_in_both_orders() {
             Some("original-installed-turn")
         );
         assert_eq!(saved.inputs.0[&first].state, InputState::Handled);
-        let until = Instant::now() + Duration::from_secs(3);
+        let until = Instant::now() + HANG_GUARD;
         let next = loop {
             let next = fixture.sdk.command(json!({"action":"poll"}));
             if next["prompts"].as_array().unwrap().len() == 2 {
@@ -736,7 +754,7 @@ fn installed_session_end_fences_the_original_delayed_native_announcement() {
     fixture
         .sdk
         .command(json!({"action":"connect-detached","session":id(2)}));
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + HANG_GUARD;
     while !fixture.root.path().join("announce-entered").exists() {
         assert!(
             Instant::now() < deadline,
@@ -782,7 +800,7 @@ fn installed_session_end_fences_the_original_delayed_native_announcement() {
             .activation
             .as_ref()
             .unwrap()
-            .activate_registered_before(scope, Instant::now() + Duration::from_secs(2))
+            .activate_registered_before(scope, Instant::now() + HANG_GUARD)
             .unwrap_err()
             .code,
         CoreErrorCode::HostUnreachable

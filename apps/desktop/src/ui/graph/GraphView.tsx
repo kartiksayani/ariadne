@@ -6,7 +6,7 @@
 // otherwise the first node in view) is put back where it was on screen. Only the owner's own moves (scrolling, keys,
 // a reveal, a search step, opening the Graph) take the view somewhere else.
 import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react';
-import type { ItemRoute, SessionPreferences } from '../../generated/core';
+import type { SessionPreferences } from '../../generated/core';
 import { useSession, type Immutable, type SessionStore } from '../../data/session-store';
 import type { RegisteredRoutes, RevealedItem } from '../../data/routes';
 import { plainFailure } from '../../data/plain';
@@ -17,9 +17,9 @@ import { visibleSession } from '../remove/model';
 import { GraphFilter, GraphFilterSlot } from '../tree/FilterBar';
 import { BRANCH_HUES } from '../tree/branch';
 import type { ChangeMarker } from '../tree/model';
-import { usePeek, type PeekNavigation } from '../peek/context';
+import { usePeek } from '../peek/context';
 import { applyChange, graphColumn, mergeChange, relatedLines, sessionGraph, statusVisual, type GraphNode, type SessionGraph, type TopicGraph, type ViewChange } from './model';
-import { useMapSearch } from './search';
+import { useMapSearch } from '../tree/mapSearch';
 import './graph.css';
 import { useFilterFolds } from '../shared/filterFolds';
 import { notices } from '../pages/notices';
@@ -40,14 +40,6 @@ export interface GraphViewProps {
   /** Selection reached the item; `openDetail` is false for ↑/↓ moves and folds. */
   readonly onReveal: (result: RevealedItem, openDetail: boolean) => void;
 }
-
-/** The peek's hover API (contract C5); optional until the peek piece lands it. */
-type GraphPeek = PeekNavigation & Partial<{
-  hoverStart(route: ItemRoute, anchor: HTMLElement): void;
-  hoverEnd(): void;
-  toggle(route: ItemRoute, anchor: HTMLElement): void;
-  closeAll(): void;
-}>;
 
 /** Room kept beside a keyboard-reached target: its focus ring (2px outline + 2px offset) plus a little air. */
 const RING_ROOM = 8;
@@ -146,7 +138,7 @@ export function GraphView({ store, routes, view, later, reveal, markers, prefere
   const state = useSession(store), raw = state.snapshot?.session, hidden = useHidden();
   const session = useMemo(() => raw && visibleSession(raw, state.route, hidden), [raw, state.route, hidden]);
   const scroller = useRef<HTMLDivElement>(null), dockInset = useDockInset();
-  const peek = usePeek() as GraphPeek | null, search = useMapSearch();
+  const peek = usePeek(), search = useMapSearch();
   const [localReveal, setLocalReveal] = useState<{ result: RevealedItem; external: RevealedItem | null } | null>(null);
   const [localSelection, setLocalSelection] = useState<{ id: string; external: RevealedItem | null } | null>(null);
   const [dismissedReveal, setDismissedReveal] = useState<RevealedItem | null>(null);
@@ -260,6 +252,7 @@ export function GraphView({ store, routes, view, later, reveal, markers, prefere
   const change = useCallback((next: ViewChange) => setPending(previous => mergeChange(previous, next)), []);
   /** Select an item: show it now, save it, and tell the App (which opens detail when asked). */
   const select = useCallback((id: string, options: { openDetail: boolean; expand?: boolean }) => {
+    peek?.closeAll();
     setLocalSelection({ id, external: latest.current.external });
     setFocusedEntry({ id, selectedId: id });
     if (options.expand && latest.current.graph?.filtering) filterFolds.setFold('items', id, false);
@@ -271,7 +264,7 @@ export function GraphView({ store, routes, view, later, reveal, markers, prefere
       ownReveal.current = result;
       setLocalReveal({ result, external }); latest.current.onReveal(result, options.openDetail);
     }).catch((failure: unknown) => { if (mounted.current && call === request.current && external === latest.current.external) setError(plainFailure(failure, 'This item could not be opened.')); });
-  }, [change, filterFolds.setFold]);
+  }, [change, filterFolds.setFold, peek]);
   // Clicking a node selects it and opens detail; a folded node also opens its next tier.
   const open = useCallback((node: GraphNode) => {
     select(node.item.id, { openDetail: true, expand: node.folded });
@@ -312,7 +305,7 @@ export function GraphView({ store, routes, view, later, reveal, markers, prefere
     },
     peek: () => {
       const id = focusedRow.current ?? latest.current.selectedId, element = id ? nodeElement(id) : null;
-      if (!id || !element || !peek?.toggle) return false;
+      if (!id || !element || !peek) return false;
       peek.toggle({ ...state.route, item_id: id }, element); return true;
     },
   }, { scope: 'workspace' });
@@ -332,7 +325,7 @@ export function GraphView({ store, routes, view, later, reveal, markers, prefere
   useEffect(() => {
     if (search.stepped === stepped.current) return;
     stepped.current = search.stepped;
-    peek?.closeAll?.();
+    peek?.closeAll();
     const id = search.current?.id;
     if (id && latest.current.graph?.nodes.has(id)) setScrollTarget({ id, center: false });
   }, [search.stepped, search.current, peek]);
@@ -373,18 +366,18 @@ export function GraphView({ store, routes, view, later, reveal, markers, prefere
     const id = element?.dataset.row ?? null;
     if (!element || !id || id === hovered.current) return;
     hovered.current = id; setHoverId(id);
-    peek?.hoverStart?.({ ...state.route, item_id: id }, element);
+    peek?.hoverStart({ ...state.route, item_id: id }, element);
   };
   // A scroll or a search step makes the peek forget the node; resting on it again asks again (the same node is a no-op).
   const pointerMove = (event: MouseEvent<HTMLDivElement>) => {
     const element = event.target instanceof Element ? event.target.closest<HTMLElement>('.graph-node[data-row]') : null;
-    if (element?.dataset.row) peek?.hoverStart?.({ ...state.route, item_id: element.dataset.row }, element);
+    if (element?.dataset.row) peek?.hoverStart({ ...state.route, item_id: element.dataset.row }, element);
   };
   const pointerOut = (event: MouseEvent<HTMLDivElement>) => {
     const element = event.target instanceof Element ? event.target.closest<HTMLElement>('.graph-node[data-row]') : null;
     if (!element || (event.relatedTarget instanceof globalThis.Node && element.contains(event.relatedTarget))) return;
     hovered.current = null; setHoverId(null);
-    peek?.hoverEnd?.();
+    peek?.hoverEnd();
   };
 
   const focusId = focusedEntry && focusedEntry.selectedId === selectedId && graph?.order.includes(focusedEntry.id) ? focusedEntry.id

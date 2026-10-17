@@ -68,8 +68,21 @@ struct Harness {
     read_delay: Arc<Mutex<Duration>>,
     worker: Option<JoinHandle<()>>,
 }
+/// How long a test may wait for something that must happen. It is a hang guard, not a
+/// speed check: every wait below returns the moment its condition holds.
+const HANG_GUARD: Duration = Duration::from_secs(30);
+/// The adapter's own call budgets (version probe 5 s, connect 10 s, submit 20 s) are
+/// wall-clock. A busy machine can take longer than that to start the stub `sh`, so these
+/// tests stretch the budgets tenfold. Debug builds only; the budgets stay as written otherwise.
+fn stretch_adapter_budgets() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        std::env::set_var(deadline_scale::DEADLINE_SCALE_ENV, "10");
+    });
+}
 impl Harness {
     fn new(mode: &str) -> Self {
+        stretch_adapter_budgets();
         let directory = tempfile::Builder::new()
             .prefix("ariadne-queue-")
             .tempdir_in("/tmp")
@@ -122,12 +135,8 @@ impl Harness {
                 // macOS accepted sockets can inherit the listener's nonblocking flag.
                 // Fixture server handshakes are blocking with their own bounded timeout.
                 stream.set_nonblocking(false).unwrap();
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(2)))
-                    .unwrap();
-                stream
-                    .set_write_timeout(Some(Duration::from_secs(2)))
-                    .unwrap();
+                stream.set_read_timeout(Some(HANG_GUARD)).unwrap();
+                stream.set_write_timeout(Some(HANG_GUARD)).unwrap();
                 let stopped = stopped.clone();
                 let called = called.clone();
                 let history = history.clone();
@@ -222,7 +231,7 @@ impl Harness {
     }
     fn qualified(&self) -> QualifiedCodexThread {
         self.read.lock().unwrap()["thread"]["cwd"] = json!(self.directory.path());
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + deadline_scale::scaled(Duration::from_secs(10));
         CodexDaemonReader::open_before(
             CodexOptions::new(self.executable.clone(), self.directory.path().to_owned()).unwrap(),
             self.connect().endpoint,
@@ -305,7 +314,7 @@ impl Harness {
             .count()
     }
     fn wait_sent(&self) {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + HANG_GUARD;
         while self.count() == 0 {
             assert!(Instant::now() < deadline);
             thread::sleep(Duration::from_millis(2));
@@ -490,7 +499,7 @@ fn active_duplicate_and_dropped_receipt_do_not_resend_or_claim_rejection_when_bu
     drop(active);
     drop(waiting);
     h.release();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + HANG_GUARD;
     loop {
         let result = block_on(adapter.submit(request.clone())).unwrap();
         if matches!(result, SubmitOutcome::Accepted { .. }) {
@@ -758,7 +767,7 @@ fn abandoned_pending_submit_never_spawns_and_retains_proven_unsent_outcome() {
     drop(pending);
     h.release();
     block_on(active).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + HANG_GUARD;
     loop {
         let result = block_on(adapter.submit(request.clone())).unwrap();
         if matches!(result, SubmitOutcome::RejectedBeforeDelivery { .. }) {
@@ -1285,14 +1294,18 @@ fn qualified_adapter_final_bind_keeps_original_queued_connect_deadline() {
         endpoint: h.connect().endpoint,
         configuration: h.connect().configuration,
     });
-    let observed_by = Instant::now() + Duration::from_secs(2);
+    let observed_by = Instant::now() + HANG_GUARD;
     while h.method_count("initialize") < 2 {
         assert!(Instant::now() < observed_by);
         thread::sleep(Duration::from_millis(2));
     }
+    // The ten seconds are explicit, not the adapter's own connect budget, so the stretch above
+    // (which would make that budget longer than the delays below) does not apply to them.
     let started = Instant::now();
     assert_eq!(
-        block_on(adapter.connect(h.connect())).unwrap_err().code,
+        block_on(adapter.connect_before(h.connect(), started + Duration::from_secs(10)))
+            .unwrap_err()
+            .code,
         AdapterErrorCode::HostUnreachable
     );
     assert!(started.elapsed() < Duration::from_millis(10_800));

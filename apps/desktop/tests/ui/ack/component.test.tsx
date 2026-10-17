@@ -67,7 +67,7 @@ async function mount(transport = new AckTransport()) {
   return transport;
 }
 
-describe('local acknowledgement', { timeout: 10_000 }, () => {
+describe('local acknowledgement', () => {
   it.each([
     { status: 'open', target: 'open', hint: 'Ack → keeps it open' },
     { status: 'open', target: 'in_progress', hint: 'Ack → In progress' },

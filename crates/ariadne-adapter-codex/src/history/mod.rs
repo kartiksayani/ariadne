@@ -4,7 +4,9 @@ mod normalize;
 mod preflight;
 use crate::{
     generated::v0_160_0 as wire,
-    transport::{error, ExecutableIdentity, RpcClient, SocketIdentity, SUPPORTED_CODEX_VERSION},
+    transport::{
+        budget, error, ExecutableIdentity, RpcClient, SocketIdentity, SUPPORTED_CODEX_VERSION,
+    },
 };
 use ariadne_agent_protocol::{
     host_version::{accepted_range, classify_host_version, untested_notice, HostVersionStatus},
@@ -19,7 +21,7 @@ use std::{
     collections::{HashMap, HashSet},
     env,
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 /// Explicit executable selection is mandatory; there is no host launch or PATH fallback.
@@ -32,7 +34,7 @@ impl CodexOptions {
     /// A detected version is diagnostic only and never qualifies a daemon/thread.
     pub fn read_host_version(&self, deadline: Instant) -> Result<String, AdapterError> {
         ExecutableIdentity::read(&self.executable)?
-            .read_version_before(deadline.min(Instant::now() + Duration::from_secs(5)))
+            .read_version_before(deadline.min(Instant::now() + budget(5)))
     }
     /// Reads only CODEX_HOME/HOME, never provider credentials or configuration files.
     pub fn from_environment(executable: PathBuf) -> Result<Self, AdapterError> {
@@ -153,7 +155,7 @@ impl CodexHistoryClient {
         observed_at: UtcMillis,
     ) -> Result<(Self, ConnectResult), AdapterError> {
         request.validate()?;
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + budget(10);
         let daemon = CodexDaemonReader::open_before(options, request.endpoint.clone(), deadline)?;
         daemon.bind_before(request, instance_id, observed_at, deadline)
     }
@@ -163,7 +165,7 @@ impl CodexHistoryClient {
         observed_at: UtcMillis,
     ) -> Result<PresenceObservation, AdapterError> {
         let result = self
-            .read_thread(Instant::now() + Duration::from_secs(5))
+            .read_thread(Instant::now() + budget(5))
             .map(|thread| self.presence_for(&thread, observed_at));
         self.fence(result)
     }
@@ -206,12 +208,7 @@ impl CodexHistoryClient {
         scan: &mut HistoryScan,
         observed_at: UtcMillis,
     ) -> Result<ReconcileResult, AdapterError> {
-        self.read_history_before(
-            request,
-            scan,
-            observed_at,
-            Instant::now() + Duration::from_secs(10),
-        )
+        self.read_history_before(request, scan, observed_at, Instant::now() + budget(10))
     }
     pub(crate) fn read_history_before(
         &mut self,

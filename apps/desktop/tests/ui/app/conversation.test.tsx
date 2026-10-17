@@ -115,7 +115,7 @@ async function switchQuestion(id = '2') {
   await waitFor(() => expect(conversation().querySelector('[data-detail-item-id]')?.getAttribute('data-detail-item-id')).toBe(id));
 }
 
-describe('desktop item conversation', { timeout: 10_000 }, () => {
+describe('desktop item conversation', () => {
   it('opens the selected item and returns focus to expand without remounting or scrolling the Map', async () => {
     const transport = await setup();
     const tree = screen.getByRole('region', { name: 'Session tree' }), selectedRow = row('4');

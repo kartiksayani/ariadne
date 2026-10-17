@@ -132,3 +132,7 @@ preference files readable while persisting unsent-message recovery completion.
 [ADR-0101](ADR-0101-lock-free-claim-check-and-busy-read-retry.md) answers idle
 claim polls from a lock-free committed snapshot, retries busy reads within a
 budget (5 s, or 2.5 s for the plugin's reads), and gives each local error code one plain hint with `store_busy` retryable.
+
+[ADR-0102](ADR-0102-replacement-waits-for-own-binding-lease.md) makes a replacement
+activation wait up to 2 s for this desktop's own earlier binding lease, then return
+the retryable `store_busy`; any other holder is still `permission_denied`.

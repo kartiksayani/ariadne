@@ -1,5 +1,6 @@
 #[path = "../../../../../../tests/native/window/held_turn.rs"]
 mod held_turn;
+mod lease;
 mod window;
 
 use super::*;
@@ -14,6 +15,23 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+
+/// How long a test may wait for something that must happen. It is a hang guard, not a
+/// speed check: every wait returns the moment its condition holds.
+const HANG_GUARD: Duration = Duration::from_secs(30);
+
+/// Claude qualification and the control socket give each call a few wall-clock seconds, which
+/// a busy machine (or a coverage build) can use up. These tests stretch those budgets tenfold.
+/// Debug builds only; release budgets stay as written.
+fn stretch_budgets() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        std::env::set_var(
+            ariadne_agent_protocol::deadline_scale::DEADLINE_SCALE_ENV,
+            "10",
+        );
+    });
+}
 
 fn id(n: u64) -> UuidV4 {
     UuidV4::new(format!("00000000-0000-4000-8000-{n:012x}")).unwrap()
@@ -56,6 +74,7 @@ pub(super) struct Fixture {
 }
 impl Fixture {
     pub(super) fn new() -> Self {
+        stretch_budgets();
         let home = tempfile::Builder::new()
             .prefix("ariadne-composition-")
             .tempdir_in("/tmp")
@@ -260,7 +279,7 @@ impl Fixture {
         }
     }
     fn wait_route(&self, scope: &BindingScope) {
-        let until = Instant::now() + Duration::from_secs(3);
+        let until = Instant::now() + HANG_GUARD;
         loop {
             match self.call(7, ControlMethod::Ping(scope.clone())) {
                 Ok(ControlResult::Ping(_)) => return,

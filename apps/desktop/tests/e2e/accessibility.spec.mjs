@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { json } from '../../../../scripts/run-native-e2e.mjs';
 import { openSession } from './session-button.mjs';
 
-const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
+const wait = (condition, message) => browser.waitUntil(condition, { timeout: 60000, interval: 100, timeoutMsg: message });
 const focus = selector => browser.execute(selector => document.querySelector(selector).focus(), selector);
 const active = selector => browser.execute(selector => document.activeElement === document.querySelector(selector), selector);
 // Real embedded-WebDriver key input, actual DesktopApp/core/store. This helper
@@ -37,9 +37,10 @@ export async function runAccessibilityAcceptance(configuration) {
   const editor = '.item-detail .detail-dock [data-owner-input] textarea';
   // The key needs the session ready and idle and the detail's reply box mounted. Wait for those, then press once: a key the
   // app loses must fail this step, not be pressed again until it happens to land.
-  await wait(async () => await browser.$('.tree-column').getAttribute('data-session-status') === 'ready'
+  const replyReady = () => wait(async () => await browser.$('.tree-column').getAttribute('data-session-status') === 'ready'
     && await browser.$('.tree-column').getAttribute('data-session-busy') === 'false' && await browser.$(editor).isExisting(),
   'Session and reply box were not ready for the Reply shortcut');
+  await replyReady();
   await focus(row);
   await browser.keys('r');
   await wait(() => active(editor), 'Reply shortcut did not focus ordinary native editor');
@@ -63,7 +64,9 @@ export async function runAccessibilityAcceptance(configuration) {
     if (saved !== lastSaved) { lastSaved = saved; settledSince = Date.now(); }
     return Date.now() - settledSince >= 3000;
   }, { timeout: 30000, interval: 200, timeoutMsg: 'Saved preferences did not settle after the draft edit' });
-  await select(); await browser.keys('r'); await wait(() => active(editor), 'Repeated Reply did not refocus');
+  // Same readiness as the first press: selecting the row again re-renders the Details before the key can land.
+  await select(); await replyReady(); await focus(row);
+  await browser.keys('r'); await wait(() => active(editor), 'Repeated Reply did not refocus');
   assert.equal(await (await browser.$(editor)).getValue(), `${draft}g`);
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-keyboard-retained-editor.png'));
   // Close session on the top bar's connection card (opened from the connection button) opens its one confirmation.

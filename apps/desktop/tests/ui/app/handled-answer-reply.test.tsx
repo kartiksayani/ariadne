@@ -111,7 +111,7 @@ function trigger(how: Trigger, surface: Surface, scope: HTMLElement) {
 
 const cases = (['Details', 'bigger view'] as const).flatMap(surface => (['click Add a reply', 'r'] as const).map(how => [surface, how] as const));
 
-describe('reply after a handled answer', { timeout: 15_000 }, () => {
+describe('reply after a handled answer', () => {
   it.each(cases)('%s, %s: opens the reply box below the sealed answer, keeps its words and sends them once as a reply', async (surface, how) => {
     const { transport } = await setup('handled');
     let scope = await open(surface);
