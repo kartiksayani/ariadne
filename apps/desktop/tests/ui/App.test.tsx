@@ -74,13 +74,14 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     fireEvent.click(within(since).getByRole('button', { name: /^Since you were here/ }));
     expect(within(since).getByRole('button', { name: 'New receipt branch' })).toBeTruthy();
     const chip = within(detail).getByRole('button', { name: `${target.question} · Open` });
-    vi.useFakeTimers(); fireEvent.click(chip); await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    // Past the 1 s that Details and the dock wait before marking seen.
+    vi.useFakeTimers(); fireEvent.click(chip); await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
     expect(screen.getByRole('dialog', { name: `Peek: ${target.question}` })).toBeTruthy();
     // The card says it is New, and the Map, the Since card and the saved reads all still do.
     expect(screen.getByRole('dialog').querySelector('.peek-marker')?.textContent).toBe('New');
     expect(within(row()).getByRole('img', { name: 'New to you' })).toBeTruthy();
     expect(within(since).getByRole('button', { name: 'New receipt branch' })).toBeTruthy();
-    fireEvent.keyDown(document, { key: 'Escape' }); await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    fireEvent.keyDown(document, { key: 'Escape' }); await act(async () => { await vi.advanceTimersByTimeAsync(500); });
     expect(within(row()).getByRole('img', { name: 'New to you' })).toBeTruthy();
     expect(since.isConnected).toBe(true);
     expect(screen.getByRole('article').getAttribute('data-detail-item-id')).toBe('1');
