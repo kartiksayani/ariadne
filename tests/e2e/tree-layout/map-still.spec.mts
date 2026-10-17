@@ -69,7 +69,7 @@ const bandButton = (page: Page, name: string | RegExp) => band(page).getByRole('
 const moreActions = (page: Page) => bandButton(page, /^More actions for/);
 
 // [name, kind, subject (a row that must be in view, or null), before, change, done]
-type Trigger = readonly [name: string, kind: 'still' | 'held', subject: string | null, before: (page: Page) => Promise<void>,
+type Trigger = readonly [name: string, kind: 'still' | 'held' | 'goes', subject: string | null, before: (page: Page) => Promise<void>,
   change: (page: Page) => Promise<void>, done: (page: Page) => Promise<void>];
 const nothing = async () => {};
 const triggers: readonly Trigger[] = [
@@ -113,10 +113,14 @@ const triggers: readonly Trigger[] = [
   ['the Next label changes while stepping', 'still', '11', nothing, page => press(bandButton(page, 'Next unseen')),
     page => expect(bandButton(page, /^Next unseen, 1 of 2/)).toBeVisible()],
   ['the "…" menu opens', 'still', null, nothing, page => press(moreActions(page)), page => expect(page.getByRole('menu')).toBeVisible()],
-  ['Open the bin from the "…" menu', 'held', null, nothing, async page => {
+  ['Open the bin is chosen in the "…" menu: the bin opens and scrolls into view', 'goes', null, nothing, async page => {
     await press(moreActions(page));
     await page.getByRole('menuitem', { name: /^Open the bin/ }).click();
-  }, page => expect(page.getByRole('button', { name: /^Removed by agent/ })).toHaveAttribute('aria-expanded', 'true')],
+  }, async page => {
+    const fold = page.getByRole('button', { name: /^Removed by agent/ });
+    await expect(fold).toHaveAttribute('aria-expanded', 'true');
+    await expect(fold).toBeInViewport();
+  }],
   ['a topic reply opens under the band', 'held', null, nothing, async page => {
     await press(moreActions(page));
     await page.getByRole('menuitem', { name: /^Reply to topic/ }).click();
@@ -152,7 +156,7 @@ async function open(page: Page, origin: string) {
   await page.mouse.move(2, 690);
 }
 
-for (const [name, kind, subject, before, change, done] of triggers) test(`the Map stays still when ${name}`, async ({ page }) => {
+for (const [name, kind, subject, before, change, done] of triggers) test(`the Map ${kind === 'goes' ? 'goes where the owner asked when' : 'stays still when'} ${name}`, async ({ page }) => {
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
     logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
   try {
@@ -169,6 +173,8 @@ for (const [name, kind, subject, before, change, done] of triggers) test(`the Ma
     await change(page);
     await done(page);
     await settle(page);
+    // An owner action that asks for a place ('goes') moves the Map there on purpose, so the reading row is not held.
+    if (kind === 'goes') return;
     // The row the owner reads never moves (3px, as the width table allows for sub-pixel text reflow).
     await expect.poll(async () => Math.abs((await reading(page, read.key)).top - read.top)).toBeLessThanOrEqual(kind === 'held' ? 3 : 0.5);
     if (kind === 'still') {
