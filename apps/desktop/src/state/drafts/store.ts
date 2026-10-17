@@ -7,6 +7,7 @@ import { CoreFailure, ServiceFailure, type RendererService } from '../../data/se
 import { OwnFailure } from '../../data/plain';
 import type { PreferencesWriteCoordination } from '../navigation/store';
 import { ownerReplied } from '../../selectors/waiting/replied';
+import { agentReceived } from '../../selectors/waiting/stuck';
 
 /** A reply to a whole topic (target item_id null). */
 export const TOPIC_REPLY: InputKind = 'topic_reply';
@@ -51,13 +52,27 @@ const sameMessage = (a: Immutable<OwnerDraft>, b: Immutable<OwnerDraft>) => same
   && a.text === b.text && (!!a.text || a.selected_option_id === b.selected_option_id);
 
 /**
- * The input a saved receipt points to was cancelled or skipped ("Cancel message", "Mark as done"): it never reached the
- * agent, so the receipt no longer stands and the question waits on the owner again.
+ * The input a saved receipt points to was cancelled or skipped ("Cancel message", "Mark as done", "Stop waiting"): the
+ * receipt no longer stands and the question waits on the owner again. A skipped one may still have reached the agent
+ * (`receivedCopy`).
  */
 export function receiptWithdrawn(entry: DraftEntry | undefined, session: Immutable<Session>): boolean {
   const receipt = entry?.receipt?.data;
   const state = receipt?.kind === 'input_submit' ? session.inputs[receipt.input_id]?.state : undefined;
   return state === 'cancelled' || state === 'skipped';
+}
+
+/**
+ * An answer to this same question that some attempt delivered to the agent, then cancelled or skipped ("Stop waiting"),
+ * carried these same words and choice: sending them again gives the agent a second copy, so the owner confirms first
+ * ("Send again?", as a received message's "Send again" does).
+ */
+export function receivedCopy(draft: Immutable<OwnerDraft>, session: Immutable<Session>): boolean {
+  const text = draft.text.trim();
+  if (draft.intent !== 'answer' || !draft.target.item_id || !text && !draft.selected_option_id) return false;
+  return Object.values(session.inputs).some(input => !!input && input.kind === 'answer' && (input.state === 'cancelled' || input.state === 'skipped')
+    && input.target.item_id === draft.target.item_id && input.payload.target_snapshot.question_revision === draft.question_revision
+    && input.payload.text.trim() === text && input.payload.selected_option_id === draft.selected_option_id && input.attempts.some(agentReceived));
 }
 
 export function ownerActions(item: Immutable<Item>): OwnerIntent[] {
@@ -286,7 +301,8 @@ export class OwnerDraftStore {
     const next = itemId ? this.begin(session, itemId, entry.draft.intent as OwnerIntent, true)
       : entry.draft.intent === TOPIC_REPLY ? this.beginTopic(session, entry.draft.target.topic_id, true) : null;
     // A withdrawn answer to the same question goes back in its cards, as "Put back" would: the owner's words and choice
-    // are never lost. Only a choice still offered is kept. It can't go out twice: its own input will never be sent.
+    // are never lost. Only a choice still offered is kept. Its own input will never be sent; when the agent already had
+    // it, sending the same words again asks first (`receivedCopy`, useSubmit).
     const input = entry.receipt.data.kind === 'input_submit' ? session.inputs[entry.receipt.data.input_id] : undefined;
     if (!next || !withdrawn || entry.draft.intent !== 'answer' || !sameQuestion || !input) return;
     const option = input.payload.selected_option_id;

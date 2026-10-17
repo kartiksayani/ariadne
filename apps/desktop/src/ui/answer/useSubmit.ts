@@ -1,13 +1,13 @@
 // One owner submission for one item and intent: answer, reply, note, followup,
 // drop, bring or reopen. The durable draft store keeps the draft and the exact
 // operation; this hook adds the guards and wording the controls show.
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { ItemRoute } from '../../generated/core';
 import type { PresenceObservation, Session } from '../../generated/domain/models';
 import { connectionOf, reconnectingNote, type Connection } from '../shared/connection';
 import type { Immutable } from '../../data/session-store';
 import { plainFailure } from '../../data/plain';
-import { blockedDraft, emptyDraft, ownerActions, receiptWithdrawn, useOwnerDrafts, type DraftEntry, type OwnerDraftStore, type OwnerIntent } from '../../state/drafts/store';
+import { blockedDraft, emptyDraft, ownerActions, receiptWithdrawn, receivedCopy, useOwnerDrafts, type DraftEntry, type OwnerDraftStore, type OwnerIntent } from '../../state/drafts/store';
 import { agentName } from '../shell/model';
 import { ownerReplied } from '../../selectors/waiting/replied';
 import { sessionAnswerBlocked } from '../../selectors/sessionClosed';
@@ -67,6 +67,10 @@ export interface Submit {
   readonly agent: string;
   readonly preferenceUncertain: boolean;
   readonly error: string | null;
+  /** The draft carries the words and choice of an answer the agent already had (`receivedCopy`): sending asks first. */
+  readonly copy: boolean;
+  /** A send of such a copy, held for the owner's "Send again?"; `confirm` sends it once, `cancel` keeps the draft as it is. */
+  readonly resend: { readonly disabled: boolean; readonly confirm: () => void; readonly cancel: () => void } | null;
   select: (optionId: string | null) => void;
   write: (text: string) => void;
   /** Sends the option with the given note, or the draft's current text when omitted. */
@@ -89,11 +93,14 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
   const route = session ? { project_id: session.project_id, session_id: session.id } : null;
   const entry = route ? drafts.find(route, itemId, intent) : undefined;
   const item = session?.items[itemId];
-  // A receipt stops standing when the question moved on, or when its answer was cancelled or skipped before the agent had
-  // it: the cards open again (with that answer's words, `another`).
+  // A receipt stops standing when the question moved on, or when its answer was cancelled or skipped: the cards open
+  // again (with that answer's words, `another`).
   const previousQuestion = !!entry?.receipt && !!item && (entry.draft.question_revision !== item.question_revision
     || intent === 'answer' && receiptWithdrawn(entry, session!));
   useEffect(() => { if (previousQuestion && session && entry) drafts.another(entry.draft.op_id, session); }, [previousQuestion, session, entry, drafts]);
+  // A send of words the agent already has, waiting for "Send again?"; it belongs to one draft only.
+  const [asking, setAsking] = useState<{ readonly id: string; readonly label: string; readonly change: DraftChange } | null>(null);
+  useEffect(() => { setAsking(null); }, [drafts, itemId, intent]);
   const eligible = !!item && ownerActions(item).includes(intent);
   useEffect(() => { if (!drafts.getSnapshot().ready) void drafts.load(); }, [drafts]);
   useEffect(() => {
@@ -124,10 +131,11 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
         : guard === emptyDraft ? null : guard;
   const locked = !entry || !!entry.holding || entry.saving || entry.uncertain || !!entry.receipt || intent === 'answer' && !!session && !!item && ownerReplied(session, item) || state.preferenceUncertain;
   const submit = () => entry ? drafts.submit(entry.draft.op_id).then(saved => { if (saved) onSaved?.(); return saved; }) : Promise.resolve(false);
-  // The change is saved only when the input goes out: a cancelled "not running" dialog keeps the draft as typed.
-  const dispatch = (label: string, change: DraftChange) => {
+  // The change is saved only when the input goes out: a cancelled "not running" or "Send again?" dialog keeps the draft as typed.
+  const dispatch = (label: string, change: DraftChange, confirmed = false) => {
     if (!route || !entry) return;
     const id = entry.draft.op_id;
+    if (!confirmed && session && receivedCopy({ ...entry.draft, ...change }, session)) { setAsking({ id, label, change }); return; }
     const apply = () => { const saved = drafts.getSnapshot().entries[id]?.draft;
       if (saved && (saved.text !== change.text || saved.selected_option_id !== change.selected_option_id)) drafts.edit(id, change); };
     const queue = () => { apply(); return submit(); };
@@ -140,9 +148,14 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
     } else void queue();
   };
   const ready = () => !!entry && !locked && !changed && !blocked;
+  const held = asking && asking.id === entry?.draft.op_id ? asking : null;
   return {
     entry, changed, blocked, locked, connection, agent, preferenceUncertain: state.preferenceUncertain,
     error: entry?.error ? plainFailure(entry.error) : state.error ? plainFailure(state.error) : null,
+    copy: !!draft && !!session && receivedCopy(draft, session),
+    resend: held && { disabled: !ready(),
+      confirm: () => { setAsking(null); if (ready()) dispatch(held.label, held.change, true); },
+      cancel: () => { setAsking(null); } },
     select: optionId => { if (entry && !locked) drafts.edit(entry.draft.op_id, { selected_option_id: optionId }); },
     write: text => { if (entry && !locked) drafts.edit(entry.draft.op_id, { text }); },
     sendOption: (optionId, note) => {
