@@ -168,9 +168,10 @@ for (const theme of ['light', 'dark']) test(`Getting around keeps breadcrumbs an
       const box = element.closest('.tree-scroll')!, viewport = box.getBoundingClientRect();
       const header = element.closest('.tree-topic-group')!.querySelector('.tree-topic')!.getBoundingClientRect();
       const top = Math.max(viewport.top, header.bottom), bottom = Math.min(viewport.bottom, window.innerHeight);
+      // The scroll position is a whole pixel and row heights are fractional: a row may sit a fraction under the band.
       return [...box.querySelectorAll<HTMLElement>('.tree-item')].find(row => {
         const bounds = row.getBoundingClientRect();
-        return bounds.top >= top && bounds.bottom <= bottom;
+        return bounds.top >= top - 1 && bounds.bottom <= bottom;
       })?.dataset.itemId;
     })).toBe('23');
     await expect(crumbs.getByRole('button')).toHaveText(['Rehearsal notes', 'Evidence check', 'Owner handoff']);
@@ -229,21 +230,23 @@ test('folds a long preview to three lines, never rewraps on hover and never scro
     if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
     await openTree(page, `http://127.0.0.1:${address.port}`);
 
-    // Separate three-line body clamp; titles stay readable.
+    // The body and a long title each fold to three lines, and one flag per item opens (and closes) both.
     const first = page.locator('.tree-item[data-item-id="1"]');
     const text = first.locator('.tree-outcome .tree-clamp'), line = await text.evaluate(element => parseFloat(getComputedStyle(element).lineHeight));
     const folded = (await text.boundingBox())!.height;
     // Fractional line heights can round either way in browser layout.
     expect(folded).toBeLessThanOrEqual(line * 3 + 0.5); expect(folded).toBeGreaterThanOrEqual(line * 3 - 0.5);
-    await expect(first.getByRole('button', { name: 'Show more' })).toBeVisible();
+    await expect(first.getByRole('button', { name: 'Show more' })).toHaveCount(2);
     const title = first.locator('.tree-question'), titleLine = await title.evaluate(element => parseFloat(getComputedStyle(element).lineHeight));
-    const titleHeight = (await title.boundingBox())!.height;
-    expect(titleHeight).toBeGreaterThan(titleLine * 2);
-    await first.getByRole('button', { name: 'Show more' }).click();
+    const clip = first.locator('.tree-question-block .tree-clamp'), titleHeight = (await clip.boundingBox())!.height;
+    // The title's text rectangles round on their own at the scaled size: one CSS pixel of slack, as for the scale check below.
+    expect(titleHeight).toBeLessThanOrEqual(titleLine * 3 + 1); expect(titleHeight).toBeGreaterThanOrEqual(titleLine * 3 - 1);
+    await first.getByRole('button', { name: 'Show more' }).last().click();
     expect((await text.boundingBox())!.height).toBeGreaterThan(line * 15);
-    expect((await title.boundingBox())!.height).toBe(titleHeight);
-    await first.getByRole('button', { name: 'Show less' }).click();
+    expect((await clip.boundingBox())!.height).toBeGreaterThan(titleLine * 3 + 1);
+    await first.getByRole('button', { name: 'Show less' }).first().click();
     expect((await text.boundingBox())!.height).toBeLessThanOrEqual(line * 3 + 0.5);
+    expect((await clip.boundingBox())!.height).toBeLessThanOrEqual(titleLine * 3 + 1);
 
     // Hovering a row keeps its text column and its line count exactly as they were.
     const wrapped = page.locator('.tree-item[data-item-id="5"]'), body = wrapped.locator('.tree-body'), outcome = wrapped.locator('.tree-outcome .tree-clamp');
@@ -328,8 +331,10 @@ test('gives the title the row beside a fixed end cluster with all actions and ke
     for (const action of await actions.all()) {
       await expect(action).toBeVisible();
       const box = (await action.boundingBox())!;
-      expect(box.width).toBe(26); expect(box.height).toBe(24);
-      if (await action.evaluate(element => !!element.closest('.tree-actions'))) lines.add(box.y);
+      const inBar = await action.evaluate(element => !!element.closest('.tree-actions'));
+      // The six hover slots are 26 x 24; Ack, in its own slot, is 22 x 20.
+      expect(box.width).toBe(inBar ? 26 : 22); expect(box.height).toBe(inBar ? 24 : 20);
+      if (inBar) lines.add(box.y);
       const name = (await action.getAttribute('aria-label'))!;
       await action.click(); await expect(page.getByLabel('Last action')).toHaveText(name);
     }
@@ -400,7 +405,7 @@ test('counts paragraph, list and code text lines exactly, and unfolds links only
       await page.evaluate(value => document.documentElement.style.setProperty('--text-scale', value), scale);
       // Three lines stay open; at four the clamp (three lines) would hide one, so it folds.
       for (const [id, count, kind] of [[11, 3, 'paragraph'], [12, 4, 'paragraph'], [13, 3, 'list'], [14, 4, 'list'], [15, 3, 'code'], [16, 4, 'code'], [17, 4, 'mixed']] as const) {
-        const row = page.locator(`.tree-item[data-item-id="${id}"]`), excerpt = row.locator('.tree-clamp');
+        const row = page.locator(`.tree-item[data-item-id="${id}"]`), excerpt = row.locator('.tree-outcome .tree-clamp');
         await expect(row.getByRole('button', { name: 'Show more' })).toHaveCount(count === 4 ? 1 : 0);
         // Markdown's inline mode renders the single mixed paragraph as a span;
         // multi-paragraph bodies, lists and fenced code retain their block elements.
@@ -504,7 +509,7 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: boxes, thread, c
       probe.remove(); return { actual, expected, full };
     });
     expect(accent.actual).toBe(accent.expected);
-    expect(await root.locator('.tree-more').evaluate(element => getComputedStyle(element).color)).toBe(accent.full);
+    expect(await root.locator('.tree-more').last().evaluate(element => getComputedStyle(element).color)).toBe(accent.full);
     // Nothing is drawn until a row is selected: the thread is the Map's only line.
     await expect(page.locator('.tree-thread, .tree-thread-elbow')).toHaveCount(0);
     await child.locator('.tree-question').click();
@@ -520,7 +525,7 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: boxes, thread, c
     for (const [id, lines] of [['9', 3], ['10', 4]] as const) {
       const row = page.locator(`.tree-item[data-item-id="${id}"]`);
       await row.evaluate(element => element.scrollIntoView({ block: 'center' }));
-      const body = row.locator('.tree-clamp');
+      const body = row.locator('.tree-outcome .tree-clamp');
       const line = await body.evaluate(element => parseFloat(getComputedStyle(element).lineHeight));
       // Prove the fixture really contains three/four body lines before testing the threshold.
       await expect(body.locator('br')).toHaveCount(lines - 1);
