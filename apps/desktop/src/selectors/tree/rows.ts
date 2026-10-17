@@ -1,4 +1,5 @@
-import type { Item, ItemOwner, Session } from '../../generated/domain/models';
+import type { Item, Session } from '../../generated/domain/models';
+import { sameOwner } from './filter';
 import type { SessionPreferences } from '../../generated/core';
 import { indexSession, type Immutable } from '../../data';
 import { itemRemoved } from '../removed';
@@ -21,10 +22,7 @@ export interface SentenceRows {
   readonly matchingTotal: number;
   readonly scopeTotal: number;
 }
-export function sameOwner(left: Immutable<ItemOwner>, right: Immutable<ItemOwner>): boolean {
-  return left.kind === right.kind && (left.kind === 'me' || (left.kind === 'agent' && right.kind === 'agent'
-    && left.binding_id === right.binding_id) || (left.kind === 'other' && right.kind === 'other' && left.name === right.name));
-}
+export { sameOwner };
 export { normalizeSearch } from './search';
 const selectedBySession = new WeakMap<Immutable<Session>, { key: string; value: SentenceRows }>();
 
