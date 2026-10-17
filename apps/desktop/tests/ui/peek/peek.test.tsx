@@ -43,14 +43,14 @@ function RowSource() {
 }
 
 function mount(value: Awaited<ReturnType<typeof setup>>, extra: Partial<PeekProviderProps> = {}) {
-  const go = vi.fn(), visit = vi.fn();
-  render(<PeekProvider lookup={() => value.store} drafts={value.drafts} onGoTo={go} onVisit={visit} {...extra}>
+  const go = vi.fn(), open = vi.fn(), visit = vi.fn();
+  render(<PeekProvider lookup={() => value.store} drafts={value.drafts} onGoTo={go} onOpenDetails={open} onVisit={visit} {...extra}>
     <ItemRefSession.Provider value={route}>
       <Markdown text="See [#2](item:2) and [#8](item:8)." />
       <RowSource /><button type="button">Outside control</button>
     </ItemRefSession.Provider>
   </PeekProvider>);
-  return { go, visit, chip: () => screen.getByRole('button', { name: `${value.source.items['2']!.question} · Waiting on me` }) };
+  return { go, open, visit, chip: () => screen.getByRole('button', { name: `${value.source.items['2']!.question} · Waiting on me` }) };
 }
 
 describe('name chips and item peek', () => {
@@ -75,15 +75,20 @@ describe('name chips and item peek', () => {
   });
 
   it('has the board footer: esc to close, Open details and Go to, and no Copy reference', async () => {
-    const value = await setup(), { chip, go } = mount(value);
+    const value = await setup(), { chip, go, open } = mount(value);
     fireEvent.click(chip());
     const peek = screen.getByRole('dialog');
     const footer = peek.querySelector<HTMLElement>('.peek-footer')!;
     expect([...footer.querySelectorAll('button')].map(button => button.textContent)).toEqual(['esc to close', 'Open details', 'Go to']);
     expect(within(peek).queryByRole('button', { name: /Copy/ })).toBeNull();
     fireEvent.click(within(footer).getByRole('button', { name: 'Open details' }));
-    expect(go).toHaveBeenCalledWith({ ...route, item_id: '2' });
+    expect(open).toHaveBeenCalledWith({ ...route, item_id: '2' });
+    expect(go).not.toHaveBeenCalled();
     expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(chip());
+    fireEvent.click(screen.getByRole('button', { name: 'Go to' }));
+    expect(go).toHaveBeenCalledWith({ ...route, item_id: '2' });
+    expect(open).toHaveBeenCalledTimes(1);
   });
 
   it('keeps running-text names inside the existing line box while retaining keyboard peek and focus return', async () => {
@@ -323,7 +328,7 @@ describe('name chips and item peek', () => {
   it('preserves agent words for removed references and honors owner text suppression under a session scope', async () => {
     const value = await setup(); value.source.items['8']!.removed_at = value.source.updated_at; ++value.source.revision;
     await value.store.refresh();
-    const { container } = render(<PeekProvider lookup={() => value.store} drafts={value.drafts} onGoTo={vi.fn()}>
+    const { container } = render(<PeekProvider lookup={() => value.store} drafts={value.drafts} onGoTo={vi.fn()} onOpenDetails={vi.fn()}>
       <ItemRefSession.Provider value={route}><ItemRefs.Provider value={{ lookup: () => null, onOpenItem: vi.fn() }}>
         <Markdown text="Keep [the agent’s original words](item:8)." />
         <ItemRefs.Provider value={null}><Markdown text="Keep [my exact words](item:2)." /><ItemReference itemId="2">Owner reference</ItemReference></ItemRefs.Provider>
@@ -337,7 +342,7 @@ describe('name chips and item peek', () => {
   it('keeps a hover pending across parent refreshes and uses the latest visit callback for an explicit open', async () => {
     const value = await setup(); vi.useFakeTimers();
     const visited = vi.fn();
-    const tree = (renderCount: number) => <PeekProvider lookup={() => value.store} drafts={value.drafts} onGoTo={() => {}} onVisit={() => visited(renderCount)}>
+    const tree = (renderCount: number) => <PeekProvider lookup={() => value.store} drafts={value.drafts} onGoTo={() => {}} onOpenDetails={() => {}} onVisit={() => visited(renderCount)}>
       <ItemRefSession.Provider value={route}><ItemReference itemId="2" /></ItemRefSession.Provider>
     </PeekProvider>;
     const { rerender } = render(tree(1));
@@ -360,7 +365,7 @@ describe('name chips and item peek', () => {
     mount(value);
     expect(screen.getByRole('button', { name: `${value.source.items['2']!.question} · Waiting on me` }).textContent).toBe('delivery · Receipt lookup');
     expect(screen.getByRole('button', { name: `${value.source.items['8']!.question} · Open` }).textContent).toBe('retry · Receipt lookup');
-    const { container } = render(<PeekProvider lookup={() => value.store} drafts={value.drafts} onGoTo={vi.fn()}><ItemRefSession.Provider value={route}>
+    const { container } = render(<PeekProvider lookup={() => value.store} drafts={value.drafts} onGoTo={vi.fn()} onOpenDetails={vi.fn()}><ItemRefSession.Provider value={route}>
       <ItemReference itemId="404">Unknown reference</ItemReference>
     </ItemRefSession.Provider></PeekProvider>);
     expect(container.querySelector('button')).toBeNull();
@@ -472,11 +477,11 @@ describe('simple question answers in peek', () => {
     const value = await setup();
     const id = value.drafts.begin(value.source, '2', 'answer')!;
     value.drafts.edit(id, { text: 'Long first line\nKeep the full second line.' });
-    const { chip, go } = mount(value); fireEvent.click(chip());
+    const { chip, open } = mount(value); fireEvent.click(chip());
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(screen.getByRole('button', { name: /^Keep the design/ }).hasAttribute('disabled')).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Open details' }));
-    expect(go).toHaveBeenCalledWith({ ...route, item_id: '2' });
+    expect(open).toHaveBeenCalledWith({ ...route, item_id: '2' });
     expect(value.drafts.find(route, '2', 'answer')?.draft.text).toBe('Long first line\nKeep the full second line.');
     value.drafts.edit(id, { text: 'A short answer' });
     ++value.source.items['2']!.question_revision; ++value.source.items['2']!.revision; ++value.source.revision;
@@ -491,13 +496,13 @@ describe('simple question answers in peek', () => {
     const value = await setup(), text = 'Before first line\nsecond line after';
     const id = value.drafts.begin(value.source, '2', 'answer')!;
     value.drafts.edit(id, { text });
-    const { chip, go } = mount(value); fireEvent.click(chip());
+    const { chip, open } = mount(value); fireEvent.click(chip());
     expect(screen.queryByRole('button', { name: 'Write my own answer' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /^Keep the design/ }));
     expect(value.drafts.find(route, '2', 'answer')?.draft).toMatchObject({ text, selected_option_id: 'yes' });
     expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Open details' }));
-    expect(go).toHaveBeenCalledWith({ ...route, item_id: '2' });
+    expect(open).toHaveBeenCalledWith({ ...route, item_id: '2' });
     expect(value.transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(0);
   });
 
@@ -571,7 +576,7 @@ describe('peek viewport position', () => {
       return this.matches('[data-peek-anchor]') ? new DOMRect(75, 300, 120, 20) : new DOMRect(20, 290, 900, 40);
     });
     vi.stubGlobal('innerWidth', 1000); vi.stubGlobal('innerHeight', 800);
-    render(<PeekProvider lookup={() => value.store} drafts={value.drafts} onGoTo={vi.fn()}><Row /></PeekProvider>);
+    render(<PeekProvider lookup={() => value.store} drafts={value.drafts} onGoTo={vi.fn()} onOpenDetails={vi.fn()}><Row /></PeekProvider>);
     fireEvent.keyDown(screen.getByTestId('row'), { key: ' ' });
     expect(screen.getByRole('dialog').style.left).toBe('75px');
     expect(screen.getByRole('dialog').style.top).toBe('326px');

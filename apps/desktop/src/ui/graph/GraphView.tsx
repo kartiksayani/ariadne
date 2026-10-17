@@ -46,12 +46,13 @@ export interface GraphViewProps {
 const RING_ROOM = 8;
 /**
  * Scrolls `element` into the scroller: centred (opening, links) or just into view (keys, search steps).
- * The visible area ends above the floating dock (`bottomInset`), so a node under the dock counts as hidden.
+ * The visible area ends above the floating dock and the legend card (`bottomInset`), so a node under either counts as hidden.
  */
-function scrollToNode(scroller: HTMLElement, element: Element, center: boolean, bottomInset = 0) {
+function scrollToNode(scroller: HTMLElement, element: Element, center: boolean, bottomInset = 0, dockInset = 0) {
   const a = scroller.getBoundingClientRect(), b = element.getBoundingClientRect();
   if (center) {
-    scroller.scrollTop += (b.top + Math.min(b.height, 120) / 2) - (a.top + (a.height - bottomInset) / 2);
+    // A centred node sits mid-view, clear of the legend card: only the dock shortens the area it is centred in.
+    scroller.scrollTop += (b.top + Math.min(b.height, 120) / 2) - (a.top + (a.height - dockInset) / 2);
     scroller.scrollLeft += (b.left + b.width / 2) - (a.left + a.width / 2);
     return;
   }
@@ -85,7 +86,7 @@ const Node = memo(function Node({ node, width, focusable, related, match, curren
     <i className={`graph-node-icon ${visual.icon}`} role="img" aria-label={visual.label} title={visual.label} style={{ color: statusColor(node.status) }} />
     <span className="graph-node-name" data-peek-anchor="">{node.short}</span>
     {node.folded && <span className="graph-node-inside" title={inside}>+{node.inside}
-      {node.waitingInside > 0 && <i className="ph-fill ph-question graph-node-waiting" aria-hidden="true" />}</span>}
+      {node.waitingInside > 0 && <span className="graph-node-waiting"> · {node.waitingInside} waiting</span>}</span>}
     {marker && <ChangeMarker kind={marker} form="diamond" />}
   </div>;
 });
@@ -180,13 +181,28 @@ export function GraphView({ store, routes, view, later, reveal, markers, prefere
     [graph, session, selectedId, hoverId]);
 
   // ------------------------------------------------------------ the anchor
-  /** The node the owner is looking at, where it sat in the scroller, and the scroll it was seen at. */
-  const held = useRef<{ readonly id: string; readonly x: number; readonly y: number; readonly top: number; readonly left: number } | null>(null);
+  /**
+   * The node the owner is looking at: where it sat in the window (`y`; the scroller itself can move, plan D24) and across
+   * the scroller (`x`), the scroll it was seen at, and the layout it was seen in (to find its neighbours if it leaves).
+   */
+  const held = useRef<{ readonly id: string; readonly x: number; readonly y: number; readonly top: number; readonly left: number; readonly graph: SessionGraph } | null>(null);
   const nodeElement = (id: string) => scroller.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(id)}"]`) ?? null;
+  /** The legend card hangs over the scroller's bottom edge; a node must land above it as well as above the dock. */
+  const legendInset = useRef(0);
+  const bottomInset = () => latest.current.dockInset + legendInset.current;
+  /** Blank room under the canvas that keeps the scroll extent when the content shrinks under a held node at the bottom. */
+  const spacer = useRef<HTMLDivElement>(null);
+  const anchorOn = (element: HTMLElement, box: HTMLElement, graph: SessionGraph) => {
+    const frame = box.getBoundingClientRect(), rect = element.getBoundingClientRect();
+    return { id: element.dataset.row!, x: rect.left - frame.left, y: rect.top, top: box.scrollTop, left: box.scrollLeft, graph };
+  };
   const remember = () => {
     const box = scroller.current, current = latest.current.graph;
     if (!box || !current) { held.current = null; return; }
-    const frame = box.getBoundingClientRect(), bottom = frame.bottom - latest.current.dockInset;
+    // The owner scrolling back up gives the room back: keep only what the current scroll position needs.
+    const gap = spacer.current;
+    if (gap && gap.offsetHeight) gap.style.height = `${Math.max(0, Math.ceil(box.scrollTop - (box.scrollHeight - box.clientHeight - gap.offsetHeight)))}px`;
+    const frame = box.getBoundingClientRect(), bottom = frame.bottom - bottomInset();
     const inView = (rect: DOMRect) => rect.bottom > frame.top && rect.top < bottom && rect.right > frame.left && rect.left < frame.right;
     const selected = latest.current.selectedId;
     let element = selected && current.nodes.has(selected) ? nodeElement(selected) : null;
@@ -201,22 +217,70 @@ export function GraphView({ store, routes, view, later, reveal, markers, prefere
         if (top >= frame.top && top < bottom && left >= frame.left && left < frame.right) { element = nodeElement(id); break; }
       }
     }
-    const rect = element?.getBoundingClientRect();
-    held.current = element && rect ? { id: element.dataset.row!, x: rect.left - frame.left, y: rect.top - frame.top, top: box.scrollTop, left: box.scrollLeft } : null;
+    held.current = element ? anchorOn(element, box, current) : null;
   };
-  /** Puts the held node back; a node folded or removed away hands its place to its nearest drawn ancestor. */
+  /**
+   * Where the held node's place is now, and the window position that place should keep. The node itself while it is drawn;
+   * the ancestor that folded over it; else the nearest node that survives, below it first, then above, which keeps the
+   * position it had before (plan D24); else the nearest drawn ancestor.
+   */
+  const placeOf = (before: NonNullable<typeof held.current>, current: SessionGraph) => {
+    const own = nodeElement(before.id), was = before.graph;
+    if (own) return { element: own, y: before.y, x: before.x };
+    const parentOf = (id: string) => was.nodes.get(id)?.item.parent ?? null;
+    for (let id = parentOf(before.id); id; id = parentOf(id)) {
+      const element = current.nodes.get(id)?.folded ? nodeElement(id) : null;
+      if (element) return { element, y: before.y, x: before.x };
+    }
+    const tops = topicTops(was), me = was.nodes.get(before.id), at = was.order.indexOf(before.id);
+    if (me && at >= 0) {
+      for (const step of [1, -1]) {
+        for (let index = at + step; index >= 0 && index < was.order.length; index += step) {
+          const id = was.order[index]!, node = was.nodes.get(id)!, element = current.nodes.has(id) ? nodeElement(id) : null;
+          if (element) return { element, y: before.y + (tops.get(node.topicId) ?? 0) + node.y - (tops.get(me.topicId) ?? 0) - me.y, x: before.x + node.x - me.x };
+        }
+      }
+    }
+    for (let id = parentOf(before.id); id; id = parentOf(id)) {
+      const element = nodeElement(id);
+      if (element) return { element, y: before.y, x: before.x };
+    }
+    return null;
+  };
+  /** Puts the held node back where it was in the window, keeping the scroll extent it needs. */
   const restore = () => {
-    const box = scroller.current, before = held.current;
-    // A different scroll position than the one the node was seen at is the owner's own move: keep it.
-    if (!box || !before || box.scrollTop !== before.top || box.scrollLeft !== before.left) return;
-    let element = nodeElement(before.id);
-    for (let id = session?.items[before.id]?.parent; !element && id; id = session?.items[id]?.parent) element = nodeElement(id);
-    if (!element) return;
-    const frame = box.getBoundingClientRect(), rect = element.getBoundingClientRect();
-    const dy = rect.top - frame.top - before.y, dx = rect.left - frame.left - before.x;
-    if (Math.abs(dy) >= 0.5) box.scrollTop += dy;
+    const box = scroller.current, before = held.current, current = latest.current.graph;
+    if (!box || !before || !current) return;
+    // A different scroll position than the one the node was seen at is the owner's own move: keep it. The browser also
+    // moves a scroll by itself when the content shrank under it (clamped to the new end); that is not the owner.
+    const clamped = (now: number, was: number, limit: number) => was > now && Math.abs(now - limit) < 0.5;
+    if (box.scrollTop !== before.top && !clamped(box.scrollTop, before.top, box.scrollHeight - box.clientHeight)) return;
+    if (box.scrollLeft !== before.left && !clamped(box.scrollLeft, before.left, box.scrollWidth - box.clientWidth)) return;
+    const place = placeOf(before, current);
+    if (!place) return;
+    const frame = box.getBoundingClientRect(), rect = place.element.getBoundingClientRect();
+    const dy = rect.top - place.y, dx = rect.left - frame.left - place.x;
+    const top = box.scrollTop + (Math.abs(dy) >= 0.5 ? dy : 0), gap = spacer.current;
+    if (gap) gap.style.height = `${Math.max(0, Math.ceil(top - (box.scrollHeight - box.clientHeight - gap.offsetHeight)))}px`;
+    if (Math.abs(dy) >= 0.5) box.scrollTop = top;
     if (Math.abs(dx) >= 0.5) box.scrollLeft += dx;
   };
+  /** Measures the legend card (it wraps with the width) so scrolling and the scroller's padding keep clear of it. */
+  const measureLegend = () => {
+    const box = scroller.current, legend = box?.parentElement?.querySelector<HTMLElement>('.graph-legend');
+    const inset = legend?.offsetHeight ? legend.offsetHeight + 12 : 0;
+    if (inset === legendInset.current) return;
+    legendInset.current = inset;
+    box?.style.setProperty('--graph-legend-inset', `${inset}px`);
+  };
+  useLayoutEffect(measureLegend);
+  useEffect(() => {
+    const view = scroller.current?.parentElement;
+    if (!view || typeof ResizeObserver === 'undefined') return;
+    const watch = new ResizeObserver(measureLegend);
+    watch.observe(view);
+    return () => watch.disconnect();
+  }, []);
 
   // Keep keyboard focus at the same layout position when the focused node disappears.
   const focusedRow = useRef<string | null>(null);
@@ -252,6 +316,10 @@ export function GraphView({ store, routes, view, later, reveal, markers, prefere
   /** Select an item: show it now, save it, and tell the App (which opens detail when asked). */
   const select = useCallback((id: string, options: { openDetail: boolean; expand?: boolean }) => {
     peek?.closeAll();
+    // The node the owner aimed at keeps its place through what this changes (it may unfold above the old selection),
+    // so it is held at its pre-commit position instead of the old selection.
+    const box = scroller.current, current = latest.current.graph, element = nodeElement(id);
+    if (box && current?.nodes.has(id) && element) held.current = anchorOn(element, box, current);
     setLocalSelection({ id, external: latest.current.external });
     setFocusedEntry({ id, selectedId: id });
     if (options.expand && latest.current.graph?.filtering) filterFolds.setFold('items', id, false);
@@ -352,7 +420,7 @@ export function GraphView({ store, routes, view, later, reveal, markers, prefere
     const box = scroller.current;
     const element = target ? nodeElement(target.id) : null;
     if (box && element && target) {
-      scrollToNode(box, element, target.center, dockInset);
+      scrollToNode(box, element, target.center, bottomInset(), dockInset);
       if (target.focus || box.contains(document.activeElement)) element.focus({ preventScroll: true });
     } else if (initial) box?.focus({ preventScroll: true });
     remember();
@@ -394,14 +462,17 @@ export function GraphView({ store, routes, view, later, reveal, markers, prefere
         if (!(event.relatedTarget instanceof globalThis.Node) || !event.currentTarget.contains(event.relatedTarget)) focusedRow.current = null;
       }}
       onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => { if (!(event.target instanceof HTMLButtonElement)) keys(event); }}>
-      {graph && drawn && <div className="graph-canvas" style={{ width: graph.width, height: graph.height }} onMouseOver={pointerOver} onMouseMove={pointerMove} onMouseOut={pointerOut}>
-        {graph.topics.map(topic => <Topic key={topic.topic.id} graph={topic} width={graph.nodeWidth} focusId={focusId} related={lines.related}
-          matches={search.ids} current={current} markers={markers} onOpen={open} />)}
-        <svg className="graph-lines" width={graph.width} height={graph.height} aria-hidden="true">
-          {lines.paths.map(path => <path key={path.id} data-edge={path.id} d={path.d} className="graph-related" />)}
-          {graph.path && <path data-edge="path" d={graph.path} className="graph-path" />}
-        </svg>
-      </div>}
+      {graph && drawn && <>
+        <div className="graph-canvas" style={{ width: graph.width, height: graph.height }} onMouseOver={pointerOver} onMouseMove={pointerMove} onMouseOut={pointerOut}>
+          {graph.topics.map(topic => <Topic key={topic.topic.id} graph={topic} width={graph.nodeWidth} focusId={focusId} related={lines.related}
+            matches={search.ids} current={current} markers={markers} onOpen={open} />)}
+          <svg className="graph-lines" width={graph.width} height={graph.height} aria-hidden="true">
+            {lines.paths.map(path => <path key={path.id} data-edge={path.id} d={path.d} className="graph-related" />)}
+            {graph.path && <path data-edge="path" d={graph.path} className="graph-path" />}
+          </svg>
+        </div>
+        <div ref={spacer} aria-hidden="true" />
+      </>}
     </div>
     <Legend drawn={drawn} />
   </div>;

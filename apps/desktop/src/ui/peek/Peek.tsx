@@ -29,7 +29,10 @@ export interface PeekProviderProps {
   readonly navigation?: NavigationStore;
   /** When Conversation owns input, only its item may offer answer actions. */
   readonly answerTarget?: ItemRoute;
+  /** "Go to": select the item and scroll the Map to it; Details stays as it is. */
   readonly onGoTo: (route: ItemRoute) => void;
+  /** "Open details": select the item and open Details on it. */
+  readonly onOpenDetails: (route: ItemRoute) => void;
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
   /** 'peek' only for an explicit open (click or key); a hover is not a visit. */
   readonly onVisit?: (route: ItemRoute, action: PeekVisit) => void;
@@ -45,7 +48,7 @@ const sameRoute = (left: ItemRoute, right: ItemRoute) => left.project_id === rig
 const anchorRect = (anchor: HTMLElement) => (anchor.querySelector<HTMLElement>('[data-peek-anchor]') ?? anchor).getBoundingClientRect();
 const modal = () => !!document.querySelector('[aria-modal="true"]');
 
-export function PeekProvider({ lookup, drafts, navigation, answerTarget, onGoTo, onAgentNotRunning, onVisit, children }: PeekProviderProps) {
+export function PeekProvider({ lookup, drafts, navigation, answerTarget, onGoTo, onOpenDetails, onAgentNotRunning, onVisit, children }: PeekProviderProps) {
   const [shown, setShown] = useState<OpenPeek | null>(null);
   // `live` mirrors `shown` synchronously, so pointer and key handlers in one tick agree on what is open.
   const live = useRef<OpenPeek | null>(null), hover = useRef<Hover | null>(null);
@@ -180,11 +183,12 @@ export function PeekProvider({ lookup, drafts, navigation, answerTarget, onGoTo,
     }),
     hoverProps: route => ({ onMouseEnter: event => hoverStart(route, event.currentTarget), onMouseLeave: hoverEnd }),
   }), [show, toggle, close, closeAll, hoverStart, hoverEnd]);
-  const goTo = (route: ItemRoute) => { close(false); onVisit?.(route, 'opened'); onGoTo(route); };
+  const leaveTo = (go: (route: ItemRoute) => void) => (route: ItemRoute) => { close(false); onVisit?.(route, 'opened'); go(route); };
+  const goTo = leaveTo(onGoTo), openDetails = leaveTo(onOpenDetails);
   return <PeekContext.Provider value={peek}>{children}{shown && createPortal(<PeekCard key={JSON.stringify(shown.route)} shown={shown} drafts={drafts} card={card}
     navigation={navigation} sending={sending}
     allowAnswer={!answerTarget || sameRoute(answerTarget, shown.route)}
-    onClose={() => close()} onGoTo={() => goTo(shown.route)} onAgentNotRunning={onAgentNotRunning}
+    onClose={() => close()} onGoTo={() => goTo(shown.route)} onOpenDetails={() => openDetails(shown.route)} onAgentNotRunning={onAgentNotRunning}
     onEngage={() => { engaged.current = true; cancelClose(); }} onPointerEnter={cancelClose} onPointerLeave={leave}
     onAnswered={() => onVisit?.(shown.route, 'answered')} />, document.body)}</PeekContext.Provider>;
 }
@@ -196,11 +200,11 @@ function usePeekSeen(navigation: NavigationStore | undefined, route: SessionRef)
   return useReadingSeen(navigation?.reading, preferences, route);
 }
 
-function PeekCard({ shown, drafts, card, navigation, sending, allowAnswer, onClose, onGoTo, onAgentNotRunning, onEngage, onPointerEnter, onPointerLeave, onAnswered }: {
+function PeekCard({ shown, drafts, card, navigation, sending, allowAnswer, onClose, onGoTo, onOpenDetails, onAgentNotRunning, onEngage, onPointerEnter, onPointerLeave, onAnswered }: {
   readonly shown: OpenPeek; readonly drafts: OwnerDraftStore; readonly card: RefObject<HTMLDivElement | null>;
   readonly navigation?: NavigationStore; readonly sending: MutableRefObject<() => boolean>;
   readonly allowAnswer: boolean;
-  readonly onClose: () => void; readonly onGoTo: () => void; readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
+  readonly onClose: () => void; readonly onGoTo: () => void; readonly onOpenDetails: () => void; readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
   readonly onEngage: () => void; readonly onPointerEnter: () => void; readonly onPointerLeave: () => void; readonly onAnswered: () => void;
 }) {
   const state = useSession(shown.store), session = state.snapshot?.session, item = session?.items[shown.route.item_id];
@@ -236,7 +240,7 @@ function PeekCard({ shown, drafts, card, navigation, sending, allowAnswer, onClo
   const footer = <div className="peek-footer">
     <button type="button" className="peek-close" aria-label="Close peek" title="Close ( esc )" onClick={onClose}>esc to close</button>
     {valid && <>
-      <button type="button" className="peek-button" onClick={onGoTo}><i className="ph ph-file-text" aria-hidden="true" />Open details</button>
+      <button type="button" className="peek-button" onClick={onOpenDetails}><i className="ph ph-file-text" aria-hidden="true" />Open details</button>
       <button type="button" className="peek-button peek-go" onClick={onGoTo}><i className="ph ph-arrow-right" aria-hidden="true" />Go to</button>
     </>}
   </div>;

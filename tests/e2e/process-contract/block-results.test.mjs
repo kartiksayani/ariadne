@@ -194,3 +194,17 @@ test('runner never treats passing, missing or malformed results as an acceptance
     await assert.rejects(completedBlockResults(evidence, failure), error => error === failure);
   }
 }));
+
+test('a block subset runs and records only the selected blocks and still demands their dependencies', async () => fixture(async evidence => {
+  const ran = [], blocks = acceptanceBlocks({ evidence, reset: async () => {}, capture: async () => {}, only: new Set(['tree', 'history']) });
+  await blocks.run('discovery', () => assert.fail('Unselected blocks must not run'));
+  await blocks.run('tree', async () => { ran.push('tree'); });
+  await blocks.run('history', async () => { ran.push('history'); }, ['tree']);
+  await blocks.run('remove', () => assert.fail('Unselected blocks must not run'), ['discovery']);
+  await assert.rejects(acceptanceBlocks({ evidence, reset: async () => {}, capture: async () => {}, only: new Set(['history']) })
+    .run('history', () => assert.fail('Missing prerequisite'), ['tree']), /Missing acceptance dependency: tree/);
+  await blocks.finish(async () => {});
+  assert.deepEqual(ran, ['tree', 'history']);
+  assert.deepEqual(blocks.results.map(result => result.name), ['tree', 'history']);
+  assert.deepEqual(await savedResults(evidence), blocks.results);
+}));

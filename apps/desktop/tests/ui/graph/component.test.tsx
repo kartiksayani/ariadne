@@ -528,9 +528,8 @@ describe('session graph view', () => {
     it('opens a folded node: selects it, unfolds it, opens detail and saves the view', async () => {
       const value = await setup(undefined, preferences({ expanded_item_ids: [] })); render(<value.Composition />);
       const chip = node('1').querySelector<HTMLElement>('.graph-node-inside')!;
-      expect(chip.textContent).toBe('+3');
+      expect(chip.textContent).toBe('+3 · 1 waiting');
       expect(chip.title).toBe('3 inside, 1 waiting on you');
-      expect(chip.querySelector('.graph-node-waiting')).toBeTruthy();
       expect(node('1').getAttribute('aria-label')).toMatch(/\(folded, 3 inside, 1 waiting on you\)$/);
       expect(node('1').getAttribute('aria-expanded')).toBe('false');
       fireEvent.click(node('1'));
@@ -550,7 +549,6 @@ describe('session graph view', () => {
       render(<value.Composition />);
       const chip = (id: string) => node(id).querySelector('.graph-node-inside')?.textContent;
       expect(chip('1')).toBe('+3');
-      expect(node('1').querySelector('.graph-node-waiting')).toBeNull();
       fireEvent.click(node('1'));
       await waitFor(() => expect(value.reveals).toEqual([['1', true]]));
       expect(ids()).toEqual(['1', '1.2', '2', '3', '8']);

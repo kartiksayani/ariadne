@@ -119,7 +119,8 @@ impl NativeActivation {
         self.routes.clone()
     }
     /// A clone of the running supervisor's binding lease. It retains the OS lease
-    /// like any started call does, and grants no dispatch context.
+    /// like any started call does, and grants no dispatch context. Tests only.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn held_lease(&self, binding_id: &UuidV4) -> Option<crate::leases::BindingLease> {
         let state = self.state.lock().ok()?;
         let active = state.active.get(binding_id)?;

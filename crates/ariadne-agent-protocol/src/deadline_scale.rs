@@ -14,15 +14,13 @@ pub const DEADLINE_SCALE_ENV: &str = "ARIADNE_TEST_DEADLINE_SCALE";
 /// The budget a debug test run should allow for `budget`; exactly `budget` in a release build.
 #[cfg(debug_assertions)]
 pub fn scaled(budget: Duration) -> Duration {
-    use std::sync::OnceLock;
-    static SCALE: OnceLock<u32> = OnceLock::new();
-    let scale = *SCALE.get_or_init(|| {
-        std::env::var(DEADLINE_SCALE_ENV)
-            .ok()
-            .and_then(|value| value.parse::<u32>().ok())
-            .filter(|scale| (1..=100).contains(scale))
-            .unwrap_or(1)
-    });
+    // Read on every call, not cached: a test binary sets the variable once, and a parallel test that
+    // asked for a budget first must not pin the factor at 1 for the rest of the process.
+    let scale = std::env::var(DEADLINE_SCALE_ENV)
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|scale| (1..=100).contains(scale))
+        .unwrap_or(1);
     budget.saturating_mul(scale)
 }
 
@@ -36,9 +34,24 @@ pub const fn scaled(budget: Duration) -> Duration {
 mod tests {
     use super::*;
 
+    /// One test, because it owns the variable for the whole process: the factor is read on every
+    /// call, so a test binary may set it after other tests already asked for a budget.
     #[test]
-    fn an_unset_scale_leaves_the_budget_unchanged() {
-        // The unit-test process never sets the variable, so the factor is 1.
-        assert_eq!(scaled(Duration::from_secs(5)), Duration::from_secs(5));
+    fn the_scale_is_read_on_every_call() {
+        let five = Duration::from_secs(5);
+        std::env::remove_var(DEADLINE_SCALE_ENV);
+        assert_eq!(scaled(five), five, "unset means 1");
+        std::env::set_var(DEADLINE_SCALE_ENV, "10");
+        assert_eq!(
+            scaled(five),
+            Duration::from_secs(50),
+            "set after the first call"
+        );
+        for refused in ["0", "101", "ten", ""] {
+            std::env::set_var(DEADLINE_SCALE_ENV, refused);
+            assert_eq!(scaled(five), five, "{refused:?} means 1");
+        }
+        std::env::remove_var(DEADLINE_SCALE_ENV);
+        assert_eq!(scaled(five), five, "removed again");
     }
 }

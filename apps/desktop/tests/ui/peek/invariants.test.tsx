@@ -119,7 +119,7 @@ describe('answering in the peek: one send, and the owner’s words and pick surv
         <button type="button" aria-label="Map row" onKeyDown={event => { if (event.key === ' ') { event.preventDefault(); peek.open({ ...route, item_id: '2' }, event.currentTarget); } }}>Row</button>
       </div>;
     }
-    render(<PeekProvider lookup={() => store} drafts={drafts} onGoTo={vi.fn()}><Scroller /></PeekProvider>);
+    render(<PeekProvider lookup={() => store} drafts={drafts} onGoTo={vi.fn()} onOpenDetails={vi.fn()}><Scroller /></PeekProvider>);
     const chip = () => screen.getByRole('button', { name: `${source.items['2']!.question} · Waiting on me` });
     return { transport, store, drafts, source, chip, release, sent, map: () => screen.getByTestId('map') };
   }
