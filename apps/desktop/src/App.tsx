@@ -5,6 +5,8 @@ import { useReadingSeen } from './state/preferences/reading';
 import { waitForLifecycleReady } from './ui/shared/lifecycleReady';
 import { itemRemoved } from './selectors/removed';
 import { hasStatusFilter } from './selectors/tree/folds';
+import { filterCount, type LocalChip } from './selectors/tree/filter';
+import { useLocalChips } from './ui/tree/useLocalChips';
 import { AgentRemovalNotices } from './ui/remove/AgentRemovalNotices';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createDesktopService, type RendererService } from './data/service';
@@ -84,8 +86,8 @@ interface Application {
 const sameSession = (a: SessionRef, b: SessionRef) => a.project_id === b.project_id && a.session_id === b.session_id;
 const clearedFilters = (filters: { readonly archived: boolean }): SessionPreferences['filters'] =>
   ({ search: '', statuses: [], owners: [], topic_id: null, hide_later: false, archived: filters.archived });
-const filtering = (filters: Immutable<SessionPreferences['filters']>) => !!filters.search.trim() || hasStatusFilter(filters.statuses)
-  || filters.owners.length > 0 || filters.hide_later;
+const filtering = (filters: Immutable<SessionPreferences['filters']>, local: readonly LocalChip[]) => !!filters.search.trim() || hasStatusFilter(filters.statuses)
+  || filters.owners.length > 0 || filters.hide_later || local.length > 0;
 interface CenterProps {
   readonly application: Application; readonly view: OpenedSessionView; readonly graph: boolean; readonly query: string;
   readonly reveal: RevealedItem | null; readonly selectedId: string | null; readonly detailOpen: boolean;
@@ -98,6 +100,7 @@ interface CenterProps {
   readonly onClearFilters: () => void; readonly onClearSearch: () => void; readonly onShowArchive: () => void;
   readonly onRemove: (target: TreeRemoveTarget) => void;
   readonly filterOpen?: boolean;
+  readonly onCloseFilter?: () => void;
   readonly onSearchStatus?: (status: MapSearchStatus | null) => void;
 }
 function SessionCenter({ application, view, graph, reveal, ...props }: CenterProps) {
@@ -115,7 +118,7 @@ function SessionCenter({ application, view, graph, reveal, ...props }: CenterPro
       onOpenItem={props.onOpenItem} /> : undefined}
     notices={notice || recovering ? <div className="tree-notices">{notice}{recovering && <RecoveryPanel actions={actions} />}</div> : null}
     graph={graph ? <NavigationGraph navigation={application.navigation} store={view.store}
-      reveal={reveal} onReveal={props.onSelected} /> : null} />;
+      reveal={reveal} onReveal={props.onSelected} onClearFilters={props.onClearFilters} /> : null} />;
 }
 function Workspace({ application }: { application: Application }) {
   const navigation = application.navigation, state = useNavigation(navigation);
@@ -432,6 +435,7 @@ function Workspace({ application }: { application: Application }) {
   // A view saved by an older release may still show archived topics in the Tree; Tree or Graph leaves that.
   const archived = view?.filters.archived ?? false;
   const [filterOpen, setFilterOpen] = useState(false);
+  const localChips = useLocalChips(view?.session.session_id ?? '');
   // The Map publishes its search count, arrows and note here for the top bar.
   const [searchStatus, setSearchStatus] = useState<MapSearchStatus | null>(null);
 
@@ -483,6 +487,7 @@ function Workspace({ application }: { application: Application }) {
   const clearFilters = () => {
     if (!view) return;
     setSearchEdit(null); setDismissedReveal(currentReveal);
+    localChips.set([]);
     saveView({ filters: clearedFilters(view.filters) });
   };
   // An explicit clear (the top bar's ×, esc, MapSearch.clear) saves at once, so a session switch never brings it back.
@@ -554,7 +559,7 @@ function Workspace({ application }: { application: Application }) {
     askRemove,
     toggleLater, toggleHidden,
     toggleGraph: () => setGraphModes(previous => ({ ...previous, [key]: !graph })),
-    clearFilters: detailOpen && !!selectedId || !view || !filtering(view.filters) && !query ? undefined : clearFilters,
+    clearFilters: detailOpen && !!selectedId || !view || !filtering(view.filters, localChips.chips) && !query ? undefined : clearFilters,
   };
   useIntents(itemIntents(intentApp));
   const keys = useWorkspaceKeys<HTMLDivElement>(workspaceKeys(intentApp), { scope: 'workspace' });
@@ -593,7 +598,7 @@ function Workspace({ application }: { application: Application }) {
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
       onRemoveTarget={removeTarget} waitingStore={application.waiting}
       chrome={{ query, searchStatus, graph: graph && !archived, onView: store ? showView : undefined, theme: shown, searchBlocked: conversationOpen,
-        filter: store ? { active: filterOpen, count: view && hasStatusFilter(view.filters.statuses) ? view.filters.statuses.length : 0, onToggle: () => setFilterOpen(value => !value) } : undefined,
+        filter: store ? { active: filterOpen, count: view ? filterCount({ view, local: localChips.chips }) : localChips.chips.length, onToggle: () => setFilterOpen(value => !value) } : undefined,
         onRecent: store ? () => { dispatchIntent('recent.open'); } : undefined,
         textSize: shownTextSize, onTextSizeChange: changeTextSize,
         // A search highlights in place (SPEC §6.9): typing keeps every row, including a temporary reveal's.
@@ -628,7 +633,7 @@ function Workspace({ application }: { application: Application }) {
         onFocusRequestConsumed={consumeOwnerRequest} onAgentNotRunning={onAgentNotRunning}
         onLater={value => preferences ? navigation.setLater({ ...route, item_id: conversation.itemId }, value, preferences.revision) : Promise.resolve(false)} /> : undefined}
       onCloseDetail={closeDetail}
-      renderSession={opened => <SessionCenter filterOpen={filterOpen} application={application} view={opened} graph={graph} query={query} reveal={treeReveal}
+      renderSession={opened => <SessionCenter filterOpen={filterOpen} onCloseFilter={() => setFilterOpen(false)} application={application} view={opened} graph={graph} query={query} reveal={treeReveal}
         covered={conversationOpen} actingId={conversationOpen ? conversation?.itemId : null}
         historyReveal={historyReveal.current === treeReveal ? historyReveal.current : null}
         selectedId={treeSelectedId} detailOpen={conversationOpen || detailOpen && !!selectedId}

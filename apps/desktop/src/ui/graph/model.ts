@@ -10,7 +10,7 @@ import { itemLabels } from '../shared/short';
 import { displayStatus, type DisplayStatus } from '../../selectors/waiting/replied';
 import { waitingOnOwner } from '../../selectors/sessionClosed';
 import { hiddenItems } from '../tree/hidden';
-import { hasStatusFilter } from '../../selectors/tree/folds';
+import { filterOf, type FilterScope, type LocalChip } from '../../selectors/tree/filter';
 import { connectedItems } from '../../selectors/related';
 import { branchSlot } from '../tree/branch';
 import { STATUS, statusKey, type StatusKey } from '../shared/status';
@@ -101,6 +101,8 @@ export interface GraphInput {
   readonly session: Immutable<Session>;
   readonly view: Immutable<SessionPreferences>;
   readonly later: ReadonlySet<string>;
+  /** The local chips picked in this session (D15); the saved chips are in `view`. */
+  readonly local?: readonly LocalChip[];
   readonly temporaryExpandedItemIds?: readonly string[];
   readonly revealedItemId?: string | null;
   readonly filterCollapsedItemIds?: ReadonlySet<string>;
@@ -108,10 +110,6 @@ export interface GraphInput {
   /** The fitted column (graphColumn); the narrowest when unmeasured. */
   readonly column?: number;
 }
-
-/** Filtering, Graph sense: the status, owner and Later filters. Search is not a filter on the Map (contract C4). */
-export const isFiltering = (filters: Immutable<SessionPreferences['filters']>): boolean =>
-  hasStatusFilter(filters.statuses) || filters.owners.length > 0 || filters.hide_later;
 
 type Point = { readonly x: number; readonly y: number };
 /** Orthogonal branch edge: from the parent's right edge, out ELBOW px, down (or up) to the child's centre, across into it. */
@@ -164,9 +162,9 @@ export function relatedLines(graph: SessionGraph, session: Immutable<Session>, s
 export function sessionGraph(input: GraphInput): SessionGraph {
   const { session, view, later, selectedId } = input;
   const column = input.column ?? COLUMN_MIN, width = nodeWidth(column);
-  // Search tints matches and never filters (contract C4), so it is not part of the rows' view.
-  const filters = view.filters.search ? { ...view.filters, search: '' } : view.filters;
-  const filtering = isFiltering(filters);
+  // Search tints matches and never filters (contract C4); the scope has no search. The Tree and the Graph share one filter (D17).
+  const scope: FilterScope = { session, view, later, local: input.local ?? [] };
+  const filtering = filterOf(scope).active;
   const explicit = new Set(view.hidden_item_ids ?? []);
   const hidden = hiddenItems(session, explicit);
   // Hidden items are not drawn (SPEC 1.3), except on the route to the selected or revealed item, dimmed: a path needs them.
@@ -178,8 +176,7 @@ export function sessionGraph(input: GraphInput): SessionGraph {
   if (selectedId && [...route].some(id => hidden.has(id))) {
     for (let id = session.items[selectedId]?.parent; id; id = session.items[id]?.parent) temporary.add(id);
   }
-  const rows = sentenceRows(session, filters === view.filters ? view : { ...view, filters }, later, [...temporary],
-    input.revealedItemId ?? null, input.filterCollapsedItemIds).rows;
+  const rows = sentenceRows(scope, [...temporary], input.revealedItemId ?? null, input.filterCollapsedItemIds).rows;
   const drawable = (id: string) => !hidden.has(id) || route.has(id);
   const kidsByParent = new Map<string, SentenceRow[]>(), rootsByTopic = new Map<string, SentenceRow[]>();
   for (const row of rows) {

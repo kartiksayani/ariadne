@@ -3,9 +3,11 @@ import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { SessionPreferences } from '../../../src/generated/core';
 import type { Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
-import { initialExpansion, normalizeSearch, sentenceRows } from '../../../src/selectors/tree/rows';
-import { chipsOf, toggleChip, topicCounts } from '../../../src/ui/tree/model';
+import { initialExpansion, normalizeSearch } from '../../../src/selectors/tree/rows';
+import { sentenceRows } from './scope';
+import { topicCounts } from '../../../src/ui/tree/model';
 import { branchSlot } from '../../../src/ui/tree/branch';
+import { chipCounts, savedChips, toggleSavedChip, type LocalChip } from '../../../src/selectors/tree/filter';
 import { shimTree } from './shimTree';
 import { closedSessionQuestion, waitingOnOwner } from '../../../src/selectors/sessionClosed';
 import { displayStatus } from '../../../src/selectors/waiting/replied';
@@ -25,12 +27,13 @@ describe('saved status filter chips', () => {
     const frozen = immutable(session);
     const project = () => shimTree({ session: frozen, view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
       selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) });
+    const waiting = () => chipCounts({ session: frozen, view: preferences, later: new Set(), local: [] }).waiting;
     expect(project().rows.some(row => row.kind === 'item' && row.item.id === '2')).toBe(true);
-    expect(project().counts.waiting).toBe(0);
+    expect(waiting()).toBe(0);
     preferences.filters.statuses = ['waiting_on_me'];
     expect(project().rows).toEqual([]);
     expect(project().shownCount).toBe(0);
-    expect(project().counts.waiting).toBe(0);
+    expect(waiting()).toBe(0);
     expect(sentenceRows(frozen, preferences, new Set()).matchingTotal).toBe(0);
     expect(sentenceRows(frozen, preferences, new Set()).rows).toEqual([]);
   });
@@ -47,12 +50,18 @@ describe('saved status filter chips', () => {
     expect(displayStatus(frozen, item)).toBe('sent');
     expect(closedSessionQuestion(frozen, item)).toBe(false);
     expect(waitingOnOwner(frozen, item)).toBe(false);
+    const project = (local: readonly LocalChip[] = []) => shimTree({ session: frozen, view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
+      selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at), local });
+    const found = (local?: readonly LocalChip[]) => project(local).rows.find(row => row.kind === 'item' && row.item.id === item.id);
+    expect(found()).toMatchObject({ status: 'sent', sessionClosed: false });
+    // Sent is its own chip (D14): the Sent chip keeps the item, In progress no longer does.
+    expect(found(['sent'])).toMatchObject({ status: 'sent', sessionClosed: false });
     preferences.filters.statuses = ['in_progress'];
-    const model = shimTree({ session: frozen, view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
-      selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) });
-    expect(model.rows.find(row => row.kind === 'item' && row.item.id === item.id)).toMatchObject({ status: 'sent', sessionClosed: false });
-    expect(model.counts.waiting).toBe(0);
-    expect(sentenceRows(frozen, preferences, new Set()).rows.some(row => row.item.id === item.id)).toBe(true);
+    expect(found()).toBeUndefined();
+    expect(chipCounts({ session: frozen, view: preferences, later: new Set(), local: [] }).waiting).toBe(0);
+    expect(sentenceRows(frozen, preferences, new Set()).rows.some(row => row.item.id === item.id)).toBe(false);
+    preferences.filters.statuses = [];
+    expect(sentenceRows(frozen, preferences, new Set(), [], null, new Set(), ['sent']).rows.some(row => row.item.id === item.id)).toBe(true);
   });
   it('places Ack counts after both waiting counts and before other statuses', () => {
     const statuses = ['open', 'sent', 'queued', 'done', 'waiting_on_me', 'in_progress'] as const;
@@ -63,10 +72,10 @@ describe('saved status filter chips', () => {
   });
   it('treats every known saved status as All before toggling, while preserving partial groups', () => {
     const full = ['open', 'waiting_on_me', 'in_progress', 'decided', 'done', 'dropped', 'replaced', 'open'] as const;
-    expect([...chipsOf(full)]).toEqual(['all']);
-    expect(toggleChip(full, 'open')).toEqual(['open']);
-    expect([...chipsOf(['done'])]).toEqual(['closed']);
-    expect(toggleChip(['done'], 'open')).toEqual(['open', 'done']);
+    expect(savedChips(full)).toEqual([]);
+    expect(toggleSavedChip(full, 'open')).toEqual(['open']);
+    expect(savedChips(['done'])).toEqual(['done']);
+    expect(toggleSavedChip(['done'], 'open')).toEqual(['open', 'done']);
   });
 });
 

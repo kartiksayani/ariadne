@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyChange, elbowPath, graphColumn, graphStatus, isClosed, isFiltering, mergeChange, nodeWidth, relatedLines, relatedPath,
+import { filterOf, type LocalChip } from '../../../src/selectors/tree/filter';
+import { applyChange, elbowPath, graphColumn, graphStatus, isClosed, mergeChange, nodeWidth, relatedLines, relatedPath,
   sessionGraph, type GraphInput } from '../../../src/ui/graph/model';
 import { shortLabel } from '../../../src/ui/shared/short';
 import { graphSession, preferences, topicA, topicB } from './fixture';
@@ -170,9 +171,11 @@ describe('graph model', () => {
   it('reads statuses and filters; search is not a filter', () => {
     expect([graphStatus('waiting_on_me'), graphStatus('in_progress'), graphStatus('dropped')]).toEqual(['waiting', 'progress', 'dropped']);
     expect([isClosed('done'), isClosed('replaced'), isClosed('open')]).toEqual([true, true, false]);
-    const filters = preferences().filters;
-    expect([isFiltering(filters), isFiltering({ ...filters, statuses: ['open'] }), isFiltering({ ...filters, owners: [{ kind: 'me' }] }),
-      isFiltering({ ...filters, hide_later: true }), isFiltering({ ...filters, search: 'receipt' })]).toEqual([false, true, true, true, false]);
+    const filters = preferences().filters, session = graphSession();
+    const filtering = (next: typeof filters, local: LocalChip[] = []) =>
+      filterOf({ session, view: { ...preferences(), filters: next }, later: new Set(), local }).active;
+    expect([filtering(filters), filtering({ ...filters, statuses: ['open'] }), filtering({ ...filters, owners: [{ kind: 'me' }] }),
+      filtering({ ...filters, hide_later: true }), filtering({ ...filters, search: 'receipt' }), filtering(filters, ['blocked'])]).toEqual([false, true, true, true, false, true]);
     expect(build().nodes.get('1')!.closed).toBe(true);
   });
 

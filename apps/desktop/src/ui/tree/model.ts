@@ -23,7 +23,7 @@ import { columnX, COLUMN_STEP, withBoxes, type Box } from './boxes';
 import { agentRunning, connectionOf, type Connection } from '../shared/connection';
 import { connectedItems } from '../../selectors/related';
 import { ackTarget } from '../../selectors/ack';
-import { FILTER_STATUSES, hasStatusFilter, matchExpansion } from '../../selectors/tree/folds';
+import { matchExpansion } from '../../selectors/tree/folds';
 import { changeTreeOrder, type SeenState } from '../../selectors/changes/seen';
 
 export type ChangeMarker = 'new' | 'changed';
@@ -64,36 +64,6 @@ const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ?
 const items = (session: Immutable<Session>) => activeItems(session);
 const topicList = (session: Immutable<Session>) => [...activeTopics(session)]
   .sort((a, b) => a.order - b.order);
-
-// ---------------------------------------------------------------- chips
-
-export type Chip = 'all' | 'waiting' | 'open' | 'progress' | 'closed';
-export const CHIPS: readonly { readonly chip: Chip; readonly label: string; readonly icon: string; readonly iconColor: string; readonly statuses: readonly ItemStatus[] }[] = [
-  { chip: 'all', label: 'All', icon: 'ph ph-list', iconColor: 'inherit', statuses: [] },
-  { chip: 'waiting', label: 'Waiting on me', icon: STATUS.waiting.icon, iconColor: 'var(--st-waiting)', statuses: ['waiting_on_me'] },
-  { chip: 'open', label: 'Open', icon: STATUS.open.icon, iconColor: 'var(--st-open)', statuses: ['open'] },
-  { chip: 'progress', label: 'In progress', icon: STATUS.progress.icon, iconColor: 'var(--st-progress)', statuses: ['in_progress'] },
-  { chip: 'closed', label: 'Closed', icon: STATUS.decided.icon, iconColor: 'var(--st-decided)', statuses: ['decided', 'done', 'dropped', 'replaced'] },
-];
-const fullStatusFilter = (statuses: readonly ItemStatus[]) => statuses.length > 0 && !hasStatusFilter(statuses);
-/** The selected chips represented by the saved status set; empty and full sets mean All. */
-export function chipsOf(statuses: readonly ItemStatus[]): ReadonlySet<Chip> {
-  return new Set(statuses.length && !fullStatusFilter(statuses)
-    ? CHIPS.filter(value => value.statuses.some(status => statuses.includes(status))).map(value => value.chip) : ['all']);
-}
-/** Toggle a group of statuses without changing the persisted preference shape. */
-export function toggleChip(statuses: readonly ItemStatus[], chip: Chip): ItemStatus[] {
-  if (chip === 'all') return [];
-  const group = CHIPS.find(value => value.chip === chip)!.statuses, next = new Set(fullStatusFilter(statuses) ? [] : statuses);
-  if (group.some(status => next.has(status))) group.forEach(status => next.delete(status));
-  else group.forEach(status => next.add(status));
-  const ordered = FILTER_STATUSES.filter(status => next.has(status));
-  return ordered.length === FILTER_STATUSES.length ? [] : ordered;
-}
-/** Local reply delivery stays under the persisted In progress filter. */
-export const statusIn = (statuses: readonly ItemStatus[], status: DisplayStatus) =>
-  status === 'sent' || status === 'queued' ? statuses.includes('in_progress') : statuses.includes(status);
-const inChip = (chip: Chip, status: DisplayStatus) => chip === 'all' || statusIn(CHIPS.find(value => value.chip === chip)!.statuses, status);
 
 // ---------------------------------------------------------------- search
 
@@ -290,7 +260,7 @@ export const stripKey = (topicId: string, parent: string | null, reason: StripRe
 export interface TreeInput {
   readonly session: Immutable<Session>;
   readonly view: Immutable<SessionPreferences>;
-  /** The filters that scope the rows (owners, Later and statuses, today through `shimFilter`). */
+  /** The filters that scope the rows (owners, Later and the picked chips: `filterOf` in selectors/tree/filter). */
   readonly filter: TreeFilter;
   /** The walk keeps only this top item (and its topic); the other top items of its topic become one 'focus' strip. */
   readonly focusRootId?: string | null;
@@ -329,8 +299,6 @@ export interface TreeModel {
   readonly noMatch: boolean;
   /** The session has no items at all. */
   readonly empty: boolean;
-  readonly chips: ReadonlySet<Chip>;
-  readonly counts: Readonly<Record<Chip, number>>;
   /** Matching items the rows do not show: in hidden items, and inside folded items or topics; and what shows them. */
   readonly search: { readonly hidden: number; readonly collapsed: number; readonly outsideFocus: number; readonly reveal: SearchReveal };
 }
@@ -381,7 +349,6 @@ export function treeModel(input: TreeInput): TreeModel {
   const shownBySearch = input.searchShown ?? NO_REVEAL;
   shownBySearch.groups.forEach(key => hiddenGroups.add(key));
   const terms = searchTerms(input.search);
-  const chips = chipsOf(filters.statuses);
   const attentionTopic = input.attentionRevealId ? session.items[input.attentionRevealId]?.topic_id : null;
   // Focus keeps one top item and its topic; a stale or non-top id focuses nothing.
   const focusItem = input.focusRootId ? session.items[input.focusRootId] : undefined;
@@ -399,7 +366,6 @@ export function treeModel(input: TreeInput): TreeModel {
   const display = (item: Immutable<Item>) => shows.get(item.id) ?? item.status;
   const filtering = filter.active;
   const scoped = live.filter(item => base(item));
-  const counts = Object.fromEntries(CHIPS.map(({ chip: key }) => [key, scoped.filter(item => (!hidden.has(item.id) || key === 'waiting') && (key !== 'waiting' || waitingOnOwner(session, item)) && inChip(key, display(item))).length])) as Record<Chip, number>;
 
   // includeSets: matches, the forced reveal and selection, and their ancestors.
   const matched = new Set<string>(), forced = new Set<string>(), include = new Set<string>();
@@ -558,7 +524,7 @@ export function treeModel(input: TreeInput): TreeModel {
       reveal.topics.add(item.topic_id);
     }
   }
-  return { rows, filtering, shownCount: scoped.filter(item => !hidden.has(item.id) && filter.matches(item)).length, hiddenCount: scoped.filter(item => hidden.has(item.id) && filter.matches(item)).length, itemCount: live.filter(item => !hidden.has(item.id)).length, outside, noMatch: live.length > 0 && rows.length === 0, empty: Object.keys(session.items).length === 0 && !Object.values(session.topics).some(topic => topic?.removed_at), chips, counts,
+  return { rows, filtering, shownCount: scoped.filter(item => !hidden.has(item.id) && filter.matches(item)).length, hiddenCount: scoped.filter(item => hidden.has(item.id) && filter.matches(item)).length, itemCount: live.filter(item => !hidden.has(item.id)).length, outside, noMatch: live.length > 0 && rows.length === 0, empty: Object.keys(session.items).length === 0 && !Object.values(session.topics).some(topic => topic?.removed_at),
     search: { hidden: hiddenMatches, collapsed: collapsedMatches, outsideFocus, reveal: { items: [...reveal.items], topics: [...reveal.topics], groups: [...reveal.groups] } } };
 }
 

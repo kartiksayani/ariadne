@@ -255,9 +255,3 @@
 .graph-legend-related .graph-related {
   stroke-width: 1.5;
 }
-
-/* The funnel is no taller than a legend line, so seating it here keeps the card's height. */
-.graph-legend .tree-filter-button {
-  width: 22px;
-  height: 22px;
-}

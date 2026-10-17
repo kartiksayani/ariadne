@@ -18,7 +18,7 @@ import '../../../apps/desktop/src/ui/detail/detail.css';
 // Item 1 carries a long finding (it must fold to three lines), item 5 a paragraph that
 // wraps over a few lines (hover must not rewrap it), the rest keep their short text.
 class TreeLayoutTransport extends AppTransport {
-  constructor({ gettingAround = false, changes = false, card = false, still = false } = {}) {
+  constructor({ gettingAround = false, changes = false, card = false, still = false, filter = false } = {}) {
     super();
     const session = this.sessions.get(route.session_id)!;
     if (card) { // An archived session with a long name: the top bar and its connection card must still fit a narrow window.
@@ -63,7 +63,7 @@ class TreeLayoutTransport extends AppTransport {
       this.preferences.seen = [{ session: route, since: baseline, items: [], topics: [] }];
       this.preferences.sessions[0]!.expanded_item_ids = [];
     }
-    if (still) {
+    if (still || filter) {
       // The Map-still table (map-still.spec.mts): 1.1 folds inside item 1, 11 is New, 12 Changed and waits for an Ack.
       const baseline = '2026-10-01T00:00:00.000Z', later = '2026-10-13T09:00:00.000Z';
       Object.values(items).forEach(item => { if (item) { item.created_at = baseline; item.changes = []; } });
@@ -76,6 +76,28 @@ class TreeLayoutTransport extends AppTransport {
       this.preferences.seen = [{ session: route, since: baseline, items: [], topics: [] }];
       this.preferences.sessions[0]!.expanded_item_ids = ['2', '3'];
     }
+    if (filter) {
+      // The filter-row table (map-still.spec.mts): every chip's list scrolls. Items 19-38 join 9-18 as one-line results.
+      // To ack: 12 and 19-38. Blocked: 9-37 wait on item 8, which stays open; 38 waits on item 2, which an agent can settle.
+      for (let n = 19; n <= 38; n++) {
+        items[String(n)] = { ...items['8']!, id: String(n), ordinal: n, question: `Another item ${n}`, outcome: 'A short result.',
+          type: 'finding', ack_to: 'done', ask: null };
+      }
+      for (let n = 9; n <= 37; n++) items[String(n)]!.depends_on = ['8'];
+      items['38']!.depends_on = ['2'];
+    }
+  }
+  /** The owner's Ack lands: the proposal is accepted, so the item takes its target status and leaves "to ack". */
+  async invoke<T>(name: string, args: Parameters<AppTransport['invoke']>[1]): Promise<T> {
+    const { request } = args;
+    if ('command' in request && request.command.command === 'ack') {
+      const session = this.sessions.get(request.session!.session_id)!, item = session.items[request.command.params.item_id]!;
+      item.status = item.ack_to!; item.ack_to = null; ++item.revision; ++session.revision;
+      this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+      return { api_version: 1, ok: true, data: { operation_id: request.command.op_id, session_id: session.id, revision: session.revision,
+        data: { kind: 'item_ack', item_id: item.id, item_revision: item.revision, status: item.status, message_id: crypto.randomUUID() } } } as T;
+    }
+    return super.invoke<T>(name, args);
   }
   /** What the agent writes while the owner reads: the session's next revision, announced as the desktop does. */
   agent(change: string) {
@@ -87,6 +109,10 @@ class TreeLayoutTransport extends AppTransport {
     // The agent renames an item above the reading row to a much longer name: it wraps to more lines.
     if (change === 'grow-above') { items['9']!.question = 'Another item 9, renamed to a much longer name that wraps over several lines in the Map. '.repeat(3); ++items['9']!.revision; }
     if (change === 'session-ends') { session.state = 'closed'; session.closed_at = session.updated_at; }
+    // The dependency of the last Blocked item is done: it leaves the Blocked filter by itself.
+    if (change === 'settle') { items['2']!.status = 'done'; ++items['2']!.revision; }
+    // An Ack landing from elsewhere (the Graph has no Ack button): the item takes its target status and is no longer to ack.
+    if (change.startsWith('ack:')) { const item = items[change.slice(4)]!; item.status = item.ack_to ?? item.status; item.ack_to = null; ++item.revision; }
     ++session.revision;
     this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
   }
@@ -147,7 +173,7 @@ function DetailsFixture({ dock, bigger }: { dock: number; bigger: boolean }) {
 }
 
 const query = new URLSearchParams(window.location.search);
-const transport = new TreeLayoutTransport({ gettingAround: query.has('nav'), changes: query.has('changes'), card: query.has('card'), still: query.has('still') });
+const transport = new TreeLayoutTransport({ gettingAround: query.has('nav'), changes: query.has('changes'), card: query.has('card'), still: query.has('still'), filter: query.has('filter') });
 // The specs drive agent writes and seen marks through this handle.
 (window as unknown as { treeLayout: TreeLayoutTransport }).treeLayout = transport;
 createRoot(document.getElementById('root')!).render(query.has('details') ? <DetailsFixture dock={Number(query.get('dock') ?? 0)} bigger={query.has('bigger')} />

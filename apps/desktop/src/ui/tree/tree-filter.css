@@ -1,73 +1,95 @@
-/* The filter control of the Map (the chip row piece owns this file). */
-
-/* The filter control ends the Recent row. */
-.tree-filters {
+/* The chip row of the Map (SPEC 6.10): one row in flow under the top bar, above both the Tree and the Graph. */
+.tree-filter-row {
   display: flex;
   flex: none;
   align-items: center;
-  margin-left: auto;
+  gap: 12px;
+  min-width: 0;
+  container-type: inline-size;
+  padding: 8px 12px;
+  font-size: calc(12px * var(--text-scale));
+  background: var(--a-side);
+  box-shadow: inset 0 -1px 0 var(--color-divider);
 }
 
-.tree-filter-button {
-  position: relative;
-  display: inline-flex;
+.tree-filter-chips {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
+  min-width: 0;
+  gap: 6px;
+}
+
+.tree-filter-chip {
+  display: inline-flex;
   flex: none;
+  align-items: center;
+  height: 24px;
+  gap: 5px;
+  padding: 0 9px 0 7px;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--color-text);
+  background: var(--a-card);
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+}
+
+.tree-filter-chip[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--a-card));
+  box-shadow: inset 0 0 0 1.5px var(--color-accent);
+}
+
+.tree-filter-chip:disabled {
+  cursor: default;
+  opacity: .6;
+}
+
+.tree-filter-count {
+  font-variant-numeric: tabular-nums;
+  opacity: .58;
+}
+
+.tree-filter-end {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.tree-filter-summary {
+  font-variant-numeric: tabular-nums;
+}
+
+.tree-filter-narrow {
+  display: none;
+}
+
+.tree-filter-clear {
   padding: 0;
   border: 0;
-  border-radius: 7px;
-  font-size: calc(14px * var(--text-scale));
-  cursor: pointer;
-  color: color-mix(in srgb, var(--color-text) 74%, transparent);
-  background: transparent;
-  box-shadow: 0 0 0 1px var(--color-divider);
-}
-
-.tree-filter-button[data-active] {
-  color: var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 55%, transparent);
-}
-
-.tree-filter-button:disabled {
-  cursor: default;
-}
-
-.tree-filter-dot {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentcolor;
-}
-
-.tree-filter-option {
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 4px;
   font: inherit;
+  text-decoration: underline;
   cursor: pointer;
   color: var(--color-text);
   background: transparent;
 }
 
-.tree-filter-option:disabled {
+.tree-filter-clear:disabled {
   cursor: default;
   opacity: .5;
 }
 
-.tree-filter-check {
-  width: 14px;
-  color: var(--color-accent);
-}
+@container (max-width: 560px) {
+  .tree-filter-wide {
+    display: none;
+  }
 
-.tree-chip-count {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-  opacity: .7;
+  .tree-filter-narrow {
+    display: inline;
+  }
 }

@@ -11,7 +11,6 @@ import { createDesktopService, type DesktopTransport } from '../../../src/data/s
 import { GraphView } from '../../../src/ui/graph/GraphView';
 import { MapSearchContext, NO_SEARCH, type MapSearch } from '../../../src/ui/tree/mapSearch';
 import { PeekContext, type PeekNavigation } from '../../../src/ui/peek/context';
-import { GraphFilterSlot } from '../../../src/ui/tree/FilterBar';
 import type { ChangeMarker } from '../../../src/ui/tree/model';
 import { graphSession, preferences, topicA } from './fixture';
 import { Notices, notices } from '../../../src/ui/pages/notices';
@@ -21,7 +20,7 @@ afterEach(() => { cleanup(); opened.splice(0).forEach(sessions => sessions.close
 
 interface CompositionProps {
   reveal?: RevealedItem | null; hidden?: string[]; selection?: string; filters?: Partial<SessionPreferences['filters']>;
-  expanded?: string[]; markers?: ReadonlyMap<string, ChangeMarker>; search?: MapSearch; onCommit?: () => void;
+  expanded?: string[]; markers?: ReadonlyMap<string, ChangeMarker>; search?: MapSearch; onCommit?: () => void; onClearFilters?: () => void;
 }
 async function setup(session: Session = graphSession(), view = preferences()) {
   const route = { project_id: session.project_id, session_id: session.id };
@@ -41,12 +40,12 @@ async function setup(session: Session = graphSession(), view = preferences()) {
   const store = sessions.open(route); await store.refresh();
   const routes = new RegisteredRoutes(service, sessions), saved: SessionPreferences[] = [], reveals: [string, boolean][] = [];
   let write: (next: SessionPreferences) => Promise<boolean> = async () => true;
-  function Composition({ reveal = null, hidden, selection, filters, expanded, markers, search, onCommit }: CompositionProps) {
+  function Composition({ reveal = null, hidden, selection, filters, expanded, markers, search, onCommit, onClearFilters }: CompositionProps) {
     const [current, setCurrent] = useState(view);
     useLayoutEffect(() => { onCommit?.(); });
     const graph = <GraphView store={store} routes={routes} view={immutable({ ...current, ...(hidden ? { hidden_item_ids: hidden } : {}),
       ...(selection ? { selected_item_id: selection } : {}), ...(filters ? { filters: { ...current.filters, ...filters } } : {}),
-      ...(expanded ? { expanded_item_ids: expanded } : {}) })} later={new Set()} reveal={reveal} markers={markers}
+      ...(expanded ? { expanded_item_ids: expanded } : {}) })} later={new Set()} reveal={reveal} markers={markers} onClearFilters={onClearFilters}
       saveView={async next => { saved.push(structuredClone(next)); const ok = await write(next); if (ok) setCurrent(next); return ok; }}
       onReveal={(result, openDetail) => { if (result.kind === 'item') reveals.push([result.route.item_id, openDetail]); }} />;
     return <MapSearchContext.Provider value={search ?? NO_SEARCH}>{graph}</MapSearchContext.Provider>;
@@ -725,21 +724,44 @@ describe('session graph view', () => {
     await act(async () => {});
   });
 
-  it('seats the Tree column’s filter control at the end of the legend card, and keeps it reachable when no topic is drawn', async () => {
-    const slot = <button type="button">Filter</button>;
-    const value = await setup(), view = render(<GraphFilterSlot.Provider value={slot}><value.Composition /></GraphFilterSlot.Provider>);
+  it.each<[string, Partial<SessionPreferences['filters']>]>([
+    ['a saved chip', { statuses: ['decided'] }],
+    ['a leftover saved dropped', { statuses: ['dropped'] }],
+    ['saved owners', { owners: [{ kind: 'other', name: 'Nobody' }] }],
+  ])('says nothing matches, with a Clear, when %s leaves the Graph empty', async (_name, filters) => {
+    const value = await setup(), clear = vi.fn();
+    render(<value.Composition filters={filters} onClearFilters={clear} />);
+    expect(document.querySelector('.graph-canvas')).toBeNull();
+    expect(screen.getByText('No items match these filters.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(clear).toHaveBeenCalledTimes(1);
+    await act(async () => {});
+  });
+
+  it('draws no empty-filter message while nothing filters, even when the session has no items', async () => {
+    const session = graphSession(); session.items = {};
+    const empty = await setup(session); render(<empty.Composition onClearFilters={vi.fn()} />);
+    expect(screen.queryByText('No items match these filters.')).toBeNull();
+    await act(async () => {});
+  });
+
+  it('draws no empty-filter message while a filter still leaves nodes', async () => {
+    const value = await setup(); render(<value.Composition filters={{ statuses: ['open'] }} onClearFilters={vi.fn()} />);
+    expect(ids().length).toBeGreaterThan(0);
+    expect(screen.queryByText('No items match these filters.')).toBeNull();
+    await act(async () => {});
+  });
+
+  it('keeps the legend card to the three lines: the filter is the chip row above the Map, so an empty Graph draws no card', async () => {
+    const value = await setup(), view = render(<value.Composition />);
     const legend = screen.getByRole('group', { name: 'Graph legend' });
-    expect(legend.lastElementChild!.textContent).toBe('Filter');
+    expect(within(legend).queryByRole('button')).toBeNull();
     expect(document.querySelectorAll('.graph-legend')).toHaveLength(1);
     view.unmount();
     const session = graphSession(); session.items = {};
-    const empty = await setup(session); render(<GraphFilterSlot.Provider value={slot}><empty.Composition /></GraphFilterSlot.Provider>);
-    expect(screen.getByRole('group', { name: 'Graph legend' }).textContent).toBe('Filter');
-    await act(async () => {});
-    cleanup();
-    // Nothing provided (archived sessions): no stray card.
-    render(<empty.Composition />);
+    const empty = await setup(session); render(<empty.Composition />);
     expect(document.querySelector('.graph-legend')).toBeNull();
+    await act(async () => {});
   });
 });
 

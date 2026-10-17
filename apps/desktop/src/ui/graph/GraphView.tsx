@@ -5,7 +5,7 @@
 // The Graph never moves on its own: after every commit the node the owner is looking at (the selection when in view,
 // otherwise the first node in view) is put back where it was on screen. Only the owner's own moves (scrolling, keys,
 // a reveal, a search step, opening the Graph) take the view somewhere else.
-import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react';
 import type { SessionPreferences } from '../../generated/core';
 import { useSession, type Immutable, type SessionStore } from '../../data/session-store';
 import type { RegisteredRoutes, RevealedItem } from '../../data/routes';
@@ -14,7 +14,7 @@ import { statusColor } from '../shared/status';
 import { useWorkspaceKeys } from '../keys';
 import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
-import { GraphFilter, GraphFilterSlot } from '../tree/FilterBar';
+import { filterSignature, type LocalChip } from '../../selectors/tree/filter';
 import { BRANCH_HUES } from '../tree/branch';
 import type { ChangeMarker } from '../tree/model';
 import { usePeek } from '../peek/context';
@@ -36,6 +36,10 @@ export interface GraphViewProps {
   /** New and Changed markers by item id (ui/tree/model.ts `mapChanges`): a diamond alone on the node (SPEC 9.9). */
   readonly markers?: ReadonlyMap<string, ChangeMarker>;
   readonly preferencesBusy?: boolean;
+  /** The session's local filter chips (To ack, Sent, Blocked, Later), picked in the chip row. */
+  readonly local?: readonly LocalChip[];
+  /** The same Clear the chip row and the Tree's empty state use; shown when the filter leaves no topic to draw. */
+  readonly onClearFilters?: () => void;
   readonly saveView: (view: SessionPreferences) => Promise<boolean>;
   /** Selection reached the item; `openDetail` is false for ↑/↓ moves and folds. */
   readonly onReveal: (result: RevealedItem, openDetail: boolean) => void;
@@ -115,27 +119,23 @@ const Topic = memo(function Topic({ graph, width, focusId, related, matches, cur
   </section>;
 });
 
-/** The legend card (SPEC 1.3): what the three lines mean, plus the Tree column's filter control when it is open. */
+/** The legend card (SPEC 1.3): what the three lines mean. The filter is the chip row above the Map (D13). */
 function Legend({ drawn }: { readonly drawn: boolean }) {
-  // With nothing drawn the card stays only to keep the filter reachable.
-  const filter = useContext(GraphFilterSlot);
-  if (!drawn && !filter) return null;
+  if (!drawn) return null;
   return <div className="graph-legend" role="group" aria-label="Graph legend">
-    {drawn && <>
-      <span className="graph-legend-key"><span className="graph-legend-branch" aria-hidden="true" />Branch</span>
-      <span className="graph-legend-key"><span className="graph-legend-path" aria-hidden="true" />Path to the selected item</span>
-      <span className="graph-legend-key"><svg className="graph-legend-related" aria-hidden="true"><path className="graph-related" d="M0 3 H22" /></svg>Related</span>
-      <span className="graph-legend-note">Lines show for the selected item and the one under the pointer.</span>
-    </>}
-    <GraphFilter />
+    <span className="graph-legend-key"><span className="graph-legend-branch" aria-hidden="true" />Branch</span>
+    <span className="graph-legend-key"><span className="graph-legend-path" aria-hidden="true" />Path to the selected item</span>
+    <span className="graph-legend-key"><svg className="graph-legend-related" aria-hidden="true"><path className="graph-related" d="M0 3 H22" /></svg>Related</span>
+    <span className="graph-legend-note">Lines show for the selected item and the one under the pointer.</span>
   </div>;
 }
 
 /** Each topic's top in the canvas, by topic id. */
 const topicTops = (graph: SessionGraph) => new Map(graph.topics.map(topic => [topic.topic.id, topic.top]));
 const NO_LINES: ReturnType<typeof relatedLines> = { paths: [], related: new Set() };
+const NO_LOCAL: readonly LocalChip[] = [];
 
-export function GraphView({ store, routes, view, later, reveal, markers, preferencesBusy = false, saveView, onReveal }: GraphViewProps) {
+export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal, markers, preferencesBusy = false, saveView, onReveal, onClearFilters }: GraphViewProps) {
   const state = useSession(store), raw = state.snapshot?.session, hidden = useHidden();
   const session = useMemo(() => raw && visibleSession(raw, state.route, hidden), [raw, state.route, hidden]);
   const scroller = useRef<HTMLDivElement>(null), dockInset = useDockInset();
@@ -165,14 +165,15 @@ export function GraphView({ store, routes, view, later, reveal, markers, prefere
   const currentReveal = offered === dismissedReveal ? null : offered;
   const itemReveal = currentReveal?.store === store && currentReveal.kind === 'item' ? currentReveal : null;
   const shown = useMemo(() => applyChange(applyChange(view, inflight), pending), [view, inflight, pending]);
-  const filterFolds = useFilterFolds(routes, shown.session, shown.filters);
+  const filterKey = filterSignature({ view: shown, local });
+  const filterFolds = useFilterFolds(routes, shown.session, filterKey);
   // An outside reveal wins immediately over an older selection whose preference write is still pending.
   const optimisticSelection = localSelection?.external === reveal && (pending?.selected || inflight?.selected) ? localSelection.id : null;
   const selectedId = optimisticSelection ?? itemReveal?.route.item_id ?? view.selected_item_id;
-  const graph = useMemo(() => session && column !== null ? sessionGraph({ session, view: shown, later, selectedId, column,
+  const graph = useMemo(() => session && column !== null ? sessionGraph({ session, view: shown, later, local, selectedId, column,
     temporaryExpandedItemIds: itemReveal?.temporaryExpandedItemIds ?? [], revealedItemId: itemReveal?.route.item_id ?? null,
     filterCollapsedItemIds: filterFolds.items }) : null,
-  [session, shown, later, selectedId, column, itemReveal, filterFolds.items]);
+  [session, shown, later, local, selectedId, column, itemReveal, filterFolds.items]);
   const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: reveal, dockInset, folds: filterFolds.items });
   latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: reveal, dockInset, folds: filterFolds.items };
 
@@ -486,6 +487,10 @@ export function GraphView({ store, routes, view, later, reveal, markers, prefere
         </div>
         <div ref={spacer} data-testid="graph-spacer" aria-hidden="true" />
       </>}
+      {graph && !drawn && graph.filtering && onClearFilters && <div className="tree-no-match">
+        <div className="tree-no-match-title">No items match these filters.</div>
+        <button type="button" className="btn btn-secondary" onClick={onClearFilters}>Clear filters</button>
+      </div>}
     </div>
     <Legend drawn={drawn} />
   </div>;

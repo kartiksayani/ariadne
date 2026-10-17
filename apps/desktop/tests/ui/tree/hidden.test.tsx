@@ -5,6 +5,7 @@ import { stripKey } from '../../../src/ui/tree/model';
 import { shimTree, type ShimInput } from './shimTree';
 import { AppTransport, route } from '../app/transport';
 import { FILTER_STATUSES } from '../../../src/selectors/tree/folds';
+import { chipCounts, summaryCounts } from '../../../src/selectors/tree/filter';
 
 function fixture(hidden: string[] = []) {
   const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
@@ -127,10 +128,10 @@ describe('hidden item tree projection', () => {
   it('flags a waiting descendant under a hidden parent and retains the waiting chip count', () => {
     const { session, input } = fixture(['1']); session.items['1.1']!.status = 'waiting_on_me';
     const hidden = shimTree({ ...input, session: immutable(session) });
-    const visible = shimTree({ ...input, session: immutable(session), view: { ...input.view, hidden_item_ids: [] } });
     expect(hidden.rows.find(row => row.kind === 'strip')).toMatchObject({ reason: 'hidden', waiting: 1 });
-    expect(hidden.counts.waiting).toBe(visible.counts.waiting);
-    expect(hidden.counts.all).toBe(visible.counts.all - 2);
+    const scopeOf = (view: typeof input.view) => ({ session: immutable(session), view, later: new Set<string>(), local: [] });
+    expect(chipCounts(scopeOf(input.view)).waiting).toBe(chipCounts(scopeOf({ ...input.view, hidden_item_ids: [] })).waiting);
+    expect(summaryCounts(scopeOf(input.view)).total).toBe(summaryCounts(scopeOf({ ...input.view, hidden_item_ids: [] })).total - 2);
   });
 
   it('reveals nested hidden groups from outside the tree without removing hidden preferences', () => {
@@ -148,7 +149,7 @@ describe('hidden item tree projection', () => {
     const { model } = fixture(['1.1']);
     const plain = model(), searched = model({ search: 'receipt' });
     // The search changes no count and no row; the hidden 1.1 ("Add the receipt lookup test") is named in the note.
-    expect(searched.counts).toEqual(plain.counts); expect(searched.rows.map(row => row.key)).toEqual(plain.rows.map(row => row.key));
+    expect(searched.rows.map(row => row.key)).toEqual(plain.rows.map(row => row.key));
     expect(searched.shownCount).toBe(plain.shownCount); expect(searched.itemCount).toBe(8); expect(searched.hiddenCount).toBe(1);
     expect(searched.rows.find(row => row.key === '3')).toMatchObject({ matches: ['question'] });
     expect(searched.search).toMatchObject({ hidden: 1, collapsed: 0 });
@@ -156,10 +157,10 @@ describe('hidden item tree projection', () => {
   });
 
   it('counts hidden matches only for the selected statuses without search text', () => {
-    const { view, model } = fixture(['1.1']); view.filters.statuses = ['open'];
+    const { session, view, model } = fixture(['1.1']); view.filters.statuses = ['open'];
     const filtered = model();
     expect(filtered.shownCount).toBe(2); expect(filtered.itemCount).toBe(8); expect(filtered.hiddenCount).toBe(1);
-    expect(filtered.counts.open).toBe(2);
+    expect(chipCounts({ session: immutable(session), view, later: new Set(), local: [] }).open).toBe(2);
     view.filters.statuses = ['in_progress'];
     expect(model().hiddenCount).toBe(0);
   });

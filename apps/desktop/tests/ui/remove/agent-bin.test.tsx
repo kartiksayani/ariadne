@@ -12,7 +12,8 @@ import { OpenSessions, type Immutable } from '../../../src/data/session-store';
 import { SessionActionControllers, type SessionActions } from '../../../src/components/bindings/actions';
 import { activeItems, activeTopics, heldInputs, itemRemoved, removedRoots, removedSubtree } from '../../../src/selectors/removed';
 import { ackTarget } from '../../../src/selectors/ack';
-import { sentenceRows } from '../../../src/selectors/tree/rows';
+import { sentenceRows } from '../tree/scope';
+import { chipCounts } from '../../../src/selectors/tree/filter';
 import { relatedItems } from '../../../src/selectors/related';
 import { sentRows, waitingRows } from '../../../src/selectors/waiting/rows';
 import { sessionGraph } from '../../../src/ui/graph/model';
@@ -209,7 +210,7 @@ describe('removed work projections', () => {
     expect(revealAncestors.bind(null, session, { ...route, item_id: '1.1.1' })).toThrow('unavailable');
     const model = shimTree({ session, view, search: '', later: new Set(), collapsedTopics: new Set(), selectedId: '1.1.1',
       revealId: '1.1.1', temporaryExpanded: ['1', '1.1'], presence: null, summaries: [], now: Date.parse(session.updated_at) });
-    expect(model.itemCount).toBe(2); expect(model.counts.waiting).toBe(0);
+    expect(model.itemCount).toBe(2); expect(chipCounts({ session, view, later: new Set(), local: [] }).waiting).toBe(0);
     expect(model.rows.filter(row => row.kind === 'topic').map(row => row.topic.id)).toEqual([topicA]);
     expect(model.rows.filter(row => row.kind === 'item').map(row => row.item.id)).toEqual(['2', '3']);
   });
