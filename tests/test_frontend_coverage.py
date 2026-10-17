@@ -1,6 +1,7 @@
 """Exercise the real frontend report against the existing source inventory policy."""
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -27,6 +28,15 @@ class FrontendCoverage(unittest.TestCase):
             (root / "node_modules").symlink_to(ROOT / "node_modules", target_is_directory=True)
             shutil.copyfile(ROOT / "apps/desktop/vite.config.ts", desktop / "vite.config.ts")
             shutil.copyfile(ROOT / "quality-gates.json", root / "quality-gates.json")
+            # Vitest setup files named in the config must exist in the copy too; derive them, don't list them.
+            setup_files = re.findall(r"resolve\(root, ['\"]([^'\"]*setup-[^'\"]+)['\"]\)",
+                                     (ROOT / "apps/desktop/vite.config.ts").read_text())
+            self.assertTrue(setup_files, "no vitest setup files found in vite.config.ts")
+            for name in setup_files:
+                source = (ROOT / "apps/desktop" / name).resolve()
+                target = (desktop / name).resolve()
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, target)
             # Actual pinned compiler outputs, not a claim about the domain generator.
             generator = """
 const ts = require('typescript');
