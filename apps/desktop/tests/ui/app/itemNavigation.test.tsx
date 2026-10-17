@@ -258,6 +258,25 @@ describe('composed item navigation', () => {
     await keyDown(document.body, ']', true); await selected('2');
   });
 
+  it('peek footer: "Go to" selects the item and leaves a closed Details closed, "Open details" opens it', async () => {
+    const transport = await setup(); await openSession(); await pick('1');
+    await click(screen.getByRole('button', { name: 'Close detail' }));
+    expect(screen.queryByLabelText(/^Detail of /)).toBeNull();
+    const peekOn = async (id: string) => { await keyDown(treeRow(id), ' '); return screen.findByRole('button', { name: 'Go to' }); };
+    await click(await peekOn('1.1'));
+    await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1.1'));
+    expect(screen.queryByLabelText(/^Detail of /)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Go to' })).toBeNull();
+    await peekOn('1');
+    await click(screen.getByRole('button', { name: 'Open details' }));
+    await waitFor(() => selected('1'));
+    expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
+    // Details already open: "Go to" follows the selection in it, as the Map does.
+    await peekOn('1.1');
+    await click(screen.getByRole('button', { name: 'Go to' }));
+    await waitFor(() => selected('1.1'));
+  });
+
   it('keeps history isolated between session views and retains it when returning to an existing session', async () => {
     const transport = await setup(); await openSession(); await pick('1'); await pick('4');
     await openSession(secondId);

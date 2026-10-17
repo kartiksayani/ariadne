@@ -3,6 +3,9 @@ use crate::{queue::Worker, transport::budget, CodexOptions, QualifiedCodexThread
 use ariadne_agent_protocol::*;
 use std::time::Instant;
 
+/// How long `Adapter::connect` may take, in seconds, before any debug-only test stretch.
+const CONNECT_SECONDS: u64 = 10;
+
 pub struct CodexAdapter {
     worker: Worker,
 }
@@ -43,9 +46,10 @@ impl Adapter for CodexAdapter {
         })
     }
     fn connect(&self, request: ConnectRequest) -> AdapterFuture<'_, ConnectResult> {
-        self.worker.call(budget(10), move |state, deadline| {
-            state.connect(request, deadline)
-        })
+        self.worker
+            .call(budget(CONNECT_SECONDS), move |state, deadline| {
+                state.connect(request, deadline)
+            })
     }
     fn submit(&self, request: SubmitRequest) -> AdapterFuture<'_, SubmitOutcome> {
         self.worker.submit(request)
@@ -63,5 +67,18 @@ impl Adapter for CodexAdapter {
     fn disconnect(&self, request: DisconnectRequest) -> AdapterFuture<'_, DisconnectResult> {
         self.worker
             .call(budget(5), move |state, _| state.disconnect(request))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// This unit-test process never sets the deadline stretch (tests/queue.rs sets it in its own
+    /// process and passes explicit deadlines), so `Adapter::connect` keeps its written 10 s budget.
+    #[test]
+    fn connect_keeps_its_ten_second_budget_when_the_scale_is_unset() {
+        assert_eq!(budget(CONNECT_SECONDS), Duration::from_secs(10));
     }
 }
