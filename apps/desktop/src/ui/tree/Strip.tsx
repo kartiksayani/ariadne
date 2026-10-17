@@ -1,19 +1,20 @@
-// The one strip of the Map. Today it draws what two older pieces drew: the "N items hidden" row
-// and the folded branch's chip. The Map look piece gives both one dashed style.
+// The one strip of the Map. A run of omitted siblings (hidden, not matching the filter, or outside the focus) and the
+// folded branch's chip. The Map look piece gives both one dashed style.
 import type { KeyboardEvent } from 'react';
 import { Guides } from './Guides';
 import type { StripRow } from './model';
 
 export type StripProps =
-  /** A treeitem row standing in for a group of hidden siblings. */
+  /** A treeitem row standing in for a run of omitted siblings. */
   | {
-    readonly variant: 'hidden';
+    readonly variant: 'row';
     readonly row: StripRow;
     readonly focused: boolean;
     readonly remember: (key: string, element: HTMLDivElement | null) => void;
     readonly onFocus: (key: string) => void;
     readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
-    readonly onToggle: (key: string) => void;
+    /** Opens or closes the hidden items under the strip's parent. Only a hidden strip toggles. */
+    readonly onToggle: (row: StripRow) => void;
   }
   /** The chip inside an item's body that stands for its folded descendants. */
   | {
@@ -28,14 +29,16 @@ export function Strip(props: StripProps) {
       onClick={event => { event.stopPropagation(); props.onClick(); }}><i className="ph ph-dots-three" />{props.text}</button>;
   }
   const { row, focused, remember, onFocus, onKeyDown, onToggle } = props;
+  const hidden = row.reason === 'hidden';
   return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={row.depth + 1}
-    aria-expanded={row.expanded} tabIndex={focused ? 0 : -1} className="tree-row tree-hidden-group"
-    data-row={row.key} style={{ paddingLeft: 12 + row.depth * 24 }}
+    aria-expanded={hidden ? row.expanded : undefined} tabIndex={focused ? 0 : -1} className="tree-row tree-hidden-group"
+    data-row={row.key} data-strip={row.reason} style={{ paddingLeft: 12 + row.depth * 24 }}
     onFocus={event => { if (event.target === event.currentTarget) onFocus(row.key); }} onKeyDown={onKeyDown}
-    onClick={() => onToggle(row.key)}>
+    onClick={hidden ? () => onToggle(row) : undefined}>
     <Guides guides={row.guides} />
-    <span className="tree-chevron"><i className={row.expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} /></span>
-    <span>{row.count} {row.count === 1 ? 'item' : 'items'} hidden</span>
-    {row.waiting && <span className="tree-hidden-waiting"><i className="ph-fill ph-question" />waiting on you</span>}
+    {hidden && <span className="tree-chevron"><i className={row.expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} /></span>}
+    <span>{row.reason === 'hidden' ? `${row.count} ${row.count === 1 ? 'item' : 'items'} hidden`
+      : row.reason === 'filter' ? `${row.count} not matching` : `${row.count} outside the focus`}</span>
+    {row.waiting > 0 && <span className="tree-hidden-waiting"><i className="ph-fill ph-question" />waiting on you</span>}
   </div>;
 }

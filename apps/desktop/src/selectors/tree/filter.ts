@@ -8,11 +8,9 @@ import { ackTarget } from '../ack';
 import { waitingOnOwner } from '../sessionClosed';
 import { displayStatus } from '../waiting/replied';
 import { hiddenItems } from '../../ui/tree/hidden';
+import type { TreeFilter } from '../../ui/tree/model';
 import { FILTER_STATUSES, hasStatusFilter } from './folds';
 import { isBlocked } from './blocked';
-
-// W2's `TreeFilter` (ALPHA20-REPLAN §5.1), structurally; this becomes an import of ui/tree/model once its contract SHA is in.
-export type TreeFilter = { readonly active: boolean; matches(item: Immutable<Item>): boolean };
 
 export function sameOwner(left: Immutable<ItemOwner>, right: Immutable<ItemOwner>): boolean {
   return left.kind === right.kind && (left.kind === 'me' || (left.kind === 'agent' && right.kind === 'agent'

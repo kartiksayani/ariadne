@@ -16,7 +16,7 @@ import { sentenceRows } from '../tree/scope';
 import { relatedItems } from '../../../src/selectors/related';
 import { sentRows, waitingRows } from '../../../src/selectors/waiting/rows';
 import { sessionGraph } from '../../../src/ui/graph/model';
-import { treeModel } from '../../../src/ui/tree/model';
+import { shimTree } from '../tree/shimTree';
 import { projectRemoval, sessionRemoval } from '../../../src/ui/pages/model';
 import { Notices, notices } from '../../../src/ui/pages/notices';
 import { AgentBin, binView, removalNotice, restoreRemoved } from '../../../src/ui/remove/AgentBin';
@@ -156,7 +156,7 @@ describe('removed work projections', () => {
       item.ack_to = choice; item.ask = null; item.options = [];
       session.items['2']!.ack_to = 'done'; session.items['2']!.ask = null;
       const counts = (snapshot: Immutable<Session>) => {
-        const tree = treeModel({ session: snapshot, view, search: '', later: new Set(), collapsedTopics: new Set(), selectedId: null,
+        const tree = shimTree({ session: snapshot, view, search: '', later: new Set(), collapsedTopics: new Set(), selectedId: null,
           revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(snapshot.updated_at) });
         // The Graph carries no counts (SPEC 1.3: a topic title only).
         return { tree: tree.rows.flatMap(row => row.kind === 'topic' ? row.counts.map(count => count.text) : []) };
@@ -201,13 +201,13 @@ describe('removed work projections', () => {
     // A search narrows no rows (SPEC §4), and it finds nothing in removed work: no row matches, none counts as out of view.
     const search = { ...view, filters: { ...view.filters, search: 'morning or evening' } };
     expect(ids(sentenceRows(session, search, new Set(), ['1', '1.1'], '1.1.1').rows.map(row => row.item))).toEqual(['2', '3']);
-    const searched = treeModel({ session, view, search: 'morning or evening', later: new Set(), collapsedTopics: new Set(), selectedId: null,
+    const searched = shimTree({ session, view, search: 'morning or evening', later: new Set(), collapsedTopics: new Set(), selectedId: null,
       revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) });
     expect(searched.rows.filter(row => row.kind === 'item' && row.matches.length > 0)).toEqual([]);
     expect(searched.search).toMatchObject({ hidden: 0, collapsed: 0 });
     expect(indexSession(session).activeDescendants.get('1')).toBe(0);
     expect(revealAncestors.bind(null, session, { ...route, item_id: '1.1.1' })).toThrow('unavailable');
-    const model = treeModel({ session, view, search: '', later: new Set(), collapsedTopics: new Set(), selectedId: '1.1.1',
+    const model = shimTree({ session, view, search: '', later: new Set(), collapsedTopics: new Set(), selectedId: '1.1.1',
       revealId: '1.1.1', temporaryExpanded: ['1', '1.1'], presence: null, summaries: [], now: Date.parse(session.updated_at) });
     expect(model.itemCount).toBe(2); expect(model.counts.waiting).toBe(0);
     expect(model.rows.filter(row => row.kind === 'topic').map(row => row.topic.id)).toEqual([topicA]);
@@ -226,7 +226,7 @@ describe('removed work projections', () => {
 
   it('hides a removed replacement reference and restores it when that work becomes active again', () => {
     const session = removedSession(); session.items['3']!.replaced_by = '1';
-    const view = preferences(), tree = (snapshot: Session) => treeModel({ session: snapshot, view, search: '', later: new Set(),
+    const view = preferences(), tree = (snapshot: Session) => shimTree({ session: snapshot, view, search: '', later: new Set(),
       collapsedTopics: new Set(), selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(snapshot.updated_at) });
     const removed = tree(session).rows.find(row => row.kind === 'item' && row.item.id === '3');
     expect(removed?.kind === 'item' && removed.replacedBy).toBeNull();
