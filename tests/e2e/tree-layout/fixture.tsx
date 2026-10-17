@@ -72,6 +72,8 @@ class TreeLayoutTransport extends AppTransport {
       items['12']!.type = 'finding'; items['12']!.ack_to = 'done'; items['12']!.ask = null;
       // The agent removed an item from this topic: its bin (the "…" menu's Open the bin) holds it.
       items['41'] = { ...items['18']!, id: '41', ordinal: 41, question: 'Removed by the agent', removed_at: later };
+      // No reply to a whole topic is on its way, so the "…" menu's Reply to topic is open to press.
+      for (const input of Object.values(session.inputs)) if (input && input.target.item_id === null && !['handled', 'cancelled', 'skipped'].includes(input.state)) input.state = 'handled';
       this.preferences.seen = [{ session: route, since: baseline, items: [], topics: [] }];
       this.preferences.sessions[0]!.expanded_item_ids = ['2', '3'];
     }

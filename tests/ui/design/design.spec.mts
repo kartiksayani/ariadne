@@ -504,42 +504,8 @@ for (const frame of ['graph-hidden', 'graph-hidden-small'] as const) for (const 
   });
 }
 
-/** Focus leaves from the sticky Unfocus copy when the focused row is not on screen: its topic folded. (A search no longer
- * takes a row off screen, SPEC §4, so it is no longer a way here; tests/ui/tree/component.test.tsx pins that the row stays.) */
-for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) for (const state of ['folded'] as const) {
-  test(`The sticky Unfocus is whole and clear of the path row when the focused row is under a ${state} topic: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
-    await openApp(page, origin, { ...frameSpec(frame), theme });
-    const roots = page.locator('.tree-item-root:has(.tree-chevron)'), first = roots.first();
-    const topic = page.locator('.tree-topic-group').first().locator('.tree-topic');
-    await first.getByRole('button', { name: /^Focus on / }).click();
-    await expect(first.getByRole('button', { name: /^Unfocus / })).toBeVisible();
-    await topic.locator('.tree-chevron').dispatchEvent('click');
-    await settle(page);
-    const copy = page.getByRole('navigation', { name: 'Map ancestors' }).getByRole('button', { name: /^Unfocus / });
-    await expect(copy, 'the exit stays in the path row').toBeVisible();
-    await expect(copy).toHaveText('Unfocus');
-    const facts = await page.evaluate(() => {
-      const box = (element: Element) => element.getBoundingClientRect();
-      const copy = document.querySelector('.tree-path .tree-focus-action')!, path = document.querySelector('.tree-path')!, bar = document.querySelector('.tree-breadcrumb')!;
-      const others = [...document.querySelectorAll('.tree-breadcrumb button:not(.tree-focus-action), .tree-back')].map(element => ({ name: element.textContent, rect: box(element) }));
-      const centre = document.elementFromPoint(box(copy).left + box(copy).width / 2, box(copy).top + box(copy).height / 2);
-      return { copy: box(copy), path: box(path), bar: box(bar), others, covers: !!centre?.closest('.tree-focus-action'), width: innerWidth, height: innerHeight,
-        clipped: copy.scrollWidth > copy.clientWidth };
-    });
-    expect(facts.copy.left).toBeGreaterThanOrEqual(facts.bar.left - 0.5); expect(facts.copy.right).toBeLessThanOrEqual(facts.bar.right + 0.5);
-    expect(facts.copy.top).toBeGreaterThanOrEqual(facts.path.top - 0.5); expect(facts.copy.bottom).toBeLessThanOrEqual(facts.path.bottom + 0.5);
-    expect(facts.copy.right).toBeLessThanOrEqual(facts.width); expect(facts.copy.bottom).toBeLessThanOrEqual(facts.height);
-    expect(facts.clipped, 'the word is not cut off').toBe(false);
-    expect(facts.covers, 'nothing paints over it').toBe(true);
-    for (const other of facts.others) {
-      const apart = other.rect.right <= facts.copy.left + 0.5 || other.rect.left >= facts.copy.right - 0.5 || other.rect.bottom <= facts.copy.top || other.rect.top >= facts.copy.bottom;
-      expect(apart, `${other.name} does not overlap Unfocus`).toBe(true);
-    }
-    await page.screenshot({ path: testInfo.outputPath(`fix1-unfocus-${state}-${frame}-${theme}.png`), animations: 'disabled' });
-    await copy.click();
-    await expect(copy).toHaveCount(0);
-  });
-}
+/* The sticky Unfocus copy in the path row is gone (D9): Focus and Unfocus are one band button, kept in reach by
+ * tests/e2e/tree-layout/tree-layout.spec.mts (the 92px swap and the 560/480px Map at the largest text). */
 
 test.describe.configure({ mode: 'parallel' });
 
