@@ -156,7 +156,8 @@ export function AnswerControl({ options, layout = 'details', selected, draft, wa
       {on && sealed && draft.trim() && <p className="answer-sent-note">{draft}</p>}
     </div>;
   });
-  const ownCard = words && options.length > 0 && <div className={`answer-card answer-own${own ? ' answer-card-on' : ''}${sealed && !own ? ' answer-card-dim' : ''}`}>
+  // The board dims only the unpicked options after Send; the own-answer card stays as it was.
+  const ownCard = words && options.length > 0 && <div className={`answer-card answer-own${own ? ' answer-card-on' : ''}`}>
     <button type="button" data-answer-own aria-pressed={own} {...gate(locked, frozen || sealed)} className="answer-option"
       onClick={event => { event.stopPropagation(); focusNext.current = true; choose(-1); }}>
       <span className="answer-key" aria-hidden="true"><i className="ph ph-pencil-simple" /></span>

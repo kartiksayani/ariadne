@@ -175,7 +175,7 @@ describe('answer cards', () => {
     expect(values.onSendText).toHaveBeenCalledExactlyOnceWith(values.draft);
   });
 
-  it('a sealed bar locks the cards, dims the unpicked ones and replaces Send', () => {
+  it('a sealed bar locks the cards, dims the unpicked options (not the own-answer card) and replaces Send', () => {
     const values = props({ bar: { icon: 'ph ph-check', tone: 'done', text: 'Sent at 21:25. Waiting for the agent to pick it up.', narrow: 'Sent at 21:25.', sealed: true,
       actions: <button type="button">Undo</button> } });
     const view = render(<AnswerControl {...values} />);
@@ -183,7 +183,8 @@ describe('answer cards', () => {
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(screen.queryByRole('button', { name: '+ Add a note' })).toBeNull();
     expect(screen.getByText(values.draft.trim(), { exact: false })).toBeTruthy();
-    expect(view.container.querySelectorAll('.answer-card-dim')).toHaveLength(2);
+    expect(view.container.querySelectorAll('.answer-card-dim')).toHaveLength(1);
+    expect(view.container.querySelector('.answer-own')!.classList.contains('answer-card-dim')).toBe(false);
     expect(view.container.querySelector('.answer-card-on .answer-check')).toBeTruthy();
     fireEvent.click(view.container.querySelector('[data-answer-option="1"]')!);
     fireEvent.keyDown(view.container.querySelector('.answer')!, { key: '2' });

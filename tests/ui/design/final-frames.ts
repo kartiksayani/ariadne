@@ -152,28 +152,28 @@ const stateList: readonly FinalState[] = [
   // 1. The window and the Map
   { id: '1.1', part: 'Window', sid: 'b-wait', owner: 'dock', pending: false, title: 'Question waiting', app: { view: { dock: 'open', dockQuestion: 0 } } },
   { id: '1.2', part: 'Window', sid: 'b-sel', owner: 'details', pending: false, title: 'Item selected', app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' } } },
-  { id: '1.3', part: 'Window', sid: 'b-graph', owner: 'details', pending: true, title: 'Graph', app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' },
+  { id: '1.3', part: 'Window', sid: 'b-graph', owner: 'details', pending: false, title: 'Graph', app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' },
     // Neither the Graph nor a folded Details is saved data the fixture can set: the owner's two clicks reach them.
     act: [{ click: 'Graph' }, { click: 'Fold Details' }] } },
   { id: '1.4', part: 'Window', sid: 'b-long', owner: 'shell', pending: false, title: 'Long text', app: { items: { longText: true }, view: { selected: 'a8', details: 'open', dock: 'line', shown: ['a7'] } } },
   // 2. Answering in the dock
   { id: '2.1', part: 'Answering', sid: 'd-opts', owner: 'dock', pending: false, title: 'Three options, one recommended, with a note on the picked one', app: { view: { selected: Q1, dock: 'open', dockQuestion: 0 }, drafts: [d(Q1, { pick: 0, note: note1 })] } },
-  { id: '2.2', part: 'Answering', sid: 'd-own', owner: 'dock', pending: true, title: 'Writing my own answer instead of picking one', app: { view: { selected: Q1, dock: 'open', dockQuestion: 0 }, drafts: [d(Q1, { own: 'Add the note, but link to the deploy docs instead of explaining the rebuild.' })] } },
+  { id: '2.2', part: 'Answering', sid: 'd-own', owner: 'dock', pending: false, title: 'Writing my own answer instead of picking one', app: { view: { selected: Q1, dock: 'open', dockQuestion: 0 }, drafts: [d(Q1, { own: 'Add the note, but link to the deploy docs instead of explaining the rebuild.' })] } },
   { id: '2.3', part: 'Answering', sid: 'd-long', owner: 'dock', pending: false, title: 'A long question with long options', app: { view: { selected: Q2, dock: 'open', dockQuestion: 1 }, drafts: [d(Q2, { pick: 0 })] } },
-  { id: '2.4', part: 'Answering', sid: 'd-send', owner: 'dock', pending: true, title: 'Sending, then sent, then waiting for the agent', app: { view: { selected: Q1, dock: 'open', dockQuestion: 0 }, drafts: [d(Q1, { pick: 0 })],
+  { id: '2.4', part: 'Answering', sid: 'd-send', owner: 'dock', pending: false, title: 'Sending, then sent, then waiting for the agent', app: { view: { selected: Q1, dock: 'open', dockQuestion: 0 }, drafts: [d(Q1, { pick: 0 })],
     // The Sent bar is the 2.7 s hold right after Send, so the app gets there by sending, not by saved data.
     act: [{ click: 'Send' }] } },
   { id: '2.5', part: 'Answering', sid: 'd-fail', owner: 'dock', pending: true, title: 'A send that failed', app: { view: { selected: Q1, dock: 'open', dockQuestion: 0 }, drafts: [d(Q1, { pick: 1, note: 'Keep it under five lines, and link the deploy docs.' })], questions: { failed: [Q1] } } },
   { id: '2.6', part: 'Answering', sid: 'd-none', owner: 'dock', pending: false, title: 'Nothing waiting on me', app: { view: { selected: null, dock: 'line' }, questions: { sent: [Q1, Q2] } } },
-  { id: '2.7', part: 'Answering', sid: 'd-other', owner: 'dock', pending: true, title: 'Questions waiting in other sessions', app: { view: { selected: Q1, dock: 'open', dockQuestion: 0 }, drafts: [d('schema-1', { pick: 0 })], chrome: { otherPopover: 'schema-1' } } },
+  { id: '2.7', part: 'Answering', sid: 'd-other', owner: 'dock', pending: false, title: 'Questions waiting in other sessions', app: { view: { selected: Q1, dock: 'open', dockQuestion: 0 }, drafts: [d('schema-1', { pick: 0 })], chrome: { otherPopover: 'schema-1' } } },
   { id: '2.8', part: 'Answering', sid: 'd-move', owner: 'dock', pending: false, title: 'Moving between waiting questions, with a draft kept on the first', app: { view: { selected: Q2, dock: 'open', dockQuestion: 1 }, drafts: [d(Q1, { pick: 0, note: note1 })] } },
   { id: '2.9', part: 'Answering', sid: 'd-tall', owner: 'dock', pending: false, title: 'The dock dragged tall by its top edge', app: { view: { selected: Q2, dock: 'open', dockQuestion: 1, dockHeight: 'tall' }, drafts: [d(Q2, { pick: 0 })] } },
-  { id: '2.10', part: 'Answering', sid: 'd-short', owner: 'dock', pending: true, title: 'The dock dragged short', app: { view: { selected: Q2, dock: 'open', dockQuestion: 1, dockHeight: 'short' }, drafts: [d(Q2, { pick: 0 })] } },
+  { id: '2.10', part: 'Answering', sid: 'd-short', owner: 'dock', pending: false, title: 'The dock dragged short', app: { view: { selected: Q2, dock: 'open', dockQuestion: 1, dockHeight: 'short' }, drafts: [d(Q2, { pick: 0 })] } },
   // 3. An item's conversation: where Details sits (its content is a later release)
   { id: '3.1', part: 'Conversation', sid: 'c-details', owner: 'details', pending: false, title: 'Details beside the Map', app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' } } },
   // 3.2 stays pending: the bigger view of Details is release 3.
   { id: '3.2', part: 'Conversation', sid: 'c-read', owner: 'details', pending: true, title: 'A bigger view for a long thread', app: { view: { selected: 'a2.2.1', details: 'bigger', dock: 'line' } } },
-  { id: '3.6', part: 'Conversation', sid: 'c-fold', owner: 'details', pending: true, title: 'Details folded to a strip, dock open', app: { view: { selected: 'a2.2.1.1', details: 'folded', dock: 'open', dockQuestion: 0 }, act: [{ click: 'Fold Details' }] } },
+  { id: '3.6', part: 'Conversation', sid: 'c-fold', owner: 'details', pending: false, title: 'Details folded to a strip, dock open', app: { view: { selected: 'a2.2.1.1', details: 'folded', dock: 'open', dockQuestion: 0 }, act: [{ click: 'Fold Details' }] } },
   // 12. Connection. 12.2 to 12.9 stay pending: the connection states and their banners (the connect guide, the last good copy, the unsaved-change notice,
   // the loading skeleton, "This session can't be read") are release 3 (ENGINEERING-PLAN: D3); 12.1's card is above.
   { id: '12.1', part: 'R4-Connection', sid: 'c-live', owner: 'topbar', pending: true, title: 'Live', app: { sessions: { connection: 'live' }, chrome: { overlay: 'connection-card' }, act: [{ click: 'Live' }] } },
@@ -231,27 +231,25 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   // fraction of a pixel apart), of the top bar's right-hand glyphs and of the chevron. A region with no limit matches exactly.
   '1.1': [...topBarMain(BAR), ...dockOpen(572, 351, [0.002, 0.002])],
   '1.2': [...topBarMain(BAR), ...dockLine([0.003, 0.004]), ...detailsEdge([0.002, 0.002])],
-  // 1.3 and 3.6 stay pending: the rail's glyphs (», the status mark, the vertical label) sit 1px right of the board's in the app (about 1% of the rail).
-  '1.3': [...topBarMain(), ...dockLine(), ...detailsRail(760, 610)],
+  '1.3': [...topBarMain(BAR), ...dockLine([0.003, 0.004]), ...detailsRail(760, 610)],
   '1.4': [...topBarMain(BAR), ...dockLine([0.003, 0.004])],
   '2.1': [...topBarMain(BAR), ...dockOpen(523, 301, [0.002, 0.002])],
-  // 2.2 and 2.10 stay pending: the option cards start 1px higher in the app than in the board (1.3% and 5.1% of the dock).
-  '2.2': [...topBarMain(), ...dockOpen(527, 306)],
+  '2.2': [...topBarMain(BAR), ...dockOpen(527, 306, [0.002, 0.002])],
   '2.3': [...topBarMain(BAR), ...dockOpen(398, 260, [0.002, 0.003])],
-  // 2.4 stays pending: the own-answer box is dimmed after Send (the board leaves it bright) and the sent button carries another icon.
-  '2.4': [...topBarMain(), ...dockOpen(572, 351)],
+  // The light frame's limit is wider: the board's token for the sent chip's colour resolves with dark-theme values there (see `dockLineQuiet`).
+  '2.4': [...topBarMain(BAR), ...dockOpen(572, 351, [0.004, 0.003])],
   // 2.5 stays pending: recovery behaviour differs (the board leaves the other cards undimmed, words the failure otherwise and offers Copy and Retry only).
   '2.5': [...topBarMain(), ...dockOpen(523, 301)],
   // The board's first file words this clear line "Nothing waiting on you" and counts one sent answer (it counts a pick, not the send);
   // R4 (15.3, 15.4) adds "New questions open here." and the app follows R4. So this frame holds the line's icon and its chip only.
   '2.6': [...topBarMain(BAR), ...box('dock line icon', [0, 760, 32, 40], [0, 610, 32, 40]), ...box('dock line other-sessions chip', [1130, 760, 150, 40], [790, 610, 110, 40])],
-  // 2.7 stays pending: the other-sessions popover is about 5px shorter than the board's (its top edge sits 4px lower); 14% of the popover differs.
-  '2.7': [...topBarMain(), ...dockOpen(572, 351), ...box('other-sessions popover', [868, 168, 404, 400], [487, 52, 406, 296])],
+  // The popover's own pixels (its 400px box, from its first row): the Map under its shadow is release 2's.
+  '2.7': [...topBarMain(BAR), ...dockOpen(572, 351, [0.002, 0.002]), ...box('other-sessions popover', [870, 169, 400, 397], [490, 54, 400, 290], [0.002, 0.002])],
   '2.8': [...topBarMain(BAR), ...dockOpen(418, 260, [0.003, 0.002])],
   '2.9': [...topBarMain(BAR), ...dockOpen(170, 170, [0.002, 0.002])],
-  '2.10': [...topBarMain(), ...dockOpen(600, 450)],
+  '2.10': [...topBarMain(BAR), ...dockOpen(600, 450, [0.002, 0.002])],
   '3.1': [...topBarMain(BAR), ...dockLine([0.003, 0.004]), ...detailsEdge([0.002, 0.002])],
-  '3.6': [...topBarMain(), ...dockOpen(572, 351), ...detailsRail(572, 351)],
+  '3.6': [...topBarMain(BAR), ...dockOpen(572, 351, [0.002, 0.002]), ...detailsRail(572, 351)],
   // The board's second file (R4, states 12 to 16) draws the dock line's question in 72% text; its first file (1 to 3) in full text.
   // The app draws it as the first file does, so these states hold the line's pill and chips and leave the text between.
   // The board's R4 file also draws the dock's chevron in full text colour (the first file and the app: muted), so the chip region stops before it.

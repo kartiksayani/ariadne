@@ -94,6 +94,11 @@
    rail is all that shows in the 36px column. */
 .shell-detail-folded {
   overflow: hidden;
+
+  /* The board draws the divider as an inset shadow, so its 36px rail has 36px of centring room; a border would take 1px of it
+     and put every glyph 1px right of the board's. */
+  border-left: 0;
+  box-shadow: inset 1px 0 0 var(--color-divider);
 }
 
 .shell-detail-folded > .shell-detail-body {

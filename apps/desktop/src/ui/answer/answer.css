@@ -271,9 +271,11 @@
 /* The board seats the box 4px under a picked option's text and 5px under "Write my own answer", whose box is 13.5px. */
 .answer-option + .answer-text { margin-top: -1px; }
 
-/* Its label column is only as tall as its line (13.5px at 1.4), not as the 19px number box beside it. */
+/* Its label column is only as tall as its line (13.5px at 1.4), not as the 19px number box beside it. The extra 0.02px
+   lands the layout on the board's 1/64px step (the browser truncates a margin to 1/64px): without it the card is 1/64px
+   taller, and the first row of cards rounds to the pixel above the board's whenever the dock's top sits near a half pixel. */
 .answer-own > .answer-option + .answer-text {
-  margin-top: calc(-3px - max(0px, 19px - 18.9px * var(--text-scale)));
+  margin-top: calc(-3px - max(0px, 19px - 18.9px * var(--text-scale)) - 0.02px);
   font-size: calc(13.5px * var(--text-scale));
 }
 

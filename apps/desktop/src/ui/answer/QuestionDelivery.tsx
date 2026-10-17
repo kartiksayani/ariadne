@@ -105,7 +105,7 @@ export function useQuestionDelivery({ drafts, store, itemId, inputId }: {
     const at = clock(acceptedAt(receiptId));
     return done({ content: held, extra: extraOf(null),
       bar: { icon: 'ph ph-check', tone: 'done', text: `Sent at ${at}. Waiting for the agent to pick it up.`, narrow: `Sent at ${at}. Waiting for the agent.`, sealed: true,
-        actions: button({ label: 'Sent', icon: 'ph ph-paper-plane-right', title: 'Already sent', kind: 'ghost' }) } });
+        actions: button({ label: 'Sent', icon: 'ph ph-paper-plane-tilt', title: 'Already sent', kind: 'ghost' }) } });
   }
   const checking = evidence?.kind === 'uncertain' || evidence?.kind === 'unavailable';
   const sentAt = clock(Date.parse(input.created_at));
@@ -133,11 +133,11 @@ export function useQuestionDelivery({ drafts, store, itemId, inputId }: {
       ? { icon: 'ph ph-hourglass-medium', text: `Queued at ${sentAt}. It goes when the agent is ${busyAgent ? 'free' : 'running'}.`, narrow: `Queued at ${sentAt}.`, sealed: true,
         actions: <>{undoButton}{button({ label: 'Queued', icon: 'ph ph-hourglass-medium', title: 'Already queued', kind: 'ghost' })}</> }
       : { icon: 'ph ph-check', tone: 'done', text: `Sent at ${sentAt}. Waiting for the agent to pick it up.`, narrow: `Sent at ${sentAt}. Waiting for the agent.`, sealed: true,
-        actions: <>{undoButton}{button({ label: 'Sent', icon: 'ph ph-paper-plane-right', title: 'Already sent', kind: 'ghost' })}</> } });
+        actions: <>{undoButton}{button({ label: 'Sent', icon: 'ph ph-paper-plane-tilt', title: 'Already sent', kind: 'ghost' })}</> } });
   }
   const picked = pickedAt ? `Picked up at ${clock(Date.parse(pickedAt))}.` : 'Picked up by the agent.';
   return done({ content, extra: extraOf(null),
-    bar: { icon: 'ph ph-check', tone: 'done', text: picked, sealed: true, actions: button({ label: 'Sent', icon: 'ph ph-paper-plane-right', title: 'Already sent', kind: 'ghost' }) } });
+    bar: { icon: 'ph ph-check', tone: 'done', text: picked, sealed: true, actions: button({ label: 'Sent', icon: 'ph ph-paper-plane-tilt', title: 'Already sent', kind: 'ghost' }) } });
 }
 
 /** One sent answer as a line: the dock's Sent list. It shows the words exactly as they went out. */
