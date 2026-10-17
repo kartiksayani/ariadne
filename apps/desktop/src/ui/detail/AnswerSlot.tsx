@@ -2,6 +2,7 @@
 // (ui/answer/AnswerControl.tsx), sent through `useSubmit`, so every place answers the same way and shares one draft and
 // one send lock. After Send the same cards stay, sealed, with the delivery bar (ui/answer/QuestionDelivery.tsx).
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { plainFailure } from '../../data/plain';
 import { receiptWithdrawn, useOwnerDrafts, type DraftEntry, type DraftState, type OwnerDraftStore } from '../../state/drafts/store';
@@ -12,6 +13,7 @@ import { answerStanding, useQuestionDelivery } from '../answer/QuestionDelivery'
 import { sessionEnded, sessionAnswerBlocked } from '../../selectors/sessionClosed';
 import { copyText } from '../shared/clipboard';
 import { waitingAge } from '../dock/model';
+import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 
 /** The handoff's wording for a saved draft written against an older item revision or binding. */
 export const changedText ='This item changed. Review the current question and options; your text is retained.';
@@ -148,10 +150,17 @@ export function AnswerSlot({ drafts, store, itemId, layout = 'details', hint, he
         ? { icon: 'ph ph-warning-circle', tone: 'danger', text: 'Not sent. Your words are kept.',
           actions: <>{copy}{barButton('Retry', 'ph ph-arrow-clockwise', () => { void submit.retry(); }, { primary: true, disabled: busy || !!submit.blocked || submit.changed, title: 'Send again ( ↵ )' })}</> }
         : null;
+  // Words the agent already had (a refill after "Stop waiting") go again only after the same "Send again?" as the message's
+  // own Send again. Its clicks and keys stay off the cards and the Map; a held ↵ that repeats onto it confirms nothing.
+  const resend = submit.resend && createPortal(<div onClick={event => event.stopPropagation()}
+    onKeyDownCapture={event => { if (event.repeat) { event.preventDefault(); event.stopPropagation(); } }} onKeyDown={event => event.stopPropagation()}>
+    <ConfirmDialog title="Send again?" body={`${submit.agent} already has this message. Send it again anyway?`} confirmLabel="Send again"
+      busy={submit.resend.disabled} onCancel={submit.resend.cancel} onConfirm={submit.resend.confirm} /></div>, document.body);
   return <div ref={root} className="detail-answer-slot" data-owner-input={mark}>
     {heading}
     {shortcutStatus && <p role="alert">{shortcutStatus}</p>}
-    <AnswerControl layout={layout} options={options} selected={selected} draft={draft.text} label="Answer" hint={hint} bar={bar}
+    <AnswerControl layout={layout} options={options} selected={selected} draft={draft.text} label="Answer" bar={bar}
+      hint={submit.copy ? `${submit.agent} already has this answer. Sending it again asks first.` : hint}
       locked={submit.locked || submit.changed || ended} frozen={!live}
       warn={submit.changed && !entry.uncertain ? changedText : undefined} warnAction={submit.changed && !entry.uncertain ? review : undefined}
       blocked={ended ? sessionAnswerBlocked(session!) : entry.uncertain || submit.changed ? undefined : submit.blocked ?? blocked ?? undefined}
@@ -161,5 +170,6 @@ export function AnswerSlot({ drafts, store, itemId, layout = 'details', hint, he
     {/* The one alert: why it failed, under the bar that offers the way on. */}
     {error && <p className="detail-error" role="alert">{error}</p>}
     {preferences}
+    {resend}
   </div>;
 }

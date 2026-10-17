@@ -95,6 +95,7 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
   });
   // 1–9 while the open dock has no rival for the focus; ⌘↵ only with the focus in the dock. A send elsewhere (Details)
   // disables its field and drops the focus to <body>, so a second ⌘↵ there must never send the dock's question.
+  // An idle 1–9 also moves the focus to the option it picked, so the cards' own ⌘↵ and ↵ send it next.
   // Never Esc: Esc belongs to whatever has the focus. A key another handler took (defaultPrevented) is left alone.
   useEffect(() => {
     const keys = (event: globalThis.KeyboardEvent) => {
@@ -106,7 +107,8 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
       if (!model.getSnapshot().open || !(inDock || idle)) return;
       else if (!event.metaKey && /^[1-9]$/.test(event.key)) {
         if (inDock && target?.closest('.answer')) return;
-        root.current?.querySelector<HTMLButtonElement>(`.answer-dock-current [data-answer-option="${Number(event.key) - 1}"]`)?.click();
+        const choice = root.current?.querySelector<HTMLButtonElement>(`.answer-dock-current [data-answer-option="${Number(event.key) - 1}"]`);
+        choice?.click(); choice?.focus();
       } else if (event.metaKey && event.key === 'Enter') {
         if (!inDock || target?.closest('.answer')) return;
         root.current?.querySelector<HTMLButtonElement>('.answer-dock-current [data-answer-send]')?.click();
