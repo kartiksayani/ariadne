@@ -62,7 +62,7 @@ describe('peek desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => expect(document.activeElement).toBe(document.querySelector(`${selector}[data-item-id="1"]`)));
   });
 
-  it('previews a historical fork with its full title while its chip keeps the disambiguated name before Go to selects it', async () => {
+  it('previews a historical fork under its disambiguated name, with its full question, before Go to selects it', async () => {
     const transport = new AppTransport(), source = transport.sessions.get(route.session_id)!;
     const fork = source.items['1.1']!, elsewhere = source.items['8']!;
     fork.short = elsewhere.short = 'Cache lookup'; elsewhere.topic_id = fork.topic_id;
@@ -78,8 +78,11 @@ describe('peek desktop composition', { timeout: 10_000 }, () => {
     expect(chip.title).toBe(fork.question); expect(chip.classList.contains('name-chip')).toBe(true);
     fireEvent.click(chip);
     const peek = await screen.findByRole('dialog', { name: `Peek: ${fork.question}` });
-    expect(within(peek).getByRole('heading', { level: 2 }).textContent).toBe(fork.question);
-    expect(within(peek).queryByText('Redis · Cache lookup')).toBeNull();
+    // The card heads with the same disambiguated name; the full question is its title and its summary.
+    const heading = within(peek).getByRole('heading', { level: 2 });
+    expect(heading.textContent).toBe('Redis · Cache lookup');
+    expect(heading.title).toBe(fork.question);
+    expect(peek.querySelector('.peek-summary')!.textContent).toBe(fork.question);
     expect(screen.getByRole('article').getAttribute('data-detail-item-id')).toBe('1');
     expect(transport.preferences.sessions[0]!.selected_item_id).toBe('1');
     fireEvent.click(within(peek).getByRole('button', { name: 'Go to' }));

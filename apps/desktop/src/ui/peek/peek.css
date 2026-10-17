@@ -1,42 +1,87 @@
+/* The peek card (board 6.x): fixed in a portal, so opening or closing it never moves the Map. */
 .item-peek {
   position: fixed;
   z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   width: 340px;
   box-sizing: border-box;
   overflow: auto;
-  padding: 15px;
-  border: 1px solid var(--a-edge);
-  border-radius: 6px;
+  padding: 12px;
+  border-radius: 9px;
   background: var(--a-card);
   color: var(--color-text);
-  box-shadow: var(--a-pop);
-  font-size: calc(12px * var(--text-scale));
+  box-shadow: var(--shadow-lg);
+  font-size: calc(12.5px * var(--text-scale));
+}
+
+@media (width <= 1000px) {
+  .item-peek { width: 300px; }
 }
 
 .peek-head,
-.peek-tags,
-.peek-footer,
-.peek-reply {
+.peek-footer {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
 }
 
-.peek-head { align-items: flex-start; }
+.peek-icon {
+  display: inline-flex;
+  flex: none;
+}
 
-.peek-head h2 {
+.peek-name {
   flex: 1;
   min-width: 0;
   margin: 0;
-  font-size: inherit;
-  white-space: pre-wrap;
+  font-size: calc(14px * var(--text-scale));
+  font-weight: 500;
   overflow-wrap: break-word;
 }
-.peek-tags { margin: 8px 0; }
 
-.peek-tags > span:first-child {
-  color: var(--a-label);
-  text-transform: capitalize;
+.peek-head .status-badge { flex: none; }
+
+/* New / Changed, as on Map rows (SPEC 3.7). */
+.peek-marker {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 17px;
+  box-sizing: border-box;
+  padding: 0 7px 0 6px;
+  border-radius: 999px;
+  font-size: calc(10.5px * var(--text-scale));
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.peek-marker > i {
+  width: 5px;
+  height: 5px;
+  border-radius: 1px;
+  transform: rotate(45deg);
+}
+
+.peek-marker[data-marker="new"] {
+  background: var(--attention);
+  color: var(--a-bg);
+}
+
+.peek-marker[data-marker="new"] > i { background: currentcolor; }
+
+.peek-marker[data-marker="changed"] {
+  box-shadow: inset 0 0 0 1.25px var(--attention);
+  color: var(--attention);
+}
+
+.peek-marker[data-marker="changed"] > i {
+  width: 6px;
+  height: 6px;
+  box-sizing: border-box;
+  border: 1.25px solid currentcolor;
 }
 
 .peek-summary {
@@ -44,76 +89,67 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
-  color: var(--a-label);
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
 }
-.peek-footer { margin-top: 12px; }
 
-.peek-go { margin-left: auto; }
+.peek-strip {
+  margin: 0;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--attention) 9%, transparent);
+  line-height: 1.45;
+}
+
+.peek-strip strong { font-weight: 600; }
 
 .peek-answer {
-  margin-top: 12px;
-  padding-top: 10px;
+  padding-top: 8px;
   border-top: 1px solid var(--color-divider);
 }
 
-.peek-options {
-  display: grid;
-  gap: 6px;
+.peek-hint {
+  margin: 0;
+  color: var(--a-label);
 }
 
-.peek-option {
-  padding: 8px;
-  border: 1px solid var(--a-edge);
-  border-radius: 5px;
-  text-align: left;
-  background: var(--a-card);
-}
+.peek-footer { margin-top: 2px; }
 
-.peek-option-pick {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px;
-  width: 100%;
+.peek-close {
+  margin-right: auto;
   padding: 0;
   border: 0;
-  color: inherit;
   background: transparent;
+  color: color-mix(in srgb, var(--color-text) 52%, transparent);
   font: inherit;
-  text-align: left;
+  font-size: calc(11.5px * var(--text-scale));
   cursor: pointer;
 }
 
-.peek-option-pick:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.peek-option small { color: var(--a-acc-text); }
+.peek-close:hover { color: var(--color-text); }
 
-.peek-option .md {
-  display: block;
-  margin-top: 4px;
-  color: var(--a-label);
-}
-.peek-option:hover { border-color: var(--a-acc-text); }
-.peek-reply { margin-top: 10px; }
-
-.peek-reply .input {
-  width: 0;
-  flex: 1;
-}
-.peek-details { margin-top: 6px; }
-
-.peek-hint {
-  margin: 8px 0 0;
-  color: var(--a-label);
-}
-.peek-error { color: var(--a-danger); }
-
-.peek-copy-fallback {
-  display: grid;
+.peek-button {
+  display: inline-flex;
+  align-items: center;
   gap: 5px;
-  margin-top: 8px;
+  height: 26px;
+  box-sizing: border-box;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--a-card);
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+  color: inherit;
+  font: inherit;
+  font-size: calc(12px * var(--text-scale));
+  cursor: pointer;
+}
+
+.peek-button:hover { box-shadow: inset 0 0 0 1px var(--a-edge-strong); }
+
+.peek-close:focus-visible,
+.peek-button:focus-visible {
+  outline: 2px solid var(--a-acc-text);
+  outline-offset: 2px;
 }
 
 .name-chip {

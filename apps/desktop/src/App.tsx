@@ -548,9 +548,8 @@ function Workspace({ application }: { application: Application }) {
   // Keys pressed while focus is on <body> (after launch or a click on a non-focusable area) still reach the keymap.
   const appRoot = useRef<HTMLDivElement>(null);
   useWindowKeys(appRoot, historyControls, intent => changeTextSize(nextTextSize(textSizeIntent.current ?? navigation.getSnapshot().preferences?.global.text_scale, intent)));
-  return <PeekProvider lookup={target => navigation.opened.open(target)} drafts={application.drafts} onGoTo={revealItem} onAgentNotRunning={onAgentNotRunning}
+  return <PeekProvider lookup={target => navigation.opened.open(target)} drafts={application.drafts} navigation={navigation} onGoTo={revealItem} onAgentNotRunning={onAgentNotRunning}
     answerTarget={conversationOpen && conversation && route ? { ...route, item_id: conversation.itemId } : undefined}
-    onPeekSeen={(target, observedRevision) => navigation.markItemSeen(target, target.item_id, observedRevision)}
     onVisit={(target, action) => { if (action !== 'opened') navigationVisits.record(target, target.item_id, action === 'peek' ? 'peeked' : 'answered'); }}>
     <ItemRefSession.Provider value={route ?? null}><ItemHistoryContext.Provider value={historyControls}><RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys} onKeyDownCapture={event => {
       if (!conversationOpen) return;

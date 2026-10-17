@@ -38,8 +38,9 @@ async function showFilters() {
 export async function goToPeekItem(item, currentItemId) {
   const peek = () => browser.$('.item-peek');
   const heading = () => browser.$('.item-peek .peek-head h2');
+  // The card heads with the short name; its title carries the complete question.
   await wait(async () => await peek().isDisplayed() && await heading().isDisplayed()
-    && await browser.execute(element => element.textContent, await heading()) === item.question,
+    && await browser.execute(element => element.title, await heading()) === item.question,
   'Item reference peek did not show the complete saved question');
   assert.equal(await browser.$('.item-detail').getAttribute('data-detail-item-id'), currentItemId,
     'Opening a reference peek must preserve the selected detail until Go to');

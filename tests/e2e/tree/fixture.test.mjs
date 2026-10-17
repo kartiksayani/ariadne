@@ -12,7 +12,7 @@ for (const scenario of ['complete', 'hidden', 'truncated', 'premature-navigation
   test(`reference navigation requires full visible peek, unchanged detail and deliberate Go to: ${scenario}`, async () => {
     const item = { id: 'child', question: 'Complete child question\nRetain the exact second line.' }, calls = [];
     let open = true;
-    const heading = { isDisplayed: async () => true, textContent: scenario === 'truncated' ? 'Complete child question…' : item.question };
+    const heading = { isDisplayed: async () => true, title: scenario === 'truncated' ? 'Complete child question…' : item.question };
     const go = {
       waitForEnabled: async () => calls.push('enabled'), scrollIntoView: async () => calls.push('scroll'),
       click: async () => { calls.push('go'); if (scenario !== 'lingering-peek') open = false; },
