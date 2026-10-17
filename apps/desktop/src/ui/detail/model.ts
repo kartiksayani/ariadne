@@ -101,8 +101,11 @@ export interface DetailModel {
    * on a finished one. Null when the session or topic is read-only. Words written in another box stay in their draft and go out as this.
    */
   readonly box: WordsKind | null;
-  /** A waiting item whose input is in flight or queued: a reply queues behind it (owner FIFO). Named for what is sent: a reply. */
-  readonly followUp: { readonly label: string; readonly hint: string; readonly disabled: boolean } | null;
+  /**
+   * A waiting item whose input is in flight or queued, or whose answer the agent already handled: a reply queues behind it
+   * (owner FIFO). Named for what is sent: a reply. `answered`: the sealed answer stands and this is the way to say more.
+   */
+  readonly followUp: { readonly label: string; readonly hint: string; readonly disabled: boolean; readonly answered: boolean } | null;
   readonly answer: AnswerModel | null;
   readonly outcome: { readonly label: string; readonly text: string; readonly color: string } | null;
   readonly note: string | null;
@@ -284,12 +287,19 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     if (offline && open) open = { ...open, hint: `Reconnecting to ${agent}. These come back with the connection.` };
   }
 
-  const answerable = !archived && status === 'waiting' && !pending && !(sessionEnded(session) && ownerReplied(session, item));
+  // The agent handled the owner's answer to the current ask and has not asked again: the answer stays sealed, and the owner
+  // says more in a reply (one answer per question). A reply queued after it leaves the sealed answer in place.
+  const answerHandled = status === 'waiting' && session.answers.some(answer => answer.item_id === item.id
+    && answer.question_revision === item.question_revision && session.inputs[answer.input_id]?.state === 'handled'
+    && !session.answers.some(newer => newer.supersedes_answer_id === answer.id));
+  const answerable = !archived && status === 'waiting' && (!pending || answerHandled) && !(sessionEnded(session) && ownerReplied(session, item));
   // The answer slot hides while its input is pending; a follow-up reply still queues behind it.
   // A reply being written stays when the hold clears, next to the answer box. A waiting item's words go out as a reply
   // (`sentAs`), so the button says reply: "follow-up" is only ever the kind sent on a finished item.
-  const followUp = !readOnly && status === 'waiting' && (pending || replyDraft) ? { label: `Add a ${sentAs(status)}`,
-    hint: pending ? 'Queued behind the answer in flight' : 'Your reply is kept. Send it, or answer below.', disabled: offline } : null;
+  const followUp = !readOnly && status === 'waiting' && (pending || replyDraft || answerHandled) ? { label: `Add a ${sentAs(status)}`,
+    hint: answerHandled ? pending ? 'Your reply is on its way. You can write another; it goes out after.' : 'The agent has your answer. Add a reply to say more.'
+      : pending ? 'Queued behind the answer in flight' : 'Your reply is kept. Send it, or answer below.',
+    disabled: offline, answered: answerHandled } : null;
   const recommended = item.options.findIndex(option => option.recommended);
   const blocked = sessionEnded(session) ? sessionAnswerBlocked(session)
     : offline ? reconnectingNote(agent) : null;

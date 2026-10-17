@@ -255,6 +255,43 @@ fn input_without_an_option_omits_the_option_fields() {
 }
 
 #[test]
+fn reply_after_a_handled_answer_reaches_the_agent_on_its_next_claim() {
+    let t = Setup::new(&asked());
+    let answer = t.submit(10, InputKind::Answer, "Go with it.", Some("lru"));
+    // The agent handled the answer and has not asked again: the item still waits and its answer stands.
+    t.store()
+        .transact(
+            &id(2),
+            &ReceiptActorScope::Owner {},
+            &id(11),
+            &serde_json::json!({"test":11}),
+            |session| {
+                session.inputs.0.get_mut(&answer).unwrap().state = InputState::Handled;
+                Ok::<_, ()>(SavedReceiptData::InputCancel {
+                    input_id: id(999),
+                    state: InputState::Cancelled,
+                })
+            },
+        )
+        .unwrap();
+    let session = t.saved();
+    assert_eq!(session.items.0[&item("1")].status, ItemStatus::WaitingOnMe);
+    assert!(session.answers.iter().any(|a| a.input_id == answer));
+    // The desktop's "Add a reply" sends a Reply to the same item, against the same question.
+    let reply = t.submit(12, InputKind::Reply, "One more thing.", None);
+    let p = t.claim(20).unwrap();
+    assert_eq!(p.input_id, reply);
+    let body = envelope(&p);
+    assert_eq!(body["input_kind"], "reply");
+    assert_eq!(body["item_id"], "1");
+    assert_eq!(body["text"], "One more thing.");
+    assert_eq!(
+        body["question_revision"],
+        t.saved().items.0[&item("1")].question_revision.value()
+    );
+}
+
+#[test]
 fn input_behind_the_current_question_is_held_and_later_inputs_still_deliver() {
     let t = Setup::new(&seed());
     let stale = t.submit(
