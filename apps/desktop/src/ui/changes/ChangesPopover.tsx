@@ -3,6 +3,7 @@ import type { Immutable } from '../../data/session-store';
 import type { SessionRef } from '../../generated/core';
 import type { Item, Session } from '../../generated/domain/models';
 import type { NavigationStore } from '../../state/navigation/store';
+import type { ChangeRow } from '../../selectors/changes/card';
 import { briefLists } from '../../selectors/changes/topic';
 import { changeLabel } from '../../selectors/changes/label';
 import { awayGroups, type UnseenRow, unseenTopicRows } from '../../selectors/changes/unseen';
@@ -11,7 +12,7 @@ import { waitingOnOwner } from '../../selectors/sessionClosed';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { peekNames } from '../peek/names';
 import { StatusBadge } from '../shared/StatusBadge';
-import { statusKey } from '../shared/status';
+import { STATUS, statusColor, statusKey } from '../shared/status';
 import { shortLabel } from '../shared/short';
 import { ChangeMarker } from './ChangeMarker';
 import { Compare } from './Compare';
@@ -76,21 +77,30 @@ export function ChangesPopover({ session, topicId, route, navigation, data, undo
   const needs = away.find(group => group.key === 'waiting');
 
   const undoButton = <button type="button" className="btn btn-ghost changes-undo-button" onClick={() => navigation.reading.undo(undoToken!)}>↺ Undo</button>;
+  // SPEC 5.2: each group lists its names with a one-line text: the outcome of a decided or replaced item, the question that waits on the owner.
+  const oneLine = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ').trim();
+  const briefGroups = [
+    { label: 'Decided', status: 'decided' as const, rows: lists.decided, line: (row: ChangeRow) => oneLine(row.item.outcome || row.item.why) },
+    { label: 'Your turn', status: 'waiting' as const, rows: lists.yourTurn, line: (row: ChangeRow) => oneLine(row.item.ask || row.item.question) },
+    { label: 'Replaced', status: 'replaced' as const, rows: lists.replaced, line: (row: ChangeRow) => oneLine(row.item.outcome || row.item.why) },
+  ];
   const brief = <section className="changes-section" aria-label="Topic brief">
     <button ref={briefButton} type="button" className="changes-brief-head" aria-expanded={briefOpen} onClick={() => toggleBrief(!briefOpen)}>
       <i className={briefOpen ? 'ph ph-caret-down' : 'ph ph-caret-right'} aria-hidden="true" />
       <span className="changes-label-caps">Brief</span>
       {topic.brief && <>{' '}<span className="change-muted">by the agent · updated <time dateTime={topic.brief_updated_at ?? topic.created_at}>{clockTime(topic.brief_updated_at ?? topic.created_at)}</time></span></>}
-      {!briefOpen && <>{' '}<span className="change-muted changes-brief-counts">{lists.decided.length} decided · {lists.yourTurn.length} your turn · {lists.replaced.length} replaced</span></>}
     </button>
+    {!briefOpen && <p className="change-muted changes-brief-counts">{lists.decided.length} decided · {lists.yourTurn.length} your turn · {lists.replaced.length} replaced</p>}
     {briefOpen && <div className="changes-brief-body">
-      {topic.brief && <p className="brief-text">{topic.brief}</p>}
-      {[{ label: 'Decided', rows: lists.decided }, { label: 'Your turn', rows: lists.yourTurn }, { label: 'Replaced', rows: lists.replaced }].map(group => <div className="brief-list" key={group.label}>
-        <strong>{group.label}</strong><ul>{group.rows.length ? group.rows.map(row => <li key={row.item.id} data-pair={group.label === 'Replaced' || undefined}>
-          {group.label === 'Replaced'
-            ? <><del><ItemName item={row.item} route={route} label={labels.get(row.item.id)} onOpen={onOpenItem} /></del>{' '}<span className="brief-replacement"><span className="change-muted">replaced by </span>
-              {row.replacement ? <ItemName item={row.replacement} route={route} label={labels.get(row.replacement.id)} onOpen={onOpenItem} /> : <span className="change-muted">an unavailable item</span>}</span></>
-            : <ItemName item={row.item} route={route} label={labels.get(row.item.id)} onOpen={onOpenItem} />}
+      {briefGroups.map(group => <div className="brief-group" key={group.label}>
+        <h3 className="brief-group-label"><i className={STATUS[group.status].icon} style={{ color: statusColor(group.status) }} aria-hidden="true" />{group.label}</h3>
+        <ul>{group.rows.length ? group.rows.map(row => <li key={row.item.id}>
+          <span className="brief-names">
+            <ItemName item={row.item} route={route} label={labels.get(row.item.id)} onOpen={onOpenItem} />
+            {group.label === 'Replaced' && <>{' '}<span role="img" aria-label="replaced by">→</span>{' '}
+              {row.replacement ? <ItemName item={row.replacement} route={route} label={labels.get(row.replacement.id)} onOpen={onOpenItem} /> : <span className="change-muted">an unavailable item</span>}</>}
+          </span>
+          {group.line(row) && <span className="brief-line">{group.line(row)}</span>}
         </li>) : <li className="change-muted">{group.label === 'Your turn' ? 'No questions waiting on you' : 'None yet'}</li>}</ul>
       </div>)}
     </div>}
@@ -130,7 +140,7 @@ export function ChangesPopover({ session, topicId, route, navigation, data, undo
           <time className="changes-time" dateTime={entry.at}>{clockTime(entry.at)}</time>
           <button type="button" className="btn btn-ghost changes-seen" disabled={marked} title="Mark seen" aria-label={marked ? `${name} is seen` : `Mark ${name} seen`}
             onClick={() => markSeen(entry)}>{marked ? '✓ Seen' : '✓'}</button>
-          <Compare row={row} session={session} why={item.why} />
+          <Compare row={row} session={session} why={item.why} variant="link" />
         </li>;
       })}</ul>
     </section>}

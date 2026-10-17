@@ -39,6 +39,22 @@ describe('the Recent popover from the top bar', () => {
     expect(document.activeElement).toBe(recentButton());
   });
 
+  it('is titled "Recent · viewed and changed", lists Viewed before Changed lately, and each row has a status icon and an underlined name', async () => {
+    await openSession(transport => { viewOf(transport).recent_items = [{ item_id: '2', action: 'viewed', visited_at: '2026-10-13T11:00:00.000Z' }]; });
+    fireEvent.click(recentButton());
+    const dialog = popover();
+    expect(within(dialog).getByRole('heading', { level: 2 }).textContent).toBe('Recent · viewed and changed');
+    const regions = within(dialog).getAllByRole('region').map(region => region.getAttribute('aria-label'));
+    expect(regions).toEqual(['Viewed', 'Changed lately']);
+    for (const region of within(dialog).getAllByRole('region')) {
+      for (const row of within(region).getAllByRole('button').filter(button => button.classList.contains('recent-item'))) {
+        expect(within(row).getByRole('img'), 'the status icon').toBeTruthy();
+        expect(row.querySelector('time')).not.toBeNull();
+        expect(row.querySelector('.recent-name')!.textContent).not.toBe('');
+      }
+    }
+  });
+
   it('lists what was viewed with its action and what changed lately, and a click selects the item and closes it', async () => {
     const transport = await openSession(transport => {
       viewOf(transport).recent_items = [{ item_id: '2', action: 'peeked', visited_at: '2026-10-13T11:00:00.000Z' }];

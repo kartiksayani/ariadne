@@ -25,7 +25,8 @@ export async function setupChanges(updated = 1, replaced = 0, added = 0, away = 
   const onOpenItem = vi.fn();
   function Harness({ session }: { readonly session: Session }) {
     const nav = useNavigation(navigation), seen = useReadingSeen(navigation.reading, nav.preferences, route);
-    return <div className="product-app"><ChangesOpener session={session} topicId={value.topic.id} seen={seen} navigation={navigation} onOpenItem={onOpenItem} /></div>;
+    return <div className="product-app"><div className="tree-column"><div className="tree-topic">
+      <ChangesOpener session={session} topicId={value.topic.id} seen={seen} navigation={navigation} onOpenItem={onOpenItem} /></div></div></div>;
   }
   const element = () => <Harness session={structuredClone(value.session)} />;
   const rendered = render(element());

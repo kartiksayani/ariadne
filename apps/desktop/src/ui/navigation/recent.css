@@ -2,19 +2,19 @@
 .recent-popover {
   position: absolute;
   top: 44px;
-  right: 8px;
+  right: 138px;
   z-index: 15;
   display: flex;
   flex-direction: column;
   gap: 12px;
   box-sizing: border-box;
-  width: 360px;
+  width: 340px;
   max-width: calc(100% - 16px);
   max-height: calc(100% - 56px);
   padding: 8px 14px 14px;
   overflow: auto;
   border-radius: 9px;
-  background: var(--a-card);
+  background: var(--a-side);
   box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-divider);
   font-size: calc(12.5px * var(--text-scale));
   line-height: 1.45;
@@ -33,6 +33,12 @@
   margin: 0;
   font-size: calc(13px * var(--text-scale));
   font-weight: 500;
+}
+
+.recent-sub {
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+  font-size: calc(12px * var(--text-scale));
+  font-weight: 400;
 }
 
 .recent-close {
@@ -73,10 +79,18 @@
   outline-offset: -2px;
 }
 
+.recent-item > .status-badge-icon {
+  flex: none;
+  align-self: center;
+}
+
 .recent-name {
   min-width: 0;
   overflow: hidden;
   font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, var(--color-text) 45%, transparent);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -100,4 +114,12 @@
 .recent-empty {
   margin: 0;
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+/* The board's narrow frame (900): the popover sits nearer the right edge and is 300 wide. */
+@media (width < 1100px) {
+  .recent-popover {
+    right: 34px;
+    width: 300px;
+  }
 }

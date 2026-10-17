@@ -104,7 +104,7 @@ async function changesFit(surface: Locator) {
   const layout = await surface.evaluate(element => {
     const card = element.getBoundingClientRect();
     return { overflow: element.scrollWidth - element.clientWidth,
-      children: [...element.querySelectorAll('.change-name, .change-read-as, .brief-text, .change-comparison, .changes-seen')].map(child => {
+      children: [...element.querySelectorAll('.change-name, .change-read-as, .brief-line, .change-comparison, .changes-seen')].map(child => {
         const rect = child.getBoundingClientRect();
         return { text: child.textContent, left: rect.left - card.left, right: rect.right - card.right,
           overflow: child.scrollWidth - child.clientWidth };
@@ -181,8 +181,16 @@ for (const theme of ['dark', 'light'] as const) {
     await openChanges(page);
     const sinceCard = page.getByRole('dialog', { name: 'What changed', exact: true }).getByTestId('changes-row')
       .filter({ has: page.getByRole('button', { name: 'Retry schedule', exact: true }) });
-    const sinceControl = await compactCompare(sinceCard);
-    expect([currentControl, historyControl, sinceControl]).toEqual([answerControl, answerControl, answerControl]);
+    // The popover's rows use the board's "› Before → after" line instead of the compact icon (SPEC 5.3).
+    const sinceLink = sinceCard.getByRole('button', { name: 'Before → after', exact: true });
+    await expect(sinceLink).toHaveAttribute('aria-expanded', 'false');
+    const sinceComparison = page.locator(`[id="${await sinceLink.getAttribute('aria-controls')}"]`);
+    await sinceLink.click();
+    await expect(sinceComparison.locator('del').first()).toBeVisible();
+    await expect(sinceComparison.locator('mark').first()).toBeVisible();
+    await expect(sinceCard.getByRole('button', { name: 'Hide before → after', exact: true })).toBeVisible();
+    await changesFit(sinceCard);
+    expect([currentControl, historyControl]).toEqual([answerControl, answerControl]);
     await testInfo.attach(`changes-comparisons-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
   });
 
@@ -197,14 +205,18 @@ for (const theme of ['dark', 'light'] as const) {
     await brief.getByRole('button', { name: /Brief/ }).click();
     await expect(brief).toContainText('by the agent · updated');
     await expect(brief.locator('time')).toHaveAttribute('datetime', '2026-10-07T15:02:00.000Z');
-    await expect(brief.locator('.brief-list').nth(0).locator('.change-name')).toHaveText(['Recovery policy']);
-    await expect(brief.locator('.brief-list').nth(1).locator('.change-name')).toHaveText(['Recovery question']);
-    const replaced = brief.locator('.brief-list').nth(2);
-    await expect(replaced.locator('del')).toHaveText('Old retry policy');
-    await expect(replaced).toContainText('replaced by Recovery policy');
-    expect(await replaced.locator('del').evaluate(element => getComputedStyle(element).textDecorationLine)).toContain('line-through');
-    const columns = await brief.locator('.brief-list').evaluateAll(elements => elements.map(element => ({
-      label: element.querySelector('strong')!.getBoundingClientRect().x, links: element.querySelector('ul')!.getBoundingClientRect().x,
+    const groups = brief.locator('.brief-group');
+    await expect(groups.nth(0).locator('.change-name')).toHaveText(['Recovery policy']);
+    await expect(groups.nth(0).locator('.brief-line')).toHaveText(['Keep retries quiet and resume saved changes once.']);
+    await expect(groups.nth(1).locator('.change-name')).toHaveText(['Recovery question']);
+    await expect(groups.nth(1).locator('.brief-line')).toHaveText(['Should recovery wait until you reconnect?']);
+    const replaced = groups.nth(2);
+    await expect(replaced.locator('.change-name')).toHaveText(['Old retry policy', 'Recovery policy']);
+    await expect(replaced.getByRole('img', { name: 'replaced by' })).toBeVisible();
+    // The names are the board's underlined, peekable names, and each group lists them in one column under its label.
+    expect(await replaced.locator('.change-name').first().evaluate(element => getComputedStyle(element).textDecorationLine)).toContain('underline');
+    const columns = await groups.evaluateAll(elements => elements.map(element => ({
+      label: element.querySelector('h3')!.getBoundingClientRect().x, links: element.querySelector('ul')!.getBoundingClientRect().x,
     })));
     expect(new Set(columns.map(column => column.label)).size).toBe(1);
     expect(new Set(columns.map(column => column.links)).size).toBe(1);
@@ -246,7 +258,7 @@ for (const theme of ['dark', 'light'] as const) {
     await testInfo.attach(`changes-caught-up-undo-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
     await popover.getByRole('button', { name: '↺ Undo', exact: true }).click();
     await expect(away).toContainText('You were away since');
-    await expect(brief.locator('.brief-list').nth(1).locator('.change-name')).toHaveText(['Recovery question']);
+    await expect(brief.locator('.brief-group').nth(1).locator('.change-name')).toHaveText(['Recovery question']);
     await testInfo.attach(`changes-away-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
   });
 }
@@ -255,38 +267,33 @@ for (const theme of ['dark', 'light'] as const) {
 const mapSizes = [{ brief: 'map-brief-long', map: 'map-thread' }, { brief: 'map-brief-long-small', map: 'map-thread-small' }] as const;
 
 for (const { brief: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) {
-  test(`Topic brief names flow across the width instead of one per line: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+  test(`Topic brief groups each name with its one-line text, one row per name: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
     await openApp(page, origin, { ...frameSpec(frame), theme });
     const brief = (await openChanges(page)).getByRole('region', { name: 'Topic brief', exact: true });
     await brief.getByRole('button', { name: /Brief/ }).click();
-    const decided = brief.locator('.brief-list').nth(0);
-    // Every name is there, in order.
+    const decided = brief.locator('.brief-group').nth(0);
+    // Every name is there, in order, each on its own row with its text.
     await expect(decided.locator('.change-name')).toHaveText(['Recovery policy', ...longDecided]);
-    const layout = await decided.evaluate(list => {
-      const names = list.querySelector('ul')!, box = names.getBoundingClientRect(), items = [...names.children].map(item => item.getBoundingClientRect());
-      return { count: items.length, lines: new Set(items.map(rect => Math.round(rect.top))).size, width: box.width,
-        reach: Math.max(...items.map(rect => rect.right)) - box.left, label: 0,
-        dot: getComputedStyle(names.firstElementChild!, '::after').content, lastDot: getComputedStyle(names.lastElementChild!, '::after').content };
-    });
-    expect(layout.lines, 'names share lines').toBeLessThanOrEqual(Math.ceil(layout.count * 0.6));
-    expect(layout.lines).toBeGreaterThan(1);
-    expect(layout.reach, 'the names use the width').toBeGreaterThan(layout.width * 0.7);
-    expect(layout.dot).toBe('"·"');
-    expect(layout.lastDot).toBe('none');
+    await expect(decided.locator('li')).toHaveCount(longDecided.length + 1);
+    const rows = await decided.locator('li').evaluateAll(items => items.map(item => ({ top: item.getBoundingClientRect().top,
+      name: item.querySelector('.change-name')!.getBoundingClientRect().left, line: item.querySelector('.brief-line')?.textContent ?? '' })));
+    expect(new Set(rows.map(row => Math.round(row.top))).size, 'one row per name').toBe(rows.length);
+    expect(new Set(rows.map(row => Math.round(row.name))).size, 'the names share a column').toBe(1);
+    for (const row of rows) expect(row.line, 'each name has its one-line text').not.toBe('');
     // The group labels stay a column on the left, and "Your turn" / "Replaced" do not wrap.
-    const labels = await brief.locator('.brief-list > strong').evaluateAll(elements => elements.map(element => {
-      const range = document.createRange(); range.selectNodeContents(element);
+    const labels = await brief.locator('.brief-group > h3').evaluateAll(elements => elements.map(element => {
+      const range = document.createRange(); range.selectNodeContents(element.lastChild!);
       return { x: element.getBoundingClientRect().x, lines: new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size };
     }));
     expect(new Set(labels.map(label => label.x)).size).toBe(1);
     for (const label of labels) expect(label.lines, 'a group label stays on one line').toBe(1);
-    // "old replaced by new" is one unit: the "replaced by" and the new name share a line.
-    const pair = await brief.locator('.brief-list').nth(2).locator('li').first().evaluate(item => {
-      const replacement = item.querySelector('.brief-replacement')!, button = replacement.querySelector('button')!;
-      const middle = (rect: DOMRect) => rect.top + rect.height / 2;
-      return { lead: middle(replacement.firstElementChild!.getBoundingClientRect()), name: middle(button.getBoundingClientRect()), rects: replacement.getClientRects().length };
+    // "old → new" reads as one unit: the arrow and both names share a line.
+    const pair = await brief.locator('.brief-group').nth(2).locator('li').first().evaluate(item => {
+      const names = item.querySelector('.brief-names')!, middle = (rect: DOMRect) => rect.top + rect.height / 2;
+      const buttons = [...names.querySelectorAll('button')].map(button => middle(button.getBoundingClientRect()));
+      return { spread: Math.max(...buttons) - Math.min(...buttons), rects: names.getClientRects().length };
     });
-    expect(Math.abs(pair.lead - pair.name)).toBeLessThan(4);
+    expect(pair.spread).toBeLessThan(4);
     expect(pair.rects).toBe(1);
     await changesFit(brief);
     await testInfo.attach(`brief-wrap-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });

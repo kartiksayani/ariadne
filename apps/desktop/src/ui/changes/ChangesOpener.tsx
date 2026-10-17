@@ -11,7 +11,7 @@ import { clockTime, weekdayName } from './clock';
 import './changes.css';
 import './popover.css';
 
-const GAP = 6, EDGE = 12, MAX_WIDTH = 540;
+const EDGE = 12, MAX_WIDTH = 540;
 
 /**
  * The band's "◆ N new ◇ N changed since HH:MM ›" (SPEC 5.5) and the What changed popover it opens (D18).
@@ -44,8 +44,10 @@ export function ChangesOpener({ session, topicId, seen, navigation, onOpenItem }
       const left0 = column?.left ?? 0, width0 = column?.width ?? (document.documentElement.clientWidth || window.innerWidth);
       const dock = parseFloat(getComputedStyle(anchor).getPropertyValue('--dock-inset')) || 0;
       const bottom = (column?.bottom ?? (document.documentElement.clientHeight || window.innerHeight)) - dock - 14;
-      const top = rect.bottom + GAP, width = Math.max(240, Math.min(MAX_WIDTH, width0 - EDGE * 2));
-      const left = Math.max(left0 + EDGE, Math.min(rect.left, left0 + width0 - EDGE - width));
+      // As on the board: the Map's left edge plus 12, just under the topic band, whatever x the opener sits at.
+      const band = anchor.closest('.tree-topic')?.getBoundingClientRect();
+      const top = band?.bottom ?? rect.bottom + 6, width = Math.max(240, Math.min(MAX_WIDTH, width0 - EDGE * 2));
+      const left = left0 + EDGE;
       setPlacement({ left, top, width, maxHeight: Math.max(160, bottom - top) });
     };
     place();
