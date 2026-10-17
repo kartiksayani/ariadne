@@ -787,8 +787,10 @@ export function TreeView(props: TreeViewProps) {
     readonly key: string;
     /** Its top below the reading edge (the scroller's top plus the sticky band there), and its window top. */
     readonly offset: number; readonly y: number;
-    /** The scroller's window top and scroll position then. */
-    readonly boxTop: number; readonly scrollTop: number;
+    /** The scroller's window top and scroll position then, and how far the scroller has carried the row down in the window (`carried`). */
+    readonly boxTop: number; readonly scrollTop: number; readonly carried: number;
+    /** Where the row above it, clipped by the band, starts below the reading edge (negative); Infinity when none is clipped. */
+    readonly lead: number;
     /** The session and rows then, and the offsets of the item rows on screen: a reading row that goes hands the hold on. */
     readonly sessionId: string | undefined; readonly rows: readonly Row[]; readonly offsets: ReadonlyMap<string, number>;
   }
@@ -799,22 +801,42 @@ export function TreeView(props: TreeViewProps) {
   const [breadcrumb, setBreadcrumb] = useState<readonly string[]>([]);
   const placed = useRef<Anchor | null>(null);
   placed.current = anchor;
+  /** The scroll position the hold's own correction last set, so the next `remembering` tells it from an owner's scroll. */
+  const ownScroll = useRef<number | null>(null);
+  /**
+   * How far the held row goes down in the window with the scroller since it was last held, so the sticky band never covers
+   * more of it than before: the new target is the larger of the row's old window y and the band's new bottom less what the
+   * band covered of the row (`held`: its offset below the reading edge, negative when covered; the clipped row above it,
+   * `lead`, counts too, as the band covers it first). A scroller that moves down by `moved`
+   * takes the band with it, so a row `offset` clear of the band goes down by what is left of `moved` (none when it stays
+   * clear), and a covered row by all of it. When the scroller comes back up the row returns the same, no more than it was
+   * carried: a bar that opens above the Map and closes again leaves the row where it was.
+   */
+  const carried = (box: HTMLElement, before: Held, held: number) => {
+    const moved = box.getBoundingClientRect().top - before.boxTop, offset = Math.min(held, before.lead);
+    if (moved > 0) return offset < 0 ? moved : Math.max(0, moved - offset);
+    return Math.max(moved, -before.carried);
+  };
   /** The scroller width `holding` last held the reading row at. */
   const previousWidth = useRef<number | null>(null);
   /**
    * Puts the held row back at its offset below the reading edge. The sticky topic bar at that edge belongs to whichever
    * topic is under it at this scroll position: after a width change, rows reflow and another topic's bar (wrapped to a
    * different height) can sit there until the row is back, so settle against the bar the row ends under, measuring it
-   * afresh on each of a few passes. The scroller's own move in the window is not subtracted: the row keeps its window place.
+   * afresh on each of a few passes. The scroller's own move in the window is not subtracted: the row keeps its window place,
+   * except for `carried`: the sticky band goes down with a scroller that moves down (a notice opens above the Map), and a row
+   * the band already covers the top of goes down by as much instead of sliding further under it.
    * Where the rows no longer reach that far down, the bottom spacer grows to keep the scroll extent.
    */
-  const restoreHeld = (box: HTMLDivElement, before: { readonly offset: number; readonly boxTop: number }, element: HTMLElement) => {
+  const restoreHeld = (box: HTMLDivElement, before: Held, offset: number, element: HTMLElement) => {
+    const carry = carried(box, before, offset);
     for (let pass = 0; pass < 3; pass++) {
-      const delta = element.getBoundingClientRect().top - readingTop() - before.offset + box.getBoundingClientRect().top - before.boxTop;
+      const delta = element.getBoundingClientRect().top - readingTop() - offset + box.getBoundingClientRect().top - before.boxTop - carry;
       if (Math.abs(delta) < 1) return;
       const short = box.scrollTop + delta + box.clientHeight - scrollEnd(box);
       if (short > 0 && box.clientHeight > 0) setSpacer(box, spacer.current + short);
       box.scrollTop += delta;
+      ownScroll.current = box.scrollTop;
     }
   };
   /**
@@ -868,8 +890,19 @@ export function TreeView(props: TreeViewProps) {
     // An observer, layout effect or delayed programmatic scroll event can arrive between
     // reflows. With no owner scroll, restore the held row's window place before adopting the new layout.
     if (before && element && box.scrollTop === before.scrollTop && (settled.current || !placed.current)) {
-      const delta = element.getBoundingClientRect().top - before.y;
-      if (Math.abs(delta) >= 1) box.scrollTop += delta;
+      // Where the row was in the window, plus what the scroller carried it (see `restoreHeld`).
+      const delta = element.getBoundingClientRect().top - before.y - carried(box, before, before.offset);
+      if (Math.abs(delta) >= 1) { box.scrollTop += delta; ownScroll.current = box.scrollTop; }
+    }
+    // What the scroller has carried the row since: forgotten when the owner scrolled (the row is somewhere else now).
+    const driven = before && (box.scrollTop === before.scrollTop || box.scrollTop === ownScroll.current);
+    ownScroll.current = null;
+    const step = before && driven ? carried(box, before, before.offset) : 0;
+    const carry = before && driven ? Math.max(0, before.carried + step) : 0;
+    // A revealed row keeps the offset it was revealed at, but the band it is measured from moves with the scroller: the part of
+    // the move the row did not follow is distance the band gained (or lost) over it, so the offset takes it.
+    if (revealedAnchor.current && before?.key === revealedAnchor.current.key && driven) {
+      revealedAnchor.current = { ...revealedAnchor.current, offset: revealedAnchor.current.offset + step - (box.getBoundingClientRect().top - before.boxTop) };
     }
     // An owner scroll back up (or rows growing into it) gives the spacer's room back; what is on screen stays.
     trimSpacer(box);
@@ -907,8 +940,11 @@ export function TreeView(props: TreeViewProps) {
       if (!rect || rect.top >= screenEnd) break;
       offsets.set(list[index]!.key, rect.top - top);
     }
+    // The row held is the first one whole below the band, which covers the top of the row above it: that top row's offset
+    // (negative) counts for the carry too, so the band never covers more of it than before.
+    const lead = !revealed && !selectedShown && firstTop !== undefined && firstTop < top - READING_EDGE_CLEARANCE && holdKey !== key ? firstTop - top : Infinity;
     held.current = holdKey && holdRect ? { key: holdKey, offset: revealed?.offset ?? holdRect.top - top, y: holdRect.top,
-      boxTop: box.getBoundingClientRect().top, scrollTop: box.scrollTop, sessionId: latest.current.session?.id, rows: latest.current.rows, offsets } : null;
+      boxTop: box.getBoundingClientRect().top, scrollTop: box.scrollTop, carried: carry, lead, sessionId: latest.current.session?.id, rows: latest.current.rows, offsets } : null;
     // Reading holds the first whole row, but breadcrumb names belong to the first complete
     // row below the pinned topic, which also ends on screen.
     // Fractional row heights leave a row placed at the band a fraction under it: half a pixel still counts as whole.
@@ -943,7 +979,7 @@ export function TreeView(props: TreeViewProps) {
     if (previous.detailOpen && !current.detailOpen && target && target.key === current.selectedId) {
       const offset = Math.max(target.top, readingTop() + 8) - readingTop();
       revealedAnchor.current = { key: target.key, offset };
-      held.current = { key: target.key, offset, y: readingTop() + offset, boxTop: scroller.current?.getBoundingClientRect().top ?? 0,
+      held.current = { key: target.key, offset, y: readingTop() + offset, boxTop: scroller.current?.getBoundingClientRect().top ?? 0, carried: 0, lead: Infinity,
         scrollTop: target.scrollTop, sessionId: latest.current.session?.id, rows: latest.current.rows, offsets: new Map() };
     }
     if (resized || previous.selectedId !== current.selectedId || previous.reveal !== current.reveal || previous.detailOpen !== current.detailOpen) {
@@ -955,7 +991,7 @@ export function TreeView(props: TreeViewProps) {
     // (A scroller with no layout yet, zero high, has no end to clamp to.)
     const clamped = !!box && !!before && box.clientHeight > 0 && box.scrollTop < before.scrollTop && box.scrollTop >= box.scrollHeight - box.clientHeight - 1;
     const back = box && before && (box.scrollTop === before.scrollTop || clamped) && (settled.current || !placed.current) ? heldRow(before) : null;
-    if (box && before && back) restoreHeld(box, { offset: back.offset, boxTop: before.boxTop }, back.element);
+    if (box && before && back) restoreHeld(box, before, back.offset, back.element);
     remembering();
   };
   useLayoutEffect(holding);

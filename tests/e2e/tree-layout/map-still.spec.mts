@@ -39,6 +39,16 @@ const reading = (page: Page, key?: string) => page.locator('.tree-scroll').evalu
   const row = wanted ? rows.find(element => element.dataset.row === wanted)! : rows.find(element => element.getBoundingClientRect().bottom > edge + bar + 1)!;
   return { key: row.dataset.row!, top: row.getBoundingClientRect().top };
 }, key);
+/** The window y where the sticky topic band ends (the Map's edge when none is stuck): what the reading row sits under. */
+const bandBottom = (page: Page) => page.locator('.tree-scroll').evaluate(box => {
+  const edge = box.getBoundingClientRect().top;
+  let bottom = edge;
+  for (const header of box.querySelectorAll('.tree-topic')) {
+    const rect = header.getBoundingClientRect();
+    if (rect.top <= edge && rect.bottom > edge) bottom = Math.max(bottom, rect.bottom);
+  }
+  return bottom;
+});
 const settle = (page: Page) => page.evaluate(() => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
 const agent = (page: Page, change: string) => page.evaluate(value => (window as unknown as { treeLayout: { agent(change: string): void } }).treeLayout.agent(value), change);
 const seen = (page: Page, id: string) => page.evaluate(value => (window as unknown as { treeLayout: { seen(id: string): void } }).treeLayout.seen(value), id);
@@ -150,7 +160,8 @@ const triggers: readonly Trigger[] = [
     await expect.poll(async () => (await row(page, '12').getByTestId('change-marker').boundingBox())!.width).toBeLessThanOrEqual(16);
   }],
   // The chip takes the status badge's slot and width: no row changes its width or height. The closed-session notice pushes the
-  // Map down; the rows hold their window place and only the topic bar stuck to the Map's edge goes with it.
+  // Map down, and the topic bar stuck to the Map's edge goes with it; the rows keep their place under the band, so they go down
+  // by as far as the band passed the reading row (here all of it: the band covers the top of item 10).
   ['a session ends', 'still', '13', nothing, page => agent(page, 'session-ends'), page => expect(row(page, '13').getByText('Session closed')).toBeVisible()],
   // The band (alpha.20 W3): its buttons, menu and popovers float or swap in place; none changes a row.
   ['Focus is turned on', 'held', null, selectReading, page => press(bandButton(page, 'Focus')),
@@ -232,12 +243,12 @@ for (const under of [4, 17, 40]) test(`Show more keeps the clicked row's window 
 });
 
 for (const [name, kind, subject, before, change, done] of triggers) test(`the Map ${kind === 'goes' ? 'goes where the owner asked when' : 'stays still when'} ${name}`, async ({ page }) => {
-  // The closed-session notice pushes the Map down; the Tree hold piece holds viewport y through its scroller observer.
+  // The closed-session notice pushes the Map down; the Tree hold holds viewport y, except where the band passes the reading row.
   await serve(async origin => {
     await open(page, origin);
     await before(page);
     await settle(page);
-    const rows = await placed(page), read = await reading(page), edge = await mapTop(page);
+    const rows = await placed(page), read = await reading(page), edge = await mapTop(page), bandBefore = await bandBottom(page);
     expect(read.key).toBe('10');
     if (subject) expect(rows.map(value => value.key), `${subject} is in view`).toContain(subject);
     await change(page);
@@ -245,20 +256,37 @@ for (const [name, kind, subject, before, change, done] of triggers) test(`the Ma
     await settle(page);
     // An owner action that asks for a place ('goes') moves the Map there on purpose, so the reading row is not held.
     if (kind === 'goes') return;
-    // The row the owner reads never moves (3px, as the width table allows for sub-pixel text reflow).
-    await expect.poll(async () => Math.abs((await reading(page, read.key)).top - read.top)).toBeLessThanOrEqual(kind === 'held' ? 3 : 0.5);
+    // The band never moves down over the reading row: when its bottom edge moves down (a notice above the Map, the band
+    // growing), the row goes down with it and keeps the same distance below the band, covered by the same few pixels.
+    if (kind === 'held' || name === 'a session ends') {
+      await expect.poll(async () => {
+        const rise = await bandBottom(page) - bandBefore;
+        return rise > 0.5 ? Math.abs((await reading(page, read.key)).top - await bandBottom(page) - (read.top - bandBefore)) : 0;
+      }, 'the reading row keeps its place under a band whose bottom moved down').toBeLessThanOrEqual(0.5);
+    }
+    // The row the owner reads never moves (3px, as the width table allows for sub-pixel text reflow), except down with a band
+    // whose bottom moved down over it.
+    const rose = async () => Math.max(0, await bandBottom(page) - bandBefore);
+    await expect.poll(async () => Math.abs((await reading(page, read.key)).top - read.top - await rose())).toBeLessThanOrEqual(kind === 'held' ? 3 : 0.5);
     if (kind === 'still') {
-      // A bar opening above the Map (the closed-session notice) moves the Map's edge and the topic bar stuck to it; no row moves.
-      const after = new Map((await placed(page)).map(value => [value.key, value])), edgeMoved = await mapTop(page) - edge;
-      for (const value of rows) expect(after.get(value.key), `${value.key} keeps its place, height and text width`)
-        .toEqual(value.pinned ? { ...value, top: value.top + edgeMoved } : value);
+      // A bar opening above the Map (the closed-session notice) moves the Map's edge and the topic bar stuck to it; the rows
+      // below it keep their place under the band, which has moved down as far.
+      const after = new Map((await placed(page)).map(value => [value.key, value])), edgeMoved = await mapTop(page) - edge, down = await rose();
+      const bottom = await page.locator('.tree-scroll').evaluate(box => box.getBoundingClientRect().bottom);
+      for (const value of rows) {
+        const top = value.top + (value.pinned ? edgeMoved : down);
+        // A row the move carries past the Map's bottom edge is out of view; every other one is where it was under the band.
+        if (!after.has(value.key) && top >= bottom) continue;
+        expect(after.get(value.key), `${value.key} keeps its place, height and text width`).toEqual({ ...value, top });
+      }
     }
   });
 });
 
 // ---- The filter row (D13-D17, D24). The chip row opens above the Map, and a chip, Clear, an Ack or an agent's change
 // removes rows. The Map holds the reading row at its *viewport* place, so these rows are measured in window coordinates,
-// in both views, with the Map scrolled to the top, the middle and the bottom.
+// in both views, with the Map scrolled to the top, the middle and the bottom. The one exception: the Tree's sticky band goes
+// down with the Map's top edge, and a row it would then cover more of goes down as far as the band passed it.
 type View = 'Tree' | 'Graph';
 type Spot = 'top' | 'middle' | 'bottom';
 interface Cell { readonly id: string; readonly top: number; readonly left: number; readonly height: number }
@@ -402,6 +430,8 @@ test.describe('the filter row never moves the Map', () => {
       // How far the Map's own top edge moves in the window when the trigger opens or closes the rows above it, and which
       // rows above the held one are drawn before.
       const edgeBefore = (await viewportPlace(page, scrollerOf(view)))!, drawnBefore = await rowsAround(page, view, held.id);
+      // The band covers the top of the first row in view before it reaches the held one, so that row counts for the reach too.
+      const bandBefore = view === 'Tree' ? await bandBottom(page) : 0, topRow = view === 'Tree' ? (await reading(page)).top : held.top;
       await trigger.change(page, view, reader);
       await trigger.done(page, view, reader);
       await settle(page); await page.waitForTimeout(60); await settle(page);
@@ -416,11 +446,58 @@ test.describe('the filter row never moves the Map', () => {
       const left = view === 'Tree' ? gone.reduce((sum, value) => sum + value.height, 0) : gone.length * Math.abs(cells[1]!.top - reader.top);
       // At the top an owner-caused boundary may carry the rows up (never down) by what left; anywhere else, nothing moves.
       const room = spot === 'top' && trigger.top ? (trigger.top === 'filter row' ? edgeMoved : left) + 1 : 1;
+      // The band never covers more of the held row than before: when its bottom edge moves down past the row's top (the chip row
+      // opening above the Map takes the band with it), the row goes down by exactly as much as the band passed it. A row clear
+      // of the band's new edge keeps its window y.
+      const rise = view === 'Tree' ? await bandBottom(page) - bandBefore : 0, clear = Math.min(held.top, topRow) - bandBefore;
+      const follow = clear < 0 ? Math.max(0, rise) : Math.max(0, rise - clear);
       expect(shift, `${held.id} moved ${shift}px in the window`).toBeGreaterThanOrEqual(-room);
-      expect(shift, `${held.id} moved ${shift}px in the window`).toBeLessThanOrEqual(1);
+      expect(shift, `${held.id} moved ${shift}px in the window`).toBeLessThanOrEqual(1 + follow);
+      if (follow > 1) expect(Math.abs(shift - follow), `${held.id} keeps its distance below the band`).toBeLessThanOrEqual(1);
       expect(Math.abs(after!.x - before.x), `${held.id} moved sideways`).toBeLessThanOrEqual(1);
     });
   }
+
+  // A bar that opens above the Map and closes again carries the reading row down with the band and gives all of it back:
+  // the Map is where it was, not left a bar's height lower.
+  for (const spot of ['middle', 'bottom'] as const) test(`Tree, scrolled to the ${spot}: the chip row opening and closing again leaves the reading row where it was`, async ({ page }) => {
+    await prepare(page, origin, 'Tree');
+    await scrollTo(page, 'Tree', spot);
+    await page.mouse.move(2, 690);
+    const reader = (await wholeCells(page, 'Tree'))[0]!, before = (await viewportPlace(page, cellOf('Tree', reader.id)))!, band = await bandBottom(page);
+    await openRow(page);
+    expect(await bandBottom(page) - band, 'the Map\'s top edge moved down').toBeGreaterThan(20);
+    await page.waitForTimeout(60); await settle(page);
+    expect((await viewportPlace(page, cellOf('Tree', reader.id)))!.y - before.y, 'the band took the row down with it').toBeGreaterThan(5);
+    await funnel(page).click();
+    await expect(chipRow(page)).toHaveCount(0);
+    await page.waitForTimeout(60); await settle(page);
+    expect(Math.abs((await viewportPlace(page, cellOf('Tree', reader.id)))!.y - before.y), 'and gave it back').toBeLessThanOrEqual(1);
+  });
+
+  // The reading row is the selected row while it is on screen. Mid-screen, far clear of the band, it keeps its window y
+  // exactly when the chip row opens and closes above the Map: the band passes nothing of it, so there is nothing to follow.
+  test('Tree, scrolled to the middle: the selected row far below the band keeps its window y as the chip row opens and closes', async ({ page }) => {
+    await prepare(page, origin, 'Tree');
+    await scrollTo(page, 'Tree', 'middle');
+    const cell =(await wholeCells(page, 'Tree'))[3]!;
+    await page.mouse.click(cell.left + 100, cell.top + 10);
+    const close = page.getByRole('button', { name: 'Close detail' });
+    await expect(close).toBeVisible();
+    await close.click();
+    await page.mouse.move(2, 690);
+    await settle(page);
+    const before = (await viewportPlace(page, cellOf('Tree', cell.id)))!, band = await bandBottom(page);
+    expect(before.y - band, 'the selected row is far below the band').toBeGreaterThan(100);
+    await openRow(page);
+    expect(await bandBottom(page) - band, 'the Map\'s top edge moved down').toBeGreaterThan(20);
+    await page.waitForTimeout(60); await settle(page);
+    expect(Math.abs((await viewportPlace(page, cellOf('Tree', cell.id)))!.y - before.y), 'it keeps its window y as the row opens').toBeLessThanOrEqual(0.5);
+    await funnel(page).click();
+    await expect(chipRow(page)).toHaveCount(0);
+    await page.waitForTimeout(60); await settle(page);
+    expect(Math.abs((await viewportPlace(page, cellOf('Tree', cell.id)))!.y - before.y), 'and as it closes').toBeLessThanOrEqual(0.5);
+  });
 });
 
 // ------------------------------------------------------------------- D24: the hold at every scroll position
@@ -597,10 +674,12 @@ for (const [name, change, done] of shortMap) test(`the Map holds on a short Map 
   await settle(page);
   const short = await scroller(page).evaluate(box => box.getBoundingClientRect().bottom - box.querySelector('.tree-rows')!.getBoundingClientRect().bottom);
   expect(short, 'the rows end well above the window\'s bottom').toBeGreaterThan(300);
-  const read = await readingRow(page), y = (await windowTop(page, read.key))!;
+  const read = await readingRow(page), y = (await windowTop(page, read.key))!, bandBefore = await bandBottom(page);
   await change(page);
   await done(page);
   await settle(page);
-  await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - y), `${read.key} keeps its window place`).toBeLessThanOrEqual(3);
+  // The row keeps its window place, except down with the band when a notice opening above the Map moves it down.
+  await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - y - Math.max(0, await bandBottom(page) - bandBefore)),
+    `${read.key} keeps its place under the band`).toBeLessThanOrEqual(3);
   expect(await scroller(page).evaluate(box => box.scrollHeight - box.clientHeight - box.scrollTop), 'no spare room below').toBeLessThan(1);
 }));
