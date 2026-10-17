@@ -145,7 +145,7 @@ class SessionAckHold implements AckHold {
       const unshown = !entry.saving && !(this.shown.get(id) ?? 0);
       if (unshown && !this.announced.has(id)) {
         this.announced.add(id);
-        notices.push({ id: this.heldNoticeId(id), icon: 'ph ph-check', dismissible: false, text: `Acked “${shortLabel(entry.reviewed)}”`,
+        notices.push({ id: this.heldNoticeId(id), icon: 'ph ph-check', dismissible: true, text: `Acked “${shortLabel(entry.reviewed)}”`,
           actions: [{ label: 'Undo', run: () => { this.undo(id); } }] });
       } else if (!unshown && this.announced.has(id)) { this.announced.delete(id); notices.dismiss(this.heldNoticeId(id)); }
     }

@@ -32,7 +32,6 @@ describe('saved status filter chips', () => {
     expect(waiting()).toBe(0);
     preferences.filters.statuses = ['waiting_on_me'];
     expect(project().rows).toEqual([]);
-    expect(project().shownCount).toBe(0);
     expect(waiting()).toBe(0);
     expect(sentenceRows(frozen, preferences, new Set()).matchingTotal).toBe(0);
     expect(sentenceRows(frozen, preferences, new Set()).rows).toEqual([]);

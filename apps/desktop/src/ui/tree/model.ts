@@ -8,7 +8,6 @@ import type { BindingSummary, Input, Item, ItemOption, ItemStatus, PresenceObser
 import type { SessionPreferences } from '../../generated/core';
 import { indexSession, type Immutable } from '../../data';
 import type { SupervisorHealth } from '../../data/service';
-import { sameOwner } from '../../selectors/tree/rows';
 import { hitSegments, holdsTerms, searchTerms, type MatchField, type Segment } from '../../selectors/tree/search';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
 import { agentReceived, stoppedAttempt, stuckInput, type Stuck } from '../../selectors/waiting/stuck';
@@ -292,10 +291,6 @@ export interface TreeModel {
   readonly rows: readonly Row[];
   /** A status, owner or Later filter scopes the rows. A search never does. */
   readonly filtering: boolean;
-  /** Items the filters keep, hidden ones aside: the "Showing N of M" count. */
-  readonly shownCount: number;
-  readonly hiddenCount: number;
-  readonly itemCount: number;
   /** "Showing an item outside your current filters." */
   readonly outside: boolean;
   readonly noMatch: boolean;
@@ -360,14 +355,9 @@ export function treeModel(input: TreeInput): TreeModel {
   const topics = focusRootId ? scopeTopics.filter(topic => topic.id === focusItem!.topic_id) : scopeTopics;
   const shown = new Set(scopeTopics.map(topic => topic.id));
   const live = all.filter(item => shown.has(item.topic_id));
-  const base = (item: Immutable<Item>) => {
-    if (filters.owners.length && !filters.owners.some(owner => sameOwner(owner, item.owner))) return false;
-    return !(filters.hide_later && later.has(item.id));
-  };
   const shows = new Map(all.map(item => [item.id, displayStatus(session, item)]));
   const display = (item: Immutable<Item>) => shows.get(item.id) ?? item.status;
   const filtering = filter.active;
-  const scoped = live.filter(item => base(item));
 
   // includeSets: matches, the forced reveal and selection, and their ancestors.
   const matched = new Set<string>(), forced = new Set<string>(), include = new Set<string>();
@@ -526,7 +516,7 @@ export function treeModel(input: TreeInput): TreeModel {
       reveal.topics.add(item.topic_id);
     }
   }
-  return { rows, filtering, shownCount: scoped.filter(item => !hidden.has(item.id) && filter.matches(item)).length, hiddenCount: scoped.filter(item => hidden.has(item.id) && filter.matches(item)).length, itemCount: live.filter(item => !hidden.has(item.id)).length, outside, noMatch: live.length > 0 && rows.length === 0, empty: Object.keys(session.items).length === 0 && !Object.values(session.topics).some(topic => topic?.removed_at),
+  return { rows, filtering, outside, noMatch: live.length > 0 && rows.length === 0, empty: Object.keys(session.items).length === 0 && !Object.values(session.topics).some(topic => topic?.removed_at),
     search: { hidden: hiddenMatches, collapsed: collapsedMatches, outsideFocus, reveal: { items: [...reveal.items], topics: [...reveal.topics], groups: [...reveal.groups] } } };
 }
 

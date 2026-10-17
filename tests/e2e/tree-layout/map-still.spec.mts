@@ -10,7 +10,9 @@ import { resolve } from 'node:path';
 import type { Server } from 'node:http';
 import { viewportPlace } from '../map-viewport.mts';
 
-interface Placed { readonly key: string; readonly top: number; readonly height: number; readonly text: number }
+/** `pinned`: a topic bar stuck to the Map's top edge, which goes where the Map's edge goes. */
+interface Placed { readonly key: string; readonly top: number; readonly height: number; readonly text: number; readonly pinned: boolean }
+const mapTop = (page: Page) => page.locator('.tree-scroll').evaluate(box => box.getBoundingClientRect().top);
 
 /** Every row and band in view: where it sits, how tall it is and how wide its text runs. */
 const placed = (page: Page): Promise<Placed[]> => page.locator('.tree-scroll').evaluate(box => {
@@ -20,10 +22,12 @@ const placed = (page: Page): Promise<Placed[]> => page.locator('.tree-scroll').e
     if (rect.bottom <= edge.top || rect.top >= edge.bottom) return [];
     const text = row.querySelector('.tree-question, .tree-topic-name')?.getBoundingClientRect().width ?? 0;
     // Viewport coordinates: a bar inserted above the Map counts as movement.
-    return [{ key: row.dataset.row!, top: Math.round(rect.top * 2) / 2, height: Math.round(rect.height * 2) / 2, text: Math.round(text * 2) / 2 }];
+    return [{ key: row.dataset.row!, top: Math.round(rect.top * 2) / 2, height: Math.round(rect.height * 2) / 2, text: Math.round(text * 2) / 2,
+      pinned: row.classList.contains('tree-topic') && rect.top <= edge.top + 0.5 }];
   });
 });
-/** The first item row reaching below the sticky band, and its offset from the band's bottom. */
+/** The first item row reaching below the sticky band, and its top in the window: a bar opening above the Map moves the Map's own
+ * edge, so the window place is what the owner sees hold. */
 const reading = (page: Page, key?: string) => page.locator('.tree-scroll').evaluate((box, wanted) => {
   const edge = box.getBoundingClientRect().top;
   let bar = 0;
@@ -33,7 +37,7 @@ const reading = (page: Page, key?: string) => page.locator('.tree-scroll').evalu
   }
   const rows = [...box.querySelectorAll<HTMLElement>('.tree-item')];
   const row = wanted ? rows.find(element => element.dataset.row === wanted)! : rows.find(element => element.getBoundingClientRect().bottom > edge + bar + 1)!;
-  return { key: row.dataset.row!, top: row.getBoundingClientRect().top - edge - bar };
+  return { key: row.dataset.row!, top: row.getBoundingClientRect().top };
 }, key);
 const settle = (page: Page) => page.evaluate(() => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
 const agent = (page: Page, change: string) => page.evaluate(value => (window as unknown as { treeLayout: { agent(change: string): void } }).treeLayout.agent(value), change);
@@ -131,7 +135,8 @@ const triggers: readonly Trigger[] = [
     await expect.poll(async () => (await page.locator('.tree-scroll').boundingBox())!.width).toBeLessThan(560);
     await expect.poll(async () => (await row(page, '12').getByTestId('change-marker').boundingBox())!.width).toBeLessThanOrEqual(16);
   }],
-  // The chip takes the status badge's slot and width: no row changes its width or height.
+  // The chip takes the status badge's slot and width: no row changes its width or height. The closed-session notice pushes the
+  // Map down; the rows hold their window place and only the topic bar stuck to the Map's edge goes with it.
   ['a session ends', 'still', '13', nothing, page => agent(page, 'session-ends'), page => expect(row(page, '13').getByText('Session closed')).toBeVisible()],
   // The band (alpha.20 W3): its buttons, menu and popovers float or swap in place; none changes a row.
   ['Focus is turned on', 'held', null, selectReading, page => press(bandButton(page, 'Focus')),
@@ -218,7 +223,7 @@ for (const [name, kind, subject, before, change, done] of triggers) test(`the Ma
     await open(page, origin);
     await before(page);
     await settle(page);
-    const rows = await placed(page), read = await reading(page);
+    const rows = await placed(page), read = await reading(page), edge = await mapTop(page);
     expect(read.key).toBe('10');
     if (subject) expect(rows.map(value => value.key), `${subject} is in view`).toContain(subject);
     await change(page);
@@ -229,8 +234,10 @@ for (const [name, kind, subject, before, change, done] of triggers) test(`the Ma
     // The row the owner reads never moves (3px, as the width table allows for sub-pixel text reflow).
     await expect.poll(async () => Math.abs((await reading(page, read.key)).top - read.top)).toBeLessThanOrEqual(kind === 'held' ? 3 : 0.5);
     if (kind === 'still') {
-      const after = new Map((await placed(page)).map(value => [value.key, value]));
-      for (const value of rows) expect(after.get(value.key), `${value.key} keeps its place, height and text width`).toEqual(value);
+      // A bar opening above the Map (the closed-session notice) moves the Map's edge and the topic bar stuck to it; no row moves.
+      const after = new Map((await placed(page)).map(value => [value.key, value])), edgeMoved = await mapTop(page) - edge;
+      for (const value of rows) expect(after.get(value.key), `${value.key} keeps its place, height and text width`)
+        .toEqual(value.pinned ? { ...value, top: value.top + edgeMoved } : value);
     }
   });
 });

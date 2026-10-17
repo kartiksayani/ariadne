@@ -150,18 +150,13 @@ describe('hidden item tree projection', () => {
     const plain = model(), searched = model({ search: 'receipt' });
     // The search changes no count and no row; the hidden 1.1 ("Add the receipt lookup test") is named in the note.
     expect(searched.rows.map(row => row.key)).toEqual(plain.rows.map(row => row.key));
-    expect(searched.shownCount).toBe(plain.shownCount); expect(searched.itemCount).toBe(8); expect(searched.hiddenCount).toBe(1);
     expect(searched.rows.find(row => row.key === '3')).toMatchObject({ matches: ['question'] });
     expect(searched.search).toMatchObject({ hidden: 1, collapsed: 0 });
     expect(model({ search: 'unmatched' }).search).toMatchObject({ hidden: 0, collapsed: 0 });
   });
 
   it('counts hidden matches only for the selected statuses without search text', () => {
-    const { session, view, model } = fixture(['1.1']); view.filters.statuses = ['open'];
-    const filtered = model();
-    expect(filtered.shownCount).toBe(2); expect(filtered.itemCount).toBe(8); expect(filtered.hiddenCount).toBe(1);
+    const { session, view } = fixture(['1.1']); view.filters.statuses = ['open'];
     expect(chipCounts({ session: immutable(session), view, later: new Set(), local: [] }).open).toBe(2);
-    view.filters.statuses = ['in_progress'];
-    expect(model().hiddenCount).toBe(0);
   });
 });
