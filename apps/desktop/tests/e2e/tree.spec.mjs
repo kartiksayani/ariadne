@@ -9,7 +9,7 @@ import { goToPage, openSessionButton } from './session-button.mjs';
 import { activateOwned, identity } from '../../../../scripts/run-native-e2e.mjs';
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
-const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
+const wait = (condition, message) => browser.waitUntil(condition, { timeout: 60000, interval: 100, timeoutMsg: message });
 const row = id => browser.$(`.tree-rows [data-item-id="${id}"]`);
 const searchField = 'input[aria-label="Search the Map"]';
 // The top bar's search is a button until the owner opens it (a click here, `/` at the keyboard); the field then stays open

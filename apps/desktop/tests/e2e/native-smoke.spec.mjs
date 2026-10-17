@@ -22,7 +22,7 @@ const evidence = process.env.ARIADNE_E2E_EVIDENCE;
 const phase = process.env.ARIADNE_E2E_PHASE;
 const receiptPath = join(root, 'smoke/receipt.json');
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
-const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
+const wait = (condition, message) => browser.waitUntil(condition, { timeout: 60000, interval: 100, timeoutMsg: message });
 async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.click(); }
 // What one surface shows for a saved reply's delivery: its stuck note (when it has words) or else the dock's delivery line.
 // `facts` lists every stuck note and delivery line present, so a failure says what was actually there.

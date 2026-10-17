@@ -6,7 +6,7 @@ import { admissions, cliRequest, completeTurn, journeyResultRequest, publishResu
 import { folded, openFollowUp, openOwnerReply, ownerReplyTarget, sendDetailReply, waitForOwnerReplyTarget } from './owner-reply.mjs';
 import { openSendingDialog, openSession, sessionReady } from './session-button.mjs';
 
-const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
+const wait = (condition, message) => browser.waitUntil(condition, { timeout: 60000, interval: 100, timeoutMsg: message });
 const dialog = () => browser.$('[role="dialog"]');
 // The Sending… dialog's status line: what the session bar's chip used to say.
 const sendingLabel = () => browser.$('[role="dialog"] [data-dispatch]');

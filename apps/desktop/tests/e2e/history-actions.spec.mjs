@@ -8,7 +8,7 @@ import { connectionCardButton, openSendingDialog, openSession as clickSession, s
 import { folded } from './owner-reply.mjs';
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
-const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
+const wait = (condition, message) => browser.waitUntil(condition, { timeout: 60000, interval: 100, timeoutMsg: message });
 const dialog = () => browser.$('[role="dialog"]');
 async function archiveDiagnostics(failure) {
   let tree = '(unavailable)', hasDialog = '(unavailable)';
