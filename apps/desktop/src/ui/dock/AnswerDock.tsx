@@ -1,6 +1,6 @@
 // The answer dock (board screen 2, §5.2, §6.4): a 40px line, or the open dock at one waiting question of this session,
 // floating over the Map and Details. It never opens by itself, and it never selects, focuses or scrolls anything in the
-// Map: only the owner's own clicks on a path segment do (`onOpenItem`).
+// Map: only the owner's own clicks on a path segment or on the question's title do (`onOpenItem`).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { useWaiting, type WaitingStore } from '../../selectors/waiting/store';
@@ -212,11 +212,11 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
             <i className="ph ph-arrow-right" aria-hidden="true" /></button>
         </span>
         {keptChip}
-        {session && item && <nav className="dock-path" aria-label="Question location">{dockPath(session, item.id, fullPath).map((part, at, parts) => <span key={`${part.itemId ?? part.label}:${at}`} className="dock-crumb" data-more={part.more || undefined}>
+        {session && item && <nav className="dock-path" aria-label="Question location">{dockPath(session, item.id, fullPath).map((part, at) => <span key={`${part.itemId ?? part.label}:${at}`} className="dock-crumb" data-more={part.more || undefined}>
+          {at > 0 && <span className="dock-crumb-sep" aria-hidden="true">›</span>}
           {part.more ? <button type="button" className="dock-link" title="Show the full path" onClick={() => setFullPath(true)}>…</button>
             : part.itemId && onOpenItem ? <button type="button" className="dock-link" title={`Go to “${part.label}”`} onClick={() => onOpenItem(part.itemId!)}>{part.label}</button>
-              : <span className="dock-crumb-text" title={part.full}>{part.label}</span>}
-          {at < parts.length - 1 && <i className="ph ph-caret-right" aria-hidden="true" />}</span>)}</nav>}
+              : <span className="dock-crumb-text" title={part.full}>{part.label}</span>}</span>)}</nav>}
         <span className="dock-spacer" />
         {item?.waiting_since && <span className="dock-age dock-wide">Waiting {waitingAge(Date.parse(item.waiting_since), now())}</span>}
         {sentChip}{othersChip}
@@ -224,7 +224,9 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
       </div>
       {item && <div className="answer-dock-current" key={state.current!.id}>
         <div className="dock-question">
-          <h2 className="dock-question-title">{item.question}</h2>
+          <h2 className="dock-question-title">{onOpenItem
+            ? <button type="button" className="dock-question-open" aria-label={`Open ${item.question}`} title={`Go to “${item.question}”`} onClick={() => onOpenItem(item.id)}>{item.question}</button>
+            : item.question}</h2>
           {item.ask && <p className="dock-question-ask">{item.ask}</p>}
           {item.note && item.note.split(/\n{2,}/).map((paragraph, at) => <p key={at} className="dock-question-body">{paragraph}</p>)}
         </div>

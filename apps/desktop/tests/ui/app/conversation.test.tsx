@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { notices } from '../../../src/ui/pages/notices';
@@ -107,11 +108,10 @@ async function dockAt(id: string) {
   await waitFor(() => expect(at()).not.toBeNull());
 }
 
-/** Shows waiting question `id` in the conversation from the dock's path, as the Waiting card did: the Map selection stays. */
+/** Shows waiting question `id` in the conversation from the dock's question title, as the Waiting card did: the Map selection stays. */
 async function switchQuestion(id = '2') {
   await dockAt(id);
-  const crumbs = dock().querySelectorAll<HTMLButtonElement>('.dock-path .dock-link');
-  fireEvent.click(crumbs[crumbs.length - 1]!);
+  fireEvent.click(dock().querySelector<HTMLButtonElement>('.dock-question-open')!);
   await waitFor(() => expect(conversation().querySelector('[data-detail-item-id]')?.getAttribute('data-detail-item-id')).toBe(id));
 }
 
@@ -215,9 +215,20 @@ describe('desktop item conversation', { timeout: 10_000 }, () => {
     fireEvent.click(within(conversation()).getByRole('button', { name: 'Back to Map' }));
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Item conversation' })).toBeNull());
     await dockAt('2');
-    const crumbs = dock().querySelectorAll<HTMLButtonElement>('.dock-path .dock-link');
-    expect(crumbs[crumbs.length - 1]!.title).toBe('Go to “Which delivery window?”');
-    fireEvent.click(crumbs[crumbs.length - 1]!);
+    const title = dock().querySelector<HTMLButtonElement>('.dock-question-open')!;
+    expect(title.title).toBe('Go to “Which delivery window?”');
+    fireEvent.click(title);
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
+    await waitFor(() => expect(selected(transport)).toBe('2'));
+  });
+
+  it.each(['click', 'Enter'] as const)('opens the dock question in Details from its title, by %s', async how => {
+    const transport = await setup(); await dockAt('2');
+    const title = within(dock().querySelector<HTMLElement>('.dock-question-title')!).getByRole<HTMLButtonElement>('button', { name: 'Open Which delivery window?' });
+    expect(title.matches('.dock-question-open')).toBe(true);
+    expect(within(dock().querySelector<HTMLElement>('.dock-path')!).queryByText('Which delivery window?')).toBeNull();
+    if (how === 'click') fireEvent.click(title);
+    else { title.focus(); expect(document.activeElement).toBe(title); await userEvent.keyboard('{Enter}'); }
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     await waitFor(() => expect(selected(transport)).toBe('2'));
   });

@@ -146,9 +146,9 @@ export function AnswerControl({ options, layout = 'details', selected, draft, wa
           <span className="answer-label">{option.label}{peek && option.recommended && <span className="answer-star" aria-label="Recommended"> · <i className="ph-fill ph-star" aria-hidden="true" /></span>}</span>
           {!peek && (option.recommended || option.consequence) && <span className="answer-consequence">
             {option.recommended && <span className="answer-recommended"><i className="ph-fill ph-star" aria-hidden="true" />Recommended</span>}
-            {option.recommended && option.consequence && ' · '}{option.consequence}</span>}
+            {option.recommended && option.consequence && <span className="answer-recommended-dot"> · </span>}{option.consequence}</span>}
         </span>
-        {on && <i className="ph-fill ph-check-circle answer-check" aria-hidden="true" />}
+        {(on || !peek) && <i className={on ? 'ph-fill ph-check-circle answer-check' : 'ph-fill ph-check-circle answer-check answer-check-off'} aria-hidden="true" />}
       </button>
       {on && words && !sealed && !noteShown(option) && <button type="button" className="answer-note-link" disabled={locked}
         onClick={event => { event.stopPropagation(); focusNext.current = true; setNoteOpen(option.id); }}>+ Add a note</button>}
@@ -161,6 +161,7 @@ export function AnswerControl({ options, layout = 'details', selected, draft, wa
       onClick={event => { event.stopPropagation(); focusNext.current = true; choose(-1); }}>
       <span className="answer-key" aria-hidden="true"><i className="ph ph-pencil-simple" /></span>
       <span className="answer-body"><span className="answer-label">Write my own answer</span></span>
+      {!peek && <i className={own ? 'ph-fill ph-check-circle answer-check' : 'ph-fill ph-check-circle answer-check answer-check-off'} aria-hidden="true" />}
     </button>
     {own && !sealed && textBox('Answer in your own words…', 'Reply in your own words')}
     {own && sealed && draft.trim() && <p className="answer-sent-note">{draft}</p>}

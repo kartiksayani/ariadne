@@ -11,7 +11,7 @@
   color: var(--color-text);
   font-family: var(--font-body);
   font-size: calc(14px * var(--text-scale));
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
 /* macOS full screen (ui/shell/fullscreen.ts): the system menu bar slides down over the top

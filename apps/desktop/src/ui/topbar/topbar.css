@@ -101,9 +101,9 @@
 
 .tb-conn {
   gap: 6px;
-  padding: 0 7px;
+  padding: 0 6px;
   font-size: calc(12px * var(--text-scale));
-  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
 
 .tb-dot {

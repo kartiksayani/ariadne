@@ -120,17 +120,19 @@ describe('dock view invariant: only owner actions open it; no Map side effects',
 
 describe('the dock head path', () => {
   const session = () => structuredClone(demo) as unknown as Session;
-  it('runs from the topic through the ancestors to the question itself', () => {
+  it('runs from the topic through the ancestors and stops at the parent: the question itself is the title, not a segment', () => {
     expect(dockPath(immutable(session()), '1.1').map(part => [part.itemId, part.full])).toEqual([
-      [null, 'Delivery decisions'], ['1', 'Keep the full reply history?'], ['1.1', 'Add the receipt lookup test']]);
-    expect(dockPath(immutable(session()), '2').map(part => part.itemId)).toEqual([null, '2']);
+      [null, 'Delivery decisions'], ['1', 'Keep the full reply history?']]);
+    expect(dockPath(immutable(session()), '2').map(part => part.itemId)).toEqual([null]);
     expect(dockPath(immutable(session()), 'missing')).toEqual([]);
   });
-  it('folds past three parts to first, second, "…", last until expanded', () => {
+  it('folds past three parts to first, second, "…", the parent until expanded', () => {
     const value = session();
     value.items['1.1']!.parent = '1'; value.items['4']!.parent = '1.1'; value.items['5']!.parent = '4';
     const folded = dockPath(immutable(value), '5');
-    expect(folded.map(part => part.more ? '…' : part.itemId)).toEqual([null, '1', '…', '5']);
-    expect(dockPath(immutable(value), '5', true).map(part => part.itemId)).toEqual([null, '1', '1.1', '4', '5']);
+    expect(folded.map(part => part.more ? '…' : part.itemId)).toEqual([null, '1', '…', '4']);
+    expect(dockPath(immutable(value), '5', true).map(part => part.itemId)).toEqual([null, '1', '1.1', '4']);
+    // Three parts (topic and two ancestors) are not folded.
+    expect(dockPath(immutable(value), '4').map(part => part.itemId)).toEqual([null, '1', '1.1']);
   });
 });

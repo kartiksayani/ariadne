@@ -219,17 +219,18 @@
   display: flex;
   flex: 0 1 auto;
   align-items: center;
-  gap: 4px;
+  gap: 2px 5px;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
 }
 
+/* A segment is its "›" and its name: the board's "›" belongs to the segment it leads into. */
 .dock-crumb {
   display: inline-flex;
   flex: 0 100 auto;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   min-width: 6ch;
 }
 
@@ -243,9 +244,8 @@
   min-width: 0;
 }
 
-.dock-crumb > i {
+.dock-crumb-sep {
   flex: none;
-  font-size: calc(10px * var(--text-scale));
   opacity: 0.55;
 }
 
@@ -325,7 +325,28 @@
   margin: 0;
   font-size: calc(15px * var(--text-scale));
   font-weight: 400;
+  letter-spacing: normal;
   line-height: 1.45;
+}
+
+/* The title opens its question, like a path segment does; at rest it reads as plain text. */
+.dock-question-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  text-wrap: inherit;
+  color: inherit;
+  background: none;
+  cursor: pointer;
+}
+
+.dock-question-open:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .dock-question-ask {
@@ -410,6 +431,8 @@
   margin: 6px 6px 2px;
   font-size: calc(12.5px * var(--text-scale));
   font-weight: 500;
+  letter-spacing: normal;
+  line-height: inherit;
 }
 
 .dock-other-row {

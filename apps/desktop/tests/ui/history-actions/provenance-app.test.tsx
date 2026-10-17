@@ -76,12 +76,11 @@ it.each(['dock path', 'Back history'] as const)('reports an unavailable %s link 
   });
   if (caller === 'Back history') fireEvent.click(screen.getByLabelText('Back', { selector: 'button' }));
   else {
-    // The dock's last path segment opens its question in Details.
+    // The dock's question title opens its question in Details.
     const dock = screen.getByRole('region', { name: 'Answer dock' });
     fireEvent.click(await within(dock).findByRole('button', { name: /^\d+ (more )?waiting$/ }));
     await waitFor(() => expect(dock.querySelector('.answer-dock-current [data-owner-input="2"]')).not.toBeNull());
-    const crumbs = dock.querySelectorAll<HTMLButtonElement>('.dock-path .dock-link');
-    fireEvent.click(crumbs[crumbs.length - 1]!);
+    fireEvent.click(dock.querySelector<HTMLButtonElement>('.dock-question-open')!);
   }
   await screen.findByText('This session could not be opened. Check that its project folder is available, then try again.');
   expect(screen.queryByText(/couldn’t read or save/)).toBeNull();

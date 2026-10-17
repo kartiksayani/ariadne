@@ -76,12 +76,11 @@ function outsideTree(id: string) {
   const rectangle = treeRow(id).getBoundingClientRect();
   expect(rectangle.top < 0 || rectangle.bottom > 400).toBe(true);
 }
-/** Opens the dock's first waiting question and follows its path's last segment, the question itself (as a Waiting card did). */
+/** Opens the dock's first waiting question and follows its title, the question itself (as a Waiting card did). */
 async function fromDock() {
   const dock = screen.getByRole('region', { name: 'Answer dock' });
   if (!dock.hasAttribute('data-open')) await click(within(dock).getByRole('button', { name: /^\d+ (more )?waiting$/ }));
-  const crumbs = dock.querySelectorAll<HTMLButtonElement>('.dock-path .dock-link');
-  await click(crumbs[crumbs.length - 1]!);
+  await click(dock.querySelector<HTMLButtonElement>('.dock-question-open')!);
 }
 function inTree(id: string) {
   const rectangle = treeRow(id).getBoundingClientRect();
