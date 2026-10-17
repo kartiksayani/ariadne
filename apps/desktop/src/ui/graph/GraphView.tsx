@@ -172,8 +172,8 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
     temporaryExpandedItemIds: itemReveal?.temporaryExpandedItemIds ?? [], revealedItemId: itemReveal?.route.item_id ?? null,
     filterCollapsedItemIds: filterFolds.items }) : null,
   [session, shown, later, local, selectedId, column, itemReveal, filterFolds.items]);
-  const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: reveal, dockInset });
-  latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: reveal, dockInset };
+  const latest = useRef({ graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: reveal, dockInset, folds: filterFolds.items });
+  latest.current = { graph, shown, view, routes, onReveal, saveView, busy: preferencesBusy, ready: state.status === 'ready', selectedId, external: reveal, dockInset, folds: filterFolds.items };
 
   // Related lines show for the selected node and the one under the pointer only (SPEC 1.3). They are drawn over the
   // canvas from the laid-out positions, so hovering never rebuilds the 2,000-node model.
@@ -221,29 +221,41 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
   };
   /**
    * Where the held node's place is now, and the window position that place should keep. The node itself while it is drawn;
-   * the ancestor that folded over it; else the nearest node that survives, below it first, then above, which keeps the
-   * position it had before (plan D24); else the nearest drawn ancestor.
+   * the ancestor the owner folded over it, at its own old place; else the nearest node that survives, below it first,
+   * then above, which keeps the position it had before (plan D24); else the nearest drawn ancestor, at its own old place.
    */
   const placeOf = (before: NonNullable<typeof held.current>, current: SessionGraph) => {
     const own = nodeElement(before.id), was = before.graph;
     if (own) return { element: own, y: before.y, x: before.x };
     const parentOf = (id: string) => was.nodes.get(id)?.item.parent ?? null;
+    const tops = topicTops(was), me = was.nodes.get(before.id);
+    /** Where the window held `id` when the held node sat at its place: its own old spot, by the layout it was seen in. */
+    const placeFor = (id: string) => {
+      const node = was.nodes.get(id), element = current.nodes.has(id) ? nodeElement(id) : null;
+      if (!me || !node || !element) return null;
+      return { element, y: before.y + (tops.get(node.topicId) ?? 0) + node.y - (tops.get(me.topicId) ?? 0) - me.y, x: before.x + node.x - me.x };
+    };
+    // A fold the owner made is the change: the ancestor was open and is now shut by the view. A parent whose children left
+    // on their own (a filter, an agent) is not: its place is only a guess, so the survivor rule below holds the Map.
+    const { shown, folds } = latest.current;
+    const shut = (id: string) => !shown.expanded_item_ids.includes(id) || folds.has(id);
     for (let id = parentOf(before.id); id; id = parentOf(id)) {
-      const element = current.nodes.get(id)?.folded ? nodeElement(id) : null;
-      if (element) return { element, y: before.y, x: before.x };
+      if (!current.nodes.get(id)?.folded || !was.nodes.get(id)?.canFold || !shut(id)) continue;
+      const place = placeFor(id);
+      if (place) return place;
     }
-    const tops = topicTops(was), me = was.nodes.get(before.id), at = was.order.indexOf(before.id);
+    const at = was.order.indexOf(before.id);
     if (me && at >= 0) {
       for (const step of [1, -1]) {
         for (let index = at + step; index >= 0 && index < was.order.length; index += step) {
-          const id = was.order[index]!, node = was.nodes.get(id)!, element = current.nodes.has(id) ? nodeElement(id) : null;
-          if (element) return { element, y: before.y + (tops.get(node.topicId) ?? 0) + node.y - (tops.get(me.topicId) ?? 0) - me.y, x: before.x + node.x - me.x };
+          const place = placeFor(was.order[index]!);
+          if (place) return place;
         }
       }
     }
     for (let id = parentOf(before.id); id; id = parentOf(id)) {
-      const element = nodeElement(id);
-      if (element) return { element, y: before.y, x: before.x };
+      const place = placeFor(id);
+      if (place) return place;
     }
     return null;
   };
@@ -471,7 +483,7 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
             {graph.path && <path data-edge="path" d={graph.path} className="graph-path" />}
           </svg>
         </div>
-        <div ref={spacer} aria-hidden="true" />
+        <div ref={spacer} data-testid="graph-spacer" aria-hidden="true" />
       </>}
     </div>
     <Legend drawn={drawn} />
