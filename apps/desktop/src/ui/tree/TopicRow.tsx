@@ -59,7 +59,7 @@ export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onK
       <button type="button" className="tree-chevron" tabIndex={-1} aria-label="Expand or collapse topic"
         onClick={event => { event.stopPropagation(); onToggle(topic.id); }}><i className={row.expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} /></button>
       <span className="tree-topic-name" data-earlier={row.earlier || undefined} title={topic.name}>{topic.name}</span>
-      {row.chip && <span className="tree-session-chip" title={row.chip.title}><i className="ph ph-clock-counter-clockwise" />{row.chip.label}</span>}
+      {row.chip && <span className="tree-session-chip" title={row.chip.title}><i className="ph ph-clock-counter-clockwise" /><span className="tree-session-chip-label">{row.chip.label}</span></span>}
       {actions.length > 0 && <span className="tree-topic-end">
         <span className="tree-topic-actions">{actions.map(action => <button key={action.label} type="button" tabIndex={-1}
           className="tree-topic-action" title={action.title} aria-label={action.label} data-shortcut-archive-topic={action.archive ? topic.id : undefined}

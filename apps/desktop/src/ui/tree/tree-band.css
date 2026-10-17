@@ -50,7 +50,7 @@
 
 .tree-topic-name {
   flex: 1 1 0;
-  min-width: 0;
+  min-width: 8ch; /* A long session chip shrinks (it ends in "…") before the topic's name does. */
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -67,7 +67,8 @@
 }
 
 .tree-session-chip {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -80,7 +81,14 @@
   box-shadow: inset 0 0 0 1px var(--color-divider);
 }
 
+.tree-session-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .tree-session-chip i {
+  flex: none;
   font-size: calc(12px * var(--text-scale));
 }
 
