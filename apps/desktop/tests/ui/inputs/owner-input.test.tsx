@@ -2406,7 +2406,7 @@ describe('J1 answer invariants', () => {
         fireEvent.click(await screen.findByRole('button', { name: /^\d+ waiting$/ }));
       } else render(<OtherSessionQuestions drafts={env.drafts} waiting={waiting} currentSession="another session" />);
     } else if (trigger === 'peek Send') {
-      render(<PeekProvider lookup={() => env.store} drafts={env.drafts} onGoTo={() => {}}><OpenAnswerPeek /></PeekProvider>);
+      render(<PeekProvider lookup={() => env.store} drafts={env.drafts} onGoTo={() => {}} onOpenDetails={() => {}}><OpenAnswerPeek /></PeekProvider>);
       fireEvent.click(screen.getByRole('button', { name: 'Open answer peek' }));
       await screen.findByRole('dialog', { name: /Peek:/ });
     } else if (trigger === 'Details Send') {

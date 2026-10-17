@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node
 import { spawn, execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { activateOwned, command, identity, alive, selector, portFree, listeners, buildEnv, nativeBuildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit, waitForQuitExit, isSameBirthZombie } from '../../../scripts/run-native-e2e.mjs';
+import { activateOwned, command, identity, alive, selector, parseArgs, portFree, listeners, buildEnv, nativeBuildEnv, json, digest, observeOwned, stop, runNative, delay, sourceState, releasedLeases, proveQuit, waitForQuitExit, isSameBirthZombie } from '../../../scripts/run-native-e2e.mjs';
 import { resolvedNames, verifyGraph, mergedConfig, normalBuildFeatures, buildArtifacts, frontendModules, checkRelease, verifyProductionSecurity, verifyCleanup, verifyReferenceIsolation } from '../../../scripts/check-release-boundary.mjs';
 import { admissions, completeTurn, startScriptedProvider, thread } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
 import { waitForDiscoveredCandidate, waitForRegistrationCompletion } from '../../../apps/desktop/tests/e2e/discovery.spec.mjs';
@@ -196,6 +196,30 @@ test('selectors are explicit and default runs the complete gate', () => {
   assert.equal(selector([]), 'all');
   for (const name of ['all', 'native', 'process-contract']) assert.equal(selector(['--suite', name]), name);
   for (const args of [['--suite'], ['--suite', 'skip'], ['--skip'], ['--suite', 'native', '--suite', 'all']]) assert.throws(() => selector(args));
+});
+test('--spec selects native acceptance blocks, embedded proof only, and rejects every other form', () => {
+  assert.deepEqual(parseArgs([]), { suite: 'all', blocks: null });
+  assert.deepEqual(parseArgs(['--suite', 'native']), { suite: 'native', blocks: null });
+  assert.deepEqual(parseArgs(['--spec', 'tree']), { suite: 'native', blocks: ['runTreeAcceptance', 'restoreTreeAcceptance'] });
+  assert.deepEqual(parseArgs(['--spec', 'tree', '--spec', 'graph']).blocks, ['runTreeAcceptance', 'restoreTreeAcceptance', 'runGraphAcceptance']);
+  for (const args of [['--spec'], ['--spec', 'nope'], ['--spec', '__proto__'], ['--spec', 'tree', '--suite', 'all'], ['--suite', 'all', '--spec', 'tree'], ['--spec', 'tree', 'extra']])
+    assert.throws(() => parseArgs(args), undefined, args.join(' '));
+});
+test('every --spec block list matches native-smoke.spec.mjs and is closed under its declared dependencies', async () => {
+  const source = await readFile(join(import.meta.dirname, '../../../apps/desktop/tests/e2e/native-smoke.spec.mjs'), 'utf8');
+  const declared = new Map([...source.matchAll(/blocks\.run\('(\w+)',[^\n]*?(?:, \[([^\]]*)\])?\);/g)]
+    .map(([, name, deps]) => [name, [...(deps ?? '').matchAll(/'(\w+)'/g)].map(match => match[1])]));
+  assert.ok(declared.size >= 10, 'the spec registers its blocks with blocks.run');
+  const specs = await import('../../../apps/desktop/tests/e2e/native-specs.mjs');
+  const listed = new Set(Object.values(specs.NATIVE_SPECS).flat());
+  assert.deepEqual([...listed].sort(), [...declared.keys()].sort(), 'every block belongs to a spec and none is invented');
+  for (const [spec, blocks] of Object.entries(specs.NATIVE_SPECS))
+    for (const block of blocks)
+      for (const dependency of declared.get(block)) assert.ok(blocks.includes(dependency), `${spec}: ${block} needs ${dependency}`);
+  assert.deepEqual([...specs.RESTORATION_BLOCKS].sort(), [...declared.keys()].filter(name => /^(restore|runGraph|runRecovery)/.test(name)).sort());
+  assert.equal(specs.selectedBlocks(''), null);
+  assert.deepEqual([...specs.selectedBlocks('runTreeAcceptance,restoreTreeAcceptance')], ['runTreeAcceptance', 'restoreTreeAcceptance']);
+  assert.throws(() => specs.selectedBlocks('runTreeAcceptance,bogus'), /bogus/);
 });
 test('source evidence distinguishes generated untracked files from tracked changes against HEAD', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ariadne-source-'));

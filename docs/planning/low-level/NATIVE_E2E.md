@@ -323,7 +323,10 @@ Default `npm run test:e2e` invokes both the embedded
 native wrapper and production boundary checker and fails closed. `--suite all`
 is equivalent; `--suite native` selects the embedded proof only and
 `--suite process-contract` selects the real Node process-helper suite. Invalid or
-extra selectors fail. `npm run test:native` is the explicit embedded-only command;
+extra selectors fail. `node scripts/run-native-e2e.mjs --spec <name>` (repeatable; names in
+`apps/desktop/tests/e2e/native-specs.mjs`) runs only that spec's acceptance blocks, embedded proof
+only, as a development aid; it skips the restart phase when no selected block needs it.
+`npm run test:native` is the explicit embedded-only command;
 application CI uses embedded smoke; release-sensitive changes and manual milestones
 use the complete default. The hook runs cheap changed-language format/lint/types.
 Application CI runs meaningful unit/functional tests, fresh Rust/TypeScript LCOV
