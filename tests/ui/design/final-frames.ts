@@ -265,7 +265,11 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   // R4's empty-Map line (clear0) keeps "New questions open here." at 900 wide; its "Nothing waiting" line (15.4) drops it. The app trims both, so 15.3 narrow holds the icon only.
   '15.3': [...topBarUnnamed(BAR), { name: 'dock line text', rect: [0, 760, 700, 40], variants: WIDE }, { name: 'dock line icon (narrow)', rect: [0, 610, 36, 40], variants: NARROW },
     ...box('dock line other-sessions chip', [1130, 760, 150, 40], [790, 610, 110, 40])],
-  '15.4': [...topBar(BAR), ...dockLineQuiet()]
+  '15.4': [...topBar(BAR), ...dockLineQuiet()],
+  // The board's first run offers "Copy instruction" for Codex, but there is nothing to copy before a project is registered, so the
+  // app says to register first and offers "Register a project". The taller card re-centres the page, so only the top bar compares
+  // (dark measured 0.13%: the right-hand glyphs' anti-aliasing).
+  '15.1': [...topBar([0.002, 0.002])]
 };
 
 export const finalStates: readonly FinalState[] = stateList.map(state => regionsById[state.id] ? { ...state, regions: regionsById[state.id]! } : state);
