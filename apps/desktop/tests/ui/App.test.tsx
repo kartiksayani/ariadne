@@ -21,8 +21,10 @@ vi.mock('../../src/ui/tree/TreeView', async importOriginal => {
   return { ...actual, TreeView: vi.fn(actual.TreeView) };
 });
 
-const mutations = (transport: AppTransport, command: string) => transport.mutations.filter(request => request.command.command === command
-  && (request.command.command !== 'preferences_patch' || request.command.params.entries.some(entry => entry.kind !== 'mark_seen')));
+/** Owner writes, leaving out background saves that only mark items seen. */
+const ownerWrites = (transport: AppTransport) => transport.mutations.filter(request =>
+  request.command.command !== 'preferences_patch' || request.command.params.entries.some(entry => entry.kind !== 'mark_seen'));
+const mutations = (transport: AppTransport, command: string) => ownerWrites(transport).filter(request => request.command.command === command);
 async function openSession(id = route.session_id, pending = false) {
   await goToSession({ project_id: route.project_id, session_id: id });
   await screen.findByRole('region', { name: 'Session tree' });
@@ -1120,14 +1122,15 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     fireEvent.keyDown(document.body, { key: '?' });
     const help = await screen.findByRole('dialog', { name: 'Help: keys and markers' });
     expect(within(help).getByRole('tab', { name: 'Keys' }).getAttribute('aria-selected')).toBe('true');
-    const before = transport.mutations.length;
+    // The selected item's seen mark may land at any moment on a slow machine; it is not an item action.
+    const before = ownerWrites(transport).length;
     for (const key of ['a', 'd', 'h', 'Backspace', 'Delete', 'c', 'z']) fireEvent.keyDown(selected, { key });
-    expect(transport.mutations).toHaveLength(before);
+    expect(ownerWrites(transport)).toHaveLength(before);
     fireEvent.keyDown(document.body, { key: '?' }); expect(screen.queryByRole('dialog', { name: 'Help: keys and markers' })).toBeNull();
     fireEvent.keyDown(document.body, { key: 'o', metaKey: true });
     await screen.findByRole('dialog', { name: 'Switch session or project' });
     for (const key of ['d', 'h', 'Backspace', 'Delete', 'z']) fireEvent.keyDown(selected, { key });
-    expect(transport.mutations).toHaveLength(before);
+    expect(ownerWrites(transport)).toHaveLength(before);
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: 'Switch session or project' })).toBeNull();
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
