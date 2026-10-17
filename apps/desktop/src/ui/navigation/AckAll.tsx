@@ -9,7 +9,7 @@ import { StatusBadge } from '../shared/StatusBadge';
 import { ackAllFor } from './ackAllController';
 import './navigation.css';
 
-const WIDTH = 340, EDGE = 8, RIGHT_INSET = 10, GAP = 6;
+const WIDTH = 340, EDGE = 8, RIGHT_INSET = 10, GAP = 4;
 
 /** The review popover under the band (SPEC 4.3). It leaves the Map's flow, closes on scroll and never covers the band. */
 function AckAllReview({ anchor, label, topicName, items, error, onConfirm, onCancel }: {

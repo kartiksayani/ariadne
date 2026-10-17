@@ -394,6 +394,8 @@ const mapRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '8.2': [...box('filter row', [0, 40, 1280, 40], [0, 40, 900, 40], TEXT), ...box('topic band', [0, 80, 1280, 42], [0, 80, 900, 62], MAP)],
   '8.3': [...box('topic band (left of the popover)', [0, 40, 800, 42], [0, 40, 562, 62], MAP), ...box('Recent popover', [802, 44, 340, 430], [566, 44, 300, 430], TEXT),
     ...box('first row (left of the popover)', [0, 82, 800, 66], [0, 102, 562, 66], MAP)],
+  // The band only (ends above the first strip). The board draws no "N outside the focus" strips in 8.4; the app keeps them, with "· N waiting",
+  // so no question outside the focus goes unseen: an approved deviation (ALPHA20-REPLAN §3a). It sits below this region, so none is masked here.
   '8.4': box('topic band', [0, 40, 880, 62], [0, 40, 560, 82], MAP),
   '8.5': [...box('topic band', [0, 40, 880, 62], [0, 40, 560, 114], MAP), ...box('Back to selected pill', [318, 712, 244, 40], [158, 562, 244, 40], MAP),
     wideOnly('first row', [0, 102, 880, 66], 0.01)],

@@ -8,7 +8,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 10px 16px 10px 12px;
+  padding: 10px 10px 10px 12px;
   border-top: 1px solid var(--color-divider);
   border-bottom: 1px solid var(--color-divider);
   background: var(--a-side);
@@ -39,7 +39,7 @@
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   min-height: calc(22px * var(--text-scale));
 }
@@ -201,12 +201,12 @@
 .tree-topic-head > .tree-topic-ack-all {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: calc(22px * var(--text-scale));
-  padding: 0 7px;
+  gap: 5px;
+  height: max(22px, calc(22px * var(--text-scale)));
+  padding: 0 8px 0 6px;
   border: 0;
   border-radius: 5px;
-  font-size: calc(12.5px * var(--text-scale));
+  font-size: calc(12px * var(--text-scale));
   white-space: nowrap;
   color: var(--color-text);
   box-shadow: inset 0 0 0 1px var(--a-edge);
@@ -223,8 +223,11 @@
 .ack-all-held {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 7px;
+  height: max(22px, calc(22px * var(--text-scale)));
+  font-size: calc(12px * var(--text-scale));
   white-space: nowrap;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
 }
 
 .ack-all-held i {
@@ -244,6 +247,7 @@
   background: transparent;
   color: var(--color-text);
   font: inherit;
+  font-weight: 500;
   text-decoration: underline;
   cursor: pointer;
 }
@@ -280,15 +284,15 @@
   flex: none;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 5px;
   box-sizing: border-box;
   width: 92px;
-  height: calc(22px * var(--text-scale));
+  height: max(22px, calc(22px * var(--text-scale)));
   padding: 0;
   border: 0;
   border-radius: 5px;
   font: inherit;
-  font-size: calc(12.5px * var(--text-scale));
+  font-size: calc(12px * var(--text-scale));
   white-space: nowrap;
   color: var(--color-text);
   background: transparent;
@@ -307,12 +311,12 @@
   flex: none;
   align-items: center;
   gap: 5px;
-  height: calc(22px * var(--text-scale));
-  padding: 0 7px;
+  height: max(22px, calc(22px * var(--text-scale)));
+  padding: 0 8px 0 6px;
   border: 0;
   border-radius: 5px;
   font: inherit;
-  font-size: calc(12.5px * var(--text-scale));
+  font-size: calc(12px * var(--text-scale));
   white-space: nowrap;
   color: var(--color-text);
   background: transparent;
@@ -325,7 +329,7 @@
   display: grid;
   place-items: center;
   width: 22px;
-  height: calc(22px * var(--text-scale));
+  height: max(22px, calc(22px * var(--text-scale)));
   padding: 0;
   border: 0;
   border-radius: 5px;
@@ -363,6 +367,9 @@
 .ack-all-review {
   position: fixed;
   z-index: 28;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
   box-sizing: border-box;
   padding: 12px;
   border-radius: 8px;
@@ -371,25 +378,25 @@
 }
 
 .ack-all-title {
-  margin: 0 0 6px;
+  margin: 0;
   font-size: calc(14px * var(--text-scale));
   font-weight: 500;
 }
 
 .ack-all-text {
-  margin: 0 0 8px;
+  margin: 0;
   font-size: calc(12.5px * var(--text-scale));
-  line-height: 1.4;
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
 }
 
 .ack-all-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
   max-height: 40vh;
-  margin: 0 0 12px;
-  padding: 0;
+  margin: 0;
+  padding: 2px 0;
   overflow-y: auto;
   list-style: none;
   font-size: calc(12.5px * var(--text-scale));
@@ -398,7 +405,7 @@
 .ack-all-list li {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   min-width: 0;
 }
 
@@ -410,7 +417,7 @@
 }
 
 .ack-all-error {
-  margin: 0 0 8px;
+  margin: 0;
   font-size: calc(12.5px * var(--text-scale));
   color: var(--a-danger);
 }
@@ -418,7 +425,7 @@
 .ack-all-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
 }
 
 .ack-all-progress {
@@ -492,11 +499,25 @@
   cursor: pointer;
 }
 
-/* The shared menu panel makes its buttons flex rows; these are grids of a fixed width. */
+/* The panel (SPEC 2.2): 300px wide with 6px padding and 1px between rows, a divider ring in place of a border. */
+.tree-menu-panel {
+  box-sizing: border-box;
+  width: min(300px, calc(100vw - 16px));
+  padding: 6px;
+  border: 0;
+  border-radius: 8px;
+  gap: 1px;
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-divider);
+  line-height: 1.4;
+}
+
+/* The shared menu panel makes its buttons flex rows; these are grids that fill the panel. */
 .action-menu-options > .tree-menu-row {
   display: grid;
   box-sizing: border-box;
-  width: min(292px, calc(100vw - 32px));
+  width: 100%;
+  align-items: start;
+  align-content: start;
 }
 
 .tree-menu-icon {
@@ -535,6 +556,6 @@
 
 .tree-menu-divider {
   height: 1px;
-  margin: 3px 0;
+  margin: 4px 6px;
   background: var(--color-divider);
 }

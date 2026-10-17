@@ -33,7 +33,7 @@ export function TopicMenu({ topicName, reply, bin, archive, remove, dismissKey }
     <span className="tree-menu-detail">{entry.detail}</span>
   </button>;
   const label = `More actions for “${topicName}”`;
-  return <ActionMenu label={label} title="Reply to topic, the bin, archive, remove" align="end" dismissKey={dismissKey}
+  return <ActionMenu label={label} title="Reply to topic, the bin, archive, remove" align="end" gap={6} panelClassName="tree-menu-panel" dismissKey={dismissKey}
     className="tree-band-menu-host" buttonClassName="tree-band-menu" icon={<i className="ph ph-dots-three" aria-hidden="true" />}>
     {close => <>
       {reply && row({ icon: 'ph ph-chat-text', label: 'Reply to topic', detail: 'Write to the agent about the whole topic, in Details', run: reply.run,
