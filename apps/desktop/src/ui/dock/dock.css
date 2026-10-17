@@ -325,7 +325,28 @@
   margin: 0;
   font-size: calc(15px * var(--text-scale));
   font-weight: 400;
+  letter-spacing: normal;
   line-height: 1.45;
+}
+
+/* The title opens its question, like a path segment does; at rest it reads as plain text. */
+.dock-question-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  text-wrap: inherit;
+  color: inherit;
+  background: none;
+  cursor: pointer;
+}
+
+.dock-question-open:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .dock-question-ask {

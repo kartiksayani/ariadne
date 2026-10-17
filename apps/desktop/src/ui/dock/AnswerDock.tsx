@@ -1,6 +1,6 @@
 // The answer dock (board screen 2, §5.2, §6.4): a 40px line, or the open dock at one waiting question of this session,
 // floating over the Map and Details. It never opens by itself, and it never selects, focuses or scrolls anything in the
-// Map: only the owner's own clicks on a path segment do (`onOpenItem`).
+// Map: only the owner's own clicks on a path segment or on the question's title do (`onOpenItem`).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { useWaiting, type WaitingStore } from '../../selectors/waiting/store';
@@ -224,7 +224,9 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
       </div>
       {item && <div className="answer-dock-current" key={state.current!.id}>
         <div className="dock-question">
-          <h2 className="dock-question-title">{item.question}</h2>
+          <h2 className="dock-question-title">{onOpenItem
+            ? <button type="button" className="dock-question-open" aria-label={`Open ${item.question}`} title={`Go to “${item.question}”`} onClick={() => onOpenItem(item.id)}>{item.question}</button>
+            : item.question}</h2>
           {item.ask && <p className="dock-question-ask">{item.ask}</p>}
           {item.note && item.note.split(/\n{2,}/).map((paragraph, at) => <p key={at} className="dock-question-body">{paragraph}</p>)}
         </div>

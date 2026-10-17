@@ -29,12 +29,11 @@ it('guards conversation targets and footer on the first render of a different se
   render(<DesktopApp service={createDesktopService(transport)} />);
   await screen.findByRole('button', { name: 'Open the conversation in a bigger view' });
   fireEvent.click(screen.getByRole('button', { name: 'Open the conversation in a bigger view' }));
-  // The dock's path switches the open conversation to its question, as the Waiting card did.
+  // The dock's question title switches the open conversation to its question, as the Waiting card did.
   const dock = screen.getByRole('region', { name: 'Answer dock' });
   fireEvent.click(within(dock).getByRole('button', { name: /^\d+ (more )?waiting$/ }));
   await waitFor(() => expect(dock.querySelector('.answer-dock-current [data-owner-input="2"]')).not.toBeNull());
-  const crumbs = dock.querySelectorAll<HTMLButtonElement>('.dock-path .dock-link');
-  fireEvent.click(crumbs[crumbs.length - 1]!);
+  fireEvent.click(dock.querySelector<HTMLButtonElement>('.dock-question-open')!);
   await waitFor(() => expect(screen.getByRole('region', { name: 'Item conversation' }).querySelector('[data-detail-item-id]')?.getAttribute('data-detail-item-id')).toBe('2'));
   let inspected = false;
   probe.inspect = props => {

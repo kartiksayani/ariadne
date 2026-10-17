@@ -220,8 +220,7 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
     const next = () => within(dock).getByRole<HTMLButtonElement>('button', { name: 'Next question' });
     while (!current() && !next().disabled) fireEvent.click(next());
     expect(current()).not.toBeNull();
-    const crumbs = dock.querySelectorAll<HTMLButtonElement>('.dock-path .dock-link');
-    fireEvent.click(crumbs[crumbs.length - 1]!); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' }); await ready();
+    fireEvent.click(dock.querySelector<HTMLButtonElement>('.dock-question-open')!); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' }); await ready();
     expect(group().getAttribute('aria-expanded')).toBe('true');
     expect(row('2')!.classList.contains('tree-item-hidden')).toBe(true);
     expect(saved(transport).hidden_item_ids).toEqual(['2']);

@@ -54,7 +54,7 @@ export function waitingAge(at: number, now: number): string {
 
 export interface PathPart { readonly label: string; readonly full: string; readonly itemId: string | null; readonly more?: boolean }
 
-/** Topic, ancestors and the question itself. Past three parts: first, second, "…", last, unless `expanded`. */
+/** Topic and ancestors, as the board draws it: the question itself is the title below, not a segment. Past three parts: first, second, "…", last, unless `expanded`. */
 export function dockPath(session: Immutable<Session>, itemId: string, expanded = false): PathPart[] {
   const names = peekNames(session), item = session.items[itemId], path = detailPath(session, itemId);
   if (!item || !path.length) return [];
@@ -62,7 +62,7 @@ export function dockPath(session: Immutable<Session>, itemId: string, expanded =
   const name = (id: string) => ({ label: names.get(id) ?? session.items[id]?.question ?? '', full: session.items[id]?.question ?? '', itemId: id });
   const parts: PathPart[] = [...path.map(crumb => crumb.itemId === null
     ? { label: crumb.label ?? topic?.name ?? '', full: topic?.name ?? crumb.label ?? '', itemId: null }
-    : name(crumb.itemId)), name(itemId)];
+    : name(crumb.itemId))];
   if (expanded || parts.length <= 3) return parts;
   return [parts[0]!, parts[1]!, { label: '…', full: 'Show the full path', itemId: null, more: true }, parts[parts.length - 1]!];
 }
