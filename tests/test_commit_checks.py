@@ -342,6 +342,56 @@ class CoverageTests(unittest.TestCase):
                     first = next(index for index, call in enumerate(calls) if call[:len(later)] == later)
                     self.assertLess(calls.index(["cargo", "fetch", "--locked"]), first)
 
+    def test_ts_only_coverage_runs_the_web_report_alone(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "quality-gates.json").write_text('{"minimum_line_coverage":80,"coverage_exclusions":[]}')
+            rust, web = (root / name for name in commit.APPLICATION_REPORTS)
+            for path in (rust, web):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("stale evidence")
+            with mock.patch.object(commit, "ROOT", root), mock.patch.object(
+                    commit, "changed_paths", return_value=["apps/desktop/src/App.tsx"]), mock.patch.object(
+                    commit, "lint"), mock.patch.object(commit, "run") as run, mock.patch.object(
+                    commit, "coverage_counts", return_value=(1, 100)) as counts:
+                # 1% of lines is far below the floor, yet the TS-only run does not enforce the combined floor.
+                commit.main(["--ci", "--base", "main", "--stage", "coverage", "--ts-only"])
+            self.assertEqual([call.args for call in run.call_args_list], [("npm", "run", "test:coverage")])
+            counts.assert_called_once_with([web], root, {
+                "minimum_line_coverage": 80, "coverage_exclusions": []}, exclude_suffixes=(".rs",))
+            self.assertFalse(web.exists())
+            self.assertTrue(rust.exists())
+
+    def test_ts_only_is_limited_to_the_coverage_stage(self):
+        for stage in ("all", "static", "native"):
+            with self.subTest(stage=stage), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    commit.main(["--ci", "--base", "main", "--stage", stage, "--ts-only"])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            commit.main(["--ts-only"])
+
+    def test_ts_only_counts_skip_rust_sources_but_still_reject_empty_ts_records(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for name in ("apps/main.ts", "crates/core/src/lib.rs"):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("run();\n")
+            web = report(root, "web", "apps/main.ts", [1])
+            self.assertEqual(commit.coverage_counts([web], root, exclude_suffixes=(".rs",)), (1, 1))
+            with self.assertRaisesRegex(ValueError, "omits application sources: crates/core/src/lib.rs"):
+                commit.coverage_counts([web], root)
+            # The CI surprise: a TS record with no DA lines.
+            web.write_text("SF:apps/main.ts\nLF:0\nLH:0\nend_of_record\n")
+            with self.assertRaisesRegex(ValueError, "Missing executable line data"):
+                commit.coverage_counts([web], root, exclude_suffixes=(".rs",))
+            # A TS source the report leaves out is still caught.
+            other = root / "apps/other.ts"
+            other.write_text("run();\n")
+            web = report(root, "web", "apps/main.ts", [1])
+            with self.assertRaisesRegex(ValueError, "omits application sources: apps/other.ts"):
+                commit.coverage_counts([web], root, exclude_suffixes=(".rs",))
+
     def test_weighted_counts_include_uncovered_lines_and_merge_duplicates(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

@@ -256,7 +256,7 @@ function Workspace({ application }: { application: Application }) {
     for (const [target, request] of quickRequests.current) if (request === token) quickRequests.current.delete(target);
     setOwnerFocus(current => current?.token === token ? null : current);
   };
-  const reveal = async (target: ItemRoute, token: number, fromHistory = false, onReveal?: (result: RevealedItem) => void, requireItem = fromHistory): Promise<{ request: number; result: RevealedItem } | null> => {
+  const reveal = async (target: ItemRoute, token: number, fromHistory = false, onReveal?: (result: RevealedItem) => void, requireItem = fromHistory, openDetail = true): Promise<{ request: number; result: RevealedItem } | null> => {
     let result: RevealedItem | null = null;
     let failure: unknown = null;
     // Reserve the destination at the click, before registered item resolution
@@ -273,13 +273,17 @@ function Workspace({ application }: { application: Application }) {
         return resolved;
       }, error => { failure = error; });
     const request = navigation.getNavigationRequest();
+    // Closed Details stays closed through this navigation: its epoch is the one the owner dismissed Details at.
+    if (!openDetail && !detailOpen) detailDismissedAt.current = request;
     const opened = navigation.getNavigationCompletion(request);
     const saved = await opened;
     if (navigation.getNavigationRequest() !== request || shortcutSequence.current !== token) return null;
     if (!saved) { if (failure) throw failure; return null; }
     if (!result) return null;
     recordViewed(result);
-    detailDismissedAt.current = null; setLocalReveal(result); setDetailOpen(true); setDetailAsked(count => count + 1);
+    setLocalReveal(result);
+    // "Go to" in the peek selects and scrolls to the row; only the opening paths open Details.
+    if (openDetail) { detailDismissedAt.current = null; setDetailOpen(true); setDetailAsked(count => count + 1); }
     // Continuations use this exact admitted request, including queued reveals.
     return { request, result };
   };
@@ -291,14 +295,14 @@ function Workspace({ application }: { application: Application }) {
     invalidateOwnerRequest(); setLocalReveal(result);
     if (openDetail) { detailDismissedAt.current = null; setDetailOpen(true); setDetailAsked(count => count + 1); }
   };
-  const revealLinkedItem = (target: ItemRoute) => {
+  const revealLinkedItem = (target: ItemRoute, openDetail = true) => {
     if (conversation) closeConversation();
     setRouteError(null);
     invalidateOwnerRequest();
-    return reveal(target, shortcutSequence.current);
+    return reveal(target, shortcutSequence.current, false, undefined, false, openDetail);
   };
-  const revealItem = (target: ItemRoute) => {
-    void revealLinkedItem(target).catch((error: unknown) => reportRouteError(navigationFailure(error)));
+  const revealItem = (target: ItemRoute, openDetail = true) => {
+    void revealLinkedItem(target, openDetail).catch((error: unknown) => reportRouteError(navigationFailure(error)));
   };
   const navigateHistory = (direction: HistoryDirection) => {
     if (conversation || !route || state.writing || state.pendingOperationId !== null) return false;
@@ -547,7 +551,7 @@ function Workspace({ application }: { application: Application }) {
   // Keys pressed while focus is on <body> (after launch or a click on a non-focusable area) still reach the keymap.
   const appRoot = useRef<HTMLDivElement>(null);
   useWindowKeys(appRoot, historyControls, intent => changeTextSize(nextTextSize(textSizeIntent.current ?? navigation.getSnapshot().preferences?.global.text_scale, intent)));
-  return <PeekProvider lookup={target => navigation.opened.open(target)} drafts={application.drafts} navigation={navigation} onGoTo={revealItem} onAgentNotRunning={onAgentNotRunning}
+  return <PeekProvider lookup={target => navigation.opened.open(target)} drafts={application.drafts} navigation={navigation} onGoTo={target => revealItem(target, false)} onOpenDetails={target => revealItem(target)} onAgentNotRunning={onAgentNotRunning}
     answerTarget={conversationOpen && conversation && route ? { ...route, item_id: conversation.itemId } : undefined}
     onVisit={(target, action) => { if (action !== 'opened') navigationVisits.record(target, target.item_id, action === 'peek' ? 'peeked' : 'answered'); }}>
     <ItemRefSession.Provider value={route ?? null}><ItemHistoryContext.Provider value={historyControls}><RemovalContext.Provider value={removals}><div ref={appRoot} className="product-app" onKeyDown={keys} onKeyDownCapture={event => {

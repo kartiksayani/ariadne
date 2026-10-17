@@ -60,6 +60,22 @@ export async function crop(page: Page, png: Buffer, rect: { x: number; y: number
   return Buffer.from(base64, 'base64');
 }
 
+/** The board's frame (left) and the app's (right) in one PNG, an 8px gap between: for looking at the rows' looks by eye, not for asserting. */
+export async function sideBySide(page: Page, design: Buffer, app: Buffer): Promise<Buffer> {
+  const base64 = await page.evaluate(async ({ design, app }) => {
+    const load = (data: string) => new Promise<HTMLImageElement>((done, fail) => {
+      const image = new Image(); image.onload = () => done(image); image.onerror = fail; image.src = `data:image/png;base64,${data}`;
+    });
+    const [left, right] = await Promise.all([load(design), load(app)]), gap = 8;
+    const canvas = document.createElement('canvas'); canvas.width = left.width + gap + right.width; canvas.height = Math.max(left.height, right.height);
+    const context = canvas.getContext('2d')!;
+    context.fillStyle = '#808080'; context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(left, 0, 0); context.drawImage(right, left.width + gap, 0);
+    return canvas.toDataURL('image/png').split(',')[1]!;
+  }, { design: design.toString('base64'), app: app.toString('base64') });
+  return Buffer.from(base64, 'base64');
+}
+
 export type CompareResult = Awaited<ReturnType<typeof compare>>;
 export interface CaptureInput {
   readonly id: string; readonly design: Buffer; readonly app: Buffer;

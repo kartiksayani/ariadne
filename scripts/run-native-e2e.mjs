@@ -6,6 +6,7 @@ import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
 import { blockFailureSummary, completedBlockResults } from '../apps/desktop/tests/e2e/block-results.mjs';
+import { RESTORATION_BLOCKS, blocksForSpecs } from '../apps/desktop/tests/e2e/native-specs.mjs';
 export const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const desktop = join(repo, 'apps/desktop');
 export const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -41,6 +42,17 @@ export function selector(args) {
   if (!args.length) return 'all';
   if (args.length !== 2 || args[0] !== '--suite' || !['all', 'native', 'process-contract'].includes(args[1])) throw new Error('Use --suite all|native|process-contract');
   return args[1];
+}
+// `--spec <name>` (repeatable) runs only those native acceptance blocks, embedded proof only: a quick check while
+// developing, never a substitute for the full run. Everything else goes through `selector`.
+export function parseArgs(args) {
+  if (!args.includes('--spec')) return { suite: selector(args), blocks: null };
+  const names = [];
+  for (let i = 0; i < args.length; i += 2) {
+    if (args[i] !== '--spec' || !args[i + 1]) throw new Error('Use --spec <name> (repeatable), not combined with --suite');
+    names.push(args[i + 1]);
+  }
+  return { suite: 'native', blocks: blocksForSpecs(names) };
 }
 export async function portFree(port) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid driver port');
@@ -188,7 +200,7 @@ export function nativeBuildEnv(target, e2e = false) {
   // isolation. This override belongs only to the two native acceptance builds.
   return { ...buildEnv(target, e2e), CARGO_PROFILE_DEV_OPT_LEVEL: '1', CARGO_PROFILE_DEV_DEBUG_ASSERTIONS: 'true' };
 }
-export async function runNative() {
+export async function runNative(blocks = null) {
   if (process.platform !== 'darwin') throw new Error('Native E2E requires a logged-in macOS GUI session');
   const port = Number(process.env.ARIADNE_E2E_PORT || '4445'); await portFree(port);
   const quitNote = await import('./native-quit-note.mjs');
@@ -221,7 +233,10 @@ export async function runNative() {
     const env = { ...buildEnv(join(repo, 'target/native-e2e')), ARIADNE_HOME: join(root, 'data'), ARIADNE_E2E_ROOT: root, ARIADNE_E2E_NONCE: nonce, ARIADNE_E2E_BINARY: binary, ARIADNE_E2E_PORT: String(port), ARIADNE_E2E_EVIDENCE: evidence };
     provider = await (await import('../apps/desktop/tests/e2e/scripted-provider.mjs')).startScriptedProvider(root, join(repo, 'target/native-e2e/debug/ariadne'), evidence, env);
     env.ARIADNE_E2E_APP_ARGS = JSON.stringify(provider.configuration.appArgs);
-    for (const phase of ['delivery', 'restoration']) {
+    // A block subset with nothing to check after the restart skips the second launch.
+    const needed = blocks && !blocks.some(block => RESTORATION_BLOCKS.has(block)) ? ['delivery'] : ['delivery', 'restoration'];
+    if (blocks) env.ARIADNE_E2E_BLOCKS = blocks.join(',');
+    for (const phase of needed) {
       const phaseEvidence = join(evidence, phase), phaseNonce = phase === 'delivery' ? nonce : randomBytes(32).toString('hex');
       await mkdir(phaseEvidence);
       const phaseRun = { phase, evidence: phaseEvidence }; phases.push(phaseRun);
@@ -279,9 +294,9 @@ export async function runNative() {
   console.log(`Native evidence: ${evidence}`);
 }
 async function main() {
-  const suite = selector(process.argv.slice(2));
+  const { suite, blocks } = parseArgs(process.argv.slice(2));
   if (suite === 'process-contract') return command(process.execPath, ['--test', 'tests/e2e/process-contract/runner.test.mjs', 'tests/e2e/process-contract/native-quit-note.test.mjs', 'tests/e2e/process-contract/block-results.test.mjs']);
-  await runNative();
+  await runNative(blocks);
   if (suite === 'all') await (await import('./check-release-boundary.mjs')).checkRelease();
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(error => { console.error(error.message); process.exitCode = 1; });

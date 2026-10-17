@@ -18,12 +18,15 @@ export async function completedBlockResults(evidence, failure) {
 
 // Foundations run directly. Acceptance errors are retained; finish recovers any
 // pending UI state, attempts shutdown and publishes all results even on failure.
-export function acceptanceBlocks({ evidence, reset, capture, priorResults = [] }) {
+// `only` (a Set of block names, or null for all) runs just those blocks; the others are neither run nor recorded.
+// A selected block still needs its declared dependencies recorded, so `only` must be closed under them.
+export function acceptanceBlocks({ evidence, reset, capture, priorResults = [], only = null }) {
   const results = [], known = new Map(priorResults.map(result => [result.name, result]));
   let needsReset = false;
   return {
     results,
     async run(name, action, dependencies = []) {
+      if (only && !only.has(name)) return;
       const required = dependencies.map(dependency => {
         if (!known.has(dependency)) throw new Error(`Missing acceptance dependency: ${dependency}`);
         return known.get(dependency);
