@@ -192,7 +192,8 @@ async function scrollTo(page: Page, view: View, spot: Spot) {
 
 async function prepare(page: Page, origin: string, view: View) {
   await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
-  await page.setViewportSize({ width: 1000, height: 700 });
+  // Tall enough that, under every chip, at least one row is whole between the band and the bottom edge.
+  await page.setViewportSize({ width: 1000, height: 900 });
   await page.goto(`${origin}/tests/e2e/tree-layout/fixture.html?filter`);
   await page.locator('[data-popover-trigger="switcher"]').click();
   await page.getByRole('dialog', { name: 'Switch session or project' }).getByRole('button', { name: 'All sessions' }).click();
@@ -252,6 +253,8 @@ const filterTriggers: readonly FilterTrigger[] = [
 ];
 
 test.describe('the filter row never moves the Map', () => {
+  // Each row opens a window, so a missing control fails fast instead of waiting for the suite's long limit.
+  test.describe.configure({ timeout: 90_000 });
   let server: Awaited<ReturnType<typeof createServer>>, origin = '';
   test.beforeAll(async () => {
     server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
@@ -274,15 +277,17 @@ test.describe('the filter row never moves the Map', () => {
       // The row the Map must hold: the reading row, or the one under it when the trigger removes the reading row.
       const held = trigger.holds === 'reader' ? reader : cells[1]!;
       const before = (await viewportPlace(page, cellOf(view, held.id)))!;
-      const rowHeight = (await chipRow(page).boundingBox())?.height ?? 0;
+      // How far the Map's own top edge moves in the window when the trigger opens or closes the rows above it.
+      const edgeBefore = (await viewportPlace(page, scrollerOf(view)))!;
       await trigger.change(page, view, reader);
       await trigger.done(page, view, reader);
       await settle(page); await page.waitForTimeout(60); await settle(page);
+      const edgeMoved = Math.abs((await viewportPlace(page, scrollerOf(view)))!.y - edgeBefore.y);
       const after = await viewportPlace(page, cellOf(view, held.id));
       expect(after, `${held.id} is still drawn`).not.toBeNull();
       const shift = after!.y - before.y;
       // At the top an owner-caused boundary may carry the rows up (never down) by the height that left; anywhere else, nothing moves.
-      const room = spot === 'top' && trigger.top ? (trigger.top === 'filter row' ? rowHeight : reader.height) + 1 : 1;
+      const room = spot === 'top' && trigger.top ? (trigger.top === 'filter row' ? edgeMoved : reader.height) + 1 : 1;
       expect(shift, `${held.id} moved ${shift}px in the window`).toBeGreaterThanOrEqual(-room);
       expect(shift, `${held.id} moved ${shift}px in the window`).toBeLessThanOrEqual(1);
       expect(Math.abs(after!.x - before.x), `${held.id} moved sideways`).toBeLessThanOrEqual(1);
