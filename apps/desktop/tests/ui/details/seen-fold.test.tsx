@@ -21,7 +21,14 @@ const markedSeen = (transport: AppTransport) => transport.mutations.some(request
   && request.command.params.entries.some(entry => entry.kind === 'mark_seen' && entry.items.some(item => item.item_id === ITEM)));
 /** Longer than the dwell plus the session's settling after it opens. */
 const PAST_DWELL = SEEN_DWELL_MS * 2.5;
-const seenSoon = (transport: AppTransport) => waitFor(() => expect(markedSeen(transport)).toBe(true), { timeout: PAST_DWELL });
+/** Waits for the mark; a loaded machine only delays it, so the wait is generous. */
+const seenSoon = (transport: AppTransport) => waitFor(() => expect(markedSeen(transport)).toBe(true), { timeout: 10_000 });
+/** When each mutation was sent, by the clock, so a test can tell how long after an owner action the mark came. */
+function sentTimes(transport: AppTransport): number[] {
+  const times: number[] = [], push = transport.mutations.push.bind(transport.mutations);
+  transport.mutations.push = (...requests) => { times.push(Date.now()); return push(...requests); };
+  return times;
+}
 async function click(element: Element) { await act(async () => { fireEvent.click(element); }); }
 const fold = () => click(screen.getByRole('button', { name: 'Fold Details' }));
 const unfold = () => click(rail()!);
@@ -53,12 +60,14 @@ describe('the seen dwell and a folded Details column', () => {
     const transport = await open(true);
     await wait(PAST_DWELL);
     expect(markedSeen(transport)).toBe(false);
+    const times = sentTimes(transport), sent = transport.mutations.length, unfoldedAt = Date.now();
     await unfold();
     expect(rail()).toBeNull();
-    // The folded time does not count toward the dwell.
-    await wait(SEEN_DWELL_MS * 0.5);
-    expect(markedSeen(transport)).toBe(false);
     await seenSoon(transport);
+    // The folded time does not count toward the dwell: the mark comes a whole dwell after the unfold, not at once.
+    const markedAt = times[transport.mutations.findIndex((request, at) => at >= sent && request.command.command === 'preferences_patch'
+      && request.command.params.entries.some(entry => entry.kind === 'mark_seen')) - sent]!;
+    expect(markedAt - unfoldedAt).toBeGreaterThanOrEqual(SEEN_DWELL_MS - 20);
     await fold();
     expect(rail()).not.toBeNull();
     expect(diamond()).toBeNull();
@@ -67,7 +76,8 @@ describe('the seen dwell and a folded Details column', () => {
   it('fold mid-dwell: the dwell stops and nothing is marked', async () => {
     const transport = await open(false);
     expect(rail()).toBeNull();
-    await wait(SEEN_DWELL_MS * 0.6);
+    await wait(SEEN_DWELL_MS * 0.3);
+    // Still inside the dwell (a loaded machine could have let it end, which would make this case prove nothing).
     expect(markedSeen(transport)).toBe(false);
     await fold();
     await wait(PAST_DWELL);
