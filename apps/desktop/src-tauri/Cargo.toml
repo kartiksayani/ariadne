@@ -42,6 +42,7 @@ objc2-user-notifications = { version = "=0.3.2", default-features = false, featu
 [dev-dependencies]
 ariadne-store = { path = "../../../crates/ariadne-store" }
 ariadne-core = { path = "../../../crates/ariadne-core", features = ["test-support"] }
+ariadne-runtime = { path = "../../../crates/ariadne-runtime", features = ["test-support"] }
 tauri = { workspace = true, features = ["test"] }
 
 [features]
