@@ -2,8 +2,10 @@
 
 Claude Code on **Opus 5.5** maintains delivery. Team mode (ORCHESTRATOR): **Sonnet 5.5
 (high effort)** does most implementation, including browser work; **Codex
-(gpt-6.1-sol, high effort)** does pure-logic pieces its sandbox can test, in isolated
-worktrees with declared, disjoint paths. The maintainer integrates the pieces and runs
+(gpt-6.1-sol, high effort)** does pure-logic pieces its sandbox can test; **Opus 5.5
+(high effort)** does only the critical pieces (send-once, typed text, storage and locks,
+saved formats) and all reviews; **Haiku 5.5** does mechanical edits. Pieces run in
+isolated worktrees with declared, disjoint paths. The maintainer integrates them and runs
 one full gate on the combined head. Independent review uses a separate **Opus 5.5** context
 at the exact head; one targeted re-review follows fixes. The owner authorized
 pushes and squash merges with green `quality` and exact-head review. The maintainer
@@ -15,9 +17,9 @@ branches and history; no force-push or open-source licence.
 Codex jobs cannot run browsers, sockets, the app, native e2e or `git add`/commits, so
 that work goes to Sonnet. Implementers run `npm run check` and targeted tests, then
 hand back. The maintainer runs the full gate (Playwright, design frames and the local
-native journey) once on the integrated head before push, and plans time for it. Before UI implementation, share a
-clickable HTML mock under `designs/mocks/`; the owner signs off and implementation
-follows it.
+native journey) once on the integrated head before push, and plans time for it. UI
+designs come from Claude Design: the owner approves them (the approved board is
+`designs/Ariadne-final-board.zip`), and implementation follows the board.
 
 **Main: `c87909da` (#169). Alpha.19 released as
 [`v0.1.0-alpha.19`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.19)**
@@ -136,9 +138,11 @@ Items 1 and 2 are for alpha.20. Items 3 and 4 are small and do not touch the red
    - P11.37 (T) Tree core: search in place, a fixed end cluster, the Map-never-moves table.
    - P11.38 (M1) Map look. P11.39 (M2) topic band. P11.40 (M5) filter chip row. P11.41 (M3) Graph. P11.42 (M6) changes, markers and Back-to. P11.43 (M7) peek. P11.44 (V) design regions for the Map states.
    - Owner answers on 2026-10-17: hovering to peek is not a Recent visit; a single Ack shows Undo, then saves; a folded chip also says "N waiting"; several topics in one session stack in the Graph.
-2. Fixes already built on branches and not merged. They are in progress, not done:
-   - P11.35 Silent Send in Details under load, branch `redesign/a20-sendfix` (`edd355c6`). `submit.ts` refuses when the sending session differs from the rendered one and sets `loadingError`; the next snapshot clears it. The text is kept, Send stays enabled, nothing is saved and no message shows. Found in the alpha.19 gate, where the native recovery journey failed once under load and passed 3 of 3 alone. The bug dates from alpha.8.
-   - P11.22 and P11.23 Fair store lock and a realistic `claim_contention` test, branch `redesign/a20-lock` (`a01d22eb`).
+2. Other alpha.20 must-dos:
+   - P11.26 Deflake the load-sensitive tests. The Codex `queue.rs` version probe is a second occurrence, so the Flakes rule (ORCHESTRATOR) requires the fix before the next merge. Scope: every flake in Known flakes below, including the alpha.19 ones (llvm-cov composition wake test, native recovery under load, the native Graph step and the accessibility `r` step).
+   - Fixes already built on branches and not merged. They are in progress, not done:
+     - P11.35 Silent Send in Details under load, branch `redesign/a20-sendfix` (`edd355c6`). `submit.ts` refuses when the sending session differs from the rendered one and sets `loadingError`; the next snapshot clears it. The text is kept, Send stays enabled, nothing is saved and no message shows. Found in the alpha.19 gate, where the native recovery journey failed once under load and passed 3 of 3 alone. The bug dates from alpha.8.
+     - P11.22 and P11.23 Fair store lock and a realistic `claim_contention` test, branch `redesign/a20-lock` (`a01d22eb`).
 3. Hook notice follow-ups from the alpha.18 final re-review (non-blocking), each a small task:
    - P11.17 `claim` is not retired after binding removal (`claims.js` `end()`), so the terminal "removed" line stays current and hides later advice until reconnect. Retire it after the removal is recorded.
    - P11.18 Pre-existing dead end: `autoConnect` holds `ownerTransition` while awaiting `deliverNote` (`register.js`). If `$.session.append` hangs, `/ariadne-connect` and `/ariadne-disconnect` answer "already connecting" forever. Don't await the note inside the transition window, or time-box it.
@@ -150,7 +154,6 @@ Items 1 and 2 are for alpha.20. Items 3 and 4 are small and do not touch the red
    - P11.23 In progress (item 2). `claim_contention.rs` readers should resolve like the CLI (`AgentResolver::resolve`), so a busy catalogue fails the try instead of hiding a 2 s wait. Place queue inputs outside the 2.3 s holds (space them 150–200 ms). Keep every assertion. It fails 2 to 4 of 5 local runs on a shared machine.
    - P11.24 Later: the owner's `session_read` takes the session lock (`queries/mod.rs` to `catalogue.rs`). Peek-based reads are possible.
    - P11.25 While the alpha.17 app ran, `install.sh`'s doctor printed "some data was busy or unreadable" and "Saved data couldn't be read safely". A rerun right after said "No problems found". The install-time doctor should ride out busy like other reads, or word it as busy, try again.
-   - P11.26 Deflake the load-sensitive tests (see Known flakes).
    - P11.27 Every alpha ships as plugin version 0.1.0, so the Claude plugin cache cannot tell alphas apart.
 5. Follow-ups from #162, each a small task:
    - P11.10 Graph selection reply race: a Graph click's `revealItem` reply is dropped when a reveal is dismissed mid-flight, because the `external` guard in `GraphView.tsx` compares App's `treeReveal`. Fix with a counter that changes only on a non-own, non-null outside reveal.

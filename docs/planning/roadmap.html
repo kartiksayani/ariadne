@@ -3799,14 +3799,17 @@
       "paths": [
         "apps/desktop/src/selectors/tree/*",
         "apps/desktop/src/ui/tree/TreeView.tsx",
-        "apps/desktop/src/ui/tree/*",
+        "apps/desktop/src/ui/tree/model.ts",
+        "apps/desktop/src/ui/tree/tree.css",
         "apps/desktop/tests/ui/tree/*"
       ],
       "spec": [
         "docs/delivery/HANDOFF.md"
       ],
       "acceptance": [
+        "TreeView.tsx and model.ts are shared seams: the P0 contracts (band slot props, box-pass hook) are how M1, M2 and M5 plug in, and their pieces merge in the order M5, M2, M1. tree.css here is the core file left after P0 splits out tree-rows.css, tree-band.css and tree-filter.css.",
         "Search runs in place (M4) and leaves the tree model before the filter chips are built on it.",
+        "The leftover ⌘J retainedJump check in TreeView.tsx (about lines 1044–1046) is removed, because ⌘J is no longer a key.",
         "A fixed end cluster holds markers, Ack and pills, so they never re-wrap a row. The topic band wraps by width.",
         "The Map never moves on its own: every trigger (new agent rows above or below, marker clear, Ack or Undo, Show more, band changes, Details fold or resize, window resize, search step, \"Show them\", filter chip, peek open or close) leaves the reading row's screen position unchanged, tested as a table in the Tree and the Graph."
       ],
@@ -3823,8 +3826,13 @@
         "P11.37"
       ],
       "paths": [
-        "apps/desktop/src/ui/tree/*",
-        "apps/desktop/tests/ui/tree/*"
+        "apps/desktop/src/ui/tree/ItemRow.tsx",
+        "apps/desktop/src/ui/tree/boxes.ts",
+        "apps/desktop/src/ui/tree/branch.ts",
+        "apps/desktop/src/ui/tree/HoverBar.tsx",
+        "apps/desktop/src/ui/tree/tree-rows.css",
+        "apps/desktop/tests/ui/tree/item-row*",
+        "apps/desktop/tests/ui/tree/branch*"
       ],
       "spec": [
         "docs/delivery/HANDOFF.md"
@@ -3843,11 +3851,16 @@
       "title": "Alpha.20 M2: Topic band",
       "phase": "M11",
       "depends_on": [
-        "P11.36"
+        "P11.37"
       ],
       "paths": [
-        "apps/desktop/src/ui/tree/*",
-        "apps/desktop/tests/ui/tree/*"
+        "apps/desktop/src/ui/tree/TopicRow.tsx",
+        "apps/desktop/src/ui/tree/TopicMenu.tsx",
+        "apps/desktop/src/ui/navigation/AckAll.tsx",
+        "apps/desktop/src/ui/tree/gettingAround.ts",
+        "apps/desktop/src/ui/tree/tree-band.css",
+        "apps/desktop/tests/ui/tree/topic*",
+        "apps/desktop/tests/ui/tree/gettingAround.test.ts"
       ],
       "spec": [
         "docs/delivery/HANDOFF.md"
@@ -3869,9 +3882,13 @@
         "P11.37"
       ],
       "paths": [
-        "apps/desktop/src/ui/tree/*",
-        "apps/desktop/src/selectors/tree/*",
-        "apps/desktop/tests/ui/tree/*"
+        "apps/desktop/src/ui/tree/FilterRow.tsx",
+        "apps/desktop/src/ui/tree/FilterBar.tsx",
+        "apps/desktop/src/ui/tree/chips.ts",
+        "apps/desktop/src/selectors/filter/*",
+        "apps/desktop/src/ui/tree/tree-filter.css",
+        "apps/desktop/tests/ui/tree/filter*",
+        "apps/desktop/tests/ui/tree/chips*"
       ],
       "spec": [
         "docs/delivery/HANDOFF.md"
@@ -3896,7 +3913,8 @@
       "paths": [
         "apps/desktop/src/ui/graph/*",
         "apps/desktop/tests/ui/graph/*",
-        "apps/desktop/tests/e2e/*"
+        "tests/e2e/graph/*",
+        "apps/desktop/tests/e2e/graph.spec.mjs"
       ],
       "spec": [
         "docs/delivery/HANDOFF.md"
@@ -3920,9 +3938,10 @@
       ],
       "paths": [
         "apps/desktop/src/ui/changes/*",
+        "apps/desktop/src/ui/navigation/Recent.tsx",
         "apps/desktop/src/selectors/changes/*",
-        "apps/desktop/src/state/preferences/*",
-        "apps/desktop/tests/ui/*"
+        "apps/desktop/src/state/preferences/reading.ts",
+        "apps/desktop/tests/ui/changes/*"
       ],
       "spec": [
         "docs/delivery/HANDOFF.md"
@@ -3941,7 +3960,9 @@
       "id": "P11.43",
       "title": "Alpha.20 M7: Peek",
       "phase": "M11",
-      "depends_on": [],
+      "depends_on": [
+        "P11.36"
+      ],
       "paths": [
         "apps/desktop/src/ui/peek/*",
         "apps/desktop/tests/ui/peek/*"
@@ -3995,7 +4016,9 @@
         "crates/ariadne-cli/tests/claude_installed_join.rs",
         "crates/ariadne-cli/tests/doctor.rs",
         "crates/ariadne-adapter-codex/*",
+        "apps/desktop/src-tauri/src/composition/*",
         "apps/desktop/tests/ui/*",
+        "apps/desktop/tests/e2e/*",
         "docs/delivery/HANDOFF.md"
       ],
       "spec": [
@@ -4003,7 +4026,9 @@
         "ORCHESTRATOR.md"
       ],
       "acceptance": [
-        "The alpha.18 load flakes listed in HANDOFF are fixed or have a deadline that no longer depends on machine load: claude_installed_join (deadline asserts), the two doctor.rs Codex tests, the Codex queue.rs version probe, owner-input.test.tsx, the App.test.tsx reveal test, the itemNavigation reveal tests and the tree component status-chip test.",
+        "Must be done in alpha.20: the Codex queue.rs version probe is a second occurrence, and the ORCHESTRATOR Flakes rule says a second occurrence is fixed before the next merge.",
+        "The load flakes listed in HANDOFF are fixed or have a deadline that no longer depends on machine load: claude_installed_join (deadline asserts), the two doctor.rs Codex tests, the Codex queue.rs version probe, owner-input.test.tsx, the App.test.tsx reveal test, the itemNavigation reveal tests and the tree component status-chip test.",
+        "The alpha.19 flakes are in scope too: the llvm-cov composition wake test (a held lease), the native recovery step (\"Sending…\" not displayed within 10 s under load), the native Graph step that compares Tree and Graph items, and the accessibility step whose first r press needed a retry (replace the retry with a readiness wait).",
         "No assertion is removed or relaxed to pass. The one exception is a native timing assertion that fails again: the owner ruling of 2026-10-06 (ORCHESTRATOR.md, Delivery feedback rules, on latency budgets) says to remove that assertion rather than change product code."
       ],
       "checks": [
