@@ -51,9 +51,12 @@ export class DockStore {
         questions = [...incoming.slice(0, before), held, ...incoming.slice(before)];
       }
     }
+    // A revised question has a new id (it carries the question revision): the dock stays on the same item, never jumps.
+    const shown = this.state.current;
     const current = changed ? questions[0] ?? null
-      : this.held && this.held.id === this.state.current?.id ? this.held
-        : questions.find(question => question.id === this.state.current?.id) ?? questions[0] ?? null;
+      : this.held && this.held.id === shown?.id ? this.held
+        : questions.find(question => question.id === shown?.id) ?? questions.find(question => question.itemId === shown?.itemId)
+          ?? questions[0] ?? null;
     this.publish({ session, questions, current, open: !changed && !!current && this.state.open });
     const pending = this.pending;
     if (pending && pending.session === session && ready) {

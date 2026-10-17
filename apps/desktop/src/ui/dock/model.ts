@@ -3,7 +3,7 @@ import type { Immutable } from '../../data/session-store';
 import type { Item, Session } from '../../generated/domain/models';
 import { waitingOnOwner } from '../../selectors/waiting/rows';
 import { itemRemoved } from '../../selectors/removed';
-import type { OwnerDraftStore } from '../../state/drafts/store';
+import { receiptWithdrawn, type OwnerDraftStore } from '../../state/drafts/store';
 import type { DockQuestion } from '../../state/dock/store';
 import { detailPath } from '../detail/model';
 import { peekNames } from '../peek/names';
@@ -14,7 +14,7 @@ export const dockQuestionId = (session: Immutable<Session>, itemId: string) => `
 /**
  * The session's unsent waiting questions, oldest first (`waiting_since`, then the item number). The same eligibility as
  * the waiting counts (`waitingOnOwner`: waiting on me, not replied, topic and item present); an answer whose receipt is in
- * leaves at once, unless that answer was cancelled. `hide` drops items a pending removal hides, and the one Details answers.
+ * leaves at once, unless that answer was cancelled or skipped. `hide` drops items a pending removal hides, and the one Details answers.
  */
 export function dockQuestions(session: Immutable<Session> | null | undefined, drafts: OwnerDraftStore, hide: (itemId: string) => boolean = () => false): DockQuestion[] {
   if (!session) return [];
@@ -23,8 +23,8 @@ export function dockQuestions(session: Immutable<Session> | null | undefined, dr
     if (!item || !waitingOnOwner(session, item) || itemRemoved(session, item.id) || hide(item.id)) return false;
     const entry = drafts.find(route, item.id, 'answer');
     const input = entry?.receipt?.data.kind === 'input_submit' ? session.inputs[entry.receipt.data.input_id] : null;
-    // A failed answer (needs attention) stays in place with its delivery bar and Retry.
-    return !entry?.receipt || entry.draft.question_revision !== item.question_revision || input?.state === 'cancelled' || input?.state === 'needs_attention';
+    // A failed answer (needs attention) stays in place with its delivery bar and Retry; a cancelled or skipped one is back.
+    return !entry?.receipt || entry.draft.question_revision !== item.question_revision || receiptWithdrawn(entry, session) || input?.state === 'needs_attention';
   }).sort((a, b) => (a.waiting_since ?? '').localeCompare(b.waiting_since ?? '') || a.id.localeCompare(b.id, undefined, { numeric: true }))
     .map(item => ({ id: dockQuestionId(session, item.id), itemId: item.id, question: item.question }));
 }

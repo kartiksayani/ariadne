@@ -7,7 +7,7 @@ import type { PresenceObservation, Session } from '../../generated/domain/models
 import { connectionOf, reconnectingNote, type Connection } from '../shared/connection';
 import type { Immutable } from '../../data/session-store';
 import { plainFailure } from '../../data/plain';
-import { blockedDraft, emptyDraft, ownerActions, useOwnerDrafts, type DraftEntry, type OwnerDraftStore, type OwnerIntent } from '../../state/drafts/store';
+import { blockedDraft, emptyDraft, ownerActions, receiptWithdrawn, useOwnerDrafts, type DraftEntry, type OwnerDraftStore, type OwnerIntent } from '../../state/drafts/store';
 import { agentName } from '../shell/model';
 import { ownerReplied } from '../../selectors/waiting/replied';
 import { sessionAnswerBlocked } from '../../selectors/sessionClosed';
@@ -89,7 +89,10 @@ export function useSubmit({ drafts, session, current, itemId, intent, onAgentNot
   const route = session ? { project_id: session.project_id, session_id: session.id } : null;
   const entry = route ? drafts.find(route, itemId, intent) : undefined;
   const item = session?.items[itemId];
-  const previousQuestion = !!entry?.receipt && !!item && entry.draft.question_revision !== item.question_revision;
+  // A receipt stops standing when the question moved on, or when its answer was cancelled or skipped before the agent had
+  // it: the cards open again (with that answer's words, `another`).
+  const previousQuestion = !!entry?.receipt && !!item && (entry.draft.question_revision !== item.question_revision
+    || intent === 'answer' && receiptWithdrawn(entry, session!));
   useEffect(() => { if (previousQuestion && session && entry) drafts.another(entry.draft.op_id, session); }, [previousQuestion, session, entry, drafts]);
   const eligible = !!item && ownerActions(item).includes(intent);
   useEffect(() => { if (!drafts.getSnapshot().ready) void drafts.load(); }, [drafts]);

@@ -50,6 +50,16 @@ const sameMessage = (a: Immutable<OwnerDraft>, b: Immutable<OwnerDraft>) => same
   && a.target.item_id === b.target.item_id && a.target.topic_id === b.target.topic_id && a.intent === b.intent
   && a.text === b.text && (!!a.text || a.selected_option_id === b.selected_option_id);
 
+/**
+ * The input a saved receipt points to was cancelled or skipped ("Cancel message", "Mark as done"): it never reached the
+ * agent, so the receipt no longer stands and the question waits on the owner again.
+ */
+export function receiptWithdrawn(entry: DraftEntry | undefined, session: Immutable<Session>): boolean {
+  const receipt = entry?.receipt?.data;
+  const state = receipt?.kind === 'input_submit' ? session.inputs[receipt.input_id]?.state : undefined;
+  return state === 'cancelled' || state === 'skipped';
+}
+
 export function ownerActions(item: Immutable<Item>): OwnerIntent[] {
   return ['bring', ...(item.status === 'waiting_on_me' ? ['answer' as const] : []), 'reply', 'note', 'followup', 'drop',
     ...(terminal(item) && item.status !== 'replaced' ? ['reopen' as const] : [])];
@@ -269,14 +279,19 @@ export class OwnerDraftStore {
   }
   another(id: string, session: Immutable<Session>): void {
     const entry = this.state.entries[id]; if (!entry?.receipt) return;
-    if (entry.draft.intent === 'answer' && entry.draft.target.item_id) {
-      const input = entry.receipt.data.kind === 'input_submit' ? session.inputs[entry.receipt.data.input_id] : null;
-      if (session.items[entry.draft.target.item_id]?.question_revision === entry.draft.question_revision
-        && input?.state !== 'cancelled') return;
-    }
+    const withdrawn = receiptWithdrawn(entry, session), itemId = entry.draft.target.item_id;
+    const item = itemId ? session.items[itemId] : undefined, sameQuestion = item?.question_revision === entry.draft.question_revision;
+    if (entry.draft.intent === 'answer' && itemId && sameQuestion && !withdrawn) return;
     const entries = { ...this.state.entries }; delete entries[id]; this.publish({ entries: Object.freeze(entries) });
-    if (entry.draft.target.item_id) this.begin(session, entry.draft.target.item_id, entry.draft.intent as OwnerIntent, true);
-    else if (entry.draft.intent === TOPIC_REPLY) this.beginTopic(session, entry.draft.target.topic_id, true);
+    const next = itemId ? this.begin(session, itemId, entry.draft.intent as OwnerIntent, true)
+      : entry.draft.intent === TOPIC_REPLY ? this.beginTopic(session, entry.draft.target.topic_id, true) : null;
+    // A withdrawn answer to the same question goes back in its cards, as "Put back" would: the owner's words and choice
+    // are never lost. Only a choice still offered is kept. It can't go out twice: its own input will never be sent.
+    const input = entry.receipt.data.kind === 'input_submit' ? session.inputs[entry.receipt.data.input_id] : undefined;
+    if (!next || !withdrawn || entry.draft.intent !== 'answer' || !sameQuestion || !input) return;
+    const option = input.payload.selected_option_id;
+    const selected = option && item?.options.some(value => value.id === option) ? option : null;
+    if (input.payload.text || selected) void this.editSaved(next, { text: input.payload.text, selected_option_id: selected });
   }
   prepareRevised(id: string, session: Immutable<Session>): void {
     const previous = this.state.entries[id];
