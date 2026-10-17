@@ -6,7 +6,20 @@ import type { Server } from 'node:http';
 
 async function ready(page: Page) {
   await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-status', 'ready');
-  await expect(page.locator('.tree-session-bar')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-busy', 'false');
+}
+
+/** Opens one of the pages (Projects, All sessions, Archive) from the switcher's footer links, as tests/ui/app/open.ts `goToPage`. There are no tabs. */
+async function goToPage(page: Page, name: 'Projects' | 'All sessions' | 'Archive') {
+  await page.locator('[data-popover-trigger="switcher"]').click();
+  await page.getByRole('dialog', { name: 'Switch session or project' }).getByRole('button', { name, exact: true }).click();
+}
+
+/** The filter row is closed until the top bar's Filter button opens it (SPEC 2.1, `f`). */
+async function showFilters(page: Page) {
+  const group = page.getByRole('group', { name: 'Filter items' });
+  if (!await group.count()) await page.getByRole('button', { name: /^Filter by status/ }).click();
+  await expect(group).toBeVisible();
 }
 
 async function reachable(control: Locator) {
@@ -50,9 +63,18 @@ async function withLayoutFixture(page: Page, viewport: Viewport, query: string, 
   } finally { await server.close(); }
 }
 
+/** Every registered session is listed on All sessions, so the session opens from there whichever page the App started on. */
 async function openLayoutSession(page: Page) {
-  await page.locator('button[data-session-id]').first().click();
+  await goToPage(page, 'All sessions');
+  const session = page.locator('button[data-session-id]').first();
+  await expect(session).toBeEnabled(); await session.click();
   await ready(page);
+}
+
+/** From the Projects page: the project's own page, then its first session. */
+async function openProjectPage(page: Page) {
+  await goToPage(page, 'Projects');
+  await page.locator('.pj-name').first().click();
 }
 
 function geometry(page: Page) {
@@ -60,67 +82,48 @@ function geometry(page: Page) {
     const rows = document.querySelector<HTMLElement>('.tree-scroll')!, center = document.querySelector<HTMLElement>('.shell-center-content')!;
     return { rowsHeight: rows.clientHeight, rowsScrollHeight: rows.scrollHeight, rowsScrollTop: rows.scrollTop,
       centerScrollTop: center.scrollTop, centerHeight: center.clientHeight, centerScrollHeight: center.scrollHeight,
-      // The toolbar's offset under the session bar. The body never scrolls sideways, so opening the detail
-      // column narrows the centre and the session bar may wrap; the toolbar must still sit right under it.
-      toolbarGap: document.querySelector('[role="group"][aria-label="Filter items"]')!.getBoundingClientRect().top - document.querySelector('.tree-session-bar')!.getBoundingClientRect().bottom,
-      headerTop: document.querySelector('.shell-header')!.getBoundingClientRect().top };
+      // The toolbar's offset under the top bar. The body never scrolls sideways, so opening the detail
+      // column narrows the centre; the toolbar must still sit right under the bar.
+      toolbarGap: document.querySelector('[role="group"][aria-label="Filter items"]')!.getBoundingClientRect().top - document.querySelector('.shell-top')!.getBoundingClientRect().bottom,
+      headerTop: document.querySelector('.shell-top')!.getBoundingClientRect().top };
   });
 }
 
-async function checkSessionBar(page: Page, viewport: Viewport) {
+async function checkConnectionCard(page: Page, viewport: Viewport) {
   const tree = page.getByRole('tree');
   const selected = tree.locator('[data-item-id="10.50"]');
   await selected.click();
   await expect(selected).toHaveAttribute('aria-selected', 'true');
   expect((await geometry(page)).rowsScrollTop).toBeGreaterThan(0);
   await ready(page);
-  const bar = page.locator('.tree-session-bar');
-  const actions = bar.getByRole('button', { name: 'Session actions', exact: true });
-  await reachable(actions);
-  // Every session action stays reachable through the menu with the tree scrolled.
-  for (const label of ['Close session', 'Rename', 'Copy ID']) {
-    await actions.click();
-    const menu = page.getByRole('menu', { name: 'Session actions' });
-    const menuBox = (await menu.boundingBox())!;
-    expect(menuBox.x).toBeGreaterThanOrEqual(0);
-    expect(menuBox.y).toBeGreaterThanOrEqual(0);
-    expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(viewport.width);
-    expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(viewport.height);
-    const action = page.getByRole('menuitem', { name: label, exact: true });
+  // The session bar is gone (SPEC 7): its actions (Close, Copy ID, Sending) are the connection card's, opened from the dot.
+  const dot = page.locator('[data-popover-trigger="connection"]');
+  await reachable(dot);
+  // Every session action stays reachable through the card with the tree scrolled.
+  for (const label of ['Sending…', 'Close session', 'Copy session ID']) {
+    await dot.click();
+    const card = page.locator('.cc');
+    const cardBox = (await card.boundingBox())!;
+    expect(cardBox.x).toBeGreaterThanOrEqual(0);
+    expect(cardBox.y).toBeGreaterThanOrEqual(0);
+    expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(viewport.width);
+    expect(cardBox.y + cardBox.height).toBeLessThanOrEqual(viewport.height);
+    const action = card.getByRole('button', { name: label, exact: true });
     await reachable(action);
-    if (label === 'Copy ID') {
+    if (label === 'Copy session ID') {
       // This harness grants no clipboard permissions; check reachability without writing.
       await page.keyboard.press('Escape');
     } else {
       await action.click();
-      if (label === 'Rename') {
-        const field = bar.getByLabel('Session name');
-        await expect(field).toBeInViewport();
-        await page.keyboard.press('Escape');
-        await expect(field).toHaveCount(0);
-      } else {
-        const review = page.getByRole('dialog');
-        await expect(review).toBeInViewport();
-        await review.getByRole('button', { name: 'Cancel', exact: true }).click();
-        await expect(review).toHaveCount(0);
-      }
+      const review = page.getByRole('dialog');
+      await expect(review).toBeInViewport();
+      await review.getByRole('button', { name: label === 'Sending…' ? 'Done' : 'Cancel', exact: true }).click();
+      await expect(review).toHaveCount(0);
     }
-    await expect(actions).toBeFocused();
+    await expect(dot).toBeFocused();
   }
-  // Sending details and optional dispatch actions remain directly in the bar.
-  await reachable(bar.getByRole('button').and(bar.getByTitle('Sending and connection', { exact: true })));
-  const directControls = await bar.getByRole('button').all();
-  for (const action of directControls) {
-    if (await action.getAttribute('aria-label') === 'Session actions') continue;
-    await reachable(action);
-    if (await action.getAttribute('title') !== 'Sending and connection') continue;
-    await action.click();
-    const review = page.getByRole('dialog');
-    await expect(review).toBeInViewport();
-    await review.getByRole('button', { name: 'Done', exact: true }).click();
-    await expect(review).toHaveCount(0);
-    await expect(action).toBeFocused();
-  }
+  // Every control that stayed in the top bar (the old bar's direct controls) is still reachable at this size.
+  for (const control of await page.locator('.shell-top button:visible').all()) await reachable(control);
   const current = await geometry(page);
   expect(current.rowsHeight).toBeGreaterThan(usefulRows);
   expect(current.centerScrollTop).toBe(0);
@@ -145,8 +148,7 @@ async function checkSessionBar(page: Page, viewport: Viewport) {
 
 test('keeps the connect card and scrolling instruction accessible', async ({ page }) => {
   await withLayoutFixture(page, { width: 1000, height: 668 }, '', async () => {
-    await page.locator('[data-shell-tab="projects"]').click();
-    await page.locator('.pw-project-open').first().click();
+    await openProjectPage(page);
     await page.getByRole('button', { name: 'Connect existing session', exact: true }).click();
     const dialog = page.getByRole('dialog');
     // Only the Codex notice renders the pasted instruction; the Claude Mod has nothing to paste.
@@ -157,12 +159,12 @@ test('keeps the connect card and scrolling instruction accessible', async ({ pag
     await dialog.getByLabel('Registered Ariadne session').selectOption('00000000-0000-4000-8000-000000000002');
     await dialog.getByRole('button', { name: 'Connect existing session', exact: true }).click();
     await expect(dialog).toHaveCount(0);
-    // The connect card sits directly under the project header, above the Active list.
+    // The connect card sits directly under the page head, above the project's session list (the old "Active" list; SPEC 14.2).
     await expect(page.getByRole('region', { name: 'Session setup' }).getByRole('button', { name: 'Copy instruction' })).toBeVisible();
     expect(await page.evaluate(() => {
       const card = document.querySelector('[aria-label="Session setup"]');
-      const active = [...document.querySelectorAll('h3')].find(heading => heading.textContent?.startsWith('Active sessions · '));
-      return !!card && !!active && !!(card.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING);
+      const list = document.querySelector('.sl-group');
+      return !!card && !!list && !!(card.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING);
     })).toBe(true);
     // The instruction starts collapsed; opened, it scrolls inside its own frame and its last line is readable there.
     const card = page.getByRole('region', { name: 'Session setup' });
@@ -182,7 +184,7 @@ test('keeps the connect card and scrolling instruction accessible', async ({ pag
     await openLayoutSession(page);
     // The connect card belongs to the project page; the session view does not carry it.
     await expect(card).toHaveCount(0);
-    await page.getByRole('navigation', { name: 'Projects and sessions' }).getByRole('button', { name: 'Projects', exact: true }).click();
+    await goToPage(page, 'Projects');
     await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
     await expect(card).toHaveCount(0);
   });
@@ -193,6 +195,7 @@ test('scrolls and selects full variable rows in a 2000-item tree with accessible
   test.setTimeout(900_000);
   await withLayoutFixture(page, { width: 1000, height: 668 }, '?largeTree', async () => {
     await openLayoutSession(page);
+    await showFilters(page);
     const tree = page.getByRole('tree');
     await expect(tree.locator('.tree-item')).toHaveCount(2000);
     const before = await geometry(page);
@@ -216,29 +219,38 @@ test('scrolls and selects full variable rows in a 2000-item tree with accessible
   });
 });
 
-test('keeps session-bar actions accessible over a scrolled tree at 1000x668 and after resizing to 900x650', async ({ page }) => {
+test('keeps connection-card actions accessible over a scrolled tree at 1000x668 and after resizing to 900x650', async ({ page }) => {
   const viewport = { width: 1000, height: 668 };
   await withLayoutFixture(page, viewport, '?scrollTree', async () => {
     await openLayoutSession(page);
-    await checkSessionBar(page, viewport);
+    await showFilters(page);
+    await checkConnectionCard(page, viewport);
     await page.setViewportSize({ width: 900, height: 650 });
     await ready(page);
-    await reachable(page.locator('.tree-session-bar').getByRole('button', { name: 'Session actions', exact: true }));
+    await reachable(page.locator('[data-popover-trigger="connection"]'));
     await expect(page.getByRole('tree').locator('[data-item-id="10.50"]')).toHaveAttribute('aria-selected', 'true');
     const resized = await geometry(page);
     expect(resized.rowsHeight).toBeGreaterThan(usefulRows);
     expect(resized.centerScrollTop).toBe(0);
     expect(resized.centerScrollHeight).toBeLessThanOrEqual(resized.centerHeight + 1);
     await checkFilters(page);
+    // Rename left the session bar for the All sessions page's rows (SPEC 5.14): its dialog fits the narrow window too.
+    await goToPage(page, 'All sessions');
+    await page.getByRole('button', { name: /^Rename /, }).first().click();
+    const rename = page.getByRole('dialog', { name: 'Name this session' });
+    await expect(rename).toBeInViewport();
+    await page.keyboard.press('Escape');
+    await expect(rename).toHaveCount(0);
   });
 });
 
-test('keeps session-bar actions and graph scrolling accessible at 900x650', async ({ page }) => {
+test('keeps connection-card actions and graph scrolling accessible at 900x650', async ({ page }) => {
   const viewport = { width: 900, height: 650 };
   await withLayoutFixture(page, viewport, '?scrollTree', async () => {
     await openLayoutSession(page);
-    await checkSessionBar(page, viewport);
-    // Graph renders in the tree column under the session bar and owns its
+    await showFilters(page);
+    await checkConnectionCard(page, viewport);
+    // Graph renders in the tree column under the top bar and owns its
     // scrolling there. Catalogue routes retain the centre pane scroller,
     // including complete setup content below the catalogue.
     await page.getByRole('button', { name: 'Graph', exact: true }).click();
@@ -249,7 +261,7 @@ test('keeps session-bar actions and graph scrolling accessible at 900x650', asyn
     expect(graphBox.y + graphBox.height).toBeLessThanOrEqual(centerBox.y + centerBox.height + 1);
     // Nothing in the session column is clipped: banners and controls shrink and scroll themselves.
     expect(await page.locator('.nav-session-content').evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
-    await page.getByRole('navigation', { name: 'Projects and sessions' }).getByRole('button', { name: 'Projects', exact: true }).click();
+    await goToPage(page, 'Projects');
     await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
   });
 });
@@ -266,19 +278,15 @@ test('keeps one sent answer with its delivery controls in the ordinary App', asy
     const origin = `http://127.0.0.1:${address.port}`;
     await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
     await page.goto(`${origin}/tests/e2e/owner-input/fixture.html`);
-    // All sessions lists only sessions with an open tab; a fresh App opens the
-    // session from its project page.
-    await page.locator('[data-shell-tab="projects"]').click();
-    await page.locator('.pw-project-open').first().click();
-    const session = page.locator('button[data-session-id]').first();
-    await expect(session).toBeEnabled(); await session.click();
-    await ready(page);
+    // There are no tabs: a fresh App opens the session from All sessions.
+    await openLayoutSession(page);
     await page.locator('[data-item-id="2"]').click();
     // The item and chat scroll on top; the composer is docked below it.
     const detail = page.locator('.shell-detail-scroll'), head = detail.locator('.item-detail .detail-head');
     await expect(head.getByRole('heading', { name: 'Which native delivery window should we use?', level: 2 })).toBeVisible();
     await detail.getByLabel('Reply in your own words').fill('Use the saved native delivery option.');
-    await detail.getByRole('button', { name: 'Send as a reply only', exact: true }).click();
+    // One Send in Details' answer bar; the old "Send as a reply only" menu entry is gone (SPEC 5.3).
+    await detail.getByRole('region', { name: 'Your answer' }).getByRole('button', { name: 'Send', exact: true }).click();
     // A sent answer becomes the delivery stepper on top and one pending bubble in the chat.
     // The fixture's session already
     // has a message in flight, so its status line says what the reply waits behind instead of
@@ -327,11 +335,7 @@ test('docks the composer under a scrolling detail body that grows it to a third 
     const origin = `http://127.0.0.1:${address.port}`;
     await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
     await page.goto(`${origin}/tests/e2e/owner-input/fixture.html`);
-    await page.locator('[data-shell-tab="projects"]').click();
-    await page.locator('.pw-project-open').first().click();
-    const session = page.locator('button[data-session-id]').first();
-    await expect(session).toBeEnabled(); await session.click();
-    await ready(page);
+    await openLayoutSession(page);
     await page.locator('[data-item-id="2"]').click();
     const pane = page.locator('.item-detail'), body = pane.locator('.detail-body'), dock = pane.locator('.detail-dock');
     const composer = pane.getByLabel('Reply in your own words');
@@ -385,21 +389,19 @@ test('reads as a chat: oldest exchange first with no round headers, quick replie
     const origin = `http://127.0.0.1:${address.port}`;
     await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
     await page.goto(`${origin}/tests/e2e/owner-input/fixture.html?chat`);
-    await page.locator('[data-shell-tab="projects"]').click();
-    await page.locator('.pw-project-open').first().click();
-    const session = page.locator('button[data-session-id]').first();
-    await expect(session).toBeEnabled(); await session.click();
-    await ready(page);
+    await openLayoutSession(page);
     const pane = page.locator('.item-detail');
 
-    // A waiting item shows every quick reply above the composer immediately.
+    // A waiting item shows every quick reply as an option card immediately; "Write my own answer" opens the composer
+    // below them (SPEC 5.3: the cards replace the old always-open composer with quick replies above it).
     await page.locator('[data-item-id="2"]').click();
+    const options = pane.locator('[data-answer-option]');
+    await expect(options).toHaveCount(2);
+    const choices = pane.locator('.answer-options');
+    await expect(choices).toBeVisible();
+    await pane.locator('[data-answer-own]').click();
     const composer = pane.getByLabel('Reply in your own words');
     await expect(composer).toBeVisible();
-    const options = pane.locator('.detail-dock [data-answer-option]');
-    await expect(options).toHaveCount(2);
-    const choices = pane.locator('.answer-choices');
-    await expect(choices).toBeVisible();
     const composerBox = (await composer.boundingBox())!;
     for (const option of await options.all()) {
       await expect(option).toBeInViewport();

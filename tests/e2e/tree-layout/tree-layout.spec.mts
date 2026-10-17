@@ -77,7 +77,8 @@ for (const theme of ['light', 'dark'] as const) test(`N wraps unread Map targets
     await expect(child).toHaveAttribute('aria-selected', 'true');
     await expect(child.getByRole('img', { name: 'New to you' })).toHaveCount(0);
     // Typing N in the search box leaves the last landed target alone.
-    const search = page.getByRole('textbox', { name: 'Search questions and outcomes' });
+    await page.getByRole('button', { name: 'Search the Map' }).click();
+    const search = page.getByRole('textbox', { name: 'Search the Map' });
     await search.focus(); await page.keyboard.press('n');
     await expect(child).toHaveAttribute('data-next-unseen', 'true');
   } finally { await server.close(); }
@@ -186,7 +187,7 @@ for (const theme of ['light', 'dark']) test(`Getting around keeps breadcrumbs an
     await page.keyboard.down('Meta'); await root.hover();
     const peek = page.getByRole('dialog', { name: /^Peek:/ });
     await expect(peek).toBeVisible(); await page.keyboard.up('Meta');
-    const peekBox = (await peek.boundingBox())!, topBar = (await page.locator('.shell-header').boundingBox())!;
+    const peekBox = (await peek.boundingBox())!, topBar = (await page.locator('.shell-top').boundingBox())!;
     expect(peekBox.y).toBeGreaterThanOrEqual(topBar.y + topBar.height);
     expect(peekBox.x).toBeGreaterThanOrEqual(0);
     expect(peekBox.x + peekBox.width).toBeLessThanOrEqual(1000);
@@ -417,25 +418,33 @@ test('counts paragraph, list and code text lines exactly, and unfolds links only
   } finally { await server.close(); }
 });
 
-test('keeps the session menu inside a narrow column with Restore and a long name', async ({ page }) => {
+test('keeps the connection card inside a narrow window with Restore and a long name', async ({ page }) => {
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
     logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
   try {
     await server.listen();
     const address = (server.httpServer as Server).address();
     if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    // 900px is the narrow top bar (below 1100); the archived session's long name must give way, not push the controls out.
+    // An archived session is not listed on All sessions, so the fixture starts on it (the saved selection), as the vitest card tests do.
     const origin = `http://127.0.0.1:${address.port}`;
     await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
-    await page.setViewportSize({ width: 1600, height: 960 });
-    await page.goto(`${origin}/tests/e2e/tree-layout/fixture.html?bar`);
+    await page.setViewportSize({ width: 900, height: 700 });
+    await page.goto(`${origin}/tests/e2e/tree-layout/fixture.html?card`);
+    await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-status', 'ready');
     await page.evaluate(async () => { await document.fonts.ready; });
-    const bar = page.locator('.tree-session-bar'), more = bar.getByRole('button', { name: 'Session actions' });
-    await expect(bar.getByRole('button', { name: 'Restore session' })).toBeVisible();
-    const bounds = (await bar.boundingBox())!, menu = (await more.boundingBox())!;
-    expect(menu.x + menu.width).toBeLessThanOrEqual(bounds.x + bounds.width);
+    const bar = page.locator('.shell-top'), dot = page.locator('[data-popover-trigger="connection"]');
+    const bounds = (await bar.boundingBox())!, control = (await dot.boundingBox())!;
+    expect(control.x).toBeGreaterThanOrEqual(bounds.x);
+    expect(control.x + control.width).toBeLessThanOrEqual(bounds.x + bounds.width);
     expect(await bar.evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(Math.ceil(bounds.width));
-    await more.click();
-    await expect(page.getByRole('menuitem', { name: 'Copy ID' })).toBeVisible();
+    await dot.click();
+    const card = page.locator('.cc');
+    await expect(card.getByRole('button', { name: 'Restore session' })).toBeVisible();
+    await expect(card.getByRole('button', { name: 'Copy session ID' })).toBeVisible();
+    const box = (await card.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(900);
   } finally { await server.close(); }
 });
 
@@ -578,9 +587,9 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
     await expectRevealedRow(root);
     await scroller.evaluate(element => { element.scrollTop = element.scrollHeight; });
     await expect(marker).toBeVisible();
-    // The shortcut works while the session's other panel has focus.
+    // The shortcut (`.`, SPEC 6.1; ⌘J is gone) works while the session's other panel has focus.
     await page.locator('.item-detail').getByRole('button', { name: 'Copy reference' }).focus();
-    await page.keyboard.press('Meta+j');
+    await page.keyboard.press('.');
     await expect(marker).toHaveCount(0);
     await expectRevealedRow(root);
     // Nearest keyboard reveal also clears the actual sticky header, without centering the row.

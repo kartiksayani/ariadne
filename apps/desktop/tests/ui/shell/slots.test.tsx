@@ -16,14 +16,14 @@ const rules = (source: string, selector: string) => source.match(new RegExp(`(?:
 const viewport = () => document.querySelector<HTMLElement>('.shell-body-viewport')!;
 
 describe('shell slots', () => {
-  it('puts each slot in its place: top bar, main, side, footer and overlay', () => {
+  it('puts each slot in its place: top bar, main, side and overlay', () => {
     render(<Shell topBar={<p>Top bar</p>} main={<p>Map</p>} side={<DetailsColumn><p>Details</p></DetailsColumn>}
-      footer={<footer className="shell-footer">Footer</footer>} overlay={<div role="dialog">Dialog</div>} />);
+      overlay={<div role="dialog">Dialog</div>} />);
     expect(screen.getByText('Top bar').parentElement?.className).toBe('shell-top');
     expect(screen.getByText('Map').parentElement?.className).toBe('shell-center-content');
     expect(screen.getByText('Details').closest('aside')?.parentElement?.className).toBe('shell-body');
     const shell = document.querySelector('.shell')!;
-    expect([...shell.children].map(child => child.className || child.getAttribute('role'))).toEqual(['shell-top', 'shell-body-viewport', 'shell-footer', 'dialog']);
+    expect([...shell.children].map(child => child.className || child.getAttribute('role'))).toEqual(['shell-top', 'shell-body-viewport', 'dialog']);
   });
   it('renders no side column and no dock layer when they are absent', () => {
     render(<Shell topBar={null} main={<p>Map</p>} />);
@@ -41,7 +41,7 @@ describe('shell slots', () => {
   });
   it('keeps one 40px top bar in the slot grid, with no header, tab row or footer rows left (SPEC 2)', () => {
     const shell = css('ui/shell/shell.css');
-    expect(rules(shell, '.shell')).toContain('grid-template-rows: auto minmax(0, 1fr) auto;');
+    expect(rules(shell, '.shell')).toContain('grid-template-rows: auto minmax(0, 1fr);');
     expect(rules(css('ui/topbar/topbar.css'), '.tb')).toContain('height: 40px;');
     for (const selector of ['.shell-header', '.shell-tabs', '.shell-footer']) expect(rules(shell, selector)).toBe('');
   });
