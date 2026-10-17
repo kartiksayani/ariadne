@@ -132,11 +132,14 @@ for (const alreadyOpen of [true, false]) test(`native status menu opens only whe
   let expanded = alreadyOpen;
   const calls = [], trigger = { getAttribute: async name => { assert.equal(name, 'aria-expanded'); return String(expanded); },
     waitForClickable: async () => calls.push('clickable'), click: async () => { calls.push('click'); expanded = true; } };
+  let shown = 0;
   const actual = await runInNewContext(`(${openStatusFilterMenu.toString()})()`, {
+    // The filter row opens from the top bar's Filter button first; that step has its own native proof.
+    showFilters: async () => { shown++; },
     browser: { $: async selector => { assert.equal(selector, '[role="group"][aria-label="Filter items"] button[aria-haspopup="menu"]'); return trigger; } },
     wait: async condition => { calls.push('wait'); assert.ok(await condition()); },
   });
-  assert.equal(actual, trigger); assert.equal(expanded, true);
+  assert.equal(actual, trigger); assert.equal(expanded, true); assert.equal(shown, 1, 'The filter row is shown before the menu button is read');
   assert.deepEqual(calls, alreadyOpen ? [] : ['clickable', 'click', 'wait']);
 });
 

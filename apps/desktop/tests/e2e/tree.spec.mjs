@@ -5,13 +5,35 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { admissions, awaitConnected, cliRequest, snapshot } from './scripted-provider.mjs';
 import { installSearchTimingObservation, takeSearchTimingObservation } from './search-timing-observation.mjs';
-import { openSessionButton } from './session-button.mjs';
+import { goToPage, openSessionButton } from './session-button.mjs';
 import { activateOwned, identity } from '../../../../scripts/run-native-e2e.mjs';
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const row = id => browser.$(`.tree-rows [data-item-id="${id}"]`);
-const search = () => browser.$('[data-shell-search]');
+const searchField = 'input[aria-label="Search the Map"]';
+// The top bar's search is a button until the owner opens it (a click here, `/` at the keyboard); the field then stays open
+// while it holds words or until Esc clears it. `search` returns whichever of the two shows now without opening anything: its
+// enabled state tells that navigation is idle (it is disabled while a preference write is pending). `searchBox` opens the field
+// first when needed, which moves the focus into it.
+export const search = () => browser.$(`${searchField}, button[aria-label="Search the Map"]`);
+export const searchBox = async () => {
+  const field = await browser.$(searchField);
+  if (await field.isExisting()) return field;
+  const open = await browser.$('button[aria-label="Search the Map"]');
+  await open.waitForEnabled(); await open.click();
+  await field.waitForExist();
+  return field;
+};
+// The filter row is closed until the top bar's Filter button opens it.
+async function showFilters() {
+  const group = await browser.$('[role="group"][aria-label="Filter items"]');
+  if (!await group.isExisting()) {
+    const button = await browser.$('button[aria-label^="Filter by status"]');
+    await button.waitForEnabled(); await button.click();
+    await group.waitForDisplayed();
+  }
+}
 // Reference chips preview an item without selecting it; only Go to reveals it.
 export async function goToPeekItem(item, currentItemId) {
   const peek = () => browser.$('.item-peek');
@@ -37,7 +59,7 @@ export async function showFullItemQuestion(item) {
 }
 // Types the text, then waits until the debounced preference write has made it durable.
 async function setSearch(tree, value) {
-  const input = await search(); await input.waitForEnabled(); await input.setValue(value);
+  const input = await searchBox(); await input.waitForEnabled(); await input.setValue(value);
   await wait(async () => (await preferences(tree)).view.filters.search === value, 'Search text was not durably saved');
 }
 const applyRequest = operations => ({ op_id: randomUUID(), source_input_id: null, attempt_id: null,
@@ -187,9 +209,11 @@ async function focusedId() { return browser.execute(() => document.activeElement
 async function roving() {
   assert.equal(await browser.execute(() => [...document.querySelectorAll('.tree-rows [role="treeitem"]')].filter(element => element.tabIndex === 0).length), 1);
 }
+// All sessions is a page of the switcher, not a tab; it lists every registered session, which the App discovers through its
+// ordinary catalogue refresh.
 async function catalogue() {
-  const button = await browser.$('button[data-shell-tab="all_sessions"]'); await button.waitForDisplayed(); await button.waitForEnabled(); await button.click();
-  await wait(async () => await button.getAttribute('aria-current') === 'page' && await button.isEnabled(), 'Tree catalogue navigation did not finish its actual preference write');
+  await goToPage('All sessions');
+  await (await browser.$('[role="region"][aria-label="All sessions"]')).waitForDisplayed();
 }
 async function open(tree) {
   await catalogue(); const button = await readySessionButton(tree); await button.click();
@@ -345,6 +369,7 @@ async function readySessionButton(tree) {
   return button;
 }
 export async function openStatusFilterMenu() {
+  await showFilters();
   const trigger = await browser.$('[role="group"][aria-label="Filter items"] button[aria-haspopup="menu"]');
   if (await trigger.getAttribute('aria-expanded') !== 'true') {
     await trigger.waitForClickable(); await trigger.click();
@@ -500,7 +525,7 @@ export async function runTreeAcceptance(configuration) {
         alerts: [...document.querySelectorAll('[role="alert"],.nav-banner')].slice(0, 12).map(element => element.textContent.slice(0, 500)),
         statuses: [...document.querySelectorAll('[role="status"]')].slice(0, 12).map(element => element.textContent.slice(0, 500)),
         current: [...document.querySelectorAll('[aria-current]')].slice(0, 12).map(element => element.outerHTML.slice(0, 1000)),
-        controls: [...document.querySelectorAll('[role="group"][aria-label="Filter items"] button,[role="menu"][aria-label^="Filter"] button,[data-shell-search],button[data-session-id]')].slice(0, 40).map(element => {
+        controls: [...document.querySelectorAll('[role="group"][aria-label="Filter items"] button,[role="menu"][aria-label^="Filter"] button,.shell-top [aria-label="Search the Map"],button[data-session-id]')].slice(0, 40).map(element => {
           const bounds = element.getBoundingClientRect();
           return { text: element.textContent.slice(0, 200), sessionId: element.dataset.sessionId, disabled: element.disabled,
             checked: element.getAttribute('aria-checked'), expanded: element.getAttribute('aria-expanded'), active: element.hasAttribute('data-active'),
@@ -551,8 +576,9 @@ async function treeAcceptance(configuration) {
   const timingInstallation = await browser.execute(installSearchTimingObservation);
   let searchFailure;
   try {
+    await searchBox();
     for (const id of measuredIds) {
-      searchMs.push(await measureAction('input', '[data-shell-search]', [id.split('.')[0], id], async () => { const input = await search(); await input.waitForEnabled(); await input.setValue(`Native token_${id.replace('.', '_')}_end`); }, tree));
+      searchMs.push(await measureAction('input', searchField, [id.split('.')[0], id], async () => { const input = await searchBox(); await input.waitForEnabled(); await input.setValue(`Native token_${id.replace('.', '_')}_end`); }, tree));
     }
   } catch (error) { searchFailure = error;
   } finally {
@@ -594,8 +620,8 @@ async function treeAcceptance(configuration) {
   await wait(async () => JSON.stringify(await visibleIds()) === JSON.stringify(['1', '1.1']), 'Resume must remove only temporary outside-filter reveal');
   await (await search()).waitForEnabled(); await (await row('1.1')).click(); await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'Selected item preference did not persist');
   const beforeKeys = (await preferences(tree)).view;
-  // Home lands on the topic band (no item id); l steps into its first row.
-  for (const [key, id] of [['ArrowUp', '1'], ['j', '1.1'], ['k', '1'], ['End', '1.1'], ['Home', null], ['l', '1'], ['l', '1.1'], ['h', '1']]) {
+  // Home lands on the topic band (no item id); → steps into its first row; ← goes back to the parent (h and l are gone: SPEC 6.1).
+  for (const [key, id] of [['ArrowUp', '1'], ['j', '1.1'], ['k', '1'], ['End', '1.1'], ['Home', null], ['ArrowRight', '1'], ['ArrowRight', '1.1'], ['ArrowLeft', '1']]) {
     await browser.keys(key); assert.equal(await focusedId(), id); await roving();
   }
   assert.equal((await preferences(tree)).view.selected_item_id, beforeKeys.selected_item_id, 'Focus movement alone must not select or mutate preferences');
@@ -642,7 +668,7 @@ async function treeAcceptance(configuration) {
     'The real upstream edit must materially grow its native row before it can prove scroll anchoring');
   const afterEdit = await anchor(); assert.equal(afterEdit.id, beforeEdit.id); assert.ok(Math.abs(afterEdit.offset - beforeEdit.offset) <= 2, 'Live wrapped-row growth must preserve the actual visible scroll anchor');
   assert.equal(await focusedId(), '10.50', 'Live update must not steal native keyboard focus');
-  await (await search()).waitForEnabled(); await (await search()).click();
+  await (await search()).waitForEnabled(); await (await searchBox()).click();
   await wait(async () => (await preferences(tree)).view.scroll?.item_id === afterEdit.id, 'Native blur did not persist the scroll anchor');
   await (await search()).waitForEnabled();
   const saved = await preferences(tree), finalSession = await snapshot(tree);
