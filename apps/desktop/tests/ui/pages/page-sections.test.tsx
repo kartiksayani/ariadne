@@ -27,9 +27,12 @@ const rowName = (name: string) => screen.queryByRole('button', { name });
 const tab = (name: RegExp) => within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name });
 
 describe('All sessions status tabs', () => {
-  it('defaults to Open and selects Closed or All without writing', async () => {
+  it('opens on All (SPEC 14.2) and selects Open or Closed without writing', async () => {
     const { props, transport } = await setup(); render(<SessionLists {...props} currentSession={route} />);
-    expect(tab(/^Open/).getAttribute('aria-pressed')).toBe('true');
+    expect(tab(/^All/).getAttribute('aria-pressed')).toBe('true');
+    expect(tab(/^Open/).getAttribute('aria-pressed')).toBe('false');
+    expect(rowName('Open review')).toBeTruthy(); expect(rowName('Closed review')).toBeTruthy();
+    fireEvent.click(tab(/^Open/));
     expect(rowName('Open review')).toBeTruthy(); expect(rowName('Closed review')).toBeNull();
     fireEvent.click(tab(/^Closed/));
     // A closed row keeps Close, greyed (SPEC 14.2); Reopen lives on the connection card of the opened session.
@@ -84,6 +87,27 @@ describe('the unified Archive page', () => {
     await act(async () => { fireEvent.click(within(topics).getByRole('button', { name: `Restore ${topic.name}` })); });
     await waitFor(() => expect(first.topics[topic.id]!.archived_at).toBeNull());
     expect(within(screen.getByRole('region', { name: /^Topics · / })).getByText('Back in the Map')).toBeTruthy();
+  });
+  it('a session row opens that archived session to read, without restoring it', async () => {
+    const { props, second, transport } = await setup(true);
+    render(<ArchivePage {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Closed review' }));
+    expect(props.onOpenSession).toHaveBeenCalledExactlyOnceWith({ project_id: second.project_id, session_id: second.id });
+    expect(transport.mutations).toEqual([]);
+    expect(screen.getByRole('button', { name: 'Restore Closed review' })).toBeTruthy();
+  });
+  it('a topic row opens the session it was archived from', async () => {
+    const { props, first, transport } = await setup(true); const topic = Object.values(first.topics)[0]!; topic.archived_at = first.updated_at;
+    render(<ArchivePage {...props} />);
+    fireEvent.click(within(screen.getByRole('region', { name: /^Topics · / })).getByRole('button', { name: topic.name }));
+    expect(props.onOpenSession).toHaveBeenCalledExactlyOnceWith({ project_id: first.project_id, session_id: first.id });
+    expect(transport.mutations).toEqual([]);
+  });
+  it('opens nothing while navigation is saving', async () => {
+    const { props } = await setup(true);
+    render(<ArchivePage {...props} disabled />);
+    fireEvent.click(screen.getByRole('button', { name: 'Closed review' }));
+    expect(props.onOpenSession).not.toHaveBeenCalled();
   });
   it('restores a session closed and says so in its row', async () => {
     const { props, transport } = await setup(true);

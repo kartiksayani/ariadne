@@ -62,6 +62,20 @@ describe('connection actions', () => {
     }
   });
 
+  it('an archived session’s card and line say Restore session; a closed one’s say Reopen session', () => {
+    const a = everything();
+    for (const [closed, label] of [[view('closed'), 'Reopen session'], [view('closed', { archived: true }), 'Restore session']] as const) {
+      expect(cardActions(closed, a).find(action => ['reopen', 'restore'].includes(action.key))!.label).toBe(label);
+      expect(lineActions(closed, a).map(action => action.label)).toEqual([label]);
+    }
+    const archived = everything();
+    render(<ConnectionLine view={view('closed', { archived: true })} actions={archived} />);
+    expect(screen.queryByRole('button', { name: 'Reopen session' })).toBeNull();
+    expect(screen.getByRole('status').textContent).toContain('This session is archived.');
+    fireEvent.click(screen.getByRole('button', { name: 'Restore session' }));
+    expect(archived.onReopen).toHaveBeenCalledTimes(1);
+  });
+
   it('draws only what the caller can do', () => {
     expect(cardActions(view('live'), {})).toEqual([]);
     expect(cardActions(view('none'), { onCopyId: vi.fn() }).map(action => action.key)).toEqual(['copy-id']);
@@ -149,6 +163,19 @@ describe('ConnectionLine', () => {
     expect(a.onCopyInstruction).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: 'Hide steps' }));
     expect(screen.queryByText('/ariadne-connect')).toBeNull();
+  });
+
+  it('without a setup receipt there is no Copy instruction; the step says the plain next thing to do', () => {
+    const { onCopyInstruction, ...noReceipt } = everything();
+    render(<ConnectionLine view={view('none')} actions={noReceipt} />);
+    fireEvent.click(screen.getByRole('button', { name: 'How to connect' }));
+    expect(screen.queryByRole('button', { name: 'Copy instruction' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy();
+    const steps = document.querySelector('.cl-steps')!.textContent!;
+    expect(steps).toContain('Using Codex? Choose “Connect existing session” on the project’s page');
+    expect(steps).toContain('setup instruction to paste into its thread once');
+    expect(steps).toContain('Connecting sends nothing to the model.');
+    expect(onCopyInstruction).not.toHaveBeenCalled();
   });
 
   it('can be told to open its steps from outside (the card\'s "How to connect")', () => {

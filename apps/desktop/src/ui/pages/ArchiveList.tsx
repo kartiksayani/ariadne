@@ -21,7 +21,12 @@ function Section({ label, rows, props }: { readonly label: string; readonly rows
     <div className="ar-box">
       {rows.map(row => <div className="ar-row" key={`${row.kind}:${row.id}`}>
         <i className={row.kind === 'topic' ? 'ph ph-tree-structure ar-icon' : 'ph ph-terminal-window ar-icon'} aria-hidden="true" />
-        <div className="ar-id"><span className="ar-name">{row.name}</span><span className="ar-sub">{row.sub}</span></div>
+        <div className="ar-id">
+          {props.onOpen
+            ? <button type="button" className="ar-name ar-open" title="Open to read" onClick={() => props.onOpen!(row)}>{row.name}</button>
+            : <span className="ar-name">{row.name}</span>}
+          <span className="ar-sub">{row.sub}</span>
+        </div>
         <span className="ar-when">{row.when}</span>
         {row.restored
           ? <span className="ar-done"><i className="ph ph-check" aria-hidden="true" />{row.kind === 'topic' ? 'Back in the Map' : 'Restored, closed'}</span>

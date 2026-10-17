@@ -101,6 +101,8 @@ export interface ArchiveListProps {
   readonly sessions: readonly ArchiveRowData[];
   readonly topics: readonly ArchiveRowData[];
   readonly onRestore: (row: ArchiveRowData) => void;
+  /** The row's name: open it to read, as it is (a topic opens the session it came from). Restore stays its own button. Omit and the name is plain text. */
+  readonly onOpen?: (row: ArchiveRowData) => void;
   /** The row's "…" menu: remove it from Ariadne. Omit and the "…" is not drawn. */
   readonly onRemove?: (row: ArchiveRowData) => void;
 }

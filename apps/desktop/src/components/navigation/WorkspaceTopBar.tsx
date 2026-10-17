@@ -25,7 +25,9 @@ export function connectionView(state: SessionState): ConnectionView {
   const where = agent && binding?.host_location ? `${agent} in ${binding.host_location}` : agent;
   const last = session.messages.at(-1);
   const base = { agent, where, lastMessageAt: last ? clock(Date.parse(last.created_at)) : undefined };
-  if (session.archived_at != null || session.state === 'closed') return { ...base, kind: 'closed', closedAt: session.closed_at ? clock(Date.parse(session.closed_at)) : undefined };
+  if (session.archived_at != null || session.state === 'closed') {
+    return { ...base, kind: 'closed', closedAt: session.closed_at ? clock(Date.parse(session.closed_at)) : undefined, ...(session.archived_at != null ? { archived: true } : {}) };
+  }
   if (state.status === 'stale' || state.snapshot?.freshness === 'stale') return { ...base, kind: 'stale' };
   if (state.status === 'inaccessible') return { ...base, kind: 'unreadable' };
   const connection = connectionOf(binding, binding ? state.presence[binding.id] : null);
@@ -38,6 +40,8 @@ interface SessionBarProps {
   readonly bar: BarProps; readonly controllers: SessionActionControllers;
   /** Where the line above the Map goes (the session view's slot); absent on a page. */
   readonly line?: HTMLElement | null;
+  /** The setup instruction of the last connect receipt and the session it was made for. Without one for the session shown, the line has no Copy instruction. */
+  readonly setup?: { readonly sessionId: string; readonly instruction: string } | null;
 }
 
 const idleSubscribe = () => () => {};
@@ -48,7 +52,7 @@ const idleSnapshot = () => null;
  * One bar stays mounted across session changes, so a control that has focus (the switcher button, the theme button)
  * keeps it; only the per-session state (the card open, the Sending dialog) starts again.
  */
-export function WorkspaceTopBar({ bar, store: given, controllers, line }: SessionBarProps & { readonly store: SessionStore | null }) {
+export function WorkspaceTopBar({ bar, store: given, controllers, line, setup }: SessionBarProps & { readonly store: SessionStore | null }) {
   const store = bar.variant === 'first-run' ? null : given;
   const actions = useMemo(() => store ? controllers.forSession(store) : null, [controllers, store]);
   const lifecycle = useSessionLifecycleFor(actions);
@@ -67,6 +71,7 @@ export function WorkspaceTopBar({ bar, store: given, controllers, line }: Sessio
     onSending: binding && lifecycle.state === 'active' ? () => setSending(true) : undefined,
     onTryAgain: view.kind === 'stale' || view.kind === 'unreadable' ? () => { void store.refresh(); } : undefined,
     onCopyCommand: () => { void copyText('/ariadne-connect').catch(() => {}); },
+    onCopyInstruction: setup && session && setup.sessionId === session.id ? () => { void copyText(setup.instruction).catch(() => {}); } : undefined,
   };
   return <>
     <TopBar {...bar} connection={view} connectionOpen={open} onConnectionToggle={() => setOpen(value => !value)}

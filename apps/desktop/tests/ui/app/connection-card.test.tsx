@@ -74,14 +74,24 @@ describe('connection card session actions (were the session bar’s)', { timeout
     await waitFor(() => expect(commands(transport)).toEqual(['session_reopen']));
   });
 
-  it('on an archived session the card’s Reopen restores it at once', async () => {
+  it('on an archived session the card says Restore session, and it restores at once', async () => {
     const transport = await setup(value => {
       session(value).state = 'closed'; session(value).closed_at = session(value).updated_at; session(value).archived_at = session(value).updated_at;
     });
     const view = await openCard();
-    await act(async () => { fireEvent.click(view.getByRole('button', { name: 'Reopen session' })); });
+    expect(view.queryByRole('button', { name: 'Reopen session' })).toBeNull();
+    await act(async () => { fireEvent.click(view.getByRole('button', { name: 'Restore session' })); });
     await waitFor(() => expect(commands(transport)).toEqual(['session_restore']));
     expect(screen.queryByRole('dialog', { name: /^Reopen/ })).toBeNull();
+  });
+
+  it('with no agent connected and no setup receipt, the line’s steps have no Copy instruction and say what to do instead', async () => {
+    await setup(value => { session(value).active_binding_id = null; });
+    const line = await screen.findByRole('status', { name: 'Connection' });
+    fireEvent.click(within(line).getByRole('button', { name: 'How to connect' }));
+    expect(within(line).getByRole('button', { name: 'Copy' })).toBeTruthy();
+    expect(within(line).queryByRole('button', { name: 'Copy instruction' })).toBeNull();
+    expect(line.textContent).toContain('Using Codex? Choose “Connect existing session” on the project’s page');
   });
 
   it('while a session change is unconfirmed, Copy stays and Close waits', async () => {

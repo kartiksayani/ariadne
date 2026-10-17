@@ -69,7 +69,9 @@ export function connectionLine(view: ConnectionView): LineCopy | null {
   switch (view.kind) {
     case 'none': return { icon: 'ph ph-plugs', color: 'var(--st-open)', title: 'No agent is connected to this session.', text: 'You can read the Map and write answers; they wait here until one connects.' };
     case 'off': return { icon: 'ph ph-pause-circle', color: 'var(--st-open)', title: `${agent} isn’t running for this session.`, text: 'What you send is queued and goes out once, when it runs again.' };
-    case 'closed': return { icon: 'ph ph-lock-simple', color: text(62), title: 'This session is closed.', text: 'It’s read-only. Reopen it to answer; the questions that were waiting are still here.' };
+    case 'closed': if (view.archived) return { icon: 'ph ph-lock-simple', color: text(62), title: 'This session is archived.',
+      text: 'It’s read-only. Restore it, then reopen it to answer; the questions that were waiting are still here.' };
+      return { icon: 'ph ph-lock-simple', color: text(62), title: 'This session is closed.', text: 'It’s read-only. Reopen it to answer; the questions that were waiting are still here.' };
     case 'reconnect': return { icon: 'ph ph-circle-notch', color: 'var(--a-warn)', title: `Reconnecting to ${agent}…`, text: `${view.droppedAt ? `The connection dropped at ${view.droppedAt}. ` : ''}What you send waits here and goes out once, when it’s back.` };
     case 'unreadable': return { icon: 'ph ph-warning-circle', color: 'var(--a-danger)', title: 'This session can’t be read.', text: `Its file ends partway through ${view.unreadableLine ? `line ${view.unreadableLine.toLocaleString('en-US')}` : 'a line'}, so there’s no Map to show. Nothing in the file was changed, and Ariadne tries again when it changes.` };
     case 'stale': return { icon: 'ph ph-clock-counter-clockwise', color: 'var(--a-warn)', title: `Showing the last good copy${view.lastGoodAt ? `, from ${view.lastGoodAt}` : ''}.`, text: 'Newer changes in the session couldn’t be read. You can read the Map; answers wait until it can be read again.' };
@@ -81,6 +83,9 @@ export function connectionLine(view: ConnectionView): LineCopy | null {
 export interface ConnAction { readonly key: string; readonly icon: string; readonly label: string; readonly run: () => void }
 
 const make = (key: string, icon: string, label: string, run: (() => void) | undefined): ConnAction[] => run ? [{ key, icon, label, run }] : [];
+/** A closed session is reopened; an archived one (also closed) is restored, which is what its button does. */
+const comeBack = (view: ConnectionView, run: (() => void) | undefined) => view.archived
+  ? make('restore', 'ph ph-arrow-u-up-left', 'Restore session', run) : make('reopen', 'ph ph-arrow-u-up-left', 'Reopen session', run);
 
 /** The buttons of the card: what fits the state first, then Close or Reopen, then Copy session ID. Only what the caller can do is drawn. */
 export function cardActions(view: ConnectionView, a: ConnectionCardActions): ConnAction[] {
@@ -90,7 +95,7 @@ export function cardActions(view: ConnectionView, a: ConnectionCardActions): Con
     live: sending,
     none: make('connect', 'ph ph-info', 'How to connect', a.onHowToConnect),
     off: sending,
-    closed: make('reopen', 'ph ph-arrow-u-up-left', 'Reopen session', a.onReopen),
+    closed: comeBack(view, a.onReopen),
     loading: [],
     reconnect: make('again', 'ph ph-arrows-clockwise', 'Try now', a.onTryAgain),
     unreadable: [...again, ...make('file', 'ph ph-folder-simple', 'Show the file', a.onShowFile)],
@@ -105,7 +110,7 @@ export function cardActions(view: ConnectionView, a: ConnectionCardActions): Con
 export function lineActions(view: ConnectionView, a: ConnectionCardActions): ConnAction[] {
   switch (view.kind) {
     case 'off': return make('sending', 'ph ph-paper-plane-tilt', 'Sending…', a.onSending);
-    case 'closed': return make('reopen', 'ph ph-arrow-u-up-left', 'Reopen session', a.onReopen);
+    case 'closed': return comeBack(view, a.onReopen);
     case 'reconnect': return make('again', 'ph ph-arrows-clockwise', 'Try now', a.onTryAgain);
     case 'unreadable': return [...make('again', 'ph ph-arrows-clockwise', 'Try again', a.onTryAgain), ...make('file', 'ph ph-folder-simple', 'Show the file', a.onShowFile)];
     case 'stale': return make('again', 'ph ph-arrows-clockwise', 'Try again', a.onTryAgain);
