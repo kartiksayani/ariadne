@@ -94,6 +94,10 @@ export interface WorkspaceChrome {
   readonly onView?: (view: 'tree' | 'graph') => void;
   readonly filter?: { readonly active: boolean; readonly count: number; readonly onToggle: () => void };
   readonly onRecent?: () => void;
+  /** The Recent popover is open: the clock button reads pressed. */
+  readonly recentOpen?: boolean;
+  /** The Recent popover, shown in the window's overlay layer under the top bar (ui/navigation/Recent). */
+  readonly recentPanel?: ReactNode;
   readonly theme: ShellTheme;
   readonly onToggleTheme?: () => void;
   readonly textSize?: TextSize;
@@ -370,7 +374,7 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
         note: chrome.searchStatus.note ?? undefined } : {} },
     view: chrome.graph ? 'graph' as const : 'tree' as const, onView: chrome.onView ?? noop,
     filter: chrome.filter ?? { active: false, count: 0, onToggle: noop },
-    recent: { active: false, onToggle: chrome.onRecent ?? noop },
+    recent: { active: !!chrome.recentOpen, onToggle: chrome.onRecent ?? noop },
     archive: { active: view.kind === 'page' && view.page === 'archive', onOpen: () => showPage('archive') },
     textSize: chrome.textSize ?? 80, onTextSizeChange: chrome.onTextSizeChange ?? noop,
     theme: chrome.theme, onToggleTheme: chrome.onToggleTheme ?? noop,
@@ -391,7 +395,7 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
     legacy={page ? undefined : { conversation }}
     overlay={<>{switcherOpen && <SwitcherMenu projects={switcher.projects} onClose={closeSwitcher}
       onOpenSession={(target, _projectId, itemId) => openAt(target.route, itemId)} onOpenPage={page => showPage(page)} />}
-    {helpOpen && <HelpPanel narrow={narrow} onClose={closeHelp} />}{registering
+    {helpOpen && <HelpPanel narrow={narrow} onClose={closeHelp} />}{onSession && chrome.recentPanel}{registering
       ? <RegisterProject store={store} initialRoot={registrationRoot} disabled={mutationDisabled} close={() => setRegistering(false)} />
       : binding ? <BindSession store={store} project={binding} sessions={sessions.filter(session => session.project_id === binding.project_id)}
         adapters={adapterChoices} discovery={discovery} disabled={mutationDisabled} close={() => setBinding(null)} /> : undefined}</>} />

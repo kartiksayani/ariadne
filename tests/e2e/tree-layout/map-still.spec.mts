@@ -61,8 +61,13 @@ type Trigger = readonly [name: string, kind: 'still' | 'held', subject: string |
   change: (page: Page) => Promise<void>, done: (page: Page) => Promise<void>];
 const nothing = async () => {};
 const triggers: readonly Trigger[] = [
-  ['a New marker clears', 'still', '11', nothing, page => seen(page, '11'), page => expect(row(page, '11').locator('.tree-change-marker')).toHaveCount(0)],
-  ['a Changed marker clears', 'still', '12', nothing, page => seen(page, '12'), page => expect(row(page, '12').locator('.tree-change-marker')).toHaveCount(0)],
+  ['a New marker clears', 'still', '11', nothing, page => seen(page, '11'), page => expect(row(page, '11').getByTestId('change-marker')).toHaveCount(0)],
+  ['a Changed marker clears', 'still', '12', nothing, page => seen(page, '12'), page => expect(row(page, '12').getByTestId('change-marker')).toHaveCount(0)],
+  // The popovers open over the Map and take no room in it (D18, D19).
+  ['What changed opens', 'still', '12', nothing, page => page.getByRole('button', { name: /new|changed|changes since/ }).first().click(),
+    page => expect(page.getByRole('dialog', { name: 'What changed' })).toBeVisible()],
+  ['Recent opens', 'still', '12', nothing, page => page.getByRole('button', { name: 'Recent' }).click(),
+    page => expect(page.getByRole('dialog', { name: 'Recent items' })).toBeVisible()],
   // The band's Ack all goes with the topic's only result to ack.
   ['an Ack lands: the row\'s Ack and the band\'s Ack all go', 'still', '12', nothing, page => agent(page, 'ack-lands'), async page => {
     await expect(row(page, '12').getByRole('button', { name: /^Ack/ })).toHaveCount(0);

@@ -70,15 +70,15 @@ describe('ordinary desktop composition', () => {
     const detail = await screen.findByRole('article', { name: `Detail of ${session.items['1']!.question}` });
     const row = () => document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1.1"]')!;
     expect(within(row()).getByRole('img', { name: 'New to you' })).toBeTruthy();
-    const since = screen.getAllByRole('region', { name: 'Since you were here' }).find(region => within(region).queryByRole('button', { name: /^Since you were here/ }))!;
-    fireEvent.click(within(since).getByRole('button', { name: /^Since you were here/ }));
+    fireEvent.click(screen.getByRole('button', { name: /1 new/ }));
+    const since = screen.getByRole('dialog', { name: 'What changed' });
     expect(within(since).getByRole('button', { name: 'New receipt branch' })).toBeTruthy();
     const chip = within(detail).getByRole('button', { name: `${target.question} · Open` });
     // Past the 1 s that Details and the dock wait before marking seen.
     vi.useFakeTimers(); fireEvent.click(chip); await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
     expect(screen.getByRole('dialog', { name: `Peek: ${target.question}` })).toBeTruthy();
     // The card says it is New, and the Map, the Since card and the saved reads all still do.
-    expect(screen.getByRole('dialog').querySelector('.peek-marker')?.textContent).toBe('New');
+    expect(within(screen.getByRole('dialog', { name: `Peek: ${target.question}` })).getByTestId('change-marker').getAttribute('aria-label')).toBe('New');
     expect(within(row()).getByRole('img', { name: 'New to you' })).toBeTruthy();
     expect(within(since).getByRole('button', { name: 'New receipt branch' })).toBeTruthy();
     fireEvent.keyDown(document, { key: 'Escape' }); await act(async () => { await vi.advanceTimersByTimeAsync(500); });

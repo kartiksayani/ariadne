@@ -102,7 +102,7 @@ async function changesFit(surface: Locator) {
   const layout = await surface.evaluate(element => {
     const card = element.getBoundingClientRect();
     return { overflow: element.scrollWidth - element.clientWidth,
-      children: [...element.querySelectorAll('.change-name, .change-read-as, .brief-text, .change-comparison, .since-seen')].map(child => {
+      children: [...element.querySelectorAll('.change-name, .change-read-as, .brief-text, .change-comparison, .changes-seen')].map(child => {
         const rect = child.getBoundingClientRect();
         return { text: child.textContent, left: rect.left - card.left, right: rect.right - card.right,
           overflow: child.scrollWidth - child.clientWidth };
@@ -114,6 +114,14 @@ async function changesFit(surface: Locator) {
     expect(child.right, `${child.text} ends inside its card`).toBeLessThanOrEqual(1);
     expect(child.overflow, `${child.text} wraps instead of clipping`).toBeLessThanOrEqual(1);
   }
+}
+
+/** Opens the band's What changed popover (D18) over the Map and returns it. */
+async function openChanges(page: Page) {
+  await page.getByRole('button', { name: /new|changed|changes since/ }).first().click();
+  const popover = page.getByRole('dialog', { name: 'What changed', exact: true });
+  await expect(popover).toBeVisible();
+  return popover;
 }
 
 async function compactCompare(surface: Locator) {
@@ -168,9 +176,9 @@ for (const theme of ['dark', 'light'] as const) {
     const older = page.locator('.change-history-entry').first();
     await expect(older).toContainText('Rewording');
     const historyControl = await compactCompare(older);
-    const since = page.getByRole('region', { name: 'Since you were here', exact: true });
-    await since.getByRole('button', { name: /^Since you were here ·/ }).click();
-    const sinceCard = since.locator('.since-card').filter({ has: page.getByRole('button', { name: 'Retry schedule', exact: true }) });
+    await openChanges(page);
+    const sinceCard = page.getByRole('dialog', { name: 'What changed', exact: true }).getByTestId('changes-row')
+      .filter({ has: page.getByRole('button', { name: 'Retry schedule', exact: true }) });
     const sinceControl = await compactCompare(sinceCard);
     expect([currentControl, historyControl, sinceControl]).toEqual([answerControl, answerControl, answerControl]);
     await testInfo.attach(`changes-comparisons-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
@@ -183,9 +191,9 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(answer).toContainText('Because you chose Keep retries quiet:');
     await expect(answer.locator('.change-owner-words, .change-read-as')).toHaveCount(0);
     await changesFit(answer);
-    const brief = page.getByRole('region', { name: 'Topic brief', exact: true });
-    await brief.scrollIntoViewIfNeeded();
-    await expect(brief.locator('.brief-attribution')).toContainText('By the agent · as of');
+    const brief = (await openChanges(page)).getByRole('region', { name: 'Topic brief', exact: true });
+    await brief.getByRole('button', { name: /Brief/ }).click();
+    await expect(brief).toContainText('by the agent · updated');
     await expect(brief.locator('time')).toHaveAttribute('datetime', '2026-10-07T15:02:00.000Z');
     await expect(brief.locator('.brief-list').nth(0).locator('.change-name')).toHaveText(['Recovery policy']);
     await expect(brief.locator('.brief-list').nth(1).locator('.change-name')).toHaveText(['Recovery question']);
@@ -202,37 +210,40 @@ for (const theme of ['dark', 'light'] as const) {
     await testInfo.attach(`changes-brief-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
   });
 
-  test(`M2 Since cards acknowledge Seen before leaving (${theme})`, async ({ page, origin }) => {
+  test(`M2 a row marked Seen stays, dimmed, until the popover closes (${theme})`, async ({ page, origin }) => {
     await openApp(page, origin, { ...frameSpec('changes-typed'), theme });
-    const since = page.getByRole('region', { name: 'Since you were here', exact: true });
-    await since.getByRole('button', { name: /^Since you were here ·/ }).click();
-    const card = since.locator('.since-card').filter({ has: page.getByRole('button', { name: 'Retry schedule', exact: true }) });
+    const popover = await openChanges(page);
+    const card = popover.getByTestId('changes-row').filter({ has: page.getByRole('button', { name: 'Retry schedule', exact: true }) });
     await changesFit(card);
-    await card.getByRole('button', { name: 'Seen', exact: true }).click();
-    await expect(card.getByRole('button', { name: '✓ Seen', exact: true })).toBeVisible();
-    await expect(card.getByRole('button', { name: '✓ Seen', exact: true })).toBeDisabled();
-    await expect(card).toHaveCount(0, { timeout: 6000 });
+    await card.getByRole('button', { name: 'Mark Retry schedule seen', exact: true }).click();
+    await expect(card.getByRole('button', { name: 'Retry schedule is seen', exact: true })).toBeDisabled();
+    await expect(card.getByTestId('change-marker')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(popover).toHaveCount(0);
     await expect(page.locator('[data-item-id="3.9"]')).toContainText('Recovery question');
+    const again = await openChanges(page);
+    await expect(again.getByRole('button', { name: 'Retry schedule', exact: true })).toHaveCount(0);
   });
 
-  test(`M2 long absence puts the brief first and offers reversible catch-up (${theme})`, async ({ page, origin }, testInfo) => {
+  test(`M2 long absence leads with a calm summary, then the brief, and offers reversible catch-up (${theme})`, async ({ page, origin }, testInfo) => {
     await openApp(page, origin, { ...frameSpec('changes-away'), theme });
-    const brief = page.getByRole('region', { name: 'Topic brief', exact: true });
-    const since = page.getByRole('region', { name: 'Since you were here', exact: true });
-    await expect(since).toContainText('8 changes while you were away');
-    await expect(since.locator('.since-card')).toHaveCount(0);
-    const briefBox = await brief.boundingBox(), sinceBox = await since.boundingBox();
-    expect(briefBox).not.toBeNull(); expect(sinceBox).not.toBeNull();
-    expect(briefBox!.y + briefBox!.height).toBeLessThan(sinceBox!.y);
-    await changesFit(brief); await changesFit(since);
-    await since.getByRole('button', { name: 'Mark all seen', exact: true }).click();
-    // Caught up leaves no box: a check in the brief's header line, with Undo beside it while it is offered.
-    await expect(since).toHaveCount(0);
-    await expect(brief.getByRole('img', { name: 'All caught up' })).toBeVisible();
+    const popover = await openChanges(page);
+    const away = popover.getByRole('region', { name: 'While you were away', exact: true });
+    const brief = popover.getByRole('region', { name: 'Topic brief', exact: true });
+    await expect(away).toContainText('You were away since');
+    const awayBox = await away.boundingBox(), briefBox = await brief.boundingBox();
+    expect(awayBox).not.toBeNull(); expect(briefBox).not.toBeNull();
+    expect(awayBox!.y + awayBox!.height).toBeLessThan(briefBox!.y);
+    await changesFit(away);
+    await away.getByRole('button', { name: 'Read the brief', exact: true }).click();
     await changesFit(brief);
+    await away.getByRole('button', { name: 'Mark all caught up', exact: true }).click();
+    // Caught up: the popover says so, and Undo is beside it and in the band while it is offered.
+    await expect(popover.getByText(/All caught up\. The markers are cleared/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeVisible();
     await testInfo.attach(`changes-caught-up-undo-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
-    await brief.getByRole('button', { name: 'Undo', exact: true }).click();
-    await expect(since).toContainText('8 changes while you were away');
+    await popover.getByRole('button', { name: '↺ Undo', exact: true }).click();
+    await expect(away).toContainText('You were away since');
     await expect(brief.locator('.brief-list').nth(1).locator('.change-name')).toHaveText(['Recovery question']);
     await testInfo.attach(`changes-away-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
   });
@@ -244,9 +255,8 @@ const mapSizes = [{ brief: 'map-brief-long', map: 'map-thread' }, { brief: 'map-
 for (const { brief: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) {
   test(`Topic brief names flow across the width instead of one per line: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
     await openApp(page, origin, { ...frameSpec(frame), theme });
-    const brief = page.getByRole('region', { name: 'Topic brief', exact: true });
-    await page.locator('.tree-scroll').evaluate(element => { element.scrollTop = 0; });
-    await brief.scrollIntoViewIfNeeded();
+    const brief = (await openChanges(page)).getByRole('region', { name: 'Topic brief', exact: true });
+    await brief.getByRole('button', { name: /Brief/ }).click();
     const decided = brief.locator('.brief-list').nth(0);
     // Every name is there, in order.
     await expect(decided.locator('.change-name')).toHaveText(['Recovery policy', ...longDecided]);
@@ -341,56 +351,14 @@ for (const { map: frame } of mapSizes) test(`The Back-to pill floats inside the 
   for (const button of boxes.buttons) expect(button.right).toBeLessThanOrEqual(boxes.crumbs.right + 0.5);
 });
 
-/** The selected path and the plain guide must each run as one line from the topic band through its cards to the items. */
-async function railRuns(page: Page) {
-  await page.locator('.tree-scroll').evaluate(element => { element.scrollTop = 0; });
-  await settle(page);
-  return page.locator('.tree-topic-group').first().evaluate(group => {
-    const origin = group.getBoundingClientRect(), topic = group.querySelector('.tree-topic')!.getBoundingClientRect();
-    const lines = [...group.querySelectorAll<HTMLElement>('.tree-guide')].map(line => ({ rect: line.getBoundingClientRect(), on: line.style.width === '1.5px' }))
-      .filter(line => Math.abs(line.rect.left - origin.left - 20) < 1.5 && line.rect.height > 0);
-    const runs = (on: boolean) => {
-      const merged: number[][] = [];
-      for (const [top, bottom] of lines.filter(line => line.on === on).map(line => [line.rect.top, line.rect.bottom]).sort((a, b) => a[0] - b[0])) {
-        const last = merged.at(-1);
-        if (last && top <= last[1] + 1.5) last[1] = Math.max(last[1], bottom); else merged.push([top, bottom]);
-      }
-      return merged;
-    };
-    const cards = group.querySelector('.topic-changes')?.getBoundingClientRect(), first = group.querySelector('[data-item-id]')?.getBoundingClientRect();
-    return { off: runs(false), on: runs(true), topic: { top: topic.top, bottom: topic.bottom }, first: first ? { top: first.top, bottom: first.bottom } : null,
-      cardsLeft: cards ? cards.left - origin.left : null, cardsHeight: cards?.height ?? 0 };
-  });
-}
-for (const { name, frame, theme, act } of [
-  { name: 'brief open, no since cards', frame: 'map-thread', theme: 'dark', act: async () => {} },
-  { name: 'brief open, no since cards', frame: 'map-thread', theme: 'light', act: async () => {} },
-  { name: 'brief open, no since cards at 900', frame: 'map-thread-small', theme: 'dark', act: async () => {} },
-  { name: 'brief collapsed', frame: 'map-thread', theme: 'dark', act: async (page: Page) => { await page.getByRole('button', { name: 'Topic brief', exact: true }).first().click(); } },
-  { name: 'long brief with since cards', frame: 'map-brief-long', theme: 'dark', act: async (page: Page) => { await page.getByRole('button', { name: /^Since you were here ·/ }).click(); } },
-  { name: 'long brief with since cards', frame: 'map-brief-long', theme: 'light', act: async (page: Page) => { await page.getByRole('button', { name: /^Since you were here ·/ }).click(); } },
-  { name: 'long brief collapsed at 900', frame: 'map-brief-long-small', theme: 'dark', act: async (page: Page) => { await page.getByRole('button', { name: 'Topic brief', exact: true }).click(); } },
-] as const) test(`The thread is one unbroken line through the topic cards: ${name} (${frame}, ${theme})`, async ({ page, origin }, testInfo) => {
-  await openApp(page, origin, { ...frameSpec(frame), theme });
-  await act(page);
-  const runs = await railRuns(page);
-  expect(runs.off, 'the plain guide is one line from the band to the last item').toHaveLength(1);
-  expect(runs.on, 'the accent thread is one line from the band to the selected path').toHaveLength(1);
-  for (const run of [runs.off[0]!, runs.on[0]!]) {
-    expect(run[0], 'it starts inside the band').toBeLessThanOrEqual(runs.topic.bottom);
-    expect(run[1], 'it reaches the first item').toBeGreaterThanOrEqual(runs.first!.top);
-  }
-  expect(runs.cardsHeight).toBeGreaterThan(0);
-  expect(runs.cardsLeft!, 'the cards sit clear of the rail').toBeGreaterThanOrEqual(24);
-  await testInfo.attach(`thread-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
-});
+// The thread through the topic cards is gone with the cards: the brief and the changes are the band's popover (D18).
+// The thread's own checks belong to the Map look (D2).
 
 for (const { map: frame } of mapSizes) test(`A folded topic draws no rail below its band: ${frame}`, async ({ page, origin }) => {
   await openApp(page, origin, frameSpec(frame));
   const group = page.locator('.tree-topic-group').first();
   await group.locator('.tree-topic .tree-chevron').dispatchEvent('click');
   await expect(group.locator('.tree-topic')).toHaveAttribute('aria-expanded', 'false');
-  await expect(group.locator('.tree-topic-cards')).toHaveCount(0);
   const below = await group.evaluate(element => {
     const band = element.querySelector('.tree-topic')!.getBoundingClientRect();
     return [...element.querySelectorAll('.tree-guide')].filter(line => line.getBoundingClientRect().height > 0 && line.getBoundingClientRect().bottom > band.bottom + 2).length;
@@ -398,48 +366,25 @@ for (const { map: frame } of mapSizes) test(`A folded topic draws no rail below 
   expect(below).toBe(0);
 });
 
-for (const frame of ['map-thread', 'map-thread-small'] as const) for (const theme of ['dark', 'light'] as const) {
-  test(`Nothing to catch up on is a check in the brief header, not a box: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
-    await openApp(page, origin, { ...frameSpec(frame), theme });
-    await page.locator('.tree-scroll').evaluate(element => { element.scrollTop = 0; });
-    await expect(page.getByRole('region', { name: 'Since you were here', exact: true })).toHaveCount(0);
-    const brief = page.getByRole('region', { name: 'Topic brief', exact: true }).first();
-    const icon = brief.getByRole('img', { name: 'All caught up' });
-    await expect(icon).toBeVisible();
-    await expect(icon).toHaveAttribute('title', 'All caught up');
-    const line = await brief.evaluate(element => {
-      const toggle = element.querySelector('button')!.getBoundingClientRect(), mark = element.querySelector('[aria-label="All caught up"]')!.getBoundingClientRect();
-      return { sameLine: Math.abs((toggle.top + toggle.height / 2) - (mark.top + mark.height / 2)) < 8, after: mark.left >= toggle.right - 0.5 };
-    });
-    expect(line).toEqual({ sameLine: true, after: true });
-    await testInfo.attach(`caught-up-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
-  });
-}
-
 for (const size of [{ width: 1280, height: 800 }, { width: 900, height: 650 }] as const) for (const theme of ['dark', 'light'] as const) {
-  test(`Caught up keeps Undo beside the check, and changes keep their box: ${size.width}x${size.height} (${theme})`, async ({ page, origin }, testInfo) => {
+  test(`The What changed popover fits the window, never holds the Map, and keeps Undo reachable: ${size.width}x${size.height} (${theme})`, async ({ page, origin }, testInfo) => {
     await openApp(page, origin, { ...frameSpec('changes-away'), ...size, theme });
-    const brief = page.getByRole('region', { name: 'Topic brief', exact: true });
-    const since = page.getByRole('region', { name: 'Since you were here', exact: true });
-    // While there are changes the box is today's, unchanged.
-    await expect(since).toContainText('8 changes while you were away');
-    await expect(brief.getByRole('img', { name: 'All caught up' })).toHaveCount(0);
+    const rowTop = () => page.locator('[data-item-id]').first().evaluate(element => element.getBoundingClientRect().top);
+    const before = await rowTop();
+    const popover = await openChanges(page);
+    expect(await rowTop(), 'opening it moves nothing in the Map').toBe(before);
+    const box = (await popover.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(size.width);
+    expect(box.y).toBeGreaterThanOrEqual(0); expect(box.y + box.height).toBeLessThanOrEqual(size.height);
+    await changesFit(popover.locator('.changes-body'));
     await testInfo.attach(`has-changes-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
-    await since.getByRole('button', { name: 'Mark all seen', exact: true }).click();
-    await expect(since).toHaveCount(0);
-    const check = brief.getByRole('img', { name: 'All caught up' }), undo = brief.getByRole('button', { name: 'Undo', exact: true });
-    await expect(check).toBeVisible(); await expect(undo).toBeVisible();
-    const line = await brief.evaluate(element => {
-      const toggle = element.querySelector('button')!.getBoundingClientRect(), mark = element.querySelector('[aria-label="All caught up"]')!.getBoundingClientRect();
-      const undo = [...element.querySelectorAll('button')].find(button => button.textContent === 'Undo')!.getBoundingClientRect();
-      const middle = (rect: DOMRect) => rect.top + rect.height / 2;
-      return { oneLine: Math.abs(middle(toggle) - middle(mark)) < 8 && Math.abs(middle(toggle) - middle(undo)) < 8, ordered: toggle.right <= mark.left + 0.5 && mark.right <= undo.left + 0.5 };
-    });
-    expect(line).toEqual({ oneLine: true, ordered: true });
-    await changesFit(brief);
+    await popover.getByRole('button', { name: 'Mark all caught up', exact: true }).click();
+    const undo = page.getByRole('button', { name: 'Undo', exact: true });
+    await expect(undo).toBeVisible();
     await testInfo.attach(`caught-up-undo-${theme}`, { body: await page.screenshot(), contentType: 'image/png' });
-    await undo.click();
-    await expect(since).toContainText('8 changes while you were away');
+    await popover.getByRole('button', { name: '↺ Undo', exact: true }).click();
+    await expect(popover).toContainText('You were away since');
+    expect(await rowTop(), 'catching up and undoing move nothing in the Map').toBe(before);
   });
 }
 

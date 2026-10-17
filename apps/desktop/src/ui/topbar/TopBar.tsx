@@ -137,7 +137,7 @@ export function TopBar(props: TopBarProps) {
         disabled={disabled} onClick={props.filter.onToggle}>
         <i className="ph ph-funnel" aria-hidden="true" />{props.filter.count > 0 && <span className="tb-badge" aria-hidden="true">{props.filter.count}</span>}
       </button>
-      <button type="button" className="p-iconbtn tb-icon" title="Recent ( ⌘E )" aria-label="Recent" aria-pressed={props.recent.active} data-active={props.recent.active || undefined}
+      <button type="button" className="p-iconbtn tb-icon" data-popover-trigger="recent" title="Recent ( ⌘E )" aria-label="Recent" aria-haspopup="dialog" aria-expanded={props.recent.active} aria-pressed={props.recent.active} data-active={props.recent.active || undefined}
         disabled={disabled} onClick={props.recent.onToggle}><i className="ph ph-clock-counter-clockwise" aria-hidden="true" /></button>
     </>}
     {!narrow && <>

@@ -18,7 +18,7 @@ import { useSupervisorHealth } from '../../components/bindings/health';
 import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { useIntents } from '../intents';
 import { notices as noticeStore } from '../pages/notices';
-import { chipsOf, closed, collapsedNote, mapChanges, nextMarkedItem, oldestWaiting, parentKey, sessionBar, stripOf, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row, type SearchReveal } from './model';
+import { chipsOf, closed, collapsedNote, mapChanges, nextMarkedItem, parentKey, sessionBar, stripOf, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row, type SearchReveal } from './model';
 import { alsoMatching, matchCount, searchTerms, type MapMatch } from '../../selectors/tree/search';
 import { MapSearchContext, type MapSearch, type MapSearchStatus } from './mapSearch';
 import { Keycap } from '../parts/parts';
@@ -26,7 +26,6 @@ import { Strip } from './Strip';
 import { hiddenGroupKey, hiddenGroupsFor, hiddenSource } from './hidden';
 import { HideIcon } from '../shared/HideIcon';
 import { ackTarget, ackTitle, useAck } from '../shared/ack';
-import { Guides } from './Guides';
 import { ItemRow, type RowAction } from './ItemRow';
 import { TopicRow, type TopicAction } from './TopicRow';
 import { TopicReply } from '../answer/TopicReply';
@@ -53,7 +52,7 @@ import { isViewConflict } from '../shared/conflictNotice';
 import { TreeFonts, useTreeFonts } from './fonts';
 import { branchItems, breadcrumbItems, focusedRows } from './gettingAround';
 import { usePeek } from '../peek/Peek';
-import { RecentDialog, RecentTrail } from '../navigation/Recent';
+import { ChangesOpener } from '../changes/ChangesOpener';
 import { navigationVisits } from '../navigation/visits';
 import { AckAll } from '../navigation/AckAll';
 import { ackAllItems } from '../navigation/ackAllController';
@@ -87,8 +86,6 @@ export interface TreeViewProps {
   readonly graph?: ReactNode;
   /** Notices above the rows: stale data, recovery. */
   readonly notices?: ReactNode;
-  /** Expanded topic information below its sticky header, above the item rows. */
-  readonly topicContent?: (topicId: string) => ReactNode;
   readonly summaries: readonly Immutable<SessionSummary>[];
   readonly now?: () => number;
   /** The tree selected an item; restoration preserves the current detail state. */
@@ -177,7 +174,6 @@ export function TreeView(props: TreeViewProps) {
   const [kbd, setKbd] = useState(false);
   const [continuing, setContinuing] = useState<string | null>(null);
   const [replying, setReplying] = useState<string | null>(null);
-  const [recentOpen, setRecentOpen] = useState(false);
   useEffect(() => navigationVisits.bind(navigation), [navigation]);
   useOwnerDrafts(drafts, raw);
   const lifecycle = useSessionLifecycleFor(actions);
@@ -513,7 +509,6 @@ export function TreeView(props: TreeViewProps) {
   useIntents({
     'focus.toggle': toggleSelectedFocus,
     'topic.continue': continueSelected,
-    'recent.open': () => { if (!session) return false; setRecentOpen(true); return true; },
     // n outlines the next unseen row; the Graph and the bigger view have none.
     'map.nextUnseen': ({ repeat }) => { if (graph || covered) return false; if (!repeat) nextCallbacks.current(); return true; },
     'map.backToSelected': () => { if (graph || covered || !selectedId) return false; revealSelected(true); return true; },
@@ -1048,10 +1043,9 @@ export function TreeView(props: TreeViewProps) {
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
         reply={replying === row.topic.id && !archivedMode ? <TopicReply drafts={drafts} store={store} actions={actions} topicId={row.topic.id}
           agent={bar?.agent ?? 'the agent'} onClose={() => { setReplying(null); focusRow(row.key); }} /> : null} fix={fixOf(row)} />
-      {/* The topic's rail runs on through its cards, so the thread is one line from the band to the first item. */}
-      {row.expanded && props.topicContent && <div className="tree-topic-cards" data-topic-cards={row.topic.id}>
-        <Guides guides={row.guides.filter(guide => guide.kind === 'line').map(guide => ({ ...guide, fromBullet: false }))} />
-        {props.topicContent(row.topic.id)}</div>}
+      {/* Until the band's changes slot lands, the opener sits in a line of its own that is always there, so it appearing or
+          clearing never moves the Map. The popover it opens takes no room in the Map. */}
+      {session && <div className="tree-changes-slot"><ChangesOpener session={session} topicId={row.topic.id} seen={seen} navigation={navigation} onOpenItem={id => select(id, false)} /></div>}
       {items.map(row => row.kind === 'hidden'
         ? <Strip key={row.key} variant="hidden" row={stripOf(row)} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleHiddenGroup} />
         : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={focusDisabled} closedReason={session ? sessionAnswerBlocked(session) : undefined}
@@ -1128,15 +1122,7 @@ export function TreeView(props: TreeViewProps) {
     onMouseDownCapture={() => { if (kbd) setKbd(false); }}>
     <span role="status" className="tree-unseen-announcement">{noUnseen ? 'No unseen items.' : ''}</span>
     {/* The filter control ends this row, so it needs no row of its own. Over a loaded graph it sits in the graph's legend row instead. */}
-    {filtersShown && !graphShown && <div className="tree-recent">
-      {session && !graph && <><RecentTrail session={session} entries={view?.recent_items}
-        nextWaiting={oldestWaiting(session)} onReveal={id => select(id, false)} />
-      <button type="button" className="btn btn-ghost" title="Recent (⌘E)" onClick={() => setRecentOpen(true)}>Recent</button></>}
-      {filterBar}
-    </div>}
-    {session && recentOpen && lift(<RecentDialog session={session} entries={view?.recent_items}
-      seen={seen}
-      onReveal={id => { if (covered && props.onOpenItem) props.onOpenItem(id); else select(id, false); }} onClose={() => setRecentOpen(false)} />)}
+    {filtersShown && !graphShown && <div className="tree-recent">{filterBar}</div>}
     {model && !graph && !model.chips.has('all') && <Banner icon="ph ph-funnel" actions={<><span aria-hidden="true">·</span><button type="button" className="btn btn-ghost" disabled={nav.writing || nav.pendingOperationId !== null} onClick={onClearFilters}>Clear filters</button></>}>
       Showing {model.shownCount} of {model.itemCount} items{model.hiddenCount > 0 ? ` (${model.hiddenCount} hidden)` : ''} in the statuses you picked</Banner>}
     {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>

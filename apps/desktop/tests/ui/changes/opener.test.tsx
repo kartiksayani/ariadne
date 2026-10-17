@@ -1,14 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { ChangeMarker } from '../../../src/ui/changes/ChangeMarker';
-import { ChangesOpener } from '../../../src/ui/changes/ChangesOpener';
-import { NavigationStore, useNavigation } from '../../../src/state/navigation/store';
-import { useReadingSeen } from '../../../src/state/preferences/reading';
-import { createDesktopService } from '../../../src/data/service';
-import { AppTransport, route } from '../app/transport';
-import { changesFixture } from './fixture';
+import { route } from '../app/transport';
+import { setupChanges, stores } from './harness';
 
-const stores: NavigationStore[] = [];
 afterEach(() => { cleanup(); stores.splice(0).forEach(store => store.stop()); vi.useRealTimers(); localStorage.clear(); });
 
 describe('ChangeMarker', () => {
@@ -33,49 +28,33 @@ describe('ChangeMarker', () => {
   });
 });
 
-async function setup(updated = 2, replaced = 1, added = 1) {
-  vi.useFakeTimers(); vi.setSystemTime('2026-10-10T02:00:00Z');
-  const value = changesFixture(updated, replaced, added), transport = new AppTransport();
-  transport.sessions.set(value.session.id, value.session); transport.preferences.seen = [value.seen];
-  transport.preferences.global.selected_navigation = { kind: 'session', session: route };
-  const navigation = new NavigationStore(createDesktopService(transport)); stores.push(navigation);
-  await navigation.start(); await navigation.opened.open(route).refresh();
-  const onOpenItem = vi.fn();
-  function Harness() {
-    const nav = useNavigation(navigation), seen = useReadingSeen(navigation.reading, nav.preferences, route);
-    return <div className="product-app"><ChangesOpener session={value.session} topicId={value.topic.id} seen={seen} navigation={navigation} onOpenItem={onOpenItem} /></div>;
-  }
-  render(<Harness />);
-  return { ...value, transport, navigation, onOpenItem };
-}
-
 describe('ChangesOpener', () => {
   it('renders nothing when nothing is unseen', async () => {
-    const value = await setup(0, 0, 0);
-    expect(value.navigation.getSnapshot().preferences).not.toBeNull();
-    expect(document.querySelector('.changes-opener')).toBeNull();
+    await setupChanges(0, 0, 0);
+    expect(screen.queryByRole('button')).toBeNull();
   });
   it('counts what is new and what changed, with the time of the last look', async () => {
-    await setup();
+    await setupChanges(2, 1, 1);
     const opener = screen.getByRole('button', { name: /1 new.*3 changed/ });
     expect(opener.getAttribute('aria-expanded')).toBe('false');
     expect(opener.textContent).toMatch(/since \d\d:\d\d/);
   });
   it('opens a popover with the since-you-were-here rows, labelled and marked', async () => {
-    const value = await setup();
+    const value = await setupChanges(2, 1, 1);
     fireEvent.click(screen.getByRole('button', { name: /1 new/ }));
     const popover = screen.getByRole('dialog', { name: 'What changed' });
     expect(popover.closest('.product-app')).not.toBeNull();
-    const rows = within(popover).getAllByRole('listitem').filter(row => row.classList.contains('changes-row'));
+    const rows = within(popover).getAllByTestId('changes-row');
     expect(rows).toHaveLength(4);
     expect(within(popover).getAllByTestId('change-marker').map(marker => marker.getAttribute('data-kind')).sort()).toEqual(['changed', 'changed', 'changed', 'new']);
     expect(within(popover).getByText('New name A').closest('li')!.textContent).toContain('New');
+    expect(within(popover).getByText(/Open → Replaced|Replaced by/)).toBeTruthy();
     fireEvent.click(within(popover).getByRole('button', { name: 'Updated name A' }));
     expect(value.onOpenItem).toHaveBeenCalledWith('updated-0');
     expect(screen.queryByRole('dialog', { name: 'What changed' })).toBeNull();
   });
   it('closes on Escape and on a press outside, and returns focus to the opener on Escape', async () => {
-    await setup();
+    await setupChanges(2, 1, 1);
     const opener = screen.getByRole('button', { name: /1 new/ });
     fireEvent.click(opener);
     fireEvent.keyDown(window, { key: 'Escape' });
@@ -85,8 +64,16 @@ describe('ChangesOpener', () => {
     fireEvent.pointerDown(document.body);
     expect(screen.queryByRole('dialog', { name: 'What changed' })).toBeNull();
   });
+  it('closes when the Map scrolls but not when its own list does', async () => {
+    await setupChanges(2, 1, 1);
+    fireEvent.click(screen.getByRole('button', { name: /1 new/ }));
+    fireEvent.scroll(screen.getByRole('dialog', { name: 'What changed' }).querySelector('.changes-body')!);
+    expect(screen.getByRole('dialog', { name: 'What changed' })).toBeTruthy();
+    fireEvent.scroll(document.body.firstElementChild!);
+    expect(screen.queryByRole('dialog', { name: 'What changed' })).toBeNull();
+  });
   it('clears a marker only through a row’s own button, not by opening, and shows Seen', async () => {
-    const value = await setup();
+    const value = await setupChanges(2, 1, 1);
     fireEvent.click(screen.getByRole('button', { name: /1 new/ }));
     expect(value.navigation.reading.getSnapshot()).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Mark Updated name A seen' }));
@@ -95,7 +82,7 @@ describe('ChangesOpener', () => {
     expect(screen.getByRole('button', { name: /1 new.*2 changed/ })).toBeTruthy();
   });
   it('marks everything caught up with an 8 second Undo that restores the markers', async () => {
-    const value = await setup();
+    const value = await setupChanges(2, 1, 1);
     fireEvent.click(screen.getByRole('button', { name: /1 new/ }));
     fireEvent.click(screen.getByRole('button', { name: /Mark all caught up/ }));
     expect(screen.getByText(/All caught up\. The markers are cleared; nothing was acked or changed\./)).toBeTruthy();

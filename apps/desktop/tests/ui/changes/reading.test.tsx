@@ -18,6 +18,45 @@ describe('shared reading observations', () => {
     result.rerender({ key: 'other', revision: 1 }); result.rerender({ key: null, revision: 1 });
     act(() => vi.advanceTimersByTime(1000)); expect(observe).toHaveBeenCalledTimes(1);
   });
+  describe('the dwell runs only while the window is visible and in front (D20)', () => {
+    const setWindow = (state: { visible: boolean; focused: boolean }) => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state.visible ? 'visible' : 'hidden' });
+      document.hasFocus = () => state.focused;
+      act(() => { window.dispatchEvent(new Event(state.focused ? 'focus' : 'blur')); document.dispatchEvent(new Event('visibilitychange')); });
+    };
+    afterEach(() => { delete (document as { visibilityState?: unknown }).visibilityState; });
+    it.each([
+      ['blurred', { visible: true, focused: false }],
+      ['hidden', { visible: false, focused: false }],
+      ['hidden but focused', { visible: false, focused: true }],
+    ])('never observes while the window is %s, however long the item stays open', (_name, state) => {
+      vi.useFakeTimers(); const observe = vi.fn();
+      setWindow(state);
+      renderHook(() => useSeenDwell('item', 1, observe));
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(observe).not.toHaveBeenCalled();
+    });
+    it('observes once the window comes to the front, a full second after it did', () => {
+      vi.useFakeTimers(); const observe = vi.fn();
+      setWindow({ visible: true, focused: false });
+      renderHook(() => useSeenDwell('item', 1, observe));
+      act(() => vi.advanceTimersByTime(5000));
+      setWindow({ visible: true, focused: true });
+      act(() => vi.advanceTimersByTime(999)); expect(observe).not.toHaveBeenCalled();
+      act(() => vi.advanceTimersByTime(1)); expect(observe).toHaveBeenCalledTimes(1);
+    });
+    it('starts again from zero after the window is hidden or blurred mid-dwell', () => {
+      vi.useFakeTimers(); const observe = vi.fn();
+      setWindow({ visible: true, focused: true });
+      renderHook(() => useSeenDwell('item', 1, observe));
+      act(() => vi.advanceTimersByTime(900));
+      setWindow({ visible: true, focused: false });
+      act(() => vi.advanceTimersByTime(5000));
+      setWindow({ visible: true, focused: true });
+      act(() => vi.advanceTimersByTime(900)); expect(observe).not.toHaveBeenCalled();
+      act(() => vi.advanceTimersByTime(100)); expect(observe).toHaveBeenCalledTimes(1);
+    });
+  });
   it('shares optimistic reads, undoes bulk marks, and keeps reads made after the shortcut', () => {
     vi.useFakeTimers(); const save = vi.fn(), lane = new ReadingLane(save), value = changesFixture(2);
     const prefs = { seen: [value.seen] } as PreferencesSnapshot;

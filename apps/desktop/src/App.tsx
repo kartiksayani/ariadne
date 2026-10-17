@@ -1,5 +1,5 @@
 import { useImplicitCaughtUp } from './ui/changes/useCaughtUp';
-import { TopicChanges } from './ui/changes/TopicChanges';
+import { RecentPopover } from './ui/navigation/Recent';
 import { useSeenDwell } from './ui/changes/useSeenDwell';
 import { useReadingSeen } from './state/preferences/reading';
 import { waitForLifecycleReady } from './ui/shared/lifecycleReady';
@@ -61,7 +61,7 @@ import { FileRefs, LinkOpener } from './ui/shared/MarkdownText';
 import { fileOpener, linkOpener, listenForLinkFailures } from './ui/shared/openers';
 import { useWorkspaceKeys } from './ui/keys';
 import { itemIntents, workspaceKeys, type ItemIntentApp, type TreeRemoveTarget } from './ui/shell/workspaceKeys';
-import { dispatchIntent, useIntents } from './ui/intents';
+import { useIntents } from './ui/intents';
 import { useConversation } from './ui/detail/useConversation';
 
 const adapters: readonly AdapterChoice[] = [
@@ -111,8 +111,6 @@ function SessionCenter({ application, view, graph, reveal, ...props }: CenterPro
   const notice = state.status !== 'loading' && <SessionNotice state={state} refresh={() => { void view.store.refresh(); }} />;
   return <TreeView {...props} navigation={application.navigation} store={view.store} actions={actions} drafts={application.drafts}
     reveal={reveal?.store === view.store ? reveal : null} summaries={summaries}
-    topicContent={session ? topicId => <TopicChanges session={session} topicId={topicId} navigation={application.navigation}
-      onOpenItem={props.onOpenItem} /> : undefined}
     notices={notice || recovering ? <div className="tree-notices">{notice}{recovering && <RecoveryPanel actions={actions} />}</div> : null}
     graph={graph ? <NavigationGraph navigation={application.navigation} store={view.store}
       reveal={reveal} onReveal={props.onSelected} /> : null} />;
@@ -428,6 +426,8 @@ function Workspace({ application }: { application: Application }) {
   // A view saved by an older release may still show archived topics in the Tree; Tree or Graph leaves that.
   const archived = view?.filters.archived ?? false;
   const [filterOpen, setFilterOpen] = useState(false);
+  // The Recent popover under the top bar's clock button; ⌘E and the button both toggle it (D19).
+  const [recentOpen, setRecentOpen] = useState(false);
   // The Map publishes its search count, arrows and note here for the top bar.
   const [searchStatus, setSearchStatus] = useState<MapSearchStatus | null>(null);
 
@@ -553,6 +553,10 @@ function Workspace({ application }: { application: Application }) {
     clearFilters: detailOpen && !!selectedId || !view || !filtering(view.filters) && !query ? undefined : clearFilters,
   };
   useIntents(itemIntents(intentApp));
+  useIntents({ 'recent.open': () => { if (!store || viewOf(state).kind !== 'session') return false; setRecentOpen(value => !value); return true; } });
+  // Recent belongs to the session on screen: leaving it, or a page, closes it.
+  const viewKind = viewOf(state).kind;
+  useEffect(() => { setRecentOpen(false); }, [key, viewKind]);
   const keys = useWorkspaceKeys<HTMLDivElement>(workspaceKeys(intentApp), { scope: 'workspace' });
   // Keys pressed while focus is on <body> (after launch or a click on a non-focusable area) still reach the keymap.
   const appRoot = useRef<HTMLDivElement>(null);
@@ -590,7 +594,11 @@ function Workspace({ application }: { application: Application }) {
       onRemoveTarget={removeTarget} waitingStore={application.waiting}
       chrome={{ query, searchStatus, graph: graph && !archived, onView: store ? showView : undefined, theme: shown, searchBlocked: conversationOpen,
         filter: store ? { active: filterOpen, count: view && hasStatusFilter(view.filters.statuses) ? view.filters.statuses.length : 0, onToggle: () => setFilterOpen(value => !value) } : undefined,
-        onRecent: store ? () => { dispatchIntent('recent.open'); } : undefined,
+        onRecent: store ? () => setRecentOpen(value => !value) : undefined, recentOpen,
+        recentPanel: recentOpen && store && route && sessionState?.snapshot?.session
+          ? <RecentPopover session={sessionState.snapshot.session} entries={view?.recent_items}
+            onReveal={itemId => revealItem({ ...route, item_id: itemId })}
+            onClose={restoreFocus => { setRecentOpen(false); if (restoreFocus) document.querySelector<HTMLElement>('[data-popover-trigger="recent"]')?.focus(); }} /> : undefined,
         textSize: shownTextSize, onTextSizeChange: changeTextSize,
         // A search highlights in place (SPEC §6.9): typing keeps every row, including a temporary reveal's.
         onQueryChange: view ? text => { if (conversation) closeConversation(); setSearchEdit({ route: key, text, attempted: false }); } : undefined,

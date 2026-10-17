@@ -88,20 +88,21 @@ export function ChangesOpener({ session, topicId, seen, navigation, onOpenItem }
       title="What changed since you last looked. The key is in the ? menu."
       onClick={event => { keyboard.current = event.detail === 0; setOpen(value => !value); }}>
       {list.length === 0 ? <><i className="ph ph-check" aria-hidden="true" /><span>All caught up</span></>
-        : long ? <span>{summary.changeCount} changes<span className="changes-since"> since {weekdayName(summary.baseline!)}</span></span> : <>
+        : long ? <span>{summary.changeCount} changes{' '}<span className="changes-since">since {weekdayName(summary.baseline!)}</span></span> : <>
           {newCount > 0 && <span className="changes-count"><i className="changes-diamond" data-kind="new" aria-hidden="true" />{newCount} new</span>}
+          {newCount > 0 && changedCount > 0 && ' '}
           {changedCount > 0 && <span className="changes-count"><i className="changes-diamond" data-kind="changed" aria-hidden="true" />{changedCount} changed</span>}
-          {since && <span className="changes-since">since {since}</span>}</>}
+          {since && <>{' '}<span className="changes-since">since {since}</span></>}</>}
       <i className={open ? 'ph ph-caret-down' : 'ph ph-caret-right'} aria-hidden="true" />
     </button>
-    {list.length === 0 && canUndo && <button type="button" className="change-link changes-undo" onClick={() => navigation.reading.undo(undoToken!)}>Undo</button>}
+    {canUndo && <button type="button" className="change-link changes-undo" onClick={() => navigation.reading.undo(undoToken!)}>Undo</button>}
     {open && createPortal(<div ref={panel} id={id} role="dialog" aria-label="What changed" className="changes-popover" tabIndex={-1} style={placement}
       onKeyDown={event => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); }
         else if (event.key !== 'F6') event.stopPropagation();
       }}>
       <header className="changes-head">
-        <i className="ph ph-list-checks" aria-hidden="true" />
+        <i className="ph ph-list" aria-hidden="true" />
         <h2>What changed</h2>
         {since && <span className="change-muted">since you looked at {since}</span>}
         <button type="button" className="btn btn-ghost changes-close" aria-label="Close" title="Close ( esc )" onClick={() => close(true)}>×</button>

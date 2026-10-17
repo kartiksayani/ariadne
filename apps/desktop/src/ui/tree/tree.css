@@ -635,11 +635,6 @@
   padding: 0 6px;
 }
 
-.tree-recent > button {
-  flex: none;
-  font-size: calc(12px * var(--text-scale));
-}
-
 .tree-focus-action:hover {
   background: color-mix(in srgb, var(--color-text) 8%, transparent);
 }
@@ -653,9 +648,4 @@
   min-width: 0;
   gap: 8px;
   padding: 4px 16px 0;
-}
-
-.tree-recent > nav {
-  flex: 1;
-  min-width: 0;
 }

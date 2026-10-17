@@ -274,15 +274,15 @@ describe('name chips and item peek', () => {
     vi.useFakeTimers();
     if (how === 'click') fireEvent.click(chip()); else { fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350)); }
     const card = screen.getByRole('dialog');
-    const pill = () => card.querySelector<HTMLElement>('.peek-marker');
-    expect(pill()?.textContent).toBe('Changed');
+    const pill = () => within(card).queryByTestId('change-marker');
+    expect(pill()?.getAttribute('aria-label')).toBe('Changed');
     expect(pill()?.title).toBe('Changed since you last saw it');
     const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(at));
     expect(card.querySelector('.peek-strip')!.textContent).toBe(`Changed · ${time}. First draft is in the docs folder.`);
     act(() => vi.advanceTimersByTime(5000));
     vi.useRealTimers();
     await act(async () => { await Promise.resolve(); });
-    expect(pill()?.textContent).toBe('Changed');
+    expect(pill()?.getAttribute('aria-label')).toBe('Changed');
     expect(marks).not.toHaveBeenCalled();
     expect(value.transport.mutations.some(request => request.command.command === 'preferences_patch'
       && request.command.params.entries.some(entry => entry.kind === 'mark_seen'))).toBe(false);
@@ -405,6 +405,53 @@ describe('simple question answers in peek', () => {
     fireEvent.keyDown(screen.getByRole('button', { name: 'Map row' }), { key: ' ' });
     expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
     expect(value.transport.mutations.filter(request => request.command.command === 'input_submit')).toHaveLength(1);
+  });
+
+  describe('closing the card while the send is in flight', () => {
+    const submits = (value: Awaited<ReturnType<typeof setup>>) => value.transport.mutations.filter(request => request.command.command === 'input_submit');
+    /** Holds the response of the answer's submit until `release(error?)`; the request itself is recorded at once. */
+    function hold(value: Awaited<ReturnType<typeof setup>>) {
+      let release!: (error?: Error) => void;
+      const gate = new Promise<void>((resolve, reject) => { release = error => { if (error) reject(error); else resolve(); }; });
+      const invoke = value.transport.invoke.bind(value.transport);
+      vi.spyOn(value.transport, 'invoke').mockImplementation(async (name, args) => {
+        const request = args.request as { command?: { command?: string } };
+        if (request.command?.command === 'input_submit') { const result = await invoke(name, args); await gate; return result; }
+        return invoke(name, args);
+      });
+      return release;
+    }
+    const pickAndSend = (chip: () => HTMLElement) => {
+      fireEvent.click(chip());
+      fireEvent.click(screen.getByRole('button', { name: /^Keep the design/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    };
+    it.each([['the Close button', () => fireEvent.click(screen.getByRole('button', { name: 'Close peek' }))],
+      ['Escape', () => fireEvent.keyDown(document, { key: 'Escape' })]] as const)('still records "answered" once, and sends once, when %s closes it before the reply', async (_name, close) => {
+      const value = await setup(), { chip, visit } = mount(value), release = hold(value);
+      pickAndSend(chip);
+      await waitFor(() => expect(submits(value)).toHaveLength(1));
+      close();
+      expect(visit).not.toHaveBeenCalledWith({ ...route, item_id: '2' }, 'answered');
+      await act(async () => { release(); await Promise.resolve(); });
+      await waitFor(() => expect(visit).toHaveBeenCalledWith({ ...route, item_id: '2' }, 'answered'));
+      expect(visit.mock.calls.filter(([, action]) => action === 'answered')).toHaveLength(1);
+      // Reopening shows no second send and no second request is made.
+      fireEvent.click(chip());
+      expect(submits(value)).toHaveLength(1);
+    });
+    it('keeps the draft and records nothing when the send fails after the card closed', async () => {
+      const value = await setup(), { chip, visit } = mount(value), release = hold(value);
+      pickAndSend(chip);
+      await waitFor(() => expect(submits(value)).toHaveLength(1));
+      fireEvent.click(screen.getByRole('button', { name: 'Close peek' }));
+      await act(async () => { release(new Error('Connection lost')); await Promise.resolve(); });
+      await waitFor(() => expect(value.drafts.find(route, '2', 'answer')?.draft).toMatchObject({ selected_option_id: 'yes' }));
+      expect(visit.mock.calls.filter(([, action]) => action === 'answered')).toHaveLength(0);
+      // The words are still the owner's: the draft stays, with its one operation id, and nothing was sent again.
+      expect(value.drafts.find(route, '2', 'answer')?.draft.op_id).toBeTruthy();
+      expect(submits(value)).toHaveLength(1);
+    });
   });
 
   it('sends an option pick through the same durable answer path', async () => {
