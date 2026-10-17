@@ -142,9 +142,12 @@
   white-space: nowrap;
 }
 
+/* The board's chip is its icon and text, with no room around them. The 22px button keeps that room as hit area: the
+   padding is cancelled by the margin, so the row lays out as the board's does. */
 .dock-sent {
   height: 22px;
   padding: 0 8px 0 6px;
+  margin: 0 -8px 0 -6px;
   color: var(--st-agent);
 }
 
@@ -371,21 +374,24 @@
   color: color-mix(in srgb, var(--color-text) 80%, transparent);
 }
 
+/* 6px over the dock's top edge (the board's): the dock's 1.5px rule is drawn 1px, so measured from its padding box that is 7px.
+   Its top stops 54px under the window's top (the board's "popMax": the window less the top bar, the dock and 20px). */
 .dock-popover {
   position: absolute;
   right: 10px;
-  bottom: calc(100% + 8px);
+  bottom: calc(100% + 7px);
   display: flex;
   flex-direction: column;
   gap: 2px;
   width: 400px;
   max-width: calc(100% - 20px);
-  max-height: calc(100vh - 160px);
+  max-height: max(160px, calc(100vh - 60px - var(--dock-inset, 0px)));
   padding: 8px;
   overflow: auto;
+  scrollbar-width: thin;
   border-radius: 8px;
   background: var(--a-card);
-  box-shadow: var(--shadow-md), 0 0 0 1px var(--color-divider);
+  box-shadow: var(--shadow-md);
 }
 
 .dock-popover-left {
@@ -397,7 +403,7 @@
   padding: 4px 6px 6px;
   font-size: calc(11px * var(--text-scale));
   font-weight: 500;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--color-text) 55%, transparent);
 }
@@ -450,6 +456,10 @@
   font-weight: 500;
   letter-spacing: normal;
   line-height: inherit;
+}
+
+.dock-other-group > h3 > i {
+  font-size: calc(14px * var(--text-scale));
 }
 
 .dock-other-row {
@@ -519,6 +529,7 @@
 .dock-other-row .answer-list .answer-options {
   gap: 5px;
   padding-left: 21px;
+  overflow: visible;
 }
 
 .question-delivery .answer-bar {
@@ -548,8 +559,18 @@
 
 .dock-other-row .answer-list .answer-body { gap: 1px; }
 
+.dock-other-row .answer-list .answer-recommended > i { font-size: calc(10px * var(--text-scale)); }
+
+/* The board's check is the row's own size, 2px down. */
+.dock-other-row .answer-list .answer-check {
+  margin-top: 2px;
+  font-size: inherit;
+}
+
+/* The board's hint and Send sit in the cards' column: 5px under the last card, inset 21px like the cards. */
 .dock-other-row .answer-list .answer-bar {
-  margin-top: 0;
+  margin-top: 5px;
+  margin-left: 21px;
   padding: 2px 0 0;
   font-size: calc(12px * var(--text-scale));
   line-height: 1.4;

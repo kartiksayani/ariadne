@@ -169,7 +169,7 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
   const first = unsent[0] ?? null;
   return <section ref={root} className="answer-dock" aria-label="Answer dock" data-open={open || undefined} data-waiting={waitingNow || open || undefined}
     data-sized={open && visibleHeight !== null || undefined}
-    style={open && visibleHeight !== null ? { height: visibleHeight, '--dock-question-max': `${Math.max(40, Math.floor((visibleHeight - 96) * 0.42))}px` } as React.CSSProperties : undefined}>
+    style={open && visibleHeight !== null ? { height: visibleHeight, '--dock-question-max': `${Math.max(40, Math.round((visibleHeight - 96) * 0.42))}px` } as React.CSSProperties : undefined}>
     {(open || waitingNow) && <div className="answer-dock-grip" role="separator" aria-label="Resize answer dock" aria-orientation="horizontal" tabIndex={0}
       title="Drag to change the dock’s height; drag it down to fold it" aria-valuemin={DOCK_MIN} aria-valuenow={visibleHeight ?? undefined}
       onPointerDown={event => {
