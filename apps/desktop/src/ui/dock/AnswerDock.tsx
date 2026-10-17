@@ -212,11 +212,11 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
             <i className="ph ph-arrow-right" aria-hidden="true" /></button>
         </span>
         {keptChip}
-        {session && item && <nav className="dock-path" aria-label="Question location">{dockPath(session, item.id, fullPath).map((part, at, parts) => <span key={`${part.itemId ?? part.label}:${at}`} className="dock-crumb" data-more={part.more || undefined}>
+        {session && item && <nav className="dock-path" aria-label="Question location">{dockPath(session, item.id, fullPath).map((part, at) => <span key={`${part.itemId ?? part.label}:${at}`} className="dock-crumb" data-more={part.more || undefined}>
+          {at > 0 && <span className="dock-crumb-sep" aria-hidden="true">›</span>}
           {part.more ? <button type="button" className="dock-link" title="Show the full path" onClick={() => setFullPath(true)}>…</button>
             : part.itemId && onOpenItem ? <button type="button" className="dock-link" title={`Go to “${part.label}”`} onClick={() => onOpenItem(part.itemId!)}>{part.label}</button>
-              : <span className="dock-crumb-text" title={part.full}>{part.label}</span>}
-          {at < parts.length - 1 && <i className="ph ph-caret-right" aria-hidden="true" />}</span>)}</nav>}
+              : <span className="dock-crumb-text" title={part.full}>{part.label}</span>}</span>)}</nav>}
         <span className="dock-spacer" />
         {item?.waiting_since && <span className="dock-age dock-wide">Waiting {waitingAge(Date.parse(item.waiting_since), now())}</span>}
         {sentChip}{othersChip}

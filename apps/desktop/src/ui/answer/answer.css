@@ -87,7 +87,9 @@
   padding: 0;
 }
 
-/* `.answer.answer-dock`: the dock's own section is also `.answer-dock`, and holds the other-sessions list. */
+/* `.answer.answer-dock`: the dock's own section is also `.answer-dock`, and holds the other-sessions list. The dock's top rule is not repeated inside it. */
+.answer.answer-dock { border-top: 0; }
+
 .answer.answer-dock > .answer-options {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -158,6 +160,7 @@
   place-items: center;
   width: 18px;
   height: 18px;
+  margin-top: 1px;
   border-radius: 4px;
   font-size: calc(11.5px * var(--text-scale));
   line-height: 1;
@@ -186,7 +189,7 @@
 .answer-label {
   font-size: calc(13.5px * var(--text-scale));
   font-weight: 500;
-  line-height: 1.35;
+  line-height: 1.4;
 }
 
 .answer-consequence {
@@ -203,6 +206,10 @@
   color: var(--a-acc-text);
 }
 
+/* The board draws "★ Recommended · " as one accent run: its star is followed by a real space (0.6em in the mono face). */
+.answer-recommended { gap: 0.6em; }
+.answer-recommended-dot { color: var(--a-acc-text); }
+
 .answer-recommended > i,
 .answer-star > i {
   font-size: calc(11px * var(--text-scale));
@@ -213,6 +220,9 @@
   font-size: calc(15px * var(--text-scale));
   color: var(--color-accent);
 }
+
+/* Laid out whether or not its card is picked, as the board does, so a pick never rewraps the text. */
+.answer-check-off { visibility: hidden; }
 
 .answer-note-link {
   align-self: flex-start;

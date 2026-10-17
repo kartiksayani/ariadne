@@ -219,17 +219,18 @@
   display: flex;
   flex: 0 1 auto;
   align-items: center;
-  gap: 4px;
+  gap: 2px 5px;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
 }
 
+/* A segment is its "›" and its name: the board's "›" belongs to the segment it leads into. */
 .dock-crumb {
   display: inline-flex;
   flex: 0 100 auto;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   min-width: 6ch;
 }
 
@@ -243,9 +244,8 @@
   min-width: 0;
 }
 
-.dock-crumb > i {
+.dock-crumb-sep {
   flex: none;
-  font-size: calc(10px * var(--text-scale));
   opacity: 0.55;
 }
 
