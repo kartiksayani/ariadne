@@ -1,5 +1,6 @@
 #[path = "../../../../../../tests/native/window/held_turn.rs"]
 mod held_turn;
+mod lease;
 mod window;
 
 use super::*;

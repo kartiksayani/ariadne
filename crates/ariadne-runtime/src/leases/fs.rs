@@ -99,6 +99,14 @@ impl Directory {
         })
     }
     pub fn lock(&self, name: &str) -> Result<File, CoreError> {
+        let file = self.lease_file(name)?;
+        if !try_lock(&file)? {
+            return Err(held_elsewhere());
+        }
+        Ok(file)
+    }
+    /// Opens (creating) a private stable lease file without locking it.
+    pub fn lease_file(&self, name: &str) -> Result<File, CoreError> {
         let name = CString::new(name)
             .map_err(|_| error(CoreErrorCode::InvalidArgument, "Invalid lease file name."))?;
         // SAFETY: valid parent fd/name; created files are private and no final link is followed.
@@ -123,17 +131,6 @@ impl Directory {
         // SAFETY: successful openat returned a new owned descriptor.
         let file = unsafe { File::from_raw_fd(fd) };
         check(&file, false)?;
-        // SAFETY: flock operates on our owned file descriptor and never waits.
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } < 0 {
-            let e = std::io::Error::last_os_error();
-            if e.kind() == std::io::ErrorKind::WouldBlock {
-                return Err(error(
-                    CoreErrorCode::PermissionDenied,
-                    "Another desktop or supervisor holds this nonblocking lease.",
-                ));
-            }
-            return Err(io_error("Acquire nonblocking lease", e));
-        }
         Ok(file)
     }
     pub fn validate_path(&self) -> Result<(), CoreError> {
@@ -156,6 +153,25 @@ impl Directory {
         }
         Ok(())
     }
+}
+/// Takes the exclusive lock without waiting: `false` when another open file
+/// description holds it, in this process or another.
+pub(crate) fn try_lock(file: &File) -> Result<bool, CoreError> {
+    // SAFETY: flock operates on the caller's live file descriptor and never waits.
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } < 0 {
+        let e = std::io::Error::last_os_error();
+        if e.kind() == std::io::ErrorKind::WouldBlock {
+            return Ok(false);
+        }
+        return Err(io_error("Acquire nonblocking lease", e));
+    }
+    Ok(true)
+}
+pub(crate) fn held_elsewhere() -> CoreError {
+    error(
+        CoreErrorCode::PermissionDenied,
+        "Another desktop or supervisor holds this nonblocking lease.",
+    )
 }
 fn check(file: &File, directory: bool) -> Result<(), CoreError> {
     let metadata = file
