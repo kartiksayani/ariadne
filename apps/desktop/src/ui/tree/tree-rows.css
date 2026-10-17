@@ -60,10 +60,11 @@
   gap: 3px;
 }
 
-.tree-heading > .tree-question {
+.tree-heading > .tree-question-block {
   flex: 1 1 12ch;
   min-width: 0;
 }
+
 
 .tree-line-tight {
   flex-wrap: nowrap;
@@ -103,7 +104,7 @@
   text-wrap: pretty;
 }
 
-/* Four body lines remain visible when at least three lines can be folded. */
+/* Three lines remain visible when folding hides at least one more; the question and the details fold alike. */
 .tree-preview {
   display: flex;
   flex-direction: column;
@@ -145,7 +146,8 @@
   background: color-mix(in srgb, var(--color-text) 7%, transparent);
 }
 
-.tree-ask + .tree-more {
+.tree-ask + .tree-more,
+.tree-question-block > .tree-more {
   margin-left: 0;
 }
 
@@ -167,30 +169,31 @@
   text-underline-offset: 3px;
 }
 
-.tree-change-marker {
-  flex: none;
-  color: var(--attention);
+/* Narrow Map (D5): the marker slot is 16px and the New / Changed pill gives way to its diamond. */
+@container tree-map (max-width: 559px) {
+  .tree-end { --tree-end-marker: 16px; }
+
+  .tree-end-marker .change-marker[data-form="pill"] {
+    height: auto;
+    padding: 0;
+    background: none;
+    box-shadow: none;
+    color: var(--attention);
+  }
+
+  .tree-end-marker .change-marker[data-form="pill"] > span { display: none; }
+
+  .tree-end-marker .change-marker[data-form="pill"] > i {
+    width: 7px;
+    height: 7px;
+    margin-right: 3px;
+    border-radius: 1.5px;
+  }
 }
 
-.tree-change-new {
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--attention) 13%, var(--a-bg));
-  font-size: calc(10.5px * var(--text-scale));
-  font-weight: 600;
-  line-height: calc(16px * var(--text-scale));
-}
-
-.tree-change-changed {
-  width: 7px;
-  height: 7px;
-  margin: 0 3px;
-  border-radius: 50%;
-  background: var(--attention);
-}
-
+/* The next unseen target (n): a dashed 1.5px outline, kept after its arrival pulse. */
 .tree-item[data-next-unseen] {
-  outline: 2px solid var(--attention);
+  outline: 1.5px dashed var(--attention);
   outline-offset: -2px;
 }
 
@@ -241,22 +244,111 @@
   --tree-bullet-y: 20px;
 
   isolation: isolate;
-  padding-right: calc(18px + (var(--depth) - 1) * 6px);
-  padding-left: calc(var(--tree-x) - 9px);
+  padding: 5px calc(18px + (var(--depth) - 1) * 6px) 5px calc(var(--tree-x) - 9px);
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 40px;
   color: color-mix(in srgb, var(--color-text) 58%, transparent);
   cursor: pointer;
 }
 
-.tree-hidden-waiting {
+/* The one strip style (D8): a dashed 20px pill with an icon and a count. Only a hidden strip opens; the others are
+   undone by Clear and Unfocus, so they are not clickable. */
+.tree-strip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: calc(11px * var(--text-scale));
-  color: var(--st-waiting);
+  gap: 6px;
+  height: 20px;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 0 8px;
+  border: 1px dashed color-mix(in srgb, var(--color-text) 34%, transparent);
+  border-radius: 5px;
+  font-size: calc(11.5px * var(--text-scale));
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.tree-strip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-strip > i {
+  flex: none;
+  font-size: calc(13px * var(--text-scale));
+}
+
+.tree-hidden-group[data-strip="filter"],
+.tree-hidden-group[data-strip="focus"] {
+  cursor: default;
+}
+
+.tree-hidden-group[data-strip="hidden"]:hover .tree-strip {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+}
+
+/* The Map's status badge (D22): 18px high, 11.5px text, radius 4. The shared badge is unchanged. */
+.tree-end-badge .status-badge {
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: calc(11.5px * var(--text-scale));
+}
+
+/* A closed session's chip sits in the badge's slot and never widens it. */
+.tree-end-badge .session-closed-chip {
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Ack is 22 x 20 (D22), outside the hover bar. */
+.tree-action.tree-action-ack {
+  width: 22px;
+  height: 20px;
+}
+
+/* A held single Ack (D11): drawn over the cluster's area left of the Ack slot, so the row never rewraps. */
+.tree-acked {
+  position: absolute;
+  z-index: 1;
+  inset: 0 calc(var(--tree-end-ack) + 6px) 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 5px;
+  font-size: calc(12px * var(--text-scale));
+  white-space: nowrap;
+  color: var(--a-acc-text);
+  background: var(--a-card);
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+}
+
+.tree-acked-undo {
+  padding: 0;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+  color: var(--a-acc-text);
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* A slot that does not apply is greyed (D4). */
+.tree-action:disabled:not(.tree-action-ack) {
+  opacity: .3;
+  cursor: default;
+}
+
+.tree-action:disabled:not(.tree-action-ack):hover {
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+  background: transparent;
 }
 
 .tree-item-hidden {

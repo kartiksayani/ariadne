@@ -18,7 +18,7 @@ import { useSupervisorHealth } from '../../components/bindings/health';
 import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { useIntents } from '../intents';
 import { notices as noticeStore } from '../pages/notices';
-import { chipsOf, closed, collapsedNote, mapChanges, nextMarkedItem, oldestWaiting, parentKey, sessionBar, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row, type SearchReveal, type StripRow } from './model';
+import { chipsOf, closed, collapsedNote, mapChanges, nextMarkedItem, oldestWaiting, parentKey, sessionBar, toggleChip, treeModel, visual, type Chip, type ItemRow as ItemRowModel, type Row, type SearchReveal, type StripRow } from './model';
 import { shimFilter } from './filterShim';
 import { alsoMatching, matchCount, searchTerms, type MapMatch } from '../../selectors/tree/search';
 import { MapSearchContext, type MapSearch, type MapSearchStatus } from './mapSearch';
@@ -26,7 +26,8 @@ import { Keycap } from '../parts/parts';
 import { Strip } from './Strip';
 import { hiddenGroupKey, hiddenGroupsFor, hiddenSource } from './hidden';
 import { HideIcon } from '../shared/HideIcon';
-import { ackTarget, ackTitle, useAck } from '../shared/ack';
+import { ackHoldFor, ackTarget, ackTitle, useAck, useAckHeld } from '../shared/ack';
+import { STATUS } from '../shared/status';
 import { Guides } from './Guides';
 import { ItemRow, type RowAction } from './ItemRow';
 import { TopicRow, type TopicAction } from './TopicRow';
@@ -40,7 +41,7 @@ import { useSessionLifecycleFor } from '../shared/SessionLifecycleOwner';
 import { ItemRefs } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
 import { peekNames } from '../peek/names';
-import { nearestDelta, openingTop } from './scroll';
+import { nearestDelta, openingTop, type BackPill } from './scroll';
 import { useDockInset } from '../shell/dockInset';
 import { displayStatus } from '../../selectors/waiting/replied';
 import { sessionAnswerBlocked } from '../../selectors/sessionClosed';
@@ -184,6 +185,7 @@ export function TreeView(props: TreeViewProps) {
   useOwnerDrafts(drafts, raw);
   const lifecycle = useSessionLifecycleFor(actions);
   const ack = useAck(actions, selectedId);
+  const ackHeld = useAckHeld(route.session_id);
   const [ackItemId, setAckItemId] = useState<string | null>(null);
   const runAck = (itemId: string) => { setAckItemId(itemId); return ack.run(itemId).then(saved => {
     if (saved) navigationVisits.record(route, itemId, 'acked');
@@ -271,10 +273,14 @@ export function TreeView(props: TreeViewProps) {
   const matchIndex = Math.max(0, pinnedIndex), currentMatch = matches[matchIndex] ?? null;
   /** The reading row before "Show them" adds rows: the next layout puts it back even at the very top. */
   const pinReading = useRef<readonly Row[] | null>(null);
+  // Show more / Show less on a long question or preview: one flag per item opens both.
+  const { isUnfolded, toggle: toggleUnfolded, open: openUnfolded } = useUnfolded(route.project_id, route.session_id);
   const stepSearch = (by: 1 | -1) => {
     if (!matches.length) return;
     const next = matches[(matchIndex + by + matches.length) % matches.length]!;
     setSearchCurrent(next); setStepped(value => value + 1);
+    // A match on a folded row unfolds it, so the stepped word is on screen.
+    openUnfolded(next.id);
     searchScroll.current = next.id;
     peek?.closeAll();
   };
@@ -283,6 +289,8 @@ export function TreeView(props: TreeViewProps) {
     if (!reveal || !reveal.items.length && !reveal.topics.length && !reveal.groups.length) return;
     setSearchCurrent(currentMatch);
     pinReading.current = latest.current.rows;
+    // Matches outside the focus are shown by leaving it.
+    if (model?.search.outsideFocus) focusBranch(null);
     const join = (a: readonly string[] = [], b: readonly string[]) => [...new Set([...a, ...b])];
     setSearchShown(previous => ({ items: join(previous?.items, reveal.items), topics: join(previous?.topics, reveal.topics), groups: join(previous?.groups, reveal.groups) }));
   };
@@ -294,7 +302,8 @@ export function TreeView(props: TreeViewProps) {
     showThem: () => searchActions.current.showMatches(), clear: () => searchActions.current.clear?.() }),
   [query, terms, matches, currentMatch, stepped, hiddenMatches, collapsedMatches]);
   const searchCount = terms.length ? matchCount(matchIndex, matches.length) : null;
-  const searchNote = terms.length ? alsoMatching(hiddenMatches, collapsedMatches) : null;
+  const outsideFocusMatches = terms.length ? model?.search.outsideFocus ?? 0 : 0;
+  const searchNote = terms.length ? alsoMatching(hiddenMatches, collapsedMatches, outsideFocusMatches) : null;
   const onSearchStatus = props.onSearchStatus;
   useEffect(() => {
     onSearchStatus?.(searchCount === null ? null : { count: searchCount, onNext: () => searchActions.current.stepSearch(1), onPrev: () => searchActions.current.stepSearch(-1),
@@ -644,7 +653,12 @@ export function TreeView(props: TreeViewProps) {
     const box = scroller.current, element = elements.current.get(key);
     if (!box || !element) return;
     const a = box.getBoundingClientRect(), b = element.getBoundingClientRect();
-    box.scrollTop += nearestDelta(a.height, b.top - a.top, b.height, headerHeight(element), margin, inset.current);
+    // The Back-to pill floats over the edge it points at: a row the owner is taken to ends clear of it.
+    const back = margin > 0 ? box.parentElement?.querySelector<HTMLElement>('.tree-back') : null, rect = back?.getBoundingClientRect();
+    const side = back?.dataset.edge === 'above' ? 'above' : back?.dataset.edge === 'below' ? 'below' : null;
+    // A pill with no height is not laid out (no layout engine): it covers nothing.
+    const pill: BackPill | null = rect && rect.height > 0 && side ? { edge: side, top: rect.top - a.top, bottom: rect.bottom - a.top } : null;
+    box.scrollTop += nearestDelta(a.height, b.top - a.top, b.height, headerHeight(element), margin, inset.current, pill);
   };
   const centered = useRef(false), settled = useRef(false), openingReveal = useRef<string | null>(null);
   const openingPlacement = useRef<string | null>(null);
@@ -652,11 +666,10 @@ export function TreeView(props: TreeViewProps) {
   const [openingFinished, setOpeningFinished] = useState(0);
   // Show more / Show less on a long preview. The owner is steering, so the view stops holding its anchor; folding
   // a preview the owner has read down to its end keeps that row's top in sight rather than leaving the tree below it.
-  const { isUnfolded, toggle: toggleUnfolded } = useUnfolded(route.project_id, route.session_id);
   const folding = useRef<string | null>(null);
   const unfold = (id: string) => {
+    // The hold stays: Show more above the reading row grows what is above it, and the row the owner reads stays put.
     settled.current = true;
-    held.current = null; revealedAnchor.current = null;
     if (isUnfolded(id)) folding.current = id;
     toggleUnfolded(id);
   };
@@ -1000,17 +1013,25 @@ export function TreeView(props: TreeViewProps) {
       scrollRequested.current = null;
       onAct(intent, target, result => { clickedReveal.current = result; });
     };
-    if (item.status !== 'waiting_on_me' && (!row.delivery || row.delivery.failed || closed(item.status)) && running && !archivedMode && session?.state === 'active') {
-      const bring = { icon: 'ph ph-megaphone-simple', title: 'Bring it up (b)', run: act('bring') };
-      if (item.status === 'open') list.push(bring, ...row.later ? [{ icon: 'ph ph-arrow-u-up-left', title: 'Unpark (z)', run: act('later') }]
-        : [{ icon: 'ph ph-chat-text', title: 'Reply (r)', run: act('reply') }, { icon: 'ph ph-x-circle', title: 'Drop (d)', run: act('drop') },
-          { icon: 'ph ph-clock', title: 'Later (z)', run: act('later') }]);
-      else if (item.status === 'in_progress') list.push({ icon: 'ph ph-chat-text', title: 'Add a note (r)', run: act('note') });
-      else {
-        list.push({ icon: 'ph ph-chat-text', title: 'Follow up (r)', run: act('followup') });
-        if (item.status !== 'replaced') list.push({ icon: 'ph ph-arrow-counter-clockwise', title: 'Back to Open (o)', run: act('reopen') });
-      }
-    }
+    // The hover bar always has the same six slots in SPEC 6.2's order. A slot that does not apply is greyed and says why;
+    // slots 1-4 are all greyed when the agent is not running or the session is archived (D4).
+    const statusLabel = row.later ? 'Later' : STATUS[visual(row.status)].label;
+    const open = item.status === 'open', isClosed = closed(item.status);
+    const stopped = archivedMode || session?.archived_at ? 'archived' : running && session?.state === 'active' ? null : 'the agent is not running';
+    // A message already on its way to the agent holds the row's other actions, as before.
+    const inFlight = !!row.delivery && !row.delivery.failed && !isClosed;
+    const slot = (action: string, applies: boolean, offer: { icon: string; title: string; run: () => void }): RowAction =>
+      stopped ? { icon: offer.icon, title: `${action}: ${stopped}`, disabled: true, run: () => {} }
+        : applies && !inFlight ? offer : { icon: offer.icon, title: `${action}: not for ${statusLabel} items`, disabled: true, run: () => {} };
+    const reply = item.status === 'waiting_on_me' ? { title: 'Answer (r)', intent: 'reply' as const } : isClosed ? { title: 'Follow up (r)', intent: 'followup' as const }
+      : open ? { title: 'Reply (r)', intent: 'reply' as const } : { title: 'Add a note (r)', intent: 'note' as const };
+    list.push(
+      slot(reply.title.replace(/ \(r\)$/, ''), true, { icon: 'ph ph-chat-text', title: reply.title, run: act(reply.intent) }),
+      isClosed ? slot('Back to Open', item.status !== 'replaced', { icon: 'ph ph-arrow-counter-clockwise', title: 'Back to Open (o)', run: act('reopen') })
+        : slot('Bring it up', open, { icon: 'ph ph-megaphone-simple', title: 'Bring it up (b)', run: act('bring') }),
+      row.later ? slot('Unpark', true, { icon: 'ph ph-arrow-u-up-left', title: 'Unpark (z)', run: act('later') })
+        : slot('Later', open, { icon: 'ph ph-clock', title: 'Later (z)', run: act('later') }),
+      slot('Drop', open, { icon: 'ph ph-x-circle', title: 'Drop (d)', run: act('drop') }));
     list.push({ icon: '', glyph: <HideIcon hidden={row.hidden} />, title: row.hidden ? 'Unhide (h)' : 'Hide (h)', run: () => hideItem(row) });
     list.push({ icon: 'ph ph-trash', title: 'Remove (⌫)', run: () => onRemove({ kind: 'item', item: target }) });
     return list;
@@ -1067,7 +1088,7 @@ export function TreeView(props: TreeViewProps) {
         note={row.collapsed ? collapsedNote(row.collapsed) : null}
         actions={itemActions(row)} fix={fixOf(row)}
         unfolded={isUnfolded(row.key)} onUnfold={unfold}
-        onFocusBranch={focusBranch} branchFocused={focusedId === row.key} names={names}
+        acked={ackHeld.has(row.key)} onUndoAck={id => { ackHoldFor(route.session_id, actions).undo(id); }}
         onPeekHover={(id, event) => { const handlers = peek?.chipProps({ ...route, item_id: id });
           if (event.type === 'mouseenter') handlers?.onMouseEnter(event); else handlers?.onMouseMove(event);
         }}

@@ -58,35 +58,36 @@ function mount(body: string, extra: Partial<ItemRowProps> = {}) {
       onFocus={() => {}} onKeyDown={() => {}} onSelect={onSelect} onToggle={() => {}} {...extra} /></LinkOpener.Provider></TreeFonts.Provider></ItemRefs.Provider>;
   }
   const view = render(<Harness />);
-  return { ...view, row, onSelect, openItem, openLink, preview: () => document.querySelector<HTMLElement>('.tree-preview')! };
+  return { ...view, row, onSelect, openItem, openLink, preview: () => document.querySelector<HTMLElement>('.tree-preview:not(.tree-question-block)')! };
 }
 
 describe('rendered preview lines', () => {
-  it.each(['paragraphs', 'list', 'code'] as const)('never folds six real %s lines, despite gaps and padding', kind => {
-    const body = kind === 'paragraphs' ? text(6, '\n\n') : kind === 'list' ? text(6).split('\n').map(line => `- ${line}`).join('\n') : `\`\`\`\n${text(6)}\n\`\`\``;
+  it.each(['paragraphs', 'list', 'code'] as const)('never folds three real %s lines, despite gaps and padding', kind => {
+    const body = kind === 'paragraphs' ? text(3, '\n\n') : kind === 'list' ? text(3).split('\n').map(line => `- ${line}`).join('\n') : `\`\`\`\n${text(3)}\n\`\`\``;
     geometry(node => {
-      if (node.parentElement?.closest('pre')) return Array.from({ length: 6 }, (_, index) => rectangle(120 + index * 21));
+      if (node.parentElement?.closest('pre')) return Array.from({ length: 3 }, (_, index) => rectangle(120 + index * 21));
       const index = Number(node.textContent?.match(/Line (\d+)/)?.[1]) - 1;
       return Number.isFinite(index) ? [rectangle(100 + index * 35)] : [];
     });
     const view = mount(body);
     expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
     expect(view.preview().hasAttribute('data-clamped')).toBe(false);
-    expect(document.querySelectorAll(kind === 'code' ? 'pre' : kind === 'list' ? 'li' : 'p')).toHaveLength(kind === 'code' ? 1 : 6);
+    expect(document.querySelectorAll(kind === 'code' ? 'pre' : kind === 'list' ? 'li' : 'p')).toHaveLength(kind === 'code' ? 1 : 3);
   });
 
-  it.each(['paragraphs', 'list', 'code'] as const)('folds seven %s lines at the complete fourth line boundary', kind => {
+  // The clamp is three lines and it folds as soon as one line would hide (D6): the fourth line is the first to fold.
+  it.each(['paragraphs', 'list', 'code'] as const)('folds four %s lines at the complete third line boundary', kind => {
     const gap = kind === 'code' ? 18 : 29, inset = kind === 'code' ? 8 : 0;
-    const body = kind === 'paragraphs' ? text(7, '\n\n') : kind === 'list' ? text(7).split('\n').map(line => `- ${line}`).join('\n') : `\`\`\`\n${text(7)}\n\`\`\``;
+    const body = kind === 'paragraphs' ? text(4, '\n\n') : kind === 'list' ? text(4).split('\n').map(line => `- ${line}`).join('\n') : `\`\`\`\n${text(4)}\n\`\`\``;
     geometry(node => {
-      if (node.parentElement?.closest('pre')) return Array.from({ length: 7 }, (_, index) => rectangle(100 + inset + index * gap, gap));
+      if (node.parentElement?.closest('pre')) return Array.from({ length: 4 }, (_, index) => rectangle(100 + inset + index * gap, gap));
       const index = Number(node.textContent?.match(/Line (\d+)/)?.[1]) - 1;
       return Number.isFinite(index) ? [rectangle(100 + index * gap)] : [];
     }, () => kind === 'code' ? 18 : 21);
-    const view = mount(body), height = inset + 3 * gap + (kind === 'code' ? 18 : 21);
+    const view = mount(body), height = inset + 2 * gap + (kind === 'code' ? 18 : 21);
     expect(view.preview().hasAttribute('data-clamped')).toBe(true);
     expect(view.preview().style.getPropertyValue('--tree-clamp-height')).toBe(`${height}px`);
-    expect(height).toBeLessThanOrEqual(inset + 4 * gap);
+    expect(height).toBeLessThanOrEqual(inset + 3 * gap);
     fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
     expect(view.preview().hasAttribute('data-clamped')).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Show less' }));
@@ -100,8 +101,25 @@ describe('rendered preview lines', () => {
     expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
   });
 
+  // One unfold flag per item (D6): a long question and long details open together, from either Show more.
+  it('opens a long question and long details together with one unfold flag', () => {
+    geometry(() => Array.from({ length: 5 }, (_, index) => rectangle(100 + index * 21)));
+    const view = mount('Details that run\nto several lines\nfor sure');
+    const blocks = () => [...document.querySelectorAll('.tree-preview')];
+    expect(blocks()).toHaveLength(2);
+    expect(blocks().every(block => block.hasAttribute('data-clamped'))).toBe(true);
+    const more = screen.getAllByRole('button', { name: 'Show more' });
+    expect(more).toHaveLength(2);
+    fireEvent.click(more[1]!);
+    expect(blocks().some(block => block.hasAttribute('data-clamped'))).toBe(false);
+    expect(screen.getAllByRole('button', { name: 'Show less' })).toHaveLength(2);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Show less' })[0]!);
+    expect(blocks().every(block => block.hasAttribute('data-clamped'))).toBe(true);
+    expect(view.onSelect).not.toHaveBeenCalled();
+  });
+
   it('remeasures width and completed fonts while clipped, including a later font load', async () => {
-    let count = 7, line = 21;
+    let count = 4, line = 21;
     const observers: { run: () => void; targets: Set<Element> }[] = [];
     vi.stubGlobal('ResizeObserver', class {
       targets = new Set<Element>();
@@ -115,18 +133,18 @@ describe('rendered preview lines', () => {
     Object.defineProperty(document, 'fonts', { configurable: true, get: () => fonts });
     geometry(() => Array.from({ length: count }, (_, index) => rectangle(100 + index * line, line)), () => line);
     const view = mount('Body that wraps as the available width and fonts change.');
-    expect(view.preview().style.getPropertyValue('--tree-clamp-height')).toBe('84px');
-    count = 8; line = 25;
-    act(() => observers.find(observer => observer.targets.has(document.querySelector('.tree-clamp')!))!.run());
+    expect(view.preview().style.getPropertyValue('--tree-clamp-height')).toBe('63px');
+    count = 5; line = 25;
+    act(() => observers.find(observer => observer.targets.has(document.querySelector('.tree-outcome .tree-clamp')!))!.run());
     expect(view.preview().hasAttribute('data-clamped')).toBe(true);
-    expect(view.preview().style.getPropertyValue('--tree-clamp-height')).toBe('100px');
-    count = 6;
+    expect(view.preview().style.getPropertyValue('--tree-clamp-height')).toBe('75px');
+    count = 3;
     await act(async () => { ready(); await Promise.resolve(); });
     expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
-    count = 7; line = 23;
+    count = 4; line = 23;
     act(() => fonts.dispatchEvent(new Event('loadingdone')));
     expect(view.preview().hasAttribute('data-clamped')).toBe(true);
-    expect(view.preview().style.getPropertyValue('--tree-clamp-height')).toBe('92px');
+    expect(view.preview().style.getPropertyValue('--tree-clamp-height')).toBe('69px');
     view.unmount();
     expect(observers.every(observer => observer.targets.size === 0)).toBe(true);
   });
@@ -140,18 +158,18 @@ describe('rendered preview lines', () => {
       observe(element: Element) { this.targets.add(element); }
       disconnect() { this.targets.clear(); }
     });
-    geometry(() => Array.from({ length: 7 }, (_, index) => rectangle(100 + index * line, line)), () => line);
-    const view = mount(text(7));
-    const excerpt = document.querySelector('.tree-clamp')!, content = document.querySelector('.tree-clamp-content')!;
+    geometry(() => Array.from({ length: 4 }, (_, index) => rectangle(100 + index * line, line)), () => line);
+    const view = mount(text(4));
+    const excerpt = document.querySelector('.tree-outcome .tree-clamp')!, content = document.querySelector('.tree-outcome .tree-clamp-content')!;
     const observer = observers.find(observer => observer.targets.has(content))!;
     expect(observer).toBeDefined();
     expect(observer.targets.has(excerpt)).toBe(true);
-    expect(view.preview().style.getPropertyValue('--tree-clamp-height')).toBe('84px');
+    expect(view.preview().style.getPropertyValue('--tree-clamp-height')).toBe('63px');
     // The clip's mock bounds remain 84px; only its natural child's observer fires.
     line = 31.5;
     act(() => observer.run());
     expect(view.preview().hasAttribute('data-clamped')).toBe(true);
-    expect(view.preview().style.getPropertyValue('--tree-clamp-height')).toBe('126px');
+    expect(view.preview().style.getPropertyValue('--tree-clamp-height')).toBe('94.5px');
     expect(document.querySelectorAll('.tree-clamp-content.tree-clamp')).toHaveLength(0);
   });
 

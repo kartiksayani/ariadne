@@ -55,14 +55,16 @@ const press = async (control: Locator) => {
   const box = (await control.boundingBox())!;
   await control.page().mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 };
+/** A click on a control above the viewport, where the owner's click would land: the DOM click, with no scroll into view. */
+const click = (control: Locator) => control.evaluate(element => (element as HTMLElement).click());
 
 // [name, kind, subject (a row that must be in view, or null), before, change, done]
 type Trigger = readonly [name: string, kind: 'still' | 'held', subject: string | null, before: (page: Page) => Promise<void>,
   change: (page: Page) => Promise<void>, done: (page: Page) => Promise<void>];
 const nothing = async () => {};
 const triggers: readonly Trigger[] = [
-  ['a New marker clears', 'still', '11', nothing, page => seen(page, '11'), page => expect(row(page, '11').locator('.tree-change-marker')).toHaveCount(0)],
-  ['a Changed marker clears', 'still', '12', nothing, page => seen(page, '12'), page => expect(row(page, '12').locator('.tree-change-marker')).toHaveCount(0)],
+  ['a New marker clears', 'still', '11', nothing, page => seen(page, '11'), page => expect(row(page, '11').getByTestId('change-marker')).toHaveCount(0)],
+  ['a Changed marker clears', 'still', '12', nothing, page => seen(page, '12'), page => expect(row(page, '12').getByTestId('change-marker')).toHaveCount(0)],
   // The band's Ack all goes with the topic's only result to ack.
   ['an Ack lands: the row\'s Ack and the band\'s Ack all go', 'still', '12', nothing, page => agent(page, 'ack-lands'), async page => {
     await expect(row(page, '12').getByRole('button', { name: /^Ack/ })).toHaveCount(0);
@@ -93,6 +95,35 @@ const triggers: readonly Trigger[] = [
     page => page.getByRole('button', { name: 'Show them' }).click(), page => expect(row(page, '1.1')).toHaveCount(1)],
   ['Show more on the reading row', 'held', '10', nothing, page => press(row(page, '10').getByRole('button', { name: 'Show more' })),
     page => expect(row(page, '10').getByRole('button', { name: 'Show less' })).toHaveCount(1)],
+  // The rows below change what is above the reading row, which is out of view: the owner's click is a DOM click.
+  ['a child unfolds above the reading row', 'held', null, nothing, page => click(row(page, '1').getByRole('button', { name: 'Expand or collapse' })),
+    page => expect(row(page, '1.1')).toHaveCount(1)],
+  ['a child folds above the reading row', 'held', null, async page => {
+    await click(row(page, '1').getByRole('button', { name: 'Expand or collapse' }));
+    await expect(row(page, '1.1')).toHaveCount(1);
+  }, page => click(row(page, '1').getByRole('button', { name: 'Expand or collapse' })), page => expect(row(page, '1.1')).toHaveCount(0)],
+  ['an item above the reading row is hidden', 'held', null, nothing, page => click(row(page, '9').getByRole('button', { name: /^Hide/, includeHidden: true })),
+    page => expect(row(page, '9')).toHaveCount(0)],
+  ['Show more above the reading row', 'held', null, nothing, page => click(row(page, '1').getByRole('button', { name: 'Show more' })),
+    page => expect(row(page, '1').getByRole('button', { name: 'Show less' })).toHaveCount(1)],
+  ['an item above the reading row grows to more lines', 'held', null, nothing, page => agent(page, 'grow-above'),
+    page => expect(row(page, '9').locator('.tree-question')).toContainText('renamed')],
+  // The Map crosses 560px: the Changed pill in the marker slot collapses to its diamond (a container query on the Map).
+  ['the Map narrows below 560px', 'held', null, async page => {
+    await expect.poll(async () => (await page.locator('.tree-scroll').boundingBox())!.width).toBeGreaterThanOrEqual(560);
+    await expect.poll(async () => (await row(page, '12').getByTestId('change-marker').boundingBox())!.width).toBeGreaterThan(20);
+  }, page => page.setViewportSize({ width: 700, height: 700 }), async page => {
+    await expect.poll(async () => (await page.locator('.tree-scroll').boundingBox())!.width).toBeLessThan(560);
+    await expect.poll(async () => (await row(page, '12').getByTestId('change-marker').boundingBox())!.width).toBeLessThanOrEqual(16);
+  }],
+  ['an Ack is held, with its Undo', 'still', '12', nothing, page => press(row(page, '12').getByRole('button', { name: /^Ack/ })),
+    page => expect(row(page, '12').getByRole('status')).toContainText('Acked')],
+  ['Undo of a held Ack', 'still', '12', async page => {
+    await press(row(page, '12').getByRole('button', { name: /^Ack/ }));
+    await expect(row(page, '12').getByRole('status')).toContainText('Acked');
+  }, page => press(row(page, '12').getByRole('button', { name: /^Undo Ack/ })), page => expect(row(page, '12').getByRole('button', { name: /^Ack/ })).toHaveCount(1)],
+  // The chip takes the status badge's slot and width: no row changes its width or height.
+  ['a session ends', 'still', '13', nothing, page => agent(page, 'session-ends'), page => expect(row(page, '13').getByText('Session closed')).toBeVisible()],
 ];
 
 async function open(page: Page, origin: string) {
@@ -107,7 +138,7 @@ async function open(page: Page, origin: string) {
   await page.evaluate(async () => { await document.fonts.ready; });
   const close = page.getByRole('button', { name: 'Close detail' });
   if (await close.count()) await close.click();
-  // Item 10 (a seven-line finding that folds behind Show more) is the reading row: its top just under the band.
+  // Item 10 (a four-line finding that folds behind Show more) is the reading row: its top just under the band.
   await row(page, '10').evaluate(element => {
     const box = element.closest('.tree-scroll')!, header = element.closest('.tree-topic-group')!.querySelector('.tree-topic')!;
     box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top - header.getBoundingClientRect().height + 4;

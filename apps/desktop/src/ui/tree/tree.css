@@ -21,6 +21,7 @@
   scroll-padding-top: var(--tree-header-height, 0);
   overflow: auto;
   overflow-anchor: none; /* Use Ariadne's position hold in Chromium as in the shipped WKWebView. */
+  container: tree-map / inline-size; /* rows narrow their end cluster below a 560px Map (D5) */
 }
 
 .tree-rows {
@@ -317,10 +318,10 @@
    changing or a related count appearing never changes the text's width: the row never rewraps. The widths are tokens the
    row look tunes with its pills. */
 .tree-end {
-  --tree-end-marker: calc(40px * var(--text-scale));
+  --tree-end-marker: calc(23px + 44.5px * var(--text-scale)); /* as wide as the "Changed" pill: its padding and diamond, then its word */
   --tree-end-badge: calc(104px * var(--text-scale)); /* "Waiting on me", the longest badge */
   --tree-end-related: 26px;
-  --tree-end-ack: 26px;
+  --tree-end-ack: 22px;
 
   position: relative;
   flex: none;
@@ -339,7 +340,7 @@
 }
 
 .tree-end-marker { width: var(--tree-end-marker); }
-.tree-end-badge { min-width: var(--tree-end-badge); }
+.tree-end-badge { width: var(--tree-end-badge); }
 .tree-end-related { width: var(--tree-end-related); }
 .tree-ack-slot { width: var(--tree-end-ack); }
 

@@ -138,3 +138,24 @@
   border-left: 7px solid var(--tree-halo);
   border-bottom-left-radius: 9px;
 }
+
+/* The folded branch's chip ("4 inside"): the fill of the box two steps deeper than its row, in the branch's ink. */
+.tree-collapsed[data-step] {
+  background: oklch(var(--chip-l) calc(var(--chip-c) * var(--branch-c, 1)) var(--branch-h, 80));
+  color: oklch(var(--tree-ink-l) calc(var(--tree-ink-c) * var(--branch-c, 1)) var(--branch-h, 80));
+}
+
+.tree-collapsed[data-step="3"] {
+  --chip-l: var(--tree-fw-l-3);
+  --chip-c: var(--tree-fw-c-3);
+}
+
+.tree-collapsed[data-step="4"] {
+  --chip-l: var(--tree-fw-l-4);
+  --chip-c: var(--tree-fw-c-4);
+}
+
+.tree-collapsed[data-step="5"] {
+  --chip-l: var(--tree-fw-l-5);
+  --chip-c: var(--tree-fw-c-5);
+}

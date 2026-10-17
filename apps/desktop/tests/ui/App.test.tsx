@@ -69,7 +69,7 @@ describe('ordinary desktop composition', () => {
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
     const detail = await screen.findByRole('article', { name: `Detail of ${session.items['1']!.question}` });
     const row = () => document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1.1"]')!;
-    expect(within(row()).getByRole('img', { name: 'New to you' })).toBeTruthy();
+    expect(within(row()).getByRole('img', { name: 'New' })).toBeTruthy();
     const since = screen.getAllByRole('region', { name: 'Since you were here' }).find(region => within(region).queryByRole('button', { name: /^Since you were here/ }))!;
     fireEvent.click(within(since).getByRole('button', { name: /^Since you were here/ }));
     expect(within(since).getByRole('button', { name: 'New receipt branch' })).toBeTruthy();
@@ -79,10 +79,10 @@ describe('ordinary desktop composition', () => {
     expect(screen.getByRole('dialog', { name: `Peek: ${target.question}` })).toBeTruthy();
     // The card says it is New, and the Map, the Since card and the saved reads all still do.
     expect(screen.getByRole('dialog').querySelector('.peek-marker')?.textContent).toBe('New');
-    expect(within(row()).getByRole('img', { name: 'New to you' })).toBeTruthy();
+    expect(within(row()).getByRole('img', { name: 'New' })).toBeTruthy();
     expect(within(since).getByRole('button', { name: 'New receipt branch' })).toBeTruthy();
     fireEvent.keyDown(document, { key: 'Escape' }); await act(async () => { await vi.advanceTimersByTimeAsync(500); });
-    expect(within(row()).getByRole('img', { name: 'New to you' })).toBeTruthy();
+    expect(within(row()).getByRole('img', { name: 'New' })).toBeTruthy();
     expect(since.isConnected).toBe(true);
     expect(screen.getByRole('article').getAttribute('data-detail-item-id')).toBe('1');
     expect(transport.preferences.seen![0].items.some(item => item.item_id === target.id)).toBe(false);
@@ -1102,7 +1102,7 @@ describe('ordinary desktop composition', () => {
     await act(async () => { await Promise.resolve(); });
     expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);
     expect(screen.getByRole('region', { name: 'Answer dock' }).getAttribute('data-open')).toBe(open);
-    expect(screen.queryByRole('button', { name: /Waiting on me/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Waiting on me/ })).toBeNull();
   });
 
   it('leaves removed chrome shortcuts unbound, including while typing', async () => {

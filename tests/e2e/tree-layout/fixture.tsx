@@ -15,7 +15,7 @@ import { DetailsColumnProvider } from '../../../apps/desktop/src/state/details/c
 import '../../../apps/desktop/src/ui/detail/detail.css';
 
 // The ordinary App over its real stores; only the native transport is replaced.
-// Item 1 carries a long finding (it must fold to four lines), item 5 a paragraph that
+// Item 1 carries a long finding (it must fold to three lines), item 5 a paragraph that
 // wraps over a few lines (hover must not rewrap it), the rest keep their short text.
 class TreeLayoutTransport extends AppTransport {
   constructor({ gettingAround = false, changes = false, card = false, still = false } = {}) {
@@ -29,13 +29,14 @@ class TreeLayoutTransport extends AppTransport {
     const items = session.items;
     items['1']!.question = 'A long item title with enough words to span several lines in a narrow tree. '.repeat(5);
     for (let n = 9; n <= 18; n++) items[String(n)] = { ...items['8']!, id: String(n), ordinal: n, question: `Another item ${n}`, outcome: 'A short result.' };
-    items['9']!.outcome = Array.from({ length: 6 }, (_, index) => `Body line ${index + 1}`).join('\n');
-    items['10']!.outcome = Array.from({ length: 7 }, (_, index) => `Body line ${index + 1}`).join('\n');
-    for (const [id, lines, kind] of [[11, 6, 'paragraph'], [12, 7, 'paragraph'], [13, 6, 'list'], [14, 7, 'list'], [15, 6, 'code'], [16, 7, 'code']] as const) {
+    // The clamp is three lines and folds only when at least one line would hide: three lines stay open, four fold.
+    items['9']!.outcome = Array.from({ length: 3 }, (_, index) => `Body line ${index + 1}`).join('\n');
+    items['10']!.outcome = Array.from({ length: 4 }, (_, index) => `Body line ${index + 1}`).join('\n');
+    for (const [id, lines, kind] of [[11, 3, 'paragraph'], [12, 4, 'paragraph'], [13, 3, 'list'], [14, 4, 'list'], [15, 3, 'code'], [16, 4, 'code']] as const) {
       const body = Array.from({ length: lines }, (_, index) => `${kind === 'list' ? '- ' : ''}Short line ${index + 1}`);
       items[String(id)]!.outcome = kind === 'code' ? `\`\`\`\n${body.join('\n')}\n\`\`\`` : body.join(kind === 'paragraph' ? '\n\n' : '\n');
     }
-    items['17']!.outcome = '[Read the evidence](https://example.com)\n' + Array.from({ length: 6 }, (_, index) => `**Evidence** \`code\` line ${index + 1}`).join('\n');
+    items['17']!.outcome = '[Read the evidence](https://example.com)\n' + Array.from({ length: 3 }, (_, index) => `**Evidence** \`code\` line ${index + 1}`).join('\n');
     items['1']!.outcome = Array.from({ length: 20 }, (_, index) => `Line ${index + 1} of a long finding the agent wrote.`).join('\n');
     items['5']!.outcome = 'A decision paragraph that is long enough to wrap over several lines in the tree column, so that any change in the width of its '
       + 'column on hover would move words from one line to the next and show up as a different line count.';
@@ -70,6 +71,8 @@ class TreeLayoutTransport extends AppTransport {
       items['12']!.revision = 2;
       items['12']!.changes = [{ revision: 2, at: later, cause_message_id: items['12']!.created_message_id, before: { status: 'in_progress' } }];
       items['12']!.type = 'finding'; items['12']!.ack_to = 'done'; items['12']!.ask = null;
+      // 13 is a question waiting on the owner: it carries the "Session closed" chip when the session ends.
+      Object.assign(items['13']!, { status: 'waiting_on_me', type: items['2']!.type, ask: items['2']!.ask, ack_to: null });
       this.preferences.seen = [{ session: route, since: baseline, items: [], topics: [] }];
       this.preferences.sessions[0]!.expanded_item_ids = ['2', '3'];
     }
@@ -81,6 +84,9 @@ class TreeLayoutTransport extends AppTransport {
     if (change === 'add-below') items['40'] = { ...items['18']!, id: '40', ordinal: 40, question: 'A new item at the end' };
     if (change === 'ack-lands') { items['12']!.status = 'done'; items['12']!.ack_to = null; ++items['12']!.revision; }
     if (change === 'counts') { items['15']!.status = 'in_progress'; ++items['15']!.revision; }
+    // The agent renames an item above the reading row to a much longer name: it wraps to more lines.
+    if (change === 'grow-above') { items['9']!.question = 'Another item 9, renamed to a much longer name that wraps over several lines in the Map. '.repeat(3); ++items['9']!.revision; }
+    if (change === 'session-ends') { session.state = 'closed'; session.closed_at = session.updated_at; }
     ++session.revision;
     this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
   }
@@ -100,13 +106,13 @@ function ActionGridFixture() {
   const row: Row = { kind: 'item', key: item.id, item: immutable(item), status: 'open', ack: null, depth: 1,
     hasKids: false, expanded: false, context: false, guides: [], later: false, hidden: false,
     segments: [{ text: item.question, hit: false }], matches: [], replacedBy: null, relatedCount: 0,
-    collapsed: null, delivery: null, badge: 'Open' };
+    collapsed: null, delivery: null, badge: 'Open', branch: 0, boxes: [] };
+  // The hover bar's six slots in SPEC 6.2's order, then Ack in its own persistent slot.
   const definitions = [
     { icon: 'ph ph-check', title: 'Ack → Decided', label: 'Ack', persistent: true },
-    { icon: 'ph ph-megaphone-simple', title: 'Bring it up (b)' }, { icon: 'ph ph-chat-text', title: 'Reply (r)' },
-    { icon: 'ph ph-x-circle', title: 'Drop (d)' }, { icon: 'ph ph-clock', title: 'Later (z)' },
-    { icon: 'ph ph-arrow-counter-clockwise', title: 'Back to Open (o)' }, { icon: 'ph ph-eye-slash', title: 'Hide (x)' },
-    { icon: 'ph ph-trash', title: 'Remove (⌫)' },
+    { icon: 'ph ph-chat-text', title: 'Reply (r)' }, { icon: 'ph ph-megaphone-simple', title: 'Bring it up (b)' },
+    { icon: 'ph ph-clock', title: 'Later (z)' }, { icon: 'ph ph-x-circle', title: 'Drop (d)' },
+    { icon: 'ph ph-eye-slash', title: 'Hide (h)' }, { icon: 'ph ph-trash', title: 'Remove (⌫)' },
   ];
   const actions: RowAction[] = definitions.map(action => ({ ...action, run: () => setClicked(action.title) }));
   const props = { focused: false, highlight: null, note: null, answer: null, unfolded: false, onUnfold: () => {},
