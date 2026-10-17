@@ -81,8 +81,20 @@ class TreeLayoutTransport extends AppTransport {
     if (change === 'add-below') items['40'] = { ...items['18']!, id: '40', ordinal: 40, question: 'A new item at the end' };
     if (change === 'ack-lands') { items['12']!.status = 'done'; items['12']!.ack_to = null; ++items['12']!.revision; }
     if (change === 'counts') { items['15']!.status = 'in_progress'; ++items['15']!.revision; }
+    // The hold at every scroll position (D24): a first row above everything, and a named row leaving or removed.
+    if (change === 'add-top') items['0'] = { ...items['1.1']!, id: '0', parent: null, ordinal: 0, question: 'A new item at the very top' };
+    const [verb, id] = change.split(':');
+    if (verb === 'leave' && id) { items[id]!.status = 'in_progress'; ++items[id]!.revision; }
+    if (verb === 'grow' && id) { items[id]!.question = 'A longer title the agent rewrote, wrapping over a few lines of the Map. '.repeat(4); ++items[id]!.revision; }
+    if (verb === 'remove' && id) { items[id]!.removed_at = session.updated_at; ++items[id]!.revision; }
     ++session.revision;
     this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+  }
+  /** A saved status filter lands, as the desktop's other window or a restore writes it. */
+  filter(statuses: string[]) {
+    this.preferences.sessions.find(value => value.session.session_id === route.session_id)!.filters.statuses = statuses as never;
+    ++this.preferences.revision;
+    this.emit('ariadne://preferences_changed', { revision: this.preferences.revision });
   }
   /** The owner's reading of an item lands from elsewhere (the dock or Details' 1 s dwell): its marker clears. */
   seen(itemId: string) {

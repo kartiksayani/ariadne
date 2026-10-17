@@ -265,8 +265,6 @@ export function TreeView(props: TreeViewProps) {
     [rows, terms]);
   const pinnedIndex = searchCurrent ? matches.findIndex(match => match.id === searchCurrent.id && match.field === searchCurrent.field) : -1;
   const matchIndex = Math.max(0, pinnedIndex), currentMatch = matches[matchIndex] ?? null;
-  /** The reading row before "Show them" adds rows: the next layout puts it back even at the very top. */
-  const pinReading = useRef<readonly Row[] | null>(null);
   const stepSearch = (by: 1 | -1) => {
     if (!matches.length) return;
     const next = matches[(matchIndex + by + matches.length) % matches.length]!;
@@ -278,7 +276,6 @@ export function TreeView(props: TreeViewProps) {
     const reveal = model?.search.reveal;
     if (!reveal || !reveal.items.length && !reveal.topics.length && !reveal.groups.length) return;
     setSearchCurrent(currentMatch);
-    pinReading.current = latest.current.rows;
     const join = (a: readonly string[] = [], b: readonly string[]) => [...new Set([...a, ...b])];
     setSearchShown(previous => ({ items: join(previous?.items, reveal.items), topics: join(previous?.topics, reveal.topics), groups: join(previous?.groups, reveal.groups) }));
   };
@@ -735,10 +732,23 @@ export function TreeView(props: TreeViewProps) {
     // Keyboard moves scroll only when the new row is off-screen, and by the least amount.
     nearest(focusKey, 8);
   }, [focusKey]);
-  // The tree never jumps on its own: what the owner is reading stays put when rows above it grow, shrink, arrive or
-  // leave (a live edit, a message landing, fonts loading). WKWebView has no `overflow-anchor`, so the first visible row
-  // is remembered with its offset (and the scroll position it was seen at) and put back after every layout change.
-  const held = useRef<{ readonly key: string; readonly offset: number; readonly top: number; readonly scrollTop: number } | null>(null);
+  // The Map never moves on its own (D24): what the owner is reading keeps its place in the window when rows above it grow,
+  // shrink, arrive or leave (a live edit, a message landing, fonts loading, a filter) and when the scroller itself moves (a
+  // row opening above the Map), at every scroll position. WKWebView has no `overflow-anchor`, so the reading row (the
+  // selected row while on screen, else the first whole row) is remembered and put back after every layout change.
+  // At `scrollTop = 0` a shrink at or above it lets the rows below rise; at the bottom a shrink leaves a spacer.
+  interface Held {
+    readonly key: string;
+    /** Its top below the reading edge (the scroller's top plus the sticky band there), and its window top. */
+    readonly offset: number; readonly y: number;
+    /** The scroller's window top and scroll position then. */
+    readonly boxTop: number; readonly scrollTop: number;
+    /** The session and rows then, and the offsets of the item rows on screen: a reading row that goes hands the hold on. */
+    readonly sessionId: string | undefined; readonly rows: readonly Row[]; readonly offsets: ReadonlyMap<string, number>;
+  }
+  const held = useRef<Held | null>(null);
+  /** The blank space added below the rows so a shrink at the bottom keeps the scroll extent; owner scrolls trim it. */
+  const spacer = useRef(0);
   const panelTarget = useRef<{ readonly key: string; readonly top: number; readonly scrollTop: number } | null>(null);
   const [breadcrumb, setBreadcrumb] = useState<readonly string[]>([]);
   /** Keep an exit in the band whenever the focused row's own Unfocus is unavailable. */
@@ -751,14 +761,48 @@ export function TreeView(props: TreeViewProps) {
    * Puts the held row back at its offset below the reading edge. The sticky topic bar at that edge belongs to whichever
    * topic is under it at this scroll position: after a width change, rows reflow and another topic's bar (wrapped to a
    * different height) can sit there until the row is back, so settle against the bar the row ends under, measuring it
-   * afresh on each of a few passes.
+   * afresh on each of a few passes. The scroller's own move in the window is not subtracted: the row keeps its window place.
+   * Where the rows no longer reach that far down, the bottom spacer grows to keep the scroll extent.
    */
-  const restoreHeld = (box: HTMLDivElement, before: { readonly offset: number }, element: HTMLElement) => {
+  const restoreHeld = (box: HTMLDivElement, before: { readonly offset: number; readonly boxTop: number }, element: HTMLElement) => {
     for (let pass = 0; pass < 3; pass++) {
-      const delta = element.getBoundingClientRect().top - readingTop() - before.offset;
+      const delta = element.getBoundingClientRect().top - readingTop() - before.offset + box.getBoundingClientRect().top - before.boxTop;
       if (Math.abs(delta) < 1) return;
+      const room = box.scrollHeight - box.clientHeight - box.scrollTop;
+      if (delta > room && box.clientHeight > 0) setSpacer(box, spacer.current + delta - room);
       box.scrollTop += delta;
     }
+  };
+  const setSpacer = (box: HTMLDivElement, height: number) => {
+    const next = Math.max(0, Math.ceil(height)), rows = box.querySelector<HTMLElement>('.tree-rows');
+    if (next === spacer.current) return;
+    spacer.current = next;
+    if (rows) rows.style.paddingBottom = next ? `${next}px` : '';
+  };
+  /** Keeps only the part of the bottom spacer still on screen, so trimming never moves the view; growing rows use it up. */
+  const trimSpacer = (box: HTMLDivElement) => {
+    if (spacer.current) setSpacer(box, Math.min(spacer.current, box.scrollTop + box.clientHeight - (box.scrollHeight - spacer.current)));
+  };
+  /**
+   * The held row, or when it went (filtered out, hidden or removed), the nearest surviving row below it, else above it.
+   * A row the owner folded away under its topic or a parent is the owner's own move: nothing is held, as before D24.
+   */
+  const heldRow = (before: Held): { readonly element: HTMLElement; readonly offset: number } | null => {
+    const element = elements.current.get(before.key);
+    if (element) return { element, offset: before.offset };
+    const { rows: now, session: current } = latest.current, item = current?.items[before.key];
+    if (!current || current.id !== before.sessionId) return null;
+    const shown = new Map(now.map(row => [row.key, row]));
+    for (let key = item ? item.parent ?? item.topic_id : null; key; key = current.items[key]?.parent ?? current.items[key]?.topic_id ?? null) {
+      const row = shown.get(key);
+      if (row?.kind === 'topic' ? !row.expanded : row?.kind === 'item' && row.hasKids && !row.expanded) return null;
+    }
+    const keys = before.rows.flatMap(row => row.kind === 'item' ? [row.key] : []), at = keys.indexOf(before.key);
+    for (const key of [...keys.slice(at + 1), ...keys.slice(0, Math.max(at, 0)).reverse()]) {
+      const survivor = elements.current.get(key);
+      if (survivor) return { element: survivor, offset: before.offsets.get(key) ?? before.offset };
+    }
+    return null;
   };
   const remembering = () => {
     const box = scroller.current;
@@ -768,11 +812,13 @@ export function TreeView(props: TreeViewProps) {
     if (previousWidth.current !== null && previousWidth.current !== box.getBoundingClientRect().width) { holding(); return; }
     const before = held.current, element = before ? elements.current.get(before.key) : undefined;
     // An observer, layout effect or delayed programmatic scroll event can arrive between
-    // reflows. With no owner scroll, restore the held row before adopting the new layout.
-    if (before && element && before.scrollTop > 0 && box.scrollTop === before.scrollTop && (settled.current || !placed.current)) {
-      const delta = element.getBoundingClientRect().top - box.getBoundingClientRect().top - before.top;
+    // reflows. With no owner scroll, restore the held row's window place before adopting the new layout.
+    if (before && element && box.scrollTop === before.scrollTop && (settled.current || !placed.current)) {
+      const delta = element.getBoundingClientRect().top - before.y;
       if (Math.abs(delta) >= 1) box.scrollTop += delta;
     }
+    // An owner scroll back up (or rows growing into it) gives the spacer's room back; what is on screen stays.
+    trimSpacer(box);
     const top = readingTop(), list = latest.current.rows.filter(row => row.kind === 'item');
     const panelKey = latest.current.selectedId;
     const panelRect = panelKey ? elements.current.get(panelKey)?.getBoundingClientRect() : undefined;
@@ -785,19 +831,30 @@ export function TreeView(props: TreeViewProps) {
       if (!element || element.getBoundingClientRect().bottom > top + READING_EDGE_CLEARANCE) high = middle; else low = middle + 1;
     }
     const key = list[low]?.key;
+    const first = key ? elements.current.get(key) : undefined, firstTop = first?.getBoundingClientRect().top;
+    // The reading row: the selected row while any of it is on screen below the band, else the first row whole below the
+    // band (the clipped predecessor only when nothing else starts on screen).
+    const selectedShown = panelKey && panelRect && panelRect.bottom > top + READING_EDGE_CLEARANCE && panelRect.top < visibleBottom(box) ? panelKey : null;
+    const whole = list[low + (firstTop !== undefined && firstTop >= top - READING_EDGE_CLEARANCE ? 0 : 1)]?.key;
+    const reading = selectedShown ?? (whole && elements.current.has(whole) ? whole : key);
     // A deliberate reveal holds its own row through detail-width and preview-clamp changes.
     // The previous row may still peek out below the sticky header's eight-pixel margin.
     if (revealedAnchor.current && !elements.current.has(revealedAnchor.current.key)) revealedAnchor.current = null;
     const revealed = revealedAnchor.current;
-    const holdKey = revealed?.key ?? key, holdElement = holdKey ? elements.current.get(holdKey) : undefined;
+    const holdKey = revealed?.key ?? reading, holdElement = holdKey ? elements.current.get(holdKey) : undefined;
     // Edge/breadcrumb observation may run before reflow correction. Preserve the
     // reveal's original offset instead of adopting its temporarily obscured top.
     const holdRect = holdElement?.getBoundingClientRect();
-    held.current = holdKey && holdRect ? { key: holdKey, offset: revealed?.offset ?? holdRect.top - top,
-      top: holdRect.top - box.getBoundingClientRect().top, scrollTop: box.scrollTop } : null;
-    // Reading keeps a partially visible row anchored, but breadcrumb names belong to
-    // the first complete row below the pinned topic, not that clipped predecessor.
-    const first = key ? elements.current.get(key) : undefined;
+    const offsets = new Map<string, number>(), screenEnd = visibleBottom(box);
+    for (let index = Math.max(low - 1, 0); index < list.length; index++) {
+      const rect = elements.current.get(list[index]!.key)?.getBoundingClientRect();
+      if (!rect || rect.top >= screenEnd) break;
+      offsets.set(list[index]!.key, rect.top - top);
+    }
+    held.current = holdKey && holdRect ? { key: holdKey, offset: revealed?.offset ?? holdRect.top - top, y: holdRect.top,
+      boxTop: box.getBoundingClientRect().top, scrollTop: box.scrollTop, sessionId: latest.current.session?.id, rows: latest.current.rows, offsets } : null;
+    // Reading holds the first whole row, but breadcrumb names belong to the first complete
+    // row below the pinned topic, which also ends on screen.
     const completeKey = list[low + (first && first.getBoundingClientRect().top >= top ? 0 : 1)]?.key;
     const complete = completeKey ? elements.current.get(completeKey)?.getBoundingClientRect() : undefined;
     const breadcrumbKey = complete && complete.top >= top && complete.bottom <= Math.min(visibleBottom(box), window.innerHeight)
@@ -835,30 +892,39 @@ export function TreeView(props: TreeViewProps) {
     if (previous.detailOpen && !current.detailOpen && target && target.key === current.selectedId) {
       const offset = Math.max(target.top, readingTop() + 8) - readingTop();
       revealedAnchor.current = { key: target.key, offset };
-      held.current = { key: target.key, offset, top: readingTop() + offset - (scroller.current?.getBoundingClientRect().top ?? 0), scrollTop: target.scrollTop };
+      held.current = { key: target.key, offset, y: readingTop() + offset, boxTop: scroller.current?.getBoundingClientRect().top ?? 0,
+        scrollTop: target.scrollTop, sessionId: latest.current.session?.id, rows: latest.current.rows, offsets: new Map() };
     }
     if (resized || previous.selectedId !== current.selectedId || previous.reveal !== current.reveal || previous.detailOpen !== current.detailOpen) {
       settled.current = true; setAnchor(null);
     }
-    const box = scroller.current, before = held.current, element = before ? elements.current.get(before.key) : undefined;
-    // "Show them" adds rows around the reading row and keeps it, even at the very top.
-    const pinned = pinReading.current !== null && pinReading.current !== latest.current.rows;
-    if (pinned) pinReading.current = null;
-    // At the very top the owner wants the newest rows; a different scroll position means the view was moved on purpose
-    // (a scroll, a reveal, the keyboard), and the opening placement holds its own row until the owner steers.
-    if (box && before && element && (before.scrollTop > 0 || pinned) && box.scrollTop === before.scrollTop && (settled.current || !placed.current)) restoreHeld(box, before, element);
+    const box = scroller.current, before = held.current;
+    // A different scroll position means the view was moved on purpose (a scroll, a reveal, the keyboard), and the opening
+    // placement holds its own row until the owner steers. A shrink at the bottom clamps the scroll position: that is no move.
+    // (A scroller with no layout yet, zero high, has no end to clamp to.)
+    const clamped = !!box && !!before && box.clientHeight > 0 && box.scrollTop < before.scrollTop && box.scrollTop >= box.scrollHeight - box.clientHeight - 1;
+    const back = box && before && (box.scrollTop === before.scrollTop || clamped) && (settled.current || !placed.current) ? heldRow(before) : null;
+    if (box && before && back) restoreHeld(box, { offset: back.offset, boxTop: before.boxTop }, back.element);
     remembering();
   };
   useLayoutEffect(holding);
   const hasRows = rows.length > 0 && !graph;
   useEffect(() => {
-    const content = scroller.current?.querySelector('.tree-rows');
-    if (!content || typeof ResizeObserver === 'undefined') return;
+    const box = scroller.current, content = box?.querySelector('.tree-rows');
+    if (!box || !content || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(holding);
     observer.observe(content);
     content.querySelectorAll('.tree-topic').forEach(header => observer.observe(header));
-    return () => observer.disconnect();
-  }, [hasRows]);
+    // The scroller itself: a row opening or closing above the Map resizes it as it moves it in the window (D13).
+    let frame = box.getBoundingClientRect();
+    const moved = new ResizeObserver(() => {
+      const now = box.getBoundingClientRect();
+      if (now.top !== frame.top || now.height !== frame.height) holding();
+      frame = now;
+    });
+    moved.observe(box);
+    return () => { observer.disconnect(); moved.disconnect(); setSpacer(box, 0); };
+  }, [hasRows, store]);
   // Leaving the tree saves the first visible row as the session's reading position.
   const saveScroll = (event: FocusEvent<HTMLDivElement>) => {
     const box = scroller.current;
