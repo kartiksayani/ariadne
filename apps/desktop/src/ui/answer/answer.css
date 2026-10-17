@@ -94,9 +94,18 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-@container answer (width < 1000px) {
+/* The dock's cards and hint follow the dock's own width (the board's "narrow" window), not the answer's: the section is also named `dock`. */
+@container dock (width < 1000px) {
   .answer.answer-dock > .answer-options {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .answer.answer-dock .answer-bar-wide {
+    display: none;
+  }
+
+  .answer.answer-dock .answer-bar-narrow {
+    display: inline;
   }
 }
 
@@ -195,6 +204,7 @@
 .answer-consequence {
   font-size: calc(12.5px * var(--text-scale));
   line-height: 1.45;
+  text-wrap: pretty;
   color: color-mix(in srgb, var(--color-text) 66%, transparent);
 }
 
@@ -227,6 +237,7 @@
 .answer-note-link {
   align-self: flex-start;
   margin-left: 27px;
+  margin-top: -3px;
   padding: 0;
   border: 0;
   font: inherit;
@@ -236,9 +247,9 @@
   cursor: pointer;
 }
 
-/* The box sits in the card's text column: after the 18px number and its 9px gap, before the 9px gap and 15px check. */
+/* The box sits in the card's text column: after the 18px number and its 9px gap, before the 9px gap and the check (15px, scaled). */
 .answer-text {
-  width: calc(100% - 51px);
+  width: calc(100% - 36px - 15px * var(--text-scale));
   margin-left: 27px;
   padding: 6px 8px;
   border: 0;
@@ -255,6 +266,15 @@
 .answer-text:focus {
   outline: none;
   box-shadow: 0 0 0 1.5px var(--color-accent);
+}
+
+/* The board seats the box 4px under a picked option's text and 5px under "Write my own answer", whose box is 13.5px. */
+.answer-option + .answer-text { margin-top: -1px; }
+
+/* Its label column is only as tall as its line (13.5px at 1.4), not as the 19px number box beside it. */
+.answer-own > .answer-option + .answer-text {
+  margin-top: calc(-3px - max(0px, 19px - 18.9px * var(--text-scale)));
+  font-size: calc(13.5px * var(--text-scale));
 }
 
 .answer-sent-note {

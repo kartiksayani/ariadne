@@ -27,6 +27,25 @@ describe('answer cards', () => {
     expect(screen.getByText('Pick an option with 1–2 or write your own, then send with ↵.')).toBeTruthy();
   });
 
+  it('carries the dock hint in both widths, and the keys it names pick and send', () => {
+    const onSelect = vi.fn(), onSendOption = vi.fn();
+    const view = render(<AnswerControl {...props({ selected: 0, draft: '', onSelect, onSendOption })} />);
+    expect(view.container.querySelector('.answer-bar-wide')?.textContent).toBe('Pick an option with 1–2 or write your own, then send with ↵.');
+    expect(view.container.querySelector('.answer-bar-narrow')?.textContent).toBe('Pick with 1–2, send with ↵.');
+    const card = view.container.querySelector<HTMLElement>('[data-answer-option="1"]')!;
+    card.focus(); fireEvent.keyDown(card, { key: '2' });
+    expect(onSelect).toHaveBeenCalledWith(1); expect(onSendOption).not.toHaveBeenCalled();
+    fireEvent.keyDown(card, { key: 'Enter' });
+    expect(onSendOption).toHaveBeenCalledTimes(1);
+  });
+
+  it('lays out a check on every card and on "Write my own answer", visible only on the picked one', () => {
+    const view = render(<AnswerControl {...props({ selected: 0, draft: '' })} />);
+    const checks = [...view.container.querySelectorAll('.answer-option')].map(card => card.querySelector('.answer-check'));
+    expect(checks.every(Boolean)).toBe(true);
+    expect(checks.map(check => check!.classList.contains('answer-check-off'))).toEqual([false, true, true]);
+  });
+
   it.each(['dock', 'details', 'wide'] as const)('keeps multiline words, plain Enter and Escape in the note box (%s)', layout => {
     const values = props({ layout, onEscape: vi.fn() });
     const view = render(<AnswerControl {...values} />);
