@@ -278,34 +278,6 @@ impl Fixture {
             },
         }
     }
-    /// Waits until nothing holds this binding's lease file. A control request or blocking
-    /// call that the old activation started keeps its lease clone until it returns, and a
-    /// replacement activation's nonblocking lease fails while any clone is alive. The probe
-    /// takes the same exclusive lock the product takes and drops it again at once.
-    fn wait_lease_free(&self, scope: &BindingScope) {
-        let path = self
-            .home
-            .join("run/leases")
-            .join(format!("{}.lock", scope.binding_id.as_str()));
-        let until = Instant::now() + HANG_GUARD;
-        loop {
-            match fs::OpenOptions::new().read(true).write(true).open(&path) {
-                // Never locked, or removed: nothing holds it.
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
-                Err(error) => panic!("probe lease file: {error}"),
-                Ok(file) => {
-                    if file.try_lock().is_ok() {
-                        return;
-                    }
-                }
-            }
-            assert!(
-                Instant::now() < until,
-                "the old activation's lease was never released"
-            );
-            std::thread::sleep(Duration::from_millis(10));
-        }
-    }
     fn wait_route(&self, scope: &BindingScope) {
         let until = Instant::now() + HANG_GUARD;
         loop {
@@ -421,9 +393,6 @@ fn wake_replaces_activation_only_after_old_monitors_exit_and_requires_fresh_boun
     let bridge = runtime.bridge();
     let before = read(bridge.core(), &route);
     assert!(runtime.reconcile_after_wake().is_err());
-    // The announcement below starts a replacement activation that takes the binding's
-    // nonblocking lease; the old activation's last clones may still be unwinding.
-    fixture.wait_lease_free(&scope);
     assert_eq!(
         fixture
             .call(8, ControlMethod::Ping(scope.clone()))
