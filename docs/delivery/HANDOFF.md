@@ -19,13 +19,49 @@ native journey) once on the integrated head before push, and plans time for it. 
 clickable HTML mock under `designs/mocks/`; the owner signs off and implementation
 follows it.
 
-**Main: `0336a903` (#164). Alpha.18 released as
-[`v0.1.0-alpha.18`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.18)**
-(tag at `0336a903`). Alpha.17 is `v0.1.0-alpha.17` (tag at `925c9645`, #162), alpha.16 is
+**Main: `c87909da` (#169). Alpha.19 released as
+[`v0.1.0-alpha.19`](https://github.com/kartiksayani/ariadne/releases/tag/v0.1.0-alpha.19)**
+(tag at `c87909da`). Alpha.18 is `v0.1.0-alpha.18` (tag at `0336a903`, #164), alpha.17 is
+`v0.1.0-alpha.17` (tag at `925c9645`, #162), alpha.16 is
 `v0.1.0-alpha.16` (tag at `44158cbf`, #160), alpha.15 is `v0.1.0-alpha.15` (tag at
 `10b6013a`, #159) and alpha.14 is `v0.1.0-alpha.14` (tag at `1135693c`, #155): a Map you
 can follow, from #150 (`395736a2`), #151 (`bc7fa712`), #152 (`63295ec5`), #153
 (`2bd09408`), #154 (`8a58f93c`) and #155 (`1135693c`).
+
+## Alpha.19 released
+
+[#169](https://github.com/kartiksayani/ariadne/pull/169), `c87909da`, "The window": the
+first of three redesign releases, built to the owner-approved Claude Design board
+(checks against the final board landed in
+[#167](https://github.com/kartiksayani/ariadne/pull/167), `65484aca`). Tasks
+P11.28–P11.34. What changed for the owner:
+
+- No tabs, header or footer. A top bar holds a switcher (⌘O) for projects, sessions and their waiting questions, and the pages Projects, All sessions and Archive. All sessions rows have Rename, Close and Archive. Archive rows open the session to read without restoring it; an archived session's card says "Restore session".
+- The connection card (the "Live" chip) holds Sending…, Close session, Restore or Reopen session, and Copy session ID. A failed copy reads "Couldn't copy". Copy instruction is hidden when there is no setup receipt.
+- The answer dock replaces the Waiting column. It floats over the Map and Details, opens with `[`, `]` or the "N waiting" pill, and can be dragged to any height. Number keys pick an option; ↵ or ⌘↵ sends (⌘↵ only when focus is in the dock). The dock path ends at the parent; clicking the question's title, or focusing it and pressing Enter, opens it in Details.
+- One answer per question. Undo works only while the answer is queued. A busy agent's answer reads "It goes when the agent is free".
+- A failed send keeps the owner's words, with Copy and Retry. Cancel message, Mark as done and Stop waiting reopen the cards with the words and choice. If the agent may already have the answer, Send asks "Send again?" first.
+- After a handled answer, "Add a reply" (or `r`) adds more words.
+- Details folds to a rail (» or the rail); its width and fold are saved outside the saved file. Opening an item (click, Enter, `r`, ⌘[ / ⌘]) unfolds it; arrow keys through the Map do not. Nothing is marked seen while it is folded, and the rail shows a marker for something new. The reading row stays put when Details folds, unfolds or is resized.
+- Keys act on the selected item only; on a page they do nothing to the Map. Removed: ⌥1–9 / ⌥0 quick-send, ⌘J (use `.` to return to the selected item), `e`, `w`, `x` and `h` / `l` folding. `a` only acknowledges.
+- First run says to register a project folder before a Codex setup instruction can be copied.
+
+Differences from the board, kept on purpose:
+
+- A failed send keeps Mark as done, Cancel message and More options, so a stuck message is never a dead end.
+- A project page keeps "Connect existing session", which is how a Codex session connects.
+- First run offers "Register a project" where the board shows "Copy instruction", because there is nothing to copy before a project exists.
+- "Disconnect" versus "Close session" and "Copy session ID" (board 12.1) waits for release 3 (connection states).
+
+Decisions made while integrating: a click on a Map item unfolds folded Details but keyboard
+moves do not, so the Map never narrows without an owner action; the text scale defaults to
+80 for fresh installs and saved values are untouched. The design harness asserts 37 board
+states by region at 0.1–0.6 %, the old v2 frames are retired, and about 300 UI, e2e and
+native tests were migrated with their assertions kept. Two Opus reviews found 12 defects,
+each fixed with a failing-first test; a targeted re-review said ship and its two minor gaps
+are fixed. The full local gate passed (Vitest 3933/3933, design 261/261, build, cargo and
+native 10/10 blocks). The release-boundary check ran in CI, because the owner's app is open
+locally. Saved data is unchanged from alpha.18.
 
 ## Alpha.18 released
 
@@ -83,45 +119,53 @@ added the harness rules and the alpha.15 records.
 
 ## Next
 
-**The UI is being redesigned.** Mockups are made in Claude Design, the owner approves
-them, and only then does a redesign get built. The Map and window layout are chosen.
-The remaining rounds are:
+**The UI is being redesigned** in three releases from the owner-approved board. Mockups
+are made in Claude Design, the owner approves them, and only then does a redesign get
+built.
 
-1. Answering plus conversation.
-2. What changed plus peek.
-3. Dialogs, notices and pages.
+1. The window (answering, Details, top bar): alpha.19, released.
+2. The Map, including what changed and peek: alpha.20.
+3. Dialogs, notices and pages, with connection states: release 3.
 
 ## Next steps
 
-Items 1 and 2 are for alpha.19 (they do not touch the redesign). Items 3 onward wait until the redesign rounds above are done, unless the owner asks for one earlier.
+Items 1 and 2 are for alpha.20. Items 3 and 4 are small and do not touch the redesign; take them alongside. Items 5 onward wait until the redesign is done, unless the owner asks for one earlier.
 
-1. Hook notice follow-ups from the alpha.18 final re-review (non-blocking), each a small task:
+1. **Alpha.20 "The Map"** (plan approved by the owner on 2026-10-17). The Tree and Graph match the approved board, and three rules hold under every trigger: the Map never moves on its own; a branch's hue stays put across adds, removes and reloads; markers clear only by the defined rules. Each rule gets an invariant table written before the code. Order: P0 prep, then T, M3 and M7 in parallel, then M1, M2, M5 and M6 in parallel, then V, then one integration and one full gate, then Opus reviews split by area.
+   - P11.36 (P0) behaviour-preserving prep: split `tree.css`, hue table to `ui/tree/branch.ts`, band slot props.
+   - P11.37 (T) Tree core: search in place, a fixed end cluster, the Map-never-moves table.
+   - P11.38 (M1) Map look. P11.39 (M2) topic band. P11.40 (M5) filter chip row. P11.41 (M3) Graph. P11.42 (M6) changes, markers and Back-to. P11.43 (M7) peek. P11.44 (V) design regions for the Map states.
+   - Owner answers on 2026-10-17: hovering to peek is not a Recent visit; a single Ack shows Undo, then saves; a folded chip also says "N waiting"; several topics in one session stack in the Graph.
+2. Fixes already built on branches and not merged. They are in progress, not done:
+   - P11.35 Silent Send in Details under load, branch `redesign/a20-sendfix` (`edd355c6`). `submit.ts` refuses when the sending session differs from the rendered one and sets `loadingError`; the next snapshot clears it. The text is kept, Send stays enabled, nothing is saved and no message shows. Found in the alpha.19 gate, where the native recovery journey failed once under load and passed 3 of 3 alone. The bug dates from alpha.8.
+   - P11.22 and P11.23 Fair store lock and a realistic `claim_contention` test, branch `redesign/a20-lock` (`a01d22eb`).
+3. Hook notice follow-ups from the alpha.18 final re-review (non-blocking), each a small task:
    - P11.17 `claim` is not retired after binding removal (`claims.js` `end()`), so the terminal "removed" line stays current and hides later advice until reconnect. Retire it after the removal is recorded.
    - P11.18 Pre-existing dead end: `autoConnect` holds `ownerTransition` while awaiting `deliverNote` (`register.js`). If `$.session.append` hangs, `/ariadne-connect` and `/ariadne-disconnect` answer "already connecting" forever. Don't await the note inside the transition window, or time-box it.
    - P11.19 The oracle's one-outcome check is circular (`notice-invariants.test.js`). Turn on the `balanced()` ledger in `register.test.js` and `connect-recovery.test.mjs`.
    - P11.20 A transient turn-callback failure stays current while idle, and "it will keep trying" is false there.
    - P11.21 `HUNG_CALL_MS` (10 s) assumes one helper run per call, but auto and reports do several. Use per-producer thresholds and fix the README wording.
-2. Store and install follow-ups from the alpha.18 head review and install check:
-   - P11.22 The store lock is unfair (`crates/ariadne-store/src/session/lock.rs`): `try_lock` with a backoff growing to 50 ms lets newcomers polling at 10 ms beat the longest waiter. Use a flat 10 ms poll or a FIFO handoff.
-   - P11.23 `claim_contention.rs` readers should resolve like the CLI (`AgentResolver::resolve`), so a busy catalogue fails the try instead of hiding a 2 s wait. Place queue inputs outside the 2.3 s holds (space them 150–200 ms). Keep every assertion. It fails 2 to 4 of 5 local runs on a shared machine.
+4. Store and install follow-ups from the alpha.18 head review and install check:
+   - P11.22 In progress (item 2). The store lock is unfair (`crates/ariadne-store/src/session/lock.rs`): `try_lock` with a backoff growing to 50 ms lets newcomers polling at 10 ms beat the longest waiter. Use a flat 10 ms poll or a FIFO handoff.
+   - P11.23 In progress (item 2). `claim_contention.rs` readers should resolve like the CLI (`AgentResolver::resolve`), so a busy catalogue fails the try instead of hiding a 2 s wait. Place queue inputs outside the 2.3 s holds (space them 150–200 ms). Keep every assertion. It fails 2 to 4 of 5 local runs on a shared machine.
    - P11.24 Later: the owner's `session_read` takes the session lock (`queries/mod.rs` to `catalogue.rs`). Peek-based reads are possible.
    - P11.25 While the alpha.17 app ran, `install.sh`'s doctor printed "some data was busy or unreadable" and "Saved data couldn't be read safely". A rerun right after said "No problems found". The install-time doctor should ride out busy like other reads, or word it as busy, try again.
    - P11.26 Deflake the load-sensitive tests (see Known flakes).
    - P11.27 Every alpha ships as plugin version 0.1.0, so the Claude plugin cache cannot tell alphas apart.
-3. Follow-ups from #162, each a small task:
+5. Follow-ups from #162, each a small task:
    - P11.10 Graph selection reply race: a Graph click's `revealItem` reply is dropped when a reveal is dismissed mid-flight, because the `external` guard in `GraphView.tsx` compares App's `treeReveal`. Fix with a counter that changes only on a non-own, non-null outside reveal.
    - P11.11 Stale "outside your filters" banner: it stays after a Graph fold or stub toggle; the Tree dismisses it through `onDismissReveal`.
    - P11.12 Reveal selected detail parity: the Graph keeps detail closed and the Tree opens it. The owner decides, then both align.
    - P11.13 Missing composed tests: a plain Graph click keeps scroll and focus through App, and the selection is asserted after Resume.
    - P11.14 Flake watch for `tests/integrations/claude/register.test.js` (see Known flakes).
-4. Recovery edge cases from a failure table. Three rare cases from the #159 review:
+6. Recovery edge cases from a failure table. Three rare cases from the #159 review:
    a rollback that could remove the only copy of the recovery file on network
    filesystems, transient read errors that set a good recovery file aside, and a
    needless sync on reads. Brief it as a full failure table (ORCHESTRATOR, "Delivery
    feedback rules"). Task P11.7.
-5. Previous-release read test: an automatic check that the previous release accepts
+7. Previous-release read test: an automatic check that the previous release accepts
    the files the new build writes. Task P11.8.
-6. Watch the Known flakes list below; a second occurrence gets fixed before the next merge.
+8. Watch the Known flakes list below; a second occurrence gets fixed before the next merge.
 
 ## Process lessons
 
@@ -167,6 +211,19 @@ One entry per flake: the test and its first failure, the evidence, and the suspe
   - `itemNavigation` "keeps Waiting, linked and history reveals…" and "reveals native item routes again…", and the tree component test "never scrolls when status chip dismisses…", failed in the gate and passed alone (236 of 236).
   - Not a flake: `conformance.rs:532` failed because a non-interactive shell's background job inherits SIGINT as ignored, so the fake child exited 0. Fixed in `fc090d91`: the test binary is the child, and it resets and raises the signal.
   - `claim_contention::pollers_and_readers_together…` fails at load 15–45 on a shared machine (task P11.23). CI on a quiet runner passed.
+
+- **`crates/ariadne-adapter-codex/tests/queue.rs`, "Codex version probe timed out" under load.** Second occurrence; load-sensitive. Task P11.26.
+  - First listed with the alpha.18 load flakes above. Failed again 3 times in the alpha.19 gate (2026-10-17) with no crate change since the previous gate passed.
+  - Fix with P11.26: a deadline that does not depend on machine load.
+
+- **`cargo llvm-cov` coverage run, `composition::tests::wake_replaces_activation_only_after_old_monitors_exit_and_requires_fresh_bound_evidence` (`mod.rs:389`).** First occurrence; not fixed yet.
+  - First failed: #169 CI coverage run, 2026-10-17. PermissionDenied: "Another desktop or supervisor holds this nonblocking lease". `src-tauri` is untouched by alpha.19.
+  - Suspected cause: another test process holds the lease while the coverage build runs the test. Not confirmed.
+
+- **Native journey recovery step under load.** First occurrence; not fixed yet.
+  - First failed: alpha.19 gate 2, 2026-10-17. `runRecoveryAcceptance` waited 10 s for `button=Sending…`. The failure screenshot shows the card open with Sending… present. It did not reproduce when rerun alone (2 of 2, then 3 of 3).
+  - Likely related to P11.35 (silent Send in Details under load).
+  - Also seen once: the native Graph step "Tree must show the same filtered items as Graph". The accessibility `r` step got a retry press under load; replace it with a readiness wait, because a key must work on the first press.
 
 - **Design harness first load: `tests/ui/design/design.spec.mts` `openApp`'s 60 s `waitForFunction` for the app to render.** Fixed in #160.
   - First failed: #155 CI. Failed again: #160 CI, "M2 chosen answer and attributed topic lists (dark)" (line 271), one of the first tests a fresh worker runs. Both times a first-load timeout.
