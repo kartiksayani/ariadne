@@ -5,18 +5,24 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { createDesktopService } from '../../../src/data/service';
 import { SessionStore } from '../../../src/data/session-store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
+import { NavigationStore } from '../../../src/state/navigation/store';
 import { PeekProvider, usePeek, type PeekProviderProps } from '../../../src/ui/peek/Peek';
 import { AnswerSlot } from '../../../src/ui/detail/AnswerSlot';
 import { ItemRefSession } from '../../../src/ui/peek/context';
 import { ItemReference, ItemRefs, Markdown } from '../../../src/ui/shared/MarkdownText';
 import { peekPosition } from '../../../src/ui/peek/position';
 import { peekNames } from '../../../src/ui/peek/names';
+import { peekChange } from '../../../src/ui/peek/change';
+import type { ItemChangeBefore } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data/session-store';
 import { AppTransport, route } from '../app/transport';
 import { answerWords } from '../answer/words';
 
-const stores: SessionStore[] = [];
-afterEach(() => { cleanup(); vi.useRealTimers(); stores.splice(0).forEach(store => store.close()); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+const stores: SessionStore[] = [], navigations: NavigationStore[] = [];
+afterEach(() => {
+  cleanup(); vi.useRealTimers(); stores.splice(0).forEach(store => store.close()); navigations.splice(0).forEach(store => store.stop());
+  vi.restoreAllMocks(); vi.unstubAllGlobals();
+});
 
 async function setup() {
   const transport = new AppTransport(), service = createDesktopService(transport);
@@ -48,7 +54,7 @@ function mount(value: Awaited<ReturnType<typeof setup>>, extra: Partial<PeekProv
 }
 
 describe('name chips and item peek', () => {
-  it('shows the complete title in the peek heading without repeating the chip short name', async () => {
+  it('heads the card with the short name and status, and gives the full question in the summary and the card name', async () => {
     const value = await setup();
     const title = 'Add the receipt lookup test and keep its full result explanation available before choosing the next delivery window.';
     value.source.items['2']!.question = title; ++value.source.revision;
@@ -57,8 +63,27 @@ describe('name chips and item peek', () => {
     expect(chip().textContent).toBe('Delivery choice');
     fireEvent.click(chip());
     const peek = screen.getByRole('dialog', { name: `Peek: ${title}` });
-    expect(within(peek).getByRole('heading', { level: 2 }).textContent).toBe(title);
-    expect(within(peek).queryByText('Delivery choice')).toBeNull();
+    const heading = within(peek).getByRole('heading', { level: 2 });
+    expect(heading.textContent).toBe('Delivery choice');
+    expect(heading.title).toBe(title);
+    expect(peek.querySelector('.peek-head')!.textContent).toContain('Waiting on me');
+    expect(peek.querySelector('.peek-summary')!.textContent).toBe(title);
+    // An outcome, once there is one, is the summary instead.
+    value.source.items['2']!.outcome = 'Ship it in the morning window.'; ++value.source.revision;
+    await act(async () => { await value.store.refresh(); });
+    expect(peek.querySelector('.peek-summary')!.textContent).toBe('Ship it in the morning window.');
+  });
+
+  it('has the board footer: esc to close, Open details and Go to, and no Copy reference', async () => {
+    const value = await setup(), { chip, go } = mount(value);
+    fireEvent.click(chip());
+    const peek = screen.getByRole('dialog');
+    const footer = peek.querySelector<HTMLElement>('.peek-footer')!;
+    expect([...footer.querySelectorAll('button')].map(button => button.textContent)).toEqual(['esc to close', 'Open details', 'Go to']);
+    expect(within(peek).queryByRole('button', { name: /Copy/ })).toBeNull();
+    fireEvent.click(within(footer).getByRole('button', { name: 'Open details' }));
+    expect(go).toHaveBeenCalledWith({ ...route, item_id: '2' });
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('keeps running-text names inside the existing line box while retaining keyboard peek and focus return', async () => {
@@ -82,7 +107,6 @@ describe('name chips and item peek', () => {
     const value = await setup(); value.source.items['2']!.type = 'task'; ++value.source.revision; await value.store.refresh();
     const { chip } = mount(value); fireEvent.click(chip());
     const peek = screen.getByRole('dialog', { name: `Peek: ${value.source.items['2']!.question}` });
-    expect(within(peek).getByText('task')).toBeTruthy();
     // The peek answers with option cards and Send only.
     expect(within(peek).queryByRole('textbox')).toBeNull();
     fireEvent.click(within(peek).getByRole('button', { name: /^Change the design/ }));
@@ -99,7 +123,6 @@ describe('name chips and item peek', () => {
     expect(chip().textContent).not.toContain('#2');
     chip().focus(); fireEvent.keyDown(chip(), { key: ' ' });
     const first = screen.getByRole('dialog', { name: `Peek: ${value.source.items['2']!.question}` });
-    expect(within(first).getByText('question')).toBeTruthy();
     expect(within(first).getByText('Waiting on me')).toBeTruthy();
     expect(document.activeElement).toBe(within(first).getByRole('button', { name: 'Close peek' }));
     fireEvent.click(screen.getByRole('button', { name: `${value.source.items['8']!.question} · Open` }));
@@ -129,57 +152,147 @@ describe('name chips and item peek', () => {
     expect(document.activeElement).toBe(outside);
   });
 
-  it('only opens after half a second of command-hover and cancels on leave, command release and blur', async () => {
+  it('opens after 350 ms of a resting pointer, with no Recent visit, and cancels on an early leave or blur', async () => {
     const value = await setup(); vi.useFakeTimers();
     const { chip, visit } = mount(value);
-    fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(600));
+    fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(349));
     expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.keyDown(document, { key: 'Meta', metaKey: true }); act(() => vi.advanceTimersByTime(499));
-    expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.keyUp(document, { key: 'Meta', metaKey: false }); act(() => vi.advanceTimersByTime(1));
-    expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.mouseEnter(chip(), { metaKey: true }); act(() => vi.advanceTimersByTime(200));
     fireEvent.mouseLeave(chip()); act(() => vi.advanceTimersByTime(500));
     expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.mouseEnter(chip(), { metaKey: true }); fireEvent.blur(window); act(() => vi.advanceTimersByTime(500));
+    fireEvent.mouseEnter(chip()); fireEvent.blur(window); act(() => vi.advanceTimersByTime(500));
     expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.mouseEnter(chip(), { metaKey: true }); act(() => vi.advanceTimersByTime(500));
+    // Moving over the same name does not restart the wait.
+    fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(200));
+    fireEvent.mouseMove(chip()); act(() => vi.advanceTimersByTime(150));
     expect(screen.getByRole('dialog')).toBeTruthy();
-    expect(visit).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(document.body);
+    expect(visit).not.toHaveBeenCalled();
   });
 
-  it('emits the displayed revision once after a full second and cancels a short preview', async () => {
+  it('closes 260 ms after the pointer leaves, unless the pointer reaches the card or the owner uses it', async () => {
     const value = await setup(); vi.useFakeTimers();
-    const seen = vi.fn(), { chip } = mount(value, { onPeekSeen: seen });
-    fireEvent.click(chip()); act(() => vi.advanceTimersByTime(999));
-    expect(seen).not.toHaveBeenCalled();
-    fireEvent.keyDown(document, { key: 'Escape' }); act(() => vi.advanceTimersByTime(10));
-    expect(seen).not.toHaveBeenCalled();
-    fireEvent.click(chip()); act(() => vi.advanceTimersByTime(1000));
-    expect(seen).toHaveBeenCalledExactlyOnceWith({ ...route, item_id: '2' }, value.source.items['2']!.revision);
-    act(() => vi.advanceTimersByTime(500)); expect(seen).toHaveBeenCalledTimes(1);
+    const { chip } = mount(value);
+    const hover = () => { fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350)); return screen.getByRole('dialog'); };
+    hover(); fireEvent.mouseLeave(chip()); act(() => vi.advanceTimersByTime(259));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // Into the card within the grace: it stays; out of it: the same grace.
+    let card = hover(); fireEvent.mouseLeave(chip()); act(() => vi.advanceTimersByTime(200));
+    fireEvent.mouseEnter(card); act(() => vi.advanceTimersByTime(1000));
+    expect(screen.getByRole('dialog')).toBe(card);
+    fireEvent.mouseLeave(card); act(() => vi.advanceTimersByTime(260));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // A pick keeps it: the owner is using the card.
+    card = hover(); fireEvent.mouseLeave(chip()); fireEvent.mouseEnter(card);
+    fireEvent.click(within(card).getByRole('button', { name: /^Keep the design/ }));
+    fireEvent.mouseLeave(card); act(() => vi.advanceTimersByTime(1000));
+    expect(screen.getByRole('dialog')).toBe(card);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    // Focus inside keeps it too.
+    card = hover(); within(card).getByRole('button', { name: 'Go to' }).focus();
+    fireEvent.mouseLeave(chip()); act(() => vi.advanceTimersByTime(1000));
+    expect(screen.getByRole('dialog')).toBe(card);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    // A card opened by click is not closed by a passing pointer either.
+    fireEvent.click(chip()); fireEvent.mouseLeave(chip()); act(() => vi.advanceTimersByTime(1000));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  it('a passing pointer never replaces a card the owner opened; a click does', async () => {
+    const value = await setup(); vi.useFakeTimers();
+    const { chip } = mount(value), other = () => screen.getByRole('button', { name: `${value.source.items['8']!.question} · Open` });
+    fireEvent.click(chip());
+    fireEvent.mouseEnter(other()); act(() => vi.advanceTimersByTime(1000));
+    expect(screen.getByRole('dialog', { name: `Peek: ${value.source.items['2']!.question}` })).toBeTruthy();
+    fireEvent.click(other());
+    expect(screen.getByRole('dialog', { name: `Peek: ${value.source.items['8']!.question}` })).toBeTruthy();
+  });
+
+  it('closes on a scroll of what holds the name, not on a scroll inside the card or elsewhere', async () => {
+    const value = await setup(), { chip } = mount(value);
+    const unrelated = document.createElement('div'); document.body.append(unrelated);
+    try {
+      fireEvent.click(chip());
+      const card = screen.getByRole('dialog');
+      fireEvent.scroll(card); fireEvent.scroll(unrelated);
+      expect(screen.getByRole('dialog')).toBe(card);
+      fireEvent.scroll(chip().parentElement!);
+      expect(screen.queryByRole('dialog')).toBeNull();
+      // The card had focus: it goes back to the name, without a scroll.
+      expect(document.activeElement).toBe(chip());
+      fireEvent.click(chip()); fireEvent.scroll(document);
+      expect(screen.queryByRole('dialog')).toBeNull();
+    } finally { unrelated.remove(); }
+  });
+
+  it('a press cancels a pending hover until the pointer leaves the name and rests again', async () => {
+    const value = await setup(); vi.useFakeTimers();
+    const { chip } = mount(value), row = screen.getByRole('button', { name: 'Map row' });
+    fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(200));
+    fireEvent.mouseDown(row); fireEvent.mouseMove(chip()); act(() => vi.advanceTimersByTime(1000));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.mouseLeave(chip()); fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  it('a resting pointer reopens a card a scroll closed, but not one the owner dismissed with Escape', async () => {
+    const value = await setup(); vi.useFakeTimers();
+    const { chip } = mount(value);
+    fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350));
+    fireEvent.scroll(chip().parentElement!);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.mouseMove(chip()); act(() => vi.advanceTimersByTime(350));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.mouseMove(chip()); act(() => vi.advanceTimersByTime(1000));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.mouseLeave(chip()); fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  it('Space toggles the card from a name', async () => {
+    const value = await setup(), { chip, visit } = mount(value);
+    chip().focus(); fireEvent.keyDown(chip(), { key: ' ' });
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    fireEvent.keyDown(chip(), { key: ' ' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(visit.mock.calls.map(call => call[1])).toEqual(['peek']);
+  });
+
+  it.each(['click', 'hover'] as const)('never marks seen and keeps the Changed pill and change strip through a long %s peek', async how => {
+    const value = await setup(), since = '2026-10-01T00:00:00.000Z', at = '2026-10-13T21:08:00.000Z';
+    const item = value.source.items['2']!;
+    item.revision = 2; item.created_at = since; ++value.source.revision;
+    item.changes = [{ revision: 2, at, cause_message_id: item.created_message_id, reason: 'First draft is in the docs folder.', before: { status: 'open' } }];
+    value.transport.preferences.seen = [{ session: route, since, items: [], topics: [] }];
+    await value.store.refresh();
+    const navigation = new NavigationStore(createDesktopService(value.transport)); navigations.push(navigation);
+    await navigation.start();
+    const marks = vi.spyOn(NavigationStore.prototype, 'markItemSeen');
+    const { chip } = mount(value, { navigation });
+    vi.useFakeTimers();
+    if (how === 'click') fireEvent.click(chip()); else { fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350)); }
+    const card = screen.getByRole('dialog');
+    const pill = () => card.querySelector<HTMLElement>('.peek-marker');
+    expect(pill()?.textContent).toBe('Changed');
+    expect(pill()?.title).toBe('Changed since you last saw it');
+    const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(at));
+    expect(card.querySelector('.peek-strip')!.textContent).toBe(`Changed · ${time}. First draft is in the docs folder.`);
+    act(() => vi.advanceTimersByTime(5000));
+    vi.useRealTimers();
+    await act(async () => { await Promise.resolve(); });
+    expect(pill()?.textContent).toBe('Changed');
+    expect(marks).not.toHaveBeenCalled();
     expect(value.transport.mutations.some(request => request.command.command === 'preferences_patch'
       && request.command.params.entries.some(entry => entry.kind === 'mark_seen'))).toBe(false);
-  });
-
-  it('keeps the opening revision when the displayed item refreshes during the dwell', async () => {
-    const value = await setup(); vi.useFakeTimers();
-    const revision = value.source.items['2']!.revision, seen = vi.fn(), { chip } = mount(value, { onPeekSeen: seen });
-    fireEvent.click(chip()); act(() => vi.advanceTimersByTime(500));
-    ++value.source.items['2']!.revision; ++value.source.revision;
-    value.source.items['2']!.ask = 'A newer question summary.';
-    await act(async () => { await value.store.refresh(); });
-    expect(within(screen.getByRole('dialog')).getByText('A newer question summary.')).toBeTruthy();
-    act(() => vi.advanceTimersByTime(500));
-    expect(seen).toHaveBeenCalledExactlyOnceWith({ ...route, item_id: '2' }, revision);
-    act(() => vi.advanceTimersByTime(1000)); expect(seen).toHaveBeenCalledTimes(1);
   });
 
   it('keeps hover previews from taking editor Escape or restoring focus on close', async () => {
     const value = await setup(); vi.useFakeTimers(); const { chip } = mount(value), editorKeys = vi.fn();
     render(<input aria-label="Outside editor" onKeyDown={editorKeys} />);
     const editor = screen.getByRole('textbox', { name: 'Outside editor' }); editor.focus();
-    const hover = () => { fireEvent.mouseEnter(chip(), { metaKey: true }); act(() => vi.advanceTimersByTime(500)); };
+    const hover = () => { fireEvent.mouseLeave(chip()); fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350)); };
     hover(); expect(document.activeElement).toBe(editor);
     fireEvent.keyDown(editor, { key: 'Escape' });
     expect(editorKeys).toHaveBeenCalledTimes(1); expect(editorKeys.mock.calls[0][0].defaultPrevented).toBe(false);
@@ -192,7 +305,7 @@ describe('name chips and item peek', () => {
   });
 
   it('carries the original anchor position and focus source through nested replacement', async () => {
-    const value = await setup(); value.source.items['2']!.ask = 'Review [the branch](item:8).'; ++value.source.revision;
+    const value = await setup(); value.source.items['2']!.outcome = 'Review [the branch](item:8).'; ++value.source.revision;
     await value.store.refresh(); const { chip } = mount(value), source = chip();
     vi.spyOn(source, 'getBoundingClientRect').mockReturnValue({ left: 300, right: 400, top: 200, bottom: 220, width: 100, height: 20 } as DOMRect);
     source.focus(); fireEvent.click(source);
@@ -221,17 +334,20 @@ describe('name chips and item peek', () => {
     expect(container.querySelector('button, a')).toBeNull();
   });
 
-  it('keeps command-hover pending across parent refreshes and uses the latest visit callback', async () => {
+  it('keeps a hover pending across parent refreshes and uses the latest visit callback for an explicit open', async () => {
     const value = await setup(); vi.useFakeTimers();
     const visited = vi.fn();
     const tree = (renderCount: number) => <PeekProvider lookup={() => value.store} drafts={value.drafts} onGoTo={() => {}} onVisit={() => visited(renderCount)}>
       <ItemRefSession.Provider value={route}><ItemReference itemId="2" /></ItemRefSession.Provider>
     </PeekProvider>;
     const { rerender } = render(tree(1));
-    fireEvent.mouseEnter(screen.getByRole('button'), { metaKey: true }); act(() => vi.advanceTimersByTime(200));
-    rerender(tree(2)); act(() => vi.advanceTimersByTime(300));
+    const chip = screen.getByRole('button');
+    fireEvent.mouseEnter(chip); act(() => vi.advanceTimersByTime(200));
+    rerender(tree(2)); act(() => vi.advanceTimersByTime(150));
     expect(screen.getByRole('dialog')).toBeTruthy();
-    expect(visited).toHaveBeenCalledExactlyOnceWith(2);
+    expect(visited).not.toHaveBeenCalled();
+    rerender(tree(3)); fireEvent.click(chip);
+    expect(visited).toHaveBeenCalledExactlyOnceWith(3);
   });
 
   it('shows distinguishing names for colliding short labels and keeps missing references inert', async () => {
@@ -250,18 +366,6 @@ describe('name chips and item peek', () => {
     expect(container.querySelector('button')).toBeNull();
   });
 
-  it('copies the unchanged item reference and provides selectable fallback when the clipboard fails', async () => {
-    const value = await setup(), writeText = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal('navigator', { clipboard: { writeText } });
-    const { chip } = mount(value); fireEvent.click(chip());
-    fireEvent.click(screen.getByRole('button', { name: 'Copy reference' }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(`2 — ${value.source.items['2']!.question}`));
-    expect(await screen.findByRole('button', { name: 'Copied' })).toBeTruthy();
-    writeText.mockRejectedValue(new Error('Unavailable'));
-    fireEvent.click(screen.getByRole('button', { name: 'Copied' }));
-    const fallback = await screen.findByRole('textbox', { name: 'Select and copy reference' });
-    expect((fallback as HTMLInputElement).value).toBe(`2 — ${value.source.items['2']!.question}`);
-  });
 });
 
 describe('simple question answers in peek', () => {
@@ -387,40 +491,78 @@ describe('simple question answers in peek', () => {
 });
 
 describe('peek viewport position', () => {
-  it('measures header, tabs and ancestor chrome and includes the card border when fitting its bottom edge', async () => {
-    const chrome: HTMLElement[] = ['shell-header', 'shell-tabs', 'tree-breadcrumb'].map(className => {
-      const element = document.createElement('div'); element.className = className; document.body.append(element); return element;
-    });
+  it('flips above a name near the bottom, counting the card border, and re-fits on resize', async () => {
     const rectangle = HTMLElement.prototype.getBoundingClientRect;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      const index = chrome.indexOf(this);
-      if (this.matches('.name-chip')) return new DOMRect(900, 650, 80, 20);
-      return index < 0 ? rectangle.call(this) : new DOMRect(0, 0, 1000, [48, 86, 180][index]!);
+      return this.matches('.name-chip') ? new DOMRect(900, 650, 80, 20) : rectangle.call(this);
     });
     vi.stubGlobal('innerWidth', 1000); vi.stubGlobal('innerHeight', 700);
     const height = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(400);
-    const style = document.createElement('style'); style.textContent = '.item-peek { border: 1px solid black; }'; document.head.append(style);
+    const style = document.createElement('style'); style.textContent = '.item-peek { border: 1px solid black; width: 340px; }'; document.head.append(style);
     try {
       const value = await setup(), { chip } = mount(value);
-      expect(window.innerHeight).toBe(700);
-      expect(chrome[2]!.getBoundingClientRect().bottom).toBe(180);
       fireEvent.click(chip());
       const card = screen.getByRole('dialog');
-      expect(card.scrollHeight).toBe(400);
-      expect(card.style.top).toBe('286px'); // 700 - 12 - (400 + two border pixels).
-      expect(card.style.left).toBe('552px');
-      expect(card.style.maxHeight).toBe('500px');
+      expect(card.style.top).toBe('242px'); // 650 - 6 - (400 + two border pixels).
+      expect(card.style.left).toBe('652px'); // 1000 - 8 - 340.
+      expect(card.style.maxHeight).toBe('402px');
       height.mockReturnValue(990);
       fireEvent(window, new Event('resize'));
-      expect(card.style.top).toBe('188px');
-      expect(card.style.maxHeight).toBe('500px');
-    } finally { chrome.forEach(element => element.remove()); style.remove(); }
+      expect(card.style.top).toBe('48px');
+      expect(card.style.maxHeight).toBe('596px');
+    } finally { style.remove(); }
   });
 
-  it('fits either side of the source, below chrome, and within every viewport edge', () => {
-    expect(peekPosition({ left: 100, right: 200, top: 20, bottom: 50 }, 340, 300, 1000, 800, 60)).toMatchObject({ left: 208, top: 68 });
-    expect(peekPosition({ left: 850, right: 950, top: 750, bottom: 780 }, 340, 300, 1000, 800, 60)).toMatchObject({ left: 502, top: 488 });
-    expect(peekPosition({ left: 10, right: 40, top: 10, bottom: 20 }, 340, 1000, 200, 300, 60)).toEqual({ left: 12, top: 68, maxWidth: 176, maxHeight: 220 });
+  it('sits under the marked name of a row rather than the whole row', async () => {
+    const value = await setup();
+    function Row() {
+      const peek = usePeek()!;
+      return <div role="treeitem" aria-selected={false} tabIndex={0} data-testid="row" onKeyDown={event => peek.open({ ...route, item_id: '2' }, event.currentTarget)}>
+        <span data-peek-anchor>Delivery choice</span></div>;
+    }
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.matches('[data-peek-anchor]') ? new DOMRect(75, 300, 120, 20) : new DOMRect(20, 290, 900, 40);
+    });
+    vi.stubGlobal('innerWidth', 1000); vi.stubGlobal('innerHeight', 800);
+    render(<PeekProvider lookup={() => value.store} drafts={value.drafts} onGoTo={vi.fn()}><Row /></PeekProvider>);
+    fireEvent.keyDown(screen.getByTestId('row'), { key: ' ' });
+    expect(screen.getByRole('dialog').style.left).toBe('75px');
+    expect(screen.getByRole('dialog').style.top).toBe('326px');
+  });
+
+  it('opens under the name, aligned to it, 8px inside the window, and above it only when below does not fit', () => {
+    expect(peekPosition({ left: 100, right: 180, top: 200, bottom: 220 }, 340, 300, 1000, 800)).toEqual({ left: 100, top: 226, maxWidth: 984, maxHeight: 566 });
+    expect(peekPosition({ left: 900, right: 980, top: 200, bottom: 220 }, 340, 300, 1000, 800)).toMatchObject({ left: 652, top: 226 });
+    expect(peekPosition({ left: 100, right: 180, top: 700, bottom: 720 }, 340, 300, 1000, 800)).toEqual({ left: 100, top: 394, maxWidth: 984, maxHeight: 300 });
+    // Neither side fits: the larger one, never above 48px, scrolling inside.
+    expect(peekPosition({ left: 100, right: 180, top: 200, bottom: 220 }, 340, 600, 1000, 300)).toEqual({ left: 100, top: 48, maxWidth: 984, maxHeight: 146 });
+    expect(peekPosition({ left: 10, right: 40, top: 10, bottom: 20 }, 340, 100, 200, 300)).toEqual({ left: 8, top: 26, maxWidth: 184, maxHeight: 266 });
+  });
+});
+
+describe('the card’s marker and change strip', () => {
+  const since = '2026-10-01T00:00:00.000Z', at = '2026-10-13T21:12:00.000Z';
+  const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(at));
+  it.each([
+    ['an options change', { options: [] }, 'waiting_on_me', false, `Options changed · ${time}.`],
+    ['progress on work in hand', { note: 'Earlier' }, 'in_progress', false, `Progress · ${time}.`],
+    ['any other change', { status: 'open' }, 'decided', false, `Changed · ${time}.`],
+    ['a change the owner’s answer caused', { status: 'open' }, 'decided', true, 'Changed by your answer:'],
+  ] as const)('labels %s', async (_name, before, status, byAnswer, label) => {
+    const { source } = await setup(), item = source.items['2']!;
+    Object.assign(item, { status, created_at: since, revision: 3 });
+    const cause = byAnswer ? source.messages.find(message => message.input_id)! : source.messages.find(message => !message.input_id)!;
+    item.changes = [
+      { revision: 2, at, cause_message_id: cause.id, reason: 'An older change.', before: { status: 'open' } },
+      { revision: 3, at, cause_message_id: cause.id, reason: 'Three options now.', before: structuredClone(before) as ItemChangeBefore },
+    ];
+    const seen = { session: route, since, items: [], topics: [] };
+    expect(peekChange(source, item, seen)).toEqual({ marker: 'changed', strip: { label, text: 'Three options now.' } });
+    // Read up to the latest revision: nothing to say. New items get the New pill and no strip.
+    expect(peekChange(source, item, { ...seen, items: [{ item_id: '2', revision: 3 }] })).toEqual({ marker: null, strip: null });
+    item.created_at = at;
+    expect(peekChange(source, item, seen)).toEqual({ marker: 'new', strip: null });
+    expect(peekChange(source, item, null)).toEqual({ marker: null, strip: null });
   });
 });
 
