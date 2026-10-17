@@ -377,7 +377,7 @@
   bottom: calc(100% + 8px);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
   width: 400px;
   max-width: calc(100% - 20px);
   max-height: calc(100vh - 160px);
@@ -394,7 +394,7 @@
 }
 
 .dock-popover-title {
-  padding: 4px 6px 2px;
+  padding: 4px 6px 6px;
   font-size: calc(11px * var(--text-scale));
   font-weight: 500;
   letter-spacing: 0.06em;
@@ -433,11 +433,19 @@
   margin: 0 6px;
 }
 
+/* The board's list is a flat column 2px apart: a session's name, then its questions as 6px/8px rows. */
+.dock-other-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .dock-other-group > h3 {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 6px 6px 2px;
+  margin: 0;
+  padding: 6px 6px 2px;
   font-size: calc(12.5px * var(--text-scale));
   font-weight: 500;
   letter-spacing: normal;
@@ -445,24 +453,27 @@
 }
 
 .dock-other-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
   border-radius: 6px;
 }
 
 .dock-other-row[data-open] {
-  padding-bottom: 8px;
   background: color-mix(in srgb, var(--color-text) 5%, transparent);
 }
 
 .dock-other-row > .detail-answer-slot {
-  padding: 0 8px;
+  padding: 0;
 }
 
 .dock-other-head {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  padding: 6px;
+  padding: 0;
   border: 0;
   font: inherit;
   text-align: left;
@@ -479,18 +490,77 @@
 .dock-other-text {
   flex: 1;
   min-width: 0;
+  line-height: 1.45;
 }
 
 .dock-other-age {
   flex: none;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+
+.dock-other-head > i:last-child {
+  flex: none;
+  margin-top: 3px;
+  font-size: calc(11px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 55%, transparent);
 }
 
 .dock-others-foot {
-  margin: 4px 6px 2px;
+  margin: 0;
+  padding: 6px 6px 2px;
   font-size: calc(12px * var(--text-scale));
   line-height: 1.45;
+  text-wrap: pretty;
   color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+/* The open row's answer: cards inset 21px under the question's icon, then a hint and a 26px Send. */
+.dock-other-row .answer-list .answer-options {
+  gap: 5px;
+  padding-left: 21px;
+}
+
+.question-delivery .answer-bar {
+  min-height: 0;
+  padding: 4px 6px;
+  box-shadow: none;
+}
+
+.dock-other-row .answer-list .answer-option {
+  gap: 8px;
+}
+
+.dock-other-row .answer-list .answer-key {
+  font-size: calc(11px * var(--text-scale));
+}
+
+.dock-other-row .answer-list .answer-label {
+  font-size: inherit;
+  line-height: 1.4;
+}
+
+.dock-other-row .answer-list .answer-consequence {
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--color-text) 64%, transparent);
+}
+
+.dock-other-row .answer-list .answer-body { gap: 1px; }
+
+.dock-other-row .answer-list .answer-bar {
+  margin-top: 0;
+  padding: 2px 0 0;
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--color-text) 68%, transparent);
+}
+
+.dock-other-row .answer-list .answer-bar-icon { font-size: calc(13px * var(--text-scale)); }
+
+.dock-other-row .answer-list .answer-send {
+  padding: 0 10px;
+  font-size: calc(12px * var(--text-scale));
 }
 
 .question-sent-words {
@@ -499,10 +569,4 @@
   line-height: 1.45;
   white-space: pre-wrap;
   color: color-mix(in srgb, var(--color-text) 80%, transparent);
-}
-
-.question-delivery .answer-bar {
-  min-height: 0;
-  padding: 4px 6px;
-  box-shadow: none;
 }
