@@ -1,0 +1,163 @@
+/* The topic band (the topic band piece owns this file). Rules that tests read from tree.css
+   (.tree-topic, .tree-topic-actions, .tree-topic-status, .tree-topic-content) stay there until their tests move. */
+.tree-topic[data-first] {
+  margin-top: 0;
+  border-top: 0;
+}
+
+.tree-topic:focus,
+.tree-topic:focus-within {
+  background: color-mix(in srgb, var(--color-text) 7%, var(--a-side));
+}
+
+/* The name owns the space beside the compact actions; counts wrap below it. */
+.tree-topic-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tree-topic-name {
+  flex: 1 1 calc(12em / var(--text-scale));
+  min-width: 0;
+  padding-left: 4px;
+  font-size: calc(15.5px * var(--text-scale));
+  font-weight: 500;
+  line-height: calc(22px * var(--text-scale));
+  letter-spacing: -.01em;
+  color: var(--a-acc-text);
+}
+
+.tree-topic-name[data-earlier] {
+  color: color-mix(in srgb, var(--a-acc-text) 82%, transparent);
+}
+
+.tree-session-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: calc(11.5px * var(--text-scale));
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+}
+
+.tree-session-chip i {
+  font-size: calc(12px * var(--text-scale));
+}
+
+.tree-topic-end {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  font-size: calc(12px * var(--text-scale));
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.tree-topic-action {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 22px; /* No taller than the name's line, so the always-present actions never make the band taller. */
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  font: inherit;
+  font-size: calc(12px * var(--text-scale));
+  cursor: pointer;
+  color: color-mix(in srgb, var(--color-text) 74%, transparent);
+  background: transparent;
+}
+
+.tree-topic-action i,
+.tree-count i {
+  font-size: calc(13px * var(--text-scale));
+}
+
+.tree-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.tree-topic-counts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding-left: 26px;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.tree-topic-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-left: 26px;
+  font-size: calc(13px * var(--text-scale));
+  line-height: calc(20px * var(--text-scale));
+}
+
+.tree-topic-line > i {
+  font-size: calc(13px * var(--text-scale));
+}
+
+/* The topic's cards sit right of the rail (their left margin clears it); the wrapper's own height, margins
+   included, is what lets the rail run unbroken from the band down to the first item. */
+.tree-topic-cards {
+  position: relative;
+  display: flow-root;
+}
+
+.tree-topic-fix {
+  padding-left: 26px;
+}
+
+.tree-topic-reply {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 6px 26px;
+}
+
+.tree-topic-reply textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.tree-topic-reply-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.tree-prompt {
+  gap: 8px;
+  color: color-mix(in srgb, var(--color-text) 64%, transparent);
+}
+
+.tree-prompt > i {
+  color: var(--st-done);
+}
+
+.tree-prompt .btn {
+  padding: 2px 8px;
+  font-size: calc(12.5px * var(--text-scale));
+}
+
+/* Last: more specific than every other topic-line icon rule. */
+.tree-topic-line .btn i {
+  font-size: calc(13px * var(--text-scale));
+}

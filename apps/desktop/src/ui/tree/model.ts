@@ -18,6 +18,8 @@ import { displayStatus, type DisplayStatus } from '../../selectors/waiting/repli
 import { closedSessionQuestion, sessionEnded, waitingOnOwner } from '../../selectors/sessionClosed';
 import { continuedLabel } from '../shared/continued';
 import { hiddenGroupKey, hiddenGroupsFor, hiddenItems } from './hidden';
+import { branchHue } from './branch';
+import { withBoxes } from './boxes';
 import { agentRunning, connectionOf, type Connection } from '../shared/connection';
 import { connectedItems } from '../../selectors/related';
 import { ackTarget } from '../../selectors/ack';
@@ -262,6 +264,26 @@ export interface HiddenRow {
 }
 export type Row = TopicRow | ItemRow | HiddenRow;
 
+/** The Map's one strip row. The model still emits `hidden` rows and `Row` does not include a strip yet: the piece that
+ * emits strips adds `StripRow` to `Row`, drops `HiddenRow` and updates the places that narrow on `kind`. */
+export type StripVariant = 'hidden';
+export interface StripRow {
+  readonly kind: 'strip';
+  readonly key: string;
+  readonly variant: StripVariant;
+  readonly topicId: string;
+  readonly parent: string | null;
+  readonly depth: number;
+  readonly count: number;
+  /** A question inside waits on the owner. */
+  readonly waiting: boolean;
+  readonly expanded: boolean;
+  readonly guides: readonly Guide[];
+  readonly delivery: null;
+}
+/** A hidden group as a strip: the same fields, so the strip draws exactly what the hidden row drew. */
+export const stripOf = (row: HiddenRow | StripRow): StripRow => row.kind === 'strip' ? row : { ...row, kind: 'strip', variant: 'hidden' };
+
 export interface TreeInput {
   readonly session: Immutable<Session>;
   readonly view: Immutable<SessionPreferences>;
@@ -452,9 +474,7 @@ export function treeModel(input: TreeInput): TreeModel {
     if (parent !== undefined) lastChild.set(parent, at);
     stack[row.depth] = at;
   });
-  // Stable per-root decorative hue; selection and status also have shape/text cues.
-  const hue = (key: string) => [...key].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 0) * 139 % 360;
-  const rows = built.map((row, at): Row => {
+  const withGuides = built.map((row, at): Row => {
     const guides: Guide[] = [];
     for (const parentAt of [...parents[at], at]) {
       const parent = built[parentAt], end = lastChild.get(parentAt);
@@ -469,8 +489,10 @@ export function treeModel(input: TreeInput): TreeModel {
         if (at === next) guides.push({ kind: 'elbow', x, on: true, width: 24 });
       }
     }
-    return { ...row, guides, ...(row.kind === 'item' && row.depth === 1 ? { hue: hue(row.key) } : {}) } as Row;
+    return { ...row, guides, ...(row.kind === 'item' && row.depth === 1 ? { hue: branchHue(row.key) } : {}) } as Row;
   });
+  // The box pass is the last step; it changes nothing yet.
+  const rows = withBoxes(withGuides);
 
   // hasReveal (Ariadne.dc.html:2169): only a reveal raises the banner, not a plain selection.
   const outside = filtering && rows.length > 0 && revealIds.some(id => forced.has(id) && !matched.has(id));

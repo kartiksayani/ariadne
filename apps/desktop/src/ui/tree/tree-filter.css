@@ -1,0 +1,73 @@
+/* The filter control of the Map (the chip row piece owns this file). */
+
+/* The filter control ends the Recent row. */
+.tree-filters {
+  display: flex;
+  flex: none;
+  align-items: center;
+  margin-left: auto;
+}
+
+.tree-filter-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  font-size: calc(14px * var(--text-scale));
+  cursor: pointer;
+  color: color-mix(in srgb, var(--color-text) 74%, transparent);
+  background: transparent;
+  box-shadow: 0 0 0 1px var(--color-divider);
+}
+
+.tree-filter-button[data-active] {
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 55%, transparent);
+}
+
+.tree-filter-button:disabled {
+  cursor: default;
+}
+
+.tree-filter-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
+.tree-filter-option {
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
+  color: var(--color-text);
+  background: transparent;
+}
+
+.tree-filter-option:disabled {
+  cursor: default;
+  opacity: .5;
+}
+
+.tree-filter-check {
+  width: 14px;
+  color: var(--color-accent);
+}
+
+.tree-chip-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  opacity: .7;
+}

@@ -58,11 +58,5 @@ export const STATUS_HELP: readonly StatusHelp[] = [
   { label: 'Replaced', icon: 'ph ph-arrows-clockwise', color: 'var(--st-replaced)', text: 'another item took it over' },
 ];
 
-/** Branch hues in the order the Map gives them to top-level items, with the chroma multiplier that evens them out. */
-export const BRANCH_HUES: ReadonlyArray<{ readonly name: string; readonly hue: number; readonly chroma: number }> = [
-  { name: 'violet', hue: 295, chroma: 1 },
-  { name: 'olive', hue: 112, chroma: 1.15 },
-  { name: 'orchid', hue: 325, chroma: 0.95 },
-  { name: 'slate', hue: 220, chroma: 0.9 },
-  { name: 'rose', hue: 355, chroma: 0.85 },
-];
+/** The hue table lives with the Map (ui/tree/branch.ts); Help shows the same five. */
+export { BRANCH_HUES } from '../tree/branch';
