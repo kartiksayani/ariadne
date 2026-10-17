@@ -78,8 +78,9 @@ async function perform(page: Page, step: Step): Promise<void> {
     const named = (exact: boolean) => page.getByRole('button', { name: step.click, exact }).or(page.getByRole('tab', { name: step.click, exact })).or(page.getByRole('menuitem', { name: step.click, exact })).filter({ visible: true }).first();
     // A control named exactly so, if one is on screen; else the first whose name contains it. At the narrow width the top bar
     // folds Archive, text size, theme and Help into its "More" menu, whose own name contains "archive": open it first.
+    // Not while a dialog is open (What changed, Ack all): its controls are in the dialog, and the menu's Escape would close it.
     const more = page.getByRole('button', { name: /^More:/ });
-    if (!(await named(true).isVisible()) && await more.isVisible()) {
+    if (!(await named(true).isVisible()) && !(await page.getByRole('dialog').first().isVisible()) && await more.isVisible()) {
       await more.click();
       if (!(await named(true).isVisible())) await page.keyboard.press('Escape');
     }
