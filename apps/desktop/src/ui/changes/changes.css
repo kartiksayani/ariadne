@@ -24,7 +24,7 @@
 .change-muted { color: var(--a-label); }
 .change-group { margin-top: 8px; }
 .change-owner-words { margin: 6px 0; }
-.change-owner-words, .change-read-as, .brief-text { white-space: pre-wrap; }
+.change-owner-words, .change-read-as { white-space: pre-wrap; }
 
 .change-name, .change-link {
   border: 0;
@@ -53,6 +53,24 @@
   vertical-align: middle;
 }
 
+.change-compare-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  font: inherit;
+  font-size: calc(11.5px * var(--text-scale));
+  cursor: pointer;
+}
+
+.change-compare-toggle:hover {
+  color: var(--color-text);
+  text-decoration: underline;
+}
+
 .change-compare-button.is-open {
   color: var(--attention);
   background: color-mix(in srgb, var(--attention) 12%, transparent);
@@ -75,54 +93,6 @@
   color: var(--a-label);
 }
 .answer-changes { margin-top: 8px; }
-
-.brief-list {
-  display: flex;
-  gap: 10px;
-  margin-top: 6px;
-}
-
-/* The label never wraps ("Replaced", "Your turn"); the names beside it flow across the card's width. */
-.brief-list > strong {
-  flex: 0 0 9.5ch;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-/* Names flow as wrapping inline items separated by a thin middle dot, so a long list uses the width
-   instead of one short name per line. Every name stays; a "replaced by" pair is one item and never splits. */
-.brief-list ul {
-  display: flex;
-  flex: 1;
-  flex-wrap: wrap;
-  align-items: baseline;
-  min-width: 0;
-}
-
-/* A name and its trailing dot are two flex items, so the dot stays on the name's last line when it wraps. */
-.brief-list li {
-  display: flex;
-  align-items: baseline;
-  align-items: last baseline;
-  min-width: 0;
-  max-width: 100%;
-}
-
-/* "old replaced by new" reads as one unit: it flows as text inside its item and only wraps if it is wider than the card. */
-.brief-list li[data-pair] {
-  display: block;
-}
-
-.brief-replacement {
-  display: inline-block;
-  max-width: 100%;
-}
-
-.brief-list li:not(:last-child)::after {
-  content: '·';
-  margin: 0 .55em;
-  color: var(--a-label);
-}
 
 .what-changed { margin: 10px 16px; }
 .change-history { margin: 10px 16px; }

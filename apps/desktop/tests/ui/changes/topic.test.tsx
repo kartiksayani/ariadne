@@ -23,10 +23,16 @@ describe('topic brief and shared catch-up', () => {
     expect(brief.textContent).toContain('1 decided · 0 your turn · 1 replaced');
     fireEvent.click(within(brief).getByRole('button', { name: /Brief/ }));
     expect(within(brief).getByText(/by the agent · updated/)).toBeTruthy();
-    expect(brief.querySelector('.brief-text')?.textContent).toBe(value.session.topics[value.topic.id]!.brief);
-    expect(within(brief).getByText('Decided')).toBeTruthy(); expect(within(brief).getByText('Your turn')).toBeTruthy();
-    expect(brief.querySelector('del')?.textContent).toBe('Replaced name A');
-    expect(within(brief).getByText('replaced by')).toBeTruthy();
+    // SPEC 5.2: grouped, each name with its one-line text; the agent's paragraph is not shown, and "Replaced" reads "old → new".
+    expect(within(brief).getByRole('heading', { name: 'Decided' })).toBeTruthy(); expect(within(brief).getByRole('heading', { name: 'Your turn' })).toBeTruthy();
+    expect(within(brief).getByRole('heading', { name: 'Replaced' })).toBeTruthy();
+    const decided = within(brief).getByRole('heading', { name: 'Decided' }).parentElement!;
+    const line = value.session.items['1']!.outcome || value.session.items['1']!.why;
+    expect(line).toBeTruthy();
+    expect(within(decided).getByRole('button', { name: 'Owner decision' }).closest('li')!.textContent).toBe(`Owner decision${line}`);
+    const replaced = within(brief).getByRole('heading', { name: 'Replaced' }).parentElement!;
+    expect(within(replaced).getAllByRole('button').map(button => button.textContent)).toEqual(['Replaced name A', 'Owner decision']);
+    expect(within(replaced).getByRole('img', { name: 'replaced by' })).toBeTruthy();
     fireEvent.click(within(brief).getAllByRole('button', { name: 'Owner decision' })[0]!);
     expect(value.onOpenItem).toHaveBeenCalledWith('1');
     value.unmount(); render(value.element()); open();

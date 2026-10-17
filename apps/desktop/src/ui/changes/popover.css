@@ -17,7 +17,7 @@
   background: transparent;
   color: var(--color-text);
   font: inherit;
-  font-size: calc(12px * var(--text-scale) / 0.8);
+  font-size: calc(12px * var(--text-scale));
   white-space: nowrap;
   cursor: pointer;
 }
@@ -69,7 +69,7 @@
   border-radius: 9px;
   background: var(--a-side);
   box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-divider);
-  font-size: calc(12.5px * var(--text-scale) / 0.8);
+  font-size: calc(12.5px * var(--text-scale));
   line-height: 1.5;
 }
 
@@ -91,7 +91,7 @@
 
 .changes-head h2 {
   margin: 0;
-  font-size: calc(13px * var(--text-scale) / 0.8);
+  font-size: calc(13px * var(--text-scale));
   font-weight: 500;
 }
 
@@ -115,7 +115,7 @@
 }
 
 .changes-label-caps {
-  font-size: calc(11px * var(--text-scale) / 0.8);
+  font-size: calc(11px * var(--text-scale));
   font-weight: 600;
   letter-spacing: .06em;
   text-transform: uppercase;
@@ -141,16 +141,57 @@
 }
 
 .changes-brief-counts {
-  margin-left: auto;
+  margin: 2px 0 0 calc(12px * var(--text-scale) + 8px);
 }
 
 .changes-brief-body {
-  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+/* SPEC 5.2: a group is its label (with the status icon), then one row per name: the name, then its one-line text. */
+.brief-group-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 2px;
+  font-size: inherit;
+  font-weight: 500;
+}
+
+.brief-group ul {
+  padding: 0 0 0 calc(12px * var(--text-scale) + 6px);
+  margin: 0;
+  list-style: none;
+}
+
+.brief-group li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+  padding: 1px 0;
+}
+
+.brief-names {
+  flex: none;
+  max-width: 100%;
+}
+
+.brief-line {
+  flex: 1 1 14ch;
+  min-width: 0;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
 }
 
 .changes-catch-up {
   margin-left: auto;
-  padding: 2px 8px;
+  padding: 2px 9px;
+  border: 1px solid var(--a-edge-strong);
+  border-radius: 6px;
+  background: var(--a-card);
   font-size: inherit;
 }
 
@@ -180,6 +221,19 @@
   font-weight: 500;
 }
 
+/* Names in this popover read as the board's peekable names: text colour, underlined. */
+.changes-popover .change-name {
+  color: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, var(--color-text) 45%, transparent);
+}
+
+.changes-popover .change-name:hover {
+  text-decoration-color: currentcolor;
+}
+
 .changes-what {
   flex: 1;
   min-width: 0;
@@ -197,6 +251,7 @@
 
 .changes-seen {
   padding: 1px 8px;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
   font-size: inherit;
 }
 
@@ -206,6 +261,22 @@
 
 .changes-row .change-comparison {
   flex-basis: 100%;
+}
+
+/* "› Before → after" sits on its own line under the row, in line with the pill; its card opens below it. */
+.changes-row .change-compare-link {
+  display: block;
+  flex-basis: 100%;
+  min-width: 0;
+  padding-left: calc(15px * var(--text-scale) + 8px);
+}
+
+.changes-row .change-compare-link .change-comparison {
+  box-sizing: border-box;
+  margin: 4px 0 2px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--a-card);
 }
 
 .changes-away p {
@@ -249,5 +320,5 @@
 
 .changes-footnote {
   margin: 0;
-  font-size: calc(11.5px * var(--text-scale) / 0.8);
+  font-size: calc(11.5px * var(--text-scale));
 }

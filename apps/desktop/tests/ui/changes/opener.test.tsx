@@ -39,6 +39,20 @@ describe('ChangesOpener', () => {
     expect(opener.getAttribute('aria-expanded')).toBe('false');
     expect(opener.textContent).toMatch(/since \d\d:\d\d/);
   });
+  it('places the popover at the Map’s left edge plus 12, just under the band, whatever x the opener is at (SPEC 5.5)', async () => {
+    const rects: Record<string, Partial<DOMRect>> = { 'tree-column': { left: 40, top: 40, right: 940, bottom: 700, width: 900, height: 660 },
+      'tree-topic': { left: 40, top: 40, right: 940, bottom: 100, width: 900, height: 60 }, 'changes-summary': { left: 500, top: 70, right: 640, bottom: 90, width: 140, height: 20 } };
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const key = Object.keys(rects).find(name => this.classList.contains(name));
+      return { x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}), ...(key ? rects[key] : {}) } as DOMRect;
+    });
+    await setupChanges(1, 0, 1);
+    fireEvent.click(screen.getByRole('button', { name: /new|changed/ }));
+    const popover = screen.getByRole('dialog', { name: 'What changed' });
+    expect(popover.style.left).toBe('52px');
+    expect(popover.style.top).toBe('100px');
+    expect(popover.style.width).toBe('540px');
+  });
   it('opens a popover with the since-you-were-here rows, labelled and marked', async () => {
     const value = await setupChanges(2, 1, 1);
     fireEvent.click(screen.getByRole('button', { name: /1 new/ }));
