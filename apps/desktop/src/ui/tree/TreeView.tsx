@@ -55,6 +55,9 @@ import { navigationVisits } from '../navigation/visits';
 import { AckAll } from '../navigation/AckAll';
 import { ackAllItems } from '../navigation/ackAllController';
 import './tree.css';
+import './tree-rows.css';
+import './tree-band.css';
+import './tree-filter.css';
 
 export type RowIntent = 'bring' | 'reply' | 'drop' | 'note' | 'followup' | 'reopen' | 'later' | 'hide';
 export interface TreeViewProps {
