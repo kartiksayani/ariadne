@@ -103,9 +103,14 @@ export function ackLane<T>(actions: SessionActions, task: () => Promise<T>): Pro
 
 export interface AckHold {
   /** Captures the proposal the owner is reading now, shows it held for 6 s, then saves exactly that proposal. */
-  ack(item: Immutable<Item>, options?: { readonly announce?: boolean }): void;
+  ack(item: Immutable<Item>): void;
   /** Cancels a held Ack with no write. Does nothing once the save has started. */
   undo(itemId: string): void;
+  /**
+   * A view that is mounted and would draw "✓ Acked · Undo" for these items says so, and calls the returned function when it
+   * goes away. While an item is held and nothing shows it, a notice carries the Undo; the notice leaves when a view shows it again.
+   */
+  showing(itemIds: Iterable<string>): () => void;
   /** Saves every held Ack now. Used when the owner leaves the session and when the application closes. */
   flush(): Promise<void>;
   subscribe(listener: () => void): () => void;
@@ -117,6 +122,10 @@ class SessionAckHold implements AckHold {
   private readonly entries = new Map<string, Held>();
   private readonly running = new Set<Promise<void>>();
   private readonly listeners = new Set<() => void>();
+  /** Views drawing each item's Undo right now, counted. */
+  private readonly shown = new Map<string, number>();
+  /** Items whose Undo is carried by a notice at the moment. */
+  private readonly announced = new Set<string>();
   /** The items inside their 6 s window. A new set only when it changes, so subscribers can compare by identity. */
   held: ReadonlySet<string> = NO_ITEMS;
   constructor(readonly actions: SessionActions) {}
@@ -126,9 +135,34 @@ class SessionAckHold implements AckHold {
   private publish() {
     const holding = [...this.entries].filter(([, entry]) => !entry.saving).map(([id]) => id);
     this.held = holding.length ? new Set(holding) : NO_ITEMS;
+    this.reconcile();
     this.listeners.forEach(listener => listener());
     registryListeners.forEach(listener => listener());
   }
+  /** Every held item has an Undo somewhere: in a view that shows it, else in a notice. */
+  private reconcile() {
+    for (const [id, entry] of this.entries) {
+      const unshown = !entry.saving && !(this.shown.get(id) ?? 0);
+      if (unshown && !this.announced.has(id)) {
+        this.announced.add(id);
+        notices.push({ id: this.heldNoticeId(id), icon: 'ph ph-check', dismissible: false, text: `Acked “${shortLabel(entry.reviewed)}”`,
+          actions: [{ label: 'Undo', run: () => { this.undo(id); } }] });
+      } else if (!unshown && this.announced.has(id)) { this.announced.delete(id); notices.dismiss(this.heldNoticeId(id)); }
+    }
+    for (const id of [...this.announced]) if (!this.entries.has(id)) { this.announced.delete(id); notices.dismiss(this.heldNoticeId(id)); }
+  }
+  readonly showing = (itemIds: Iterable<string>) => {
+    const ids = [...itemIds];
+    ids.forEach(id => this.shown.set(id, (this.shown.get(id) ?? 0) + 1));
+    this.reconcile();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      for (const id of ids) { const left = (this.shown.get(id) ?? 1) - 1; if (left > 0) this.shown.set(id, left); else this.shown.delete(id); }
+      this.reconcile();
+    };
+  };
   private noticeId(itemId: string) {
     const route = this.actions.session.getSnapshot().route;
     return JSON.stringify(['item-ack', route.project_id, route.session_id, itemId]);
@@ -138,7 +172,7 @@ class SessionAckHold implements AckHold {
   }
   /** Where no row or Details shows the held Ack, this notice is the owner's only Undo. */
   private heldNoticeId(itemId: string) { return JSON.stringify(['ack-held', this.noticeId(itemId)]); }
-  readonly ack = (item: Immutable<Item>, options: { readonly announce?: boolean } = {}) => {
+  readonly ack = (item: Immutable<Item>) => {
     // A second click on a held or saving item never starts a second Ack.
     if (this.entries.has(item.id)) return;
     const blocked = ackBlocked(this.actions);
@@ -150,8 +184,6 @@ class SessionAckHold implements AckHold {
     if (ackProposal(current) !== ackProposal(item)) { this.refuse(item.id, new AckChanged().message); return; }
     notices.dismiss(this.noticeId(item.id));
     this.entries.set(item.id, { reviewed: item, saving: false, timer: setTimeout(() => { void this.save(item.id); }, ACK_HOLD_MS) });
-    if (options.announce) notices.push({ id: this.heldNoticeId(item.id), icon: 'ph ph-check', dismissible: false, text: `Acked “${shortLabel(item)}”`,
-      actions: [{ label: 'Undo', run: () => { this.undo(item.id); } }] });
     this.publish();
   };
   readonly undo = (itemId: string) => {

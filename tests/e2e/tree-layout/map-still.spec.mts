@@ -58,7 +58,7 @@ const press = async (control: Locator) => {
 
 /** Selects the reading row (its Details opens, then closes again, so the Map is as wide as before). Focus acts on it. */
 const selectReading = async (page: Page) => {
-  await press(row(page, '10').locator('.tree-question'));
+  await press(row(page, '10').getByText('Another item 10'));
   const close = page.getByRole('button', { name: 'Close detail' });
   await expect(close).toBeVisible();
   await close.click();

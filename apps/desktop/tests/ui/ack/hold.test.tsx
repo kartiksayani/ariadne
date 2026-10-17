@@ -303,7 +303,7 @@ describe('a held Ack with no row or Details to show it (the Graph, a peek)', () 
 
   it('announces itself with an Undo, and the Undo writes nothing', async () => {
     const r = await ready(); vi.useFakeTimers();
-    r.hold.ack(itemOf(r), { announce: true });
+    r.hold.ack(itemOf(r));
     const notice = await shown();
     expect(notice?.text).toBe('Acked “Result 1”');
     expect(notice?.actions?.map(action => action.label)).toEqual(['Undo']);
@@ -315,7 +315,7 @@ describe('a held Ack with no row or Details to show it (the Graph, a peek)', () 
 
   it('is gone when the save starts, and the Ack is written once', async () => {
     const r = await ready(); vi.useFakeTimers();
-    r.hold.ack(itemOf(r), { announce: true });
+    r.hold.ack(itemOf(r));
     await shown();
     expect(held()).toBeDefined();
     await vi.advanceTimersByTimeAsync(ACK_HOLD_MS);
@@ -326,7 +326,7 @@ describe('a held Ack with no row or Details to show it (the Graph, a peek)', () 
 
   it('a flush (a session switch) removes the notice too', async () => {
     const r = await ready(); vi.useFakeTimers();
-    r.hold.ack(itemOf(r), { announce: true });
+    r.hold.ack(itemOf(r));
     await shown();
     await r.hold.flush();
     expect(held()).toBeUndefined();
@@ -334,8 +334,76 @@ describe('a held Ack with no row or Details to show it (the Graph, a peek)', () 
 
   it('does not announce when a row or Details shows the Undo', async () => {
     const r = await ready(); vi.useFakeTimers();
+    const release = r.hold.showing(['1']);
     r.hold.ack(itemOf(r));
     await vi.advanceTimersByTimeAsync(400);
     expect(held()).toBeUndefined();
+    release();
+  });
+
+  it('hands the Undo to a notice when the view showing it goes away mid-hold (a Tree to Graph switch), and the Undo writes nothing', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    const release = r.hold.showing(['1']);
+    r.hold.ack(itemOf(r));
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(held()).toBeUndefined();
+    release();
+    expect(held()?.text).toBe('Acked “Result 1”');
+    held()!.actions![0]!.run();
+    expect(held()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(ACK_HOLD_MS * 2);
+    expect(acks(r.transport)).toHaveLength(0);
+  });
+
+  it('does not flush on that switch: the hold goes on and the Ack is written once at 6 s', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    const release = r.hold.showing(['1']);
+    r.hold.ack(itemOf(r));
+    release();
+    await vi.advanceTimersByTimeAsync(ACK_HOLD_MS - 1000);
+    expect(acks(r.transport)).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1000); await vi.advanceTimersByTimeAsync(0);
+    expect(acked(r.transport)).toEqual(['1']);
+    expect(held()).toBeUndefined();
+  });
+
+  it('withdraws the notice when a view shows the item again', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    r.hold.ack(itemOf(r));
+    expect(held()).toBeDefined();
+    const release = r.hold.showing(['1']);
+    expect(held()).toBeUndefined();
+    release();
+    expect(held()).toBeDefined();
+  });
+
+  it('counts the views: one of two going away leaves the Undo where the other draws it', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    const row = r.hold.showing(['1', '1.1']), details = r.hold.showing(['1']);
+    r.hold.ack(itemOf(r));
+    row();
+    expect(held()).toBeUndefined();
+    details();
+    expect(held()).toBeDefined();
+    details();                                                  // a second release changes nothing
+    expect(held()).toBeDefined();
+  });
+
+  it('a view showing a different item does not carry this item\'s Undo', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    const other = r.hold.showing(['1.1']);
+    r.hold.ack(itemOf(r));
+    expect(held()).toBeDefined();
+    other();
+  });
+
+  it('shows no notice for an item whose save has started', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    const release = r.hold.showing(['1']);
+    r.hold.ack(itemOf(r));
+    await vi.advanceTimersByTimeAsync(ACK_HOLD_MS);
+    release();
+    expect(held()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(0);
   });
 });

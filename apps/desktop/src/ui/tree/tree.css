@@ -417,6 +417,12 @@
   font-weight: 500;
 }
 
+.tree-no-match-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .tree-loading {
   display: flex;
   flex-direction: column;

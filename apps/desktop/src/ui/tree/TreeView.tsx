@@ -238,15 +238,19 @@ export function TreeView(props: TreeViewProps) {
   const focusedId = view?.focused_item_id && (!raw || (focusedItem && !focusedItem.parent && !itemRemoved(raw, focusedItem.id))) ? view.focused_item_id : null;
   // The filter shim stands in for the filter piece's `filterOf` until it lands.
   const filter = useMemo(() => session && view ? shimFilter(session, view, later) : null, [session, view, later]);
-  const model = useMemo(() => session && view && filter ? treeModel({ session, view, filter, focusRootId: focusedId, search: query, searchShown, later, collapsedTopics: closedTopics, selectedId, revealId,
+  const model = useMemo(() => session && view && filter ? treeModel({ session, view, filter, focusRootId: focusedId, ackHeld, search: query, searchShown, later, collapsedTopics: closedTopics, selectedId, revealId,
     filterCollapsedItemIds: filterFolds.items, filterCollapsedTopicIds: filterFolds.topics,
     attentionRevealId: nextRevealId, expandedHiddenGroups, temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute }) : null,
-  [session, view, filter, focusedId, query, searchShown, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, nextRevealId, presence, health, summaries, minute]);
+  [session, view, filter, focusedId, ackHeld, query, searchShown, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, nextRevealId, presence, health, summaries, minute]);
   const summary = summaries.find(value => value.project_id === route.project_id && value.session_id === route.session_id) ?? null;
   const bar = sessionBar(session, summary, presence);
   const focusedBranch = useMemo(() => session && focusedId ? branchItems(session, focusedId) : null, [session, focusedId]);
   const rows = useMemo(() => model?.rows ?? [], [model]);
-  const names = useMemo(() => session ? peekNames(session) : new Map<string, string>(), [session]);
+  // Every mounted item row would draw "✓ Acked · Undo" for a held Ack. Say so to the hold: a row folded away, filtered out or
+  // gone with the Graph leaves the Undo to a notice (D11).
+  const drawnItems = useMemo(() => graph ? '' : rows.flatMap(row => row.kind === 'item' ? [row.key] : []).join('\n'), [rows, graph]);
+  useEffect(() => hold.showing(drawnItems ? drawnItems.split('\n') : []), [hold, drawnItems]);
+  const names =useMemo(() => session ? peekNames(session) : new Map<string, string>(), [session]);
   const sections = useMemo(() => {
     const groups: { topic: Extract<Row, { kind: 'topic' }>; items: Exclude<Row, { kind: 'topic' }> [] }[] = [];
     for (const row of rows) {
@@ -1105,10 +1109,14 @@ export function TreeView(props: TreeViewProps) {
           : `${bar?.agent ?? 'The agent'} is not running · items appear when it writes`}</div>
     </div>;
   } else if (model?.noMatch) {
-    // Only the filters can empty the Map; a search never does.
+    // Only the filters can empty the Map; a search never does. No band is drawn then, so while Focus is on this is the
+    // one place left to leave it.
     body = <div className="tree-no-match">
-      <div className="tree-no-match-title">No items match these filters.</div>
-      <button type="button" className="btn btn-secondary" onClick={onClearFilters}>Clear filters</button>
+      <div className="tree-no-match-title">{focusedId ? 'Nothing in the focus matches these filters.' : 'No items match these filters.'}</div>
+      <div className="tree-no-match-actions">
+        {focusedId && <button type="button" className="btn btn-secondary" disabled={focusDisabled} onClick={() => focusBranch(null)}>Unfocus</button>}
+        <button type="button" className="btn btn-secondary" onClick={onClearFilters}>Clear filters</button>
+      </div>
     </div>;
   } else if (model && archivedMode && !rows.length) {
     body = <div className="tree-no-match"><div className="tree-no-match-title">No archived topics in this session.</div></div>;

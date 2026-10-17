@@ -77,8 +77,9 @@ describe('the "…" menu (D12)', () => {
   };
   it('offers Reply, the bin, Archive and Remove, and no "Continue here"', () => {
     const { menu } = open();
-    expect(within(menu).getAllByRole('menuitem').map(item => item.querySelector('.tree-menu-label')!.textContent))
-      .toEqual(['Reply to topic', 'Open the bin', 'Archive topic…', 'Remove topic…']);
+    const labels = ['Reply to topic', 'Open the bin', 'Archive topic…', 'Remove topic…'];
+    expect(within(menu).getAllByRole('menuitem').map(item => labels.find(label => item.textContent!.startsWith(label))))
+      .toEqual(labels);
     expect(within(menu).queryByText(/Continue here/)).toBeNull();
     expect(within(menu).getByText('2 removed · Restore or empty')).toBeTruthy();
     expect(within(menu).getByText('It and its 25 items, with 5 seconds to undo')).toBeTruthy();
@@ -120,17 +121,17 @@ describe('the band row (D10)', () => {
   const props = { focused: false, actions: [], prompt: null, remember: () => {}, onFocus: () => {}, onKeyDown: () => {}, onToggle: () => {} };
   it('says "waiting on you" wide and lets the container query cut it to "waiting"', () => {
     render(<TopicRow row={row()} {...props} />);
-    const count = screen.getByText('waiting', { exact: false, selector: '.tree-count' });
-    expect(count.textContent).toBe('1 waiting on you');
-    expect(count.querySelector('.tree-wide-only')!.textContent).toBe(' on you');
+    const wide = screen.getByText('on you');                    // the part the container query hides
+    expect(wide.parentElement!.textContent).toBe('1 waiting on you');
+    expect(wide.classList.contains('tree-wide-only')).toBe(true);
   });
   it('puts the tally, the changes opener, Next and Ack all on one counts line, in that order, and the buttons in the head', () => {
     render(<TopicRow row={row()} {...props} ackAll={<button type="button">Ack all (2)</button>}
       slots={{ changes: <span>opener</span>, next: <button type="button">Next</button>, focus: <button type="button">Focus</button>,
         continue: <button type="button">Continue</button>, menu: <button type="button">More</button> }} />);
-    const line = document.querySelector('.tree-topic-counts')!, head = document.querySelector('.tree-topic-head')!;
-    expect([...line.children].map(child => child.className === 'tree-topic-tally' ? 'tally' : child.textContent)).toEqual(['tally', 'opener', 'Next', 'Ack all (2)']);
-    expect([...head.querySelectorAll('button')].map(button => button.textContent)).toEqual(['', 'Focus', 'Continue', 'More']);
+    const line = screen.getByTestId('band-counts'), head = screen.getByTestId('band-head');
+    expect([...line.children].map(child => child.getAttribute('data-testid') === 'band-tally' ? 'tally' : child.textContent)).toEqual(['tally', 'opener', 'Next', 'Ack all (2)']);
+    expect(within(head).getAllByRole('button').map(button => button.textContent)).toEqual(['', 'Focus', 'Continue', 'More']);
   });
   it('never rewrites the to-ack count (the "one by one" wording is gone)', () => {
     const value = { ...row(), counts: topicCounts(['open', 'open', 'open'], 3) };

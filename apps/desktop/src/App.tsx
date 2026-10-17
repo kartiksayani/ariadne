@@ -522,11 +522,9 @@ function Workspace({ application }: { application: Application }) {
       const actions = application.actions.forSession(store);
       if (repeat) return true;
       ackNoticeId.current = JSON.stringify(['item-ack', target.project_id, target.session_id, target.item_id]);
-      // The Map's row and Details draw their own "Acked · Undo"; anywhere else (the Graph, a peek) the hold's notice is the Undo.
-      const here = !!route && sameSession(route, target);
-      const inDetails = here && (conversationOpen ? conversation?.itemId : detailOpen && !detailsFolded ? selectedId : null) === item.id;
-      const inRow = here && !graph && !conversationOpen && treeSelectedId === item.id;
-      ackHoldFor(target.session_id, actions).ack(item, { announce: !inDetails && !inRow });
+      // The Map's rows and Details draw their own "Acked · Undo" and say so to the hold; where none does (the Graph, a folded
+      // topic, a peek) the hold's notice is the Undo.
+      ackHoldFor(target.session_id, actions).ack(item);
       return true;
     },
     focused: () => {

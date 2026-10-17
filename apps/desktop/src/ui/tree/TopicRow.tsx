@@ -54,7 +54,7 @@ export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onK
     tabIndex={focused ? 0 : -1} className="tree-row tree-topic" data-topic-id={topic.id} data-row={row.key} data-first={row.first || undefined}
     onFocus={event => { if (event.target === event.currentTarget) onFocus(row.key); }} onKeyDown={onKeyDown}>
     <Guides guides={row.guides} />
-    <div className="tree-topic-head">
+    <div className="tree-topic-head" data-testid="band-head">
       <button type="button" className="tree-chevron" tabIndex={-1} aria-label="Expand or collapse topic"
         onClick={event => { event.stopPropagation(); onToggle(topic.id); }}><i className={row.expanded ? 'ph ph-caret-down' : 'ph ph-caret-right'} /></button>
       <span className="tree-topic-name" data-earlier={row.earlier || undefined} title={topic.name}>{topic.name}</span>
@@ -66,8 +66,8 @@ export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onK
       </span>}
       {slots.focus}{slots.continue}{slots.menu}
     </div>
-    {(counts.length > 0 || slots.counts || slots.changes || slots.next || ackAll) && <div className="tree-topic-counts">
-      {(slots.counts || counts.length > 0) && <span className="tree-topic-tally">{slots.counts ?? counts.map(count => <span key={count.text} className="tree-count">
+    {(counts.length > 0 || slots.counts || slots.changes || slots.next || ackAll) && <div className="tree-topic-counts" data-testid="band-counts">
+      {(slots.counts || counts.length > 0) && <span className="tree-topic-tally" data-testid="band-tally">{slots.counts ?? counts.map(count => <span key={count.text} className="tree-count">
         <i className={count.icon} style={{ color: count.color }} />{countText(count.text)}</span>)}</span>}
       {slots.changes}{slots.next}{ackAll}</div>}
     {row.delivery && <div className="tree-topic-line tree-topic-status" style={{ color: row.delivery.color }}><i className={row.delivery.icon} /><span>{row.delivery.text}</span></div>}

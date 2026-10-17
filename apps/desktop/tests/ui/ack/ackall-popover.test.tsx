@@ -44,7 +44,7 @@ describe('the Ack all review popover (D11, SPEC 4.3)', () => {
   it('keeps a scroll inside its own list from closing it', async () => {
     const r = await ready(); mount(r);
     const popover = open();
-    fireEvent.scroll(popover.querySelector('.ack-all-list')!);
+    fireEvent.scroll(within(popover).getByRole('list'));
     expect(screen.queryByRole('dialog')).not.toBeNull();
   });
 

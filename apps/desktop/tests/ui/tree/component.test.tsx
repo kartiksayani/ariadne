@@ -89,7 +89,7 @@ const bandMenu = (band: HTMLElement, entry: RegExp) => {
   fireEvent.click(screen.getByRole('menuitem', { name: entry }));
 };
 /** The band's Focus / Unfocus button (D9): it acts on the selected item's root, like ⇧F. */
-const focusButton = () => document.querySelector<HTMLButtonElement>('.tree-band-focus')!;
+const focusButton = () => screen.getAllByRole<HTMLButtonElement>('button', { name: /^(Focus|Unfocus “.*”)$/ })[0]!;
 const ids = () => [...document.querySelectorAll('[role="treeitem"][data-item-id]')].map(element => element.getAttribute('data-item-id'));
 const viewOf = (transport: AppTransport) => transport.preferences.sessions.find(value => value.session.session_id === route.session_id)!;
 const patches = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'preferences_patch');
@@ -364,6 +364,29 @@ describe('session tree rows', () => {
     await waitFor(() => expect(focusButton().disabled).toBe(false));
     fireEvent.click(focusButton());
     await waitFor(() => expect(viewOf(transport).focused_item_id).toBeUndefined());
+  });
+
+  it('offers Unfocus beside Clear filters when Focus and the filters leave nothing (the Map has no band then)', async () => {
+    const view = await mount({ configure: transport => {
+      viewOf(transport).focused_item_id = '1';
+      for (const item of Object.values(transport.sessions.get(route.session_id)!.items)) if (item) item.status = 'done';
+    } });
+    fireEvent.click(chip('In progress'));
+    await waitFor(() => expect(screen.queryAllByRole('treeitem')).toHaveLength(0));
+    const empty = within(screen.getByText('Nothing in the focus matches these filters.').parentElement!);
+    expect(empty.getByRole('button', { name: 'Clear filters' })).toBeTruthy();
+    fireEvent.click(empty.getByRole('button', { name: 'Unfocus' }));
+    await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
+    expect(view.calls.cleared).toBe(0);
+  });
+  it('keeps the plain empty-filter words and only Clear filters when nothing is focused', async () => {
+    await mount({ configure: transport => {
+      for (const item of Object.values(transport.sessions.get(route.session_id)!.items)) if (item) item.status = 'done';
+    } });
+    fireEvent.click(chip('In progress'));
+    await waitFor(() => expect(screen.queryAllByRole('treeitem')).toHaveLength(0));
+    expect(screen.getByText('No items match these filters.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Unfocus' })).toBeNull();
   });
 
   it('ends Focus when hidden ids change for the focused top-level item', async () => {

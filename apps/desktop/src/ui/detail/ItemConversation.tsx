@@ -296,6 +296,8 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   // Ack starts a 6 s hold in the session's hold store, which saves it or drops it on Undo; Details shows the Undo here.
   const ackHold = useMemo(() => ackHoldFor(current.route.session_id, actions), [current.route.session_id, actions]);
   const ackHeld = useAckHeld(current.route.session_id).has(itemId);
+  // Details draws the Undo for this item while it is open; closing it hands the Undo to a notice.
+  useEffect(() => ackHold.showing([itemId]), [ackHold, itemId]);
   const noticeKey = JSON.stringify([current.route.project_id, current.route.session_id, itemId]);
   const copyAttempt = useRef(0), copyMounted = useRef(true);
   useEffect(() => {

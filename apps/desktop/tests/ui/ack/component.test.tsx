@@ -151,7 +151,7 @@ describe('local acknowledgement', () => {
     await waitFor(() => expect(transport.preferences.sessions[0].recent_items?.find(entry => entry.item_id === item.id)?.action).toBe('acked'));
     expect(item.status).toBe(target); expect(item.ack_to).toBeNull();
     expect(screen.queryByText('Ack all (1)')).toBeNull();
-    const counts = row().closest('.tree-topic-group')!.querySelector<HTMLElement>('.tree-topic-counts')!;
+    const counts = screen.getAllByTestId('band-counts')[0]!;     // the first topic's band holds item 1.1
     expect(counts.textContent).toContain(target === 'open' ? '2 open' : '1 open');
     expect(counts.textContent).toContain(target === 'open' ? '1 in progress' : '2 in progress');
     expect(row().querySelector('.tree-outcome')?.textContent).toContain(item.outcome);
@@ -605,6 +605,46 @@ describe('the Ack hold in the app (D11)', () => {
     await goToSession({ project_id: route.project_id, session_id: secondId });
     await waitFor(() => expect(acks(transport)).toHaveLength(1));
     expect(transport.sessions.get(route.session_id)!.items['1.1']!.status).toBe('done');
+  });
+
+  const heldNotice = () => notices.getSnapshot().find(entry => entry.text.startsWith('Acked'));
+  const closeDetails = async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
+    await waitFor(() => expect(screen.queryByLabelText(/^Detail of /)).toBeNull());
+  };
+
+  it('with the row and Details showing it there is no notice; closing Details leaves the row as the Undo', async () => {
+    await mount(); await selectItem();
+    await act(async () => { fireEvent.click(within(row()).getByRole('button', { name: 'Ack → Done' })); });
+    expect(heldNotice()).toBeUndefined();
+    await closeDetails();
+    expect(heldNotice()).toBeUndefined();
+  });
+
+  it('a Tree to Graph switch mid-hold leaves an Undo that writes nothing', async () => {
+    const transport = await mount(); await selectItem();
+    await act(async () => { fireEvent.click(within(row()).getByRole('button', { name: 'Ack → Done' })); });
+    await closeDetails();
+    fireEvent.keyDown(row(), { key: 'g' }); await screen.findByRole('group', { name: 'Graph legend' });
+    await waitFor(() => expect(heldNotice()).toBeDefined());
+    expect(acks(transport)).toHaveLength(0);
+    act(() => { heldNotice()!.actions![0]!.run(); });
+    await holdOver();
+    expect(acks(transport)).toHaveLength(0);
+    expect(heldNotice()).toBeUndefined();
+  });
+
+  it('an Ack whose row sits inside a folded topic shows the notice', async () => {
+    const transport = await mount(); await selectItem();
+    await act(async () => { fireEvent.click(within(row()).getByRole('button', { name: 'Ack → Done' })); });
+    await closeDetails();
+    expect(heldNotice()).toBeUndefined();
+    fireEvent.click(within(row().closest('.tree-topic-group') as HTMLElement).getAllByRole('button', { name: 'Expand or collapse topic' })[0]!);
+    await waitFor(() => expect(row()).toBeNull());
+    expect(heldNotice()?.text).toBe('Acked “Record the retry limits”');
+    await holdOver();
+    await waitFor(() => expect(acks(transport)).toHaveLength(1));
+    expect(heldNotice()).toBeUndefined();
   });
 
   it('an Ack from the Graph with no row or Details showing it says so in a notice whose Undo writes nothing', async () => {
