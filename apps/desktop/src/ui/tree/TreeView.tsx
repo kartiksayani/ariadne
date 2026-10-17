@@ -58,7 +58,7 @@ import { visibleSession } from '../remove/model';
 import { useFilterFolds } from '../shared/filterFolds';
 import { isViewConflict } from '../shared/conflictNotice';
 import { TreeFonts, useTreeFonts } from './fonts';
-import { branchItems, breadcrumbItems } from './gettingAround';
+import { branchItems } from './gettingAround';
 import { usePeek } from '../peek/Peek';
 import { navigationVisits } from '../navigation/visits';
 import { AckAll } from '../navigation/AckAll';
@@ -796,7 +796,6 @@ export function TreeView(props: TreeViewProps) {
   /** The blank space added below the rows so a shrink at the bottom keeps the scroll extent; owner scrolls trim it. */
   const spacer = useRef(0);
   const panelTarget = useRef<{ readonly key: string; readonly top: number; readonly scrollTop: number } | null>(null);
-  const [breadcrumb, setBreadcrumb] = useState<readonly string[]>([]);
   const placed = useRef<Anchor | null>(null);
   placed.current = anchor;
   /** The scroller width `holding` last held the reading row at. */
@@ -898,7 +897,7 @@ export function TreeView(props: TreeViewProps) {
     if (revealedAnchor.current && !elements.current.has(revealedAnchor.current.key)) revealedAnchor.current = null;
     const revealed = revealedAnchor.current;
     const holdKey = revealed?.key ?? reading, holdElement = holdKey ? elements.current.get(holdKey) : undefined;
-    // Edge/breadcrumb observation may run before reflow correction. Preserve the
+    // Edge observation may run before reflow correction. Preserve the
     // reveal's original offset instead of adopting its temporarily obscured top.
     const holdRect = holdElement?.getBoundingClientRect();
     const offsets = new Map<string, number>(), screenEnd = visibleBottom(box);
@@ -909,19 +908,6 @@ export function TreeView(props: TreeViewProps) {
     }
     held.current = holdKey && holdRect ? { key: holdKey, offset: revealed?.offset ?? holdRect.top - top, y: holdRect.top,
       boxTop: box.getBoundingClientRect().top, scrollTop: box.scrollTop, sessionId: latest.current.session?.id, rows: latest.current.rows, offsets } : null;
-    // Reading holds the first whole row, but breadcrumb names belong to the first complete
-    // row below the pinned topic, which also ends on screen.
-    // Fractional row heights leave a row placed at the band a fraction under it: half a pixel still counts as whole.
-    const completeKey = list[low + (firstTop !== undefined && firstTop >= top - 0.5 ? 0 : 1)]?.key;
-    const complete = completeKey ? elements.current.get(completeKey)?.getBoundingClientRect() : undefined;
-    const breadcrumbKey = complete && complete.top >= top - 0.5 && complete.bottom <= Math.min(visibleBottom(box), window.innerHeight)
-      ? completeKey : null;
-    const currentSession = latest.current.session;
-    const next = breadcrumbKey && currentSession ? breadcrumbItems(currentSession, breadcrumbKey).filter(id => {
-      const ancestor = elements.current.get(id);
-      return !ancestor || ancestor.getBoundingClientRect().top < top;
-    }) : [];
-    setBreadcrumb(previous => previous.length === next.length && previous.every((id, index) => id === next[index]) ? previous : next);
   };
   const layoutState = useRef({ selectedId, reveal, detailOpen });
   const releaseReveal = () => {
@@ -1182,7 +1168,7 @@ export function TreeView(props: TreeViewProps) {
       const eligible = !archivedMode && session ? ackAllItems(session, row.topic.id) : [];
       return <div key={row.key} className="tree-topic-group" role="presentation">
       <TopicRow row={row} focused={focusKey === row.key} actions={topicActions(row)} slots={bandSlots(row)}
-        ackAll={!archivedMode ? <AckAll actions={actions} topicId={row.topic.id} topicName={row.topic.name} items={eligible} disabled={viewBusy} /> : undefined}
+        ackAll={!archivedMode ? <AckAll actions={actions} topicId={row.topic.id} topicName={shortLabel(row.topic)} items={eligible} disabled={viewBusy} /> : undefined}
         prompt={row.allClosed && !archivedMode ? () => lifecycle.archive(row.topic.id) : null}
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
         reply={replying === row.topic.id && !archivedMode ? <TopicReply drafts={drafts} store={store} actions={actions} topicId={row.topic.id}
@@ -1273,12 +1259,6 @@ export function TreeView(props: TreeViewProps) {
     <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
     {/* The graph keeps its own scroller (ui/graph/graph.css). */}
     {graphShown ? graph : <div className="tree-scroll-shell">
-      {/* One fixed-height row outside the scroller: the ancestors of the first row in view. */}
-      <div className="tree-path">
-        <nav className="tree-breadcrumb" aria-label="Map ancestors">{breadcrumb.map((id, index) => <span key={id}>
-          {index > 0 && <span aria-hidden="true"> › </span>}<button type="button" title={session?.items[id]?.question} onClick={() => select(id, false)}>{names.get(id)}</button>
-        </span>)}</nav>
-      </div>
       <div ref={scroller} className="tree-scroll" data-testid="map-scroll" onScroll={() => {
         // At the held scrollTop this can be our own correction's delayed event;
         // remembering restores any intervening reflow before capturing again.

@@ -154,7 +154,7 @@ async function expectSolidMarker(marker: Locator) {
   await expect(marker).toHaveCSS('opacity', '1');
 }
 
-for (const theme of ['light', 'dark']) test(`Getting around keeps breadcrumbs and peeks clear of rows and chrome (${theme})`, async ({ page }) => {
+for (const theme of ['light', 'dark']) test(`Getting around keeps peeks clear of rows and chrome, and the Map has no path row (${theme})`, async ({ page }) => {
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
     logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
   try {
@@ -163,7 +163,9 @@ for (const theme of ['light', 'dark']) test(`Getting around keeps breadcrumbs an
     if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
     await openTree(page, `http://127.0.0.1:${address.port}`, '?nav');
     await page.evaluate(value => document.documentElement.setAttribute('data-theme', value), theme);
-    const scroller = page.locator('.tree-scroll'), crumbs = page.getByRole('navigation', { name: 'Map ancestors' });
+    const scroller = page.locator('.tree-scroll');
+    // The sticky band and the thread show the path: no ancestors row sits above the Map (SPEC 2.2).
+    await expect(page.getByRole('navigation', { name: 'Map ancestors' })).toHaveCount(0);
     const before = await scroller.boundingBox();
     const deep = page.locator('.tree-item[data-item-id="23"]');
     await deep.evaluate(element => element.scrollIntoView({ block: 'start' }));
@@ -179,12 +181,7 @@ for (const theme of ['light', 'dark']) test(`Getting around keeps breadcrumbs an
         return bounds.top >= top - 1 && bounds.bottom <= bottom;
       })?.dataset.itemId;
     })).toBe('23');
-    await expect(crumbs.getByRole('button')).toHaveText(['Rehearsal notes', 'Evidence check', 'Owner handoff']);
     expect(await scroller.boundingBox()).toEqual(before);
-    const breadcrumbBox = (await crumbs.boundingBox())!, viewport = (await scroller.boundingBox())!;
-    expect(breadcrumbBox.y + breadcrumbBox.height).toBeLessThanOrEqual(viewport.y + 0.5);
-    await crumbs.getByRole('button', { name: 'Owner handoff' }).click();
-    await expectRevealedRow(page.locator('.tree-item[data-item-id="22"]'));
 
     // Focus restricts Map rows while Waiting remains complete.
     const root = page.locator('.tree-item[data-item-id="1"]');
@@ -192,7 +189,8 @@ for (const theme of ['light', 'dark']) test(`Getting around keeps breadcrumbs an
     // The band's Focus acts on the selected item's root: no row carries a Focus button any more.
     await expect(root.getByRole('button', { name: /Focus/ })).toHaveCount(0);
     const rootBand = page.locator('.tree-topic-group', { has: root }).locator('.tree-topic');
-    await expect(rootBand.getByRole('button', { name: 'Focus', exact: true })).toBeVisible();
+    // With nothing selected and nothing focused the band draws no Focus at all.
+    await expect(rootBand.getByRole('button', { name: 'Focus', exact: true })).toHaveCount(0);
     await root.click();
     await rootBand.getByRole('button', { name: 'Focus', exact: true }).click();
     await expect(rootBand.getByRole('button', { name: /^Unfocus / })).toBeVisible();
@@ -582,16 +580,16 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: boxes, thread, c
         await page.evaluate(() => document.documentElement.style.setProperty('--text-scale', '1'));
       }
     }
-    const scroller = page.locator('.tree-scroll'), filters = page.locator('.tree-path');
+    const scroller = page.locator('.tree-scroll');
     // The Back-to pill (SPEC §5.8) floats over the Map in the scroller's shell; it is never a row of its own.
     const marker = page.locator('.tree-scroll-shell > .tree-back');
     const last = page.locator('.tree-item[data-item-id="18"]');
     await scroller.evaluate(element => { element.scrollTop = 0; });
     await expect(marker).toHaveCount(0);
     await expect(page.locator('.tree-scroll .tree-back, .tree-selected-slot')).toHaveCount(0);
-    // The pill covers rows rather than taking room, so the path row, the scroller and the rows all keep their boxes.
+    // The pill covers rows rather than taking room, so the scroller and the rows all keep their boxes.
     const geometry = async () => ({
-      scroller: await scroller.boundingBox(), filters: await filters.boundingBox(),
+      scroller: await scroller.boundingBox(),
       scroll: await scroller.evaluate(element => ({ width: element.clientWidth, height: element.clientHeight, contentHeight: element.scrollHeight })),
       rows: await Promise.all([root, child, last].map(row => row.evaluate(element => {
         const bounds = element.getBoundingClientRect();

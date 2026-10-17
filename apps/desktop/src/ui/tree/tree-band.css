@@ -174,7 +174,7 @@
 .tree-topic-counts > .changes-opener {
   flex: 0 1 auto;
   min-width: 0;
-  overflow: hidden; /* Its tail gives way; the button stays pressable, and Ack all after it stays in reach. */
+  overflow: hidden; /* Its tail gives way; the button stays pressable, and Next after it stays in reach. */
 }
 
 .tree-topic-status > span {
@@ -197,12 +197,13 @@
   font-size: calc(13px * var(--text-scale));
 }
 
-/* Band buttons. Ack all: outlined, check + "Ack all (N)". */
-.tree-topic-counts > .tree-topic-ack-all {
+/* Band buttons. Ack all sits on the title line before Focus: outlined, check + "Ack all (N)". */
+.tree-topic-head > .tree-topic-ack-all {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding-inline: 7px;
+  height: calc(22px * var(--text-scale));
+  padding: 0 7px;
   border: 0;
   border-radius: 5px;
   font-size: calc(12.5px * var(--text-scale));
@@ -231,8 +232,7 @@
 }
 
 /* Every button on the counts line fits the line's height. */
-.tree-topic-counts > button,
-.tree-topic-counts > .ack-all-held {
+.tree-topic-counts > button {
   height: calc(20px * var(--text-scale));
   padding-block: 0;
   line-height: 1;

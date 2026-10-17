@@ -24,17 +24,6 @@
   pointer-events: none;
 }
 
-.tree-chevron-space::after {
-  content: '';
-  display: block;
-  width: 5px;
-  height: 5px;
-  margin: 8px auto;
-  border: 1px solid var(--a-guide);
-  border-radius: 50%;
-  background: var(--a-bg);
-}
-
 .tree-heading {
   display: flex;
   align-items: flex-start;
