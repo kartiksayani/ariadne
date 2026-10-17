@@ -61,7 +61,8 @@ describe('dock inset', () => {
   });
   it('keeps the Tree and Graph scrollers 40px of room below the last row, plus the dock', () => {
     expect(rules(css('ui/tree/tree.css'), '.tree-scroll')).toContain('padding-bottom: calc(40px + var(--dock-inset, 0px));');
-    expect(rules(css('ui/graph/graph.css'), '.graph-scroll')).toContain('padding-bottom: calc(40px + var(--dock-inset, 0px));');
+    // The Graph's legend card floats over the bottom: its measured height can ask for more than 40px.
+    expect(rules(css('ui/graph/graph.css'), '.graph-scroll')).toContain('padding-bottom: calc(max(40px, var(--graph-legend-inset, 0px)) + var(--dock-inset, 0px));');
   });
 });
 

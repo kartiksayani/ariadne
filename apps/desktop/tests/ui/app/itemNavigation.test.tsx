@@ -147,8 +147,8 @@ describe('composed item navigation', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(mark).toHaveBeenCalledWith(route, 'updated-0', 2);
     await click(screen.getByRole('button', { name: 'Undo' }));
-    expect(within(treeRow('updated-0')).queryByRole('img', { name: 'Changed since you read it' })).toBeNull();
-    expect(within(treeRow('updated-1')).getByRole('img', { name: 'Changed since you read it' })).toBeTruthy();
+    expect(within(treeRow('updated-0')).queryByRole('img', { name: 'Changed' })).toBeNull();
+    expect(within(treeRow('updated-1')).getByRole('img', { name: 'Changed' })).toBeTruthy();
     expect(screen.getByRole('button', { name: /1 changed/ })).toBeTruthy();
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(transport.preferences.seen![0].items).toEqual([{ item_id: 'updated-0', revision: 2 }]);

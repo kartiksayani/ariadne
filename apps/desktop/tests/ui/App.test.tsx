@@ -70,7 +70,7 @@ describe('ordinary desktop composition', () => {
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
     const detail = await screen.findByRole('article', { name: `Detail of ${session.items['1']!.question}` });
     const row = () => document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1.1"]')!;
-    expect(within(row()).getByRole('img', { name: 'New to you' })).toBeTruthy();
+    expect(within(row()).getByRole('img', { name: 'New' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /1 new/ }));
     const since = screen.getByRole('dialog', { name: 'What changed' });
     expect(within(since).getByRole('button', { name: 'New receipt branch' })).toBeTruthy();
@@ -80,7 +80,7 @@ describe('ordinary desktop composition', () => {
     expect(screen.getByRole('dialog', { name: `Peek: ${target.question}` })).toBeTruthy();
     // The card says it is New, and the Map, the Since card and the saved reads all still do.
     expect(within(screen.getByRole('dialog', { name: `Peek: ${target.question}` })).getByTestId('change-marker').getAttribute('aria-label')).toBe('New');
-    expect(within(row()).getByRole('img', { name: 'New to you' })).toBeTruthy();
+    expect(within(row()).getByRole('img', { name: 'New' })).toBeTruthy();
     expect(within(since).getByRole('button', { name: 'New receipt branch' })).toBeTruthy();
     fireEvent.keyDown(document, { key: 'Escape' }); await act(async () => { await vi.advanceTimersByTimeAsync(500); });
     expect(within(row()).getByRole('img', { name: 'New' })).toBeTruthy();

@@ -42,12 +42,14 @@ for (const theme of ['light', 'dark'] as const) test(`N wraps unread Map targets
     expect(attention.contrast, 'small New text remains readable, including while the row pulses').toBeGreaterThanOrEqual(4.5);
     for (const status of attention.statuses) expect(attention.text).not.toEqual(status);
     await expect(child).toHaveCSS('outline-color', markerColour);
-    await expect(child).toHaveCSS('outline-width', '2px');
+    // D21: a dashed 1.5px outline, which the browser computes as 1px.
+    await expect(child).toHaveCSS('outline-style', 'dashed');
+    await expect(child).toHaveCSS('outline-width', '1px');
     await expect(child).toHaveAttribute('aria-selected', 'false');
     await expect(child).not.toHaveAttribute('data-next-unseen-pulse', 'true', { timeout: 2000 });
     await expect(child).toHaveAttribute('data-next-unseen', 'true');
     await expect(child.getByTestId('change-marker')).toBeVisible();
-    await expect(child).toHaveCSS('outline-width', '2px');
+    await expect(child).toHaveCSS('outline-width', '1px');
     await expect(child).toHaveCSS('outline-color', markerColour);
     await expect(page.locator('.shell-detail')).toHaveCount(0);
     const changed = page.locator('.tree-item[data-item-id="2"]');
@@ -64,7 +66,7 @@ for (const theme of ['light', 'dark'] as const) test(`N wraps unread Map targets
     await expect(last).toHaveAttribute('data-next-unseen', 'true');
     await expectRevealedRow(last);
     await expect(last).not.toHaveAttribute('data-next-unseen-pulse', 'true', { timeout: 2000 });
-    await expect(last).toHaveCSS('outline-width', '2px');
+    await expect(last).toHaveCSS('outline-width', '1px');
     await expect(last).toHaveCSS('outline-color', markerColour);
     await expect(page.locator('.shell-detail')).toHaveCount(0);
     await page.keyboard.press('n');

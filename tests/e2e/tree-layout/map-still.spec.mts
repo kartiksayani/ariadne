@@ -87,7 +87,7 @@ const triggers: readonly Trigger[] = [
   ['a Changed marker clears', 'still', '12', page => expect(row(page, '12').getByTestId('change-marker')).toHaveCount(1), page => seen(page, '12'),
     page => expect(row(page, '12').getByTestId('change-marker')).toHaveCount(0)],
   // The popovers open over the Map and take no room in it (D18, D19).
-  ['What changed opens', 'still', '12', nothing, page => page.getByRole('button', { name: /new|changed|changes since/ }).first().click(),
+  ['What changed opens', 'still', '12', nothing, page => press(bandButton(page, /new|changed|changes since/)),
     page => expect(page.getByRole('dialog', { name: 'What changed' })).toBeVisible()],
   ['Recent opens', 'still', '12', nothing, page => page.getByRole('button', { name: 'Recent' }).click(),
     page => expect(page.getByRole('dialog', { name: 'Recent items' })).toBeVisible()],
@@ -96,6 +96,12 @@ const triggers: readonly Trigger[] = [
     await expect(row(page, '12').getByRole('button', { name: /^Ack/ })).toHaveCount(0);
     await expect(band(page).getByRole('button', { name: /^Ack all/ })).toHaveCount(0);
   }],
+  // A row's own Ack holds for 6 s with "Acked · Undo" in the Ack slot (D11); Undo puts the Ack back. No row changes size.
+  ['Ack then Undo on a row', 'still', '12', nothing, async page => {
+    await press(row(page, '12').getByRole('button', { name: /^Ack/ }));
+    await expect(row(page, '12').getByRole('status')).toContainText('Acked');
+    await press(row(page, '12').getByRole('button', { name: /^Undo Ack of/ }));
+  }, page => expect(row(page, '12').getByRole('button', { name: /^Ack/ })).toBeVisible()],
   ['Ack all holds with its Undo in the band', 'still', null, nothing, async page => {
     await press(band(page).getByRole('button', { name: /^Ack all/ }));
     await page.getByRole('dialog').getByRole('button', { name: 'Ack all' }).click();

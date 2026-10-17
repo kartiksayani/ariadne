@@ -1149,7 +1149,7 @@ export function TreeView(props: TreeViewProps) {
     const binItems = removedRoots(session, id).reduce((sum, item) => sum + removedSubtree(session, item.id).length, 0);
     return {
       // While focused, the counts line says so, in the counts' place (D9).
-      counts: focusedName ? <span className="tree-count tree-focused"><i className="ph ph-crosshair" aria-hidden="true" />
+      counts: focusedName ? <span className="tree-count tree-focused"><i className="ph ph-crosshair-simple" aria-hidden="true" />
         Focused on “{focusedName}” · {focusedCount} item{focusedCount === 1 ? '' : 's'}</span> : undefined,
       changes: <ChangesOpener session={session} topicId={id} seen={seen} navigation={navigation}
         onOpenItem={itemId => { if (covered && props.onOpenItem) props.onOpenItem(itemId); else select(itemId, false); }} />,

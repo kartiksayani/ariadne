@@ -15,5 +15,5 @@ export function FocusButton({ focusedName, canFocus, busy, onToggle }: {
   return <button type="button" className="tree-band-focus" data-on={on || undefined} disabled={disabled}
     aria-label={on ? `Unfocus “${focusedName}”` : 'Focus'} aria-pressed={on}
     title={on ? 'Show the whole Map again ( ⇧F )' : canFocus ? 'Focus on the selected item and its branch ( ⇧F )' : 'Select an item to focus'}
-    onClick={onToggle}><i className="ph ph-crosshair" aria-hidden="true" />{on ? 'Unfocus' : 'Focus'}</button>;
+    onClick={onToggle}><i className="ph ph-crosshair-simple" aria-hidden="true" />{on ? 'Unfocus' : 'Focus'}</button>;
 }

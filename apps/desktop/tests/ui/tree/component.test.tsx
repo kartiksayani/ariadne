@@ -27,6 +27,7 @@ import { peekNames } from '../../../src/ui/peek/names';
 import { RemovalContext, RemovalQueue, UNDO_MS } from '../../../src/ui/remove/queue';
 import { removeSubject } from '../../../src/ui/remove/model';
 import { ackAllFor } from '../../../src/ui/navigation/ackAllController';
+import { ACK_HOLD_MS } from '../../../src/ui/shared/ack';
 import { SessionRowAction } from '../../../src/ui/pages/SessionRowAction';
 import { dispatchIntent } from '../../../src/ui/intents';
 
@@ -346,9 +347,9 @@ describe('session tree rows', () => {
   it('offers Unfocus beside Clear filters when Focus and the filters leave nothing (the Map has no band then)', async () => {
     const view = await mount({ configure: transport => {
       viewOf(transport).focused_item_id = '1';
+      viewOf(transport).filters.statuses = ['in_progress'];
       for (const item of Object.values(transport.sessions.get(route.session_id)!.items)) if (item) item.status = 'done';
     } });
-    fireEvent.click(chip('In progress'));
     await waitFor(() => expect(screen.queryAllByRole('treeitem')).toHaveLength(0));
     const empty = within(screen.getByText('Nothing in the focus matches these filters.').parentElement!);
     expect(empty.getByRole('button', { name: 'Clear filters' })).toBeTruthy();
@@ -358,9 +359,9 @@ describe('session tree rows', () => {
   });
   it('keeps the plain empty-filter words and only Clear filters when nothing is focused', async () => {
     await mount({ configure: transport => {
+      viewOf(transport).filters.statuses = ['in_progress'];
       for (const item of Object.values(transport.sessions.get(route.session_id)!.items)) if (item) item.status = 'done';
     } });
-    fireEvent.click(chip('In progress'));
     await waitFor(() => expect(screen.queryAllByRole('treeitem')).toHaveLength(0));
     expect(screen.getByText('No items match these filters.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Unfocus' })).toBeNull();
@@ -722,14 +723,19 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     const { release, session } = await staleTree(value);
     const ack = within(row('1.1')).getByRole('button', { name: 'Ack → Done' });
     expect(ack.hasAttribute('disabled')).toBe(false);
+    vi.useFakeTimers();
     if (method === 'click') fireEvent.click(ack);
     else { row('1.1').focus(); fireEvent.keyDown(row('1.1'), { key: 'a' }); }
+    // The Ack is held for its Undo first: the row says so at once, and nothing is written until the hold is up.
+    expect(within(row('1.1')).getByRole('status').textContent).toContain('Acked');
     expect(execute).not.toHaveBeenCalled();
-    expect(ack.hasAttribute('disabled')).toBe(true);
-    await act(async () => { release(); await value.store.refresh(); });
-    await waitFor(() => expect(execute).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ command: 'ack', params: {
+    await act(async () => { await vi.advanceTimersByTimeAsync(ACK_HOLD_MS); });
+    // The save then waits for the stale session to be read again.
+    expect(execute).not.toHaveBeenCalled();
+    await act(async () => { release(); await value.store.refresh(); await vi.advanceTimersByTimeAsync(0); });
+    expect(execute).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ command: 'ack', params: {
       item_id: '1.1', expected_revision: session.items['1.1']!.revision,
-    } }), session.revision));
+    } }), session.revision);
   });
   it('selects only the latest clicked row after a stale refresh', async () => {
     const value = await mount(), { release } = await staleTree(value);
@@ -2688,11 +2694,15 @@ describe('scrolling the tree', () => {
         break;
     }
     await waitFor(() => expect(path === 'Resume filtered view' ? view.calls.resumed : view.calls.dismissed).toBe(1));
+    // A chip removes rows above the reading row, and the Map's hold (D24) moves the scroll to keep that row in place; every
+    // other path leaves the scroll where the owner put it. Either way, dismissing the reveal moves nothing further.
+    const settledAt = scroller().scrollTop;
+    if (path !== 'status chip') expect(settledAt).toBe(readingPosition);
     // Dismissal can reach the workspace before a queued preference write changes selection.
     view.rerender({ reveal: null, selectedId: '8', detailOpen: true });
-    expect(scroller().scrollTop).toBe(readingPosition);
+    expect(scroller().scrollTop).toBe(settledAt);
     await waitFor(() => expect(view.navigation.getSnapshot().writing).toBe(false));
-    expect(scroller().scrollTop).toBe(readingPosition);
+    expect(scroller().scrollTop).toBe(settledAt);
   });
 
   it('reveals external selections only as far as needed', async () => {
