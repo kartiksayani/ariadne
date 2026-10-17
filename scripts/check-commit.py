@@ -124,8 +124,9 @@ def coverage_policy(root, config):
     return sources, excluded
 
 
-def coverage_counts(paths, root=None, config=None):
+def coverage_counts(paths, root=None, config=None, exclude_suffixes=()):
     expected, excluded = coverage_policy(root, config or {}) if root else (set(), set())
+    expected = {name for name in expected if not name.endswith(tuple(exclude_suffixes))}
     lines, reported = {}, set()
     for path in paths:
         source, record_lines, report_lines = None, 0, 0
@@ -236,7 +237,12 @@ def main(argv=None):
     parser.add_argument("--print-scope", action="store_true")
     parser.add_argument("--stage", choices=("all", "static", "coverage", "native"), default="all",
                         help="Run one CI stage; all (default) runs every stage in order")
+    parser.add_argument("--ts-only", action="store_true",
+                        help="With --stage coverage: run only the TS/JS part (npm run test:coverage plus the LCOV "
+                             "validity checks); skip Rust llvm-cov and the combined floor. For local gates, not CI")
     args = parser.parse_args(argv)
+    if args.ts_only and args.stage != "coverage":
+        parser.error("--ts-only applies to --stage coverage only")
     paths = changed_paths(args.base, args.working_tree, args.merge_base) if args.base or not args.ci else None
     scope, release = scope_for(paths)
     if args.full:
@@ -266,7 +272,7 @@ def main(argv=None):
             raise ValueError("Application coverage floor must be at least 80%")
         reports = [ROOT / name for name in APPLICATION_REPORTS]
         xtask_report = ROOT / "coverage/xtask.lcov"
-        for report in [*reports, xtask_report]:
+        for report in ([reports[1]] if args.ts_only else [*reports, xtask_report]):
             report.unlink(missing_ok=True)
         (ROOT / "coverage").mkdir(exist_ok=True)
         if in_static:
@@ -284,10 +290,15 @@ def main(argv=None):
             # exercise their actual dispatcher as well as the native Home/End journey.
             run("cargo", "test", "-p", "ariadne-desktop", "-p", "tauri-plugin-wdio-webdriver",
                 "--features", "ariadne-desktop/e2e", "--lib", "key_event_tests", "--locked", "--offline")
-        if stage in ("coverage", "native"):
+        if stage in ("coverage", "native") and not args.ts_only:
             # Split stages start cold; --stage all already fetched crates via the earlier cargo build.
             run("cargo", "fetch", "--locked")
-        if in_coverage:
+        if in_coverage and args.ts_only:
+            run("npm", "run", "test:coverage")
+            covered, total = coverage_counts(reports[1:], ROOT, config, exclude_suffixes=(".rs",))
+            print(f"TS/JS line coverage: {covered}/{total} = {100 * covered / total:.2f}% "
+                  "(floor not enforced; the combined floor needs the Rust report)", flush=True)
+        elif in_coverage:
             run("env", "CARGO_LLVM_COV_DENY_WARNINGS=1", "cargo", "llvm-cov", "clean", "--workspace", "--locked", "--offline")
             ignored = "(^|/)(tools|generated|vendor|tests|__tests__)/|" + "|".join(
                 re.escape(name).replace(r"\*", ".*").replace(r"\?", ".") + "$"
