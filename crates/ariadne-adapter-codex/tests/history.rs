@@ -1,7 +1,7 @@
 //! Fixture transport tests: only a local Unix socket server and a --version stub run.
 use ariadne_adapter_codex::{CodexDaemonReader, CodexDiscovery, CodexHistoryClient, CodexOptions};
 use ariadne_agent_protocol::{
-    AdapterErrorCode as Code, AttemptEvidenceRequest, ConnectRequest, EventPayload,
+    deadline_scale, AdapterErrorCode as Code, AttemptEvidenceRequest, ConnectRequest, EventPayload,
     ReconcileRequest, ReconcileResult, Sha256, TurnFinishedStatus, UtcMillis, UuidV4,
 };
 use ariadne_domain::models::{ExecutionState, Freshness, PresenceSource};
@@ -77,8 +77,21 @@ struct Harness {
     recorded: Arc<Condvar>,
     worker: Option<JoinHandle<()>>,
 }
+/// How long a test may wait for something that must happen. It is a hang guard, not a
+/// speed check: every wait below returns the moment its condition holds.
+const HANG_GUARD: Duration = Duration::from_secs(30);
+/// The adapter's own call budgets (version probe 5 s, connect 10 s) are wall-clock. A busy
+/// machine can take longer than that to start the stub `sh`, so these tests stretch the
+/// budgets tenfold. Debug builds only; the budgets stay as written otherwise.
+fn stretch_adapter_budgets() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        std::env::set_var(deadline_scale::DEADLINE_SCALE_ENV, "10");
+    });
+}
 impl Harness {
     fn new(mut hook: impl FnMut(&Value, usize) -> Option<Action> + Send + 'static) -> Self {
+        stretch_adapter_budgets();
         let directory = tempfile::Builder::new()
             .prefix("ariadne-codex-")
             .tempdir_in("/tmp")
@@ -86,6 +99,12 @@ impl Harness {
         let executable = directory.path().join("codex");
         fs::write(&executable, "#!/bin/sh\nprintf 'codex-cli 0.160.0\\n'\n").unwrap();
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        // The first run of a new executable is the slow one on a busy machine (the system scans it).
+        // Pay that here, outside any deadline, so tests that give a probe a tight explicit budget are not racing it.
+        std::process::Command::new(&executable)
+            .arg("--version")
+            .output()
+            .unwrap();
         let socket = directory.path().join("daemon.sock");
         let listener = UnixListener::bind(&socket).unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -109,12 +128,8 @@ impl Harness {
                 }
             };
             stream.set_nonblocking(false).unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(2)))
-                .unwrap();
-            stream
-                .set_write_timeout(Some(Duration::from_secs(2)))
-                .unwrap();
+            stream.set_read_timeout(Some(HANG_GUARD)).unwrap();
+            stream.set_write_timeout(Some(HANG_GUARD)).unwrap();
             let Ok(mut ws) = tungstenite::accept(stream) else {
                 return;
             };
@@ -206,7 +221,7 @@ impl Harness {
         let calls = self.calls.lock().unwrap();
         let (calls, _) = self
             .recorded
-            .wait_timeout_while(calls, Duration::from_secs(2), |calls| {
+            .wait_timeout_while(calls, HANG_GUARD, |calls| {
                 !calls.iter().any(|call| call["method"] == method)
             })
             .unwrap();
@@ -287,7 +302,7 @@ fn pre_id_qualification_uses_exact_reader_thread_and_root_before_final_binding_i
     let alias = project.path().join("alias");
     symlink(project.path(), &alias).unwrap();
     let h = project_harness(&alias);
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + deadline_scale::scaled(Duration::from_secs(10));
     let reader = CodexDaemonReader::open(h.options(), h.request().endpoint).unwrap();
     let selected = reader
         .qualify_selected_thread(THREAD, project.path(), deadline)
@@ -365,7 +380,11 @@ fn project_qualification_rejects_other_or_missing_root_before_queue_and_history_
         let h = project_harness(project.path());
         let reader = CodexDaemonReader::open(h.options(), h.request().endpoint).unwrap();
         let error = reader
-            .qualify_selected_thread(THREAD, &root, Instant::now() + Duration::from_secs(10))
+            .qualify_selected_thread(
+                THREAD,
+                &root,
+                Instant::now() + deadline_scale::scaled(Duration::from_secs(10)),
+            )
             .err()
             .unwrap();
         assert_eq!(error.code, expected);
@@ -392,7 +411,7 @@ fn qualified_thread_cannot_be_retargeted_and_final_bind_rechecks_current_project
         .qualify_selected_thread(
             THREAD,
             project.path(),
-            Instant::now() + Duration::from_secs(10),
+            Instant::now() + deadline_scale::scaled(Duration::from_secs(10)),
         )
         .unwrap();
     assert_eq!(
@@ -420,7 +439,7 @@ fn qualified_thread_cannot_be_retargeted_and_final_bind_rechecks_current_project
         .qualify_selected_thread(
             THREAD,
             project.path(),
-            Instant::now() + Duration::from_secs(10),
+            Instant::now() + deadline_scale::scaled(Duration::from_secs(10)),
         )
         .unwrap();
     let mut request = h.request();
@@ -469,7 +488,7 @@ fn pre_id_verification_preserves_required_wire_checks_and_original_deadline() {
             .qualify_selected_thread(
                 THREAD,
                 project.path(),
-                Instant::now() + Duration::from_secs(10),
+                Instant::now() + deadline_scale::scaled(Duration::from_secs(10)),
             )
             .err()
             .unwrap();
@@ -529,7 +548,7 @@ fn fresh_unmaterialized_thread_connects_with_an_empty_turn_list() {
         .qualify_selected_thread(
             THREAD,
             project.path(),
-            Instant::now() + Duration::from_secs(10),
+            Instant::now() + deadline_scale::scaled(Duration::from_secs(10)),
         )
         .unwrap();
     assert_eq!(selected.facts().external_session_id, THREAD);
@@ -574,7 +593,7 @@ fn other_turn_list_errors_fail_with_the_bounded_server_code_and_message() {
         .qualify_selected_thread(
             THREAD,
             project.path(),
-            Instant::now() + Duration::from_secs(10),
+            Instant::now() + deadline_scale::scaled(Duration::from_secs(10)),
         )
         .err()
         .unwrap();
@@ -596,7 +615,7 @@ fn other_turn_list_errors_fail_with_the_bounded_server_code_and_message() {
         .qualify_selected_thread(
             THREAD,
             project.path(),
-            Instant::now() + Duration::from_secs(10),
+            Instant::now() + deadline_scale::scaled(Duration::from_secs(10)),
         )
         .err()
         .unwrap();
@@ -1623,7 +1642,10 @@ fn scheduled_discovery_uses_admission_deadline_and_reuses_only_verified_reader()
     assert!(harness.methods().is_empty());
     for _ in 0..2 {
         let page = discovery
-            .page(None, Instant::now() + Duration::from_secs(2))
+            .page(
+                None,
+                Instant::now() + deadline_scale::scaled(Duration::from_secs(2)),
+            )
             .unwrap();
         assert_eq!(page.candidates[0].external_session_id, THREAD);
     }
