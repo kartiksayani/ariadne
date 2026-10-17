@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { cliRequest } from '../../../apps/desktop/tests/e2e/scripted-provider.mjs';
-import { assertStatusFilters, choose, goToPeekItem, observeTreeAnchor, observeTreeClickReadiness, openStatusFilterMenu, publishTreeRequest, showFullItemQuestion, treeBatch, treeCompletionBatch, treeClickReadinessStatus, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
+import { assertStatusFilters, choose, goToPeekItem, observeTreeAnchor, observeTreeClickReadiness, openStatusFilters, publishTreeRequest, showFullItemQuestion, treeBatch, treeCompletionBatch, treeClickReadinessStatus, treeMessageBatch } from '../../../apps/desktop/tests/e2e/tree.spec.mjs';
 
 for (const scenario of ['complete', 'hidden', 'truncated', 'premature-navigation', 'lingering-peek']) {
   test(`reference navigation requires full visible peek, unchanged detail and deliberate Go to: ${scenario}`, async () => {
@@ -79,68 +79,73 @@ for (const scenario of ['multi-select', 'exclusive-selection', 'incorrect-saved-
     const operations = Array.from({ length: 20 }, (_, index) => treeBatch('topic', index + 1)).flat();
     const ids = operations.map(operation => operation.ref.replace('native_root_', '').replace('native_child_', '').replace('_', '.'));
     const doneIds = new Set(Array.from({ length: 20 }, (_, index) => treeCompletionBatch(index + 1)).flat().map(operation => operation.item.id));
-    const closed = ['decided', 'done', 'dropped', 'replaced'], selected = new Set(), calls = [];
-    let statuses = [];
-    const shown = () => ids.filter((id, index) => selected.size !== 1 || (selected.has('closed') ? doneIds.has(id)
+    const selected = new Set(), calls = [];
+    let statuses = [], rowOpen = false;
+    const shown = () => ids.filter((id, index) => selected.size !== 1 || (selected.has('done') ? doneIds.has(id)
       : !doneIds.has(id) || operations[index].parent === null));
-    let menuOpen = false;
-    const trigger = { getAttribute: async name => name === 'aria-controls' ? 'fixture-filter' : name === 'aria-expanded' ? String(menuOpen) : selected.size && scenario !== 'missing-active-indicator' ? 'true' : null };
+    // The top bar's funnel counts the picked statuses in its name.
+    const funnelName = () => scenario === 'missing-active-indicator' || !selected.size ? 'Filter by status'
+      : `Filter by status, ${selected.size} ${selected.size === 1 ? 'status' : 'statuses'} picked`;
+    const text = chip => chip === 'open' ? 'Open 1320' : 'Done 680';
     const document = { querySelectorAll: selector => {
-      assert.equal(selector, '[role="menu"][id="fixture-filter"] [role="menuitemcheckbox"][aria-checked="true"]');
-      assert.equal(menuOpen, true);
-      return ['open', 'closed'].filter(chip => selected.has(chip)).map(chip => ({ textContent: chip === 'open' ? 'Open1320' : 'Closed680' }));
+      assert.equal(selector, `${filterRowSelector} button[aria-pressed="true"]`);
+      assert.equal(rowOpen, true);
+      return ['open', 'done'].filter(chip => selected.has(chip)).map(chip => ({ getAttribute: name => { assert.equal(name, 'aria-label'); return text(chip); } }));
     } };
+    const filterRowSelector = '[role="group"][aria-label="Filter items"]';
     const context = {
+      filterRowSelector,
       assert: { ...assert, deepEqual: (actual, expected, message) => assert.deepEqual(globalThis.structuredClone(actual), globalThis.structuredClone(expected), message) },
       browser: {
         $: selector => {
-          assert.equal(selector, '[role="menu"][id="fixture-filter"]');
-          return { $: async option => {
-            assert.equal(menuOpen, true);
-            return { getText: async () => option.endsWith('Show all') ? 'Show all 2000' : option.endsWith('Open') ? 'Open 1320' : 'Closed 680' };
-          } };
+          if (selector === 'button[aria-label^="Filter by status"]') return { getAttribute: async name => { assert.equal(name, 'aria-label'); return funnelName(); } };
+          assert.equal(selector, filterRowSelector);
+          return {
+            isExisting: async () => rowOpen,
+            $: async option => {
+              assert.equal(rowOpen, true);
+              const chip = option.includes('"Open ') ? 'open' : 'done';
+              return { getAttribute: async name => { assert.equal(name, 'aria-label'); return text(chip); } };
+            },
+          };
         },
         execute: async (callback, ...args) => globalThis.structuredClone(runInNewContext(`(${callback.toString()})(...args)`, { document, args })),
-        keys: async key => { assert.equal(key, 'Escape'); menuOpen = false; },
       },
-      openStatusFilterMenu: async () => { menuOpen = true; return trigger; },
+      openStatusFilters: async () => { rowOpen = true; },
       choose: async (chip, pressed) => {
         calls.push([chip, pressed]);
-        if (chip === 'all' || scenario === 'exclusive-selection') selected.clear();
-        if (chip === 'all') menuOpen = false;
-        if (chip !== 'all') { if (selected.has(chip)) selected.delete(chip); else selected.add(chip); }
-        assert.equal(chip === 'all' ? selected.size === 0 : selected.has(chip), pressed);
-        statuses = [...(selected.has('open') ? ['open'] : []), ...(selected.has('closed') ? closed : [])];
-        if (scenario === 'incorrect-saved-set' && selected.size === 2) statuses = ['open', 'done'];
+        if (chip === 'clear' || scenario === 'exclusive-selection') selected.clear();
+        if (chip === 'clear') rowOpen = false;
+        if (chip !== 'clear') { if (selected.has(chip)) selected.delete(chip); else selected.add(chip); }
+        assert.equal(chip === 'clear' ? selected.size === 0 : selected.has(chip), pressed);
+        statuses = [...(selected.has('open') ? ['open'] : []), ...(selected.has('done') ? ['done'] : [])];
+        if (scenario === 'incorrect-saved-set' && selected.size === 2) statuses = ['open', 'decided'];
       },
       wait: async (condition, message) => assert.ok(await condition(), message), visibleIds: async () => shown(),
       preferences: async () => ({ view: { filters: { statuses } } }),
     };
     const action = runInNewContext(`(${assertStatusFilters.toString()})(null, ids)`, { ...context, ids });
-    if (scenario === 'exclusive-selection') await assert.rejects(action, /Open and Closed together/);
+    if (scenario === 'exclusive-selection') await assert.rejects(action, /Open and Done together/);
     else if (scenario === 'incorrect-saved-set') await assert.rejects(action, /deep-equal/);
-    else if (scenario === 'missing-active-indicator') await assert.rejects(action, /strictly equal/);
+    else if (scenario === 'missing-active-indicator') await assert.rejects(action, /did not match/);
     else {
       await action;
-      assert.deepEqual(calls, [['open', true], ['closed', true], ['open', false], ['all', true]]);
-      assert.deepEqual(statuses, []); assert.deepEqual(shown(), ids); assert.equal(menuOpen, false);
+      assert.deepEqual(calls, [['open', true], ['done', true], ['open', false], ['clear', true]]);
+      assert.deepEqual(statuses, []); assert.deepEqual(shown(), ids); assert.equal(rowOpen, false);
     }
   });
 }
 
-for (const alreadyOpen of [true, false]) test(`native status menu opens only when needed: ${alreadyOpen ? 'open' : 'closed'}`, async () => {
-  let expanded = alreadyOpen;
-  const calls = [], trigger = { getAttribute: async name => { assert.equal(name, 'aria-expanded'); return String(expanded); },
-    waitForClickable: async () => calls.push('clickable'), click: async () => { calls.push('click'); expanded = true; } };
-  let shown = 0;
-  const actual = await runInNewContext(`(${openStatusFilterMenu.toString()})()`, {
+test('native filter row is shown from the top bar before its chips are read, and has no menu to open', async () => {
+  const row = { name: 'chip row' }, calls = [];
+  const actual = await runInNewContext(`(${openStatusFilters.toString()})()`, {
     // The filter row opens from the top bar's Filter button first; that step has its own native proof.
-    showFilters: async () => { shown++; },
-    browser: { $: async selector => { assert.equal(selector, '[role="group"][aria-label="Filter items"] button[aria-haspopup="menu"]'); return trigger; } },
-    wait: async condition => { calls.push('wait'); assert.ok(await condition()); },
+    showFilters: async () => { calls.push('show'); },
+    filterRowSelector: '[role="group"][aria-label="Filter items"]',
+    browser: { $: async selector => { calls.push('read'); assert.equal(selector, '[role="group"][aria-label="Filter items"]'); return row; } },
   });
-  assert.equal(actual, trigger); assert.equal(expanded, true); assert.equal(shown, 1, 'The filter row is shown before the menu button is read');
-  assert.deepEqual(calls, alreadyOpen ? [] : ['clickable', 'click', 'wait']);
+  assert.equal(actual, row);
+  assert.deepEqual(calls, ['show', 'read'], 'The filter row is shown before the chips are read');
 });
 
 for (const scenario of ['sticky', 'pushed', 'not-stuck']) {
@@ -248,22 +253,21 @@ for (const expectedPressed of [true, false]) for (const scenario of ['focused', 
     const document = { visibilityState: scenario === 'hidden' ? 'hidden' : 'visible', hidden: scenario === 'hidden', hasFocus: () => scenario === 'focused' || scenario === 'readiness_error' };
     const window = { __ariadneTreeFilterCleanup: () => calls.push('cleanup') };
     let pressed = !expectedPressed;
-    const trigger = { getAttribute: async name => { if (name === 'aria-controls') return 'fixture-filter'; assert.equal(name, 'aria-expanded'); return 'true'; } };
     const button = { waitForClickable: async () => { calls.push('clickable'); }, click: async () => { calls.push('click'); pressed = !pressed; },
-      getAttribute: async name => { assert.equal(name, 'aria-checked'); return String(pressed); }, isEnabled: async () => true };
+      getAttribute: async name => { assert.equal(name, 'aria-pressed'); return String(pressed); }, isEnabled: async () => true };
     // Run the actual orchestration with observed browser/OS boundaries; this
     // checks input ordering and rejection, not real macOS activation or rendering.
     const context = {
-      process: { env: environment }, expectedPressed, assert,
+      process: { env: environment }, expectedPressed, assert, filterRowSelector: '[role="group"][aria-label="Filter items"]',
       browser: {
-        $: selector => { assert.equal(selector, '[role="menu"][id="fixture-filter"]'); return { $: async option => { assert.equal(option, '[role="menuitemcheckbox"]*=Open'); return button; } }; },
+        $: selector => { assert.equal(selector, '[role="group"][aria-label="Filter items"]'); return { $: async option => { assert.equal(option, 'button[aria-label^="Open "]'); return button; } }; },
         execute: async callback => {
           if (callback === observeTreeClickReadiness) { calls.push('observe'); return; }
           return runInNewContext(`(${callback.toString()})()`, { document, window });
         },
       },
       observeTreeClickReadiness,
-      openStatusFilterMenu: async () => { calls.push('menu'); return trigger; },
+      openStatusFilters: async () => { calls.push('menu'); },
       activateOwned: async (...args) => {
         assert.deepEqual(args, Object.values(environment)); calls.push('activate');
         if (scenario === 'activation_error') throw new Error('Owned activation rejected');
@@ -286,23 +290,23 @@ for (const expectedPressed of [true, false]) for (const scenario of ['focused', 
   });
 }
 
-for (const clearIndicator of [true, false]) test(`native Show all requires a closed menu and cleared active indicator: ${clearIndicator ? 'cleared' : 'stale'}`, async () => {
+for (const closesRow of [true, false]) test(`native Clear requires the chip row to close: ${closesRow ? 'closed' : 'stale'}`, async () => {
   const calls = [];
-  let expanded = true, active = true;
-  const trigger = { getAttribute: async name => name === 'aria-controls' ? 'fixture-filter' : name === 'aria-expanded' ? String(expanded) : active ? 'true' : null, isEnabled: async () => true };
-  const button = { waitForClickable: async () => calls.push('clickable'), click: async () => { calls.push('click'); expanded = false; active = !clearIndicator; } };
+  let rowOpen = true;
+  const button = { waitForClickable: async () => calls.push('clickable'), click: async () => { calls.push('click'); rowOpen = !closesRow; } };
   const document = { visibilityState: 'visible', hidden: false, hasFocus: () => true }, window = { __ariadneTreeFilterCleanup: () => calls.push('cleanup') };
-  const action = runInNewContext(`(${choose.toString()})('all', true)`, {
-    assert, browser: { $: selector => {
-      assert.equal(selector, '[role="menu"][id="fixture-filter"]');
-      return { $: async option => { assert.equal(option, '[role="menuitem"]*=Show all'); return button; } };
+  const action = runInNewContext(`(${choose.toString()})('clear', true)`, {
+    assert, filterRowSelector: '[role="group"][aria-label="Filter items"]',
+    browser: { $: selector => {
+      assert.equal(selector, '[role="group"][aria-label="Filter items"]');
+      return { isExisting: async () => rowOpen, $: async option => { assert.equal(option, 'button=Clear'); return button; } };
     }, execute: async callback => callback === observeTreeClickReadiness ? calls.push('observe') : runInNewContext(`(${callback.toString()})()`, { document, window }) },
-    openStatusFilterMenu: async () => trigger, observeTreeClickReadiness,
+    openStatusFilters: async () => {}, observeTreeClickReadiness,
     waitClickReadiness: async () => calls.push('ready'), wait: async (condition, message) => { if (!await condition()) throw new Error(message); },
   });
-  if (clearIndicator) await action; else await assert.rejects(action, /Native filter write was not confirmed/);
+  if (closesRow) await action; else await assert.rejects(action, /Native filter write was not confirmed/);
   assert.deepEqual(calls, ['clickable', 'observe', 'ready', 'click', 'cleanup']);
-  assert.equal(expanded, false);
+  assert.equal(rowOpen, !closesRow);
 });
 
 test('tree setup repeats only definitive Busy with the identical frozen request and stops on other failures', async () => {

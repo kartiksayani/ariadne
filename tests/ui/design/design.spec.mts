@@ -79,7 +79,9 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
   }
   const filters = page.getByRole('group', { name: 'Filter items' });
   if (await filters.count()) {
-    await expect(filters.getByRole('button', { name: /^Filter/ })).toBeVisible();
+    // The chip row (SPEC 6.10): toggle buttons named "<status> <count>", no menu button and no combobox.
+    await expect(filters.getByRole('button', { name: /\d$/ }).first()).toBeVisible();
+    await expect(filters.getByRole('button', { name: /^Filter/ })).toHaveCount(0);
     await expect(filters.getByRole('combobox')).toHaveCount(0);
   }
   // The Back-to pill (SPEC §5.8) floats over the Map in the scroller's shell, never inside the scroller, never in the Graph.

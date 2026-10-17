@@ -297,7 +297,7 @@ export function observeTreeClickReadiness(button, group, name, expectedPressed, 
     sample.readiness.hidden = document.hidden;
     sample.readiness.hasFocus = document.hasFocus();
     try {
-      const current = selector ? document.querySelector(selector) : [...((group === 'Filter items' ? document.querySelector('[role="menu"][aria-label^="Filter"]') : document.querySelector(`[aria-label="${group}"]`))?.querySelectorAll('button') ?? [])]
+      const current = selector ? document.querySelector(selector) : [...(document.querySelector(`[aria-label="${group}"]`)?.querySelectorAll('button') ?? [])]
         .find(value => value.textContent.trim() === name || [...value.children].some(child => child.tagName === 'SPAN' && child.textContent.trim() === name));
       const rect = button.getBoundingClientRect(), hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
       const enabled = !button.disabled && button.getAttribute('aria-disabled') !== 'true';
@@ -369,28 +369,23 @@ async function readySessionButton(tree) {
   if (failure) throw failure;
   return button;
 }
-export async function openStatusFilterMenu() {
+const filterRowSelector = '[role="group"][aria-label="Filter items"]';
+// The chip row is in flow above the Map once the top bar's Filter button shows it; no menu to open.
+export async function openStatusFilters() {
   await showFilters();
-  const trigger = await browser.$('[role="group"][aria-label="Filter items"] button[aria-haspopup="menu"]');
-  if (await trigger.getAttribute('aria-expanded') !== 'true') {
-    await trigger.waitForClickable(); await trigger.click();
-    await wait(async () => await trigger.getAttribute('aria-expanded') === 'true', 'Native status filter menu did not open');
-  }
-  return trigger;
+  return browser.$(filterRowSelector);
 }
-// Status options toggle a set and keep the menu open; Show all clears it and closes the menu.
+// Each chip is a toggle button named "<status> <count>" and keeps the row open; Clear empties the chips and closes the row.
 export async function choose(chip, pressed) {
   const focused = () => browser.execute(() => document.visibilityState === 'visible' && !document.hidden && document.hasFocus());
   if (!await focused()) {
     await activateOwned(process.env.ARIADNE_E2E_ROOT, process.env.ARIADNE_E2E_BINARY, process.env.ARIADNE_E2E_NONCE);
     await wait(focused, 'Owned native App did not become visible and focused before filtering');
   }
-  const labels = { all: 'Show all', waiting: 'Waiting on me', open: 'Open', progress: 'In progress', closed: 'Closed' };
-  const trigger = await openStatusFilterMenu(), label = labels[chip];
-  const selector = `[role="${chip === 'all' ? 'menuitem' : 'menuitemcheckbox'}"]*=${label}`;
-  const menuId = await trigger.getAttribute('aria-controls');
-  assert.ok(menuId, 'Open filter menu must be associated with its button');
-  const find = () => browser.$(`[role="menu"][id="${menuId}"]`).$(selector);
+  const labels = { clear: 'Clear', waiting: 'Waiting on me', open: 'Open', progress: 'In progress', decided: 'Decided', done: 'Done' };
+  await openStatusFilters();
+  const label = labels[chip], selector = chip === 'clear' ? 'button=Clear' : `button[aria-label^="${label} "]`;
+  const find = () => browser.$(filterRowSelector).$(selector);
   const button = await find();
   await button.waitForClickable();
   await browser.execute(observeTreeClickReadiness, button, 'Filter items', label, pressed);
@@ -399,11 +394,12 @@ export async function choose(chip, pressed) {
     await waitClickReadiness('Native filter target did not become stable and enabled', true);
     await button.click();
     await wait(async () => {
-      if (chip === 'all') return await trigger.getAttribute('aria-expanded') === 'false' && await trigger.getAttribute('data-active') === null && await trigger.isEnabled();
-      // Reacquire the option after the saved preference renders instead of
+      // Clear closes the row once the saved chips are empty.
+      if (chip === 'clear') return !await browser.$(filterRowSelector).isExisting();
+      // Reacquire the chip after the saved preference renders instead of
       // observing a possibly replaced DOM element.
       const current = await find();
-      return await current.getAttribute('aria-checked') === String(pressed) && await current.isEnabled() && await trigger.getAttribute('aria-expanded') === 'true';
+      return await current.getAttribute('aria-pressed') === String(pressed) && await current.isEnabled();
     }, 'Native filter write was not confirmed');
   } catch (error) { failure = error;
   } finally {
@@ -427,30 +423,30 @@ export function observeTreeAnchor() {
 const anchor = () => browser.execute(observeTreeAnchor);
 
 export async function assertStatusFilters(tree, expectedIds) {
-  const labels = { all: 'Show all', open: 'Open', closed: 'Closed' };
-  const trigger = await openStatusFilterMenu();
-  const menuId = await trigger.getAttribute('aria-controls');
-  assert.ok(menuId, 'Open filter menu must be associated with its button');
-  const chipCount = async chip => Number((await (await browser.$(`[role="menu"][id="${menuId}"]`).$(`[role="${chip === 'all' ? 'menuitem' : 'menuitemcheckbox'}"]*=${labels[chip]}`)).getText()).match(/\d+\s*$/)?.[0]);
-  const pressed = async () => browser.execute(id => [...document.querySelectorAll(`[role="menu"][id="${id}"] [role="menuitemcheckbox"][aria-checked="true"]`)]
-    .map(element => element.textContent.replace(/\d+\s*$/, '').trim()), menuId);
-  assert.equal(await trigger.getAttribute('data-active'), null);
+  const labels = { open: 'Open', done: 'Done' };
+  await openStatusFilters();
+  const chipCount = async chip => Number((await (await browser.$(filterRowSelector).$(`button[aria-label^="${labels[chip]} "]`)).getAttribute('aria-label')).match(/\d+\s*$/)?.[0]);
+  const pressed = async () => browser.execute(selector => [...document.querySelectorAll(`${selector} button[aria-pressed="true"]`)]
+    .map(element => element.getAttribute('aria-label').replace(/\s*\d+\s*$/, '').trim()), filterRowSelector);
+  const filterButton = () => browser.$('button[aria-label^="Filter by status"]');
+  // Nothing is picked: the funnel carries no count and the row asks for a status.
+  assert.equal(await (await filterButton()).getAttribute('aria-label'), 'Filter by status');
   assert.deepEqual(await pressed(), []);
-  assert.deepEqual(await Promise.all(['all', 'open', 'closed'].map(chipCount)), [2000, 1320, 680]);
+  assert.deepEqual(await Promise.all(['open', 'done'].map(chipCount)), [1320, 680]);
   await choose('open', true); await wait(async () => (await visibleIds()).length === 1340, 'Open filter differs from the canonical fixture');
   assert.deepEqual((await preferences(tree)).view.filters.statuses, ['open']); assert.equal(await chipCount('open'), 1320);
-  assert.deepEqual(await pressed(), ['Open']); assert.equal(await trigger.getAttribute('data-active'), 'true');
-  await choose('closed', true); await wait(async () => (await visibleIds()).length === 2000, 'Open and Closed together did not restore the complete fixture');
+  assert.deepEqual(await pressed(), ['Open']); assert.match(await (await filterButton()).getAttribute('aria-label'), /^Filter by status, 1 status picked/);
+  await choose('done', true); await wait(async () => (await visibleIds()).length === 2000, 'Open and Done together did not restore the complete fixture');
   assert.deepEqual(await visibleIds(), expectedIds);
-  assert.deepEqual(await pressed(), ['Open', 'Closed']); assert.equal(await trigger.getAttribute('data-active'), 'true');
-  assert.deepEqual((await preferences(tree)).view.filters.statuses, ['open', 'decided', 'done', 'dropped', 'replaced']);
-  await choose('open', false); await wait(async () => (await visibleIds()).length === 680, 'Closed filter did not keep exactly the terminal items');
-  assert.deepEqual(await pressed(), ['Closed']); assert.equal(await trigger.getAttribute('data-active'), 'true');
-  assert.deepEqual((await preferences(tree)).view.filters.statuses, ['decided', 'done', 'dropped', 'replaced']);
-  await choose('all', true); await wait(async () => (await visibleIds()).length === 2000, 'Show all did not restore every item');
-  assert.deepEqual(await visibleIds(), expectedIds); assert.equal(await trigger.getAttribute('data-active'), null);
-  await openStatusFilterMenu(); assert.deepEqual(await pressed(), []);
-  await browser.keys('Escape');
+  assert.deepEqual(await pressed(), ['Open', 'Done']); assert.match(await (await filterButton()).getAttribute('aria-label'), /^Filter by status, 2 statuses picked/);
+  assert.deepEqual((await preferences(tree)).view.filters.statuses, ['open', 'done']);
+  await choose('open', false); await wait(async () => (await visibleIds()).length === 680, 'Done filter did not keep exactly the done items');
+  assert.deepEqual(await pressed(), ['Done']);
+  assert.deepEqual((await preferences(tree)).view.filters.statuses, ['done']);
+  // Clear empties the chips, restores every item and closes the row.
+  await choose('clear', true); await wait(async () => (await visibleIds()).length === 2000, 'Clear did not restore every item');
+  assert.deepEqual(await visibleIds(), expectedIds); assert.equal(await (await filterButton()).getAttribute('aria-label'), 'Filter by status');
+  assert.equal(await browser.$(filterRowSelector).isExisting(), false);
   assert.deepEqual((await preferences(tree)).view.filters.statuses, []);
 }
 async function completeRowLayout(id, item) {
@@ -526,10 +522,10 @@ export async function runTreeAcceptance(configuration) {
         alerts: [...document.querySelectorAll('[role="alert"],.nav-banner')].slice(0, 12).map(element => element.textContent.slice(0, 500)),
         statuses: [...document.querySelectorAll('[role="status"]')].slice(0, 12).map(element => element.textContent.slice(0, 500)),
         current: [...document.querySelectorAll('[aria-current]')].slice(0, 12).map(element => element.outerHTML.slice(0, 1000)),
-        controls: [...document.querySelectorAll('[role="group"][aria-label="Filter items"] button,[role="menu"][aria-label^="Filter"] button,.shell-top [aria-label="Search the Map"],button[data-session-id]')].slice(0, 40).map(element => {
+        controls: [...document.querySelectorAll('[role="group"][aria-label="Filter items"] button,.shell-top [aria-label="Search the Map"],button[data-session-id]')].slice(0, 40).map(element => {
           const bounds = element.getBoundingClientRect();
           return { text: element.textContent.slice(0, 200), sessionId: element.dataset.sessionId, disabled: element.disabled,
-            checked: element.getAttribute('aria-checked'), expanded: element.getAttribute('aria-expanded'), active: element.hasAttribute('data-active'),
+            checked: element.getAttribute('aria-pressed'), expanded: element.getAttribute('aria-expanded'), active: element.hasAttribute('data-active'),
             bounds: { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right },
             centreTarget: document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2)?.outerHTML.slice(0, 1000) };
         }) }));

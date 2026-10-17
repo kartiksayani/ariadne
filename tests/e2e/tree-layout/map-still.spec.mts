@@ -8,6 +8,7 @@ import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 import type { Server } from 'node:http';
+import { viewportPlace } from '../map-viewport.mts';
 
 interface Placed { readonly key: string; readonly top: number; readonly height: number; readonly text: number }
 
@@ -140,4 +141,151 @@ for (const [name, kind, subject, before, change, done] of triggers) test(`the Ma
       for (const value of rows) expect(after.get(value.key), `${value.key} keeps its place, height and text width`).toEqual(value);
     }
   } finally { await server.close(); }
+});
+
+// ---- The filter row (D13-D17, D24). The chip row opens above the Map, and a chip, Clear, an Ack or an agent's change
+// removes rows. The Map holds the reading row at its *viewport* place, so these rows are measured in window coordinates,
+// in both views, with the Map scrolled to the top, the middle and the bottom.
+type View = 'Tree' | 'Graph';
+type Spot = 'top' | 'middle' | 'bottom';
+interface Cell { readonly id: string; readonly top: number; readonly left: number; readonly height: number }
+const views: readonly View[] = ['Tree', 'Graph'];
+const spots: readonly Spot[] = ['top', 'middle', 'bottom'];
+const scrollerOf = (view: View) => view === 'Tree' ? '.tree-scroll' : '.graph-scroll';
+const cellOf = (view: View, id: string) => view === 'Tree' ? `.tree-item[data-item-id="${id}"]` : `.graph-node[data-item-id="${id}"]`;
+const funnel = (page: Page) => page.getByRole('button', { name: /^Filter by status/ });
+const chipRow = (page: Page) => page.getByRole('group', { name: 'Filter items' });
+const chipButton = (page: Page, label: string) => chipRow(page).getByRole('button', { name: new RegExp(`^${label} \\d+$`) });
+const chipLabel: Readonly<Record<string, string>> = { open: 'Open', done: 'Done', in_progress: 'In progress', waiting_on_me: 'Waiting on me', decided: 'Decided', replaced: 'Replaced' };
+const statusOf = (page: Page, id: string) => page.evaluate(wanted => {
+  const transport = (window as unknown as { treeLayout: { sessions: Map<string, { items: Record<string, { status: string }> }> } }).treeLayout;
+  return [...transport.sessions.values()][0]!.items[wanted]!.status;
+}, id);
+
+/** Every item whole in view, in reading order: top to bottom, then left to right. The sticky band covers the Tree's first pixels. */
+const wholeCells = (page: Page, view: View): Promise<Cell[]> => page.evaluate(({ scroller, kind }) => {
+  const box = document.querySelector(scroller)!, edge = box.getBoundingClientRect();
+  let bar = 0;
+  if (kind === 'Tree') for (const header of box.querySelectorAll('.tree-topic')) {
+    const rect = header.getBoundingClientRect();
+    if (rect.top <= edge.top && rect.bottom > edge.top) bar = Math.max(bar, rect.bottom - edge.top);
+  }
+  return [...box.querySelectorAll<HTMLElement>(kind === 'Tree' ? '.tree-item[data-item-id]' : '.graph-node[data-item-id]')].flatMap(node => {
+    const rect = node.getBoundingClientRect();
+    return rect.top >= edge.top + bar - 0.5 && rect.bottom <= edge.bottom + 0.5 ? [{ id: node.dataset.itemId!, top: rect.top, left: rect.left, height: rect.height }] : [];
+  }).sort((a, b) => a.top - b.top || a.left - b.left);
+}, { scroller: scrollerOf(view), kind: view });
+
+async function scrollTo(page: Page, view: View, spot: Spot) {
+  await page.locator(scrollerOf(view)).evaluate((box, where) => {
+    const max = box.scrollHeight - box.clientHeight;
+    box.scrollTop = where === 'top' ? 0 : where === 'middle' ? Math.round(max / 2) : max;
+    box.dispatchEvent(new Event('scroll'));
+  }, spot);
+  await settle(page);
+  const { top, max } = await page.locator(scrollerOf(view)).evaluate(box => ({ top: box.scrollTop, max: box.scrollHeight - box.clientHeight }));
+  expect(max, 'the list is longer than the window, so the Map can scroll').toBeGreaterThan(40);
+  if (spot === 'top') expect(top).toBe(0);
+  else if (spot === 'bottom') expect(max - top).toBeLessThanOrEqual(1);
+  else { expect(top).toBeGreaterThan(0); expect(max - top).toBeGreaterThan(1); }
+}
+
+async function prepare(page: Page, origin: string, view: View) {
+  await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
+  await page.setViewportSize({ width: 1000, height: 700 });
+  await page.goto(`${origin}/tests/e2e/tree-layout/fixture.html?filter`);
+  await page.locator('[data-popover-trigger="switcher"]').click();
+  await page.getByRole('dialog', { name: 'Switch session or project' }).getByRole('button', { name: 'All sessions' }).click();
+  const session = page.locator('button[data-session-id]').first();
+  await expect(session).toBeEnabled(); await session.click();
+  await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-busy', 'false');
+  await page.evaluate(async () => { await document.fonts.ready; });
+  const close = page.getByRole('button', { name: 'Close detail' });
+  if (await close.count()) await close.click();
+  if (view === 'Graph') {
+    await page.getByRole('button', { name: 'Graph', exact: true }).click();
+    await expect(page.locator('.graph-scroll')).toBeVisible();
+  }
+  await settle(page);
+}
+const openRow = async (page: Page) => { await funnel(page).click(); await expect(chipRow(page)).toBeVisible(); await settle(page); };
+const pick = async (page: Page, label: string) => {
+  await chipButton(page, label).click();
+  await expect(chipButton(page, label)).toHaveAttribute('aria-pressed', 'true');
+  await settle(page);
+};
+
+// What an owner-caused boundary may do: at the very top the Map cannot scroll above its first row, so a row that shrinks the
+// Map's top (the chip row closing) or removes the reading row may carry the rows up by that much, and never down.
+type Allowance = 'filter row' | 'removed row' | null;
+interface FilterTrigger {
+  readonly name: string;
+  /** The filter state before the owner scrolls. */
+  readonly before: (page: Page) => Promise<void>;
+  /** The row the Map holds: the reading row, or the row below it when the trigger removes the reading row. */
+  readonly holds: 'reader' | 'next';
+  readonly change: (page: Page, view: View, reader: Cell) => Promise<void>;
+  readonly done: (page: Page, view: View, reader: Cell) => Promise<void>;
+  readonly top: Allowance;
+}
+const filterTriggers: readonly FilterTrigger[] = [
+  { name: 'the chip row opens', before: async () => {}, holds: 'reader', top: null,
+    change: page => funnel(page).click(), done: page => expect(chipRow(page)).toBeVisible() },
+  { name: 'the chip row closes', before: openRow, holds: 'reader', top: 'filter row',
+    change: page => funnel(page).click(), done: page => expect(chipRow(page)).toHaveCount(0) },
+  { name: 'a chip is picked', before: openRow, holds: 'reader', top: null,
+    change: async (page, _view, reader) => { await chipButton(page, chipLabel[await statusOf(page, reader.id)]!).click(); },
+    done: async (page, _view, reader) => { await expect(chipButton(page, chipLabel[await statusOf(page, reader.id)]!)).toHaveAttribute('aria-pressed', 'true'); } },
+  // Clear empties the picked chips and closes the row: the rows come back and the Map's top moves up.
+  { name: 'Clear empties the chips and closes the row', before: async page => { await openRow(page); await pick(page, 'Open'); }, holds: 'reader', top: 'filter row',
+    change: page => chipRow(page).getByRole('button', { name: 'Clear' }).click(), done: page => expect(chipRow(page)).toHaveCount(0) },
+  { name: 'the reading row leaves To ack after its Ack', before: async page => { await openRow(page); await pick(page, 'To ack'); }, holds: 'next', top: 'removed row',
+    change: async (page, view, reader) => {
+      // The Tree's Ack button; the Graph has none, so the Ack lands the way an Ack from the dock does.
+      if (view === 'Tree') await press(page.locator(cellOf(view, reader.id)).getByRole('button', { name: /^Ack/ }));
+      else await agent(page, `ack:${reader.id}`);
+    },
+    done: (page, view, reader) => expect(page.locator(cellOf(view, reader.id))).toHaveCount(0, { timeout: 15_000 }) },
+  // Item 38 waits on item 2: when it is done, 38 leaves Blocked below the reading row and the Map's scroll range shrinks.
+  { name: 'a dependency settles and an item leaves Blocked', before: async page => { await openRow(page); await pick(page, 'Blocked'); }, holds: 'reader', top: null,
+    change: page => agent(page, 'settle'), done: (page, view) => expect(page.locator(cellOf(view, '38'))).toHaveCount(0) },
+];
+
+test.describe('the filter row never moves the Map', () => {
+  let server: Awaited<ReturnType<typeof createServer>>, origin = '';
+  test.beforeAll(async () => {
+    server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+      logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    origin = `http://127.0.0.1:${address.port}`;
+  });
+  test.afterAll(async () => { await server.close(); });
+
+  for (const view of views) for (const spot of spots) for (const trigger of filterTriggers) {
+    test(`${view}, scrolled to the ${spot}: ${trigger.name}`, async ({ page }) => {
+      await prepare(page, origin, view);
+      await trigger.before(page);
+      await scrollTo(page, view, spot);
+      await page.mouse.move(2, 690);
+      const cells = await wholeCells(page, view), reader = cells[0]!;
+      expect(reader, 'a row is whole in view').toBeTruthy();
+      // The row the Map must hold: the reading row, or the one under it when the trigger removes the reading row.
+      const held = trigger.holds === 'reader' ? reader : cells[1]!;
+      const before = (await viewportPlace(page, cellOf(view, held.id)))!;
+      const rowHeight = (await chipRow(page).boundingBox())?.height ?? 0;
+      await trigger.change(page, view, reader);
+      await trigger.done(page, view, reader);
+      await settle(page); await page.waitForTimeout(60); await settle(page);
+      const after = await viewportPlace(page, cellOf(view, held.id));
+      expect(after, `${held.id} is still drawn`).not.toBeNull();
+      const shift = after!.y - before.y;
+      // At the top an owner-caused boundary may carry the rows up (never down) by the height that left; anywhere else, nothing moves.
+      const room = spot === 'top' && trigger.top ? (trigger.top === 'filter row' ? rowHeight : reader.height) + 1 : 1;
+      expect(shift, `${held.id} moved ${shift}px in the window`).toBeGreaterThanOrEqual(-room);
+      expect(shift, `${held.id} moved ${shift}px in the window`).toBeLessThanOrEqual(1);
+      expect(Math.abs(after!.x - before.x), `${held.id} moved sideways`).toBeLessThanOrEqual(1);
+    });
+  }
 });
