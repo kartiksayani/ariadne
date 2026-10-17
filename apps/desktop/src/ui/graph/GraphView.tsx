@@ -26,6 +26,7 @@ import { useFilterFolds } from '../shared/filterFolds';
 import { notices } from '../pages/notices';
 import { scrollIntoViewIfHidden } from '../shared/scroll';
 import { useDockInset } from '../shell/dockInset';
+import { DETAILS_RAIL } from '../../state/details/column';
 
 export interface GraphViewProps {
   readonly store: SessionStore;
@@ -131,6 +132,8 @@ function Legend({ drawn }: { readonly drawn: boolean }) {
 
 /** Each topic's top in the canvas, by topic id. */
 const topicTops = (graph: SessionGraph) => new Map(graph.topics.map(topic => [topic.topic.id, topic.top]));
+/** The Map's width with Details folded to its rail: the shell body less the rail, never less than the Map's own width. */
+const mapRoom = (box: HTMLElement): number => Math.max(box.clientWidth, (box.closest('.shell-body')?.clientWidth ?? 0) - DETAILS_RAIL);
 const NO_LINES: ReturnType<typeof relatedLines> = { paths: [], related: new Set() };
 const NO_LOCAL: readonly LocalChip[] = [];
 
@@ -144,9 +147,10 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
   const [dismissedReveal, setDismissedReveal] = useState<RevealedItem | null>(null);
   const [focusedEntry, setFocusedEntry] = useState<{ id: string; selectedId: string | null } | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
-  // The column is fitted to the Map's width when the Graph opens or the session changes, and then kept (model.ts graphColumn).
+  // The column is fitted when the Graph opens or the session changes, and then kept (model.ts graphColumn). It is fitted to the
+  // Map as it is with Details folded to its rail, so names fit on one line as on the board whether Details is open or not.
   const [fit, setFit] = useState<{ store: SessionStore; column: number } | null>(null);
-  useLayoutEffect(() => { if (scroller.current) setFit({ store, column: graphColumn(scroller.current.clientWidth) }); }, [store]);
+  useLayoutEffect(() => { if (scroller.current) setFit({ store, column: graphColumn(mapRoom(scroller.current)) }); }, [store]);
   const column = fit?.store === store ? fit.column : null;
   // Optimistic view edits: `pending` waits for the current write, `inflight` is being written.
   const [pending, setPending] = useState<ViewChange | null>(null);

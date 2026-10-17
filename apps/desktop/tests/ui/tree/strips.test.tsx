@@ -1,6 +1,8 @@
 // Strips (ALPHA20-REPLAN §5.1): each run of consecutive omitted siblings is one strip, and its reason is the first that
 // applies: focus, then filter, then hidden. Rows before and after a strip keep their order.
 import { describe, expect, it } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { Strip } from '../../../src/ui/tree/Strip';
 import { immutable } from '../../../src/data';
 import type { Item } from '../../../src/generated/domain/models';
 import { parentKey, stripKey, type Row, type StripRow } from '../../../src/ui/tree/model';
@@ -114,4 +116,14 @@ describe('strips', () => {
     const nested = model().rows.find((row): row is StripRow => row.kind === 'strip' && row.parent === '1');
     expect(nested && parentKey(nested)).toBe('1');
   });
+});
+
+describe('strip icons', () => {
+  // The board draws a "not matching" strip with the filter's funnel, the same icon as the top bar's Filter button.
+  it.each([['filter', 'Hidden by the status filter', 'ph-funnel'], ['focus', 'Outside the focus', 'ph-crosshair-simple']] as const)(
+    'draws the %s strip with %s', (reason, title, icon) => {
+      const row: StripRow = { kind: 'strip', key: 'k', reason, topicId: 't', parent: null, depth: 0, count: 2, waiting: 0, expanded: false, guides: [], boxes: [], branch: null, delivery: null };
+      render(<Strip variant="row" row={row} focused={false} remember={() => {}} onFocus={() => {}} onKeyDown={() => {}} onToggle={() => {}} />);
+      expect(screen.getByTitle(title).querySelector('i')!.classList.contains(icon)).toBe(true);
+    });
 });

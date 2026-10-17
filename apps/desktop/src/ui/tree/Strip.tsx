@@ -26,7 +26,7 @@ export type StripProps =
     readonly onClick: () => void;
   };
 
-const ICON: Readonly<Record<StripReason, string>> = { hidden: 'ph ph-dots-three', filter: 'ph ph-magnifying-glass', focus: 'ph ph-crosshair-simple' };
+const ICON: Readonly<Record<StripReason, string>> = { hidden: 'ph ph-dots-three', filter: 'ph ph-funnel', focus: 'ph ph-crosshair-simple' };
 const TITLE: Readonly<Record<StripReason, string | undefined>> = { hidden: undefined, filter: 'Hidden by the status filter', focus: 'Outside the focus' };
 
 /** "3 hidden", "3 not matching" or "3 outside the focus", and " · 2 waiting" when questions wait inside. */

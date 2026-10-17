@@ -128,6 +128,16 @@ describe('session graph view', () => {
     expect(document.querySelectorAll<HTMLElement>('.graph-node[data-item-id="1.1"]')[1]!.style.width).toBe('124px');
   });
 
+  it('fits the column to the Map as it is with Details folded: the shell body less the 36px rail, so names fit on one line as on the board', async () => {
+    // A Map squeezed to 600 by an open Details column inside a 1280 body: col = clamp(150, floor((1244 − 56) / 5), 196) = 196, nodes 170.
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('shell-body') ? 1280 : 600;
+    });
+    const value = await setup();
+    render(<div className="shell-body"><value.Composition /></div>);
+    expect([node('1.1').style.left, node('1.1').style.width]).toEqual(['232px', '170px']);
+  });
+
   it.each(['button', 'page body'] as const)('leaves focus outside the Graph on the %s when a previously focused entry disappears', async destination => {
     const value = await setup();
     render(<><button type="button">Elsewhere</button><value.Composition /></>);
