@@ -18,12 +18,16 @@ import type { AnswerBar } from './AnswerControl';
 
 const replyKinds = ['answer', 'reply', 'note', 'followup', 'drop'];
 
-/** The newest owner input on the item's current question that still stands (not cancelled or skipped). */
+/**
+ * The owner input on the item's current question that still stands (not cancelled or skipped): its answer when it has one,
+ * else the newest of its other words. A reply sent after the answer never takes the answer's place in the sealed cards.
+ */
 export function standingInput(session: Immutable<Session> | null | undefined, itemId: string): Immutable<Input> | null {
   const revision = session?.items[itemId]?.question_revision;
-  return Object.values(session?.inputs ?? {}).filter(value => !!value && replyKinds.includes(value.kind) && value.target.item_id === itemId
+  const standing = Object.values(session?.inputs ?? {}).filter(value => !!value && replyKinds.includes(value.kind) && value.target.item_id === itemId
     && value.payload.target_snapshot.question_revision === revision && !['cancelled', 'skipped'].includes(value.state))
-    .sort((a, b) => b!.seq - a!.seq)[0] ?? null;
+    .sort((a, b) => b!.seq - a!.seq);
+  return standing.find(value => value!.kind === 'answer') ?? standing[0] ?? null;
 }
 
 /** An answer to the item's current question is queued, in flight or stuck: a new answer would be a second one. */
