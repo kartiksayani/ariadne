@@ -16,6 +16,31 @@ const settle = selector => browser.waitUntil(async () => {
 
 async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.click(); }
 
+/** Opens one of the pages (Projects, All sessions, Archive) from the switcher's footer links; there are no tabs. */
+export async function goToPage(name) {
+  await click(await browser.$('button[data-popover-trigger="switcher"]'));
+  await click(await browser.$('.swm').$(`button=${name}`));
+}
+
+/** Waits until the open session's Map has loaded and no lifecycle change (close, reopen, rename, archive) is saving. */
+export const sessionReady = () => browser.waitUntil(async () => await browser.$('.tree-column').getAttribute('data-session-status') === 'ready'
+  && await browser.$('.tree-column').getAttribute('data-session-busy') === 'false', { timeout: 20000, interval: 100, timeoutMsg: 'The session was not ready' });
+
+/** Presses a button of the top bar's connection card (Close session, Reopen session, Sending…, Copy session ID), opened from the dot. */
+export async function connectionCardButton(label) {
+  await click(await browser.$('[data-popover-trigger="connection"]'));
+  const card = await browser.$('.cc'); await card.waitForDisplayed();
+  await click(await card.$(`button=${label}`));
+}
+
+/** Opens the "Sending to <agent>" dialog: the card's Sending… button. */
+export async function openSendingDialog() {
+  await connectionCardButton('Sending…');
+  const dialog = await browser.$('[role="dialog"]');
+  await browser.waitUntil(async () => (await dialog.getText()).includes('Sending to'), { timeout: 20000, interval: 100, timeoutMsg: 'Sending dialog did not open' });
+  return dialog;
+}
+
 /** Returns the session's displayed, enabled name button; the caller clicks it. */
 export async function openSessionButton(sessionId) {
   const selector = `button[data-session-id="${sessionId}"]`;

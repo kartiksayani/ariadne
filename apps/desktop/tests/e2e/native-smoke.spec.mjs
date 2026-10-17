@@ -23,6 +23,7 @@ const phase = process.env.ARIADNE_E2E_PHASE;
 const receiptPath = join(root, 'smoke/receipt.json');
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
+async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.click(); }
 // What one surface shows for a saved reply's delivery: its stuck note (when it has words) or else the dock's delivery line.
 // `facts` lists every stuck note and delivery line present, so a failure says what was actually there.
 const replyDelivery = (root, inputId) => browser.execute((root, inputId) => {
@@ -78,42 +79,44 @@ async function captureBlockFailure(name, error, started) {
 
 let navigationRecovered = false;
 const updatedNavigation = 'Updated to the latest. Try again if needed.';
-async function openSession(sessionId, itemId) {
+// Opens the session from the switcher's All sessions page; with `itemId` it also selects that item (opening Details).
+// Pages are not saved as the selected navigation, so the session itself is the saved proof that navigation finished.
+async function openSession(sessionId, itemId = null) {
   const before = await readJson(join(process.env.ARIADNE_HOME, 'ui.json')).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
   try {
-    const catalogue = await browser.$('button[data-shell-tab="all_sessions"]');
-    await catalogue.waitForDisplayed(); await catalogue.waitForEnabled();
-    await catalogue.click();
-    const selectedCatalogue = async () => {
+    const selectedSession = async () => {
       const selected = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot.global.selected_navigation;
-      return selected.kind === 'all_sessions' && await catalogue.getAttribute('aria-current') === 'page' && await catalogue.isEnabled();
+      return selected.kind === 'session' && selected.session.session_id === sessionId;
     };
-    await wait(async () => await selectedCatalogue() || await navigationUpdated(), 'All sessions navigation did not finish or refresh its changed view');
-    if (!await selectedCatalogue()) {
+    const choose = async () => {
+      const session = await openSessionButton(sessionId);
+      // Session rows can extend beyond the page's viewport.
+      await session.scrollIntoView({ block: 'center', inline: 'center' }); await session.waitForClickable(); await session.click();
+      await wait(async () => await selectedSession() || await navigationUpdated(), 'Session navigation did not finish or refresh its changed view');
+    };
+    await choose();
+    if (!await selectedSession()) {
       assert.equal(navigationRecovered, false, 'Only one fresh navigation choice is allowed per native launch');
       navigationRecovered = true;
       const refreshed = { sessionId, message: updatedNavigation, preferences: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')),
         body: await browser.$('body').getText() };
       // The changed view refreshes itself; the next click is a deliberate new owner choice.
-      await catalogue.waitForEnabled(); await catalogue.click();
-      await wait(selectedCatalogue, 'Fresh All sessions choice did not persist after automatic refresh');
+      await choose();
+      await wait(selectedSession, 'Fresh session choice did not persist after automatic refresh');
       await json(join(evidence, 'navigation-recovery.json'), { refreshed, recovered: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')) });
     }
-    const session = await openSessionButton(sessionId);
-    // Session cards can extend beyond the nested catalogue viewport.
-    await session.scrollIntoView({ block: 'center', inline: 'center' }); await session.waitForClickable(); await session.click();
-    await wait(async () => {
-      const selected = (await readJson(join(process.env.ARIADNE_HOME, 'ui.json'))).snapshot.global.selected_navigation;
-      return selected.kind === 'session' && selected.session.session_id === sessionId && await catalogue.isEnabled();
-    }, 'Selected session navigation did not finish its saved preference update');
-    const item = await browser.$(`.tree-item[data-item-id="${itemId}"]`);
-    await item.waitForDisplayed(); await item.waitForEnabled(); await item.click();
-    await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === itemId, 'Selected item detail did not load');
+    await wait(async () => await browser.$('.tree-column').getAttribute('data-session-status') === 'ready'
+      && await browser.$('.tree-column').getAttribute('data-session-busy') === 'false', 'Selected session navigation did not finish loading its Map');
+    if (itemId !== null) {
+      const item = await browser.$(`.tree-item[data-item-id="${itemId}"]`);
+      await item.waitForDisplayed(); await item.waitForEnabled(); await item.click();
+      await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === itemId, 'Selected item detail did not load');
+    }
   } catch (error) {
     await json(join(evidence, `navigation-failure-${sessionId}.json`), { before,
       after: await readJson(join(process.env.ARIADNE_HOME, 'ui.json')),
       frame: await browser.execute(() => ({ origin: window.performance.timeOrigin, ready: document.readyState,
-        body: document.body.textContent, tabs: Array.from(document.querySelectorAll('.shell-tabs button')).map(element => element.outerHTML) })) });
+        body: document.body.textContent, top: document.querySelector('.shell-top')?.outerHTML ?? null })) });
     await browser.saveScreenshot(join(evidence, `navigation-failure-${sessionId}.png`)); throw error;
   }
 }
@@ -126,11 +129,28 @@ async function showHistory(texts) {
     return texts.every(text => detail.includes(folded(text)));
   }, 'Complete saved history was not visible in native item detail');
 }
-async function nativeCard(kind, question) {
-  const region = kind === 'waiting' ? '[aria-label="Waiting questions"] .waiting-card'
-    : '[aria-label="Sent · waiting for the agent to pick up"] .waiting-sent';
-  for (const card of await browser.$$(`aside[aria-label="Waiting on me"] ${region}`)) {
-    if ((await card.getText()).includes(question)) return card;
+const dockSelector = 'section[aria-label="Answer dock"]';
+// The dock holds the session's unsent waiting questions; its "N waiting" pill opens it at the first one. The open dock is the
+// question's card: its title, ask and note, the option cards and Send. Undefined while the dock does not show that question.
+async function dockQuestion(question) {
+  const dock = await browser.$(dockSelector);
+  if (await dock.getAttribute('data-open') === null) {
+    const pill = await dock.$('button.dock-pill');
+    if (!await pill.isExisting()) return undefined;
+    await pill.waitForEnabled(); await pill.click();
+    await wait(async () => await dock.getAttribute('data-open') !== null, 'The dock did not open at the waiting question');
+  }
+  const card = await dock.$('.answer-dock-current');
+  if (!await card.isExisting()) return undefined;
+  return (await card.$('.dock-question-title').getText()).includes(question) ? card : undefined;
+}
+// What the dock's Sent chip lists for one question: the words as they went out and the delivery line. Opens the list.
+async function dockSent(question) {
+  const chip = await browser.$(`${dockSelector} button.dock-sent`);
+  if (!await chip.isExisting()) return undefined;
+  if (await chip.getAttribute('aria-expanded') !== 'true') await chip.click();
+  for (const row of await browser.$$(`${dockSelector} [aria-label="Sent answers"] .dock-sent-row`)) {
+    if ((await row.getText()).includes(question)) return row;
   }
   return undefined;
 }
@@ -168,38 +188,47 @@ async function delivery(configuration) {
     && (await browser.$('[aria-label="Item detail"]').getText()).includes('Add the receipt lookup test'), 'Canonical demo child navigation failed');
   await browser.saveScreenshot(join(evidence, 'canonical-demo.png'));
 
-  await openSession(configuration.sessionId, configuration.itemId);
+  // The session opens without selecting its item: a question Details is answering leaves the dock, and the dock is where the
+  // owner meets it first.
+  await openSession(configuration.sessionId);
   let card;
   await wait(async () => {
-    card = await nativeCard('waiting', configuration.question);
+    card = await dockQuestion(configuration.question);
     if (!card) return false;
-    const choice = await card.$('button*=Use the native window');
+    const choice = await card.$('[data-answer-option="0"]');
     return await choice.isExisting() && await choice.isEnabled() && await choice.getAttribute('aria-disabled') !== 'true';
-  }, 'The real unanswered item.ask did not become editable in Waiting');
+  }, 'The real unanswered item.ask did not become editable in the answer dock');
   const cardText = await card.getText();
   assert.ok(cardText.includes(configuration.ask)); assert.ok(cardText.includes(configuration.options[0].label));
   assert.ok(cardText.includes(configuration.options[0].consequence));
-  // The compact Waiting card sends the chosen option alone; later inputs are detail replies.
+  // The dock sends the chosen option alone; later inputs are detail replies.
   const ownerTexts = Array.from({ length: 5 }, (_, index) => index ? `native-owner-${nonce}-${index + 1}\nKeep this complete line for input ${index + 1}.` : '');
-  const choice = await card.$('button*=Use the native window'); await choice.click();
-  // The compact send button carries its Enter hint ("Send answer ↵"); selecting saves the draft first.
-  const send = await card.$('button.answer-send');
+  const choice = await card.$('[data-answer-option="0"]'); assert.ok((await choice.getText()).includes(configuration.options[0].label)); await choice.click();
+  // Picking the option saves the draft; Send then carries its Enter hint ("Send ↵").
+  const send = await card.$('button[data-answer-send]');
   await send.waitForEnabled();
-  await wait(async () => await send.isEnabled() && await send.getAttribute('aria-disabled') !== 'true', 'Waiting Send answer did not become editable');
-  assert.ok((await send.getText()).includes('Send answer')); await send.click();
+  await wait(async () => await send.isEnabled() && await send.getAttribute('aria-disabled') !== 'true', 'The dock Send did not become editable');
+  assert.ok((await send.getText()).includes('Send')); await send.click();
   await wait(async () => {
     const saved = orderedInputs(await snapshot(configuration)), queued = await admissions(configuration);
     return saved.length === 1 && queued.length === 1 && saved[0].attempts.length === 1
       && queued[0].payload === saved[0].attempts[0].formatted_payload;
-  }, 'Waiting answer did not persist and reach the host with its exact saved payload');
-  await wait(async () => !(await nativeCard('waiting', configuration.question)), 'Answered Waiting episode remained in Waiting');
-  // The Sent row's delivery line quotes the chosen option once the saved input is read back.
-  await wait(async () => (await (await nativeCard('sent', configuration.question))?.getText())?.includes(configuration.options[0].label) ?? false,
-    'Waiting answer did not appear in Sent with its chosen option');
+  }, 'Dock answer did not persist and reach the host with its exact saved payload');
+  // After its Sent hold the dock moves on: nothing unsent waits, so it folds to its line.
+  await wait(async () => !(await browser.$(`${dockSelector} button.dock-pill`).isExisting()) && await browser.$(dockSelector).getAttribute('data-open') === null,
+    'Answered question remained in the dock');
+  // The Sent list quotes the chosen option once the saved input is read back.
+  await wait(async () => (await (await dockSent(configuration.question))?.getText())?.includes(configuration.options[0].label) ?? false,
+    'Dock answer did not appear in Sent with its chosen option');
   await browser.saveScreenshot(join(evidence, 'native-waiting-answer.png'));
+  // Close the Sent list again (its chip toggles it) before the Map is used.
+  await click(await browser.$(`${dockSelector} button.dock-sent`));
 
   // The first follow-up uses the bigger conversation view; the others use the detail's same composer.
   // The held answer hides the answer slot, so all four replies queue behind it.
+  const item = await browser.$(`.tree-item[data-item-id="${configuration.itemId}"]`);
+  await item.waitForDisplayed(); await item.waitForEnabled(); await item.click();
+  await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === configuration.itemId, 'Selected item detail did not load');
   let replyTarget = ownerReplyTarget(await snapshot(configuration), configuration.itemId);
   for (const [index, text] of ownerTexts.slice(1).entries()) {
     if (index === 0) {
