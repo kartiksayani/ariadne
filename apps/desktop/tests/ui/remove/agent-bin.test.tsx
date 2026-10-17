@@ -209,8 +209,13 @@ describe('removed work projections', () => {
   it('excludes removed work from tree, search, forced reveals and active descendant counts', () => {
     const session = removedSession(), view = preferences();
     expect(ids(sentenceRows(session, view, new Set()).rows.map(row => row.item))).toEqual(['2', '3']);
+    // A search narrows no rows (SPEC §4), and it finds nothing in removed work: no row matches, none counts as out of view.
     const search = { ...view, filters: { ...view.filters, search: 'morning or evening' } };
-    expect(sentenceRows(session, search, new Set(), ['1', '1.1'], '1.1.1')).toMatchObject({ rows: [], matchingTotal: 0, scopeTotal: 2 });
+    expect(ids(sentenceRows(session, search, new Set(), ['1', '1.1'], '1.1.1').rows.map(row => row.item))).toEqual(['2', '3']);
+    const searched = treeModel({ session, view, search: 'morning or evening', later: new Set(), collapsedTopics: new Set(), selectedId: null,
+      revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) });
+    expect(searched.rows.filter(row => row.kind === 'item' && row.matches.length > 0)).toEqual([]);
+    expect(searched.search).toMatchObject({ hidden: 0, collapsed: 0 });
     expect(indexSession(session).activeDescendants.get('1')).toBe(0);
     expect(revealAncestors.bind(null, session, { ...route, item_id: '1.1.1' })).toThrow('unavailable');
     const model = treeModel({ session, view, search: '', later: new Set(), collapsedTopics: new Set(), selectedId: '1.1.1',
@@ -649,20 +654,23 @@ describe('agent removal receipts in the composed app', () => {
     expect(bin.getByRole('button', { name: 'Delete forever' })).toBeTruthy();
   });
 
-  it('resumes the matching tree rows and preserved search after an outside reveal', async () => {
+  it('resumes the filtered tree rows and preserved search after an outside reveal', async () => {
     const session = graphSession(); session.items['1.1']!.question = 'Matching child'; session.items['1.2']!.question = 'Other child';
-    const transport = new BinTransport(session); transport.preferences.sessions[0]!.filters.search = 'Matching';
+    // The status filter leaves the in-progress 1.2 out; the search only marks "Matching child" (it filters nothing).
+    const transport = new BinTransport(session), filters = transport.preferences.sessions[0]!.filters;
+    filters.search = 'Matching'; filters.statuses = ['open'];
     await openApp(transport);
-    const rows = () => [...screen.getByRole('tree', { name: 'Session items' }).querySelectorAll<HTMLElement>('[role="treeitem"][data-item-id]')]
-      .map(row => row.dataset.itemId);
-    await waitFor(() => expect(rows()).toEqual(['1', '1.1']));
+    const tree = () => screen.getByRole('tree', { name: 'Session items' });
+    const rows = () => [...tree().querySelectorAll<HTMLElement>('[role="treeitem"][data-item-id]')].map(row => row.dataset.itemId);
+    await waitFor(() => expect(rows()).toEqual(['1', '1.1', '2', '8']));
+    expect(tree().querySelector('[data-item-id="1.1"] .tree-hit')?.textContent).toBe('Matching');
     await waitFor(() => expect(transport.listeners.get('ariadne://route')?.size).toBe(1));
     await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '1.2' }); });
     const detail = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.2"]' });
     expect(within(detail).getByRole('heading', { name: 'Other child' })).toBeTruthy();
-    await waitFor(() => expect(rows()).toEqual(['1', '1.1', '1.2']));
+    await waitFor(() => expect(rows()).toEqual(['1', '1.1', '1.2', '2', '8']));
     fireEvent.click(screen.getByRole('button', { name: 'Resume filtered view' }));
-    await waitFor(() => expect(rows()).toEqual(['1', '1.1']));
+    await waitFor(() => expect(rows()).toEqual(['1', '1.1', '2', '8']));
     expect(screen.queryByRole('button', { name: 'Resume filtered view' })).toBeNull();
     expect(searchValue()).toBe('Matching');
   });
@@ -887,7 +895,8 @@ describe('agent removal receipts in the composed app', () => {
     fireEvent.click(within((await screen.findByText(text)).closest<HTMLElement>('.pw-note')!).getByRole('button', { name: 'View' }));
     expect(await screen.findByText('The bin could not be opened. Try View again.')).toBeTruthy();
     expect(transport.preferences.sessions.find(view => view.session.session_id === session.id)!.filters.search).toBe('keep the current search');
-    expect(screen.queryByRole('button', { name: 'Removed by agent · 4' })).toBeNull();
+    // A search hides no row, so the bin's fold stays in the Map (SPEC §4); the refused View leaves it folded.
+    expect(screen.getByRole('button', { name: 'Removed by agent · 4' }).getAttribute('aria-expanded')).toBe('false');
   });
 });
 

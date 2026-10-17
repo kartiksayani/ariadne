@@ -310,7 +310,38 @@
   font-size: calc(14px * var(--text-scale));
 }
 
-/* Related counts reserve their space before hover, so the question never rewraps. */
+/* The end cluster (alpha.20 C4): marker, session-closed chip, status badge, related count and Ack, right of the text and in
+   one line beside its first line. Each slot keeps its width filled or empty, so a marker clearing, an Ack landing, a status
+   changing or a related count appearing never changes the text's width: the row never rewraps. The widths are tokens the
+   row look tunes with its pills. */
+.tree-end {
+  --tree-end-marker: calc(40px * var(--text-scale));
+  --tree-end-badge: calc(104px * var(--text-scale)); /* "Waiting on me", the longest badge */
+  --tree-end-related: 26px;
+  --tree-end-ack: 26px;
+
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: calc(22px * var(--text-scale));
+  white-space: nowrap;
+}
+
+.tree-end-slot {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.tree-end-marker { width: var(--tree-end-marker); }
+.tree-end-badge { min-width: var(--tree-end-badge); }
+.tree-end-related { width: var(--tree-end-related); }
+.tree-ack-slot { width: var(--tree-end-ack); }
+
+/* The count's own slot reserves its room; it brightens on hover or selection. */
 .tree-related {
   display: inline-flex;
   flex: none;
@@ -332,31 +363,47 @@
   opacity: 1;
 }
 
-/* The shortcut icons keep their room at all times and only fade in, so the text column
-   never changes width between hover and no hover. */
+/* The hover bar floats over the row, left of the end cluster, on a card: it takes no room, so showing it moves nothing.
+   visibility keeps its buttons unclickable while hidden. */
 .tree-actions {
-  display: contents;
+  position: absolute;
+  z-index: 2;
+  top: -3px;
+  right: calc(100% + 6px);
+  display: flex;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--a-card);
+  box-shadow: var(--shadow-md), 0 0 0 1px var(--color-divider);
   visibility: hidden;
   opacity: 0;
+  transition: opacity .12s;
 }
 
-.tree-item-hidden .tree-actions,
 .tree-item:hover .tree-actions,
-.tree-item[aria-selected="true"] .tree-actions,
 .tree-column[data-kbd] .tree-item:focus .tree-actions {
   visibility: visible;
   opacity: 1;
-}
-
-/* Ack stays visible; the adjacent hover actions already reserve their space. */
-.tree-ack-slot {
-  display: contents;
 }
 
 .tree-topic-action:hover,
 .tree-action:hover {
   color: var(--color-text);
   background: color-mix(in srgb, var(--color-text) 9%, transparent);
+}
+
+/* ---------------------------------------------------------------- search in place */
+
+/* Hits are a background and a ring only, so a search never changes a line (SPEC §5.8 8.1). */
+.tree-hit {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+}
+
+.tree-hit[data-current] {
+  background: color-mix(in srgb, var(--color-accent) 34%, transparent);
+  box-shadow: 0 0 0 1.5px var(--color-accent);
 }
 
 /* ---------------------------------------------------------------- states */
@@ -461,6 +508,7 @@
 }
 
 .tree-scroll-shell {
+  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -474,8 +522,7 @@
   left: calc(-1em - 8px);
 }
 
-/* The path row keeps the same height with or without the tag; it never covers or shifts rows.
-   The tag sits at the row's right end; the ancestors beside it shorten their names first. */
+/* The path row keeps one height; it never covers or shifts rows. */
 .tree-path {
   display: flex;
   flex: none;
@@ -483,51 +530,49 @@
   min-width: 0;
 }
 
-.tree-selected-slot {
-  flex: none;
-  min-width: 0;
-  max-width: 60%;
-  height: 28px;
-  margin-right: 16px;
-  display: flex;
-  align-items: center;
-}
-
-.tree-selected-slot:empty {
-  margin-right: 0;
-}
-
-/* Content width, with an opaque surface in every state, including the global button reset. */
-.tree-selected-edge,
-.tree-selected-edge:hover,
-.tree-selected-edge:focus,
-.tree-selected-edge:active {
+/* "↑ Back to “name” ." (SPEC §5.8 8.5): floats centred over the Map, so it appearing or going never moves a row. Above:
+   12px under the sticky band (TreeView keeps --tree-header-height on the shell); below: 14px above the floating dock. An
+   opaque surface in every state, including the global button reset. */
+.tree-back,
+.tree-back:hover,
+.tree-back:focus,
+.tree-back:active {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  max-width: min(100%, 34ch);
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--color-divider);
-  border-radius: 5px;
+  gap: 6px;
+  max-width: min(70%, 48ch);
+  height: 30px;
+  padding: 0 8px 0 12px;
+  border: 0;
+  border-radius: 999px;
   background: var(--a-card);
-  color: var(--a-acc-text);
-  box-shadow: var(--a-lift);
+  color: var(--color-text);
+  box-shadow: 0 0 0 1.5px var(--color-accent), var(--shadow-md);
   font: inherit;
   font-size: calc(12.5px * var(--text-scale));
-  overflow: hidden;
   white-space: nowrap;
-  text-overflow: ellipsis;
   cursor: pointer;
+  transform: translateX(-50%);
 }
 
-.tree-selected-label {
+.tree-back[data-edge="above"] { top: calc(28px + var(--tree-header-height, 0px) + 12px); }
+.tree-back[data-edge="below"] { bottom: calc(var(--dock-inset, 0px) + 14px); }
+
+.tree-back-arrow {
+  flex: none;
+  color: var(--color-accent);
+}
+
+.tree-back-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.tree-selected-edge:focus-visible {
+.tree-back:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
@@ -588,10 +633,6 @@
   height: 22px;
   margin-left: 4px;
   padding: 0 6px;
-}
-
-.tree-selected-edge > span:first-child {
-  flex: none;
 }
 
 .tree-recent > button {

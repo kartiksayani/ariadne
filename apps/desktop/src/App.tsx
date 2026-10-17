@@ -41,6 +41,7 @@ import { SessionNotice } from './components/edge-states/EdgeState';
 import { DraftConflictNotices } from './components/edge-states/DraftConflictNotices';
 import { hiddenItems, hiddenParentSource, hiddenSource } from './ui/tree/hidden';
 import { TreeView, type RowIntent } from './ui/tree/TreeView';
+import type { MapSearchStatus } from './ui/tree/mapSearch';
 import { AgentNotRunningHost } from './ui/dialogs/AgentNotRunning';
 import { ContinueTopicHost } from './ui/dialogs/ContinueTopicDialog';
 import type { RemoveHandler, RemoveSubject, RemoveTarget } from './ui/dialogs/remove';
@@ -97,6 +98,7 @@ interface CenterProps {
   readonly onClearFilters: () => void; readonly onClearSearch: () => void; readonly onShowArchive: () => void;
   readonly onRemove: (target: TreeRemoveTarget) => void;
   readonly filterOpen?: boolean;
+  readonly onSearchStatus?: (status: MapSearchStatus | null) => void;
 }
 function SessionCenter({ application, view, graph, reveal, ...props }: CenterProps) {
   const state = useSession(view.store), session = state.snapshot?.session;
@@ -426,6 +428,8 @@ function Workspace({ application }: { application: Application }) {
   // A view saved by an older release may still show archived topics in the Tree; Tree or Graph leaves that.
   const archived = view?.filters.archived ?? false;
   const [filterOpen, setFilterOpen] = useState(false);
+  // The Map publishes its search count, arrows and note here for the top bar.
+  const [searchStatus, setSearchStatus] = useState<MapSearchStatus | null>(null);
 
   // Remove (handoff README "Remove"): ask, then hide at once and run after the undo window (ui/remove/queue).
   const [asking, setAsking] = useState<{ target: RemoveTarget; subject: RemoveSubject } | null>(null);
@@ -476,6 +480,11 @@ function Workspace({ application }: { application: Application }) {
     if (!view) return;
     setSearchEdit(null); setDismissedReveal(currentReveal);
     saveView({ filters: clearedFilters(view.filters) });
+  };
+  // An explicit clear (the top bar's ×, esc, MapSearch.clear) saves at once, so a session switch never brings it back.
+  const clearSearch = () => {
+    setSearchEdit({ route: key, text: '', attempted: false });
+    if (view?.filters.search) saveView({ filters: { ...structuredClone(view.filters), search: '' } as SessionPreferences['filters'] });
   };
   const toggleLater = (target: ItemRoute, itemId: string) => {
     if (!preferences) return false;
@@ -580,12 +589,13 @@ function Workspace({ application }: { application: Application }) {
       selectedSession={sessionState?.snapshot?.session ?? null} onTree={showBinTree} />
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
       onRemoveTarget={removeTarget} waitingStore={application.waiting}
-      chrome={{ query, graph: graph && !archived, onView: store ? showView : undefined, theme: shown, searchBlocked: conversationOpen,
+      chrome={{ query, searchStatus, graph: graph && !archived, onView: store ? showView : undefined, theme: shown, searchBlocked: conversationOpen,
         filter: store ? { active: filterOpen, count: view && hasStatusFilter(view.filters.statuses) ? view.filters.statuses.length : 0, onToggle: () => setFilterOpen(value => !value) } : undefined,
         onRecent: store ? () => { dispatchIntent('recent.open'); } : undefined,
         textSize: shownTextSize, onTextSizeChange: changeTextSize,
-        // A new search is a filter change: it drops the temporary reveal (the selection stays as its own row).
-        onQueryChange: view ? text => { if (conversation) closeConversation(); setSearchEdit({ route: key, text, attempted: false }); setDismissedReveal(currentReveal); } : undefined,
+        // A search highlights in place (SPEC §6.9): typing keeps every row, including a temporary reveal's.
+        onQueryChange: view ? text => { if (conversation) closeConversation(); setSearchEdit({ route: key, text, attempted: false }); } : undefined,
+        onClearSearch: view ? clearSearch : undefined,
         onToggleTheme: () => { if (preferences) void navigation.saveTheme(themeToggle(shown).next, preferences.revision); } }}
       hidden={selectedHidden} hiddenNotice={hiddenNotice} onHide={route && selectedId ? () => { toggleHidden({ ...route, item_id: selectedId }); } : undefined}
       onRemove={() => { if (route && selectedId) askRemove({ kind: 'item', item: { ...route, item_id: selectedId } }); }}
@@ -628,10 +638,8 @@ function Workspace({ application }: { application: Application }) {
           else if (intent === 'later') toggleLater(target, target.item_id);
           else focusOwner(target, intent, undefined, onReveal);
         }}
-        onClearSearch={() => {
-          setSearchEdit({ route: key, text: '', attempted: false }); setDismissedReveal(currentReveal);
-          if (view) saveView({ filters: { ...structuredClone(view.filters), search: '' } as SessionPreferences['filters'] });
-        }}
+        onSearchStatus={setSearchStatus}
+        onClearSearch={clearSearch}
         onClearFilters={clearFilters} onShowArchive={() => showView('archive')}
         onRemove={target => { askRemove(target); }} />} />
     {asking && <RemoveDialog subject={asking.subject} onCancel={() => setAsking(null)} onConfirm={() => removeTarget(asking.target, asking.subject)} />}

@@ -18,7 +18,10 @@ import { useSupervisorHealth } from '../../components/bindings/health';
 import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { useIntents } from '../intents';
 import { notices as noticeStore } from '../pages/notices';
-import { chipsOf, closed, collapsedNote, mapChanges, nextMarkedItem, oldestWaiting, parentKey, sessionBar, stripOf, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
+import { chipsOf, closed, collapsedNote, mapChanges, nextMarkedItem, oldestWaiting, parentKey, sessionBar, stripOf, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row, type SearchReveal } from './model';
+import { alsoMatching, matchCount, searchTerms, type MapMatch } from '../../selectors/tree/search';
+import { MapSearchContext, type MapSearch, type MapSearchStatus } from './mapSearch';
+import { Keycap } from '../parts/parts';
 import { Strip } from './Strip';
 import { hiddenGroupKey, hiddenGroupsFor, hiddenSource } from './hidden';
 import { HideIcon } from '../shared/HideIcon';
@@ -95,7 +98,10 @@ export interface TreeViewProps {
   readonly onResume: () => void;
   readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
   readonly onClearFilters: () => void;
+  /** Clears the header search (the search's own ×, esc, or MapSearch.clear). */
   readonly onClearSearch?: () => void;
+  /** The top bar's count, arrows and "Also matching" note while a search is on; null when it is off or the Map goes. */
+  readonly onSearchStatus?: (status: MapSearchStatus | null) => void;
   readonly onShowArchive: () => void;
   /** Asks to remove an item (and everything below it) or a topic: row trash, topic Remove, ⌫/Delete. */
   readonly onRemove: (target: Extract<RemoveTarget, { kind: 'item' | 'topic' }>) => void;
@@ -115,7 +121,7 @@ const SKELETON = [
 
 export function TreeView(props: TreeViewProps) {
   const { navigation, store, actions, drafts, query, reveal, selectedId, detailOpen, covered = false, graph, notices,
-    summaries, onSelected, onDismissReveal, onResume, onAct, onClearFilters, onClearSearch, onShowArchive,
+    summaries, onSelected, onDismissReveal, onResume, onAct, onClearFilters, onShowArchive,
     onRemove } = props;
   const state = useSession(store), raw = state.snapshot?.session ?? null;
   const fontEpoch = useTreeFonts();
@@ -139,7 +145,7 @@ export function TreeView(props: TreeViewProps) {
   // The graph has its own optimistic node edits; both mounted views use its saved
   // status scope while the tree's filter queue waits for persistence.
   // The composed graph reads saved statuses; both views must share the same fold scope during writes.
-  const filterFolds = useFilterFolds(navigation.routes, route, (graph ? savedView : view)?.filters, query);
+  const filterFolds = useFilterFolds(navigation.routes, route, (graph ? savedView : view)?.filters);
   const viewBusy = nav.writing || nav.pendingOperationId !== null;
   const focusDisabled = viewBusy && !navigation.isWritingRecent();
   const archivedMode = view?.filters.archived ?? false;
@@ -150,6 +156,16 @@ export function TreeView(props: TreeViewProps) {
   const closedTopics = useMemo(() => new Set(savedFolds ?? []), [savedFolds]);
   const hiddenFocus = useRef<string | null>(null);
   const [expandedHiddenGroups, setExpandedHiddenGroups] = useState<ReadonlySet<string>>(new Set());
+  // Search in place (SPEC §6.9). "Show them" opens the way to hidden and folded matches in memory until the search clears;
+  // the current match is the first until the owner steps (or shows them), then the one stepped to.
+  const terms = useMemo(() => searchTerms(query), [query]);
+  const termsKey = terms.join(' ');
+  const [searchShown, setSearchShown] = useState<SearchReveal | null>(null);
+  const [searchCurrent, setSearchCurrent] = useState<MapMatch | null>(null);
+  const [stepped, setStepped] = useState(0);
+  const searchScroll = useRef<string | null>(null);
+  useLayoutEffect(() => { setSearchCurrent(null); if (!termsKey) setSearchShown(null); }, [termsKey]);
+  useLayoutEffect(() => { setSearchCurrent(null); setSearchShown(null); }, [route.project_id, route.session_id]);
   const [focusKey, setFocusKey] = useState<string | null>(selectedId);
   const [nextTarget, setNextTarget] = useState<{ readonly id: string; readonly step: number } | null>(null);
   const [nextRevealId, setNextRevealId] = useState<string | null>(null);
@@ -221,10 +237,10 @@ export function TreeView(props: TreeViewProps) {
   const health = useSupervisorHealth(actions.service, binding?.id, binding?.generation);
   const revealId = reveal?.kind === 'item' ? reveal.route.item_id : null;
   const temporary = reveal?.kind === 'item' ? reveal.temporaryExpandedItemIds : null;
-  const model = useMemo(() => session && view ? treeModel({ session, view, search: query, later, collapsedTopics: closedTopics, selectedId, revealId,
+  const model = useMemo(() => session && view ? treeModel({ session, view, search: query, searchShown, later, collapsedTopics: closedTopics, selectedId, revealId,
     filterCollapsedItemIds: filterFolds.items, filterCollapsedTopicIds: filterFolds.topics,
     attentionRevealId: nextRevealId, expandedHiddenGroups, temporaryExpanded: temporary ?? [], presence, health, summaries, now: minute }) : null,
-  [session, view, query, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, nextRevealId, presence, health, summaries, minute]);
+  [session, view, query, searchShown, expandedHiddenGroups, later, closedTopics, filterFolds.items, filterFolds.topics, selectedId, revealId, temporary, nextRevealId, presence, health, summaries, minute]);
   const summary = summaries.find(value => value.project_id === route.project_id && value.session_id === route.session_id) ?? null;
   const bar = sessionBar(session, summary, presence);
   const focusedItem = view?.focused_item_id ? raw?.items[view.focused_item_id] : null;
@@ -243,6 +259,46 @@ export function TreeView(props: TreeViewProps) {
   const latest = useRef({ view, preferences, rows, session, selectedId, focusedId });
   latest.current = { view, preferences, rows, session, selectedId, focusedId };
 
+  // ------------------------------------------------------------ search in place
+  // The count runs over the matches on the rows the owner can see, field by field, in Map order.
+  const matches = useMemo(() => terms.length ? rows.flatMap(row => row.kind === 'item' ? row.matches.map(field => ({ id: row.key, field })) : []) : [],
+    [rows, terms]);
+  const pinnedIndex = searchCurrent ? matches.findIndex(match => match.id === searchCurrent.id && match.field === searchCurrent.field) : -1;
+  const matchIndex = Math.max(0, pinnedIndex), currentMatch = matches[matchIndex] ?? null;
+  /** The reading row before "Show them" adds rows: the next layout puts it back even at the very top. */
+  const pinReading = useRef<readonly Row[] | null>(null);
+  const stepSearch = (by: 1 | -1) => {
+    if (!matches.length) return;
+    const next = matches[(matchIndex + by + matches.length) % matches.length]!;
+    setSearchCurrent(next); setStepped(value => value + 1);
+    searchScroll.current = next.id;
+    // TODO(peek): closeAll() once the peek's new API lands; close() is today's equivalent.
+    peek?.close();
+  };
+  const showMatches = () => {
+    const reveal = model?.search.reveal;
+    if (!reveal || !reveal.items.length && !reveal.topics.length && !reveal.groups.length) return;
+    setSearchCurrent(currentMatch);
+    pinReading.current = latest.current.rows;
+    const join = (a: readonly string[] = [], b: readonly string[]) => [...new Set([...a, ...b])];
+    setSearchShown(previous => ({ items: join(previous?.items, reveal.items), topics: join(previous?.topics, reveal.topics), groups: join(previous?.groups, reveal.groups) }));
+  };
+  const searchActions = useRef({ stepSearch, showMatches, clear: props.onClearSearch });
+  searchActions.current = { stepSearch, showMatches, clear: props.onClearSearch };
+  const hiddenMatches = terms.length ? model?.search.hidden ?? 0 : 0, collapsedMatches = terms.length ? model?.search.collapsed ?? 0 : 0;
+  const mapSearch = useMemo<MapSearch>(() => ({ query: query.trim(), terms, matches, ids: new Set(matches.map(match => match.id)), current: currentMatch,
+    stepped, hidden: hiddenMatches, collapsed: collapsedMatches, step: by => searchActions.current.stepSearch(by),
+    showThem: () => searchActions.current.showMatches(), clear: () => searchActions.current.clear?.() }),
+  [query, terms, matches, currentMatch, stepped, hiddenMatches, collapsedMatches]);
+  const searchCount = terms.length ? matchCount(matchIndex, matches.length) : null;
+  const searchNote = terms.length ? alsoMatching(hiddenMatches, collapsedMatches) : null;
+  const onSearchStatus = props.onSearchStatus;
+  useEffect(() => {
+    onSearchStatus?.(searchCount === null ? null : { count: searchCount, onNext: () => searchActions.current.stepSearch(1), onPrev: () => searchActions.current.stepSearch(-1),
+      note: searchNote ? { text: searchNote, action: 'Show them', onAction: () => searchActions.current.showMatches() } : null });
+  }, [onSearchStatus, searchCount, searchNote]);
+  useEffect(() => () => onSearchStatus?.(null), [onSearchStatus]);
+
   const hiddenSelection = useRef<{ sessionId?: string; selectedId: string | null }>({ selectedId: null });
   useEffect(() => {
     const current = latest.current;
@@ -259,12 +315,17 @@ export function TreeView(props: TreeViewProps) {
       return next.size === previous.size ? previous : next;
     });
   }, [session?.id, selectedId, reveal, props.historyReveal]);
+  /** Folding a row "Show them" opened folds it: it leaves the search's in-memory reveal too. */
+  const unshow = (kind: keyof SearchReveal, id: string) => setSearchShown(previous => previous?.[kind].includes(id)
+    ? { ...previous, [kind]: previous[kind].filter(value => value !== id) } : previous);
   const toggleHiddenGroup = (key: string) => {
     setNextRevealId(null);
     onDismissReveal();
+    const open = expandedHiddenGroups.has(key) || !!searchShown?.groups.includes(key);
+    if (open) unshow('groups', key);
     setExpandedHiddenGroups(previous => {
       const next = new Set(previous);
-      if (next.has(key)) next.delete(key); else next.add(key);
+      if (open) next.delete(key); else next.add(key);
       return next;
     });
   };
@@ -398,7 +459,7 @@ export function TreeView(props: TreeViewProps) {
     if (!row || row.kind !== 'item' || !row.hasKids) return;
     setNextRevealId(null);
     if (model?.filtering) filterFolds.setFold('items', id, row.expanded);
-    if (row.expanded) onDismissReveal();
+    if (row.expanded) { onDismissReveal(); unshow('items', id); }
     void saveView(next => {
       const expanded = new Set(next.expanded_item_ids);
       if (row.expanded) expanded.delete(id); else expanded.add(id);
@@ -408,7 +469,7 @@ export function TreeView(props: TreeViewProps) {
   const toggleTopic = (id: string) => {
     setNextRevealId(null);
     const expanded = latest.current.rows.find(row => row.kind === 'topic' && row.key === id)?.expanded ?? !closedTopics.has(id);
-    if (expanded) onDismissReveal();
+    if (expanded) { onDismissReveal(); unshow('topics', id); }
     if (model?.filtering) filterFolds.setFold('topics', id, expanded);
     const next = new Set(closedTopics);
     if (expanded) next.add(id); else next.delete(id);
@@ -552,6 +613,8 @@ export function TreeView(props: TreeViewProps) {
       if (rect.top <= top && rect.bottom > top) height = Math.max(height, rect.bottom - top);
     }
     box.style.setProperty('--tree-header-height', `${height}px`);
+    // The Back-to pill floats in the shell, beside the scroller, and clears the same band.
+    box.parentElement?.style.setProperty('--tree-header-height', `${height}px`);
     return top + height;
   };
   const center = (key: string) => {
@@ -778,9 +841,12 @@ export function TreeView(props: TreeViewProps) {
       settled.current = true; setAnchor(null);
     }
     const box = scroller.current, before = held.current, element = before ? elements.current.get(before.key) : undefined;
+    // "Show them" adds rows around the reading row and keeps it, even at the very top.
+    const pinned = pinReading.current !== null && pinReading.current !== latest.current.rows;
+    if (pinned) pinReading.current = null;
     // At the very top the owner wants the newest rows; a different scroll position means the view was moved on purpose
     // (a scroll, a reveal, the keyboard), and the opening placement holds its own row until the owner steers.
-    if (box && before && element && before.scrollTop > 0 && box.scrollTop === before.scrollTop && (settled.current || !placed.current)) restoreHeld(box, before, element);
+    if (box && before && element && (before.scrollTop > 0 || pinned) && box.scrollTop === before.scrollTop && (settled.current || !placed.current)) restoreHeld(box, before, element);
     remembering();
   };
   useLayoutEffect(holding);
@@ -879,6 +945,15 @@ export function TreeView(props: TreeViewProps) {
     nextScroll.current = null;
     focusRow(id); nearest(id, 8); retainReveal(id);
   }, [rows, nextTarget, graph]);
+  // A search step brings its match into view by the least scrolling, and only a step does (typing never scrolls). The
+  // Graph scrolls its own node on `stepped`. Nothing is selected, focused or marked seen.
+  useLayoutEffect(() => {
+    const id = searchScroll.current;
+    searchScroll.current = null;
+    if (!id || graph || !elements.current.has(id)) return;
+    releaseReveal();
+    settled.current = true; setAnchor(null); nearest(id, 8); retainReveal(id);
+  }, [stepped, graph]);
   useEffect(() => {
     if (!nextTarget) return;
     const start = setTimeout(() => setNextPulse(true), 0);
@@ -1003,7 +1078,6 @@ export function TreeView(props: TreeViewProps) {
   const graphShown = !!graph && !loading;
   const filterBar = <FilterBar chips={model?.chips ?? chipsOf([])} counts={counts}
     disabled={nav.pendingOperationId !== null && !nav.writing} dismissKey={route.session_id} onChip={setChip} />;
-  const queryText = query.trim();
   let body: ReactNode;
   if (loading) {
     body = <div className="tree-loading" aria-busy="true">
@@ -1023,9 +1097,10 @@ export function TreeView(props: TreeViewProps) {
           : `${bar?.agent ?? 'The agent'} is not running · items appear when it writes`}</div>
     </div>;
   } else if (model?.noMatch) {
+    // Only the filters can empty the Map; a search never does.
     body = <div className="tree-no-match">
-      <div className="tree-no-match-title">{queryText ? `Nothing matches “${queryText}”.` : 'No items match these filters.'}</div>
-      <button type="button" className="btn btn-secondary" onClick={onClearFilters}>Clear search and filters</button>
+      <div className="tree-no-match-title">No items match these filters.</div>
+      <button type="button" className="btn btn-secondary" onClick={onClearFilters}>Clear filters</button>
     </div>;
   } else if (model && archivedMode && !rows.length) {
     body = <div className="tree-no-match"><div className="tree-no-match-title">No archived topics in this session.</div></div>;
@@ -1034,21 +1109,19 @@ export function TreeView(props: TreeViewProps) {
   // The sticky copy also covers filtered, folded or otherwise unmounted rows.
   const unfocusCopy = focusedId && <button type="button" className="tree-focus-action" aria-label={`Unfocus ${names.get(focusedId) ?? (focusedItem ? shortLabel(focusedItem) : focusedId)}`} disabled={focusDisabled}
     onClick={() => focusBranch(null)}>Unfocus</button>;
-  const selectedTag = !graph && <div className="tree-selected-slot" role="group" aria-label="Selected item navigation">
-    {selectedEdge && selectedId && session?.items[selectedId] && <button type="button" className="tree-selected-edge" data-edge={selectedEdge}
-      aria-label={`${selectedEdge === 'above' ? '↑' : '↓'} Selected: ${session.items[selectedId]!.question}`}
-      title={`Back to the selected item ( . ) · ${session.items[selectedId]!.question}`} onClick={() => revealSelected(true)}>
-      <span>{selectedEdge === 'above' ? '↑' : '↓'} Selected:</span>{' '}
-      <span className="tree-selected-label">{names.get(selectedId)}</span></button>}
-  </div>;
+  // "↓ Back to “name” ." (SPEC §5.8 8.5): floats over the Map while the selected row is out of view, at the top or above the
+  // dock by the side it went; `.` does the same. It covers rows rather than moving them. Not in the Graph.
+  const selectedItem = selectedId ? session?.items[selectedId] : undefined;
+  const backPill = !graph && selectedEdge && selectedId && selectedItem && <button type="button" className="tree-back" data-edge={selectedEdge}
+    aria-label={`Back to “${selectedItem.question}”`} title={`Back to the selected item ( . ) · ${selectedItem.question}`}
+    onClick={() => revealSelected(true)}>
+    <span className="tree-back-arrow" aria-hidden="true">{selectedEdge === 'above' ? '↑' : '↓'}</span>
+    <span className="tree-back-label">Back to “{names.get(selectedId) ?? shortLabel(selectedItem)}”</span><Keycap>.</Keycap></button>;
 
   // data-session-busy: "true" while the session is loading or a lifecycle change (close, reopen, rename, archive) saves.
-  return <section className="tree-column" aria-label="Session tree" data-session-status={state.status} data-session-busy={String(lifecycle.busy || !session)} data-kbd={kbd || undefined}
-    onKeyDownCapture={event => {
-      // Window capture has already positioned the selection for Cmd+J. That
-      // same event must not cancel the reveal before its preview reflows.
-      const retainedJump = event.defaultPrevented && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j';
-      if (!retainedJump) releaseReveal();
+  return <MapSearchContext.Provider value={mapSearch}><section className="tree-column" aria-label="Session tree" data-session-status={state.status} data-session-busy={String(lifecycle.busy || !session)} data-kbd={kbd || undefined}
+    onKeyDownCapture={() => {
+      releaseReveal();
       if (!kbd) setKbd(true);
     }}
     onPointerDownCapture={releaseReveal} onWheelCapture={releaseReveal}
@@ -1064,21 +1137,20 @@ export function TreeView(props: TreeViewProps) {
     {session && recentOpen && lift(<RecentDialog session={session} entries={view?.recent_items}
       seen={seen}
       onReveal={id => { if (covered && props.onOpenItem) props.onOpenItem(id); else select(id, false); }} onClose={() => setRecentOpen(false)} />)}
-    {model && !graph && (!!query || !model.chips.has('all')) && <Banner icon={query ? 'ph ph-magnifying-glass' : 'ph ph-funnel'} actions={<><span aria-hidden="true">·</span><button type="button" className="btn btn-ghost" disabled={nav.writing || nav.pendingOperationId !== null} onClick={query ? onClearSearch : onClearFilters}>{query ? 'Clear search' : 'Clear filters'}</button></>}>
-      Showing {model.searchCount} of {model.itemCount} items{query ? ` matching “${query}”` : ''}{model.hiddenCount > 0 ? ` (${model.hiddenCount} hidden)` : ''}{!model.chips.has('all') ? ' in the statuses you picked' : ''}</Banner>}
+    {model && !graph && !model.chips.has('all') && <Banner icon="ph ph-funnel" actions={<><span aria-hidden="true">·</span><button type="button" className="btn btn-ghost" disabled={nav.writing || nav.pendingOperationId !== null} onClick={onClearFilters}>Clear filters</button></>}>
+      Showing {model.shownCount} of {model.itemCount} items{model.hiddenCount > 0 ? ` (${model.hiddenCount} hidden)` : ''} in the statuses you picked</Banner>}
     {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>
       Showing an item outside your current filters.</Banner>}
     {lifecycle.pending && <Banner icon="ph ph-warning" alert actions={<button type="button" className="btn btn-ghost" onClick={lifecycle.reconcile}>Check again</button>}>
       {lifecycle.pending}. Check whether your last change was saved before making another.</Banner>}
     <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
-    {/* The graph keeps its own scroller so its legend stays sticky (ui/graph/graph.css). */}
+    {/* The graph keeps its own scroller (ui/graph/graph.css). */}
     {graphShown ? <GraphFilterSlot.Provider value={filtersShown ? filterBar : null}>{graph}</GraphFilterSlot.Provider> : <div className="tree-scroll-shell">
-      {/* One fixed-height row outside the scroller: the ancestors of the first row in view, and the selection tag beside them. */}
+      {/* One fixed-height row outside the scroller: the ancestors of the first row in view. */}
       <div className="tree-path">
         <nav className="tree-breadcrumb" aria-label="Map ancestors">{breadcrumb.map((id, index) => <span key={id}>
           {index > 0 && <span aria-hidden="true"> › </span>}<button type="button" title={session?.items[id]?.question} onClick={() => select(id, false)}>{names.get(id)}</button>
         </span>)}{focusExitMissing && unfocusCopy}</nav>
-        {selectedTag}
       </div>
       <div ref={scroller} className="tree-scroll" onScroll={() => {
         // At the held scrollTop this can be our own correction's delayed event;
@@ -1086,11 +1158,12 @@ export function TreeView(props: TreeViewProps) {
         if (held.current?.scrollTop !== scroller.current?.scrollTop) revealedAnchor.current = null;
         openingPlacement.current = null; settled.current = true; remembering(); updateEdge();
       }}>{body}</div>
+      {backPill}
     </div>}
     {session && <AgentBin session={session} actions={actions} onRemove={onRemove} />}
     {lifecycle.dialog}
     {continuing && lift(<ContinuePicker topicName={session?.topics[continuing]?.name ?? 'this topic'} targets={continueTargets(route, summaries)}
       onCancel={() => setContinuing(null)}
       onPick={target => { setContinuing(null); openContinueTopic({ source: route, topicId: continuing, target }); }} />)}
-  </section>;
+  </section></MapSearchContext.Provider>;
 }

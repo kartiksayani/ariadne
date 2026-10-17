@@ -241,16 +241,21 @@ describe('owner hide and unhide actions', { timeout: 10_000 }, () => {
     expect(saved(transport).hidden_item_ids).toEqual(['1']);
   });
 
-  it('explains hidden search matches and adjusts the ordinary status chip counts', async () => {
+  it('names hidden search matches in the top bar and leaves the ordinary status chip counts alone', async () => {
     await mount(); await hide('1.1');
     expect(chip('All').textContent).toContain('8'); expect(chip('Open').textContent).toContain('2');
     // The top bar's search box opens from its "Search the Map" button.
     fireEvent.click(screen.getByRole('button', { name: 'Search the Map' }));
     fireEvent.change(await screen.findByRole('textbox', { name: 'Search the Map' }), { target: { value: 'receipt' } });
-    expect(await screen.findByText('Showing 1 of 8 items matching “receipt” (1 hidden)')).toBeTruthy();
-    expect(chip('All').textContent).toContain('1'); expect(chip('Open').textContent).toContain('0');
+    // "Implement receipt lookup" is in view; "Add the receipt lookup test" is hidden, and named in the note, not shown.
+    await waitFor(() => expect(document.querySelector('.tb-search-count')?.textContent).toBe('1 of 1'));
+    expect(document.querySelector('.tb-search-note .tb-note-text')?.textContent).toBe('Also matching: 1 in a hidden item.');
+    expect(row('1.1')).toBeNull();
+    expect(chip('All').textContent).toContain('8'); expect(chip('Open').textContent).toContain('2');
     fireEvent.click(chip('Open'));
-    expect(await screen.findByText('Showing 0 of 8 items matching “receipt” (1 hidden) in the statuses you picked')).toBeTruthy();
+    expect(await screen.findByText('Showing 2 of 8 items (1 hidden) in the statuses you picked')).toBeTruthy();
+    await waitFor(() => expect(document.querySelector('.tb-search-count')?.textContent).toBe('No matches'));
+    expect(document.querySelector('.tb-search-note .tb-note-text')?.textContent).toBe('Also matching: 1 in a hidden item.');
     expect(group()).toBeTruthy();
   });
 

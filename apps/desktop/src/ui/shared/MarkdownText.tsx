@@ -8,6 +8,18 @@ import type { DisplayStatus } from '../../selectors/waiting/replied';
 import { STATUS, statusKey } from './status';
 import type { ItemRoute } from '../../generated/core';
 import { ItemRefSession, usePeek } from '../peek/context';
+import { hitSegments } from '../../selectors/tree/search';
+
+/** Search words to mark in the text below (the Map's search in place); `current` gives the hits the current-match ring.
+ * Hits are spans with a background only, so the text keeps its exact layout. */
+export const MarkdownHighlight = createContext<{ readonly terms: readonly string[]; readonly current: boolean } | null>(null);
+function Hits({ text }: { readonly text: string }) {
+  const highlight = useContext(MarkdownHighlight);
+  if (!highlight?.terms.length) return <>{text}</>;
+  return <>{hitSegments(text, highlight.terms).map((segment, index) => segment.hit
+    ? <span key={index} className="tree-hit" data-current={highlight.current || undefined}>{segment.text}</span>
+    : <Fragment key={index}>{segment.text}</Fragment>)}</>;
+}
 
 /** Opens a checked external URL; the composition supplies the desktop's opener. */
 export const LinkOpener = createContext<(url: string) => void>(() => {});
@@ -96,14 +108,14 @@ function Spans({ nodes, plain = false }: { readonly nodes: readonly Inline[]; /*
   const open = useContext(LinkOpener), found = useContext(FoundFiles);
   const file = (text: string) => !plain && !!found?.found.has(text);
   return <>{nodes.map((node, index) => {
-    if (typeof node === 'string') return <Fragment key={index}>{node}</Fragment>;
+    if (typeof node === 'string') return <Hits key={index} text={node} />;
     switch (node.t) {
       // The newline after <br> renders as nothing but keeps the text's lines in copied and read text.
       case 'br': return <Fragment key={index}><br />{'\n'}</Fragment>;
       case 'code': return file(node.text) ? <FileLink key={index} text={node.text} /> : <code key={index} className="md-code">{node.text}</code>;
       case 'ref': return file(node.text) ? <FileLink key={index} text={node.text} /> : <code key={index} className="md-code md-ref">{node.text}</code>;
       // A path that is no file in the project was only ever words.
-      case 'path': return file(node.text) ? <FileLink key={index} text={node.text} /> : <Fragment key={index}>{node.text}</Fragment>;
+      case 'path': return file(node.text) ? <FileLink key={index} text={node.text} /> : <Hits key={index} text={node.text} />;
       case 'strong': return <strong key={index}><Spans nodes={node.children} plain={plain} /></strong>;
       case 'em': return <em key={index}><Spans nodes={node.children} plain={plain} /></em>;
       case 'del': return <del key={index}><Spans nodes={node.children} plain={plain} /></del>;

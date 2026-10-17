@@ -18,7 +18,7 @@ import '../../../apps/desktop/src/ui/detail/detail.css';
 // Item 1 carries a long finding (it must fold to four lines), item 5 a paragraph that
 // wraps over a few lines (hover must not rewrap it), the rest keep their short text.
 class TreeLayoutTransport extends AppTransport {
-  constructor({ gettingAround = false, changes = false, card = false } = {}) {
+  constructor({ gettingAround = false, changes = false, card = false, still = false } = {}) {
     super();
     const session = this.sessions.get(route.session_id)!;
     if (card) { // An archived session with a long name: the top bar and its connection card must still fit a narrow window.
@@ -62,6 +62,34 @@ class TreeLayoutTransport extends AppTransport {
       this.preferences.seen = [{ session: route, since: baseline, items: [], topics: [] }];
       this.preferences.sessions[0]!.expanded_item_ids = [];
     }
+    if (still) {
+      // The Map-still table (map-still.spec.mts): 1.1 folds inside item 1, 11 is New, 12 Changed and waits for an Ack.
+      const baseline = '2026-10-01T00:00:00.000Z', later = '2026-10-13T09:00:00.000Z';
+      Object.values(items).forEach(item => { if (item) { item.created_at = baseline; item.changes = []; } });
+      items['11']!.created_at = later;
+      items['12']!.revision = 2;
+      items['12']!.changes = [{ revision: 2, at: later, cause_message_id: items['12']!.created_message_id, before: { status: 'in_progress' } }];
+      items['12']!.type = 'finding'; items['12']!.ack_to = 'done'; items['12']!.ask = null;
+      this.preferences.seen = [{ session: route, since: baseline, items: [], topics: [] }];
+      this.preferences.sessions[0]!.expanded_item_ids = ['2', '3'];
+    }
+  }
+  /** What the agent writes while the owner reads: the session's next revision, announced as the desktop does. */
+  agent(change: string) {
+    const session = this.sessions.get(route.session_id)!, items = session.items;
+    if (change === 'add-above') items['3.1'] = { ...items['1.1']!, id: '3.1', parent: '3', ordinal: 40, question: 'A new finding above the reading row' };
+    if (change === 'add-below') items['40'] = { ...items['18']!, id: '40', ordinal: 40, question: 'A new item at the end' };
+    if (change === 'ack-lands') { items['12']!.status = 'done'; items['12']!.ack_to = null; ++items['12']!.revision; }
+    if (change === 'counts') { items['15']!.status = 'in_progress'; ++items['15']!.revision; }
+    ++session.revision;
+    this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
+  }
+  /** The owner's reading of an item lands from elsewhere (the dock or Details' 1 s dwell): its marker clears. */
+  seen(itemId: string) {
+    const entry = this.preferences.seen!.find(value => value.session.session_id === route.session_id)!;
+    entry.items.push({ item_id: itemId, revision: this.sessions.get(route.session_id)!.items[itemId]!.revision });
+    ++this.preferences.revision;
+    this.emit('ariadne://preferences_changed', { revision: this.preferences.revision });
   }
 }
 /** All available actions together, including combinations that normal statuses split across rows. */
@@ -71,7 +99,7 @@ function ActionGridFixture() {
   item.status = 'open';
   const row: Row = { kind: 'item', key: item.id, item: immutable(item), status: 'open', ack: null, depth: 1,
     hasKids: false, expanded: false, context: false, guides: [], later: false, hidden: false,
-    segments: [{ text: item.question, hit: false }], replacedBy: null, rounds: 0, relatedCount: 0,
+    segments: [{ text: item.question, hit: false }], matches: [], replacedBy: null, relatedCount: 0,
     collapsed: null, delivery: null, badge: 'Open' };
   const definitions = [
     { icon: 'ph ph-check', title: 'Ack → Decided', label: 'Ack', persistent: true },
@@ -113,6 +141,9 @@ function DetailsFixture({ dock, bigger }: { dock: number; bigger: boolean }) {
 }
 
 const query = new URLSearchParams(window.location.search);
+const transport = new TreeLayoutTransport({ gettingAround: query.has('nav'), changes: query.has('changes'), card: query.has('card'), still: query.has('still') });
+// The specs drive agent writes and seen marks through this handle.
+(window as unknown as { treeLayout: TreeLayoutTransport }).treeLayout = transport;
 createRoot(document.getElementById('root')!).render(query.has('details') ? <DetailsFixture dock={Number(query.get('dock') ?? 0)} bigger={query.has('bigger')} />
   : query.has('grid') ? <ActionGridFixture />
-  : <DesktopApp service={createDesktopService(new TreeLayoutTransport({ gettingAround: query.has('nav'), changes: query.has('changes'), card: query.has('card') }))} />);
+  : <DesktopApp service={createDesktopService(transport)} />);

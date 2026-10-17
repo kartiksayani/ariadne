@@ -34,6 +34,7 @@ import { conflictNotice, isViewConflict } from '../../ui/shared/conflictNotice';
 import { useSessionSnapshots } from '../../ui/pages/snapshots';
 import { useHidden } from '../../ui/remove/queue';
 import { SessionLifecycleOwner } from '../../ui/shared/SessionLifecycleOwner';
+import type { MapSearchStatus } from '../../ui/tree/mapSearch';
 import '../../styles/navigation.css';
 
 export interface AdapterChoice { readonly adapter_id: string; readonly label: string; readonly configuration: AdapterConfig;
@@ -85,6 +86,10 @@ const partial = (counts: Immutable<SummaryCounts>) => counts.completeness === 'p
 export interface WorkspaceChrome {
   readonly query: string;
   readonly onQueryChange?: (query: string) => void;
+  /** The search box's × and esc: an explicit clear, saved at once. Falls back to an empty query. */
+  readonly onClearSearch?: () => void;
+  /** The Map's search in place: "2 of 4", the arrows and the "Also matching" note (ui/tree/mapSearch). */
+  readonly searchStatus?: MapSearchStatus | null;
   readonly graph?: boolean;
   readonly onView?: (view: 'tree' | 'graph') => void;
   readonly filter?: { readonly active: boolean; readonly count: number; readonly onToggle: () => void };
@@ -360,7 +365,9 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
     switcherOpen, onSwitcherToggle: () => { setHelpOpen(false); setSwitcherOpen(value => !value); },
     waitingHere: page ? switcher.thisWaitingCount : 0, onWaitingHere: returnToWaiting,
     search: { active: onSession && searchShown, query: chrome.query, onOpen: () => { if (onSession && chrome.onQueryChange) setSearchOpen(true); },
-      onQuery: (text: string) => chrome.onQueryChange?.(text), onClear: () => { chrome.onQueryChange?.(''); setSearchOpen(false); } },
+      onQuery: (text: string) => chrome.onQueryChange?.(text), onClear: () => { if (chrome.onClearSearch) chrome.onClearSearch(); else chrome.onQueryChange?.(''); setSearchOpen(false); },
+      ...onSession && chrome.searchStatus ? { count: chrome.searchStatus.count, onNext: chrome.searchStatus.onNext, onPrev: chrome.searchStatus.onPrev,
+        note: chrome.searchStatus.note ?? undefined } : {} },
     view: chrome.graph ? 'graph' as const : 'tree' as const, onView: chrome.onView ?? noop,
     filter: chrome.filter ?? { active: false, count: 0, onToggle: noop },
     recent: { active: false, onToggle: chrome.onRecent ?? noop },

@@ -13,13 +13,16 @@ it('explains a saved search and clears it in the box and saved view while keepin
   view.filters.statuses = ['open'];
   render(<DesktopApp service={createDesktopService(transport)} />);
   await goToSession(route);
-  expect(await screen.findByText('Showing 1 of 9 items matching “receipt” in the statuses you picked')).toBeTruthy();
+  // The banner explains the statuses only; the search's count is the top bar's (SPEC §4: a search finds in place).
+  expect(await screen.findByText('Showing 3 of 9 items in the statuses you picked')).toBeTruthy();
+  await waitFor(() => expect(document.querySelector('.tb-search-count')?.textContent).toBe('1 of 1'));
   // The top bar's search box shows while it holds words; an empty search is the closed "Search the Map" button.
   const searchValue = () => document.querySelector<HTMLInputElement>('.tb-search-input')?.value ?? '';
   expect(searchValue()).toBe('receipt');
-  fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Clear the search' }));
   expect(searchValue()).toBe('');
-  expect(screen.queryByText(/items matching/)).toBeNull();
+  expect(document.querySelector('.tb-search-count')).toBeNull();
+  expect(screen.getByText('Showing 3 of 9 items in the statuses you picked')).toBeTruthy();
   await waitFor(() => expect(transport.preferences.sessions[0]!.filters.search).toBe(''));
   expect(transport.preferences.sessions[0]!.filters.statuses).toEqual(['open']);
   // The top bar's funnel (badge 1: Open is still picked) shows the filter row; its menu lists the picked status.
@@ -35,7 +38,7 @@ it('saves an explicit clear before switching to another session and typing there
   transport.preferences.sessions.push(transport.view(secondId));
   render(<DesktopApp service={createDesktopService(transport)} />);
   await goToSession(route);
-  const clear = await screen.findByRole<HTMLButtonElement>('button', { name: 'Clear search' });
+  const clear = await screen.findByRole<HTMLButtonElement>('button', { name: 'Clear the search' });
   await waitFor(() => expect(clear.disabled).toBe(false));
   fireEvent.click(clear);
   // Switch from the top bar's switcher (SPEC 5.13).
