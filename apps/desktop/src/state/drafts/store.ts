@@ -1,13 +1,12 @@
 import { itemRemoved } from '../../selectors/removed';
 import { useEffect, useSyncExternalStore } from 'react';
 import type { MutationReceipt, OwnerDraft, OwnerMutationRequest, PreferencesPatchEntry, PreferencesSnapshot, SessionRef } from '../../generated/core';
-import type { Item, InputKind, SavedReceipt, Session } from '../../generated/domain/models';
+import type { Attempt, Item, InputKind, SavedReceipt, Session } from '../../generated/domain/models';
 import { immutable, type Immutable } from '../../data/session-store';
 import { CoreFailure, ServiceFailure, type RendererService } from '../../data/service';
 import { OwnFailure } from '../../data/plain';
 import type { PreferencesWriteCoordination } from '../navigation/store';
 import { ownerReplied } from '../../selectors/waiting/replied';
-import { agentReceived } from '../../selectors/waiting/stuck';
 
 /** A reply to a whole topic (target item_id null). */
 export const TOPIC_REPLY: InputKind = 'topic_reply';
@@ -63,16 +62,21 @@ export function receiptWithdrawn(entry: DraftEntry | undefined, session: Immutab
 }
 
 /**
- * An answer to this same question that some attempt delivered to the agent, then cancelled or skipped ("Stop waiting"),
- * carried these same words and choice: sending them again gives the agent a second copy, so the owner confirms first
- * ("Send again?", as a received message's "Send again" does).
+ * An attempt the agent may have had: accepted, uncertain ("Checking whether it was delivered", "Couldn't deliver"), only
+ * prepared, or carrying a host turn. Only a definite rejection proves it never got there.
+ */
+const mayHaveReached = (attempt: Immutable<Attempt>): boolean => attempt.acceptance !== 'rejected';
+/**
+ * An answer to this same question that some attempt may have delivered to the agent, then cancelled or skipped ("Stop
+ * waiting", "Mark as done"), carried these same words and choice: sending them again may give the agent a second copy, so
+ * the owner confirms first ("Send again?", as a received message's "Send again" does).
  */
 export function receivedCopy(draft: Immutable<OwnerDraft>, session: Immutable<Session>): boolean {
   const text = draft.text.trim();
   if (draft.intent !== 'answer' || !draft.target.item_id || !text && !draft.selected_option_id) return false;
   return Object.values(session.inputs).some(input => !!input && input.kind === 'answer' && (input.state === 'cancelled' || input.state === 'skipped')
     && input.target.item_id === draft.target.item_id && input.payload.target_snapshot.question_revision === draft.question_revision
-    && input.payload.text.trim() === text && input.payload.selected_option_id === draft.selected_option_id && input.attempts.some(agentReceived));
+    && input.payload.text.trim() === text && input.payload.selected_option_id === draft.selected_option_id && input.attempts.some(mayHaveReached));
 }
 
 export function ownerActions(item: Immutable<Item>): OwnerIntent[] {

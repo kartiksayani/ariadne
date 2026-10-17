@@ -62,3 +62,39 @@ it('keeps a dialog focusable when asynchronous controls are all disabled', async
   await user.tab(); expect(document.activeElement).toBe(dialog);
   await user.tab({ shift: true }); expect(document.activeElement).toBe(dialog);
 });
+
+// | Press                                                          | Cancels |
+// |----------------------------------------------------------------|---------|
+// | a double-click's second click on the backdrop, right away       | no      |
+// | a second click (detail 2) on the backdrop, later                | no      |
+// | any backdrop click in the first 500 ms                          | no      |
+// | a deliberate backdrop click, later                              | yes     |
+// | Esc, right away                                                 | yes     |
+// | a held ↵ repeating onto the dialog                              | no confirm; a fresh ↵ confirms |
+it.each([
+  ['a double-click’s second click, right away', 0, 2, false],
+  ['a second click, later', 600, 2, false],
+  ['a single click, right away', 0, 1, false],
+  ['a deliberate click, later', 600, 1, true],
+] as const)('the backdrop: %s cancels: %s', (_name, after, detail, cancels) => {
+  const start = Date.now(), now = vi.spyOn(Date, 'now').mockReturnValue(start);
+  try {
+    const onCancel = vi.fn();
+    render(<Dialog label="Ask" width={520} onCancel={onCancel}><button type="button">Cancel</button></Dialog>);
+    now.mockReturnValue(start + after);
+    fireEvent.click(document.querySelector('.pw-overlay')!, { detail });
+    expect(onCancel).toHaveBeenCalledTimes(cancels ? 1 : 0);
+  } finally { now.mockRestore(); }
+});
+it('Esc cancels at once; a held ↵ repeating onto the dialog confirms nothing, a fresh ↵ confirms once', () => {
+  const onCancel = vi.fn(), onConfirm = vi.fn();
+  render(<Dialog label="Ask" width={520} onCancel={onCancel} onConfirm={onConfirm}><button type="button">Cancel</button></Dialog>);
+  const dialog = screen.getByRole('dialog');
+  fireEvent.keyDown(dialog, { key: 'Enter', repeat: true });
+  fireEvent.keyDown(dialog, { key: 'Enter', repeat: true });
+  expect(onConfirm).not.toHaveBeenCalled();
+  fireEvent.keyDown(dialog, { key: 'Enter' });
+  expect(onConfirm).toHaveBeenCalledTimes(1);
+  fireEvent.keyDown(dialog, { key: 'Escape' });
+  expect(onCancel).toHaveBeenCalledTimes(1);
+});
