@@ -194,6 +194,158 @@ test('the first node in view holds still when nodes below the view are removed a
   } finally { await server.close(); }
 });
 
+// ---- The filter empties a parent, or the owner folds it, while the held node is inside it.
+
+/** The Graph's horizontal scroll, and the room it has to scroll in. */
+const scrollAcross = (page: Page) => page.evaluate(() => {
+  const box = document.querySelector<HTMLElement>('.graph-scroll')!;
+  return { left: box.scrollLeft, room: box.scrollWidth - box.clientWidth };
+});
+/** Narrows the Map (the column was fitted when the Graph opened), scrolls the Graph all the way across, then puts `id` `offset`px below the top. */
+const scrollAcrossTo = async (page: Page, id: string, offset = 220) => {
+  await anchor(page, 'window.__anchor.details(560)');
+  await settle(page);
+  await page.evaluate(() => {
+    const box = document.querySelector<HTMLElement>('.graph-scroll')!;
+    box.scrollLeft = box.scrollWidth;
+    box.dispatchEvent(new Event('scroll'));
+  });
+  await scrollNodeTo(page, id, offset);
+};
+
+/** Under the Open filter, 5's ten children are open; an agent closes `ids` one after the other. */
+const closeChildren = async (page: Page, ids: readonly string[]) => {
+  for (const id of ids) await anchor(page, `window.__anchor.status(${JSON.stringify(id)}, "decided")`);
+  await afterTrigger(page);
+};
+const tenChildren = Array.from({ length: 10 }, (_, index) => `5.${index + 1}`);
+
+test('the filter empties a parent while the Graph is scrolled horizontally', async ({ page }) => {
+  // 5.10 is the last open child of 5: when it leaves the Open filter, 5 folds on its own, one column to its left.
+  const server = await open(page, { filter: 'open' });
+  try {
+    await closeChildren(page, tenChildren.slice(0, 9));
+    await anchor(page, 'window.__anchor.select("5.10")');
+    await settle(page);
+    await scrollAcrossTo(page, '5.10');
+    const across = await scrollAcross(page);
+    expect(across.left, 'the Graph is scrolled horizontally').toBeGreaterThan(0);
+    const before = await order(page), at = before.findIndex(node => node.id === '5.10');
+    expect(at).toBeGreaterThanOrEqual(0);
+    const places = await Promise.all(before.map(node => where(page, node.id)));
+    await closeChildren(page, ['5.10']);
+    await expect(page.locator('.graph-node[data-item-id="5.10"]')).toHaveCount(0);
+    expect((await scrollAcross(page)).left, 'the Graph did not slide sideways').toBe(across.left);
+    const drawn = new Set((await order(page)).map(node => node.id));
+    const below = before.slice(at + 1).find(node => drawn.has(node.id))!;
+    const after = await where(page, below.id), was = places.find(place => place?.id === below.id)!;
+    expect(after && { x: after.x, y: after.y }, `${below.id} (below 5.10) after the filter emptied 5`).toEqual({ x: was.x, y: was.y });
+  } finally { await server.close(); }
+});
+
+test('the owner folding the parent of the held node keeps the parent where it was', async ({ page }) => {
+  const server = await open(page, {});
+  try {
+    await anchor(page, 'window.__anchor.select("5.3")');
+    await settle(page);
+    await scrollAcrossTo(page, '5.3');
+    const across = await scrollAcross(page), parent = await where(page, '5');
+    expect(parent).not.toBeNull();
+    await anchor(page, 'window.__anchor.expanded(["1", "2", "3", "4", "6", "7", "8", "4.1", "4.1.1"])');
+    await afterTrigger(page);
+    await expect(page.locator('.graph-node[data-item-id="5.3"]')).toHaveCount(0);
+    expect((await scrollAcross(page)).left, 'the Graph did not slide sideways').toBe(across.left);
+    const after = await where(page, '5');
+    expect(after && { x: after.x, y: after.y }, '5 after it folded over the held node').toEqual({ x: parent!.x, y: parent!.y });
+  } finally { await server.close(); }
+});
+
+test('the owner folding the selected parent above the view, under a filter, keeps the parent where it was', async ({ page }) => {
+  const server = await open(page, { filter: 'open' });
+  try {
+    await anchor(page, 'window.__anchor.select("5")');
+    await settle(page);
+    await scrollAcrossTo(page, '5.6', 20);
+    const across = await scrollAcross(page), parent = await where(page, '5'), held = await where(page, null);
+    expect(parent!.y, '5 is above the view').toBeLessThan((await page.locator('.graph-scroll').boundingBox())!.y);
+    expect(held?.id, 'a child of 5 is the first node in view').toMatch(/^5\./);
+    await page.evaluate(() => document.querySelector<HTMLElement>('.graph-scroll')!.focus({ preventScroll: true }));
+    await page.keyboard.press('ArrowLeft');
+    await afterTrigger(page);
+    await expect(page.locator(`.graph-node[data-item-id="${held!.id}"]`)).toHaveCount(0);
+    expect((await scrollAcross(page)).left, 'the Graph did not slide sideways').toBe(across.left);
+    const after = await where(page, '5');
+    expect(after && { x: after.x, y: after.y }, '5 after the owner folded it').toEqual({ x: parent!.x, y: parent!.y });
+  } finally { await server.close(); }
+});
+
+// ---- The blank room under the Graph lasts only as long as the scroll position needs it.
+
+const spacerHeight = (page: Page) => page.evaluate(() => document.querySelector<HTMLElement>('[data-testid="graph-spacer"]')!.offsetHeight);
+const scrollTopOf = (page: Page) => page.evaluate(() => document.querySelector<HTMLElement>('.graph-scroll')!.scrollTop);
+/** The bottom Graph shrinks under the owner's scroll: the room under the canvas keeps the scroll extent. */
+const shrinkAtBottom = async (page: Page) => {
+  await settle(page);
+  await scrollEdge(page, 'bottom');
+  await anchor(page, 'window.__anchor.remove(["8.10", "8.9", "8.8", "8.7", "8.6"])');
+  await afterTrigger(page);
+  return spacerHeight(page);
+};
+
+test('the room under the Graph shrinks as the owner wheels back up', async ({ page }) => {
+  const server = await open(page, {});
+  try {
+    const room = await shrinkAtBottom(page);
+    expect(room, 'the shrink left room under the canvas').toBeGreaterThan(60);
+    const top = await scrollTopOf(page), before = await where(page, null);
+    // The pointer rests on the scroller beside the canvas, so only the wheel (a scroll event) reaches the Graph, never a hover render.
+    const beside = await page.evaluate(() => {
+      const box = document.querySelector('.graph-scroll')!.getBoundingClientRect(), canvas = document.querySelector('.graph-canvas')!.getBoundingClientRect();
+      return { x: (canvas.right + box.right) / 2, y: box.top + 200, free: canvas.right + 8 < box.right - 8 };
+    });
+    expect(beside.free, 'the scroller has room beside the canvas').toBe(true);
+    await page.mouse.move(beside.x, beside.y);
+    await page.mouse.wheel(0, -60);
+    await afterTrigger(page);
+    expect(await scrollTopOf(page), 'the wheel scrolled 60px').toBeCloseTo(top - 60, 0);
+    expect(await spacerHeight(page), 'the room is 60px shorter').toBeCloseTo(room - 60, 0);
+    const after = await where(page, before!.id);
+    expect(after!.y, `${before!.id} moved by the wheel and nothing else`).toBeCloseTo(before!.y + 60, 0);
+  } finally { await server.close(); }
+});
+
+test('the room under the Graph is gone once nodes are added below', async ({ page }) => {
+  const server = await open(page, {});
+  try {
+    expect(await shrinkAtBottom(page), 'the shrink left room under the canvas').toBeGreaterThan(0);
+    await page.evaluate(() => document.querySelector('.graph-scroll')!.dispatchEvent(new Event('scroll')));
+    for (const id of ['8.6', '8.7', '8.8', '8.9', '8.10', '8.11', '8.12']) await anchor(page, `window.__anchor.add("${id}", "8")`);
+    await afterTrigger(page);
+    expect(await spacerHeight(page), 'the canvas grew below, so no room is needed').toBe(0);
+  } finally { await server.close(); }
+});
+
+test('the room under the Graph is gone after scrolling up past it and back to the bottom', async ({ page }) => {
+  const server = await open(page, {});
+  try {
+    // The gap between the last node and the legend card at the end of the Graph, before and after the round trip.
+    const legendGap = () => page.evaluate(() => {
+      const bottoms = [...document.querySelectorAll<HTMLElement>('.graph-node[data-item-id]')].map(node => node.getBoundingClientRect().bottom);
+      return document.querySelector('.graph-legend')!.getBoundingClientRect().top - Math.max(...bottoms);
+    });
+    await settle(page);
+    await scrollEdge(page, 'bottom');
+    const gap = await legendGap();
+    expect(gap, 'the last node sits just above the legend card').toBeGreaterThanOrEqual(0);
+    const room = await shrinkAtBottom(page);
+    expect(room, 'the shrink left room under the canvas').toBeGreaterThan(0);
+    await scrollEdge(page, 'top');
+    await scrollEdge(page, 'bottom');
+    expect(await spacerHeight(page), 'no room is kept once the owner has scrolled past it').toBe(0);
+    expect(await legendGap(), 'the last node sits on the legend card as before, with no blank band').toBeCloseTo(gap, 0);
+  } finally { await server.close(); }
+});
+
 test('a node reached by key lands above the legend card', async ({ page }) => {
   const server = await open(page, {});
   try {
