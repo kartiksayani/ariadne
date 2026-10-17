@@ -4,7 +4,8 @@ import type { SessionPreferences } from '../../../src/generated/core';
 import type { Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
 import { initialExpansion, normalizeSearch, sentenceRows } from '../../../src/selectors/tree/rows';
-import { chipsOf, toggleChip, topicCounts, treeModel } from '../../../src/ui/tree/model';
+import { chipsOf, toggleChip, topicCounts } from '../../../src/ui/tree/model';
+import { shimTree } from './shimTree';
 import { closedSessionQuestion, waitingOnOwner } from '../../../src/selectors/sessionClosed';
 import { displayStatus } from '../../../src/selectors/waiting/replied';
 
@@ -21,7 +22,7 @@ describe('saved status filter chips', () => {
     session.state = 'closed';
     if (state === 'archived') session.archived_at = session.updated_at;
     const frozen = immutable(session);
-    const project = () => treeModel({ session: frozen, view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
+    const project = () => shimTree({ session: frozen, view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
       selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) });
     expect(project().rows.some(row => row.kind === 'item' && row.item.id === '2')).toBe(true);
     expect(project().counts.waiting).toBe(0);
@@ -46,7 +47,7 @@ describe('saved status filter chips', () => {
     expect(closedSessionQuestion(frozen, item)).toBe(false);
     expect(waitingOnOwner(frozen, item)).toBe(false);
     preferences.filters.statuses = ['in_progress'];
-    const model = treeModel({ session: frozen, view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
+    const model = shimTree({ session: frozen, view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
       selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) });
     expect(model.rows.find(row => row.kind === 'item' && row.item.id === item.id)).toMatchObject({ status: 'sent', sessionClosed: false });
     expect(model.counts.waiting).toBe(0);
@@ -100,7 +101,7 @@ describe('saved topic and explicit filter folds', () => {
 describe('canonical sentence tree projection', () => {
   // Search in place (SPEC §6.9): a search marks matching questions and outcomes on the rows; it never scopes them.
   const matching = (session: ReturnType<typeof immutable<Session>>, search: string) =>
-    treeModel({ session, view: { ...view(seed()), expanded_item_ids: ['1'] }, search, later: new Set(), collapsedTopics: new Set(), selectedId: null,
+    shimTree({ session, view: { ...view(seed()), expanded_item_ids: ['1'] }, search, later: new Set(), collapsedTopics: new Set(), selectedId: null,
       revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse('2026-10-07T12:00:00Z') })
       .rows.flatMap(row => row.kind === 'item' && row.matches.length ? [row.item.id] : []);
   // Full-width "OFFICE", a precomposed "café", and "CAFE" with a combining acute accent.
@@ -116,7 +117,7 @@ describe('canonical sentence tree projection', () => {
     session.items['5']!.affects = ['1'];
     session.items['6']!.depends_on = ['1'];
     session.items['2']!.affects = ['1'];
-    const rows = treeModel({ session: immutable(session), view: preferences, search: '', later: new Set(),
+    const rows = shimTree({ session: immutable(session), view: preferences, search: '', later: new Set(),
       collapsedTopics: new Set(), selectedId: null, revealId: null, temporaryExpanded: [], presence: null,
       summaries: [], now: Date.parse('2026-10-07T12:00:00Z') }).rows;
     expect(rows.find(row => row.kind === 'item' && row.item.id === '1')).toMatchObject({ relatedCount: 5 });
@@ -294,7 +295,7 @@ describe('continuous Map rails', () => {
   const model = (session: Session, selectedId: string | null = null, collapsed = false) => {
     const preferences = view(session);
     preferences.expanded_item_ids = collapsed ? [] : ['1', '1.1'];
-    return treeModel({ session: immutable(session), view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
+    return shimTree({ session: immutable(session), view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
       selectedId, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) }).rows;
   };
   it('joins the parent bullet to the last direct child, across intervening descendants', () => {
@@ -324,13 +325,13 @@ describe('continuous Map rails', () => {
     const session = seed();
     expect(model(session, null, true).find(row => row.key === '1')!.guides.some(guide => guide.x === 44)).toBe(false);
     const preferences = view(session); preferences.expanded_item_ids = ['1']; preferences.hidden_item_ids = ['1.1'];
-    const rows = treeModel({ session: immutable(session), view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
+    const rows = shimTree({ session: immutable(session), view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
       selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) }).rows;
-    const hidden = rows.find(row => row.kind === 'hidden')!;
+    const hidden = rows.find(row => row.kind === 'strip')!;
     expect(hidden.guides).toContainEqual({ kind: 'line', x: 44, width: 24, on: false, fromBullet: false, toBullet: true });
     // A status filter with the hidden selection revealed keeps the rail from its parent.
     preferences.filters.statuses = ['open'];
-    const filtered = treeModel({ session: immutable(session), view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
+    const filtered = shimTree({ session: immutable(session), view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
       selectedId: '1.1', revealId: '1.1', temporaryExpanded: ['1'], presence: null, summaries: [], now: Date.parse(session.updated_at) }).rows;
     expect(filtered.find(row => row.key === '1')!.guides.some(guide => guide.fromBullet && guide.x === 44)).toBe(true);
   });
