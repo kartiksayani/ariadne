@@ -2,7 +2,7 @@
 // where the board draws it (part + sid), what the app is put in to match it (an AppFixture), whether the app is
 // compared yet (`pending`), and who is expected to turn that on. Thresholds live in final-thresholds.json.
 // Kept free of app imports: Node (final.spec.mts) and Vite (final-gallery.tsx) read it alike.
-import { Q1, Q2, note1 } from './final-world';
+import { Q1, Q2, note1, type MarkSet } from './final-world';
 
 /** The three renders of every state: the board's light and dark at 1280 x 800, and its light at 900 x 650. */
 export type Variant = 'light' | 'dark' | 'narrow';
@@ -24,7 +24,9 @@ export type Step =
   | { readonly key: string }
   | { readonly click: string }
   | { readonly hover: string }
-  | { readonly type: string };
+  | { readonly type: string }
+  /** The Map's own scroller, moved to its top (8.5: the selected row is out of view below). */
+  | { readonly scroll: 'top' };
 
 /** Fields of a world item (final-world.ts) a state changes. */
 export interface ItemEdit { readonly s?: 'decided' | 'done' | 'in_progress' | 'open' | 'waiting_on_me' | 'replaced'; readonly q?: string; readonly o?: string; readonly why?: string }
@@ -57,7 +59,23 @@ export interface AppFixture {
     readonly shown?: readonly string[];
   };
   readonly chrome?: { readonly page?: Page; readonly overlay?: Overlay; readonly otherPopover?: string };
+  readonly map?: MapWorld;
   readonly act?: readonly Step[];
+}
+/**
+ * The Map of alpha.20 (the reading state, final-world.ts): the findings to ack, related and dependent items, the topic brief and the
+ * owner's recent trail. Present (even as `{}`), the state gets them; absent, it renders as it did before the Map was redone.
+ * - marks: which rows carry New / Changed, from a seen baseline at 20:40 (`base`), moved back three days (`long`), or after the owner
+ *   answered "prefix bump timing" (`because`). Absent: no baseline, so no markers.
+ * - seen: items the owner already marked seen one by one (5.3).
+ * - filter: the statuses saved in the view's filter (8.2).
+ * - focus: the item the Map is focused on (8.4).
+ */
+export interface MapWorld {
+  readonly marks?: MarkSet;
+  readonly seen?: readonly string[];
+  readonly filter?: readonly ('waiting_on_me' | 'open' | 'in_progress' | 'decided' | 'done' | 'replaced')[];
+  readonly focus?: string;
 }
 /**
  * The values of the AppFixture fields the app cannot yet be put in, one entry per value. `unhonoured` below reads a state's
@@ -101,7 +119,9 @@ export interface FinalState {
   /** While true the app side is not compared (the board side still renders and is checked). The owner turns it off when the app matches. */
   readonly pending: boolean;
   /** Which release 1 builder turns `pending` off. */
-  readonly owner: 'shell' | 'dock' | 'nav-state' | 'topbar' | 'details';
+  readonly owner: 'shell' | 'dock' | 'nav-state' | 'topbar' | 'details'
+    // alpha.20, the Map: its rows (W2), the topic band (W3), the filter (W4), the changes (W5), the Graph (W1).
+    | 'rows' | 'band' | 'filter' | 'changes' | 'graph';
   readonly app: AppFixture;
   /**
    * The parts of the frame the app is held to. Absent: the whole frame is compared against the state's threshold. Present: only
@@ -207,6 +227,61 @@ const stateList: readonly FinalState[] = [
   { id: '16.2', part: 'R4-Help', sid: 'h-marks', owner: 'topbar', pending: false, title: 'Markers and statuses', app: { chrome: { overlay: 'help-marks' }, act: [{ key: '?' }, { click: 'Markers and statuses' }] } }
 ];
 
+// The alpha.20 Map. Each state below is the Map half of a board state that is already registered above (1.3, 3.1, 3.6: those hold the
+// top bar, the dock and the Details rail) or of one that has no entry yet (4 to 10). They stay `pending` until the piece that draws
+// them has merged, and are numbered like the board; the three whose board state already has an entry above end in `m` ("Map body").
+// Their `act` steps name controls by the plan's wording (ALPHA20-REPLAN D9 to D21); a name the built control spells otherwise is
+// corrected in the step when the state is turned on.
+const marked = (marks: MarkSet, rest: Omit<NonNullable<AppFixture['map']>, 'marks'> = {}): NonNullable<AppFixture['map']> => ({ marks, ...rest });
+/** The topic band's "What changed" opener: "5 new 5 changed since 20:40" (D18). */
+const openChanges: Step = { click: 'changed since' };
+const mapStateList: readonly FinalState[] = [
+  { id: '1.3m', part: 'Window', sid: 'b-graph', owner: 'graph', pending: true, title: 'Graph: the Map body',
+    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: {}, act: [{ click: 'Graph' }, { click: 'Fold Details' }] } },
+  { id: '3.1m', part: 'Conversation', sid: 'c-details', owner: 'rows', pending: true, title: 'Details beside the Map: the Map body',
+    app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' }, map: {} } },
+  { id: '3.6m', part: 'Conversation', sid: 'c-fold', owner: 'rows', pending: true, title: 'Details folded, dock open: the Map body',
+    app: { view: { selected: 'a2.2.1.1', details: 'folded', dock: 'open', dockQuestion: 0 }, map: {}, act: [{ click: 'Fold Details' }] } },
+  { id: '4.1', part: 'Acking', sid: 'k-toack', owner: 'rows', pending: true, title: 'Findings to ack: marked on the row, counted on the topic, with Ack all',
+    app: { view: { selected: 'a9', details: 'open', dock: 'line' }, map: {} } },
+  { id: '4.3', part: 'Acking', sid: 'k-confirm', owner: 'band', pending: true, title: 'Ack all: a short review before it saves',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'Ack all (3)' }] } },
+  { id: '4.4', part: 'Acking', sid: 'k-all', owner: 'band', pending: true, title: 'After Ack all: Undo stays on the topic row',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'Ack all (3)' }, { click: 'Ack all' }] } },
+  { id: '5.1', part: 'Changes', sid: 'w-glance', owner: 'changes', pending: true, title: 'Back after an hour: New and Changed on the rows, Next unseen',
+    app: { view: { selected: null, dock: 'line' }, map: marked('base') } },
+  { id: '5.2', part: 'Changes', sid: 'w-brief', owner: 'changes', pending: true, title: 'The topic brief, written by the agent',
+    app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [openChanges, { click: 'Brief' }] } },
+  // The board opens the rows of "note on workspace keys" and "cache warm-up script" on Before → after; "shared-cache retries" is already seen.
+  { id: '5.3', part: 'Changes', sid: 'w-since', owner: 'changes', pending: true, title: 'Since you were here: before → after on demand, Mark all caught up',
+    app: { view: { selected: null, dock: 'line' }, map: marked('base', { seen: ['a9'] }), act: [openChanges] } },
+  { id: '5.4', part: 'Changes', sid: 'w-caught', owner: 'changes', pending: true, title: 'All caught up: the markers clear, Undo stays for a few seconds',
+    app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [openChanges, { click: 'Mark all caught up' }] } },
+  { id: '5.5', part: 'Changes', sid: 'w-long', owner: 'changes', pending: true, title: 'Back after two days: a calm summary first',
+    app: { view: { selected: null, dock: 'line' }, map: marked('long'), act: [openChanges] } },
+  { id: '5.6', part: 'Changes', sid: 'w-because', owner: 'changes', pending: true, title: 'After I answer: Because you chose…',
+    app: { items: { afterAnswer: true, edit: { [Q2]: { s: 'decided', o: 'Bump it in this release, and warm the cache from the deploy job.' } } },
+      view: { selected: 'a5.1', details: 'open', dock: 'line' }, map: marked('because') } },
+  { id: '5.7', part: 'Changes', sid: 'w-item', owner: 'changes', pending: true, title: 'On an item: what changed and why, with older history',
+    app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' }, map: marked('base') } },
+  { id: '7.2', part: 'Related', sid: 'r-graph', owner: 'graph', pending: true, title: 'In the Graph: related items as dashed lines',
+    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: {}, act: [{ click: 'Graph' }, { click: 'Fold Details' }] } },
+  { id: '8.2', part: 'Find', sid: 'f-filter', owner: 'filter', pending: true, title: 'Filter by status, Waiting on me first',
+    app: { view: { selected: null, dock: 'line' }, map: { filter: ['waiting_on_me', 'open'] } } },
+  { id: '8.3', part: 'Find', sid: 'f-recent', owner: 'changes', pending: true, title: 'Recent: what I viewed and what changed lately',
+    app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ click: 'Recent' }] } },
+  { id: '8.4', part: 'Find', sid: 'f-focus', owner: 'band', pending: true, title: 'Focus: only the item and what is under it stay in the Map',
+    app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' }, map: { focus: 'a2' } } },
+  { id: '8.5', part: 'Find', sid: 'f-jump', owner: 'rows', pending: true, title: 'The selected item has scrolled out of view: one step back to it',
+    app: { view: { selected: 'a9', details: 'open', dock: 'line' }, map: {}, act: [{ scroll: 'top' }] } },
+  { id: '9.2', part: 'Markers', sid: 'm-next', owner: 'band', pending: true, title: 'n, or Next on the topic band, outlines the next unseen item',
+    app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ key: 'n' }, { key: 'n' }, { key: 'n' }, { key: 'n' }, { key: 'n' }] } },
+  { id: '9.9', part: 'Markers', sid: 'm-graph', owner: 'graph', pending: true, title: 'On Graph cards: the diamond alone, same shapes',
+    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: marked('base'), act: [{ click: 'Graph' }, { click: 'Fold Details' }] } },
+  { id: '10.12', part: 'R4-Dialogs', sid: 'd-tmenu', owner: 'band', pending: true, title: 'The topic’s … menu',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'Topic actions' }] } }
+];
+
 /** The Details column's left edge (its 1px border and the column's ground): where it sits, not what it says (Details' content is release 3). */
 const detailsEdge = (limits?: Limits) => box('details edge', [880, 40, 3, 616], [560, 40, 3, 467], limits);
 /**
@@ -272,7 +347,11 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '15.1': [...topBar([0.002, 0.002])]
 };
 
-export const finalStates: readonly FinalState[] = stateList.map(state => regionsById[state.id] ? { ...state, regions: regionsById[state.id]! } : state);
+/** Provisional: the whole Map column, measured and split into the band, the rows and the popovers below. */
+const mapRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = Object.fromEntries(mapStateList.map(state => [state.id, box('map body', [0, 40, 1280, 720], [0, 40, 900, 570], [0.01, 0.01])]));
+
+export const finalStates: readonly FinalState[] = [...stateList.map(state => regionsById[state.id] ? { ...state, regions: regionsById[state.id]! } : state),
+  ...mapStateList.map(state => ({ ...state, regions: mapRegionsById[state.id]! }))];
 
 export const finalIds: readonly string[] = finalStates.map(state => state.id);
 

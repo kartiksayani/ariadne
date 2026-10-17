@@ -83,9 +83,18 @@ async function perform(page: Page, step: Step): Promise<void> {
       await more.click();
       if (!(await named(true).isVisible())) await page.keyboard.press('Escape');
     }
-    await ((await named(true).isVisible()) ? named(true) : named(false)).click();
+    // A control the app does not draw yet (a pending Map state) fails here in 20 s, not at the test's 240 s.
+    await ((await named(true).isVisible()) ? named(true) : named(false)).click({ timeout: 20_000 });
   }
   else if ('hover' in step) await page.locator(step.hover).first().hover();
+  else if ('scroll' in step) {
+    // The Map's scroller is the nearest ancestor of the item tree that scrolls.
+    await page.getByRole('tree', { name: 'Session items' }).evaluate(tree => {
+      let scroller = tree.parentElement;
+      while (scroller && scroller.scrollHeight <= scroller.clientHeight) scroller = scroller.parentElement;
+      if (scroller) scroller.scrollTop = 0;
+    });
+  }
   else await page.keyboard.type(step.type);
   await settle(page);
 }
