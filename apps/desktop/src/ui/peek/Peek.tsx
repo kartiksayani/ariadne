@@ -70,8 +70,15 @@ export function PeekProvider({ lookup, drafts, navigation, answerTarget, onGoTo,
     tookFocus.current = false; engaged.current = false;
     setShown(null);
   }, [cancelOpen, cancelClose, focusInside]);
-  /** Map activity: close unless busy, giving focus back only if the card held it. */
-  const closeAll = useCallback(() => { if (live.current && !busy()) close(focusInside()); }, [busy, close, focusInside]);
+  /**
+   * Map activity: close unless busy, giving focus back only if the card held it.
+   * The pointer's next rest reopens a card here; after Escape it waits until the pointer leaves the name.
+   */
+  const closeAll = useCallback(() => {
+    if (!live.current || busy()) return;
+    hover.current = null;
+    close(focusInside());
+  }, [busy, close, focusInside]);
   const show = useCallback((route: ItemRoute, anchor: HTMLElement, explicit: boolean) => {
     cancelOpen(); cancelClose();
     if (modal()) return;
@@ -133,6 +140,8 @@ export function PeekProvider({ lookup, drafts, navigation, answerTarget, onGoTo,
     };
     const outside = (event: globalThis.MouseEvent) => {
       if (modal()) return;
+      // A press is an action: no card pops up over it until the pointer leaves the name and rests again.
+      if (!live.current) { cancelOpen(); return; }
       if (event.target instanceof Node && !card.current?.contains(event.target) && !shown?.anchor.contains(event.target)) close(false);
     };
     // Scrolling whatever holds the card's name (the Map, the Graph, Details) closes it; scrolling inside the card does not.

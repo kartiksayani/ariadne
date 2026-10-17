@@ -181,9 +181,10 @@ for (const theme of ['light', 'dark']) test(`Getting around keeps breadcrumbs an
     // The click left keyboard focus on the row's own button; the peek below restores focus to the row.
     await root.focus();
 
-    // A resting pointer previews the row after a short pause; the Map does not move.
+    // A press on the row's button opened no card. Off the row and back, a resting pointer previews it; the Map does not move.
     const scrollBeforeHover = await scroller.evaluate(element => element.scrollTop);
-    await root.hover();
+    await expect(page.getByRole('dialog', { name: /^Peek:/ })).toHaveCount(0);
+    await page.mouse.move(0, 0); await root.hover();
     const peek = page.getByRole('dialog', { name: /^Peek:/ });
     await expect(peek).toBeVisible();
     expect(await scroller.evaluate(element => element.scrollTop)).toBe(scrollBeforeHover);

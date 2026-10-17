@@ -226,6 +226,31 @@ describe('name chips and item peek', () => {
     } finally { unrelated.remove(); }
   });
 
+  it('a press cancels a pending hover until the pointer leaves the name and rests again', async () => {
+    const value = await setup(); vi.useFakeTimers();
+    const { chip } = mount(value), row = screen.getByRole('button', { name: 'Map row' });
+    fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(200));
+    fireEvent.mouseDown(row); fireEvent.mouseMove(chip()); act(() => vi.advanceTimersByTime(1000));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.mouseLeave(chip()); fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  it('a resting pointer reopens a card a scroll closed, but not one the owner dismissed with Escape', async () => {
+    const value = await setup(); vi.useFakeTimers();
+    const { chip } = mount(value);
+    fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350));
+    fireEvent.scroll(chip().parentElement!);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.mouseMove(chip()); act(() => vi.advanceTimersByTime(350));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.mouseMove(chip()); act(() => vi.advanceTimersByTime(1000));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.mouseLeave(chip()); fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
   it('Space toggles the card from a name', async () => {
     const value = await setup(), { chip, visit } = mount(value);
     chip().focus(); fireEvent.keyDown(chip(), { key: ' ' });
