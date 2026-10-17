@@ -135,9 +135,14 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
   const details = preview(row);
   const muted = closed(item.status) || row.context || row.later || row.hidden;
   const search = useMapSearch(), current = search.current?.id === item.id ? search.current.field : null;
-  const actionButton = (action: RowAction) => <button key={action.title} type="button" tabIndex={action.persistent ? 0 : -1}
-    className={`tree-action${action.persistent ? ' tree-action-ack' : ''}`} title={action.title} aria-label={action.title} disabled={action.disabled}
-    onClick={event => { event.stopPropagation(); action.run(); }}>{action.glyph ?? <i className={action.icon} />}</button>;
+  const actionButton = (action: RowAction) => {
+    const button = <button key={action.title} type="button" tabIndex={action.persistent ? 0 : -1}
+      className={`tree-action${action.persistent ? ' tree-action-ack' : ''}`} title={action.title} aria-label={action.title} disabled={action.disabled}
+      onClick={event => { event.stopPropagation(); action.run(); }}>{action.glyph ?? <i className={action.icon} />}</button>;
+    // A greyed hover-bar button swallows clicks, and the floating bar can sit over the middle of a narrow row. The wrapper
+    // (the button ignores the pointer, tree-rows.css) keeps the tooltip and lets that click through to select the row.
+    return action.disabled && !action.persistent ? <span key={action.title} className="tree-action-off" title={action.title}>{button}</span> : button;
+  };
   const persistent = actions.filter(action => action.persistent), hover = actions.filter(action => !action.persistent);
   return <div ref={element => remember(row.key, element)} role="treeitem" aria-level={row.depth + 1} aria-selected={selected} aria-disabled={disabled || undefined}
     aria-expanded={row.hasKids ? row.expanded : undefined} tabIndex={focused ? 0 : -1} className={`tree-row tree-item ${row.depth === 1 ? 'tree-item-root' : 'tree-item-child'}${row.hidden ? ' tree-item-hidden' : ''}`}
