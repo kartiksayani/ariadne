@@ -7,6 +7,7 @@ import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
 import { AppTransport, route } from '../app/transport';
 import { goToSession } from '../app/open';
+import { BAND_HOST_LANDED } from './band-host';
 
 beforeEach(() => { localStorage.clear(); });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); delete (document as { visibilityState?: unknown }).visibilityState; localStorage.clear(); });
@@ -16,8 +17,6 @@ const viewOf = (transport: AppTransport) => transport.preferences.sessions.find(
 /** Item ids carried by mark_seen saves so far, in the order they were sent. */
 const marked = (transport: AppTransport) => transport.mutations.flatMap(request => request.command.command === 'preferences_patch'
   ? request.command.params.entries.flatMap(entry => entry.kind === 'mark_seen' ? entry.items.map(item => item.item_id) : []) : []);
-/** W3's band hosts ChangesOpener; until it is merged nothing in the app shows or opens What changed. Flip this then. */
-const BAND_HOST_LANDED = false;
 const withBand = it.skipIf(!BAND_HOST_LANDED);
 /** What the band says is unseen in the topic: the markers still on the Map, counted. */
 const band = () => screen.queryByRole('button', { name: /new|changed|changes since|All caught up/ })?.textContent?.replace(/\s+/g, ' ').trim() ?? '';

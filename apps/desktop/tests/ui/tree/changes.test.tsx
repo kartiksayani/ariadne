@@ -12,6 +12,7 @@ import { dispatchIntent } from '../../../src/ui/intents';
 import { mapChanges, nextMarkedItem } from '../../../src/ui/tree/model';
 import { AppTransport, route } from '../app/transport';
 import { notices } from '../../../src/ui/pages/notices';
+import { BAND_HOST_LANDED } from '../changes/band-host';
 
 const baseline = '2026-10-01T00:00:00.000Z', later = '2026-10-13T09:00:00.000Z';
 const stores: NavigationStore[] = [];
@@ -248,7 +249,7 @@ describe('Map change markers and next unseen navigation', () => {
     } finally { vi.unstubAllGlobals(); }
   });
 
-  it('offers What changed for a topic while something in it is unseen, as a popover that takes no room in the Map', async () => {
+  it.skipIf(!BAND_HOST_LANDED)('offers What changed for a topic while something in it is unseen, as a popover that takes no room in the Map', async () => {
     const view = await mount();
     // The fixture's baseline is twelve days back, so the band speaks of changes rather than counting new and changed.
     const opener = screen.getByRole('button', { name: /2 changes since/ });

@@ -172,7 +172,10 @@
 /* The key shows the shared ChangeMarker itself, so it can never drift from the Map. */
 .hlp-markers > .change-marker {
   place-self: start;
+  gap: 5px;
   margin-top: 1px;
+  letter-spacing: 0.02em;
+  line-height: 1;
 }
 
 .hlp-diamonds {

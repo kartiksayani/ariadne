@@ -51,7 +51,7 @@ function MarkersTab() {
         <span className="hlp-diamonds" aria-hidden="true"><ChangeMarker kind="new" form="diamond" /><ChangeMarker kind="changed" form="diamond" /></span>
         <span className="hlp-text">On Graph cards and in tight spots the diamond stands alone: solid for New, outlined for Changed.</span>
       </div>
-      <Info>Both clear after about a second in Details or in the open answer dock, while this window is the one in front. Peeking, hovering, searching and scrolling past leave them, and so does n, which only outlines the next one. Mark all caught up clears every marker, with Undo for 8 seconds.</Info>
+      <Info>Both clear after about a second in Details or in the open answer dock. Peeking and scrolling past leave them, and so does n, which only outlines the next one.</Info>
     </section>
     <section className="hlp-sec" aria-label="Statuses">
       <h3 className="p-label hlp-h">Statuses</h3>

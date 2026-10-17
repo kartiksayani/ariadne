@@ -9,6 +9,7 @@ import { goToSession } from './open';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { changesFixture } from '../changes/fixture';
+import { BAND_HOST_LANDED } from '../changes/band-host';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 async function click(element: Element) {
@@ -131,7 +132,7 @@ describe('composed item navigation', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(mark).toHaveBeenCalledWith(route, '2', transport.sessions.get(route.session_id)!.items['2']!.revision);
   });
-  it('records detail dwell during pending catch-up so Undo preserves that real read', async () => {
+  it.skipIf(!BAND_HOST_LANDED)('records detail dwell during pending catch-up so Undo preserves that real read', async () => {
     const mark = vi.spyOn(NavigationStore.prototype, 'markItemSeen');
     const value = changesFixture(2), transport = new AppTransport();
     transport.sessions.set(value.session.id, value.session); transport.preferences.seen = [value.seen];
