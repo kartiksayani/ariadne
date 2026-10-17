@@ -16,6 +16,7 @@ import type { ItemRoute, SessionPreferences, SessionRef } from './generated/core
 import { NavigationStore, useNavigation } from './state/navigation/store';
 import { viewOf } from './state/navigation/view';
 import { OwnerDraftStore, useOwnerDrafts } from './state/drafts/store';
+import { readFolded } from './state/details/column';
 import { WaitingStore } from './selectors/waiting/store';
 import { NavigationWorkspace, type AdapterChoice, type OpenedSessionView } from './components/navigation/NavigationWorkspace';
 import { NavigationGraph } from './ui/graph/NavigationGraph';
@@ -145,6 +146,8 @@ function Workspace({ application }: { application: Application }) {
   const [detailOpen, setDetailOpen] = useState(true);
   // Counts the owner's choices of an item to show in Details; each one unfolds a folded Details column.
   const [detailAsked, setDetailAsked] = useState(0);
+  // The Details column's fold, as the column reports it: a folded column's item is not being seen.
+  const [detailsFolded, setDetailsFolded] = useState(readFolded);
   const detailDismissedAt = useRef<number | null>(null);
   const [localReveal, setLocalReveal] = useState<RevealedItem | null>(null);
   // "Resume filtered view", a filter change or a fold drops the tree's temporary reveal.
@@ -184,7 +187,8 @@ function Workspace({ application }: { application: Application }) {
   const observeDetail = useCallback(() => {
     if (route && readingId) navigation.markItemSeen(route, readingId, seenRevision ?? undefined);
   }, [navigation, route?.project_id, route?.session_id, readingId, seenRevision]);
-  useSeenDwell((!!conversation || detailOpen) && detailNeedsRead && route && readingId && sessionState?.status === 'ready' && !sessionState.error ? `${key}:${readingId}` : null, seenRevision, observeDetail);
+  // Folded Details shows only its rail, so its item is not seen: the dwell waits, and starts from zero on unfold.
+  useSeenDwell((!!conversation || detailOpen && !detailsFolded) && detailNeedsRead && route && readingId && sessionState?.status === 'ready' && !sessionState.error ? `${key}:${readingId}` : null, seenRevision, observeDetail);
   const openConversation = (itemId: string) => {
     const session = store?.getSnapshot().snapshot?.session;
     if (!session?.items[itemId] || !route) return;
@@ -586,8 +590,8 @@ function Workspace({ application }: { application: Application }) {
         onAgentNotRunning={onAgentNotRunning} onOpenItem={openFromDock}
         onSeen={(itemId, revision) => navigation.markItemSeen(route, itemId, revision)} /> : undefined}
       detailPath={store && selectedId && detailOpen && route ? <DetailPath store={store} itemId={selectedId} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} /> : undefined}
-      detailAsked={detailAsked}
-      detailRail={store && selectedId && detailOpen && route ? <RailStatus store={store} itemId={selectedId} /> : undefined}
+      detailAsked={detailAsked} onDetailsFolded={setDetailsFolded}
+      detailRail={store && selectedId && detailOpen && route ? <RailStatus store={store} itemId={selectedId} seen={readingSeen} /> : undefined}
       detail={conversationOpen ? <div data-covered-detail="" /> : store && selectedId && detailOpen && route ? <ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}
         onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined}
         onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onBring={() => { void queueBring({ ...route, item_id: selectedId }); }}

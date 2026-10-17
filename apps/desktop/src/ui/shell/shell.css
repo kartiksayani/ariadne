@@ -130,6 +130,16 @@
   font-size: calc(15px * var(--text-scale));
 }
 
+/* The board's New diamond (SPEC 3.6): 7px, radius 1.5, in the attention colour. */
+.shell-detail-rail-new {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 1.5px;
+  background: var(--attention);
+  transform: rotate(45deg);
+}
+
 .shell-detail-rail-label {
   font-size: calc(12px * var(--text-scale));
   writing-mode: vertical-rl;

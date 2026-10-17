@@ -59,6 +59,8 @@ export interface NavigationWorkspaceProps {
   readonly detailRail?: ReactNode;
   /** Counts the owner's choices of an item to show; each one unfolds a folded Details column. */
   readonly detailAsked?: number;
+  /** Told whenever Details folds or unfolds: a folded column's item is not being seen. */
+  readonly onDetailsFolded?: (folded: boolean) => void;
   /** Top bar controls owned by the composition: search, views, filter, Recent, text size and theme. */
   readonly chrome?: WorkspaceChrome;
   readonly onCloseDetail?: () => void;
@@ -169,7 +171,7 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   </>;
 }
 
-export function NavigationWorkspace({ store, discovery, dockContent, waitingStore, conversation, detail, detailPath, detailRail, detailAsked, chrome = defaultChrome, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
+export function NavigationWorkspace({ store, discovery, dockContent, waitingStore, conversation, detail, detailPath, detailRail, detailAsked, onDetailsFolded, chrome = defaultChrome, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
   actions: injectedActions, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
   const dock = useDock();
@@ -371,7 +373,7 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
   // The bar's session owns one lifecycle: the connection card, the Map and a page row share its review and Undo.
   const barActions = barSession ? actions.forSession(barSession) : null;
   return <NavigationProvider store={store} waiting={waiting}><SessionLifecycleOwner actions={barActions}>
-    <DetailsColumnProvider saved={shown.detail_width ?? null} unfoldWhen={detailAsked} onSave={width => saveLayout({ detail_width: width })}>
+    <DetailsColumnProvider saved={shown.detail_width ?? null} unfoldWhen={detailAsked} onFolded={onDetailsFolded} onSave={width => saveLayout({ detail_width: width })}>
     <Shell topBar={<WorkspaceTopBar bar={bar} store={barSession} controllers={actions} line={onSession ? lineHost : null}
       setup={setup?.data.kind === 'binding_connect' ? { sessionId: setup.session_id, instruction: setup.data.setup_instruction } : null} />}
     main={center}

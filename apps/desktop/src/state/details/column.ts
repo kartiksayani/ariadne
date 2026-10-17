@@ -85,11 +85,13 @@ const unmeasured = () => 1280;
  * Holds the Details column's width and fold above the shell, so the shell body can lay the column out and the column
  * can resize and fold it. `saved` is `detail_width` from ui.json (null for none); `onSave` writes the owner's width back.
  */
-export function DetailsColumnProvider({ saved = null, onSave, unfoldWhen, children }: {
+export function DetailsColumnProvider({ saved = null, onSave, unfoldWhen, onFolded, children }: {
   readonly saved?: number | null;
   readonly onSave?: (width: number) => void;
   /** Unfolds a folded column each time this changes (not on the first render): the owner chose an item to look at. */
   readonly unfoldWhen?: number;
+  /** Told the fold whenever it changes, and once on mount: what the column shows is only seen while it is unfolded. */
+  readonly onFolded?: (folded: boolean) => void;
   readonly children?: ReactNode;
 }) {
   const viewport = useSyncExternalStore(watchWindow, windowWidth, unmeasured);
@@ -97,8 +99,9 @@ export function DetailsColumnProvider({ saved = null, onSave, unfoldWhen, childr
   const [folded, setFolded] = useState(readFolded);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const waiting = useRef<number | null>(null);
-  const latest = useRef({ saved, onSave });
-  useEffect(() => { latest.current = { saved, onSave }; });
+  const latest = useRef({ saved, onSave, onFolded });
+  useEffect(() => { latest.current = { saved, onSave, onFolded }; });
+  useEffect(() => { latest.current.onFolded?.(folded); }, [folded]);
   // A width waiting for its pause is written when Details goes away, so closing it never loses the choice.
   const flush = useCallback(() => {
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
