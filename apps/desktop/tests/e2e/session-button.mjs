@@ -9,10 +9,11 @@ export function sessionListingState(selector, notes) {
   return !loading && document.querySelector('[role="region"][aria-label="All sessions"]') ? 'settled' : 'loading';
 }
 
-const settle = selector => browser.waitUntil(async () => {
-  const state = await browser.execute(sessionListingState, selector, loadingNotes);
-  return state === 'loading' ? false : state;
-}, { timeout: 20000, interval: 100, timeoutMsg: `All sessions did not finish listing sessions while looking for ${selector}` });
+/** 'found' once the button is listed. A list that has settled without it may still catch up with a session created a
+ * moment ago (slow CI runners draw the page first), so this keeps looking until the timeout rather than at the first settle. */
+const settle = selector => browser.waitUntil(async () =>
+  await browser.execute(sessionListingState, selector, loadingNotes) === 'found' ? 'found' : false,
+{ timeout: 20000, interval: 100, timeoutMsg: `All sessions did not list ${selector} within 20 s` }).catch(() => 'missing');
 
 async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.click(); }
 
