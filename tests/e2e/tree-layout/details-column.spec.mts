@@ -62,7 +62,8 @@ test('Details folds to a 36px rail and unfolds from a click on the rail, keeping
     await expect(rail).toBeVisible();
     // The rail fills the strip and reads "Details" on its side; the content stays out of sight.
     const strip = await box(page, '.shell-detail'), railBox = (await rail.boundingBox())!;
-    expect(railBox.width).toBe(strip.width - 1);
+    // The strip's divider is an inset shadow, as on the board, so the rail spans the whole strip.
+    expect(railBox.width).toBe(strip.width);
     expect(railBox.height).toBeGreaterThan(300);
     expect(await page.locator('.shell-detail-rail-label').evaluate(element => getComputedStyle(element).writingMode)).toBe('vertical-rl');
     await expect(page.locator('.detail-body')).toBeHidden();
