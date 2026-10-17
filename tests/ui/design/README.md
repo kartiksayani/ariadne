@@ -106,3 +106,12 @@ The board is untrusted, and `coverage/` is uploaded publicly. Its context (`boar
 ## The archive
 
 `designs/Ariadne-final-board.zip` holds the two board files (`Ariadne Final Board.dc.html`, `Ariadne Final Board R4.dc.html`), the design-canvas runtime (`support.js`) and `ariadne-ds/` (tokens and CSS). It has no summary, no abandoned options, no fonts and no React or Babel: the runtime is served from the same pinned packages as the `design` project (SRI-checked against `support.js`), and the six fonts that `ariadne-ds/fonts/fonts.css` names from `apps/desktop/public`. The font route serves only those six base names, each checked against a SHA-384 pin in `final-source.mts` (`fontPins`); any other name, a `..` or an encoded one, gets a 404. Before a shot, the loader checks that JetBrains Mono and Phosphor are loaded. Before replacing it, run the private-word and account-identifier scan: `unzip -p designs/Ariadne-final-board.zip | grep -i -c -E -f ~/.config/ariadne/private-words.txt` must print 0, and no email, claude.ai URL or project id may appear.
+
+## The alpha.20 Map states
+
+`final-frames.ts` ends its list with the Map states of alpha.20 (1.3m, 3.1m, 3.6m, 4.1, 4.3, 4.4, 5.1 to 5.7, 7.2, 8.2 to 8.5, 9.2, 9.9, 10.12; an `m` marks the Map half of a state registered above). They are `pending` until the piece that draws them has merged.
+
+- **World data.** `AppFixture.map` (even `{}`) puts the reading state of `final-world.ts` in the app: findings to ack, related and dependent items, the topic brief, the recent trail, and, with `marks` (`base`, `long`, `because`), a seen baseline at 20:40 with the change records behind each Changed row. A state without `map` renders as before. `final-fixtures.ts` `mapWorld` builds it.
+- **Regions.** No region spans the Map's rows: ALPHA20-REPLAN D1 drops the board's per-box row padding, so rows cannot line up (see `mapRegionsById`). The band, the first row, the overlays and the Graph canvas are compared. D12 is why 10.12 compares the "…" menu's first row only.
+- **Side by side.** Every Map state that draws the app also writes the board and the app side by side to `coverage/design/final/side-by-side/<id>-<size>.png`, for the rows' looks. Look at them; they assert nothing.
+- **Steps.** `{ scroll: 'top' }` moves the Map's scroller to its top. A step that names a control the app does not draw yet fails in 20 s (a pending state run with `FINAL_APP=1`).

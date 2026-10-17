@@ -227,7 +227,11 @@ const stateList: readonly FinalState[] = [
   { id: '16.2', part: 'R4-Help', sid: 'h-marks', owner: 'topbar', pending: false, title: 'Markers and statuses', app: { chrome: { overlay: 'help-marks' }, act: [{ key: '?' }, { click: 'Markers and statuses' }] } }
 ];
 
-// The alpha.20 Map. Each state below is the Map half of a board state that is already registered above (1.3, 3.1, 3.6: those hold the
+// The alpha.20 Map. Rule for its regions (details at `mapRegionsById`): no region spans the rows, because the app drops the board's +7/+4
+// per-box row padding (ALPHA20-REPLAN D1) and so no row below the first box can line up; the band, the first row, the overlays and the
+// Graph canvas are compared, and the rows' looks go to side-by-side PNGs for a human. D12 ("Continue here" is left out of the "…" menu)
+// is why 10.12 compares the menu's first row only.
+// Each state below is the Map half of a board state that is already registered above (1.3, 3.1, 3.6: those hold the
 // top bar, the dock and the Details rail) or of one that has no entry yet (4 to 10). They stay `pending` until the piece that draws
 // them has merged, and are numbered like the board; the three whose board state already has an entry above end in `m` ("Map body").
 // Their `act` steps name controls by the plan's wording (ALPHA20-REPLAN D9 to D21); a name the built control spells otherwise is
@@ -279,7 +283,8 @@ const mapStateList: readonly FinalState[] = [
   { id: '9.9', part: 'Markers', sid: 'm-graph', owner: 'graph', pending: true, title: 'On Graph cards: the diamond alone, same shapes',
     app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: marked('base'), act: [{ click: 'Graph' }, { click: 'Fold Details' }] } },
   { id: '10.12', part: 'R4-Dialogs', sid: 'd-tmenu', owner: 'band', pending: true, title: 'The topic’s … menu',
-    app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'Topic actions' }] } }
+    // The board's R4 file draws this menu over the same marked Map as 5.1.
+    app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ click: 'Topic actions' }] } }
 ];
 
 /** The Details column's left edge (its 1px border and the column's ground): where it sits, not what it says (Details' content is release 3). */
@@ -347,8 +352,55 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '15.1': [...topBar([0.002, 0.002])]
 };
 
-/** Provisional: the whole Map column, measured and split into the band, the rows and the popovers below. */
-const mapRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = Object.fromEntries(mapStateList.map(state => [state.id, box('map body', [0, 40, 1280, 720], [0, 40, 900, 570], [0.01, 0.01])]));
+/**
+ * The regions of the Map states above (measured on the board's own frames: coverage/design/final/<id>-<size>-design.png).
+ * The rule (agreed with the maintainer 2026-10-17): no region spans the Map's rows.
+ * - D1: the board pads a row +7 / +4 per box that opens or closes at it; the app does not (ALPHA20-REPLAN D1), so below the first box the rows
+ *   sit up to about 45px higher than the board's and a pixel compare of them could never pass. The rows' looks (tints, slices, thread,
+ *   badges, hover bar) are looked at by eye instead: every Map state also writes the board and the app side by side to
+ *   coverage/design/final/side-by-side/<id>-<size>.png (final.spec.mts).
+ * - Compared instead: the topic band (W3), the first row where it comes before any box (no drift), and the overlays: What changed, Recent,
+ *   Ack all, the filter row, the Back-to-selected pill, the "…" menu. Scrolled or selected states (3.6m, 4.1, 5.6, 8.4) leave the rows out
+ *   altogether: the board scrolls by its own row heights. The Graph states have no rows, so their whole canvas is compared.
+ * - D12: the board's "…" menu has "Continue here", which the app does not show, so the rows under it sit 43px lower in the board: 10.12
+ *   compares the menu's first row only. D8 and D10 are in the band (one line where the board has two, "· N waiting" on strips): a band
+ *   region that differs by the count text alone is reported as such.
+ * Thresholds: 0.01; 0.02 for the overlays that are mostly text (a line a pixel off moves a few percent of a text box).
+ */
+const MAP: Limits = [0.01, 0.01], TEXT: Limits = [0.02, 0.02];
+/** A region that applies to the wide sizes only (a narrow Map that Details squeezes lays its first row out differently). */
+const wideOnly = (name: string, rect: Rect, limit: number): FrameRegion => ({ name, rect, variants: WIDE, threshold: limit });
+const graph = box('graph canvas', [0, 40, 1244, 720], [0, 40, 864, 570], MAP);
+const mapRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
+  '1.3m': graph, '7.2': graph, '9.9': graph,
+  '3.1m': [...box('topic band', [0, 40, 880, 62], [0, 40, 560, 113], MAP), wideOnly('first row', [0, 102, 880, 66], 0.01)],
+  '3.6m': box('topic band', [0, 40, 1244, 42], [0, 40, 864, 62], MAP),
+  '4.1': box('topic band', [0, 40, 880, 62], [0, 40, 560, 113], MAP),
+  '4.3': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 62], MAP), ...box('Ack all popover', [930, 86, 340, 187], [549, 106, 341, 187], TEXT),
+    ...box('first row', [0, 82, 925, 66], [0, 102, 545, 66], MAP)],
+  '4.4': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 62], MAP), ...box('first row', [0, 82, 1280, 66], [0, 102, 900, 66], MAP)],
+  '5.1': [...box('topic band', [0, 40, 1280, 62], [0, 40, 900, 62], MAP), ...box('first row', [0, 102, 1280, 66], [0, 102, 900, 66], MAP)],
+  // The What changed popover covers the band's counts line and the first row's left part: the band is compared down to the popover's top edge.
+  '5.2': [...box('topic band', [0, 40, 1280, 44], [0, 40, 900, 60], MAP), ...box('What changed popover', [12, 84, 540, 662], [12, 100, 540, 497], TEXT),
+    ...box('first row (right of the popover)', [556, 102, 724, 66], [556, 102, 344, 66], MAP)],
+  '5.3': [...box('topic band', [0, 40, 1280, 44], [0, 40, 900, 60], MAP), ...box('What changed popover', [12, 84, 540, 662], [12, 100, 540, 497], TEXT),
+    ...box('first row (right of the popover)', [556, 102, 724, 66], [556, 102, 344, 66], MAP)],
+  '5.4': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 62], MAP), ...box('first row', [0, 82, 1280, 66], [0, 102, 900, 66], MAP)],
+  '5.5': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 60], MAP), ...box('What changed popover', [12, 84, 540, 330], [12, 100, 540, 330], TEXT),
+    ...box('first row (right of the popover)', [556, 82, 724, 66], [556, 102, 344, 66], MAP)],
+  '5.6': box('topic band', [0, 40, 880, 93], [0, 40, 560, 145], MAP),
+  '5.7': [...box('topic band', [0, 40, 880, 93], [0, 40, 560, 145], MAP), wideOnly('first row', [0, 133, 880, 66], 0.01)],
+  '8.2': [...box('filter row', [0, 40, 1280, 40], [0, 40, 900, 40], TEXT), ...box('topic band', [0, 80, 1280, 42], [0, 80, 900, 62], MAP)],
+  '8.3': [...box('topic band (left of the popover)', [0, 40, 800, 42], [0, 40, 562, 62], MAP), ...box('Recent popover', [802, 44, 340, 430], [566, 44, 300, 430], TEXT),
+    ...box('first row (left of the popover)', [0, 82, 800, 66], [0, 102, 562, 66], MAP)],
+  '8.4': box('topic band', [0, 40, 880, 62], [0, 40, 560, 82], MAP),
+  '8.5': [...box('topic band', [0, 40, 880, 62], [0, 40, 560, 114], MAP), ...box('Back to selected pill', [318, 712, 244, 40], [158, 562, 244, 40], MAP),
+    wideOnly('first row', [0, 102, 880, 66], 0.01)],
+  '9.2': [...box('topic band', [0, 40, 1280, 62], [0, 40, 900, 62], MAP), ...box('first row', [0, 102, 1280, 66], [0, 102, 900, 66], MAP)],
+  // The "…" menu, from its first row ("Reply to topic"); the band is compared left of the menu.
+  '10.12': [...box('topic band', [0, 40, 1280, 38], [0, 40, 586, 62], MAP), ...box('menu: Reply to topic', [970, 78, 300, 58], [590, 78, 300, 58], TEXT),
+    ...box('first row', [0, 82, 960, 66], [0, 102, 586, 66], MAP)]
+};
 
 export const finalStates: readonly FinalState[] = [...stateList.map(state => regionsById[state.id] ? { ...state, regions: regionsById[state.id]! } : state),
   ...mapStateList.map(state => ({ ...state, regions: mapRegionsById[state.id]! }))];

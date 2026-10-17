@@ -8,7 +8,7 @@ import { createServer } from 'node:http';
 import { createServer as createNetServer, type AddressInfo } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { captureFrame, crop, type CaptureInput, type CompareResult, type Region } from './compare.mts';
+import { captureFrame, crop, sideBySide, type CaptureInput, type CompareResult, type Region } from './compare.mts';
 import { boardBrowserArgs, boardContext, boardFrame, labelHeight, launchBoardBrowser, openBoard, renderBoard, settle } from './final-board.mts';
 import { finalNow, finalStates, notYet, regionsFor, unhonoured, variantNames, variants, type FinalState, type Step, type Variant } from './final-frames';
 import { cspReportPath, finalMembers, fontFile, fontPins, runtimeHashes } from './final-source.mts';
@@ -167,6 +167,11 @@ for (const state of finalStates) for (const variant of variantNames) {
     const denied: string[] = [], context = await appContext(browser, origin, variant, denied);
     try {
       const app = await renderApp(await context.newPage(), origin, state, variant);
+      // A Map state also leaves the board and the app side by side, for the rows' looks the regions leave out (final-frames.ts, Map section).
+      if (state.app.map) {
+        mkdirSync(resolve(output, 'side-by-side'), { recursive: true });
+        writeFileSync(resolve(output, 'side-by-side', `${id}.png`), await sideBySide(canvas, design, app));
+      }
       const { report, ...score } = scoring(state, variant, state.pending);
       await captureFrame(canvas, { id, design, app, directory: output, masks: corners(width, height), ...score,
         report: result => ({ pending: state.pending, owner: state.owner, size: { width: result.width, height: result.height }, unhonoured: notHonoured, ...report(result) }),
