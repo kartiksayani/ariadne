@@ -19,6 +19,7 @@ export type Theme = 'light' | 'dark';
 export interface FrameContext { readonly narrow: boolean; readonly theme: Theme }
 
 const noop = () => undefined;
+const copied = () => Promise.resolve(true);
 const live: ConnectionView = { kind: 'live', where: 'Claude Code in iTerm window 1', agent: 'Claude Code' };
 
 export function barProps({ narrow, theme }: FrameContext, over: Partial<TopBarProps> = {}): TopBarProps {
@@ -66,7 +67,7 @@ export const renderers: Record<string, (context: FrameContext) => ReactNode> = {
 };
 
 const actions: ConnectionCardActions = {
-  onSending: noop, onHowToConnect: noop, onTryAgain: noop, onShowFile: noop, onShowFolder: noop, onClose: noop, onReopen: noop, onCopyId: noop, onCopyCommand: noop, onCopyInstruction: noop,
+  onSending: noop, onHowToConnect: noop, onTryAgain: noop, onShowFile: noop, onShowFolder: noop, onClose: noop, onReopen: noop, onCopyId: copied, onCopyCommand: copied, onCopyInstruction: copied,
 };
 const states: Record<string, ConnectionView> = {
   none: { kind: 'none', agent: 'Claude Code' },
@@ -139,7 +140,7 @@ renderers.archive = context => <>{pageBar(context, { archive: { active: true, on
     topics={[{ id: 't', kind: 'topic', name: 'Old cache metrics', sub: 'From “cache PR review” · 6 items', when: 'Archived today 19:40' }]} /></>;
 renderers['first-run'] = context => <>
   <TopBar {...barProps(context, { variant: 'first-run', connection: undefined })} />
-  <FirstRun command="/ariadne-connect" onCopyCommand={noop} onCopyInstruction={noop} /></>;
+  <FirstRun command="/ariadne-connect" onCopyCommand={copied} onCopyInstruction={copied} onRegister={noop} /></>;
 renderers['name-session'] = context => <>
   <TopBar {...barProps(context, { sessionName: 'Claude Code · 14:02' })} />
   <NameSessionDialog unnamedAs="the Claude Code session from today 14:02" initialName="cache PR review" initialDescription="Reviewer’s comments on the SDK cache PR" onSave={noop} onCancel={noop} />

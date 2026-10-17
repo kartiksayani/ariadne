@@ -87,10 +87,11 @@ export interface ConnectionCardActions {
   /** Close the session (read-only until reopened). */
   readonly onClose?: () => void;
   readonly onReopen?: () => void;
-  readonly onCopyId?: () => void;
-  /** The "How to connect" steps of the line above the Map: copy `/ariadne-connect`, or the Codex setup instruction. */
-  readonly onCopyCommand?: () => void;
-  readonly onCopyInstruction?: () => void;
+  /** Copies the session reference; resolves to whether the write landed. The button says "Copied" only when it did. */
+  readonly onCopyId?: () => Promise<boolean>;
+  /** The "How to connect" steps of the line above the Map: copy `/ariadne-connect`, or the Codex setup instruction. Each resolves to whether the write landed. */
+  readonly onCopyCommand?: () => Promise<boolean>;
+  readonly onCopyInstruction?: () => Promise<boolean>;
 }
 
 export interface ConnectionCardProps {

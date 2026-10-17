@@ -11,6 +11,8 @@ export type TreeRemoveTarget = Extract<RemoveTarget, { kind: 'item' | 'topic' }>
 export interface FocusedItem { readonly item: { readonly id: string; readonly status: string; readonly topic_id: string }; readonly target: ItemRoute }
 export interface ItemIntentApp {
   readonly store: boolean;
+  /** A page (Projects, All sessions, Archive) shows: the Map's selection is hidden behind it, so item keys and Esc do nothing. */
+  readonly onPage: boolean;
   readonly toggleFilters: () => void;
   /** The current view's selected item: the conversation's item in the bigger view, else the Map's selection. Never the row under the pointer. */
   readonly focused: () => FocusedItem | null;
@@ -27,11 +29,11 @@ export interface ItemIntentApp {
 }
 
 /** The App root's keys: every intent key, plus Esc and the option digits. */
-export function workspaceKeys(app: Pick<ItemIntentApp, 'focused' | 'focusOwner' | 'closeDetail' | 'closeConversation' | 'clearFilters'>): WorkspaceHandlers<HTMLDivElement> {
+export function workspaceKeys(app: Pick<ItemIntentApp, 'focused' | 'focusOwner' | 'closeDetail' | 'closeConversation' | 'clearFilters' | 'onPage'>): WorkspaceHandlers<HTMLDivElement> {
   return {
     ...intentKeyHandlers<HTMLDivElement>(),
-    // Esc closes the answer box first (the editor stops it), then detail, then clears filters.
-    escape: () => { if (app.closeConversation) { app.closeConversation(); return true; } app.closeDetail(); app.clearFilters?.(); return false; },
+    // Esc closes the answer box first (the editor stops it), then detail, then clears filters. On a page it is not the Map's.
+    escape: () => { if (app.onPage) return false; if (app.closeConversation) { app.closeConversation(); return true; } app.closeDetail(); app.clearFilters?.(); return false; },
     choose: intent => {
       const focused = app.focused();
       if (!focused || focused.item.status !== 'waiting_on_me' || intent.kind !== 'choose') return false;

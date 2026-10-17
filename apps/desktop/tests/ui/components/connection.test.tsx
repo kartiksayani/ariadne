@@ -7,8 +7,8 @@ import type { ConnectionCardActions, ConnectionKind, ConnectionView } from '../.
 afterEach(cleanup);
 
 const everything = (): Required<ConnectionCardActions> => ({
-  onSending: vi.fn(), onHowToConnect: vi.fn(), onTryAgain: vi.fn(), onShowFile: vi.fn(), onShowFolder: vi.fn(), onClose: vi.fn(), onReopen: vi.fn(), onCopyId: vi.fn(),
-  onCopyCommand: vi.fn(), onCopyInstruction: vi.fn(),
+  onSending: vi.fn(), onHowToConnect: vi.fn(), onTryAgain: vi.fn(), onShowFile: vi.fn(), onShowFolder: vi.fn(), onClose: vi.fn(), onReopen: vi.fn(),
+  onCopyId: vi.fn(() => Promise.resolve(true)), onCopyCommand: vi.fn(() => Promise.resolve(true)), onCopyInstruction: vi.fn(() => Promise.resolve(true)),
 });
 const kinds: ConnectionKind[] = ['live', 'loading', 'none', 'off', 'closed', 'reconnect', 'unreadable', 'stale', 'unsaved'];
 const view = (kind: ConnectionKind, patch: Partial<ConnectionView> = {}): ConnectionView => ({ kind, agent: 'Claude Code', where: 'Claude Code in iTerm window 1', ...patch });
@@ -102,12 +102,12 @@ describe('ConnectionCard', () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
-  it('Copy session ID stays open and says Copied for a moment', () => {
+  it('Copy session ID stays open and says Copied for a moment', async () => {
     vi.useFakeTimers();
     try {
       const a = everything(), onDismiss = vi.fn();
       render(<ConnectionCard view={view('live')} actions={a} onDismiss={onDismiss} />);
-      fireEvent.click(screen.getByRole('button', { name: 'Copy session ID' }));
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy session ID' })); });
       expect(a.onCopyId).toHaveBeenCalledTimes(1);
       expect(onDismiss).not.toHaveBeenCalled();
       expect(screen.getByRole('button', { name: 'Copied' })).toBeTruthy();
@@ -150,15 +150,37 @@ describe('ConnectionLine', () => {
     expect(a.onSending).toHaveBeenCalledTimes(1);
   });
 
-  it('Not connected folds its steps until asked, then shows both commands with their Copy buttons', () => {
+  it('a copy that fails says so and never says Copied (the card and both steps of the line)', async () => {
+    vi.useFakeTimers();
+    try {
+      const failing = { onCopyId: vi.fn(() => Promise.resolve(false)), onCopyCommand: vi.fn(() => Promise.reject(new Error('no clipboard'))),
+        onCopyInstruction: vi.fn(() => Promise.resolve(false)) };
+      const card = render(<ConnectionCard view={view('live')} actions={failing} onDismiss={vi.fn()} />);
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy session ID' })); });
+      expect(screen.getByRole('button', { name: 'Couldn’t copy' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Copied' })).toBeNull();
+      act(() => { vi.advanceTimersByTime(2100); });
+      expect(screen.getByRole('button', { name: 'Copy session ID' })).toBeTruthy();
+      card.unmount();
+      render(<ConnectionLine view={view('none')} actions={failing} />);
+      fireEvent.click(screen.getByRole('button', { name: 'How to connect' }));
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy' })); });
+      expect(screen.getByRole('button', { name: 'Couldn’t copy' })).toBeTruthy();
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy instruction' })); });
+      expect(screen.getAllByRole('button', { name: 'Couldn’t copy' })).toHaveLength(2);
+      expect(screen.queryByRole('button', { name: 'Copied' })).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('Not connected folds its steps until asked, then shows both commands with their Copy buttons', async () => {
     const a = everything();
     render(<ConnectionLine view={view('none')} actions={a} />);
     expect(screen.queryByText('/ariadne-connect')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'How to connect' }));
     expect(screen.getByText('/ariadne-connect')).toBeTruthy();
     expect(screen.getByText('Connecting sends nothing to the model. The dot by the session name turns green when it’s done.')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Copy instruction' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy instruction' })); });
     expect(a.onCopyCommand).toHaveBeenCalledTimes(1);
     expect(a.onCopyInstruction).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: 'Hide steps' }));

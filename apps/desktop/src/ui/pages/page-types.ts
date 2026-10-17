@@ -110,8 +110,11 @@ export interface ArchiveListProps {
 export interface FirstRunProps {
   /** The command to run in the Claude Code conversation. */
   readonly command: string;
-  readonly onCopyCommand: () => void;
-  readonly onCopyInstruction: () => void;
+  /** Resolves to whether the write landed: the button says "Copied" only after one did, "Couldn't copy" otherwise. */
+  readonly onCopyCommand: () => Promise<boolean>;
+  /** Only with a setup receipt in hand. Without one the Codex step offers Register a project instead. */
+  readonly onCopyInstruction?: () => Promise<boolean>;
+  readonly onRegister: () => void;
 }
 
 export interface WaitingHereChipProps {

@@ -30,6 +30,8 @@ export interface ArchivePageProps {
   readonly snapshots: ReadonlyMap<string, Immutable<Session>>;
   readonly now: number;
   readonly disabled: boolean;
+  /** Opening a session waits only for a Refresh or the first load, not for an owner write; it queues behind the write. */
+  readonly navigationDisabled?: boolean;
   readonly back?: PageBack;
   /** A row's name: open that session (archived, to read). */
   readonly onOpenSession: (route: SessionRef) => void;
@@ -38,7 +40,7 @@ export interface ArchivePageProps {
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
-export function ArchivePage({ navigation, actions, projects, sessions, snapshots, now, disabled, back, onOpenSession, onRemove }: ArchivePageProps) {
+export function ArchivePage({ navigation, actions, projects, sessions, snapshots, now, disabled, navigationDisabled = disabled, back, onOpenSession, onRemove }: ArchivePageProps) {
   const [removing, setRemoving] = useState<{ subject: RemoveSubject; target: RemoveTarget } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   /** Rows restored in this visit, as they were, so they stay in place with their new words. */
@@ -87,7 +89,7 @@ export function ArchivePage({ navigation, actions, projects, sessions, snapshots
   };
   /** Opens the session to read; it stays archived. Restore is its own button. */
   const open = (row: ArchiveRowData) => {
-    if (disabled) return;
+    if (navigationDisabled) return;
     if (row.kind === 'topic') {
       const topic = topics.find(value => `${sessionKey(value.source)}:${value.topic.id}` === row.id);
       if (topic) onOpenSession(topic.source);

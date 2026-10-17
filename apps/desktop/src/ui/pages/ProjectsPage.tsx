@@ -24,6 +24,8 @@ export interface ProjectsPageProps {
   readonly back?: PageBack;
   /** While navigation saves, opening, registering and removing wait. */
   readonly disabled?: boolean;
+  /** Opening a project or a session waits only for a Refresh or the first load, not for an owner write; it queues behind the write. */
+  readonly navigationDisabled?: boolean;
   readonly discovery?: DiscoveryController;
   readonly onOpen: (projectId: string) => void;
   readonly onOpenSession: (route: SessionRef) => void;
@@ -40,8 +42,9 @@ function Discover({ controller, register, sessions }: { controller: DiscoveryCon
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
-export function ProjectsPage({ projects, sessions, snapshots, now, currentSession, back, disabled = false, discovery, onOpen, onOpenSession, onRegister, onRemove, children }: ProjectsPageProps) {
+export function ProjectsPage({ projects, sessions, snapshots, now, currentSession, back, disabled = false, navigationDisabled = disabled, discovery, onOpen, onOpenSession, onRegister, onRemove, children }: ProjectsPageProps) {
   const unless = <A extends unknown[]>(run: (...args: A) => void) => (...args: A) => { if (!disabled) run(...args); };
+  const unlessNavigating = <A extends unknown[]>(run: (...args: A) => void) => (...args: A) => { if (!navigationDisabled) run(...args); };
   const [removing, setRemoving] = useState<{ id: string; subject: Extract<RemoveSubject, { kind: 'project' }> } | null>(null);
   const [discovering, setDiscovering] = useState(false);
   const cards = projects.map(project => projectCardData(project, sessions, now, currentSession));
@@ -55,7 +58,7 @@ export function ProjectsPage({ projects, sessions, snapshots, now, currentSessio
   };
   return <>
     <ProjectsCards<SessionRef> back={back} sub={`${plural(projects.length, 'project')} · ${plural(waiting, 'question')} waiting on you`} projects={cards}
-      onOpenProject={unless(card => onOpen(card.id))} onOpenSession={unless((_card, session) => onOpenSession(session.route))}
+      onOpenProject={unlessNavigating(card => onOpen(card.id))} onOpenSession={unlessNavigating((_card, session) => onOpenSession(session.route))}
       onRegister={unless(() => onRegister(''))} onDiscover={unless(() => { if (discovery) setDiscovering(true); })} onRemoveProject={unless(card => remove(card.id))} />
     {children}
     {discovering && discovery && <Dialog label="Discover sessions" width={620} onCancel={() => setDiscovering(false)}>

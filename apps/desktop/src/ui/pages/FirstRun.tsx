@@ -1,11 +1,11 @@
 // First run (SPEC 5.15, "No projects yet"): what Ariadne is, three steps to connect a first session, and a quiet line
 // that it is waiting. Pure props in, callbacks out (contract C8).
-import { useCopied } from '../parts/parts';
+import { copyIcon, copyLabel, useCopy } from '../parts/parts';
 import type { FirstRunProps } from './page-types';
 import './first-run.css';
 
-export function FirstRun({ command, onCopyCommand, onCopyInstruction }: FirstRunProps) {
-  const [copied, markCopied] = useCopied(), [instruction, markInstruction] = useCopied();
+export function FirstRun({ command, onCopyCommand, onCopyInstruction, onRegister }: FirstRunProps) {
+  const [copied, copyCommand] = useCopy(), [instruction, copyInstruction] = useCopy();
   return <div className="fr" role="region" aria-label="No projects yet">
     <div className="fr-col">
       <h1 className="fr-title">No projects yet</h1>
@@ -21,11 +21,15 @@ export function FirstRun({ command, onCopyCommand, onCopyInstruction }: FirstRun
             <span>In the Claude Code conversation, run:</span>
             <span className="fr-line">
               <code className="fr-code">{command}</code>
-              <button type="button" className="p-btn p-btn-copy" onClick={() => { onCopyCommand(); markCopied(); }}><i className={copied ? 'ph ph-check' : 'ph ph-copy'} aria-hidden="true" />{copied ? 'Copied' : 'Copy'}</button>
+              <button type="button" className="p-btn p-btn-copy" onClick={() => { copyCommand(onCopyCommand); }}><i className={copyIcon(copied)} aria-hidden="true" />{copyLabel(copied, 'Copy')}</button>
             </span>
-            <span className="fr-alt">Using Codex? Paste the setup instruction into its thread once.
-              <button type="button" className="p-btn p-btn-copy" onClick={() => { onCopyInstruction(); markInstruction(); }}><i className={instruction ? 'ph ph-check' : 'ph ph-copy'} aria-hidden="true" />{instruction ? 'Copied' : 'Copy instruction'}</button>
-            </span>
+            {onCopyInstruction
+              ? <span className="fr-alt">Using Codex? Paste the setup instruction into its thread once.
+                <button type="button" className="p-btn p-btn-copy" onClick={() => { copyInstruction(onCopyInstruction); }}><i className={copyIcon(instruction)} aria-hidden="true" />{copyLabel(instruction, 'Copy instruction')}</button>
+              </span>
+              : <span className="fr-alt">Using Codex? Register your project’s folder first; Ariadne then gives you a setup instruction to paste into its thread once.
+                <button type="button" className="p-btn p-btn-copy" onClick={onRegister}><i className="ph ph-plus" aria-hidden="true" />Register a project</button>
+              </span>}
           </div>
         </li>
         <li className="fr-step">

@@ -283,7 +283,10 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
     hiddenSession: route => hidden.session(route) });
   // Opens a session, then the dock at one of its questions (C6: the dock opens it once that session loads).
   const openAt = (route: SessionRef, itemId?: string) => {
-    void store.navigate({ kind: 'session', session: route }).then(saved => { if (saved && itemId) dock.openAt({ route, itemId }); });
+    void store.navigate({ kind: 'session', session: route });
+    // The 1 s handoff `navigate` returns after is for the click; the dock waits for the navigation itself, as reveals do,
+    // so an owner write held longer than that still ends with the dock open on the question.
+    if (itemId) void store.getNavigationCompletion(store.getNavigationRequest()).then(saved => { if (saved) dock.openAt({ route, itemId }); });
   };
   const returnToWaiting = () => {
     if (!last) return;
@@ -323,21 +326,20 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
     && <p className="pw-page-note" role="status">{state.error ? 'Sessions are unavailable for this view.' : 'Loading sessions…'}</p>;
   // The setup instruction a Codex thread needs comes from the last connect receipt, when there is one.
   const instruction = setup?.data.kind === 'binding_connect' ? setup.data.setup_instruction : null;
-  const copyWords = (text: string, done: string) => {
-    void copyText(text).then(() => notices.push({ icon: 'ph ph-check-circle', text: done }),
-      () => notices.push({ icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)', tone: 'problem', text: 'Copy failed. Try again.' }));
-  };
+  /** Copies and says so in a notice; resolves to whether the write landed, for the button's own label. */
+  const copyWords = (text: string, done: string) => copyText(text).then(() => { notices.push({ icon: 'ph ph-check-circle', text: done }); return true; },
+    () => { notices.push({ icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)', tone: 'problem', text: 'Copy failed. Try again.' }); return false; });
   const page = view.kind === 'page' && view.page === 'archive'
-    ? <ArchivePage navigation={store} actions={actions} projects={projects} sessions={sessions} snapshots={snapshots} now={at} disabled={disabled} back={back} onOpenSession={openSession} onRemove={onRemoveTarget} />
+    ? <ArchivePage navigation={store} actions={actions} projects={projects} sessions={sessions} snapshots={snapshots} now={at} disabled={disabled} navigationDisabled={navigationDisabled} back={back} onOpenSession={openSession} onRemove={onRemoveTarget} />
     : firstRun ? <FirstRun command="/ariadne-connect" onCopyCommand={() => copyWords('/ariadne-connect', 'Command copied.')}
-      onCopyInstruction={() => { if (instruction) copyWords(instruction, 'Instruction copied.'); else register(''); }} />
+      onCopyInstruction={instruction ? () => copyWords(instruction, 'Instruction copied.') : undefined} onRegister={() => register('')} />
     : view.kind === 'session' ? null : view.page === 'projects'
-    ? <ProjectsPage currentSession={last} projects={projects} sessions={sessions} snapshots={snapshots} now={at} back={back} disabled={disabled}
+    ? <ProjectsPage currentSession={last} projects={projects} sessions={sessions} snapshots={snapshots} now={at} back={back} disabled={disabled} navigationDisabled={navigationDisabled}
       discovery={discovery} onOpen={openProject} onOpenSession={openSession} onRegister={register} onRemove={onRemoveTarget}>
       {state.status === 'ready' && projects.length === 0 && <p className="pw-page-note">No registered projects. Register a project to connect an existing session.</p>}
     </ProjectsPage>
     : <SessionLists navigation={store} actions={actions} projects={selectedProject ? [selectedProject] : pageProjectId ? [] : projects} single={!!pageProjectId}
-      sessions={sessions} currentSession={last} now={at} narrow={narrow} disabled={disabled} back={back} onOpenArchive={() => showPage('archive')} onOpenSession={openSession}
+      sessions={sessions} currentSession={last} now={at} narrow={narrow} disabled={disabled} navigationDisabled={navigationDisabled} back={back} onOpenArchive={() => showPage('archive')} onOpenSession={openSession}
       notes={setupCard}>
       {connectExisting}
       {sessionNote}
