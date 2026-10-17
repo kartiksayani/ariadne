@@ -8,7 +8,6 @@ import { AppTransport, route } from '../../../apps/desktop/tests/ui/app/transpor
 import { ItemRow, type RowAction } from '../../../apps/desktop/src/ui/tree/ItemRow';
 import { immutable } from '../../../apps/desktop/src/data';
 import type { ItemRow as Row } from '../../../apps/desktop/src/ui/tree/model';
-import { SessionBar } from '../../../apps/desktop/src/ui/tree/SessionBar';
 import { Shell } from '../../../apps/desktop/src/ui/shell/Shell';
 import { DetailsColumn } from '../../../apps/desktop/src/ui/shell/DetailsColumn';
 import { DockInsetProvider } from '../../../apps/desktop/src/ui/shell/dockInset';
@@ -110,8 +109,6 @@ function DetailsFixture({ dock, bigger }: { dock: number; bigger: boolean }) {
 const query = new URLSearchParams(window.location.search);
 createRoot(document.getElementById('root')!).render(query.has('details') ? <DetailsFixture dock={Number(query.get('dock') ?? 0)} bigger={query.has('bigger')} />
   : query.has('grid') ? <ActionGridFixture /> : query.has('bar')
-  ? <div className="tree-column" style={{ width: 220 }}><SessionBar busy={false} onClose={() => {}} bar={{
-    sessionId: route.session_id, title: 'A long session name that needs to fit in a narrow column', secondary: null,
-    description: null, named: true, agent: 'codex', where: 'iTerm', meta: '12 topics', running: false,
-    connection: 'not_running', closed: true, archived: true,
-  }} /></div> : <DesktopApp service={createDesktopService(new TreeLayoutTransport({ gettingAround: query.has('nav'), changes: query.has('changes') }))} />);
+  // The session bar is gone with the tabs (alpha.19 navigation); its menu moved to the top bar's connection card. The
+  // e2e migrator moves `?bar` and its test onto the card.
+  ? <p>The session bar was removed; this fixture awaits its connection-card replacement.</p> : <DesktopApp service={createDesktopService(new TreeLayoutTransport({ gettingAround: query.has('nav'), changes: query.has('changes') }))} />);

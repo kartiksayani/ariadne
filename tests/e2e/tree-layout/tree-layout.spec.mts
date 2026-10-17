@@ -89,13 +89,14 @@ async function openTree(page: Page, origin: string, query = '') {
   await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
   await page.setViewportSize({ width: 1000, height: 700 });
   await page.goto(`${origin}/tests/e2e/tree-layout/fixture.html${query}`);
-  await page.locator('[data-shell-tab="projects"]').click();
-  await page.locator('.pw-project-open').first().click();
+  // No tabs: the switcher's All sessions lists the session (as tests/ui/app/open.ts `goToSession`).
+  await page.locator('[data-popover-trigger="switcher"]').click();
+  await page.getByRole('dialog', { name: 'Switch session or project' }).getByRole('button', { name: 'All sessions' }).click();
   const session = page.locator('button[data-session-id]').first();
   await expect(session).toBeEnabled(); await session.click();
-  await expect(page.locator('.tree-session-bar').getByRole('button', { name: 'Session actions' })).toBeEnabled();
+  await expect(page.locator('[data-popover-trigger="connection"]')).toBeVisible();
   await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-status', 'ready');
-  await expect(page.locator('.tree-session-bar')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-busy', 'false');
 }
 
 async function expectRevealedRow(row: Locator) {
@@ -666,11 +667,10 @@ test('keeps the Map still while Details folds, unfolds and narrows the Map by it
   } finally { await server.close(); }
 });
 
-// The Tree keeps the reading row exactly through a width change, except where the topic bar unwraps to one line as the Map
-// widens (End, then Home): the row then ends about 20px below where it was. The same drift is on the shell-seams base, where
-// it is larger, so it is the Tree's hold (ui/tree/TreeView.tsx `holding` and `remembering`), not the column. Remove `fixme`
-// when the hold counts the bar's new height.
-test.fixme('keeps the Map still while Details widens the Map back across the topic bar unwrapping', async ({ page }) => {
+// Widening the Map back (End, then Home) reflows the rows so that another topic's sticky bar, wrapped to a different height,
+// sits at the reading edge until the row is back; the Tree's hold (ui/tree/TreeView.tsx `holding`) settles against the bar
+// the row ends under.
+test('keeps the Map still while Details widens the Map back across the topic bar unwrapping', async ({ page }) => {
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
     logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
   try {
@@ -681,5 +681,38 @@ test.fixme('keeps the Map still while Details widens the Map back across the top
     await edge.focus();
     await holds(() => page.keyboard.press('End'));
     await holds(() => page.keyboard.press('Home'));
+  } finally { await server.close(); }
+});
+
+// The Map never moves on its own (alpha.19 Details decision): every way the Map's width changes, in both directions, leaves
+// the row the owner was reading where it was below the sticky topic bar, and the body never scrolls sideways. One row per
+// trigger; `before` brings the column to where the trigger starts (not measured).
+const widthTriggers: ReadonlyArray<readonly [name: string, before: (page: Page, edge: Locator) => Promise<void>, change: (page: Page, edge: Locator) => Promise<void>]> = [
+  ['fold widens the Map', async () => {}, page => page.getByRole('button', { name: 'Fold Details' }).click()],
+  ['unfold narrows the Map', page => page.getByRole('button', { name: 'Fold Details' }).click(), page => page.getByRole('button', { name: 'Show Details' }).click()],
+  ['dragging the edge left narrows the Map', async () => {}, (page, edge) => dragEdge(page, edge, -90)],
+  ['dragging the edge right widens the Map', async (page, edge) => { await edge.focus(); await page.keyboard.press('End'); }, (page, edge) => dragEdge(page, edge, 120)],
+  ['End narrows the Map to its least', async () => {}, async (page, edge) => { await edge.focus(); await page.keyboard.press('End'); }],
+  ['Home widens the Map back, unwrapping the topic bar', async (page, edge) => { await edge.focus(); await page.keyboard.press('End'); },
+    async (page, edge) => { await edge.focus(); await page.keyboard.press('Home'); }],
+  ['a narrower window narrows the Map', async () => {}, page => page.setViewportSize({ width: 900, height: 700 })],
+  ['a wider window widens the Map, across the Details breakpoint', async () => {}, page => page.setViewportSize({ width: 1280, height: 700 })],
+];
+async function dragEdge(page: Page, edge: Locator, dx: number) {
+  const handle = (await edge.boundingBox())!, x = handle.x + handle.width / 2, y = handle.y + handle.height / 2;
+  await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + dx, y, { steps: 5 }); await page.mouse.up();
+}
+for (const [name, before, change] of widthTriggers) test(`keeps the reading row still when ${name}`, async ({ page }) => {
+  const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
+    logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
+  try {
+    await server.listen();
+    const address = (server.httpServer as Server).address();
+    if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
+    const { holds, edge } = await readingSetup(page, `http://127.0.0.1:${address.port}`);
+    await before(page, edge);
+    // Let the column's own change land before the measured one starts.
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await holds(() => change(page, edge));
   } finally { await server.close(); }
 });

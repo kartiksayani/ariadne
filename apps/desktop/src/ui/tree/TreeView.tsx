@@ -678,9 +678,27 @@ export function TreeView(props: TreeViewProps) {
   const [focusExitMissing, setFocusExitMissing] = useState(false);
   const placed = useRef<Anchor | null>(null);
   placed.current = anchor;
+  /** The scroller width `holding` last held the reading row at. */
+  const previousWidth = useRef<number | null>(null);
+  /**
+   * Puts the held row back at its offset below the reading edge. The sticky topic bar at that edge belongs to whichever
+   * topic is under it at this scroll position: after a width change, rows reflow and another topic's bar (wrapped to a
+   * different height) can sit there until the row is back, so settle against the bar the row ends under, measuring it
+   * afresh on each of a few passes.
+   */
+  const restoreHeld = (box: HTMLDivElement, before: { readonly offset: number }, element: HTMLElement) => {
+    for (let pass = 0; pass < 3; pass++) {
+      const delta = element.getBoundingClientRect().top - readingTop() - before.offset;
+      if (Math.abs(delta) < 1) return;
+      box.scrollTop += delta;
+    }
+  };
   const remembering = () => {
     const box = scroller.current;
     if (!box) { held.current = null; return; }
+    // A new width not yet held: a scroll event is handled before the frame's resize observers, so it can arrive first.
+    // The width change is `holding`'s (it keeps the row below the topic bar the row ends under), and it remembers after.
+    if (previousWidth.current !== null && previousWidth.current !== box.getBoundingClientRect().width) { holding(); return; }
     const before = held.current, element = before ? elements.current.get(before.key) : undefined;
     // An observer, layout effect or delayed programmatic scroll event can arrive between
     // reflows. With no owner scroll, restore the held row before adopting the new layout.
@@ -738,7 +756,6 @@ export function TreeView(props: TreeViewProps) {
   };
   layoutState.current = { selectedId, reveal, detailOpen };
   const previousLayout = useRef(layoutState.current);
-  const previousWidth = useRef<number | null>(null);
   const holding = () => {
     const previous = previousLayout.current, current = layoutState.current;
     previousLayout.current = current;
@@ -759,10 +776,7 @@ export function TreeView(props: TreeViewProps) {
     const box = scroller.current, before = held.current, element = before ? elements.current.get(before.key) : undefined;
     // At the very top the owner wants the newest rows; a different scroll position means the view was moved on purpose
     // (a scroll, a reveal, the keyboard), and the opening placement holds its own row until the owner steers.
-    if (box && before && element && before.scrollTop > 0 && box.scrollTop === before.scrollTop && (settled.current || !placed.current)) {
-      const delta = element.getBoundingClientRect().top - readingTop() - before.offset;
-      if (Math.abs(delta) >= 1) box.scrollTop += delta;
-    }
+    if (box && before && element && before.scrollTop > 0 && box.scrollTop === before.scrollTop && (settled.current || !placed.current)) restoreHeld(box, before, element);
     remembering();
   };
   useLayoutEffect(holding);
