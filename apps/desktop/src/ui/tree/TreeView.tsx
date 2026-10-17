@@ -18,12 +18,13 @@ import { useSupervisorHealth } from '../../components/bindings/health';
 import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { useIntents } from '../intents';
 import { notices as noticeStore } from '../pages/notices';
-import { chipsOf, closed, collapsedNote, mapChanges, nextMarkedItem, oldestWaiting, parentKey, sessionBar, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
-import { HiddenRow } from './HiddenRow';
+import { chipsOf, closed, collapsedNote, mapChanges, nextMarkedItem, oldestWaiting, parentKey, sessionBar, stripOf, toggleChip, treeModel, type Chip, type ItemRow as ItemRowModel, type Row } from './model';
+import { Strip } from './Strip';
 import { hiddenGroupKey, hiddenGroupsFor, hiddenSource } from './hidden';
 import { HideIcon } from '../shared/HideIcon';
 import { ackTarget, ackTitle, useAck } from '../shared/ack';
-import { Guides, ItemRow, type RowAction } from './ItemRow';
+import { Guides } from './Guides';
+import { ItemRow, type RowAction } from './ItemRow';
 import { TopicRow, type TopicAction } from './TopicRow';
 import { TopicReply } from '../answer/TopicReply';
 import { StuckNote } from '../answer/StuckNote';
@@ -974,7 +975,7 @@ export function TreeView(props: TreeViewProps) {
         <Guides guides={row.guides.filter(guide => guide.kind === 'line').map(guide => ({ ...guide, fromBullet: false }))} />
         {props.topicContent(row.topic.id)}</div>}
       {items.map(row => row.kind === 'hidden'
-        ? <HiddenRow key={row.key} row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleHiddenGroup} />
+        ? <Strip key={row.key} variant="hidden" row={stripOf(row)} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleHiddenGroup} />
         : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={focusDisabled} closedReason={session ? sessionAnswerBlocked(session) : undefined}
         changeMarker={changes?.markers.get(row.key)} nextUnseen={nextTarget?.id === row.key} nextUnseenPulse={nextPulse && nextTarget?.id === row.key}
         note={row.collapsed ? collapsedNote(row.collapsed) : null}

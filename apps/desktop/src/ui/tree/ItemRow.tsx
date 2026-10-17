@@ -10,22 +10,14 @@ import { shortLabel } from '../shared/short';
 import { StatusBadge } from '../shared/StatusBadge';
 import { ackTitle } from '../shared/ack';
 import { SessionClosedChip } from '../shared/SessionClosedChip';
-import { closed, visual, type ChangeMarker, type Guide, type ItemRow as Row } from './model';
+import { closed, visual, type ChangeMarker, type ItemRow as Row } from './model';
 import { measurePreviewLines } from './clamp';
+import { Guides } from './Guides';
+import { Strip } from './Strip';
 
 export interface RowAction { readonly icon: string; readonly title: string; readonly run: () => void; readonly glyph?: ReactNode; readonly disabled?: boolean; readonly persistent?: boolean }
 
 const neutral = (percent: number) => `color-mix(in srgb, var(--color-text) ${percent}%, transparent)`;
-
-export function Guides({ guides }: { guides: readonly Guide[] }) {
-  return <>{guides.map((guide, index) => {
-    const color = guide.on ? 'var(--color-accent)' : 'var(--a-guide)', stroke = guide.on ? '1.5px' : '1px';
-    return guide.kind === 'line'
-      ? <div key={index} aria-hidden="true" className="tree-guide" data-from-bullet={guide.fromBullet || undefined} data-to-bullet={guide.toBullet || undefined}
-        style={{ left: guide.x, width: stroke, background: color }} />
-      : <div key={index} aria-hidden="true" className="tree-elbow" style={{ left: guide.x, width: guide.width, borderBottom: `${stroke} solid ${color}` }} />;
-  })}</>;
-}
 
 /** Lines of an item's preview before "Show more" folds the rest away. */
 const CLAMP_LINES = 4;
@@ -165,8 +157,7 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
         onClick={event => { event.stopPropagation(); onFocusBranch(branchFocused ? null : item.id); }}>{branchFocused ? 'Unfocus' : 'Focus'}</button>}
       {row.ack && <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}>{ackTitle(row.ack, item.status)}</div>}
       {delivery(row, fix)}
-      {note && <button type="button" className="tree-collapsed" tabIndex={-1}
-        onClick={event => { event.stopPropagation(); onToggle(item.id); }}><i className="ph ph-dots-three" />{note}</button>}
+      {note && <Strip variant="inside" text={note} onClick={() => onToggle(item.id)} />}
     </div>
     <div className="tree-end">
       {row.relatedCount > 0 && <span className="tree-related" role="img" aria-label={`${row.relatedCount} related item${row.relatedCount === 1 ? '' : 's'}`}
