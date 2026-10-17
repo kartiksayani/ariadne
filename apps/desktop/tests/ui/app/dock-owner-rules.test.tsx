@@ -7,8 +7,9 @@
 // | 2       | Details (folded, open) × (answering it, not) × dock (open, folded)    | the waiting question is in view; folded never "in Details"   |
 // | 3       | a revision of the dock's question × (typing in the dock, idle)        | same item; text, field and focus kept; review asked if typed |
 // | 4       | ⌘↵ twice after a Details keyboard send, dock ready on another question| exactly one send, the Details one                            |
-// | 5       | (Stop waiting received, Mark as done never received, Mark as done     | words and choice kept; a copy the agent had goes again only  |
-// |         | received before a retry) × (Details, dock)                            | after "Send again?"; one never received sends at once, once  |
+// | 5       | (Stop waiting received, Mark as done never received / received before | words and choice kept; a copy the agent may have had goes    |
+// |         | a retry / uncertain with and without a host turn) × (Details, dock);  | again only after "Send again?" (not a double-click's second  |
+// |         | then a double-click, a held ↵, Esc; changed words or choice           | click, not a held ↵); never received or changed: at once     |
 // | 6       | an idle 1–9 in the open dock, then (⌘↵, ↵, focus to <body> + ⌘↵,      | the picked option sends once from the dock's focus; never    |
 // |         | focus on a Map row + ⌘↵)                                              | with the focus outside the dock                              |
 import { afterEach, describe, expect, it } from 'vitest';
@@ -228,77 +229,122 @@ describe('finding 5: a refill of an answer the agent already had never goes twic
   const delivered = { acceptance: 'accepted', host_turn_id: 'turn-1', turn_state: 'completed', result_state: 'missing',
     error: { code: 'result_missing', reason: 'No answer saved.', retryable: false, observed_at: '2026-10-03T12:01:00.000Z' } } as const;
   const refused = { acceptance: 'rejected', error: null } as const;
+  // Uncertain: "Checking whether it was delivered" with a host turn, "Couldn't deliver" without one. Either may have reached it.
+  const checking = { acceptance: 'uncertain', host_turn_id: 'turn-1' } as const;
+  const unsure = { acceptance: 'uncertain', host_turn_id: null } as const;
+  type Attempts = readonly (typeof delivered | typeof refused | typeof checking | typeof unsure)[];
+  const note = 'Keep these words: café';
+  const dialog = () => screen.queryByRole('dialog', { name: 'Send again?' });
+  const send = (scope: () => HTMLElement | null) => within(scope()!).getByRole('button', { name: 'Send' });
+
+  /** Sends option 2 with `note` from `place`, stops its delivery with `attempts`, then presses `button` on its stuck note. */
+  async function settled(place: 'Details' | 'dock', button: string, attempts: Attempts) {
+    const { transport, session } = await mount();
+    let scope: () => HTMLElement | null;
+    if (place === 'Details') {
+      fireEvent.click(treeRow('2'));
+      scope = () => detailSlot('2');
+    } else {
+      await openDock();
+      scope = current;
+    }
+    await ready(scope);
+    fireEvent.click(option(scope()!, 1)!);
+    fireEvent.change(answerWords(scope()!), { target: { value: note } });
+    await waitFor(() => expect(send(scope).hasAttribute('disabled')).toBe(false));
+    fireEvent.click(send(scope));
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    const input = Object.values(session.inputs).find(value => value?.kind === 'answer' && value.target.item_id === '2' && value.payload.text === note)!;
+    const template = session.inputs[failedId]!, base = template.attempts.find(value => value.id === template.active_attempt_id)!;
+    const made = attempts.map((change, at) => Object.assign(structuredClone(base), change,
+      { id: `00000000-0000-4000-8000-0000000009${at}0`, sealed_at: at < attempts.length - 1 ? '2026-10-03T12:00:50.000Z' : null }));
+    Object.assign(input, { state: 'needs_attention', attempts: made, active_attempt_id: made.at(-1)!.id });
+    changed(transport, session);
+    const binding = session.bindings[session.active_binding_id!]!;
+    const observation = { ...structuredClone(sessionsFixture.items[0].active_binding.presence), execution_state: 'idle',
+      generation: binding.generation, last_seen_at: '2026-10-03T12:01:00.000Z' } as PresenceObservation;
+    await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: binding.id, generation: binding.generation, observation }); });
+    // A stopped answer is settled where its message shows: Details' conversation, or its row on the Map.
+    const where = place === 'Details' ? '[data-detail-item-id="2"]' : '[role="tree"]';
+    const stuck = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>(`${where} [data-stuck-input="${input.id}"]`); expect(found).toBeTruthy(); return found!;
+    });
+    await waitFor(() => expect(within(stuck).getByRole('button', { name: button }).hasAttribute('disabled')).toBe(false));
+    fireEvent.click(within(stuck).getByRole('button', { name: button }));
+    await waitFor(() => expect(session.inputs[input.id]?.state).toBe('skipped'));
+    if (place === 'dock') await openDock();
+    // The words and the choice stay recoverable in the reopened cards, in every case.
+    await waitFor(() => expect(option(scope()!, 1)?.getAttribute('aria-pressed')).toBe('true'));
+    expect(answerWords(scope()!).value).toBe(note);
+    await waitFor(() => expect(send(scope).hasAttribute('disabled')).toBe(false));
+    return { transport, scope };
+  }
+
   const cases = [
     ['Stop waiting', 'received', [delivered]],
     ['Mark as done', 'never received', [refused]],
     ['Mark as done', 'received before a retry', [delivered, refused]],
+    ['Mark as done', 'uncertain, with a host turn', [checking]],
+    ['Mark as done', 'uncertain, no host turn', [unsure]],
   ] as const;
   const places = ['Details', 'dock'] as const;
   it.each(places.flatMap(place => cases.map(([button, label, attempts]) => [button, label, place, attempts] as const)))(
-    '%s (%s) in %s: words and choice kept; a copy the agent had asks "Send again?" first', async (button, label, place, attempts) => {
-      const { transport, session } = await mount();
-      const note = 'Keep these words: café';
-      let scope: () => HTMLElement | null;
-      if (place === 'Details') {
-        fireEvent.click(treeRow('2'));
-        scope = () => detailSlot('2');
-      } else {
-        await openDock();
-        scope = current;
-      }
-      await ready(scope);
-      fireEvent.click(option(scope()!, 1)!);
-      fireEvent.change(answerWords(scope()!), { target: { value: note } });
-      await waitFor(() => expect(within(scope()!).getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false));
-      fireEvent.click(within(scope()!).getByRole('button', { name: 'Send' }));
-      await waitFor(() => expect(sends(transport)).toHaveLength(1));
-      const input = Object.values(session.inputs).find(value => value?.kind === 'answer' && value.target.item_id === '2' && value.payload.text === note)!;
-      const template = session.inputs[failedId]!, base = template.attempts.find(value => value.id === template.active_attempt_id)!;
-      const made = attempts.map((change, at) => Object.assign(structuredClone(base), change,
-        { id: `00000000-0000-4000-8000-0000000009${at}0`, sealed_at: at < attempts.length - 1 ? '2026-10-03T12:00:50.000Z' : null }));
-      Object.assign(input, { state: 'needs_attention', attempts: made, active_attempt_id: made.at(-1)!.id });
-      changed(transport, session);
-      const binding = session.bindings[session.active_binding_id!]!;
-      const observation = { ...structuredClone(sessionsFixture.items[0].active_binding.presence), execution_state: 'idle',
-        generation: binding.generation, last_seen_at: '2026-10-03T12:01:00.000Z' } as PresenceObservation;
-      await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: binding.id, generation: binding.generation, observation }); });
-      // A received answer is settled where its message shows: Details' conversation, or its row on the Map.
-      const where = place === 'Details' ? '[data-detail-item-id="2"]' : '[role="tree"]';
-      const stuck = await waitFor(() => {
-        const found = document.querySelector<HTMLElement>(`${where} [data-stuck-input="${input.id}"]`); expect(found).toBeTruthy(); return found!;
-      });
-      await waitFor(() => expect(within(stuck).getByRole('button', { name: button }).hasAttribute('disabled')).toBe(false));
-      fireEvent.click(within(stuck).getByRole('button', { name: button }));
-      await waitFor(() => expect(session.inputs[input.id]?.state).toBe('skipped'));
-      if (place === 'dock') await openDock();
-      // The words and the choice stay recoverable in the reopened cards, in either case.
-      await waitFor(() => expect(option(scope()!, 1)?.getAttribute('aria-pressed')).toBe('true'));
-      expect(answerWords(scope()!).value).toBe(note);
-      await waitFor(() => expect(within(scope()!).getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false));
-      fireEvent.click(within(scope()!).getByRole('button', { name: 'Send' }));
+    '%s (%s) in %s: words and choice kept; a copy the agent may have had asks "Send again?" first', async (button, label, place, attempts) => {
+      const { transport, scope } = await settled(place, button, attempts);
+      // A double-click on Send: its second click lands on the overlay of the dialog the first one opened.
+      fireEvent.click(send(scope), { detail: 1 });
       if (label !== 'never received') {
-        // The agent already has these words: Send asks first, and Cancel keeps everything as it was.
-        const dialog = await screen.findByRole('dialog', { name: 'Send again?' });
+        await waitFor(() => expect(dialog()).not.toBeNull());
+        fireEvent.click(document.querySelector('.pw-overlay')!, { detail: 2 });
         await flush();
+        expect(dialog()).not.toBeNull();
         expect(sends(transport)).toHaveLength(1);
-        fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
-        await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Send again?' })).toBeNull());
+        // Cancel keeps everything as it was.
+        fireEvent.click(within(dialog()!).getByRole('button', { name: 'Cancel' }));
+        await waitFor(() => expect(dialog()).toBeNull());
         await flush();
         expect(sends(transport)).toHaveLength(1);
         expect(answerWords(scope()!).value).toBe(note);
         expect(option(scope()!, 1)?.getAttribute('aria-pressed')).toBe('true');
-        // ⌘↵ asks the same way; only the dialog's own "Send again" sends.
+        // ⌘↵ asks the same way. A held ↵ repeating onto the dialog confirms nothing; Esc cancels.
         fireEvent.keyDown(option(scope()!, 1)!, { key: 'Enter', metaKey: true });
-        const again = await screen.findByRole('dialog', { name: 'Send again?' });
+        await waitFor(() => expect(dialog()).not.toBeNull());
+        fireEvent.keyDown(dialog()!, { key: 'Enter', repeat: true });
+        fireEvent.keyDown(dialog()!, { key: 'Enter', repeat: true });
+        await flush();
         expect(sends(transport)).toHaveLength(1);
-        fireEvent.click(within(again).getByRole('button', { name: 'Send again' }));
-      } else expect(screen.queryByRole('dialog', { name: 'Send again?' })).toBeNull();
+        expect(dialog()).not.toBeNull();
+        fireEvent.keyDown(dialog()!, { key: 'Escape' });
+        await waitFor(() => expect(dialog()).toBeNull());
+        expect(sends(transport)).toHaveLength(1);
+        // Only the dialog's own confirmation sends: a fresh ↵ on it, or its "Send again" button.
+        fireEvent.keyDown(option(scope()!, 1)!, { key: 'Enter', metaKey: true });
+        await waitFor(() => expect(dialog()).not.toBeNull());
+        if (place === 'Details') fireEvent.keyDown(dialog()!, { key: 'Enter' });
+        else fireEvent.click(within(dialog()!).getByRole('button', { name: 'Send again' }));
+      } else expect(dialog()).toBeNull();
       await waitFor(() => expect(sends(transport)).toHaveLength(2));
       await flush();
       expect(sends(transport)).toHaveLength(2);
-      expect(screen.queryByRole('dialog', { name: 'Send again?' })).toBeNull();
+      expect(dialog()).toBeNull();
       expect(sends(transport)[1]!.command).toMatchObject({ params: { kind: 'answer', target: { item_id: '2' }, selected_option_id: 'window-2', text: note } });
     });
+
+  it.each(['the words', 'the choice'] as const)('received, then %s changed: a different answer sends at once, once', async change => {
+    const { transport, scope } = await settled('dock', 'Stop waiting', [delivered]);
+    const words = change === 'the words' ? `${note}, and one more thing` : note;
+    if (change === 'the words') fireEvent.change(answerWords(scope()!), { target: { value: words } });
+    else fireEvent.click(option(scope()!, 0)!);
+    await waitFor(() => expect(change === 'the words' ? answerWords(scope()!).value : option(scope()!, 0)?.getAttribute('aria-pressed')).toBe(change === 'the words' ? words : 'true'));
+    await waitFor(() => expect(send(scope).hasAttribute('disabled')).toBe(false));
+    fireEvent.click(send(scope));
+    await waitFor(() => expect(sends(transport)).toHaveLength(2));
+    await flush();
+    expect(dialog()).toBeNull();
+    expect(sends(transport)).toHaveLength(2);
+    expect(sends(transport)[1]!.command).toMatchObject({ params: { kind: 'answer', target: { item_id: '2' },
+      selected_option_id: change === 'the choice' ? 'window-1' : 'window-2', text: words } });
+  });
 });
 
 describe('finding 6: an idle 1–9 in the dock leaves the focus on the picked option', { timeout: 20_000 }, () => {

@@ -154,13 +154,13 @@ export function AnswerSlot({ drafts, store, itemId, layout = 'details', hint, he
   // own Send again. Its clicks and keys stay off the cards and the Map; a held ↵ that repeats onto it confirms nothing.
   const resend = submit.resend && createPortal(<div onClick={event => event.stopPropagation()}
     onKeyDownCapture={event => { if (event.repeat) { event.preventDefault(); event.stopPropagation(); } }} onKeyDown={event => event.stopPropagation()}>
-    <ConfirmDialog title="Send again?" body={`${submit.agent} already has this message. Send it again anyway?`} confirmLabel="Send again"
+    <ConfirmDialog title="Send again?" body={`${submit.agent} may already have this message. Send it again anyway?`} confirmLabel="Send again"
       busy={submit.resend.disabled} onCancel={submit.resend.cancel} onConfirm={submit.resend.confirm} /></div>, document.body);
   return <div ref={root} className="detail-answer-slot" data-owner-input={mark}>
     {heading}
     {shortcutStatus && <p role="alert">{shortcutStatus}</p>}
     <AnswerControl layout={layout} options={options} selected={selected} draft={draft.text} label="Answer" bar={bar}
-      hint={submit.copy ? `${submit.agent} already has this answer. Sending it again asks first.` : hint}
+      hint={submit.copy ? `${submit.agent} may already have this answer. Sending it again asks first.` : hint}
       locked={submit.locked || submit.changed || ended} frozen={!live}
       warn={submit.changed && !entry.uncertain ? changedText : undefined} warnAction={submit.changed && !entry.uncertain ? review : undefined}
       blocked={ended ? sessionAnswerBlocked(session!) : entry.uncertain || submit.changed ? undefined : submit.blocked ?? blocked ?? undefined}
