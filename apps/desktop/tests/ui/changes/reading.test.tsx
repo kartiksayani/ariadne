@@ -112,7 +112,8 @@ describe('shared reading observations', () => {
     lane.mark(entry); lane.mark(entry);
     expect(listener).toHaveBeenCalledTimes(1); expect(save).toHaveBeenCalledTimes(1);
     const token = lane.catchUp(entry);
-    vi.advanceTimersByTime(5000);
+    vi.advanceTimersByTime(7999); expect(lane.canUndo(token)).toBe(true);
+    vi.advanceTimersByTime(1);
     expect(lane.canUndo(token)).toBe(false); expect(listener).toHaveBeenCalledTimes(3);
     expect(save).toHaveBeenCalledTimes(1); lane.stop();
   });

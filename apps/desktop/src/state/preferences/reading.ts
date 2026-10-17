@@ -5,6 +5,8 @@ import { queueSeen, sessionSeen, type SeenPatch } from './seen';
 
 const key = (route: SessionRef) => JSON.stringify([route.project_id, route.session_id]);
 const EMPTY: readonly SeenPatch[] = Object.freeze([]);
+/** How long Mark all caught up can be undone before it is saved (SPEC 6.6). */
+export const CATCH_UP_UNDO_MS = 8000;
 
 /** Immediate shared display of background reads; catch-up can be undone before its monotonic write. */
 export class ReadingLane {
@@ -58,7 +60,7 @@ export class ReadingLane {
     const token = `${key(entry.session)}:${topicId}`;
     // A second shortcut commits the first action rather than silently dropping it.
     this.finish(token);
-    const timer = setTimeout(() => this.finish(token), 5000);
+    const timer = setTimeout(() => this.finish(token), CATCH_UP_UNDO_MS);
     this.pending.set(token, { entry, timer });
     this.publish();
     return token;

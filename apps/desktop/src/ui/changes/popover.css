@@ -1,0 +1,253 @@
+/* The band's opener (SPEC 5.5): "◆ 5 new ◇ 5 changed since 20:40 ›". The band owns where it sits. */
+.changes-opener {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.changes-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: calc(12px * var(--text-scale) / 0.8);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.changes-summary:hover,
+.changes-opener[data-open] .changes-summary {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+}
+
+.changes-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.changes-since {
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.changes-diamond {
+  flex: none;
+  box-sizing: border-box;
+  width: 7px;
+  height: 7px;
+  border-radius: 1.5px;
+  transform: rotate(45deg);
+}
+
+.changes-diamond[data-kind="new"] {
+  background: var(--attention);
+}
+
+.changes-diamond[data-kind="changed"] {
+  border: 1.5px solid var(--attention);
+}
+
+.changes-undo {
+  margin-right: 0;
+}
+
+/* The popover: portalled to .product-app and placed by ChangesOpener from the opener's rect. */
+.changes-popover {
+  position: fixed;
+  z-index: 19;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 9px;
+  background: var(--a-side);
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--color-divider);
+  font-size: calc(12.5px * var(--text-scale) / 0.8);
+  line-height: 1.5;
+}
+
+.changes-popover:focus-visible {
+  outline: none;
+}
+
+.changes-head {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 8px 4px 14px;
+}
+
+.changes-head > i {
+  align-self: center;
+}
+
+.changes-head h2 {
+  margin: 0;
+  font-size: calc(13px * var(--text-scale) / 0.8);
+  font-weight: 500;
+}
+
+.changes-close {
+  align-self: center;
+  margin-left: auto;
+  padding: 0 8px;
+}
+
+.changes-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 8px 14px 18px;
+  overflow: auto;
+}
+
+.changes-section {
+  min-width: 0;
+}
+
+.changes-label-caps {
+  font-size: calc(11px * var(--text-scale) / 0.8);
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+.changes-brief-head,
+.changes-since-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.changes-brief-head {
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.changes-brief-counts {
+  margin-left: auto;
+}
+
+.changes-brief-body {
+  margin-top: 6px;
+}
+
+.changes-catch-up {
+  margin-left: auto;
+  padding: 2px 8px;
+  font-size: inherit;
+}
+
+.changes-rows {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  margin: 6px 0 0;
+  list-style: none;
+}
+
+.changes-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--color-divider);
+}
+
+.changes-row[data-seen] > *:not(.changes-seen, .change-compare) {
+  opacity: .5;
+}
+
+.changes-row .change-name {
+  padding: 0;
+  font-weight: 500;
+}
+
+.changes-what {
+  flex: 1;
+  min-width: 0;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+.changes-what[data-tone="new"] {
+  color: var(--a-acc-text);
+}
+
+.changes-time {
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+
+.changes-seen {
+  padding: 1px 8px;
+  font-size: inherit;
+}
+
+.changes-row .change-compare {
+  display: contents;
+}
+
+.changes-row .change-comparison {
+  flex-basis: 100%;
+}
+
+.changes-away p {
+  margin: 0 0 6px;
+}
+
+.changes-away-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.changes-away-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  padding: 2px 0;
+}
+
+.changes-away-names {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+
+.changes-away-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.changes-caught-up {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+.changes-footnote {
+  margin: 0;
+  font-size: calc(11.5px * var(--text-scale) / 0.8);
+}

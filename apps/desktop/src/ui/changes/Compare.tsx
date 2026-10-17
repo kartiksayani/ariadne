@@ -19,7 +19,7 @@ function valueText(value: ChangedField['before'], field: ChangedField['field'], 
 }
 
 /** All before/after surfaces share this compact control and accessible label. */
-export function Compare({ row, session }: { readonly row: ChangeRow; readonly session: Immutable<Session> }) {
+export function Compare({ row, session, why }: { readonly row: ChangeRow; readonly session: Immutable<Session>; readonly why?: string | null }) {
   const [open, setOpen] = useState(false), id = useId();
   if (!row.fields.length) return null;
   return <span className="change-compare">
@@ -32,6 +32,6 @@ export function Compare({ row, session }: { readonly row: ChangeRow; readonly se
     {open && <span id={id} className="change-comparison">{row.fields.map(field => <span key={field.field} className="change-field">
       <strong>{fieldNames[field.field]}</strong><span><span className="change-value-label">Before</span><del>{valueText(field.before, field.field, session)}</del></span>
       <span><span className="change-value-label">After</span><mark>{valueText(field.current, field.field, session)}</mark></span>
-    </span>)}</span>}
+    </span>)}{why && !row.fields.some(field => field.field === 'why') && <span className="change-field"><strong>Why</strong><span>{why}</span></span>}</span>}
   </span>;
 }
