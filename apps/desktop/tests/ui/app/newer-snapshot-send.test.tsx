@@ -9,7 +9,8 @@
 // | Details answer, own words, Send click    | another item only        | one send, the exact words                                  |
 // | Details answer, own words, Send click    | this question revised    | no send; the review shows; words kept                      |
 // | Details answer, 1–9 key (focus request)  | another item only        | one send, the picked option                                |
-// | Details answer, 1–9 key (focus request)  | this question revised    | no send; the refusal stays after the next refresh          |
+// | Details answer, 1–9 key (focus request)  | this question revised    | no send; the refusal stays after the next refresh, and     |
+// |                                          |                          | goes once a mouse pick and send succeed (one send)         |
 // | dock answer, picked option, Send click   | another item only        | one send, the picked option                                |
 // | dock answer, picked option, Send click   | this question revised    | no send; the review shows; the choice kept                 |
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -160,7 +161,17 @@ describe('Details answer', () => {
     await act(async () => { await store.refresh(true); });
     await flush();
     expect(sends(transport)).toHaveLength(change === 'other' ? 1 : 0);
-    if (change === 'this') expect(screen.getByRole('alert').textContent).toBe('This item changed. Review it before sending. Your note is kept.');
+    if (change !== 'this') return;
+    expect(screen.getByRole('alert').textContent).toBe('This item changed. Review it before sending. Your note is kept.');
+    // The untouched draft offers no Review: the owner picks a card and sends with the mouse; the key's refusal goes with it.
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-answer-option="0"]')!);
+    const send = document.querySelector<HTMLButtonElement>('[data-answer-send]')!;
+    await waitFor(() => expect(send.disabled).toBe(false));
+    fireEvent.click(send);
+    await waitFor(() => expect(sends(transport)).toHaveLength(1));
+    await flush();
+    expect(sends(transport)[0]!.command).toMatchObject({ params: { kind: 'answer', target: { item_id: '2' }, selected_option_id: 'window-1' } });
+    expect(screen.queryByText('This item changed. Review it before sending. Your note is kept.')).toBeNull();
   });
 });
 

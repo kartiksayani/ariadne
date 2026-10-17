@@ -168,9 +168,11 @@ export function AnswerSlot({ drafts, store, itemId, layout = 'details', hint, he
       locked={submit.locked || submit.changed || ended} frozen={!live}
       warn={submit.changed && !entry.uncertain ? changedText : undefined} warnAction={submit.changed && !entry.uncertain ? review : undefined}
       blocked={ended ? sessionAnswerBlocked(session!) : entry.uncertain || submit.changed ? undefined : submit.blocked ?? blocked ?? undefined}
-      onSelect={index => { const option = options[index]; if (index === -1) submit.select(null); else if (option) submit.select(option.id); }}
-      onDraft={submit.write} onSendOption={(index, note) => { const option = options[index]; if (option) submit.sendOption(option.id, note); }}
-      onSendText={submit.sendText} onEscape={onEscape} />
+      // A key's refusal answers that key only: the owner's next pick, edit or send starts afresh, so it never outlives them.
+      onSelect={index => { setShortcutStatus(null); const option = options[index]; if (index === -1) submit.select(null); else if (option) submit.select(option.id); }}
+      onDraft={text => { setShortcutStatus(null); submit.write(text); }}
+      onSendOption={(index, note) => { setShortcutStatus(null); const option = options[index]; if (option) submit.sendOption(option.id, note); }}
+      onSendText={text => { setShortcutStatus(null); submit.sendText(text); }} onEscape={onEscape} />
     {/* The one alert: why it failed, under the bar that offers the way on. */}
     {error && <p className="detail-error" role="alert">{error}</p>}
     {preferences}
