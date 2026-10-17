@@ -24,13 +24,24 @@ export async function runAccessibilityAcceptance(configuration) {
   assert.ok(nativeWindow.logical.width >= 1300 && nativeWindow.logical.height >= 760,
     'Ordinary native window must reach minimum outer size 1300×760');
   const before = await readFile(configuration.demo.sessionPath);
-  const catalogue = await browser.$('button[data-shell-tab="all_sessions"]'); await catalogue.waitForEnabled(); await catalogue.click();
   await openSession(configuration.demo.session_id);
-  const row = '[role="treeitem"][data-item-id="2"]';
-  await (await browser.$(row)).waitForDisplayed(); await focus(row);
-  await browser.keys('r');
+  // An open item keeps its reply box docked in Details, so Reply focuses a text editor (a waiting item's Reply lands on its
+  // answer cards). Item keys act on the selected item: select the row first, then press the key on it.
+  const row = '[role="treeitem"][data-item-id="1.1"]';
+  const select = async () => {
+    const target = await browser.$(row); await target.waitForDisplayed(); await target.waitForEnabled(); await target.click();
+    await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === '1.1', 'Selecting the row did not open its detail');
+    await focus(row);
+  };
+  await select();
   const editor = '.item-detail .detail-dock [data-owner-input] textarea';
-  await wait(() => active(editor), 'Reply shortcut did not focus ordinary native editor');
+  // A loaded Mac can deliver the key before the selection has settled, so press again while the row still holds focus.
+  await browser.keys('r');
+  await wait(async () => {
+    if (await active(editor)) return true;
+    await focus(row); await browser.keys('r');
+    return false;
+  }, 'Reply shortcut did not focus ordinary native editor');
   const draft = `Native keyboard retained draft ${process.env.ARIADNE_E2E_NONCE}`;
   await (await browser.$(editor)).setValue(draft);
   await browser.keys('g');
@@ -51,15 +62,16 @@ export async function runAccessibilityAcceptance(configuration) {
     if (saved !== lastSaved) { lastSaved = saved; settledSince = Date.now(); }
     return Date.now() - settledSince >= 3000;
   }, { timeout: 30000, interval: 200, timeoutMsg: 'Saved preferences did not settle after the draft edit' });
-  await focus(row); await browser.keys('r'); await wait(() => active(editor), 'Repeated Reply did not refocus');
+  await select(); await browser.keys('r'); await wait(() => active(editor), 'Repeated Reply did not refocus');
   assert.equal(await (await browser.$(editor)).getValue(), `${draft}g`);
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-keyboard-retained-editor.png'));
-  // Close session in Session actions opens its one confirmation.
+  // Close session on the top bar's connection card (opened from the connection button) opens its one confirmation.
   await wait(async () => await browser.$('.tree-column').getAttribute('data-session-status') === 'ready'
-    && await browser.$('.tree-session-bar').getAttribute('aria-busy') === 'false', 'Session was not ready for Close session');
-  const actions = await browser.$('.tree-session-bar button[aria-label="Session actions"]');
+    && await browser.$('.tree-column').getAttribute('data-session-busy') === 'false', 'Session was not ready for Close session');
+  const connection = '[data-popover-trigger="connection"]';
+  const actions = await browser.$(connection);
   await actions.waitForEnabled(); await actions.click();
-  const closeButton = await browser.$('[role="menu"][aria-label="Session actions"]').$('[role="menuitem"]*=Close session');
+  const closeButton = await browser.$('.cc').$('button=Close session');
   await closeButton.waitForEnabled(); await closeButton.click();
   await (await browser.$('[role="dialog"]')).waitForDisplayed();
   await focus('[role="dialog"] button');
@@ -71,8 +83,9 @@ export async function runAccessibilityAcceptance(configuration) {
   await browser.keys('Escape');
   await wait(async () => !(await browser.$('[role="dialog"]').isExisting()), 'Dialog Escape did not close overlay');
   assert.equal(await (await browser.$('.shell-detail')).isExisting(), true, 'Dialog Escape must preserve selected detail');
-  const opener = await browser.execute(() => ({ label: document.activeElement?.getAttribute('aria-label') ?? null, html: document.activeElement?.outerHTML.slice(0, 300) ?? null }));
-  assert.equal(opener.label, 'Session actions', `Dialog restores opener; focus is on ${opener.html}`);
+  // The card closes as the review opens, so focus returns to the connection button the card came from.
+  const opener = await browser.execute(() => ({ trigger: document.activeElement?.getAttribute('data-popover-trigger') ?? null, html: document.activeElement?.outerHTML.slice(0, 300) ?? null }));
+  assert.equal(opener.trigger, 'connection', `Dialog restores opener; focus is on ${opener.html}`);
   await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'native-keyboard-dialog-return.png'));
   assert.deepEqual(await readFile(configuration.demo.sessionPath), before, 'Keyboard focus/draft/modal checks leave durable demo domain unchanged');
   await json(join(process.env.ARIADNE_E2E_EVIDENCE, 'keyboard-accessibility.json'), { ordinaryApp: true, actualCoreStore: true,

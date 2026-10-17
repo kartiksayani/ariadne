@@ -147,10 +147,10 @@ for (const scenario of ['delayed-readiness', 'wrong-text', 'disabled-send', 'fro
           if (selector === '.item-detail') return { getAttribute: async name => name === 'data-detail-item-id' ? configuration.itemId : String(saved.items[1].revision) };
           assert.equal(selector, '.item-detail [data-owner-input="1"]');
           return { waitForExist: async () => {}, $: async selector => {
-            assert.equal(selector, '.detail-box, .answer-reply');
+            assert.equal(selector, '.detail-box, .answer');
             return { waitForExist: async () => {}, $: async selector => {
               if (selector === 'textarea') return editor;
-              assert.equal(selector, 'button[aria-label^="Send "], button.answer-reply-send'); return send;
+              assert.equal(selector, 'button[aria-label^="Send "], button[data-answer-send]'); return send;
             } };
           } };
         },

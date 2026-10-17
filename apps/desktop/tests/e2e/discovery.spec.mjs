@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { snapshot, admissions } from './scripted-provider.mjs';
+import { goToPage } from './session-button.mjs';
 
 export async function waitForRegistrationCompletion(dialog, persisted, options) {
   // Core persistence can precede the receipt and awaited catalogue refresh.
@@ -22,7 +23,7 @@ export async function waitForDiscoveredCandidate(candidate) {
           const texts = selector => [...(section?.querySelectorAll(selector) ?? [])]
             .slice(0, 16).map(element => element.textContent.slice(0, 4096));
           return {
-            navigation_heading: document.querySelector('h1.pw-page-name')?.textContent.slice(0, 4096) ?? null,
+            navigation_heading: document.querySelector('h1.pp-title')?.textContent.slice(0, 4096) ?? null,
             section_present: section !== null, section_hidden: section?.hidden ?? null,
             expanded: section?.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded') ?? null,
             status: texts('[role="status"]'), alerts: texts('[role="alert"]'),
@@ -64,9 +65,11 @@ export async function runDiscoveryAcceptance(configuration) {
   assert.equal(await registeredId(), undefined);
   await assert.rejects(stat(join(projectRoot, '.ariadne')), { code: 'ENOENT' });
 
-  const projects = await browser.$('button=Projects');
-  await projects.waitForEnabled(); await projects.click();
-  const discover = await browser.$('button=Discover host sessions');
+  // Projects is a page of the switcher; Discover sessions is in the page's "…" menu and opens its list in a dialog.
+  await goToPage('Projects');
+  const more = await browser.$('button[aria-label="Register a project, discover sessions"]');
+  await more.waitForEnabled(); await more.click();
+  const discover = await browser.$('[role="menu"][aria-label="Projects"]').$('[role="menuitem"]*=Discover sessions');
   await discover.waitForDisplayed(); await discover.click();
   const candidate = await browser.$(`[data-discovery-id="${externalSessionId}"]`);
   await waitForDiscoveredCandidate(candidate);
@@ -76,18 +79,20 @@ export async function runDiscoveryAcceptance(configuration) {
   await assert.rejects(stat(join(projectRoot, '.ariadne')), { code: 'ENOENT' });
   const registerCandidate = await candidate.$('button=Register this project');
   await registerCandidate.waitForEnabled(); await registerCandidate.click();
-  const registerDialog = await browser.$('[role="dialog"][aria-label="Register project"]');
+  const registerDialog = await browser.$('[role="dialog"][aria-label="Register a project"]');
   assert.equal(await registerDialog.$('input').getValue(), projectRoot);
   assert.equal(await registeredId(), undefined);
   await assert.rejects(stat(join(projectRoot, '.ariadne')), { code: 'ENOENT' });
-  await registerDialog.$('button=Register project').click();
+  // The primary button carries its Enter hint after the words.
+  await registerDialog.$('button*=Register project').click();
   await waitForRegistrationCompletion(registerDialog, async () => {
     try { return JSON.parse(await readFile(await projectPath(), 'utf8')).id !== undefined; }
     catch (error) { if (error.code === 'ENOENT') return false; throw error; }
   }, { timeout: 15000, timeoutMsg: 'Explicit Register did not persist the discovered project and dismiss its completed form' });
   const metadata = JSON.parse(await readFile(await projectPath(), 'utf8'));
   await assert.rejects(stat(join(projectRoot, '.ariadne')), { code: 'ENOENT' });
-  const connect = await browser.$('.pw-group-head').$('button=Connect existing session');
+  // Registering opens the project's own page, which ends in Connect existing session.
+  const connect = await browser.$('button=Connect existing session');
   await connect.waitForDisplayed(); await connect.waitForEnabled(); await connect.click();
   const dialog = await browser.$('[role="dialog"][aria-label="Connect existing session"]');
   const chosen = await dialog.$(`[data-discovery-id="${externalSessionId}"]`).$('button=Use host session');

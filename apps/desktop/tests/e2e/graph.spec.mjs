@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { admissions, cliRequest, snapshot } from './scripted-provider.mjs';
-import { goToPeekItem, showFullItemQuestion } from './tree.spec.mjs';
+import { goToPeekItem, search, searchBox, showFullItemQuestion } from './tree.spec.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const graph = () => browser.$('.graph-view');
-const search = () => browser.$('[data-shell-search]');
+// The Tree / Graph switch is the top bar's segmented control.
+const views = () => browser.$('.shell-top [role="group"][aria-label="View"]');
 const near = (actual, expected, tolerance, message) => assert.ok(Math.abs(actual - expected) <= tolerance, `${message}: ${actual} != ${expected}`);
 
 /** Items the graph shows for an unfiltered view: roots, and children whose ancestors are all expanded. */
@@ -37,7 +38,8 @@ export function assertGraph(sample, session, selected, expected) {
 }
 export function assertCentered(sample, id) {
   const target = sample.nodes.find(value => value.id === id); assert.ok(target, `Item ${id} is not in the graph`);
-  near(target.top + target.height / 2, sample.height / 2, 2, `Item ${id} is centred vertically`);
+  // The floating dock covers the bottom of the canvas (SPEC 5.2), so the visible area, and its centre, end above it.
+  near(target.top + target.height / 2, (sample.height - (sample.inset ?? 0)) / 2, 2, `Item ${id} is centred vertically`);
 }
 async function view(tree) {
   const result = await cliRequest(tree.cli, ['preferences', 'get', '--json-stdin'], { session: null, request: { command: 'preferences_get', params: {} } });
@@ -50,7 +52,8 @@ async function sample() {
   // Passive reads only: no synthetic input, component replacement or state injection.
   return browser.execute(() => {
     const root = document.querySelector('.graph-view'), scroller = root.querySelector('.graph-scroll'), rect = scroller.getBoundingClientRect();
-    return { width: rect.width, height: rect.height, focused: document.activeElement?.getAttribute('data-item-id') ?? null,
+    const inset = parseFloat(document.querySelector('.shell-body-viewport')?.style.getPropertyValue('--dock-inset')) || 0;
+    return { width: rect.width, height: rect.height, inset, focused: document.activeElement?.getAttribute('data-item-id') ?? null,
       counts: [...root.querySelectorAll('.graph-card-counts')].map(element => element.textContent),
       nodes: [...root.querySelectorAll('.graph-node[data-item-id]')].map(element => {
         const box = element.getBoundingClientRect();
@@ -83,7 +86,7 @@ export async function runGraphAcceptance(configuration) {
   assert.equal(canonical.messages.length, prior.performance.messages + 1, 'The subsequent real CLI item edit adds one activity message');
   assert.equal(Object.keys(canonical.inputs).length, 0); assert.equal(beforeView.selected_item_id, '10.50');
   const expected = visibleIds(canonical, beforeView.expanded_item_ids), samples = [], started = Date.now();
-  await click('button=Graph', browser.$('.shell-views')); await (await graph()).waitForDisplayed();
+  await click('button[aria-label="Graph"]', views()); await (await graph()).waitForDisplayed();
   await wait(async () => (await sample()).nodes.some(value => value.id === '10.50'), 'The real registered session did not open in native Graph');
   const driverOpenToReadyMs = Date.now() - started;
 
@@ -101,7 +104,7 @@ export async function runGraphAcceptance(configuration) {
   await detail(canonical, '10.50'); await click('button[aria-label^="Native branch 10\\a "]', browser.$('[aria-label="Item location"]'));
   await goToPeekItem(canonical.items['10'], '10.50'); await detail(canonical, '10');
   await selectedIn('10');
-  await wait(async () => (await view(tree)).selected_item_id === '10' && await browser.$('.shell-views').$('button=Graph').isEnabled(),
+  await wait(async () => (await view(tree)).selected_item_id === '10' && await views().$('button[aria-label="Graph"]').isEnabled(),
     'The parent reveal must finish saving before the separate child reveal');
   await click('button[aria-label^="Native sentence 10.80\\a "]', browser.$('[aria-label="Child items"]'));
   await goToPeekItem(canonical.items['10.80'], '10'); await detail(canonical, '10.80');
@@ -123,16 +126,16 @@ export async function runGraphAcceptance(configuration) {
   await click('button[aria-label^="Native sentence 10.80\\a "]', browser.$('[aria-label="Child items"]'));
   await goToPeekItem(canonical.items['10.80'], '10'); await detail(canonical, '10.80'); await selectedIn('10.80');
 
-  await (await search()).waitForEnabled(); await (await search()).setValue('Native token_10_80_end');
+  await (await search()).waitForEnabled(); await (await searchBox()).setValue('Native token_10_80_end');
   await wait(async () => JSON.stringify((await sample()).nodes.map(value => value.id)) === JSON.stringify(['10', '10.80']), 'Graph search must keep the match and its ancestry');
   const filtered = await sample();
   await detail(canonical, '10.80');
-  await click('button=Tree', browser.$('.shell-views'));
+  await click('button[aria-label="Tree"]', views());
   await wait(async () => JSON.stringify(await browser.execute(() => [...document.querySelectorAll('.tree-rows .tree-item')].map(element => element.dataset.itemId))) === JSON.stringify(['10', '10.80']), 'Tree must show the same filtered items as Graph');
   await detail(canonical, '10.80');
   const filteredView = await view(tree); assert.equal(filteredView.filters.search, 'Native token_10_80_end'); assert.equal(filteredView.selected_item_id, '10.80');
   assert.deepEqual([...filteredView.expanded_item_ids].sort(), [...beforeView.expanded_item_ids].sort(), 'Graph collapse then expand restores the saved expansion');
-  await (await search()).waitForEnabled(); await (await search()).setValue('');
+  await (await search()).waitForEnabled(); await (await searchBox()).setValue('');
   await wait(async () => (await view(tree)).filters.search === '' && await browser.execute(() => document.querySelectorAll('.tree-rows .tree-item').length === 1901), 'Clear shared search must preserve the saved collapsed tree branch');
   const finalView = await view(tree);
   assert.deepEqual(await snapshot(tree), canonical, 'Graph view actions must not change canonical items, messages or inputs');

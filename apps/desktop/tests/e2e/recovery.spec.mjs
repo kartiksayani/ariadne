@@ -4,11 +4,12 @@ import { join } from 'node:path';
 import { delay, json } from '../../../../scripts/run-native-e2e.mjs';
 import { admissions, cliRequest, completeTurn, journeyResultRequest, publishResult, snapshot } from './scripted-provider.mjs';
 import { folded, openFollowUp, openOwnerReply, ownerReplyTarget, sendDetailReply, waitForOwnerReplyTarget } from './owner-reply.mjs';
-import { openSession } from './session-button.mjs';
+import { openSendingDialog, openSession, sessionReady } from './session-button.mjs';
 
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 20000, interval: 100, timeoutMsg: message });
 const dialog = () => browser.$('[role="dialog"]');
-const sendingLabel = () => browser.$('.tree-session-bar .dispatch-chip .dispatch-label');
+// The Sending… dialog's status line: what the session bar's chip used to say.
+const sendingLabel = () => browser.$('[role="dialog"] [data-dispatch]');
 async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.scrollIntoView({ block: 'center' }); await control.click(); }
 
 export function originalReplyRequest(configuration, admission, session, text) {
@@ -58,29 +59,21 @@ async function apply(configuration, request) {
 }
 
 async function openPrimary(configuration) {
-  await click(await browser.$('button[data-shell-tab="all_sessions"]'));
-  await wait(async () => {
-    const selected = JSON.parse(await readFile(join(process.env.ARIADNE_HOME, 'ui.json'), 'utf8')).snapshot.global.selected_navigation;
-    return selected.kind === 'all_sessions' && await browser.$('button[data-shell-tab="all_sessions"]').isEnabled();
-  }, 'Recovery All sessions navigation did not finish');
+  // The session opens from the switcher's All sessions page; pages are not saved, so the saved session proves it finished.
   await openSession(configuration.sessionId);
   await wait(async () => {
     const selected = JSON.parse(await readFile(join(process.env.ARIADNE_HOME, 'ui.json'), 'utf8')).snapshot.global.selected_navigation;
-    return selected.kind === 'session' && selected.session.session_id === configuration.sessionId
-      && await browser.$('button[data-shell-tab="all_sessions"]').isEnabled();
+    return selected.kind === 'session' && selected.session.session_id === configuration.sessionId;
   }, 'Recovery did not open the restored primary session');
+  await sessionReady();
   // Graph mode can be retained from the preceding acceptance; choose Tree explicitly.
-  await click(await browser.$('button[title="Tree (g)"]'));
+  await click(await browser.$('.shell-top button[aria-label="Tree"]'));
   await click(await browser.$(`.tree-item[data-item-id="${configuration.itemId}"]`));
   await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === configuration.itemId, 'Recovery selected a different item');
 }
 
-/** Opens the "Sending to <agent>" dialog from the session card in All sessions (its sending button, title "Sending and connection"). */
-async function openDispatch(configuration) {
-  await click(await browser.$('button[data-shell-tab="all_sessions"]'));
-  await click(await browser.$(`[data-session-card="${configuration.sessionId}"] button[title="Sending and connection"]`));
-  await wait(async () => (await dialog().getText()).includes('Sending to'), 'Sending dialog did not open');
-}
+/** Opens the "Sending to <agent>" dialog from the open session's connection card (its Sending… button). */
+const openDispatch = () => openSendingDialog();
 
 // The primary item is still waiting: with nothing pending its answer slot takes the reply; once an
 // input is held, the slot hides and the next reply queues behind it from the follow-up box.
@@ -149,9 +142,9 @@ export async function runRecoveryAcceptance(configuration) {
   assert.equal(await browser.$('[aria-label="Delivery recovery"]').isExisting(), false, 'A decision on a visible row must not also raise a banner');
   // This accepted attempt belongs to the current binding generation: the bar waits for its answer.
   const waitingLabel = `Waiting for codex to answer “${folded(workText).slice(0, 38).trimEnd()}…”`;
-  await wait(async () => (await sendingLabel().getText()) === waitingLabel, 'Session bar did not wait for the accepted message’s answer');
-  assert.equal(await browser.$('.tree-session-bar .dispatch-chip').$('button[aria-label="Resume"]').isExisting(), false, 'Missing result must not offer Resume');
-  await openDispatch(configuration);
+  // The session's sending state is read in the connection card's Sending… dialog (the session bar and its chip are gone).
+  await openDispatch();
+  await wait(async () => (await sendingLabel().getText()) === waitingLabel, 'Sending did not wait for the accepted message’s answer');
   assert.equal(await dialog().$('button=Resume sending').isEnabled(), false, 'Missing result must block Resume');
   await browser.saveScreenshot(join(evidence, 'native-result-missing.png'));
   await click(await dialog().$('button=Done'));
@@ -204,7 +197,10 @@ export async function runRecoveryAcceptance(configuration) {
   assert.equal(prepared.bindings[configuration.bindingId].pause_reason, null);
   assert.notEqual(prepared.bindings[configuration.bindingId].dispatch_state, 'recovery_required');
   await wait(async () => (await admissions(configuration)).length === queuedBefore.length + 2, 'Sending did not resume by itself to deliver the result-only repair');
-  await wait(async () => (await sendingLabel().getText()) === 'Sending', 'Session bar did not return to Sending after the decision');
+  await openDispatch();
+  await wait(async () => (await sendingLabel().getText()) === 'Sending', 'Sending did not return to Sending after the decision');
+  await click(await dialog().$('button=Done'));
+  await wait(async () => !(await dialog().isExisting()), 'Dispatch dialog remained open');
   const repair = (await admissions(configuration)).at(-1);
   session = await snapshot(configuration);
   const repairBody = assertRepairAdmission(configuration, repair, session, original, reply);

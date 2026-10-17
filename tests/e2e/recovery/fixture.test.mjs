@@ -96,25 +96,31 @@ test('a known successive Reply waits for the sent Reply box to empty, then write
   assert.deepEqual(fake.calls, ['box sent box', 'box emptied box']);
 });
 
-test('a missing Saved acknowledgement fails while the sent Reply box still holds its words', async t => {
+test('a sent Reply box that never empties fails; a waiting item\'s successive words go through Add a reply', async t => {
   const previousBrowser = globalThis.browser;
   t.after(() => { globalThis.browser = previousBrowser; });
   const fake = replyBoxBrowser(Infinity);
   globalThis.browser = fake.browser;
   await assert.rejects(openOwnerReply(true), /The sent Reply box did not empty/);
   assert.equal(fake.calls.every(call => call === 'box sent box'), true);
-  // A waiting item's answer slot must show its Saved receipt's "Write another input" first.
+  // A waiting item with an answer in flight takes its next words through "Add a reply" (the sealed cards take none); there is
+  // no "Write another input" step any more (SPEC 5.2/5.3: the sent answer keeps its cards sealed).
+  const clicks = [];
+  const exists = value => ({ async isExisting() { return value; } });
   globalThis.browser = {
     $(selector) {
-      if (selector === '.item-detail [data-owner-input] .detail-box textarea') return { async isExisting() { return false; } };
-      if (selector === '.item-detail .detail-answer-slot[data-owner-input]') return { async isExisting() { return true; }, $(selector) {
-        assert.equal(selector, 'button=Write another input');
-        return { async waitForDisplayed() { throw new Error('Saved acknowledgement absent'); } };
-      } };
-      assert.fail(`Successive answer cannot choose another form: ${selector}`);
+      if (selector === '.item-detail [data-owner-input] .detail-box textarea' || selector === '.item-detail [data-owner-input] .detail-box') return exists(false);
+      if (selector === '.item-detail[data-status="waiting"] [aria-label="Reply"] [aria-label="Item actions"] button') return exists(true);
+      if (selector === '.item-detail') return { async getAttribute(name) { return name === 'data-status' ? 'waiting' : 'item-detail'; } };
+      if (selector === '.item-detail [aria-label="Reply"] [aria-label="Item actions"] button') {
+        return { async waitForDisplayed() {}, async waitForEnabled() {}, async scrollIntoView() {}, async getText() { return 'Add a reply r'; }, async click() { clicks.push('Add a reply'); } };
+      }
+      return assert.fail(`Successive answer cannot choose another form: ${selector}`);
     },
+    async waitUntil(condition, options) { assert.ok(await condition(), options.timeoutMsg); },
   };
-  await assert.rejects(openOwnerReply(true), /Saved acknowledgement absent/);
+  await openOwnerReply(true);
+  assert.deepEqual(clicks, ['Add a reply']);
 });
 
 test('a missing Reply box after a send is a clear failure, not a saved reply, and never presses Reply', async t => {
@@ -216,10 +222,12 @@ function domBrowser(document, onPoll = () => {}) {
 
 const wordsBox = label => `<div class="detail-box"><textarea></textarea><div class="detail-box-row">
   <button aria-label="${label}">${label}</button><button>Cancel</button></div></div>`;
-const answerBox = `<div class="detail-answer-slot" data-owner-input="1"><button class="answer-send">Send “Chosen option”</button>
-  <div class="answer-reply answer-composer"><textarea></textarea><button class="answer-reply-send">Send as a reply only</button></div></div>`;
+// The answer cards (SPEC 5.2): option and own-words cards, one textarea once own words are chosen, one Send in the bar.
+const answerBox = `<div class="detail-answer-slot" data-owner-input="1"><div class="answer answer-details" role="group" aria-label="Answer">
+  <div class="answer-options"><button class="answer-option">Chosen option</button><button class="answer-option" data-answer-own aria-pressed="true">Write my own answer</button></div>
+  <textarea class="answer-text"></textarea><div class="answer-bar"><button data-answer-send class="answer-send">Send</button></div></div></div>`;
 
-for (const [status, label] of [['waiting', 'Send as a reply only'], ['open', 'Send reply'], ['progress', 'Send note'], ['done', 'Send follow-up']]) {
+for (const [status, label] of [['waiting', 'Send'], ['open', 'Send reply'], ['progress', 'Send note'], ['done', 'Send follow-up']]) {
   test(`sends exact own words with one click from the ${status} composer and diagnoses its actual Send`, async t => {
     const root = await mkdtemp(join(tmpdir(), 'ariadne-owner-composer-'));
     const dom = new JSDOM(`<article class="item-detail" data-detail-item-id="1" data-item-revision="4" data-status="${status}">${status === 'waiting' ? answerBox
@@ -235,7 +243,7 @@ for (const [status, label] of [['waiting', 'Send as a reply only'], ['open', 'Se
     await writeFile(configuration.sessionPath, JSON.stringify(session));
     let clicks = 0;
     // Wrong clicks fail: neither the recommended choice, another draft nor a retained answer may be submitted.
-    const send = document.querySelector(status === 'waiting' ? '.answer-reply-send' : '.detail-box button');
+    const send = document.querySelector(status === 'waiting' ? '[data-answer-send]' : '.detail-box button');
     for (const button of document.querySelectorAll('button')) button.addEventListener('click', () => {
       assert.equal(button, send); clicks++;
       assert.equal(document.querySelector('[data-owner-input] textarea').value, text);

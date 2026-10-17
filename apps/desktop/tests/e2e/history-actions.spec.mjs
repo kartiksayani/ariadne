@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { basename, join, resolve } from 'node:path';
 import { cliRequest, admissions, snapshot } from './scripted-provider.mjs';
 import { json } from '../../../../scripts/run-native-e2e.mjs';
-import { openSession as clickSession } from './session-button.mjs';
+import { connectionCardButton, openSendingDialog, openSession as clickSession, sessionReady } from './session-button.mjs';
 import { folded } from './owner-reply.mjs';
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
@@ -21,14 +21,12 @@ const detailReference = async () => {
   const detail = await browser.$('.item-detail');
   return await detail.isExisting() ? detail.getAttribute('data-detail-item-id') : null;
 };
-// Close lives in Session actions; Reopen sits in the session bar; Archive and Continue on each topic band.
-const sessionBar = () => browser.$('.tree-session-bar');
+// Close, Reopen and Sending are on the top bar's connection card; Archive and Continue on each topic band.
 const topicBand = name => browser.$(`.tree-rows [role="treeitem"][aria-label="${name}"]`);
 async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.click(); }
 async function openSession(sessionId) {
-  await click(await browser.$('button[data-shell-tab="all_sessions"]'));
   await clickSession(sessionId);
-  await sessionBar().waitForDisplayed();
+  await sessionReady();
 }
 // A topic band shows its actions while it holds focus (the prototype's hover).
 export async function topicAction(name, label) {
@@ -39,16 +37,12 @@ export async function topicAction(name, label) {
 export async function archiveClosedTopic(topicId) {
   // The all-closed prompt sits below the sticky band, in that topic's sibling content.
   try {
-    await wait(async () => await browser.$('.tree-column').getAttribute('data-session-status') === 'ready'
-      && await sessionBar().getAttribute('aria-busy') === 'false', 'Session was not ready for direct topic archive');
+    await sessionReady();
     await click(await browser.$(`.tree-rows [data-topic-id="${topicId}"] + .tree-topic-content .tree-prompt button`));
   } catch (failure) { throw await archiveDiagnostics(failure); }
 }
 async function lifecycle(button, confirmation, path, predicate) {
-  if (button === 'Close session') {
-    await click(await sessionBar().$('button[aria-label="Session actions"]'));
-    await click(await browser.$('[role="menu"][aria-label="Session actions"]').$('[role="menuitem"]*=Close session'));
-  } else await click(await sessionBar().$(`button*=${button}`));
+  await connectionCardButton(button);
   await click(await dialog().$(`button=${confirmation}`));
   await wait(async () => predicate(await readJson(path)), `Persisted ${confirmation} was not visible on disk`);
   await wait(async () => !(await dialog().isExisting()), 'Saved history confirmation did not close');
@@ -93,11 +87,14 @@ export async function runHistoryActionsAcceptance(configuration) {
   const bindingId = target.active_binding_id, generation = target.bindings[bindingId].generation;
 
   await openSession(target.id);
-  // The session bar's chip pauses sending in one click.
+  // The connection card's Sending… dialog pauses sending: Pause sending, then Done.
   const pauseSending = async () => {
-    await click(await sessionBar().$('.dispatch-chip').$('button[aria-label="Pause"]'));
+    const sending = await openSendingDialog();
+    await click(await sending.$('button=Pause sending'));
     await wait(async () => (await readJson(targetPath)).bindings[bindingId].dispatch_state === 'paused', 'Pause was not persisted');
-    await wait(async () => (await sessionBar().$('.dispatch-chip').getText()).includes('Paused (by you)'), 'Chip did not show Paused (by you)');
+    await wait(async () => (await sending.$('[data-dispatch]').getText()).includes('Paused (by you)'), 'Sending did not show Paused (by you)');
+    await click(await sending.$('button=Done'));
+    await wait(async () => !(await dialog().isExisting()), 'Sending dialog did not close');
   };
   await pauseSending();
   assert.equal((await readJson(targetPath)).state, 'active', 'Pause must not also close');
