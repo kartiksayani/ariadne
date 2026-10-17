@@ -582,23 +582,4 @@
   background: transparent;
 }
 
-.tree-recent > button {
-  flex: none;
-  font-size: calc(12px * var(--text-scale));
-}
-
 .tree-breadcrumb button:hover { text-decoration: underline; }
-
-.tree-recent {
-  display: flex;
-  flex: none;
-  align-items: center;
-  min-width: 0;
-  gap: 8px;
-  padding: 4px 16px 0;
-}
-
-.tree-recent > nav {
-  flex: 1;
-  min-width: 0;
-}

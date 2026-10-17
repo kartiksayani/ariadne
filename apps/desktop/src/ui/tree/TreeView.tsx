@@ -18,7 +18,7 @@ import { useSupervisorHealth } from '../../components/bindings/health';
 import { useWorkspaceKeys, type WorkspaceIntent } from '../keys';
 import { useIntents } from '../intents';
 import { notices as noticeStore } from '../pages/notices';
-import { closed, collapsedNote, mapChanges, nextMarkedItem, oldestWaiting, parentKey, sessionBar, treeModel, visual, type ItemRow as ItemRowModel, type Row, type SearchReveal, type StripRow } from './model';
+import { closed, collapsedNote, mapChanges, nextMarkedItem, parentKey, sessionBar, treeModel, visual, type ItemRow as ItemRowModel, type Row, type SearchReveal, type StripRow } from './model';
 import { alsoMatching, matchCount, searchTerms, type MapMatch } from '../../selectors/tree/search';
 import { MapSearchContext, type MapSearch, type MapSearchStatus } from './mapSearch';
 import { Keycap } from '../parts/parts';
@@ -27,7 +27,6 @@ import { hiddenGroupKey, hiddenGroupsFor, hiddenSource } from './hidden';
 import { HideIcon } from '../shared/HideIcon';
 import { ackHoldFor, ackTarget, ackTitle, useAckHeld } from '../shared/ack';
 import { STATUS } from '../shared/status';
-import { Guides } from './Guides';
 import { ItemRow, type RowAction } from './ItemRow';
 import { TopicRow, type BandSlots, type TopicAction } from './TopicRow';
 import { ContinueButton } from './band/ContinueButton';
@@ -61,7 +60,6 @@ import { isViewConflict } from '../shared/conflictNotice';
 import { TreeFonts, useTreeFonts } from './fonts';
 import { branchItems, breadcrumbItems } from './gettingAround';
 import { usePeek } from '../peek/Peek';
-import { RecentDialog, RecentTrail } from '../navigation/Recent';
 import { navigationVisits } from '../navigation/visits';
 import { AckAll } from '../navigation/AckAll';
 import { ackAllItems } from '../navigation/ackAllController';
@@ -98,8 +96,6 @@ export interface TreeViewProps {
   readonly graph?: ReactNode;
   /** Notices above the rows: stale data, recovery. */
   readonly notices?: ReactNode;
-  /** Expanded topic information below its sticky header, above the item rows. */
-  readonly topicContent?: (topicId: string) => ReactNode;
   readonly summaries: readonly Immutable<SessionSummary>[];
   readonly now?: () => number;
   /** The tree selected an item; restoration preserves the current detail state. */
@@ -190,7 +186,6 @@ export function TreeView(props: TreeViewProps) {
   const [kbd, setKbd] = useState(false);
   const [continuing, setContinuing] = useState<string | null>(null);
   const [replying, setReplying] = useState<string | null>(null);
-  const [recentOpen, setRecentOpen] = useState(false);
   useEffect(() => navigationVisits.bind(navigation), [navigation]);
   useOwnerDrafts(drafts, raw);
   const lifecycle = useSessionLifecycleFor(actions);
@@ -544,7 +539,6 @@ export function TreeView(props: TreeViewProps) {
   useIntents({
     'focus.toggle': toggleSelectedFocus,
     'topic.continue': continueSelected,
-    'recent.open': () => { if (!session) return false; setRecentOpen(true); return true; },
     // n outlines the next unseen row; the Graph and the bigger view have none.
     'map.nextUnseen': ({ repeat }) => { if (graph || covered) return false; if (!repeat) nextCallbacks.current(); return true; },
     'map.backToSelected': () => { if (graph || covered || !selectedId) return false; revealSelected(true); return true; },
@@ -1193,10 +1187,6 @@ export function TreeView(props: TreeViewProps) {
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
         reply={replying === row.topic.id && !archivedMode ? <TopicReply drafts={drafts} store={store} actions={actions} topicId={row.topic.id}
           agent={bar?.agent ?? 'the agent'} onClose={() => { setReplying(null); focusRow(row.key); }} /> : null} fix={fixOf(row)} />
-      {/* The topic's rail runs on through its cards, so the thread is one line from the band to the first item. */}
-      {row.expanded && props.topicContent && <div className="tree-topic-cards" data-topic-cards={row.topic.id}>
-        <Guides guides={row.guides.filter(guide => guide.kind === 'line').map(guide => ({ ...guide, fromBullet: false }))} />
-        {props.topicContent(row.topic.id)}</div>}
       {items.map(row => row.kind === 'strip'
         ? <Strip key={row.key} variant="row" row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleStrip} />
         : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={focusDisabled} closedReason={session ? sessionAnswerBlocked(session) : undefined}
@@ -1276,14 +1266,6 @@ export function TreeView(props: TreeViewProps) {
     <span role="status" className="tree-unseen-announcement">{noUnseen ? 'No unseen items.' : ''}</span>
     {/* The chip row sits in flow above both the Tree and the Graph (D13); the hold keeps the reading row's viewport place when it opens or closes. */}
     {filterRow}
-    {filtersShown && !graphShown && <div className="tree-recent">
-      {session && !graph && <><RecentTrail session={session} entries={view?.recent_items}
-        nextWaiting={oldestWaiting(session)} onReveal={id => select(id, false)} />
-      <button type="button" className="btn btn-ghost" title="Recent (⌘E)" onClick={() => setRecentOpen(true)}>Recent</button></>}
-    </div>}
-    {session && recentOpen && lift(<RecentDialog session={session} entries={view?.recent_items}
-      seen={seen}
-      onReveal={id => { if (covered && props.onOpenItem) props.onOpenItem(id); else select(id, false); }} onClose={() => setRecentOpen(false)} />)}
     {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>
       Showing an item outside your current filters.</Banner>}
     {lifecycle.pending && <Banner icon="ph ph-warning" alert actions={<button type="button" className="btn btn-ghost" onClick={lifecycle.reconcile}>Check again</button>}>
@@ -1297,7 +1279,7 @@ export function TreeView(props: TreeViewProps) {
           {index > 0 && <span aria-hidden="true"> › </span>}<button type="button" title={session?.items[id]?.question} onClick={() => select(id, false)}>{names.get(id)}</button>
         </span>)}</nav>
       </div>
-      <div ref={scroller} className="tree-scroll" onScroll={() => {
+      <div ref={scroller} className="tree-scroll" data-testid="map-scroll" onScroll={() => {
         // At the held scrollTop this can be our own correction's delayed event;
         // remembering restores any intervening reflow before capturing again.
         if (held.current?.scrollTop !== scroller.current?.scrollTop) revealedAnchor.current = null;

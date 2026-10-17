@@ -169,45 +169,13 @@
 
 .hlp-markers > .hlp-text { padding-top: 0; }
 
-.hlp-pill {
-  display: inline-flex;
-  align-items: center;
+/* The key shows the shared ChangeMarker itself, so it can never drift from the Map. */
+.hlp-markers > .change-marker {
   place-self: start;
   gap: 5px;
-  height: 17px;
   margin-top: 1px;
-  padding: 0 7px 0 6px;
-  border-radius: 999px;
-  white-space: nowrap;
-  font-size: calc(10.5px * var(--text-scale));
-  font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 1;
-}
-
-.hlp-new {
-  background: var(--attention);
-  color: var(--a-bg);
-}
-
-.hlp-changed {
-  color: var(--attention);
-  box-shadow: inset 0 0 0 1.25px var(--attention);
-}
-
-.hlp-diamond {
-  width: 5px;
-  height: 5px;
-  border-radius: 1px;
-  background: currentcolor;
-  transform: rotate(45deg);
-}
-
-.hlp-diamond-line {
-  width: 6px;
-  height: 6px;
-  border: 1.25px solid currentcolor;
-  background: transparent;
 }
 
 .hlp-diamonds {
@@ -215,16 +183,6 @@
   gap: 8px;
   padding: 4px 0 0 4px;
 }
-
-.hlp-dm {
-  width: 7px;
-  height: 7px;
-  border-radius: 1.5px;
-  transform: rotate(45deg);
-}
-
-.hlp-dm-solid { background: var(--attention); }
-.hlp-dm-line { border: 1.5px solid var(--attention); }
 
 .hlp-statuses {
   display: grid;

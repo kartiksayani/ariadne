@@ -182,23 +182,9 @@
   color: var(--st-waiting);
 }
 
-/* Diamonds alone on Graph nodes (SPEC §3.7): solid for New, outlined for Changed. */
-.graph-node-marker {
-  flex: none;
-  box-sizing: border-box;
-  width: 7px;
-  height: 7px;
+/* The diamond alone on a Graph node is the shared ChangeMarker (ui/changes/ChangeMarker.tsx). */
+.graph-node > .change-marker {
   margin-right: 2px;
-  border-radius: 1.5px;
-  transform: rotate(45deg);
-}
-
-.graph-node-marker.is-new {
-  background: var(--attention);
-}
-
-.graph-node-marker.is-changed {
-  border: 1.5px solid var(--attention);
 }
 
 /* — legend — hangs 12px above the dock, left 12 (SPEC §2) — */

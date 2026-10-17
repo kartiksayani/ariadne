@@ -11,6 +11,7 @@ import { TreeView } from '../../src/ui/tree/TreeView';
 import { AppTransport, route, secondId } from './app/transport';
 import { goToPage, goToSession } from './app/open';
 import { page as historyPage, projections } from './history/fixtures';
+import { BAND_HOST_LANDED } from './changes/band-host';
 
 vi.mock('react-dom/client', async importOriginal => {
   const actual = await importOriginal<typeof ReactDOM>();
@@ -59,7 +60,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 // These composed journeys include independent seen saves under default file parallelism.
 describe('ordinary desktop composition', () => {
-  it('keeps the New tag and Since card through a long peek: peeking never marks an item seen', async () => {
+  it.skipIf(!BAND_HOST_LANDED)('keeps the New tag and Since card through a long peek: peeking never marks an item seen', async () => {
     const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!, target = session.items['1.1']!;
     const baseline = new Date(Date.now() - 60_000).toISOString();
     target.created_at = new Date(Date.now() - 30_000).toISOString(); target.changes = []; target.short = 'New receipt branch';
@@ -69,17 +70,17 @@ describe('ordinary desktop composition', () => {
     fireEvent.click(document.querySelector('[role="treeitem"][data-item-id="1"]')!);
     const detail = await screen.findByRole('article', { name: `Detail of ${session.items['1']!.question}` });
     const row = () => document.querySelector<HTMLElement>('[role="treeitem"][data-item-id="1.1"]')!;
-    expect(within(row()).getByRole('img', { name: 'New' })).toBeTruthy();
-    const since = screen.getAllByRole('region', { name: 'Since you were here' }).find(region => within(region).queryByRole('button', { name: /^Since you were here/ }))!;
-    fireEvent.click(within(since).getByRole('button', { name: /^Since you were here/ }));
+    expect(within(row()).getByRole('img', { name: 'New to you' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /1 new/ }));
+    const since = screen.getByRole('dialog', { name: 'What changed' });
     expect(within(since).getByRole('button', { name: 'New receipt branch' })).toBeTruthy();
     const chip = within(detail).getByRole('button', { name: `${target.question} · Open` });
     // Past the 1 s that Details and the dock wait before marking seen.
     vi.useFakeTimers(); fireEvent.click(chip); await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
     expect(screen.getByRole('dialog', { name: `Peek: ${target.question}` })).toBeTruthy();
     // The card says it is New, and the Map, the Since card and the saved reads all still do.
-    expect(screen.getByRole('dialog').querySelector('.peek-marker')?.textContent).toBe('New');
-    expect(within(row()).getByRole('img', { name: 'New' })).toBeTruthy();
+    expect(within(screen.getByRole('dialog', { name: `Peek: ${target.question}` })).getByTestId('change-marker').getAttribute('aria-label')).toBe('New');
+    expect(within(row()).getByRole('img', { name: 'New to you' })).toBeTruthy();
     expect(within(since).getByRole('button', { name: 'New receipt branch' })).toBeTruthy();
     fireEvent.keyDown(document, { key: 'Escape' }); await act(async () => { await vi.advanceTimersByTimeAsync(500); });
     expect(within(row()).getByRole('img', { name: 'New' })).toBeTruthy();

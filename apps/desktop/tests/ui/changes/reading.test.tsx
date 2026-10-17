@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import type { PreferencesSnapshot } from '../../../src/generated/core';
 import { ReadingLane, useReadingSeen } from '../../../src/state/preferences/reading';
-import { useSeenDwell } from '../../../src/ui/changes/useSeenDwell';
+import { origin, useSeenDwell } from '../../../src/ui/changes/useSeenDwell';
 import { caughtUpTopics } from '../../../src/ui/changes/useCaughtUp';
 import { changesFixture } from './fixture';
 
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 describe('shared reading observations', () => {
   it('observes an open capture after one second and cancels closing or revision changes', () => {
     vi.useFakeTimers(); const observe = vi.fn();
@@ -17,6 +17,72 @@ describe('shared reading observations', () => {
     act(() => vi.advanceTimersByTime(1)); expect(observe).toHaveBeenCalledTimes(1);
     result.rerender({ key: 'other', revision: 1 }); result.rerender({ key: null, revision: 1 });
     act(() => vi.advanceTimersByTime(1000)); expect(observe).toHaveBeenCalledTimes(1);
+  });
+  describe('the dwell runs only while the window is visible and in front (D20)', () => {
+    const setWindow = (state: { visible: boolean; focused: boolean }) => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state.visible ? 'visible' : 'hidden' });
+      document.hasFocus = () => state.focused;
+      act(() => { window.dispatchEvent(new Event(state.focused ? 'focus' : 'blur')); document.dispatchEvent(new Event('visibilitychange')); });
+    };
+    afterEach(() => { delete (document as { visibilityState?: unknown }).visibilityState; });
+    it.each([
+      ['blurred', { visible: true, focused: false }],
+      ['hidden', { visible: false, focused: false }],
+      ['hidden but focused', { visible: false, focused: true }],
+    ])('never observes while the window is %s, however long the item stays open', (_name, state) => {
+      vi.useFakeTimers(); const observe = vi.fn();
+      setWindow(state);
+      renderHook(() => useSeenDwell('item', 1, observe));
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(observe).not.toHaveBeenCalled();
+    });
+    it('observes once the window comes to the front, a full second after it did', () => {
+      vi.useFakeTimers(); const observe = vi.fn();
+      setWindow({ visible: true, focused: false });
+      renderHook(() => useSeenDwell('item', 1, observe));
+      act(() => vi.advanceTimersByTime(5000));
+      setWindow({ visible: true, focused: true });
+      act(() => vi.advanceTimersByTime(999)); expect(observe).not.toHaveBeenCalled();
+      act(() => vi.advanceTimersByTime(1)); expect(observe).toHaveBeenCalledTimes(1);
+    });
+    it('clears after a real click plus a second when the window never fired a focus event', () => {
+      vi.useFakeTimers(); const observe = vi.fn();
+      // The webview is in front but has reported no focus yet: hasFocus() is false and no `focus` event ever comes.
+      document.hasFocus = () => false;
+      renderHook(() => useSeenDwell('item', 1, observe));
+      act(() => vi.advanceTimersByTime(5000)); expect(observe).not.toHaveBeenCalled();
+      // A script's event is not the owner.
+      act(() => { document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
+      act(() => vi.advanceTimersByTime(5000)); expect(observe).not.toHaveBeenCalled();
+      vi.spyOn(origin, 'trusted').mockReturnValue(true);
+      act(() => { document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
+      act(() => vi.advanceTimersByTime(999)); expect(observe).not.toHaveBeenCalled();
+      act(() => vi.advanceTimersByTime(1)); expect(observe).toHaveBeenCalledTimes(1);
+    });
+    it('a real key also counts, and a later blur stops the dwell until focus or another press', () => {
+      vi.useFakeTimers(); const observe = vi.fn();
+      document.hasFocus = () => false;
+      renderHook(() => useSeenDwell('item', 1, observe));
+      vi.spyOn(origin, 'trusted').mockReturnValue(true);
+      act(() => { document.body.dispatchEvent(new Event('keydown', { bubbles: true })); });
+      act(() => vi.advanceTimersByTime(900));
+      act(() => { window.dispatchEvent(new Event('blur')); });
+      act(() => vi.advanceTimersByTime(5000)); expect(observe).not.toHaveBeenCalled();
+      act(() => { window.dispatchEvent(new Event('focus')); });
+      act(() => vi.advanceTimersByTime(999)); expect(observe).not.toHaveBeenCalled();
+      act(() => vi.advanceTimersByTime(1)); expect(observe).toHaveBeenCalledTimes(1);
+    });
+    it('starts again from zero after the window is hidden or blurred mid-dwell', () => {
+      vi.useFakeTimers(); const observe = vi.fn();
+      setWindow({ visible: true, focused: true });
+      renderHook(() => useSeenDwell('item', 1, observe));
+      act(() => vi.advanceTimersByTime(900));
+      setWindow({ visible: true, focused: false });
+      act(() => vi.advanceTimersByTime(5000));
+      setWindow({ visible: true, focused: true });
+      act(() => vi.advanceTimersByTime(900)); expect(observe).not.toHaveBeenCalled();
+      act(() => vi.advanceTimersByTime(100)); expect(observe).toHaveBeenCalledTimes(1);
+    });
   });
   it('shares optimistic reads, undoes bulk marks, and keeps reads made after the shortcut', () => {
     vi.useFakeTimers(); const save = vi.fn(), lane = new ReadingLane(save), value = changesFixture(2);

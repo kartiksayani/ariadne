@@ -434,11 +434,6 @@
   }
 }
 
-.tree-topic-cards {
-  position: relative;
-  display: flow-root;
-}
-
 .tree-topic-fix {
   padding-left: 26px;
 }

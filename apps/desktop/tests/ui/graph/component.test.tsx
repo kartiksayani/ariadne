@@ -619,10 +619,11 @@ describe('session graph view', () => {
   it('draws the New and Changed markers as diamonds alone (SPEC 9.9)', async () => {
     const value = await setup();
     render(<value.Composition markers={new Map([['1.1', 'new'], ['2', 'changed']])} />);
-    expect(within(node('1.1')).getByRole('img', { name: 'New' }).className).toBe('graph-node-marker is-new');
-    expect(within(node('2')).getByRole('img', { name: 'Changed' }).className).toBe('graph-node-marker is-changed');
+    const fresh = within(node('1.1')).getByTestId('change-marker'), changed = within(node('2')).getByTestId('change-marker');
+    expect([fresh.getAttribute('aria-label'), fresh.dataset.kind, fresh.dataset.form]).toEqual(['New', 'new', 'diamond']);
+    expect([changed.getAttribute('aria-label'), changed.dataset.kind, changed.dataset.form]).toEqual(['Changed', 'changed', 'diamond']);
     expect(node('1.1').dataset.marker).toBe('new');
-    expect(node('3').querySelector('.graph-node-marker')).toBeNull();
+    expect(within(node('3')).queryByTestId('change-marker')).toBeNull();
   });
 
   it('moves with ↑/↓, Home and End, folds and unfolds with ←/→ and opens detail with Enter', async () => {

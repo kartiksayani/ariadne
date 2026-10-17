@@ -17,9 +17,11 @@ for (const theme of ['light', 'dark'] as const) test(`N wraps unread Map targets
     await expect(child).toHaveCount(0);
     await page.keyboard.press('n');
     await expect(child).toHaveAttribute('data-next-unseen', 'true');
-    await expect(child.getByRole('img', { name: 'New to you' })).toHaveText('New');
-    const markerColour = await child.locator('.tree-change-marker').evaluate(element => getComputedStyle(element).color);
-    const attention = await child.locator('.tree-change-marker').evaluate(element => {
+    await expect(child.getByTestId('change-marker')).toHaveAttribute('aria-label', 'New');
+    await expect(child.getByTestId('change-marker')).toHaveText('New');
+    // A New pill is filled with the attention colour; its outline and every other mark of attention use that colour.
+    const markerColour = await child.getByTestId('change-marker').evaluate(element => getComputedStyle(element).backgroundColor);
+    const attention = await child.getByTestId('change-marker').evaluate(element => {
       const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
       const context = canvas.getContext('2d')!;
       const pixels = (colour: string) => {
@@ -44,7 +46,7 @@ for (const theme of ['light', 'dark'] as const) test(`N wraps unread Map targets
     await expect(child).toHaveAttribute('aria-selected', 'false');
     await expect(child).not.toHaveAttribute('data-next-unseen-pulse', 'true', { timeout: 2000 });
     await expect(child).toHaveAttribute('data-next-unseen', 'true');
-    await expect(child.getByRole('img', { name: 'New to you' })).toBeVisible();
+    await expect(child.getByTestId('change-marker')).toBeVisible();
     await expect(child).toHaveCSS('outline-width', '2px');
     await expect(child).toHaveCSS('outline-color', markerColour);
     await expect(page.locator('.shell-detail')).toHaveCount(0);
@@ -54,8 +56,9 @@ for (const theme of ['light', 'dark'] as const) test(`N wraps unread Map targets
     // N's ancestry expansion is temporary; leaving this child restores the saved fold.
     await expect(child).toHaveCount(0);
     await expect(page.locator('.tree-item[data-next-unseen="true"]')).toHaveCount(1);
-    await expect(changed.getByRole('img', { name: 'Changed since you read it' })).toBeVisible();
-    await expect(changed.locator('.tree-change-marker')).toHaveCSS('background-color', markerColour);
+    await expect(changed.getByTestId('change-marker')).toHaveAttribute('aria-label', 'Changed');
+    // Changed is the outlined pill: no fill, the attention colour in its ring and its word.
+    await expect(changed.getByTestId('change-marker')).toHaveCSS('color', markerColour);
     const last = page.locator('.tree-item[data-item-id="18"]');
     await page.keyboard.press('n');
     await expect(last).toHaveAttribute('data-next-unseen', 'true');
@@ -67,15 +70,15 @@ for (const theme of ['light', 'dark'] as const) test(`N wraps unread Map targets
     await page.keyboard.press('n');
     await expect(child).toHaveAttribute('data-next-unseen', 'true');
     await expect(last).not.toHaveAttribute('data-next-unseen', 'true');
-    await expect(child.getByRole('img', { name: 'New to you' })).toBeVisible();
+    await expect(child.getByTestId('change-marker')).toBeVisible();
     await expectRevealedRow(child);
     await expect(page.locator('.shell-detail')).toHaveCount(0);
     await expect(page.locator('.tree-item[aria-selected="true"]')).toHaveCount(0);
-    await expect(page.locator('.tree-item[data-item-id="3"] .tree-change-marker')).toHaveCount(0);
+    await expect(page.locator('.tree-item[data-item-id="3"]').getByTestId('change-marker')).toHaveCount(0);
     // Opening remains an explicit action; its shared read then clears this tag.
     await page.keyboard.press('Enter');
     await expect(child).toHaveAttribute('aria-selected', 'true');
-    await expect(child.getByRole('img', { name: 'New to you' })).toHaveCount(0);
+    await expect(child.getByTestId('change-marker')).toHaveCount(0);
     // Typing N in the search box leaves the last landed target alone.
     await page.getByRole('button', { name: 'Search the Map' }).click();
     const search = page.getByRole('textbox', { name: 'Search the Map' });
@@ -224,8 +227,10 @@ for (const theme of ['light', 'dark']) test(`Getting around keeps breadcrumbs an
     await page.keyboard.press('Escape');
     await page.keyboard.press('Meta+e');
     await expect(page.getByRole('dialog', { name: 'Recent items' })).toBeVisible();
-    await page.getByRole('button', { name: 'Changed only' }).click();
-    await expect(page.getByRole('button', { name: 'Changed only' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('region', { name: 'Changed lately' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Viewed' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'Recent items' })).toHaveCount(0);
   } finally { await server.close(); }
 });
 

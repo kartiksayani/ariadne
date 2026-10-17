@@ -526,9 +526,3 @@ export function parentKey(row: Row): string | null {
   if (row.kind === 'strip') return row.parent ?? row.topicId;
   return row.item.parent ?? row.item.topic_id;
 }
-
-/** The oldest item waiting on the owner in this session; one the owner already replied to waits on the agent. */
-export function oldestWaiting(session: Immutable<Session>): Immutable<Item> | null {
-  return items(session).filter(item => waitingOnOwner(session, item) && session.topics[item.topic_id]?.archived_at === null)
-    .sort((a, b) => (a.waiting_since ?? a.created_at).localeCompare(b.waiting_since ?? b.created_at))[0] ?? null;
-}

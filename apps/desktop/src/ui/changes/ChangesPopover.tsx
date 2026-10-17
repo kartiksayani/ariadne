@@ -45,7 +45,8 @@ export function ChangesPopover({ session, topicId, route, navigation, data, undo
   const labels = peekNames(session);
   const { summary, list } = data;
   const lists = useMemo(() => briefLists(session, topicId), [session, topicId]);
-  const away = useMemo(() => summary.longAbsence && list.length > 0 ? awayGroups(session, summary) : [], [session, summary, list.length]);
+  const longAway = summary.longAbsence && list.length > 0;
+  const away = useMemo(() => longAway ? awayGroups(session, summary) : [], [session, summary, longAway]);
   const waiting = useMemo(() => activeItems(session).filter(item => item.topic_id === topicId && waitingOnOwner(session, item))
     .sort((left, right) => (left.waiting_since ?? left.created_at).localeCompare(right.waiting_since ?? right.created_at)), [session, topicId]);
   if (!topic) return null;
@@ -69,16 +70,18 @@ export function ChangesPopover({ session, topicId, route, navigation, data, undo
   };
   const lastReworded = summary.groups.reworded.flatMap(row => row.records.map(record => ({ row, at: record.at }))).sort((left, right) => Date.parse(right.at) - Date.parse(left.at))[0];
   const since = summary.baseline ? clockTime(summary.baseline) : null;
-  const caughtUp = list.length === 0;
+  // A row the owner just marked seen stays, dimmed, until the popover closes; "All caught up" shows when nothing is left to show.
+  const caughtUp = rows.length === 0;
   const quiet = away.find(group => group.key === 'progress');
   const needs = away.find(group => group.key === 'waiting');
 
+  const undoButton = <button type="button" className="btn btn-ghost changes-undo-button" onClick={() => navigation.reading.undo(undoToken!)}>↺ Undo</button>;
   const brief = <section className="changes-section" aria-label="Topic brief">
     <button ref={briefButton} type="button" className="changes-brief-head" aria-expanded={briefOpen} onClick={() => toggleBrief(!briefOpen)}>
       <i className={briefOpen ? 'ph ph-caret-down' : 'ph ph-caret-right'} aria-hidden="true" />
       <span className="changes-label-caps">Brief</span>
-      {topic.brief && <span className="change-muted">by the agent · updated <time dateTime={topic.brief_updated_at ?? topic.created_at}>{clockTime(topic.brief_updated_at ?? topic.created_at)}</time></span>}
-      {!briefOpen && <span className="change-muted changes-brief-counts">{lists.decided.length} decided · {lists.yourTurn.length} your turn · {lists.replaced.length} replaced</span>}
+      {topic.brief && <>{' '}<span className="change-muted">by the agent · updated <time dateTime={topic.brief_updated_at ?? topic.created_at}>{clockTime(topic.brief_updated_at ?? topic.created_at)}</time></span></>}
+      {!briefOpen && <>{' '}<span className="change-muted changes-brief-counts">{lists.decided.length} decided · {lists.yourTurn.length} your turn · {lists.replaced.length} replaced</span></>}
     </button>
     {briefOpen && <div className="changes-brief-body">
       {topic.brief && <p className="brief-text">{topic.brief}</p>}
@@ -93,33 +96,33 @@ export function ChangesPopover({ session, topicId, route, navigation, data, undo
     </div>}
   </section>;
 
-  return <div className="changes-body">
-    {away.length > 0 && <section className="changes-section changes-away" aria-label="While you were away">
+  return <div className="changes-body" data-testid="changes-body">
+    {longAway && <section className="changes-section changes-away" aria-label="While you were away">
       <p>You were away since {weekdayName(summary.baseline!)} {clockTime(summary.baseline!)}. A lot moved in this topic{quiet && quiet.count * 2 >= summary.changeCount ? ', most of it progress notes' : ''}.
         {needs ? ` ${needs.count === 1 ? 'One thing needs' : `${needs.count} things need`} you.` : ''}</p>
       <ul className="changes-away-list">{away.map(group => <li key={group.key}><strong>{group.count}</strong> {group.label}
         {group.key !== 'progress' && <span className="changes-away-names"><Names items={group.items} session={session} route={route} onOpen={onOpenItem} /></span>}</li>)}</ul>
       <div className="changes-away-actions">
-        {waiting[0] && <button type="button" className="btn btn-primary" onClick={() => onOpenItem(waiting[0]!.id)}><i className="ph ph-question" aria-hidden="true" /> Start with what’s waiting</button>}
+        {waiting[0] && <button type="button" className="btn btn-primary" onClick={() => onOpenItem(waiting[0]!.id)}><i className="ph-fill ph-question" aria-hidden="true" /> Start with what’s waiting</button>}
         <button type="button" className="btn btn-secondary" onClick={() => { toggleBrief(true); briefButton.current?.focus(); }}>Read the brief</button>
-        <button type="button" className="btn btn-ghost" title="Clears every marker. Nothing is acked or changed." onClick={catchUp}>Mark all caught up</button>
+        {canUndo ? undoButton : <button type="button" className="btn btn-ghost" title="Clears every marker. Nothing is acked or changed." onClick={catchUp}>Mark all caught up</button>}
       </div>
     </section>}
     {caughtUp && <p className="changes-caught-up" role="status"><i className="ph ph-check-circle" aria-hidden="true" />
-      {canUndo ? <>All caught up. The markers are cleared; nothing was acked or changed. <button type="button" className="change-link" onClick={() => navigation.reading.undo(undoToken!)}>↺ Undo</button></>
+      {canUndo ? <>All caught up. The markers are cleared; nothing was acked or changed. {undoButton}</>
         : <>All caught up. Nothing new{since ? ` since ${since}` : ''}.</>}</p>}
     {brief}
     {!caughtUp && <section className="changes-section" aria-label="Since you were here">
       <div className="changes-since-head">
         <span className="changes-label-caps">Since you were here</span>
         <span className="change-muted">{data.list.length} unseen{since ? ` · since ${since}` : ''}</span>
-        {away.length === 0 && <button type="button" className="btn btn-ghost changes-catch-up" title="Clears every marker. Nothing is acked or changed." onClick={catchUp}>✓ Mark all caught up</button>}
+        {!longAway && (canUndo ? undoButton : <button type="button" className="btn btn-ghost changes-catch-up" title="Clears every marker. Nothing is acked or changed." onClick={catchUp}>✓ Mark all caught up</button>)}
       </div>
       <ul className="changes-rows">{rows.map(entry => {
         const { row, kind } = entry, item = row.item, marked = seenHere.has(item.id);
         const name = labels.get(item.id) ?? shortLabel(item);
         const label = row.replacement && item.status === 'replaced' ? `Replaced by “${labels.get(row.replacement.id) ?? shortLabel(row.replacement)}”` : changeLabel(item, entry.record, entry.later);
-        return <li className="changes-row" key={item.id} data-item-id={item.id} data-kind={kind} data-seen={marked || undefined}>
+        return <li className="changes-row" data-testid="changes-row" key={item.id} data-item-id={item.id} data-kind={kind} data-seen={marked || undefined}>
           <StatusBadge status={statusKey[displayStatus(session, item)]} variant="icon" size={15} />
           {!marked && <ChangeMarker kind={kind} />}
           <ItemName item={item} route={route} label={name} onOpen={onOpenItem} />

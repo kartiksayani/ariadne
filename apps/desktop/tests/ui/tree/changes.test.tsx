@@ -12,6 +12,7 @@ import { dispatchIntent } from '../../../src/ui/intents';
 import { mapChanges, nextMarkedItem } from '../../../src/ui/tree/model';
 import { AppTransport, route } from '../app/transport';
 import { notices } from '../../../src/ui/pages/notices';
+import { BAND_HOST_LANDED } from '../changes/band-host';
 
 const baseline = '2026-10-01T00:00:00.000Z', later = '2026-10-13T09:00:00.000Z';
 const stores: NavigationStore[] = [];
@@ -252,17 +253,19 @@ describe('Map change markers and next unseen navigation', () => {
     } finally { vi.unstubAllGlobals(); }
   });
 
-  it('renders topic content only under expanded topic headers', async () => {
-    const view = await mount(undefined, { topicContent: id => <div data-topic-content={id}>Topic changes</div> });
-    const header = document.querySelector<HTMLElement>('.tree-topic')!;
-    // The cards sit in a wrapper that carries the topic's rail on through them (see the Map layout tests).
-    const cards = header.nextElementSibling!;
-    expect(cards.classList.contains('tree-topic-cards')).toBe(true);
-    expect(cards.querySelector('[data-topic-content]')?.getAttribute('data-topic-content')).toBe(header.dataset.row);
-    fireEvent.click(within(header).getByRole('button', { name: 'Expand or collapse topic' }));
-    await waitFor(() => expect(header.getAttribute('aria-expanded')).toBe('false'));
-    expect(header.nextElementSibling?.classList.contains('tree-topic-cards')).not.toBe(true);
-    expect(header.closest('.tree-topic-group')!.querySelector('[data-topic-content]')).toBeNull();
-    expect(view.transport.mutations).toHaveLength(1);
+  it.skipIf(!BAND_HOST_LANDED)('offers What changed for a topic while something in it is unseen, as a popover that takes no room in the Map', async () => {
+    const view = await mount();
+    // The fixture's baseline is twelve days back, so the band speaks of changes rather than counting new and changed.
+    const opener = screen.getByRole('button', { name: /2 changes since/ });
+    expect(document.querySelector('.tree-topic-cards')).toBeNull();
+    const before = row('2').getBoundingClientRect().top;
+    fireEvent.click(opener);
+    expect(screen.getByRole('dialog', { name: 'What changed' })).toBeTruthy();
+    expect(row('2').getBoundingClientRect().top).toBe(before);
+    expect(view.transport.preferences.seen![0]!.items).toEqual([]);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'What changed' })).toBeNull();
+    act(() => { view.navigation.markItemSeen(route, '1.1'); view.navigation.markItemSeen(route, '2'); });
+    expect(screen.queryByRole('button', { name: /changes since|new|changed/i })).toBeNull();
   });
 });

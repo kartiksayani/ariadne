@@ -40,12 +40,12 @@ async function mount() {
   const actions = new SessionActionControllers(service).forSession(store), drafts = new OwnerDraftStore(service);
   const selected: RevealedItem[] = [], seen = vi.spyOn(navigation, 'markItemSeen');
   let status: MapSearchStatus | null = null, search: MapSearch | null = null;
-  // The topic cards render inside the Map, under the search provider the Graph reads too.
+  // The notices render inside the Map, under the search provider the Graph reads too.
   function Probe() { search = useMapSearch(); return null; }
   function Harness({ query }: { readonly query: string }) {
     const [selectedId, setSelectedId] = useState<string | null>(null);
     return <TreeView navigation={navigation} store={store} actions={actions} drafts={drafts} query={query} reveal={null} selectedId={selectedId}
-      detailOpen={false} summaries={[]} now={now} topicContent={() => <Probe />}
+      detailOpen={false} summaries={[]} now={now} notices={<Probe />}
       onSearchStatus={value => { status = value; }}
       onSelected={result => { selected.push(result); if (result.kind === 'item') setSelectedId(result.route.item_id); }}
       onDismissReveal={() => {}} onResume={() => {}} onAct={() => {}} onClearFilters={() => {}} onShowArchive={() => {}} onRemove={() => {}} />;

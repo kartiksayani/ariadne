@@ -16,7 +16,8 @@ import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
 import { filterSignature, type LocalChip } from '../../selectors/tree/filter';
 import { BRANCH_HUES } from '../tree/branch';
-import type { ChangeMarker } from '../tree/model';
+import type { ChangeMarker as MarkerKind } from '../tree/model';
+import { ChangeMarker } from '../changes/ChangeMarker';
 import { usePeek } from '../peek/context';
 import { applyChange, graphColumn, mergeChange, relatedLines, sessionGraph, statusVisual, type GraphNode, type SessionGraph, type TopicGraph, type ViewChange } from './model';
 import { useMapSearch } from '../tree/mapSearch';
@@ -34,7 +35,7 @@ export interface GraphViewProps {
   /** The navigation's current reveal (a link, waiting card or tree selection). */
   readonly reveal: RevealedItem | null;
   /** New and Changed markers by item id (ui/tree/model.ts `mapChanges`): a diamond alone on the node (SPEC 9.9). */
-  readonly markers?: ReadonlyMap<string, ChangeMarker>;
+  readonly markers?: ReadonlyMap<string, MarkerKind>;
   readonly preferencesBusy?: boolean;
   /** The session's local filter chips (To ack, Sent, Blocked, Later), picked in the chip row. */
   readonly local?: readonly LocalChip[];
@@ -65,8 +66,6 @@ function scrollToNode(scroller: HTMLElement, element: Element, center: boolean, 
   else if (b.right > a.right - RING_ROOM) scroller.scrollLeft += Math.min(b.right - a.right + RING_ROOM, b.left - a.left - RING_ROOM);
 }
 
-const MARKER_TITLE: Readonly<Record<ChangeMarker, string>> = { new: 'New', changed: 'Changed' };
-
 interface NodeProps {
   readonly node: GraphNode;
   readonly width: number;
@@ -74,7 +73,7 @@ interface NodeProps {
   readonly related: boolean;
   readonly match: boolean;
   readonly current: boolean;
-  readonly marker: ChangeMarker | undefined;
+  readonly marker: MarkerKind | undefined;
   readonly onOpen: (node: GraphNode) => void;
 }
 const Node = memo(function Node({ node, width, focusable, related, match, current, marker, onOpen }: NodeProps) {
@@ -92,7 +91,7 @@ const Node = memo(function Node({ node, width, focusable, related, match, curren
     <span className="graph-node-name" data-peek-anchor="">{node.short}</span>
     {node.folded && <span className="graph-node-inside" title={inside}>+{node.inside}
       {node.waitingInside > 0 && <span className="graph-node-waiting"> · {node.waitingInside} waiting</span>}</span>}
-    {marker && <span className={`graph-node-marker is-${marker}`} role="img" aria-label={MARKER_TITLE[marker]} title={MARKER_TITLE[marker]} />}
+    {marker && <ChangeMarker kind={marker} form="diamond" />}
   </div>;
 });
 
@@ -103,7 +102,7 @@ interface TopicProps {
   readonly related: ReadonlySet<string>;
   readonly matches: ReadonlySet<string>;
   readonly current: string | null;
-  readonly markers: ReadonlyMap<string, ChangeMarker> | undefined;
+  readonly markers: ReadonlyMap<string, MarkerKind> | undefined;
   readonly onOpen: NodeProps['onOpen'];
 }
 const Topic = memo(function Topic({ graph, width, focusId, related, matches, current, markers, onOpen }: TopicProps) {

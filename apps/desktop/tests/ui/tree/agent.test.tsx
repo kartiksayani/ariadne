@@ -3,7 +3,7 @@ import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { SessionPreferences } from '../../../src/generated/core';
 import type { ItemStatus, Session } from '../../../src/generated/domain/models';
 import { immutable } from '../../../src/data';
-import { oldestWaiting, type ItemRow, type TopicRow } from '../../../src/ui/tree/model';
+import type { ItemRow, TopicRow } from '../../../src/ui/tree/model';
 import { shimTree } from './shimTree';
 import { chipCounts, savedChips } from '../../../src/selectors/tree/filter';
 import { sessionGraph } from '../../../src/ui/graph/model';
@@ -44,12 +44,12 @@ describe('an archived topic in the tree counts', () => {
   it('leaves Waiting on me while archived and comes back on restore; its items keep their status', () => {
     const session = structuredClone(demo) as Session, waitingTopic = session.topics[session.items['2']!.topic_id]!;
     const before = counts(session);
-    expect(before.waiting).toBeGreaterThan(0); expect(oldestWaiting(immutable(session))?.id).toBe('2');
+    expect(before.waiting).toBeGreaterThan(0);
     waitingTopic.archived_at = session.updated_at;
-    expect(counts(session).waiting).toBe(0); expect(oldestWaiting(immutable(session))).toBeNull();
+    expect(counts(session).waiting).toBe(0);
     expect(session.items['2']!.status).toBe('waiting_on_me');
     waitingTopic.archived_at = null;
-    expect(counts(session)).toEqual(before); expect(oldestWaiting(immutable(session))?.id).toBe('2');
+    expect(counts(session)).toEqual(before);
   });
 });
 

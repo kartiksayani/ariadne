@@ -247,31 +247,6 @@ describe('session tree rows', () => {
     expect(focusButton().textContent).toBe('Focus');
   });
 
-  it('updates Recent Changed only immediately while a seen save is still pending', async () => {
-    const view = await mount({ configure: transport => {
-      const session = transport.sessions.get(route.session_id)!;
-      const baseline = '2026-10-01T00:00:00.000Z';
-      session.items['1.1']!.created_at = '2026-10-13T00:00:00.000Z';
-      transport.preferences.seen = [{ session: route, since: baseline, items: [], topics: [] }];
-      viewOf(transport).recent_items = [{ item_id: '1.1', action: 'viewed', visited_at: '2026-10-13T01:00:00.000Z' }];
-    } });
-    let release!: () => void, entered = false;
-    const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
-    vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
-      if ('command' in args.request && args.request.command.command === 'preferences_patch'
-        && args.request.command.params.entries.some(entry => entry.kind === 'mark_seen')) { entered = true; await gate; }
-      return invoke(name, args);
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
-    const dialog = screen.getByRole('dialog', { name: 'Recent items' });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Changed only' }));
-    expect(within(dialog).getByRole('button', { name: / · viewed/ })).toBeTruthy();
-    act(() => { view.navigation.markItemSeen(route, '1.1'); });
-    expect(within(dialog).getByText('No changed items in your recent visits.')).toBeTruthy();
-    await waitFor(() => expect(entered).toBe(true));
-    expect(view.transport.preferences.seen![0]!.items).toEqual([]);
-    await act(async () => { release(); await gate; });
-  });
   it('enters Focus from the band button, remembers it on remount, and leaves by the same button, now reading Unfocus', async () => {
     const view = await mount({ props: { selectedId: '1' } });
     expect(focusButton().textContent).toBe('Focus');
@@ -480,7 +455,7 @@ describe('session tree rows', () => {
     expect(viewOf(view.transport).focused_item_id).toBeUndefined();
   });
 
-  it.each(['row', 'Recent', 'Selected'] as const)('keeps a %s navigation request through a held automatic Recent save', async surface => {
+  it.each(['row', 'Selected'] as const)('keeps a %s navigation request through a held automatic Recent save', async surface => {
     const view = await mount({ props: { selectedId: '8' }, configure: transport => {
       if (surface === 'Selected') viewOf(transport).focused_item_id = '1';
       viewOf(transport).recent_items = [{ item_id: '2', action: 'viewed', visited_at: '2026-10-13T11:00:00.000Z' }];
@@ -500,10 +475,7 @@ describe('session tree rows', () => {
     await waitFor(() => expect(entered).toBe(true));
     expect(view.navigation.isWritingRecent()).toBe(true);
     if (surface === 'row') fireEvent.click(row('3'));
-    else if (surface === 'Recent') {
-      fireEvent.click(screen.getByRole('button', { name: 'Recent' }));
-      fireEvent.click(within(screen.getByRole('dialog', { name: 'Recent items' })).getByRole('button', { name: / · viewed/ }));
-    } else {
+    else {
       const tag = backPill('below');
       tag.focus(); await userEvent.keyboard('{Enter}');
     }
@@ -512,7 +484,7 @@ describe('session tree rows', () => {
     if (surface === 'Selected') {
       await waitFor(() => expect(viewOf(view.transport).focused_item_id).toBeUndefined());
       await waitFor(() => expect(document.activeElement).toBe(row('8')));
-    } else await waitFor(() => expect(view.calls.selected.at(-1)).toMatchObject({ kind: 'item', route: { item_id: surface === 'row' ? '3' : '2' } }));
+    } else await waitFor(() => expect(view.calls.selected.at(-1)).toMatchObject({ kind: 'item', route: { item_id: '3' } }));
   });
 
   it('subscribes to font loading once for the whole Map, including after row rerenders', async () => {
@@ -2546,14 +2518,13 @@ describe('scrolling the tree', () => {
     view.rerender({ selectedId: '8', covered: true });
     const offset = box.scrollTop, selectedCalls = view.calls.selected.length;
     // The keys ask for intents; the Map answers `.` and `n` only while it is not covered, so neither is handled now.
-    // (Recent is the exception: its dialog is lifted above the bigger view, so ⌘E still answers; see the end.)
+    // (Recent is the App's, not the Map's: ⌘E answers over the bigger view too; see tests/ui/navigation/recentPopover.test.tsx.)
     for (const intent of ['map.backToSelected', 'map.nextUnseen'] as const) {
       let handled = true;
       act(() => { handled = dispatchIntent(intent); });
       expect(handled).toBe(false);
       expect(box.scrollTop).toBe(offset);
       expect(view.calls.selected).toHaveLength(selectedCalls);
-      expect(screen.queryByRole('dialog', { name: 'Recent items' })).toBeNull();
     }
     view.rerender({ selectedId: '8', covered: false });
     let handled = false;
@@ -2561,9 +2532,9 @@ describe('scrolling the tree', () => {
     expect(handled).toBe(true);
     expect(box.scrollTop).not.toBe(offset);
     noBackPill();
+    // The Map no longer answers Recent: the App owns it.
     act(() => { handled = dispatchIntent('recent.open'); });
-    expect(handled).toBe(true);
-    expect(screen.getByRole('dialog', { name: 'Recent items' })).toBeTruthy();
+    expect(handled).toBe(false);
   });
 
   it('holds a revealed ancestor below the sticky header when detail-width clamping shrinks its preceding row', async () => {

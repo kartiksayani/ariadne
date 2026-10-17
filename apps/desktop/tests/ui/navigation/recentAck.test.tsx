@@ -1,12 +1,12 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { immutable, SessionStore } from '../../../src/data/session-store';
 import { createDesktopService } from '../../../src/data/service';
 import { SessionActions } from '../../../src/components/bindings/actions';
-import type { MutationReceipt, OwnerMutationRequest, OwnerQueryRequest, SessionSeen } from '../../../src/generated/core';
+import type { MutationReceipt, OwnerMutationRequest, OwnerQueryRequest } from '../../../src/generated/core';
 import { AckAll } from '../../../src/ui/navigation/AckAll';
 import { ackAllFor, ackAllItems, attachAckAll, stopAckAll, ACK_ALL_HOLD_MS } from '../../../src/ui/navigation/ackAllController';
-import { RecentDialog, RecentTrail, recentEntries, recordRecent } from '../../../src/ui/navigation/Recent';
+import { RecentPopover, recentEntries, recordRecent } from '../../../src/ui/navigation/Recent';
 import { navigationVisits } from '../../../src/ui/navigation/visits';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { notices } from '../../../src/ui/pages/notices';
@@ -62,31 +62,28 @@ it('deduplicates Recent by item, retains newest action and limits distinct visit
   expect(recordRecent([...entries, entries[0]!], '99', 'peeked')[0]!.action).toBe('peeked');
 });
 
-it('Recent filters use the shared meaningful-change selectors and links reveal the item', async () => {
+it('Recent lists what changed lately with its label and what was viewed, and a click reveals the item and closes', async () => {
   const { session } = await ready(), item = session.items['1']!;
-  const baseline = '2026-10-01T00:00:00.000Z';
-  const seen: SessionSeen = { session: route, since: baseline, items: [{ item_id: item.id, revision: item.revision }], topics: [] };
-  item.created_at = baseline;
-  item.changes = [{ revision: item.revision + 1, at: '2026-10-13T00:00:00.000Z', wording_only: true,
-    cause_message_id: crypto.randomUUID(), before: { question: 'Earlier result' } }];
-  const entries = recordRecent([], '1', 'viewed');
-  expect(recentEntries(session, entries, true, seen)).toHaveLength(0);
-  item.changes[0]!.wording_only = false;
-  expect(recentEntries(session, entries, true, seen)).toHaveLength(1);
+  item.changes = [{ revision: item.revision + 1, at: '2026-10-13T00:00:00.000Z', cause_message_id: crypto.randomUUID(), before: { status: 'open' } }];
+  item.status = 'decided';
+  const entries = recordRecent(recordRecent([], '1.1', 'peeked', '2026-10-13T00:10:00.000Z'), '1', 'viewed', '2026-10-13T00:20:00.000Z');
+  expect(recentEntries(session, entries).map(visit => visit.item.id)).toEqual(['1', '1.1']);
   const reveal = vi.fn(), close = vi.fn();
-  render(<RecentDialog session={session} entries={entries} seen={seen} onReveal={reveal} onClose={close} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Changed only' }));
-  fireEvent.click(screen.getByRole('button', { name: /Result 1 · viewed/ }));
-  expect(reveal).toHaveBeenCalledWith('1'); expect(close).toHaveBeenCalledOnce();
+  render(<RecentPopover session={session} entries={entries} onReveal={reveal} onClose={close} />);
+  const lately = screen.getByRole('region', { name: 'Changed lately' }), viewed = screen.getByRole('region', { name: 'Viewed' });
+  expect(within(lately).getByRole('button', { name: /Result 1.*Open → Decided/ })).toBeTruthy();
+  expect(within(viewed).getAllByRole('button').map(button => button.textContent)).toEqual([expect.stringMatching(/Result 1.*viewed/), expect.stringMatching(/Result 1\.1.*peeked/)]);
+  fireEvent.click(within(viewed).getByRole('button', { name: /Result 1\.1.*peeked/ }));
+  expect(reveal).toHaveBeenCalledWith('1.1'); expect(close).toHaveBeenCalledOnce();
 });
 
-it('Recent trail shows three names/actions and Next reveals the supplied waiting item', async () => {
+it('Recent says so when nothing has been viewed, and closes on Escape', async () => {
   const { session } = await ready();
-  let entries = recordRecent([], '1', 'viewed');
-  for (const id of ['1.1', '2', '3']) entries = recordRecent(entries, id, 'peeked');
-  const reveal = vi.fn(); render(<RecentTrail session={session} entries={entries} nextWaiting={session.items['2']!} onReveal={reveal} />);
-  expect(screen.getByRole('navigation', { name: 'Your recent trail' }).querySelectorAll('.recent-trail-items button')).toHaveLength(3);
-  fireEvent.click(screen.getByRole('button', { name: /^Next:/ })); expect(reveal).toHaveBeenCalledWith('2');
+  const close = vi.fn();
+  render(<RecentPopover session={session} entries={[]} onReveal={vi.fn()} onClose={close} />);
+  expect(screen.getByText('Open or peek at an item to start your recent trail.')).toBeTruthy();
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(close).toHaveBeenCalledWith(true);
 });
 
 it('Ack all includes only eligible findings/explanations from the selected live topic', async () => {

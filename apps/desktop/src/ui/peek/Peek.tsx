@@ -17,6 +17,7 @@ import { ItemRefSession, PEEK_CLOSE_MS, PEEK_OPEN_MS, PeekContext, type PeekNavi
 import { peekPosition } from './position';
 import { peekNames } from './names';
 import { peekChange } from './change';
+import { ChangeMarker } from '../changes/ChangeMarker';
 import './peek.css';
 
 export { usePeek } from './context';
@@ -251,8 +252,7 @@ function PeekCard({ shown, drafts, card, navigation, sending, allowAnswer, onClo
       <div className="peek-head">
         <span className="peek-icon" aria-hidden="true"><StatusBadge status={statusKey[status]} variant="icon" size={15} /></span>
         <h2 className="peek-name" title={item.question}>{labels?.get(item.id) ?? item.question}</h2>
-        {change?.marker === 'new' && <span className="peek-marker" data-marker="new" title="New: you haven’t seen this item yet"><i aria-hidden="true" />New</span>}
-        {change?.marker === 'changed' && <span className="peek-marker" data-marker="changed" title="Changed since you last saw it"><i aria-hidden="true" />Changed</span>}
+        {change?.marker && <ChangeMarker kind={change.marker} />}
         <StatusBadge status={statusKey[status]} />
       </div>
       <Markdown className="peek-summary" text={item.outcome || item.question} compact />
