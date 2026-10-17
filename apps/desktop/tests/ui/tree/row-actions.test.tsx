@@ -106,6 +106,26 @@ describe('compact row actions', () => {
     expect(reply).toHaveBeenCalledOnce(); expect(props.onSelect).toHaveBeenCalledTimes(selections);
   });
 
+  // The six-slot hover bar can float over the middle of a narrow row. A click there must still select the row, so a greyed
+  // slot sits in a titled wrapper that takes the pointer (the button ignores it) and the click bubbles to the row.
+  it('lets a click on a greyed hover-bar slot select the row, keeps its tooltip, and never runs it', () => {
+    const later = vi.fn(), reply = vi.fn(), props = itemProps([
+      { title: 'Later: not for Done items', icon: 'ph ph-clock', disabled: true, run: later },
+      { title: 'Reply (r)', icon: 'ph ph-chat-text', run: reply },
+    ]);
+    const { container } = render(<ItemRow {...props} />);
+    const bar = container.querySelector('.tree-actions')!;
+    const slot = bar.querySelector<HTMLElement>('.tree-action-off')!;
+    expect(slot.title).toBe('Later: not for Done items');
+    const button = within(slot).getByRole('button', { name: 'Later: not for Done items' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(bar.querySelectorAll('.tree-action-off')).toHaveLength(1);
+    fireEvent.click(slot);
+    expect(props.onSelect).toHaveBeenCalledWith(props.row.item.id);
+    expect(later).not.toHaveBeenCalled();
+    expect(reply).not.toHaveBeenCalled();
+  });
+
   it('retains item metadata without an empty hover bar, and keeps the empty Ack slot so an Ack never rewraps the row', () => {
     const { container } = render(<ItemRow {...itemProps([])} />);
     expect(container.querySelector('.tree-actions')).toBeNull();
