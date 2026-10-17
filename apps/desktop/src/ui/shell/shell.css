@@ -111,10 +111,11 @@
   flex: 1;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   min-height: 0;
-  padding: 12px 0;
+  padding: 8px 0 0;
   border: 0;
+  font: inherit;
   background: transparent;
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
   cursor: pointer;
@@ -128,6 +129,15 @@
 
 .shell-detail-rail > i {
   font-size: calc(15px * var(--text-scale));
+}
+
+/* The » sits in a 26px square, in full text colour (the board draws it so). */
+.shell-detail-rail > i:first-child {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  color: var(--color-text);
 }
 
 /* The board's New diamond (SPEC 3.6): 7px, radius 1.5, in the attention colour. */

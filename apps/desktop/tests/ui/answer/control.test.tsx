@@ -39,6 +39,14 @@ describe('answer cards', () => {
     expect(onSendOption).toHaveBeenCalledTimes(1);
   });
 
+  it('draws the "↵" chip on the dock and Details Send, not on the compact and list ones', () => {
+    for (const [layout, chip] of [['dock', true], ['details', true], ['list', false], ['compact', false]] as const) {
+      const view = render(<AnswerControl {...props({ layout, selected: 0, draft: '' })} />);
+      expect(view.container.querySelector('.answer-send > kbd') !== null, layout).toBe(chip);
+      view.unmount();
+    }
+  });
+
   it('lays out a check on every card and on "Write my own answer", visible only on the picked one', () => {
     const view = render(<AnswerControl {...props({ selected: 0, draft: '' })} />);
     const checks = [...view.container.querySelectorAll('.answer-option')].map(card => card.querySelector('.answer-check'));

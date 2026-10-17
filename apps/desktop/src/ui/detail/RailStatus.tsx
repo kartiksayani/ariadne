@@ -15,7 +15,7 @@ export function RailStatus({ store, itemId, seen }: { readonly store: SessionSto
   if (!session || !item || itemRemoved(session, itemId)) return null;
   const fresh = conversationDivider(session, itemId, seen) !== null;
   return <>
-    <StatusBadge status={statusKey[displayStatus(session, item)]} variant="icon" />
+    <StatusBadge status={statusKey[displayStatus(session, item)]} variant="icon" size={15} />
     {fresh && <span className="shell-detail-rail-new" role="img" aria-label="New messages" title="New messages" />}
   </>;
 }
