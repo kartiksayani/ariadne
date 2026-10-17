@@ -2,7 +2,7 @@
 // where the board draws it (part + sid), what the app is put in to match it (an AppFixture), whether the app is
 // compared yet (`pending`), and who is expected to turn that on. Thresholds live in final-thresholds.json.
 // Kept free of app imports: Node (final.spec.mts) and Vite (final-gallery.tsx) read it alike.
-import { Q1, Q2, note1 } from './final-world';
+import { Q1, Q2, note1, type MarkSet } from './final-world';
 
 /** The three renders of every state: the board's light and dark at 1280 x 800, and its light at 900 x 650. */
 export type Variant = 'light' | 'dark' | 'narrow';
@@ -24,7 +24,9 @@ export type Step =
   | { readonly key: string }
   | { readonly click: string }
   | { readonly hover: string }
-  | { readonly type: string };
+  | { readonly type: string }
+  /** The Map's own scroller, moved to its top (8.5: the selected row is out of view below). */
+  | { readonly scroll: 'top' };
 
 /** Fields of a world item (final-world.ts) a state changes. */
 export interface ItemEdit { readonly s?: 'decided' | 'done' | 'in_progress' | 'open' | 'waiting_on_me' | 'replaced'; readonly q?: string; readonly o?: string; readonly why?: string }
@@ -57,7 +59,23 @@ export interface AppFixture {
     readonly shown?: readonly string[];
   };
   readonly chrome?: { readonly page?: Page; readonly overlay?: Overlay; readonly otherPopover?: string };
+  readonly map?: MapWorld;
   readonly act?: readonly Step[];
+}
+/**
+ * The Map of alpha.20 (the reading state, final-world.ts): the findings to ack, related and dependent items, the topic brief and the
+ * owner's recent trail. Present (even as `{}`), the state gets them; absent, it renders as it did before the Map was redone.
+ * - marks: which rows carry New / Changed, from a seen baseline at 20:40 (`base`), moved back three days (`long`), or after the owner
+ *   answered "prefix bump timing" (`because`). Absent: no baseline, so no markers.
+ * - seen: items the owner already marked seen one by one (5.3).
+ * - filter: the statuses saved in the view's filter (8.2).
+ * - focus: the item the Map is focused on (8.4).
+ */
+export interface MapWorld {
+  readonly marks?: MarkSet;
+  readonly seen?: readonly string[];
+  readonly filter?: readonly ('waiting_on_me' | 'open' | 'in_progress' | 'decided' | 'done' | 'replaced')[];
+  readonly focus?: string;
 }
 /**
  * The values of the AppFixture fields the app cannot yet be put in, one entry per value. `unhonoured` below reads a state's
@@ -101,7 +119,9 @@ export interface FinalState {
   /** While true the app side is not compared (the board side still renders and is checked). The owner turns it off when the app matches. */
   readonly pending: boolean;
   /** Which release 1 builder turns `pending` off. */
-  readonly owner: 'shell' | 'dock' | 'nav-state' | 'topbar' | 'details';
+  readonly owner: 'shell' | 'dock' | 'nav-state' | 'topbar' | 'details'
+    // alpha.20, the Map: its rows (W2), the topic band (W3), the filter (W4), the changes (W5), the Graph (W1).
+    | 'rows' | 'band' | 'filter' | 'changes' | 'graph';
   readonly app: AppFixture;
   /**
    * The parts of the frame the app is held to. Absent: the whole frame is compared against the state's threshold. Present: only
@@ -207,6 +227,66 @@ const stateList: readonly FinalState[] = [
   { id: '16.2', part: 'R4-Help', sid: 'h-marks', owner: 'topbar', pending: false, title: 'Markers and statuses', app: { chrome: { overlay: 'help-marks' }, act: [{ key: '?' }, { click: 'Markers and statuses' }] } }
 ];
 
+// The alpha.20 Map. Rule for its regions (details at `mapRegionsById`): no region spans the rows, because the app drops the board's +7/+4
+// per-box row padding (ALPHA20-REPLAN D1) and so no row below the first box can line up; the band, the first row, the overlays and the
+// Graph canvas are compared, and the rows' looks go to side-by-side PNGs for a human. D12 ("Continue here" is left out of the "…" menu)
+// is why 10.12 compares the menu's first row only.
+// Each state below is the Map half of a board state that is already registered above (1.3, 3.1, 3.6: those hold the
+// top bar, the dock and the Details rail) or of one that has no entry yet (4 to 10). They stay `pending` until the piece that draws
+// them has merged, and are numbered like the board; the three whose board state already has an entry above end in `m` ("Map body").
+// Their `act` steps name controls by the plan's wording (ALPHA20-REPLAN D9 to D21); a name the built control spells otherwise is
+// corrected in the step when the state is turned on.
+const marked = (marks: MarkSet, rest: Omit<NonNullable<AppFixture['map']>, 'marks'> = {}): NonNullable<AppFixture['map']> => ({ marks, ...rest });
+/** The topic band's "What changed" opener: "5 new 5 changed since 20:40" (D18). */
+const openChanges: Step = { click: 'changed since' };
+const mapStateList: readonly FinalState[] = [
+  { id: '1.3m', part: 'Window', sid: 'b-graph', owner: 'graph', pending: true, title: 'Graph: the Map body',
+    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: {}, act: [{ click: 'Graph' }, { click: 'Fold Details' }] } },
+  { id: '3.1m', part: 'Conversation', sid: 'c-details', owner: 'rows', pending: true, title: 'Details beside the Map: the Map body',
+    app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' }, map: {} } },
+  { id: '3.6m', part: 'Conversation', sid: 'c-fold', owner: 'rows', pending: true, title: 'Details folded, dock open: the Map body',
+    app: { view: { selected: 'a2.2.1.1', details: 'folded', dock: 'open', dockQuestion: 0 }, map: {}, act: [{ click: 'Fold Details' }] } },
+  { id: '4.1', part: 'Acking', sid: 'k-toack', owner: 'rows', pending: true, title: 'Findings to ack: marked on the row, counted on the topic, with Ack all',
+    app: { view: { selected: 'a9', details: 'open', dock: 'line' }, map: {} } },
+  { id: '4.3', part: 'Acking', sid: 'k-confirm', owner: 'band', pending: true, title: 'Ack all: a short review before it saves',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'Ack all (3)' }] } },
+  { id: '4.4', part: 'Acking', sid: 'k-all', owner: 'band', pending: true, title: 'After Ack all: Undo stays on the topic row',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'Ack all (3)' }, { click: 'Ack all' }] } },
+  { id: '5.1', part: 'Changes', sid: 'w-glance', owner: 'changes', pending: true, title: 'Back after an hour: New and Changed on the rows, Next unseen',
+    app: { view: { selected: null, dock: 'line' }, map: marked('base') } },
+  { id: '5.2', part: 'Changes', sid: 'w-brief', owner: 'changes', pending: true, title: 'The topic brief, written by the agent',
+    app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [openChanges, { click: 'Brief' }] } },
+  // The board opens the rows of "note on workspace keys" and "cache warm-up script" on Before → after; "shared-cache retries" is already seen.
+  { id: '5.3', part: 'Changes', sid: 'w-since', owner: 'changes', pending: true, title: 'Since you were here: before → after on demand, Mark all caught up',
+    app: { view: { selected: null, dock: 'line' }, map: marked('base', { seen: ['a9'] }), act: [openChanges] } },
+  { id: '5.4', part: 'Changes', sid: 'w-caught', owner: 'changes', pending: true, title: 'All caught up: the markers clear, Undo stays for a few seconds',
+    app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [openChanges, { click: 'Mark all caught up' }] } },
+  { id: '5.5', part: 'Changes', sid: 'w-long', owner: 'changes', pending: true, title: 'Back after two days: a calm summary first',
+    app: { view: { selected: null, dock: 'line' }, map: marked('long'), act: [openChanges] } },
+  { id: '5.6', part: 'Changes', sid: 'w-because', owner: 'changes', pending: true, title: 'After I answer: Because you chose…',
+    app: { items: { afterAnswer: true, edit: { [Q2]: { s: 'decided', o: 'Bump it in this release, and warm the cache from the deploy job.' } } },
+      view: { selected: 'a5.1', details: 'open', dock: 'line' }, map: marked('because') } },
+  { id: '5.7', part: 'Changes', sid: 'w-item', owner: 'changes', pending: true, title: 'On an item: what changed and why, with older history',
+    app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' }, map: marked('base') } },
+  { id: '7.2', part: 'Related', sid: 'r-graph', owner: 'graph', pending: true, title: 'In the Graph: related items as dashed lines',
+    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: {}, act: [{ click: 'Graph' }, { click: 'Fold Details' }] } },
+  { id: '8.2', part: 'Find', sid: 'f-filter', owner: 'filter', pending: true, title: 'Filter by status, Waiting on me first',
+    app: { view: { selected: null, dock: 'line' }, map: { filter: ['waiting_on_me', 'open'] } } },
+  { id: '8.3', part: 'Find', sid: 'f-recent', owner: 'changes', pending: true, title: 'Recent: what I viewed and what changed lately',
+    app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ click: 'Recent' }] } },
+  { id: '8.4', part: 'Find', sid: 'f-focus', owner: 'band', pending: true, title: 'Focus: only the item and what is under it stay in the Map',
+    app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' }, map: { focus: 'a2' } } },
+  { id: '8.5', part: 'Find', sid: 'f-jump', owner: 'rows', pending: true, title: 'The selected item has scrolled out of view: one step back to it',
+    app: { view: { selected: 'a9', details: 'open', dock: 'line' }, map: {}, act: [{ scroll: 'top' }] } },
+  { id: '9.2', part: 'Markers', sid: 'm-next', owner: 'band', pending: true, title: 'n, or Next on the topic band, outlines the next unseen item',
+    app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ key: 'n' }, { key: 'n' }, { key: 'n' }, { key: 'n' }, { key: 'n' }] } },
+  { id: '9.9', part: 'Markers', sid: 'm-graph', owner: 'graph', pending: true, title: 'On Graph cards: the diamond alone, same shapes',
+    app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: marked('base'), act: [{ click: 'Graph' }, { click: 'Fold Details' }] } },
+  { id: '10.12', part: 'R4-Dialogs', sid: 'd-tmenu', owner: 'band', pending: true, title: 'The topic’s … menu',
+    // The board's R4 file draws this menu over the same marked Map as 5.1.
+    app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ click: 'Topic actions' }] } }
+];
+
 /** The Details column's left edge (its 1px border and the column's ground): where it sits, not what it says (Details' content is release 3). */
 const detailsEdge = (limits?: Limits) => box('details edge', [880, 40, 3, 616], [560, 40, 3, 467], limits);
 /**
@@ -272,7 +352,58 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '15.1': [...topBar([0.002, 0.002])]
 };
 
-export const finalStates: readonly FinalState[] = stateList.map(state => regionsById[state.id] ? { ...state, regions: regionsById[state.id]! } : state);
+/**
+ * The regions of the Map states above (measured on the board's own frames: coverage/design/final/<id>-<size>-design.png).
+ * The rule (agreed with the maintainer 2026-10-17): no region spans the Map's rows.
+ * - D1: the board pads a row +7 / +4 per box that opens or closes at it; the app does not (ALPHA20-REPLAN D1), so below the first box the rows
+ *   sit up to about 45px higher than the board's and a pixel compare of them could never pass. The rows' looks (tints, slices, thread,
+ *   badges, hover bar) are looked at by eye instead: every Map state also writes the board and the app side by side to
+ *   coverage/design/final/side-by-side/<id>-<size>.png (final.spec.mts).
+ * - Compared instead: the topic band (W3), the first row where it comes before any box (no drift), and the overlays: What changed, Recent,
+ *   Ack all, the filter row, the Back-to-selected pill, the "…" menu. Scrolled or selected states (3.6m, 4.1, 5.6, 8.4) leave the rows out
+ *   altogether: the board scrolls by its own row heights. The Graph states have no rows, so their whole canvas is compared.
+ * - D12: the board's "…" menu has "Continue here", which the app does not show, so the rows under it sit 43px lower in the board: 10.12
+ *   compares the menu's first row only. D8 and D10 are in the band (one line where the board has two, "· N waiting" on strips): a band
+ *   region that differs by the count text alone is reported as such.
+ * Thresholds: 0.01; 0.02 for the overlays that are mostly text (a line a pixel off moves a few percent of a text box).
+ */
+const MAP: Limits = [0.01, 0.01], TEXT: Limits = [0.02, 0.02];
+/** A region that applies to the wide sizes only (a narrow Map that Details squeezes lays its first row out differently). */
+const wideOnly = (name: string, rect: Rect, limit: number): FrameRegion => ({ name, rect, variants: WIDE, threshold: limit });
+const graph = box('graph canvas', [0, 40, 1244, 720], [0, 40, 864, 570], MAP);
+const mapRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
+  '1.3m': graph, '7.2': graph, '9.9': graph,
+  '3.1m': [...box('topic band', [0, 40, 880, 62], [0, 40, 560, 113], MAP), wideOnly('first row', [0, 102, 880, 66], 0.01)],
+  '3.6m': box('topic band', [0, 40, 1244, 42], [0, 40, 864, 62], MAP),
+  '4.1': box('topic band', [0, 40, 880, 62], [0, 40, 560, 113], MAP),
+  '4.3': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 62], MAP), ...box('Ack all popover', [930, 86, 340, 187], [549, 106, 341, 187], TEXT),
+    ...box('first row', [0, 82, 925, 66], [0, 102, 545, 66], MAP)],
+  '4.4': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 62], MAP), ...box('first row', [0, 82, 1280, 66], [0, 102, 900, 66], MAP)],
+  '5.1': [...box('topic band', [0, 40, 1280, 62], [0, 40, 900, 62], MAP), ...box('first row', [0, 102, 1280, 66], [0, 102, 900, 66], MAP)],
+  // The What changed popover covers the band's counts line and the first row's left part: the band is compared down to the popover's top edge.
+  '5.2': [...box('topic band', [0, 40, 1280, 44], [0, 40, 900, 60], MAP), ...box('What changed popover', [12, 84, 540, 662], [12, 100, 540, 497], TEXT),
+    ...box('first row (right of the popover)', [556, 102, 724, 66], [556, 102, 344, 66], MAP)],
+  '5.3': [...box('topic band', [0, 40, 1280, 44], [0, 40, 900, 60], MAP), ...box('What changed popover', [12, 84, 540, 662], [12, 100, 540, 497], TEXT),
+    ...box('first row (right of the popover)', [556, 102, 724, 66], [556, 102, 344, 66], MAP)],
+  '5.4': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 62], MAP), ...box('first row', [0, 82, 1280, 66], [0, 102, 900, 66], MAP)],
+  '5.5': [...box('topic band', [0, 40, 1280, 42], [0, 40, 900, 60], MAP), ...box('What changed popover', [12, 84, 540, 330], [12, 100, 540, 330], TEXT),
+    ...box('first row (right of the popover)', [556, 82, 724, 66], [556, 102, 344, 66], MAP)],
+  '5.6': box('topic band', [0, 40, 880, 93], [0, 40, 560, 145], MAP),
+  '5.7': [...box('topic band', [0, 40, 880, 93], [0, 40, 560, 145], MAP), wideOnly('first row', [0, 133, 880, 66], 0.01)],
+  '8.2': [...box('filter row', [0, 40, 1280, 40], [0, 40, 900, 40], TEXT), ...box('topic band', [0, 80, 1280, 42], [0, 80, 900, 62], MAP)],
+  '8.3': [...box('topic band (left of the popover)', [0, 40, 800, 42], [0, 40, 562, 62], MAP), ...box('Recent popover', [802, 44, 340, 430], [566, 44, 300, 430], TEXT),
+    ...box('first row (left of the popover)', [0, 82, 800, 66], [0, 102, 562, 66], MAP)],
+  '8.4': box('topic band', [0, 40, 880, 62], [0, 40, 560, 82], MAP),
+  '8.5': [...box('topic band', [0, 40, 880, 62], [0, 40, 560, 114], MAP), ...box('Back to selected pill', [318, 712, 244, 40], [158, 562, 244, 40], MAP),
+    wideOnly('first row', [0, 102, 880, 66], 0.01)],
+  '9.2': [...box('topic band', [0, 40, 1280, 62], [0, 40, 900, 62], MAP), ...box('first row', [0, 102, 1280, 66], [0, 102, 900, 66], MAP)],
+  // The "…" menu, from its first row ("Reply to topic"); the band is compared left of the menu.
+  '10.12': [...box('topic band', [0, 40, 1280, 38], [0, 40, 586, 62], MAP), ...box('menu: Reply to topic', [970, 78, 300, 58], [590, 78, 300, 58], TEXT),
+    ...box('first row', [0, 82, 960, 66], [0, 102, 586, 66], MAP)]
+};
+
+export const finalStates: readonly FinalState[] = [...stateList.map(state => regionsById[state.id] ? { ...state, regions: regionsById[state.id]! } : state),
+  ...mapStateList.map(state => ({ ...state, regions: mapRegionsById[state.id]! }))];
 
 export const finalIds: readonly string[] = finalStates.map(state => state.id);
 

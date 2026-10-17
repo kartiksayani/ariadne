@@ -8,8 +8,9 @@ import type { ProjectSummary, SessionSummary } from '../../../apps/desktop/src/g
 import { buildFixture, type DesignFixture, type PrototypeData, type ProtoItem, type ProtoMessage, type ProtoSession, type ProtoTopic } from './fixtures';
 import type { FrameSpec, Scenario } from './frames';
 import { finalNow, variants, type AppFixture, type FinalState, type Variant } from './final-frames';
-import { archivedSessions, archivedTopic, conversations, items as worldItems, longText, others, projects, Q1, Q2, q2Body, sessions as worldSessions, topicName, topicShort,
-  type WItem } from './final-world';
+import type { Item, ItemChangeBefore, ItemChangeRecord, ItemOption } from '../../../apps/desktop/src/generated/domain/models';
+import { archivedSessions, archivedTopic, becauseRecords, brief, changeRecords, conversations, createdAfter, createdBefore, items as worldItems, longAbsenceSince, longText, markSets, others,
+  projects, Q1, Q2, q2Body, relations, seenAt, sessions as worldSessions, topicName, topicShort, viewed, type WChange, type WItem } from './final-world';
 
 const statusOf = { decided: 'decided', done: 'done', in_progress: 'progress', open: 'open', waiting_on_me: 'waiting', replaced: 'replaced' } as const;
 const typeOf = (item: WItem): ProtoItem['type'] => item.kind === 'task' ? 'task' : item.kind === 'finding' ? 'finding' : item.kind === 'explanation' ? 'explanation'
@@ -152,6 +153,59 @@ function pageWorld(fixture: DesignFixture, app: AppFixture): void {
   }
 }
 
+/**
+ * The reading state of the alpha.20 Map (`AppFixture.map`): findings to ack, related and dependent items, the topic brief, the owner's
+ * recent trail, the saved filter and focus, and, for `marks`, a seen baseline at 20:40 with the change records behind each Changed row.
+ * - An item is New when it was created after the baseline and is not in the baseline's list; it is Changed when a record that is not a
+ *   reword is newer than the baseline and than the revision the list holds. So the baseline lists every item at its current revision,
+ *   leaves the New ones out, and holds each Changed one a revision back.
+ * - Records are written whole (revision, time, the fields' "before" values) and move the item's revision up by their number.
+ */
+function mapWorld(fixture: DesignFixture, app: AppFixture): void {
+  const map = app.map, route = fixture.route;
+  if (!map || !route) return;
+  const transport = fixture.transport, session = transport.sessions.get(route.session_id)!;
+  const itemOf = (id: string): Item | undefined => session.items[id] ?? undefined;
+  // A finding or explanation the owner has not acked: open, with the status it moves to once acked.
+  for (const { item } of flatten(worldItems, null, () => true)) {
+    const found = itemOf(item.k);
+    if (item.ack && found) Object.assign(found, { status: 'open', ack_to: 'done' });
+  }
+  for (const [from, to, kind] of relations) {
+    const found = itemOf(from);
+    if (found) found[kind] = [...found[kind] ?? [], to];
+  }
+  const topic = Object.values(session.topics).find(value => value?.name === topicName);
+  if (topic) Object.assign(topic, { brief: brief.text, brief_updated_at: today(brief.at) });
+  if (map.marks) {
+    const options = (list: readonly { label: string; consequence: string; recommended?: boolean }[]): ItemOption[] =>
+      list.map((option, at) => ({ id: `option-${at + 1}`, label: option.label, consequence: option.consequence, recommended: !!option.recommended }));
+    const before = ({ options: list, ...rest }: WChange['before']): ItemChangeBefore => ({ ...rest, ...(list ? { options: options(list) } : {}) });
+    for (const item of Object.values(session.items)) {
+      if (!item) continue;
+      const wanted: readonly WChange[] = [...changeRecords[item.id] ?? [], ...map.marks === 'because' ? becauseRecords[item.id] ?? [] : []];
+      if (wanted.length) {
+        const first = item.revision;
+        item.changes = wanted.map((record, at): ItemChangeRecord => ({ revision: first + at + 1, at: today(record.at), cause_message_id: item.created_message_id,
+          ...(record.reason ? { reason: record.reason } : {}), ...(record.wording ? { wording_only: true } : {}), before: before(record.before) }));
+        item.revision = first + wanted.length;
+      }
+      const early = createdBefore[item.id] ?? createdAfter[item.id];
+      if (early) item.created_at = today(early);
+    }
+    const marks = markSets[map.marks], seen = new Set(map.seen ?? []);
+    const isNew = (id: string) => (marks.new as readonly string[]).includes(id) && !seen.has(id);
+    const isChanged = (id: string) => (marks.changed as readonly string[]).includes(id) && !seen.has(id);
+    transport.preferences.seen = [{ session: { project_id: route.project_id, session_id: route.session_id },
+      since: map.marks === 'long' ? longAbsenceSince : today(seenAt), topics: [],
+      items: Object.values(session.items).flatMap(item => !item || isNew(item.id) ? [] : [{ item_id: item.id, revision: isChanged(item.id) ? Math.max(1, item.revision - 1) : item.revision }]) }];
+  }
+  transport.preferences.sessions = transport.preferences.sessions.map(view => view.session.session_id !== route.session_id ? view : {
+    ...view, recent_items: viewed.map(([item_id, at]) => ({ item_id, action: 'viewed' as const, visited_at: today(at) })),
+    ...(map.focus ? { focused_item_id: map.focus } : {}),
+    filters: { ...view.filters, ...(map.filter ? { statuses: [...map.filter] } : {}) } });
+}
+
 /** The app's state for one final-board state at one size: sessions and items from the world, the drafts typed in. */
 export function finalFixture(state: Pick<FinalState, 'id' | 'app'>, variant: Variant): DesignFixture {
   const spec = finalSpec(state, variant), fixture = buildFixture(spec, worldData(state.app));
@@ -164,6 +218,7 @@ export function finalFixture(state: Pick<FinalState, 'id' | 'app'>, variant: Var
   const route = fixture.route, session = fixture.transport.sessions.get(route.session_id)!;
   // The board's agent is running and waiting for me: idle, so an answer sent now reads "Sent at", not queued behind a turn.
   fixture.transport.idle(route.session_id);
+  mapWorld(fixture, state.app);
   // "Later" is the owner's own mark (a preference), not a status of the item.
   fixture.transport.preferences.later = (state.app.items?.later ?? []).map(item => {
     if (!session.items[item]) throw new Error(`final ${state.id}: later on an item that is not in the session: ${item}`);

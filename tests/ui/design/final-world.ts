@@ -163,3 +163,64 @@ export const others: readonly WOther[] = [
     { label: 'Quarantine them for a week', consequence: 'They still run but don’t block merges; a task tracks the fix.', recommended: true },
     { label: 'Fix them first', consequence: 'Merges in notes-web wait until both pass.' }] }
 ];
+
+// ---- The reading state of the Map (alpha.20: SPEC 5.1, 5.5 and the Markers screen 9) ----------------------------------------
+// What the board's `mk` variants mark on the Map, as app data: a seen baseline at 20:40, the change records behind each
+// Changed row, related and dependent items, the topic brief and the owner's recent trail. It is only put in the app for
+// states that ask for it (`AppFixture.map`), so the earlier states render as they did.
+
+/** The owner's last look at the topic: every marker counts from here ("since 20:40"). */
+export const seenAt = '20:40';
+/** A long absence (SPEC 5.5): the baseline moved back three days, so more than two days have gone by and no extra records are needed. */
+export const longAbsenceSince = '2026-10-04T21:25:00.000Z';
+export type WMark = 'new' | 'changed';
+/** Which of the world's items carry New / Changed in each of the board's variants (MARK0, MARK_L, MARK_B). */
+export const markSets = {
+  // 5 New + 5 Changed (SPEC 5.1). "separate hit metrics" (a8) was only reworded: it has no marker.
+  base: { new: [Q2, 'a4', 'a2.2.1.1.2', 'a9', 'a5.2'], changed: [Q1, 'a2.2.1.1', 'a11', 'a2.2.1', 'a6'] },
+  // Back after two days: the Map marks only what needs the owner (2 New, 1 Changed).
+  long: { new: [Q1, Q2], changed: ['a11'] },
+  // After the owner answers "prefix bump timing" (SPEC 5.6): the two warm-up tasks are New, five rows are Changed.
+  because: { new: ['a5.1.1', 'a5.1.2'], changed: ['a5', 'a6', 'a2.2.2', 'a5.2', 'a8'] }
+} as const satisfies Record<string, { readonly new: readonly string[]; readonly changed: readonly string[] }>;
+export type MarkSet = keyof typeof markSets;
+
+/** What a change record holds: only the "before" values of the fields it changed (the app's ItemChangeBefore, as plain data). */
+export interface WChange {
+  readonly at: string; readonly wording?: boolean; readonly reason?: string;
+  readonly before: { readonly status?: WStatus; readonly outcome?: string | null; readonly note?: string; readonly question?: string; readonly options?: readonly WOption[] };
+}
+/** The records behind the board's change rows (CHG and HIST): Open → Decided, options changed, progress notes, a reword that is not counted. */
+export const changeRecords: Readonly<Record<string, readonly WChange[]>> = {
+  [Q1]: [{ at: '21:12', reason: 'You asked for a middle ground in the SOP thread.', before: { options: [q1Options[0]!, q1Options[2]!] } }],
+  'a2.2.1.1': [
+    { at: '20:50', wording: true, before: { question: 'Which keys go in the SOP?' } },
+    { at: '20:51', reason: 'You said workspace keys never stay stale long enough to need fixing.', before: { status: 'open', outcome: null } }],
+  a11: [{ at: '21:19', reason: 'Warming only matters if the prefix is bumped, so the agent folded it into that question.', before: { status: 'open', outcome: null } }],
+  'a2.2.1': [{ at: '21:20', before: { note: 'Outline drafted; the delete step needed a warning.' } }],
+  a6: [{ at: '21:08', before: { note: 'Started. Nothing written yet.' } }],
+  a8: [{ at: '21:05', wording: true, before: { question: 'Count shared and per-workspace hits apart?' } }]
+};
+/** After the answer (SPEC 5.6): the rows the agent changed at 21:26 when it read "Bump it and warm the cache first". */
+export const becauseRecords: Readonly<Record<string, readonly WChange[]>> = {
+  a5: [{ at: '21:26', before: { outcome: 'Yes, as a prefix, so a rollback never reads entries written by a newer SDK.' } }],
+  a6: [{ at: '21:26', before: { note: 'First draft is in the docs folder.' } }],
+  'a2.2.2': [{ at: '21:26', before: { note: 'Review the SOP draft.' } }],
+  'a5.2': [{ at: '21:26', before: { note: 'Old entries fall back until they expire.' } }],
+  a8: [{ at: '21:26', before: { note: 'Count hits together.' } }]
+};
+/** When items the board marks Changed were created: before the baseline, so they are not New as well (the board's raised times for these two are the Details meta's, not their creation). */
+export const createdBefore: Readonly<Record<string, string>> = { [Q1]: '20:30', 'a2.2.1.1': '20:20' };
+/** An item the board raises at 21:12 ("New task") though its conversation lines carry no time. */
+export const createdAfter: Readonly<Record<string, string>> = { 'a2.2.1.1.2': '21:12' };
+
+/** The board's REL: [from, to, kind]. `related`, `affects` and `depends_on` are lists on the item the line starts at. */
+export const relations: readonly (readonly [from: string, to: string, kind: 'related' | 'affects' | 'depends_on'])[] = [
+  ['a6', 'a9', 'related'], ['a6', 'a2.2.1', 'related'], ['a5.1', 'a6', 'affects'], ['a6', 'h1', 'related'],
+  // The one unsettled dependency (D16): "SOP review" waits for a question that is still waiting on the owner, so it is Blocked.
+  ['a2.2.2', Q1, 'depends_on'], ['a4', 'a5.2', 'related'], ['a8', 'a4', 'related']
+];
+/** The agent's brief of the topic, written at 21:20 (SPEC 5.2). */
+export const brief = { text: 'The cache change moves profile and plan reads to the shared cache. Two questions wait on you, and one task was folded into them.', at: '21:20' } as const;
+/** The owner's recent trail (the board's RECENT.viewed), newest first. */
+export const viewed: readonly (readonly [item: string, at: string])[] = [['a2.2.1', '21:22'], ['a2.2.1.1', '21:05'], ['a6', '20:58'], ['a5', '20:41'], ['a1', '20:30']];
