@@ -203,7 +203,7 @@ const stateList: readonly FinalState[] = [
 ];
 
 /** The Details column's left edge (its 1px border and the column's ground): where it sits, not what it says (Details' content is release 3). */
-const detailsEdge = (limits?: Limits) => box('details edge', [879, 40, 3, 720], [559, 40, 3, 570], limits);
+const detailsEdge = (limits?: Limits) => box('details edge', [880, 40, 3, 616], [560, 40, 3, 551], limits);
 /** The dock line's two ends: its pill and its chips. The text between is left out where the board's own files disagree (see `regionsById`). */
 const dockLineEnds = (limits?: Limits) => [...box('dock line pill', [0, 760, 100, 40], [0, 610, 100, 40], limits), ...box('dock line chips', [1090, 760, 190, 40], [740, 610, 160, 40], limits)];
 
@@ -222,7 +222,9 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '2.3': [...topBar(), ...dockOpen(398, 260)],
   '2.4': [...topBar(), ...dockOpen(572, 351)],
   '2.5': [...topBar(), ...dockOpen(523, 301)],
-  '2.6': [...topBar(), ...dockLine()],
+  // The board's first file words this clear line "Nothing waiting on you" and counts one sent answer (it counts a pick, not the send);
+  // R4 (15.3, 15.4) adds "New questions open here." and the app follows R4. So this frame holds the line's icon and its chip only.
+  '2.6': [...topBar(), ...box('dock line icon', [0, 760, 32, 40], [0, 610, 32, 40]), ...box('dock line other-sessions chip', [1130, 760, 150, 40], [750, 610, 150, 40])],
   '2.7': [...topBar(), ...dockOpen(572, 351), ...box('other-sessions popover', [868, 168, 404, 400], [487, 52, 406, 296])],
   '2.8': [...topBar(), ...dockOpen(418, 260)],
   '2.9': [...topBar(), ...dockOpen(170, 170)],
