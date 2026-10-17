@@ -9,7 +9,7 @@ import { OpenSessions, immutable } from '../../../src/data/session-store';
 import { RegisteredRoutes, type RevealedItem } from '../../../src/data/routes';
 import { createDesktopService, type DesktopTransport } from '../../../src/data/service';
 import { GraphView } from '../../../src/ui/graph/GraphView';
-import { MapSearchContext, type MapSearch } from '../../../src/ui/graph/search';
+import { MapSearchContext, NO_SEARCH, type MapSearch } from '../../../src/ui/graph/search';
 import { PeekContext, type PeekNavigation } from '../../../src/ui/peek/context';
 import { GraphFilterSlot } from '../../../src/ui/tree/FilterBar';
 import type { ChangeMarker } from '../../../src/ui/tree/model';
@@ -57,9 +57,8 @@ async function setup(session: Session = graphSession(), view = preferences()) {
 const node = (id: string) => document.querySelector<HTMLElement>(`.graph-node[data-item-id="${id}"]`)!;
 const ids = () => [...document.querySelectorAll<HTMLElement>('.graph-node')].map(element => element.dataset.itemId);
 const selected = () => document.querySelector<HTMLElement>('.graph-node[aria-selected="true"]')?.dataset.itemId;
-const searchFor = (matches: string[], current: string | null, stepped = 0): MapSearch =>
-  ({ query: 'needle', ids: new Set(matches), current: current ? { id: current, field: 'question' } : null, stepped });
-const NO_SEARCH: MapSearch = { query: '', ids: new Set(), current: null, stepped: 0 };
+const searchFor = (matches: string[], current: string | null, stepped = 0): MapSearch => ({ ...NO_SEARCH, query: 'needle', terms: ['needle'],
+  matches: matches.map(id => ({ id, field: 'question' })), ids: new Set(matches), current: current ? { id: current, field: 'question' } : null, stepped });
 /** Every node at one spot in a 400x300 scroller, shifted by its scroll: holding still is the only thing that can pass. */
 function stillGeometry() {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {

@@ -7,7 +7,7 @@ import { OpenSessions } from '../../../apps/desktop/src/data/session-store';
 import { RegisteredRoutes } from '../../../apps/desktop/src/data/routes';
 import { createDesktopService, type DesktopTransport } from '../../../apps/desktop/src/data/service';
 import { GraphView } from '../../../apps/desktop/src/ui/graph/GraphView';
-import { MapSearchContext, type MapSearch } from '../../../apps/desktop/src/ui/graph/search';
+import { MapSearchContext, NO_SEARCH, type MapSearch } from '../../../apps/desktop/src/ui/graph/search';
 
 // The Graph's "never moves on its own" fixture: eight top items of ten children each, one deeper chain under 4.1,
 // beside a Details column whose width the spec sets. `window.__anchor` fires each trigger; only the transport is doubled.
@@ -57,7 +57,8 @@ function Fixture() {
   // The Map's search, as the Tree core computes it: every drawn question containing the query, in Map order.
   const search = useMemo((): MapSearch => {
     const ids = query ? Object.values(session.items).filter(value => value?.question.includes(query)).map(value => value!.id) : [];
-    return { query, ids: new Set(ids), current: ids[0] ? { id: ids[0], field: 'question' } : null, stepped: 0 };
+    return { ...NO_SEARCH, query, terms: query ? [query.toLowerCase()] : [], matches: ids.map(id => ({ id, field: 'question' as const })),
+      ids: new Set(ids), current: ids[0] ? { id: ids[0], field: 'question' } : null };
   }, [query]);
   useEffect(() => {
     window.__anchor = {
