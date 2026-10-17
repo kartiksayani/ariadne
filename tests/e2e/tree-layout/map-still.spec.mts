@@ -282,8 +282,9 @@ test('the Map holds when a tall clipped row grows while it is the only row on sc
   await page.setViewportSize({ width: 1000, height: 460 });
   await goTo(page, 'top');
   await settle(page);
-  await row(page, '1').getByRole('button', { name: 'Show more' }).click();
-  await expect(row(page, '1').getByRole('button', { name: 'Show less' })).toHaveCount(1);
+  // The result's Show more (with the 3-line clamp the long question has its own, first).
+  await row(page, '1').getByRole('button', { name: 'Show more' }).last().click();
+  await expect(row(page, '1').getByRole('button', { name: 'Show less' }).first()).toBeVisible();
   await row(page, '1').evaluate(element => {
     const box = element.closest('.tree-scroll')!;
     box.scrollTop += element.getBoundingClientRect().top - box.getBoundingClientRect().top + 60;
