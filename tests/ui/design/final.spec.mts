@@ -22,10 +22,10 @@ const output = resolve(repo, 'coverage/design/final');
 const compareAlways = process.env.FINAL_APP === '1';
 /**
  * The record-only canary: one pending state whose app side runs on every CI run with `threshold: null` (the ratio is written,
- * never asserted), so the gallery, the loading wait and the `act` steps are exercised while every state is still pending.
- * 13.2 light takes both kinds of step a builder uses most: a key (the switcher's shortcut) and typed words.
+ * never asserted), so the gallery, the loading wait and the `act` steps stay exercised by a state that is still pending (the
+ * states that are not pending run their app side anyway). 12.1 light is pending and takes a click step.
  */
-const canaryState = { id: '13.2', variant: 'light' } as const;
+const canaryState = { id: '12.1', variant: 'light' } as const;
 const canary = (state: FinalState, variant: Variant) => state.id === canaryState.id && variant === canaryState.variant;
 const threshold = (id: string, variant: Variant): number => (thresholds as Record<string, number>)[`${id} ${variant}`] ?? (thresholds as Record<string, number>)[id] ?? 0;
 
@@ -89,6 +89,9 @@ async function perform(page: Page, step: Step): Promise<void> {
   else await page.keyboard.type(step.type);
   await settle(page);
 }
+
+/** The board draws its window with rounded corners (about 10px); the app's window is the page, which a native window rounds itself. The four corners are left out of every comparison. */
+const corners = (width: number, height: number): Region[] => [0, 1, 2, 3].map(corner => ({ name: `corner ${corner}`, x: corner % 2 ? width - 12 : 0, y: corner > 1 ? height - 12 : 0, width: 12, height: 12 }));
 
 /** The app in the state's fixture, at the variant's size and the board's clock. */
 async function renderApp(page: Page, origin: string, state: FinalState, variant: Variant): Promise<Buffer> {
@@ -156,7 +159,7 @@ for (const state of finalStates) for (const variant of variantNames) {
     try {
       const app = await renderApp(await context.newPage(), origin, state, variant);
       const { report, ...score } = scoring(state, variant, state.pending);
-      await captureFrame(canvas, { id, design, app, directory: output, ...score,
+      await captureFrame(canvas, { id, design, app, directory: output, masks: corners(width, height), ...score,
         report: result => ({ pending: state.pending, owner: state.owner, size: { width: result.width, height: result.height }, unhonoured: notHonoured, ...report(result) }),
         denied: [...boardDenied, ...denied] });
     } finally { await context.close(); }

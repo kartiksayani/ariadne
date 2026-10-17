@@ -16,7 +16,7 @@
 One test per state, per size: `light` and `dark` at 1280 x 800, `narrow` (light) at 900 x 650. Titles read `final 2.1 light: <title>`.
 
 1. **Board side, always.** `final-board.mts` renders the state by its part and state id (`Window` + `b-wait`) on a fake clock, with fonts loaded and no motion, and checks the frame is the right size and (after the frame's files are written) the board asked for nothing outside its files.
-2. **App side, once `pending` is `false`.** `final-gallery.tsx` mounts the real `DesktopApp` in the state's fixture. The two frames are compared; the mismatch ratio must be at most the state's threshold. Pixels differ when a channel differs by more than 16.
+2. **App side, once `pending` is `false`.** `final-gallery.tsx` mounts the real `DesktopApp` in the state's fixture. The two frames are compared; the mismatch ratio must be at most the state's threshold. Pixels differ when a channel differs by more than 16. Two things are done to the board's frame so that it compares like for like: the design canvas puts it at a fractional y (67.19 px), so the page is moved the fraction (`boardFrame(..., aligned)`) and the frame starts on a whole pixel, as the app's does (without it every element at a fractional position rasterised a row off, a floor of 0.3 to 0.5% on text-heavy frames); and the four window corners (12 x 12 px) are left out, because the board draws its window rounded and the app's window is the page. The loader's self-check compares the board with Claude Design's own screenshots and so uses neither.
 3. Everything lands in `coverage/design/final/`: `<id>-<size>-design.png` (the board), `-app.png`, `-diff.png` (mismatches red), `frames/<id>-<size>.json`, and `report.json`.
 
 ## Run one state
@@ -51,7 +51,7 @@ A builder turns a state on in the same PR that makes the app match it:
 2. Change that state's `pending: true` to `pending: false` in `final-frames.ts`.
 3. Set its threshold (next section) and run the three sizes.
 
-CI runs `final` on every push with the rest of `npm run test:design`. A `pending` state still renders the board, so a broken loader or a changed archive fails CI. One state, 13.2 light, also runs its app side in CI with `threshold: null` (record only: the ratio is written, never asserted), so the gallery, the loading wait and the `act` steps stay exercised while every state is `pending`; `canaryState` in `final.spec.mts` names it.
+CI runs `final` on every push with the rest of `npm run test:design`. A `pending` state still renders the board, so a broken loader or a changed archive fails CI. One pending state, 12.1 light, also runs its app side in CI with `threshold: null` (record only: the ratio is written, never asserted), so the gallery, the loading wait and the `act` steps stay exercised while it is `pending`; `canaryState` in `final.spec.mts` names it. Every state that is not `pending` runs its app side in CI and fails on a region over its threshold.
 
 ## Set a threshold
 

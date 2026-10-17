@@ -80,9 +80,11 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
   const project = ['project', 'archive', 'sessions', 'session', 'projects', 'projectpage', 'first', 'continue', 'notrunning'].includes(spec.scenario), blank = spec.state === 'empty' || spec.state === 'loading';
   const topics = project ? [...data.EARLIER_TOPICS, ...data.TOPICS, ...data.ARCHIVED_TOPICS, ...data.OTHER_TOPICS]
     : review ? [...data.TOPICS, data.REVIEW_TOPIC] : data.TOPICS;
-  const items: ProtoItem[] = blank ? [] : structuredClone(project ? [...data.EARLIER_ITEMS, ...data.ITEMS, ...data.ARCHIVED_ITEMS, ...data.OTHER_ITEMS]
+  // An empty Map is this session's: the questions waiting in the project's other sessions are still there (final 15.3).
+  const others = blank && spec.state === 'empty' && project;
+  const items: ProtoItem[] = blank ? structuredClone(others ? data.OTHER_ITEMS : []) : structuredClone(project ? [...data.EARLIER_ITEMS, ...data.ITEMS, ...data.ARCHIVED_ITEMS, ...data.OTHER_ITEMS]
     : review ? [...data.ITEMS, ...data.REVIEW_ITEMS, ...(thread ? data.THREAD_KIDS : [])] : data.ITEMS);
-  const msgs: ProtoMessage[] = blank ? [] : structuredClone(project ? [...data.EARLIER_MSGS, ...data.SYNC_MSGS, ...data.MSGS]
+  const msgs: ProtoMessage[] = blank ? structuredClone(others ? data.SYNC_MSGS : []) : structuredClone(project ? [...data.EARLIER_MSGS, ...data.SYNC_MSGS, ...data.MSGS]
     : review ? [...data.MSGS, ...data.REVIEW_MSGS, ...(thread ? data.THREAD_MSGS : [])] : data.MSGS);
   // The thread scenario: the backoff finding on its third round (Ariadne.dc.html:914).
   if (thread && !blank) Object.assign(items.find(item => item.id === '4.1')!, structuredClone(data.THREAD_PATCH));
