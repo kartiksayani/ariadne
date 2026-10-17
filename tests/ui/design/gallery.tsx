@@ -7,15 +7,11 @@ import { DesktopApp } from '../../../apps/desktop/src/App';
 import { createDesktopService } from '../../../apps/desktop/src/data/service';
 import { openAgentNotRunning } from '../../../apps/desktop/src/ui/dialogs/AgentNotRunning';
 import { openContinueTopic } from '../../../apps/desktop/src/ui/dialogs/ContinueTopicDialog';
-import { notices } from '../../../apps/desktop/src/ui/pages/notices';
 import { designFixture, prototypeData, type DesignFixture } from './fixtures';
 
 declare global { interface Window {
   __designFixture?: DesignFixture;
   __designError?: string;
-  __designToast?: { show: (text?: string) => void; clear: () => void };
-  /** The app's notice store, so a frame can push the notice a state needs (an actionable one stays until dismissed). */
-  __designNotices?: typeof notices;
 } }
 
 async function mount() {
@@ -27,14 +23,6 @@ async function mount() {
     ...(theme === 'light' || theme === 'dark' ? { theme } : {}),
   });
   window.__designFixture = fixture;
-  window.__designNotices = notices;
-  if (fixture.spec.toast) {
-    const id = 'design-session-toast';
-    window.__designToast = {
-      show: (text = 'Reference copied.') => { notices.push({ id, icon: 'ph ph-check', text, dismissible: true }); },
-      clear: () => { notices.dismiss(id); },
-    };
-  }
   createRoot(document.getElementById('root')!).render(<DesktopApp service={createDesktopService(fixture.transport)} />);
   // The frame's dialog, opened the way the app opens it.
   const dialog = fixture.dialog;

@@ -74,7 +74,17 @@ async function appContext(browser: { newContext: (options: object) => Promise<Br
 /** Steps the state's spec takes in the app after it mounts (a key, a click on a named control, a hover, typed words). */
 async function perform(page: Page, step: Step): Promise<void> {
   if ('key' in step) await page.keyboard.press(step.key);
-  else if ('click' in step) await page.getByRole('button', { name: step.click }).or(page.getByRole('tab', { name: step.click })).or(page.getByRole('menuitem', { name: step.click })).first().click();
+  else if ('click' in step) {
+    const named = (exact: boolean) => page.getByRole('button', { name: step.click, exact }).or(page.getByRole('tab', { name: step.click, exact })).or(page.getByRole('menuitem', { name: step.click, exact })).filter({ visible: true }).first();
+    // A control named exactly so, if one is on screen; else the first whose name contains it. At the narrow width the top bar
+    // folds Archive, text size, theme and Help into its "More" menu, whose own name contains "archive": open it first.
+    const more = page.getByRole('button', { name: /^More:/ });
+    if (!(await named(true).isVisible()) && await more.isVisible()) {
+      await more.click();
+      if (!(await named(true).isVisible())) await page.keyboard.press('Escape');
+    }
+    await ((await named(true).isVisible()) ? named(true) : named(false)).click();
+  }
   else if ('hover' in step) await page.locator(step.hover).first().hover();
   else await page.keyboard.type(step.type);
   await settle(page);
@@ -96,7 +106,8 @@ async function renderApp(page: Page, origin: string, state: FinalState, variant:
   if (view.dock === 'open') for (let at = 0; at <= (view.dockQuestion ?? 0); at++) await perform(page, { key: ']' });
   const other = others.find(value => value.k === state.app.chrome?.otherPopover);
   if (other) {
-    await page.getByRole('button', { name: /in other sessions$/ }).first().click();
+    // The dock's own chip: the top bar's switcher button also ends its name with "waiting in other sessions".
+    await page.getByRole('region', { name: 'Answer dock' }).getByRole('button', { name: /in other sessions$/ }).click();
     await page.getByRole('button', { name: other.q }).click();
     await settle(page);
   }
@@ -419,10 +430,13 @@ test('final-frames: every region is a whole-pixel rectangle inside the frames it
 
 // `unhonoured` reads the values a state sets against a list of values, one entry each: turning one on must not hide the others.
 test('unhonoured: each value is flagged on its own and removing one leaves the rest', () => {
-  for (const overlay of notYet.overlay) expect(unhonoured({ chrome: { overlay } }), overlay).toEqual([`chrome.overlay=${overlay}`]);
+  // The real list shrinks as the app grows features (the overlays all render now), so the mechanism is tested on a list of its own.
+  const listed = { overlay: ['switcher', 'help-keys', 'help-marks'] as const, connection: ['stale', 'unsaved'] as const };
+  for (const overlay of listed.overlay) expect(unhonoured({ chrome: { overlay } }, listed), overlay).toEqual([`chrome.overlay=${overlay}`]);
+  for (const connection of listed.connection) expect(unhonoured({ sessions: { connection } }, listed), connection).toEqual([`sessions.connection=${connection}`]);
+  expect(unhonoured({ sessions: { connection: 'live' } }, listed), 'live needs nothing').toEqual([]);
   for (const connection of notYet.connection) expect(unhonoured({ sessions: { connection } }), connection).toEqual([`sessions.connection=${connection}`]);
-  expect(unhonoured({ sessions: { connection: 'live' } }), 'live needs nothing').toEqual([]);
-  const withoutHelpKeys = { ...notYet, overlay: notYet.overlay.filter(overlay => overlay !== 'help-keys') };
+  const withoutHelpKeys = { ...listed, overlay: listed.overlay.filter(overlay => overlay !== 'help-keys') };
   expect(unhonoured({ chrome: { overlay: 'help-keys' } }, withoutHelpKeys)).toEqual([]);
   expect(unhonoured({ chrome: { overlay: 'help-marks' } }, withoutHelpKeys)).toEqual(['chrome.overlay=help-marks']);
   expect(unhonoured({ chrome: { overlay: 'switcher' }, sessions: { connection: 'stale' } }, withoutHelpKeys)).toEqual(['chrome.overlay=switcher', 'sessions.connection=stale']);

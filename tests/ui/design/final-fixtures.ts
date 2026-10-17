@@ -8,7 +8,7 @@ import type { ProjectSummary, SessionSummary } from '../../../apps/desktop/src/g
 import { buildFixture, type DesignFixture, type PrototypeData, type ProtoItem, type ProtoMessage, type ProtoSession, type ProtoTopic } from './fixtures';
 import type { FrameSpec, Scenario } from './frames';
 import { finalNow, variants, type AppFixture, type FinalState, type Variant } from './final-frames';
-import { archivedSessions, archivedTopic, conversations, items as worldItems, longText, others, projects, Q1, Q2, sessions as worldSessions, topicName, topicShort,
+import { archivedSessions, archivedTopic, conversations, items as worldItems, longText, others, projects, Q1, Q2, q2Body, sessions as worldSessions, topicName, topicShort,
   type WItem } from './final-world';
 
 const statusOf = { decided: 'decided', done: 'done', in_progress: 'progress', open: 'open', waiting_on_me: 'waiting', replaced: 'replaced' } as const;
@@ -40,7 +40,9 @@ function worldData(app: AppFixture): PrototypeData {
     const changed = { ...item, ...edit[item.k] }, [created = 0, ...updated] = numbersOf(item.k);
     const long = app.items?.longText ? (longText as Record<string, { q?: string; o?: string }>)[item.k] : undefined;
     return { id: item.k, topic: 't1', parent, short: item.short, type: typeOf(item), status: statusOf[changed.s], owner: changed.s === 'waiting_on_me' ? 'me' : 'agent',
-      q: long?.q ?? changed.q, outcome: long?.o ?? changed.o ?? '', why: changed.why ?? '', ...(item.ask ? { ask: item.ask } : {}), created, updated, links: [],
+      q: long?.q ?? changed.q, outcome: long?.o ?? changed.o ?? '', why: changed.why ?? '', ...(item.ask ? { ask: item.ask } : {}),
+      // The second question's long body (SPEC 5.2, 2.3): the dock draws it between the question and the options.
+      ...(item.k === Q2 ? { note: q2Body.join('\n\n') } : {}), created, updated, links: [],
       ...(item.options ? { options: item.options.map((option, at) => ({ id: `option-${at + 1}`, label: option.label, consequence: option.consequence, ...(option.recommended ? { rec: true } : {}) })) } : {}),
       ...(changed.s === 'waiting_on_me' ? { waitingSince: created } : {}) };
   });

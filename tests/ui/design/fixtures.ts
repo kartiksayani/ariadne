@@ -86,51 +86,19 @@ function scenarioWorld(spec: FrameSpec, data: PrototypeData) {
     : review ? [...data.MSGS, ...data.REVIEW_MSGS, ...(thread ? data.THREAD_MSGS : [])] : data.MSGS);
   // The thread scenario: the backoff finding on its third round (Ariadne.dc.html:914).
   if (thread && !blank) Object.assign(items.find(item => item.id === '4.1')!, structuredClone(data.THREAD_PATCH));
-  if (spec.conversationOptions !== undefined) {
-    const item = items.find(item => item.id === spec.selected)!;
-    item.q = 'Should retry backoff keep a short first window and a longer second window so the agent has time to recover while the owner can still follow the result and decide what to do next, including when delivery is interrupted and another attempt needs enough time to finish without making the owner wait through an unexplained pause?';
-    item.ask = 'Which retry window should we use? Pick a choice or add your own words. '
-      + 'Consider how long the agent needs to recover, how quickly the owner needs an answer, and what should happen when delivery is interrupted. '
-      + 'Keep the full question available while you compare the four choices and explain the timing you prefer.';
-    item.options = Array.from({ length: spec.conversationOptions }, (_, index) => ({ id: `window-${index + 1}`, rec: index === 0,
-      label: ['Keep the current window', 'Use a shorter window', 'Use a longer window', 'Choose per attempt'][index],
-      consequence: ['Keep the timing already reviewed.', 'Recover sooner after a short failure.', 'Allow more time for the agent to recover.', 'Adjust the timing to each delivery attempt.'][index] }));
-    if (spec.shortQuestion) { item.q = 'Keep the retry window?'; item.ask = 'Which retry window should we use?'; }
-  }
-  if (spec.answerOptions !== undefined) {
-    const item = items.find(item => item.id === spec.selected)!;
-    item.q = 'How should we share the examples with the readers?';
-    item.ask = 'The examples are ready for a final read. Compare the choices before deciding.\n\n'
-      + 'Keep the `example.com` links and the short code samples together so readers can follow the explanation.\n\n'
-      + '- Read the introduction and check the examples.\n- Check the captions and the list of changes.\n- Add a note if a reader needs more context.\n\n'
-      + 'The conversation keeps the full explanation available while you consider the choices. '.repeat(8);
-    item.options = Array.from({ length: spec.answerOptions }, (_, index) => ({ id: `choice-${index + 1}`, rec: index === 0,
-      label: index === 0 ? 'Share the complete examples after checking the introduction and captions'
-        : `Choice ${index + 1}: share a shorter collection after reading the examples together`,
-      consequence: 'Readers get the introduction, examples and captions in one place. '
-        + 'Each example includes a short explanation and a link to example.com for the sample material. '.repeat(8)
-        + 'The final paragraph explains what to read next.' }));
-  }
   if (spec.dockState) {
     const item = items.find(item => item.id === spec.selected)!;
     item.q = 'How should we share the examples with the readers?';
     item.short = 'Share the examples';
-    item.status = spec.dockState === 'question' ? 'waiting' : 'open';
-    item.type = spec.dockState === 'question' ? 'question' : 'decision';
-    item.ask = spec.dockState === 'question' ? 'Choose how to share the examples, or write a reply.' : undefined;
-    item.options = spec.dockState === 'question' ? [
-      { id: 'complete', label: 'Share the complete examples', consequence: 'Readers see the introduction and captions together.', rec: true },
-      { id: 'short', label: 'Share a shorter collection', consequence: 'Readers begin with a few examples.' },
-    ] : [];
+    item.status = 'open';
+    item.type = 'decision';
+    item.ask = undefined;
+    item.options = [];
     item.note = undefined; item.outcome = ''; item.why = ''; item.links = [];
     const messageIndex = msgs.findIndex(message => message.number === item.created);
     msgs[messageIndex] = { ...msgs[messageIndex],
       excerpt: 'The examples are ready to share. Read the introduction, check the captions, and keep the sample links with the explanation.\n\n'
         + 'Each example includes a short explanation for readers. The conversation keeps that context available while you consider the next step.\n\n'.repeat(12) };
-  }
-  for (const id of spec.hiddenItems ?? []) {
-    const item = items.find(item => item.id === id)!;
-    if (id !== spec.selected) item.q = 'Review the shared examples';
   }
   let clock = 15 * 60 + 6;
   if (spec.state === 'clear') {
@@ -302,7 +270,7 @@ export function buildFixture(spec: FrameSpec, data: PrototypeData): DesignFixtur
       const waiting = status === 'waiting_on_me' ? messageTimes.get(proto.waitingSince ?? -1) ?? created : null;
       return [proto.id, { id: proto.id, ordinal: siblings.indexOf(proto) + 1, topic_id: topicIds.get(proto.topic)!, parent: proto.parent, question: proto.q,
         short: proto.short,
-        type: proto.type, status, ...(spec.dockState && spec.dockState !== 'question' && proto.id === spec.selected ? { ack_to: 'decided' as const } : {}),
+        type: proto.type, status, ...(spec.dockState && proto.id === spec.selected ? { ack_to: 'decided' as const } : {}),
         owner: proto.owner === 'me' ? { kind: 'me' } : proto.owner === 'agent' ? { kind: 'agent', binding_id: bindingId } : { kind: 'other', name: proto.owner },
         revision: 1 + proto.updated.length, question_revision: roundIds.length || 1, next_child: protoItems.filter(item => item.parent === proto.id).length + 1,
         ask: proto.ask || null, note: proto.note || null,
@@ -401,7 +369,7 @@ export function buildFixture(spec: FrameSpec, data: PrototypeData): DesignFixtur
       const below = descendants(item.id);
       if (below.length && !(closedStatus.has(item.status) && below.every(value => closedStatus.has(value.status)))) ids.add(item.id);
     }
-    for (const id of [spec.selected, spec.answering]) for (let parent = id && session.items[id]?.parent; parent; parent = session.items[parent]?.parent) ids.add(parent);
+    for (let parent = spec.selected && session.items[spec.selected]?.parent; parent; parent = session.items[parent]?.parent) ids.add(parent);
     return [...ids];
   };
   const transport = new DesignTransport(sessions, projects, summaries, spec.state === 'loading' ? route : null);
@@ -415,7 +383,7 @@ export function buildFixture(spec: FrameSpec, data: PrototypeData): DesignFixtur
       // The reveal scenario filters to Waiting (Ariadne.dc.html:938); the harness then reveals the selection through a route.
       filters: { search: '', statuses: current && spec.scenario === 'reveal' ? ['waiting_on_me'] : [], owners: [], topic_id: null, archived: current && spec.scenario === 'archive', hide_later: false },
       scroll: null,
-      ...(current && (spec.hiddenItems ?? spec.foldedItems) ? { hidden_item_ids: [...(spec.hiddenItems ?? spec.foldedItems!)] } : {}) };
+      ...(current && spec.foldedItems ? { hidden_item_ids: [...spec.foldedItems] } : {}) };
   });
   // 1y continues t5 from yesterday's codex session here; 1ad answers 5.3 in that session, whose agent isn't running (Ariadne.dc.html:955-957).
   const topicIn = (session: string, proto: string) => {
