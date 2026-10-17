@@ -82,11 +82,12 @@ async function openApp(page: Page, origin: string, spec: FrameSpec) {
     await expect(filters.getByRole('button', { name: /^Filter/ })).toBeVisible();
     await expect(filters.getByRole('combobox')).toHaveCount(0);
   }
+  // The Back-to pill (SPEC §5.8) floats over the Map in the scroller's shell, never inside the scroller, never in the Graph.
   if (graphFrame(spec)) {
-    await expect(page.locator('.tree-selected-edge')).toHaveCount(0);
+    await expect(page.locator('.tree-back')).toHaveCount(0);
   } else if (await page.locator('.tree-scroll').count()) {
-    await expect(page.locator('.tree-path > .tree-selected-slot')).toHaveCount(1);
-    await expect(page.locator('.tree-scroll .tree-selected-slot, .tree-scroll .tree-selected-edge')).toHaveCount(0);
+    await expect(page.locator('.tree-selected-slot')).toHaveCount(0);
+    await expect(page.locator('.tree-scroll .tree-back')).toHaveCount(0);
   }
   await expect(page.locator('.pw-rail')).toHaveCount(0);
   await expect(page.locator('.session-activity')).toHaveCount(0);
@@ -320,19 +321,21 @@ for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as 
   });
 }
 
-for (const { map: frame } of mapSizes) test(`The selection tag and the ancestors share the path row without overlap: ${frame}`, async ({ page, origin }) => {
+for (const { map: frame } of mapSizes) test(`The Back-to pill floats inside the Map, clear of the path row and the ancestors: ${frame}`, async ({ page, origin }) => {
   await openApp(page, origin, frameSpec(frame));
   await page.locator('.tree-scroll').evaluate(element => { element.scrollTop = element.scrollHeight; });
   await settle(page);
-  const tag = page.locator('.tree-path .tree-selected-edge');
+  const tag = page.locator('.tree-scroll-shell > .tree-back');
   await expect(tag).toBeVisible();
   const boxes = await page.evaluate(() => {
     const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
     const crumbs = [...document.querySelectorAll('.tree-breadcrumb button')].map(button => button.getBoundingClientRect());
-    return { path: box('.tree-path'), crumbs: box('.tree-breadcrumb'), tag: box('.tree-selected-edge'), buttons: crumbs, scroller: box('.tree-scroll') };
+    return { path: box('.tree-path'), crumbs: box('.tree-breadcrumb'), tag: box('.tree-back'), buttons: crumbs, scroller: box('.tree-scroll') };
   });
-  expect(boxes.crumbs.right).toBeLessThanOrEqual(boxes.tag.left + 0.5);
-  expect(boxes.tag.right).toBeLessThanOrEqual(boxes.path.right + 0.5);
+  // The pill sits over the rows, below the path row, inside the Map's width; the ancestors keep the whole path row.
+  expect(boxes.tag.top).toBeGreaterThanOrEqual(boxes.path.bottom - 0.5);
+  expect(boxes.tag.left).toBeGreaterThanOrEqual(boxes.scroller.left - 0.5);
+  expect(boxes.tag.right).toBeLessThanOrEqual(boxes.scroller.right + 0.5);
   expect(boxes.path.height).toBeLessThanOrEqual(28.5);
   expect(boxes.path.bottom).toBeLessThanOrEqual(boxes.scroller.top + 0.5);
   for (const button of boxes.buttons) expect(button.right).toBeLessThanOrEqual(boxes.crumbs.right + 0.5);
@@ -521,21 +524,16 @@ for (const frame of ['graph-hidden', 'graph-hidden-small'] as const) for (const 
   });
 }
 
-/** Focus leaves from the sticky Unfocus copy when the focused row is not on screen: filtered out by search, or its topic folded. */
-for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) for (const state of ['search', 'folded'] as const) {
-  test(`The sticky Unfocus is whole and clear of the path row when the focused row is ${state === 'search' ? 'filtered out by search' : 'under a folded topic'}: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
+/** Focus leaves from the sticky Unfocus copy when the focused row is not on screen: its topic folded. (A search no longer
+ * takes a row off screen, SPEC §4, so it is no longer a way here; tests/ui/tree/component.test.tsx pins that the row stays.) */
+for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as const) for (const state of ['folded'] as const) {
+  test(`The sticky Unfocus is whole and clear of the path row when the focused row is under a ${state} topic: ${frame} (${theme})`, async ({ page, origin }, testInfo) => {
     await openApp(page, origin, { ...frameSpec(frame), theme });
     const roots = page.locator('.tree-item-root:has(.tree-chevron)'), first = roots.first();
     const topic = page.locator('.tree-topic-group').first().locator('.tree-topic');
-    // Something that matches another topic's item only, so the search leaves rows on screen but not the focused one.
-    const other = ((await roots.last().locator('.tree-question').textContent()) ?? '').trim().slice(0, 14);
     await first.getByRole('button', { name: /^Focus on / }).click();
     await expect(first.getByRole('button', { name: /^Unfocus / })).toBeVisible();
-    if (state === 'search') {
-      await page.getByRole('button', { name: 'Search the Map' }).click();
-      await page.getByRole('textbox', { name: 'Search the Map' }).fill(other);
-    }
-    else await topic.locator('.tree-chevron').dispatchEvent('click');
+    await topic.locator('.tree-chevron').dispatchEvent('click');
     await settle(page);
     const copy = page.getByRole('navigation', { name: 'Map ancestors' }).getByRole('button', { name: /^Unfocus / });
     await expect(copy, 'the exit stays in the path row').toBeVisible();
@@ -543,7 +541,7 @@ for (const { map: frame } of mapSizes) for (const theme of ['dark', 'light'] as 
     const facts = await page.evaluate(() => {
       const box = (element: Element) => element.getBoundingClientRect();
       const copy = document.querySelector('.tree-path .tree-focus-action')!, path = document.querySelector('.tree-path')!, bar = document.querySelector('.tree-breadcrumb')!;
-      const others = [...document.querySelectorAll('.tree-breadcrumb button:not(.tree-focus-action), .tree-selected-edge')].map(element => ({ name: element.textContent, rect: box(element) }));
+      const others = [...document.querySelectorAll('.tree-breadcrumb button:not(.tree-focus-action), .tree-back')].map(element => ({ name: element.textContent, rect: box(element) }));
       const centre = document.elementFromPoint(box(copy).left + box(copy).width / 2, box(copy).top + box(copy).height / 2);
       return { copy: box(copy), path: box(path), bar: box(bar), others, covers: !!centre?.closest('.tree-focus-action'), width: innerWidth, height: innerHeight,
         clipped: copy.scrollWidth > copy.clientWidth };
@@ -624,7 +622,8 @@ for (const theme of ['light', 'dark'] as const) test(`Map names and top-line sta
   await expect(page.locator('.tree-id')).toHaveCount(0);
   await expect(root.locator('.tree-top-colour')).toHaveCount(1);
   await expect(child.locator('.tree-top-colour')).toHaveCount(0);
-  const heading = root.locator('.tree-heading'), title = root.locator('.tree-question'), status = heading.locator('.tree-row-status');
+  // The status is the end cluster's badge slot, level with the title's first line (alpha.20 C4).
+  const title = root.locator('.tree-question'), status = root.locator('.tree-end > .tree-end-badge');
   await expect(status).toBeVisible();
   const titleBefore = await title.boundingBox(), statusBefore = await status.boundingBox();
   expect(statusBefore!.y).toBeLessThan(titleBefore!.y + titleBefore!.height);

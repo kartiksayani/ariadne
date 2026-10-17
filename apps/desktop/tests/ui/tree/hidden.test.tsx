@@ -55,10 +55,16 @@ describe('hidden item tree projection', () => {
     expect(model()).toEqual(normal);
     view.expanded_item_ids = [];
     const topicId = session.items['1']!.topic_id;
-    const input = { search: session.items['1.1']!.question, collapsedTopics: new Set([topicId]) };
+    const inTopic = (rows: ReturnType<typeof model>['rows']) => rows.filter(row => row.kind === 'topic' ? row.key === topicId
+      : row.kind === 'hidden' ? row.topicId === topicId : row.item.topic_id === topicId).map(row => row.key);
+    // A search neither filters nor opens anything: the folded topic stays folded.
+    expect(inTopic(model({ search: session.items['1.1']!.question, collapsedTopics: new Set([topicId]) }).rows)).toEqual([topicId]);
+    // A status filter opens the way to its matches, until the owner folds them under it.
+    view.filters.statuses = ['open'];
+    const input = { collapsedTopics: new Set([topicId]) };
     expect(model(input).rows.find(row => row.key === '1.1')).toBeDefined();
     expect(model({ ...input, filterCollapsedItemIds: new Set(['1']) }).rows.some(row => row.key === '1.1')).toBe(false);
-    expect(model({ ...input, filterCollapsedTopicIds: new Set([topicId]) }).rows.map(row => row.key)).toEqual([topicId]);
+    expect(inTopic(model({ ...input, filterCollapsedTopicIds: new Set([topicId]) }).rows)).toEqual([topicId]);
     expect(model({ ...input, filterCollapsedItemIds: new Set(['1']), filterCollapsedTopicIds: new Set([topicId]), revealId: '1.1' })
       .rows.find(row => row.key === '1.1')).toBeDefined();
     expect(view.expanded_item_ids).toEqual([]);
@@ -135,18 +141,21 @@ describe('hidden item tree projection', () => {
     expect(view.hidden_item_ids).toEqual(['1', '1.1']);
   });
 
-  it('counts search matches and status chips without hidden rows while reporting hidden matches', () => {
+  it('keeps the status chip counts under a search and reports matches in hidden items apart', () => {
     const { model } = fixture(['1.1']);
-    const searched = model({ search: 'receipt' });
-    expect(searched.searchCount).toBe(1); expect(searched.itemCount).toBe(8); expect(searched.hiddenCount).toBe(1);
-    expect(searched.counts.open).toBe(0); expect(searched.counts.progress).toBe(1); expect(searched.counts.all).toBe(1);
-    expect(model({ search: 'unmatched' }).hiddenCount).toBe(0);
+    const plain = model(), searched = model({ search: 'receipt' });
+    // The search changes no count and no row; the hidden 1.1 ("Add the receipt lookup test") is named in the note.
+    expect(searched.counts).toEqual(plain.counts); expect(searched.rows.map(row => row.key)).toEqual(plain.rows.map(row => row.key));
+    expect(searched.shownCount).toBe(plain.shownCount); expect(searched.itemCount).toBe(8); expect(searched.hiddenCount).toBe(1);
+    expect(searched.rows.find(row => row.key === '3')).toMatchObject({ matches: ['question'] });
+    expect(searched.search).toMatchObject({ hidden: 1, collapsed: 0 });
+    expect(model({ search: 'unmatched' }).search).toMatchObject({ hidden: 0, collapsed: 0 });
   });
 
   it('counts hidden matches only for the selected statuses without search text', () => {
     const { view, model } = fixture(['1.1']); view.filters.statuses = ['open'];
     const filtered = model();
-    expect(filtered.searchCount).toBe(2); expect(filtered.itemCount).toBe(8); expect(filtered.hiddenCount).toBe(1);
+    expect(filtered.shownCount).toBe(2); expect(filtered.itemCount).toBe(8); expect(filtered.hiddenCount).toBe(1);
     expect(filtered.counts.open).toBe(2);
     view.filters.statuses = ['in_progress'];
     expect(model().hiddenCount).toBe(0);

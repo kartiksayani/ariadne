@@ -1,6 +1,6 @@
 /* Item rows (the Map look piece owns this file). Rules that tests read from tree.css (.tree-item, .tree-item-root,
-   .tree-question, .tree-line, the clamp rules, .tree-collapsed, .tree-related, .tree-actions, .tree-ack-slot)
-   stay there until their tests move. */
+   .tree-question, .tree-line, the clamp rules, .tree-collapsed, .tree-related) stay there until their tests move. The end
+   cluster's slots, the floating hover bar and the search hits are the Tree core's layout contract, in tree.css. */
 .tree-item:hover {
   background: color-mix(in srgb, var(--color-text) 4%, transparent);
 }
@@ -78,11 +78,6 @@
 .tree-heading > .tree-question {
   flex: 1 1 12ch;
   min-width: 0;
-}
-
-.tree-hit {
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--color-accent) 32%, transparent);
 }
 
 .tree-line-tight {
@@ -187,22 +182,6 @@
   text-underline-offset: 3px;
 }
 
-.tree-end {
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-}
-
-.tree-row-status {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  padding-top: 2px;
-}
-
 .tree-change-marker {
   flex: none;
   color: var(--attention);
@@ -251,28 +230,6 @@
   white-space: nowrap;
 }
 
-/* Only present for actions: the intrinsic grid never reserves an empty column. */
-.tree-action-grid {
-  display: grid;
-  grid-template-rows: repeat(2, auto);
-  grid-auto-flow: column;
-  grid-auto-columns: max-content;
-  gap: 1px;
-}
-
-.tree-round {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: calc(11.5px * var(--text-scale));
-  white-space: nowrap;
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
-}
-
-.tree-round i {
-  font-size: calc(12px * var(--text-scale));
-}
-
 .tree-action {
   display: grid;
   place-items: center;
@@ -284,12 +241,6 @@
   cursor: pointer;
   color: color-mix(in srgb, var(--color-text) 70%, transparent);
   background: transparent;
-}
-
-/* Contents places each shortcut in the shared grid; its buttons own the fade. */
-.tree-actions > .tree-action {
-  opacity: inherit;
-  transition: opacity .12s;
 }
 
 .tree-action i {

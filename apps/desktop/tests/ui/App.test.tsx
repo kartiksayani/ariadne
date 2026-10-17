@@ -521,7 +521,9 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     await waitFor(() => expect(transport.preferences.sessions[0].filters.search).toBe('missing needle'));
     expect(transport.preferences.sessions[0].filters.owners).toEqual([{ kind: 'me' }]);
     expect(mutations(transport, 'preferences_patch')).toHaveLength(count + 1);
-    expect(await screen.findByText(/^Nothing matches “missing/)).toBeTruthy();
+    // The search finds in place: the top bar counts it and the Map keeps every row (SPEC §4).
+    await waitFor(() => expect(document.querySelector('.tb-search-count')?.textContent).toBe('No matches'));
+    expect(screen.getByRole('tree', { name: 'Session items' })).toBeTruthy();
     expect(mutations(transport, 'input_submit')).toHaveLength(0);
   });
   it('clears filters with Esc only when no detail is open, keeping the archive view', async () => {
@@ -579,7 +581,8 @@ describe('ordinary desktop composition', { timeout: 10_000 }, () => {
     // Asserted last (see below), so a box that stays editable does not hide the checks on what is saved.
     const lockedWhileSaving = search.disabled;
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
-    expect(screen.getByText(/^Nothing matches “missing/)).toBeTruthy();
+    // The unsaved search already finds in place: the top bar counts it before the write.
+    expect(document.querySelector('.tb-search-count')?.textContent).toBe('No matches');
     expect(transport.preferences.sessions[0].filters.search).toBe(before.filters.search);
     expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);
     if (completion === 'reconciled') transport.failNext = 'preferences_patch';

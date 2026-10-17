@@ -10,18 +10,32 @@
   background: color-mix(in srgb, var(--color-text) 7%, var(--a-side));
 }
 
-/* The name owns the space beside the compact actions; counts wrap below it. */
+/* The band's height depends on nothing that changes while the owner reads (alpha.20): the head is one line and the counts
+   line is one line of a fixed height, at every width. A count appearing, Ack all going, Undo Ack all showing or the Map
+   narrowing as Details opens never adds or removes a line, so the rows below never move. A long name ends in "…" (its
+   title has it whole); counts that do not fit are clipped at the end, waiting first so it is the last to go.
+   Deviation from SPEC §2.2 (approved 2026-10-17, "the Map never moves on its own" outranks the look): the board draws a wide
+   Map's band as one line and a narrow one as two. Any width switch would add a line as Details opens and push every row
+   down, so the band is always these two lines. */
 .tree-topic-head {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  min-height: calc(22px * var(--text-scale));
+}
+
+.tree-topic-head > * {
+  flex: none;
 }
 
 .tree-topic-name {
-  flex: 1 1 calc(12em / var(--text-scale));
+  flex: 1 1 0;
   min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   padding-left: 4px;
   font-size: calc(15.5px * var(--text-scale));
   font-weight: 500;
@@ -92,12 +106,25 @@
 
 .tree-topic-counts {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px 12px;
+  height: calc(20px * var(--text-scale));
   padding-left: 26px;
+  overflow: hidden;
   font-size: calc(12px * var(--text-scale));
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.tree-topic-counts > * {
+  flex: none;
+}
+
+/* Ack all, its Undo and any later band button fit the line's height. */
+.tree-topic-counts > button {
+  height: calc(20px * var(--text-scale));
+  padding-block: 0;
+  line-height: 1;
 }
 
 .tree-topic-line {

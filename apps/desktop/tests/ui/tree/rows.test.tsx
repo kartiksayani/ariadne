@@ -27,7 +27,7 @@ describe('saved status filter chips', () => {
     expect(project().counts.waiting).toBe(0);
     preferences.filters.statuses = ['waiting_on_me'];
     expect(project().rows).toEqual([]);
-    expect(project().searchCount).toBe(0);
+    expect(project().shownCount).toBe(0);
     expect(project().counts.waiting).toBe(0);
     expect(sentenceRows(frozen, preferences, new Set()).matchingTotal).toBe(0);
     expect(sentenceRows(frozen, preferences, new Set()).rows).toEqual([]);
@@ -74,22 +74,37 @@ describe('saved topic and explicit filter folds', () => {
     const normal = sentenceRows(session, preferences, new Set());
     preferences.filters.topic_id = 'no-longer-visible-in-the-menu';
     expect(sentenceRows(session, preferences, new Set())).toEqual(normal);
+    // A search that matches nothing scopes nothing (SPEC §6.9); a deliberate reveal still opens its row.
     preferences.filters.search = 'no matches';
-    expect(sentenceRows(session, preferences, new Set(), [], '1.1').rows.map(row => row.item.id)).toEqual(['1', '1.1']);
+    expect(sentenceRows(session, preferences, new Set()).rows).toEqual(normal.rows);
+    const revealed = sentenceRows(session, preferences, new Set(), [], '1.1').rows.map(row => row.item.id);
+    expect(revealed.slice(0, 2)).toEqual(['1', '1.1']);
+    expect(revealed).toEqual(expect.arrayContaining(normal.rows.map(row => row.item.id)));
   });
   it('opens matching ancestors until explicitly folded and lets a deliberate reveal reopen them', () => {
     const session = seed(), preferences = view(session);
     session.items['1.1']!.question = 'Unique matching descendant';
+    const frozen = immutable(session), ids = (rows: { readonly rows: readonly { readonly item: { readonly id: string } }[] }) => rows.rows.map(row => row.item.id);
+    // A search never opens a folded branch: 1.1 stays inside its folded parent.
     preferences.filters.search = 'unique matching descendant';
-    const frozen = immutable(session);
-    expect(sentenceRows(frozen, preferences, new Set()).rows.map(row => row.item.id)).toEqual(['1', '1.1']);
-    expect(sentenceRows(frozen, preferences, new Set(), [], null, new Set(['1'])).rows.map(row => row.item.id)).toEqual(['1']);
-    expect(sentenceRows(frozen, preferences, new Set(), [], '1.1', new Set(['1'])).rows.map(row => row.item.id)).toEqual(['1', '1.1']);
+    expect(ids(sentenceRows(frozen, preferences, new Set()))).not.toContain('1.1');
+    // A status filter does, until the owner folds the ancestor under it.
+    preferences.filters.statuses = ['open'];
+    expect(ids(sentenceRows(frozen, preferences, new Set())).slice(0, 2)).toEqual(['1', '1.1']);
+    expect(ids(sentenceRows(frozen, preferences, new Set(), [], null, new Set(['1'])))).not.toContain('1.1');
+    expect(ids(sentenceRows(frozen, preferences, new Set(), [], '1.1', new Set(['1']))).slice(0, 2)).toEqual(['1', '1.1']);
     expect(preferences.expanded_item_ids).toEqual([]);
   });
 });
 
 describe('canonical sentence tree projection', () => {
+  // Search in place (SPEC §6.9): a search marks matching questions and outcomes on the rows; it never scopes them.
+  const matching = (session: ReturnType<typeof immutable<Session>>, search: string) =>
+    treeModel({ session, view: { ...view(seed()), expanded_item_ids: ['1'] }, search, later: new Set(), collapsedTopics: new Set(), selectedId: null,
+      revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse('2026-10-07T12:00:00Z') })
+      .rows.flatMap(row => row.kind === 'item' && row.matches.length ? [row.item.id] : []);
+  // Full-width "OFFICE", a precomposed "café", and "CAFE" with a combining acute accent.
+  const office = 'ＯＦＦＩＣＥ', cafe = 'café', decomposed = 'CAFÉ';
   it('counts every link direction once per connected item in the tree badge', () => {
     const session = seed(), preferences = view(session);
     for (const item of Object.values(session.items)) if (item) {
@@ -116,71 +131,76 @@ describe('canonical sentence tree projection', () => {
       .toEqual(['1', '2', '3', '4', '5', '6', '7', '10']);
     expect(JSON.stringify(session)).toBe(before);
   });
-  it('uses NFKC and locale-independent token search across sentences and canonical conversation', () => {
-    const session = seed(), preferences = view(session);
-    session.items['1']!.question = 'ＯＦＦＩＣＥ café'; session.items['1']!.why = 'Preserve network safety';
-    preferences.filters.search = 'office CAFE\u0301 network';
-    expect(normalizeSearch(preferences.filters.search)).toBe('office café network');
-    expect(sentenceRows(immutable(session), preferences, new Set()).rows.map(row => row.item.id)).toEqual(['1']);
-    preferences.filters.search = 'native queue';
+  it('uses NFKC and locale-independent token search over questions and outcomes, not the conversation', () => {
+    const session = seed();
+    session.items['1']!.question = `${office} ${cafe}`; session.items['1']!.why = 'Preserve network safety';
+    expect(normalizeSearch(`office ${decomposed} network`)).toBe(`office ${cafe} network`);
+    expect(matching(immutable(session), `office ${decomposed}`)).toEqual(['1']);
+    // The why and the conversation are not searched; every word must be in the question or in the outcome.
+    expect(matching(immutable(session), `office ${decomposed} network`)).toEqual([]);
     const message = session.messages.find(message => message.kind === 'reply' && message.item_id === '1')!;
     message.body = 'Native queue receipt is the explicit domain explanation.';
-    expect(sentenceRows(immutable(session), preferences, new Set()).rows.map(row => row.item.id)).toContain('1');
+    expect(matching(immutable(session), 'native queue')).toEqual([]);
+    session.items['1']!.outcome = 'A native queue holds the receipt.';
+    expect(matching(immutable(session), 'native queue')).toEqual(['1']);
   });
   it('excludes shared activity and unrelated touched-item backlinks from search', () => {
-    const session = seed(), preferences = view(session); preferences.filters.search = 'secret diagnostic';
+    const session = seed();
     const activity = session.messages.find(message => message.kind === 'activity')!;
     activity.body = 'secret diagnostic'; activity.items_touched = ['1'];
-    expect(sentenceRows(immutable(session), preferences, new Set()).matchingTotal).toBe(0);
+    expect(matching(immutable(session), 'secret diagnostic')).toEqual([]);
   });
-  it('keeps token matching correct as queries change on the same immutable snapshot', () => {
+  it('keeps token matching correct as queries change on the same immutable snapshot, and never scopes the rows', () => {
     const session = seed(), preferences = view(session);
-    session.items['1']!.question = 'ＯＦＦＩＣＥ café'; session.items['1']!.outcome = 'Confirmed network';
+    session.items['1']!.question = `${office} ${cafe}`; session.items['1']!.outcome = 'Confirmed network';
     session.items['2']!.question = 'Separate orchard';
     session.messages.find(message => message.kind === 'reply' && message.item_id === '1')!.body = 'Canonical receipt';
     const activity = session.messages.find(message => message.kind === 'activity')!;
     activity.body = 'Excluded diagnostic'; activity.items_touched = ['1'];
-    const frozen = immutable(session);
+    const frozen = immutable(session), plain = sentenceRows(frozen, preferences, new Set());
     for (const [search, expected] of [
-      ['office CAFE\u0301 network', ['1']], ['separate orchard', ['2']],
-      ['canonical receipt', ['1']], ['office orchard', []], ['excluded diagnostic', []], ['ＯＦＦＩＣＥ', ['1']],
+      [`office ${decomposed}`, ['1']], ['confirmed network', ['1']], [`office ${decomposed} network`, []], ['separate orchard', ['2']],
+      ['canonical receipt', []], ['office orchard', []], ['excluded diagnostic', []], [office, ['1']], ['  \t ', []],
     ] as const) {
+      expect(matching(frozen, search)).toEqual(expected);
       preferences.filters.search = search;
-      expect(sentenceRows(frozen, preferences, new Set()).rows.filter(row => !row.context).map(row => row.item.id)).toEqual(expected);
+      expect(sentenceRows(frozen, preferences, new Set()).rows).toEqual(plain.rows);
     }
-    preferences.filters.search = '  \t ';
-    expect(sentenceRows(frozen, preferences, new Set()).matchingTotal).toBe(sentenceRows(frozen, view(session), new Set()).matchingTotal);
   });
-  it.each(['question', 'outcome', 'why', 'topic', 'owner_input', 'reply'] as const)('refreshes searchable %s text when an immutable session snapshot is replaced', field => {
-    const session = seed(), preferences = view(session);
+  it.each(['question', 'outcome', 'why', 'topic', 'owner_input', 'reply'] as const)('reads searchable %s text from the snapshot it is given', field => {
+    const session = seed();
     const changeText = (text: string): void => {
       if (field === 'topic') session.topics[session.items['1']!.topic_id]!.name = text;
       else if (field === 'owner_input' || field === 'reply') {
         session.messages.find(message => message.kind === field && message.item_id === '1')!.body = text;
       } else session.items['1']![field] = text;
     };
+    // Only the question and the outcome are searched (SPEC §6.9).
+    const searched = field === 'question' || field === 'outcome' ? ['1'] : [];
     changeText('BeforeToken');
     const before = immutable(session);
-    preferences.filters.search = 'beforetoken';
-    expect(sentenceRows(before, preferences, new Set()).rows.some(row => row.item.id === '1' && !row.context)).toBe(true);
+    expect(matching(before, 'beforetoken')).toEqual(searched);
     changeText('AfterToken'); session.revision++;
     const after = immutable(session);
-    expect(sentenceRows(after, preferences, new Set()).matchingTotal).toBe(0);
-    preferences.filters.search = 'aftertoken';
-    expect(sentenceRows(after, preferences, new Set()).rows.some(row => row.item.id === '1' && !row.context)).toBe(true);
-    expect(sentenceRows(before, preferences, new Set()).matchingTotal).toBe(0);
+    expect(matching(after, 'beforetoken')).toEqual([]);
+    expect(matching(after, 'aftertoken')).toEqual(searched);
+    expect(matching(before, 'aftertoken')).toEqual([]);
   });
   it('combines categories with AND and statuses with OR, preserving contextual ancestors', () => {
     const session = seed(), preferences = view(session);
     const child = session.items['1.1']!; child.question = 'Find the matching child'; child.status = 'open';
-    preferences.filters.search = 'matching child'; preferences.filters.statuses = ['open', 'waiting_on_me'];
+    preferences.filters.statuses = ['open', 'waiting_on_me'];
     preferences.filters.topic_id = child.topic_id;
     const selected = sentenceRows(immutable(session), preferences, new Set());
-    expect(selected.rows.map(row => [row.item.id, row.context, row.expanded])).toEqual([['1', true, true], ['1.1', false, false]]);
+    expect(selected.rows.slice(0, 2).map(row => [row.item.id, row.context, row.expanded])).toEqual([['1', true, true], ['1.1', false, false]]);
+    expect(selected.rows.filter(row => !row.context).map(row => row.item.id)).toEqual(['1.1', '2', '4', '8']);
+    // A search on top narrows nothing.
+    preferences.filters.search = 'matching child';
+    expect(sentenceRows(immutable(session), preferences, new Set()).rows).toEqual(selected.rows);
     preferences.filters.statuses = ['done'];
-    expect(sentenceRows(immutable(session), preferences, new Set()).rows).toHaveLength(0);
+    expect(sentenceRows(immutable(session), preferences, new Set()).rows.filter(row => !row.context).map(row => row.item.id)).toEqual(['1']);
   });
-  it('counts the union of selected statuses and narrows that union with search', () => {
+  it('counts the union of selected statuses, which a search never narrows', () => {
     const session = seed(), preferences = view(session);
     preferences.filters.statuses = ['open', 'in_progress'];
     const frozen = immutable(session), selected = sentenceRows(frozen, preferences, new Set());
@@ -189,8 +209,8 @@ describe('canonical sentence tree projection', () => {
     expect(selected.scopeTotal).toBe(9);
     preferences.filters.search = 'receipt';
     const searched = sentenceRows(frozen, preferences, new Set());
-    expect(searched.rows.filter(row => !row.context).map(row => row.item.id)).toEqual(['1.1', '3']);
-    expect(searched.matchingTotal).toBe(2);
+    expect(searched.rows.filter(row => !row.context).map(row => row.item.id)).toEqual(['1.1', '3', '4', '8']);
+    expect(searched.matchingTotal).toBe(4);
     preferences.filters.statuses = [];
     preferences.filters.search = '';
     expect(sentenceRows(frozen, preferences, new Set()).matchingTotal).toBe(9);
@@ -245,11 +265,12 @@ describe('canonical sentence tree projection', () => {
     expect(eligible[0].item.question).toBe(first.question); expect(eligible[0].item.outcome).toBe(first.outcome);
     expect(JSON.stringify(frozen)).toBe(before);
   });
-  it('memoizes the current projection without retaining an unbounded search cache', () => {
+  it('memoizes the current projection, which a search does not change', () => {
     const frozen = immutable(seed()), preferences = view(seed());
     const first = sentenceRows(frozen, preferences, new Set());
     expect(sentenceRows(frozen, structuredClone(preferences), new Set())).toBe(first);
-    preferences.filters.search = 'different'; expect(sentenceRows(frozen, preferences, new Set())).not.toBe(first);
+    preferences.filters.search = 'different'; expect(sentenceRows(frozen, preferences, new Set())).toBe(first);
+    preferences.filters.statuses = ['open']; expect(sentenceRows(frozen, preferences, new Set())).not.toBe(first);
   });
   it('rejects a contradictory session preference route before revealing a tree', () => {
     const frozen = immutable(seed()), preferences = view(seed()); preferences.session.session_id = preferences.session.project_id;
@@ -307,8 +328,9 @@ describe('continuous Map rails', () => {
       selectedId: null, revealId: null, temporaryExpanded: [], presence: null, summaries: [], now: Date.parse(session.updated_at) }).rows;
     const hidden = rows.find(row => row.kind === 'hidden')!;
     expect(hidden.guides).toContainEqual({ kind: 'line', x: 44, width: 24, on: false, fromBullet: false, toBullet: true });
-    preferences.filters.search = session.items['1.1']!.question;
-    const filtered = treeModel({ session: immutable(session), view: preferences, search: preferences.filters.search, later: new Set(), collapsedTopics: new Set(),
+    // A status filter with the hidden selection revealed keeps the rail from its parent.
+    preferences.filters.statuses = ['open'];
+    const filtered = treeModel({ session: immutable(session), view: preferences, search: '', later: new Set(), collapsedTopics: new Set(),
       selectedId: '1.1', revealId: '1.1', temporaryExpanded: ['1'], presence: null, summaries: [], now: Date.parse(session.updated_at) }).rows;
     expect(filtered.find(row => row.key === '1')!.guides.some(guide => guide.fromBullet && guide.x === 44)).toBe(true);
   });

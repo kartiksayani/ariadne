@@ -9,11 +9,11 @@ interface Store { readonly values: Map<string, Folds>; readonly listeners: Set<(
 const stores = new WeakMap<object, Store>();
 
 /** The router survives view switches; filter-specific choices do not enter the saved schema. */
-export function useFilterFolds(router: object, route: Immutable<SessionRef>, filters: Immutable<SessionPreferences['filters']> | undefined, search?: string) {
+export function useFilterFolds(router: object, route: Immutable<SessionRef>, filters: Immutable<SessionPreferences['filters']> | undefined) {
   let store = stores.get(router);
   if (!store) { store = { values: new Map(), listeners: new Set() }; stores.set(router, store); }
   const current = store, key = JSON.stringify([route.project_id, route.session_id]);
-  const signature = filters ? filterSignature(filters, search) : '';
+  const signature = filters ? filterSignature(filters) : '';
   const subscribe = useCallback((listener: () => void) => { current.listeners.add(listener); return () => { current.listeners.delete(listener); }; }, [current]);
   const snapshot = useCallback(() => current.values.get(key) ?? empty, [current, key]);
   const folds = useSyncExternalStore(subscribe, snapshot, snapshot);

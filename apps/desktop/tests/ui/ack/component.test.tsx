@@ -83,9 +83,10 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
       const label = status === 'open' ? 'Open' : 'In progress', colour = status === 'open' ? 'open' : 'progress';
       await mount(transport);
       expect(within(row()).getByRole('img', { name: label })).toBeTruthy();
-      expect(row().querySelector('.tree-heading .status-badge')?.textContent).toBe(label);
-      expect(within(row()).getByText(hint)).toBeTruthy();
+      expect(row().querySelector('.tree-end-badge .status-badge')?.textContent).toBe(label);
+      // The row names the target on its Ack button only; its old "Ack → …" body line rewrapped the row (alpha.20 C4).
       expect(within(row()).getByRole('button', { name: hint }).title).toBe(hint);
+      expect(within(row()).queryByText(hint)).toBeNull();
       expect(row().querySelector<HTMLElement>('.tree-outcome i')?.style.color).toBe(`var(--st-${colour})`);
       fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
       expect(detail().querySelector('.detail-badge')?.textContent).toBe(label);
@@ -121,10 +122,9 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
       }
       const available = question === 'answered';
       await waitFor(() => expect(!!within(row()).queryByRole('button', { name: /^Ack/ })).toBe(available));
-      for (const host of [row(), detail()]) {
-        expect(!!within(host).queryByRole('button', { name: /^Ack/ })).toBe(available);
-        expect(!!within(host).queryByText(/^Ack →/)).toBe(available);
-      }
+      for (const host of [row(), detail()]) expect(!!within(host).queryByRole('button', { name: /^Ack/ })).toBe(available);
+      // The Map row names the target on its button only; the detail also writes it out.
+      expect(!!within(detail()).queryByText(/^Ack →/)).toBe(available);
       expect(!!screen.queryByText('Ack all (1)')).toBe(available);
       fireEvent.keyDown(row(), { key: 'g' }); await screen.findByText('One graph per topic');
       expect(!!within(row()).queryByText(/^Ack →/)).toBe(available);
@@ -250,8 +250,9 @@ describe('local acknowledgement', { timeout: 10_000 }, () => {
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     const css = readFileSync(resolve(__dirname, '../../../src/ui/tree/tree.css'), 'utf8');
     expect(css).toMatch(/\.tree-actions\s*\{[^}]*visibility:\s*hidden/s);
-    expect(button.closest('.tree-action-grid')).not.toBeNull();
-    expect(css).toMatch(/\.tree-ack-slot\s*\{[^}]*display:\s*contents/s);
+    // Ack has its own fixed-width slot in the end cluster, so it landing or going never rewraps the row.
+    expect(button.closest('.tree-end')).not.toBeNull();
+    expect(css).toMatch(/\.tree-ack-slot\s*\{[^}]*width:\s*var\(--tree-end-ack\)/s);
   });
 
   it.each(['done', 'decided', 'dropped'] as const)('names %s in the detail tooltip, refreshes and keeps Follow up and Back to Open', async target => {

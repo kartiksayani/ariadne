@@ -1,16 +1,20 @@
 // "Item Row" of the handoff (Item Row.dc.html): guides and the accent thread,
 // the status icon, the question with search hits, the item's details (folded to
 // four lines, with Show more) and under them the delivery of the owner's latest
-// message, the collapsed note, the round tag, hover actions, the
-// top-line text badge.
+// message and the collapsed note.
+//
+// Layout contract (alpha.20, C4): a row's height and its text's width depend only on its text and the Map's width. The
+// marker, the session-closed chip, the status badge, the related count and Ack sit in the end cluster, each in a slot that
+// keeps its width whether or not it is filled (tree.css, `.tree-end`), so a marker clearing, an Ack landing or a status
+// changing never rewraps the row. Selection is a background and the hover bar floats (absolute, left of the cluster).
 import { useCallback, useContext, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { TreeFonts } from './fonts';
-import { ItemReference, Markdown } from '../shared/MarkdownText';
+import { ItemReference, Markdown, MarkdownHighlight } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
 import { StatusBadge } from '../shared/StatusBadge';
-import { ackTitle } from '../shared/ack';
 import { SessionClosedChip } from '../shared/SessionClosedChip';
-import { closed, visual, type ChangeMarker, type ItemRow as Row } from './model';
+import { closed, outcomeShown, visual, type ChangeMarker, type ItemRow as Row } from './model';
+import { useMapSearch } from './mapSearch';
 import { measurePreviewLines } from './clamp';
 import { Guides } from './Guides';
 import { Strip } from './Strip';
@@ -40,7 +44,8 @@ function preview(row: Row): Preview | null {
       <ItemReference itemId={row.replacedBy.id} className="tree-jump" inline>{row.replacedBy.question}</ItemReference>
       <StatusBadge status={visual(row.replacedBy.status)} variant="text" /></div> };
   }
-  if ((closed(item.status) || item.status === 'open' || item.status === 'in_progress') && item.outcome) {
+  // The same rule tells the search which outcomes are on the Map (model.ts `outcomeShown`).
+  if (outcomeShown(item, row.later, row.replacedBy) && item.outcome) {
     return { text: item.outcome, node: <div className="tree-line tree-outcome"><i className="ph ph-arrow-elbow-down-right" style={{ color: `var(--st-${visual(item.status)})` }} />
       <PreviewText text={item.outcome} /></div> };
   }
@@ -124,6 +129,7 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
   const item = row.item, status = visual(row.status);
   const details = preview(row);
   const muted = closed(item.status) || row.context || row.later || row.hidden;
+  const search = useMapSearch(), current = search.current?.id === item.id ? search.current.field : null;
   const actionButton = (action: RowAction) => <button key={action.title} type="button" tabIndex={action.persistent ? 0 : -1}
     className={`tree-action${action.persistent ? ' tree-action-ack' : ''}`} title={action.title} aria-label={action.title} disabled={action.disabled}
     onClick={event => { event.stopPropagation(); action.run(); }}>{action.glyph ?? <i className={action.icon} />}</button>;
@@ -144,29 +150,34 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
     <span className="tree-icon" onDoubleClick={event => { if (!disabled && !item.parent && onFocusBranch) { event.stopPropagation(); onFocusBranch(branchFocused ? null : item.id); } }}><StatusBadge status={status} variant="icon" /></span>
     <div className="tree-body">
       <div className="tree-heading"><div className="tree-question" style={{ color: muted ? neutral(64) : 'var(--color-text)' }}>
-        {row.segments.map((segment, index) => <span key={index} className={segment.hit ? 'tree-hit' : undefined}>{segment.text}</span>)}
-      </div><span className="tree-row-status">
-        {changeMarker && <span className={`tree-change-marker tree-change-${changeMarker}`} role="img"
-          aria-label={changeMarker === 'new' ? 'New to you' : 'Changed since you read it'} title={changeMarker === 'new' ? 'New to you' : 'Changed since you read it'}>
-          {changeMarker === 'new' ? 'New' : null}</span>}
-        {row.sessionClosed && <SessionClosedChip reason={closedReason} />}
-        <StatusBadge status={status} label={row.badge} variant="text" /></span></div>
-      <PreviewBlock value={details} open={unfolded} onToggle={() => onUnfold(item.id)} />
+        {row.segments.map((segment, index) => <span key={index} className={segment.hit ? 'tree-hit' : undefined}
+          data-current={segment.hit && current === 'question' || undefined}>{segment.text}</span>)}
+      </div></div>
+      <MarkdownHighlight.Provider value={row.matches.includes('outcome') ? { terms: search.terms, current: current === 'outcome' } : null}>
+        <PreviewBlock value={details} open={unfolded} onToggle={() => onUnfold(item.id)} />
+      </MarkdownHighlight.Provider>
       {!item.parent && onFocusBranch && <button type="button" className="tree-focus-action" tabIndex={-1} disabled={disabled}
         aria-label={`${branchFocused ? 'Unfocus' : 'Focus on'} ${names?.get(item.id) ?? shortLabel(item)}`}
         onClick={event => { event.stopPropagation(); onFocusBranch(branchFocused ? null : item.id); }}>{branchFocused ? 'Unfocus' : 'Focus'}</button>}
-      {row.ack && <div className="tree-line tree-line-tight" style={{ color: neutral(62) }}>{ackTitle(row.ack, item.status)}</div>}
       {delivery(row, fix)}
       {note && <Strip variant="inside" text={note} onClick={() => onToggle(item.id)} />}
     </div>
+    {/* The end cluster, in the board's order. Every slot keeps its width filled or empty (tree.css `.tree-end`). The hover
+        bar floats left of it (absolute), so showing it never moves or rewraps anything. */}
     <div className="tree-end">
-      {row.relatedCount > 0 && <span className="tree-related" role="img" aria-label={`${row.relatedCount} related item${row.relatedCount === 1 ? '' : 's'}`}
-        title={`${row.relatedCount} related item${row.relatedCount === 1 ? '' : 's'}`}><i className="ph ph-link" aria-hidden="true" />{row.relatedCount}</span>}
-      {row.rounds >= 2 && <span className="tree-round" title="Rounds of back and forth"><i className="ph ph-arrows-clockwise" />Round {row.rounds}</span>}
-      {actions.length > 0 && <span className="tree-action-grid">
-        {persistent.length > 0 && <span className="tree-ack-slot">{persistent.map(actionButton)}</span>}
-        {hover.length > 0 && <span className="tree-actions">{hover.map(actionButton)}</span>}
-      </span>}
+      {hover.length > 0 && <span className="tree-actions">{hover.map(actionButton)}</span>}
+      <span className="tree-end-slot tree-end-marker" data-marker={changeMarker}>
+        {changeMarker && <span className={`tree-change-marker tree-change-${changeMarker}`} role="img"
+          aria-label={changeMarker === 'new' ? 'New to you' : 'Changed since you read it'} title={changeMarker === 'new' ? 'New to you' : 'Changed since you read it'}>
+          {changeMarker === 'new' ? 'New' : null}</span>}
+      </span>
+      {row.sessionClosed && <SessionClosedChip reason={closedReason} />}
+      <span className="tree-end-slot tree-end-badge"><StatusBadge status={status} label={row.badge} variant="text" /></span>
+      <span className="tree-end-slot tree-end-related">
+        {row.relatedCount > 0 && <span className="tree-related" role="img" aria-label={`${row.relatedCount} related item${row.relatedCount === 1 ? '' : 's'}`}
+          title={`${row.relatedCount} related item${row.relatedCount === 1 ? '' : 's'}`}><i className="ph ph-link" aria-hidden="true" />{row.relatedCount}</span>}
+      </span>
+      <span className="tree-end-slot tree-ack-slot">{persistent.map(actionButton)}</span>
     </div>
   </div>;
 }

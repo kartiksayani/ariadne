@@ -8,10 +8,10 @@ export const hasStatusFilter = (statuses: readonly ItemStatus[]) => statuses.len
 export const matchesStatus = (statuses: readonly ItemStatus[], status: DisplayStatus) =>
   !hasStatusFilter(statuses) || statuses.includes(status === 'sent' || status === 'queued' ? 'in_progress' : status);
 
-/** Only visible filters scope temporary folds; the retired saved topic filter is ignored. */
-export function filterSignature(filters: Immutable<SessionPreferences['filters']>, search = filters.search): string {
-  return JSON.stringify([search.normalize('NFKC').toLowerCase().trim().split(/\s+/u).sort(),
-    hasStatusFilter(filters.statuses) ? [...new Set(filters.statuses)].sort() : [], filters.owners.map(owner => JSON.stringify(owner)).sort(), filters.hide_later, filters.archived]);
+/** Only visible filters scope temporary folds; the retired saved topic filter is ignored, and so is the search, which
+ * never scopes rows (SPEC §6.9): folding while searching is an ordinary fold. */
+export function filterSignature(filters: Immutable<SessionPreferences['filters']>): string {
+  return JSON.stringify([hasStatusFilter(filters.statuses) ? [...new Set(filters.statuses)].sort() : [], filters.owners.map(owner => JSON.stringify(owner)).sort(), filters.hide_later, filters.archived]);
 }
 
 /** Saved folds yield to matching descendants, until folded explicitly under this filter. */

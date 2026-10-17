@@ -241,9 +241,10 @@ test('folds a long preview to four lines, never rewraps on hover and never scrol
     await expect(wrapped.locator('.tree-actions')).toHaveCSS('opacity', '1');
     expect((await body.boundingBox())!.width).toBe(width); expect((await outcome.boundingBox())!.height).toBe(height);
     // A selected row is the same, with or without the pointer on it (selecting opens the detail, which narrows the tree).
+    // The floating bar shows only under the pointer or keyboard focus: on a selected row at rest it would cover the text.
     await wrapped.click(); await page.mouse.move(0, 0);
     await expect(wrapped).toHaveAttribute('aria-selected', 'true');
-    await expect(wrapped.locator('.tree-actions')).toHaveCSS('opacity', '1');
+    await expect(wrapped.locator('.tree-actions')).toHaveCSS('opacity', '0');
     const selectedWidth = (await body.boundingBox())!.width, selectedHeight = (await outcome.boundingBox())!.height;
     await wrapped.hover();
     expect((await body.boundingBox())!.width).toBe(selectedWidth); expect((await outcome.boundingBox())!.height).toBe(selectedHeight);
@@ -284,7 +285,7 @@ test('folds a long preview to four lines, never rewraps on hover and never scrol
   } finally { await server.close(); }
 });
 
-test('gives the title and status at least 60% of the row with all actions and keeps hover width stable', async ({ page }) => {
+test('gives the title the row beside a fixed end cluster with all actions and keeps hover width stable', async ({ page }) => {
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
     logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
   try {
@@ -298,7 +299,11 @@ test('gives the title and status at least 60% of the row with all actions and ke
     await page.evaluate(async () => { await document.fonts.ready; });
     const row = page.locator('.tree-item[data-item-id="1"]'), title = row.locator('.tree-question');
     const bounds = (await row.boundingBox())!, text = (await title.boundingBox())!;
-    expect((await row.locator('.tree-heading').boundingBox())!.width / bounds.width).toBeGreaterThanOrEqual(0.6);
+    // The end cluster's slots are fixed (alpha.20 C4), so the title takes the rest: about half the 560px minimum column,
+    // and never any of the cluster's room.
+    const heading = (await row.locator('.tree-heading').boundingBox())!, end = (await row.locator('.tree-end').boundingBox())!;
+    expect(heading.width / bounds.width).toBeGreaterThanOrEqual(0.45);
+    expect(heading.x + heading.width).toBeLessThanOrEqual(end.x);
     const actions = row.locator('.tree-action');
     await expect(actions).toHaveCount(8);
     await row.hover();
@@ -308,16 +313,21 @@ test('gives the title and status at least 60% of the row with all actions and ke
     for (const action of await actions.all()) {
       await expect(action).toBeVisible();
       const box = (await action.boundingBox())!;
-      expect(box.width).toBe(26); expect(box.height).toBe(24); lines.add(box.y);
+      expect(box.width).toBe(26); expect(box.height).toBe(24);
+      if (await action.evaluate(element => !!element.closest('.tree-actions'))) lines.add(box.y);
       const name = (await action.getAttribute('aria-label'))!;
       await action.click(); await expect(page.getByLabel('Last action')).toHaveText(name);
     }
-    expect(lines.size).toBe(2);
-    await row.locator('.tree-question').click(); await page.mouse.move(0, 0);
+    // The hover bar is one floating line, left of the cluster; Ack keeps its own slot inside it.
+    expect(lines.size).toBe(1);
+    const bar = (await row.locator('.tree-actions').boundingBox())!;
+    expect(bar.x + bar.width).toBeLessThanOrEqual(end.x);
+    await row.locator('.tree-icon').click(); await page.mouse.move(0, 0);
     expect((await title.boundingBox())!.width).toBe(text.width);
     const noActions = page.locator('.tree-item[data-item-id="2"]');
-    await expect(noActions.locator('.tree-action-grid')).toHaveCount(0);
-    expect((await noActions.locator('.tree-end').boundingBox())!.width).toBeLessThan((await row.locator('.tree-end').boundingBox())!.width);
+    await expect(noActions.locator('.tree-actions')).toHaveCount(0);
+    // Every slot keeps its width filled or empty: a row without actions or Ack has the same cluster.
+    expect((await noActions.locator('.tree-end').boundingBox())!.width).toBe((await row.locator('.tree-end').boundingBox())!.width);
     await page.setViewportSize({ width: 320, height: 700 });
     for (const item of [row, noActions]) {
       expect(await item.evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(Math.ceil((await item.boundingBox())!.width));
@@ -449,7 +459,7 @@ test('keeps the connection card inside a narrow window with Restore and a long n
 });
 
 
-for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails, clamp threshold, reserved selection tags and clear reveals in ${theme}`, async ({ page }) => {
+for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails, clamp threshold, floating Back-to pills and clear reveals in ${theme}`, async ({ page }) => {
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
     logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } });
   try {
@@ -463,7 +473,7 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
     await expect(page.locator('.tree-id')).toHaveCount(0);
     await expect(root.locator('.tree-top-colour')).toHaveCount(1);
     await expect(child.locator('.tree-top-colour')).toHaveCount(0);
-    await expect(root.locator('.tree-heading .tree-row-status')).toContainText('Done');
+    await expect(root.locator('.tree-end > .tree-end-badge')).toContainText('Done');
     const accent = await page.locator('.tree-topic-name').first().evaluate(element => {
       const probe = document.createElement('span');
       probe.style.color = element.hasAttribute('data-earlier') ? 'color-mix(in srgb, var(--a-acc-text) 82%, transparent)' : 'var(--a-acc-text)';
@@ -534,13 +544,13 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
       }
     }
     const scroller = page.locator('.tree-scroll'), filters = page.locator('.tree-path');
-    const slot = page.locator('.tree-path > .tree-selected-slot'), marker = slot.locator('.tree-selected-edge');
+    // The Back-to pill (SPEC §5.8) floats over the Map in the scroller's shell; it is never a row of its own.
+    const marker = page.locator('.tree-scroll-shell > .tree-back');
     const last = page.locator('.tree-item[data-item-id="18"]');
     await scroller.evaluate(element => { element.scrollTop = 0; });
     await expect(marker).toHaveCount(0);
-    await expect(slot).toHaveCount(1);
-    await expect(page.locator('.tree-scroll .tree-selected-slot, .tree-scroll .tree-selected-edge')).toHaveCount(0);
-    // The slot is as wide as the tag it holds, so only the fixed path row (and the rows) must keep their boxes.
+    await expect(page.locator('.tree-scroll .tree-back, .tree-selected-slot')).toHaveCount(0);
+    // The pill covers rows rather than taking room, so the path row, the scroller and the rows all keep their boxes.
     const geometry = async () => ({
       scroller: await scroller.boundingBox(), filters: await filters.boundingBox(),
       scroll: await scroller.evaluate(element => ({ width: element.clientWidth, height: element.clientHeight, contentHeight: element.scrollHeight })),
@@ -550,18 +560,23 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
       }))),
     });
     const hiddenGeometry = await geometry();
-    const expectReservedMarker = async (edge: 'above' | 'below', label: string) => {
+    const expectFloatingMarker = async (edge: 'above' | 'below', label: string) => {
       await expect(marker).toHaveAttribute('data-edge', edge);
-      await expect(marker).toContainText(`${edge === 'above' ? '↑' : '↓'} Selected: ${label}`);
-      const tag = (await marker.boundingBox())!, reserved = (await slot.boundingBox())!, bar = (await filters.boundingBox())!;
-      expect(tag.x).toBeGreaterThanOrEqual(reserved.x);
-      expect(tag.x + tag.width).toBeLessThanOrEqual(reserved.x + reserved.width);
-      expect(tag.y).toBeGreaterThanOrEqual(bar.y);
-      expect(tag.y + tag.height).toBeLessThanOrEqual(bar.y + bar.height);
-      expect(tag.y + tag.height).toBeLessThanOrEqual((await scroller.boundingBox())!.y);
-      expect(tag.width).toBeLessThanOrEqual(reserved.width);
-      // The tag shares the row with the ancestors, which keep the room it leaves.
-      expect(reserved.x + reserved.width).toBeLessThanOrEqual(bar.x + bar.width);
+      await expect(marker.locator('.tree-back-arrow')).toHaveText(edge === 'above' ? '↑' : '↓');
+      await expect(marker.locator('.tree-back-label')).toContainText(`Back to “${label}`);
+      const tag = (await marker.boundingBox())!, area = (await scroller.boundingBox())!;
+      // Centred over the Map and inside it; above, clear of the sticky topic band it would otherwise cover.
+      expect(Math.abs(tag.x + tag.width / 2 - (area.x + area.width / 2))).toBeLessThanOrEqual(1);
+      expect(tag.y).toBeGreaterThanOrEqual(area.y);
+      expect(tag.y + tag.height).toBeLessThanOrEqual(area.y + area.height);
+      if (edge === 'above') {
+        const band = await scroller.evaluate(box => {
+          const top = box.getBoundingClientRect().top;
+          return Math.max(top, ...[...box.querySelectorAll('.tree-topic')].map(header => header.getBoundingClientRect())
+            .filter(rect => rect.top <= top + 1 && rect.bottom > top).map(rect => rect.bottom));
+        });
+        expect(tag.y).toBeGreaterThanOrEqual(band);
+      }
       expect(await geometry()).toEqual(hiddenGeometry);
       await expectSolidMarker(marker);
       await marker.hover(); await expectSolidMarker(marker);
@@ -572,18 +587,18 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
       expect(await geometry()).toEqual(hiddenGeometry);
       await page.mouse.up();
       await expect(marker).toHaveCount(0);
-      await expect(slot).toHaveCount(1);
       expect(await geometry()).toEqual(hiddenGeometry);
     };
 
     await scroller.evaluate(element => { element.scrollTop = element.scrollHeight; });
-    await expect(marker).toContainText('↑ Selected: A long item title');
-    const longLabel = marker.locator('.tree-selected-label');
+    await expect(marker.locator('.tree-back-label')).toContainText('Back to “A long item title');
+    const longLabel = marker.locator('.tree-back-label');
     await expect(longLabel).toHaveCSS('text-overflow', 'ellipsis');
     await expect(longLabel).toHaveCSS('overflow', 'hidden');
     await expect(longLabel).toHaveCSS('white-space', 'nowrap');
-    expect(await longLabel.evaluate(element => element.scrollWidth)).toBeGreaterThan(await longLabel.evaluate(element => element.clientWidth));
-    await expectReservedMarker('above', 'A long item title');
+    // The pill names the item by its short name and never grows past 70% of the Map, however long the name.
+    expect((await marker.boundingBox())!.width).toBeLessThanOrEqual((await scroller.boundingBox())!.width * 0.7 + 0.5);
+    await expectFloatingMarker('above', 'A long item title');
     await expectRevealedRow(root);
     await scroller.evaluate(element => { element.scrollTop = element.scrollHeight; });
     await expect(marker).toBeVisible();
@@ -607,7 +622,7 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: continuous rails
     await last.locator('.tree-question').click();
     await expect(last).toHaveAttribute('aria-selected', 'true');
     await scroller.evaluate(element => { element.scrollTop = 0; });
-    await expectReservedMarker('below', 'Another item');
+    await expectFloatingMarker('below', 'Another item');
     await expectRevealedRow(last);
   } finally { await server.close(); }
 });

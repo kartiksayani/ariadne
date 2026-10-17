@@ -115,7 +115,9 @@ describe('Map change markers and next unseen navigation', () => {
       saved.expanded_item_ids = [];
       saved.collapsed_topic_ids = [transport.sessions.get(route.session_id)!.items['1.1']!.topic_id];
       saved.hidden_item_ids = ['1'];
-    }, { query: 'matches nothing' });
+      // A status filter that leaves out both targets (a search no longer filters the Map).
+      saved.filters.statuses = ['decided'];
+    });
     const saved = structuredClone(view.transport.preferences.sessions[0]);
     expect(row('1.1')).toBeNull(); next();
     expect(target()).toBe(row('1.1')); expect(row('1')).not.toBeNull();
