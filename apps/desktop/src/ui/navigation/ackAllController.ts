@@ -4,7 +4,7 @@ import type { Item, Session } from '../../generated/domain/models';
 import type { SessionActions } from '../../components/bindings/actions';
 import { ackTarget } from '../../selectors/ack';
 import { activeItems } from '../../selectors/removed';
-import { acknowledge, ackFailure } from '../shared/ack';
+import { acknowledge, ackClaimed, ackFailure, ackLane, ackProposal as proposal, alreadyAcknowledged } from '../shared/ack';
 import { notices } from '../pages/notices';
 import { navigationVisits } from './visits';
 
@@ -30,18 +30,7 @@ function ackAllByTopic(session: Immutable<Session>): ReadonlyMap<string, readonl
 export function ackAllItems(session: Immutable<Session>, topicId: string): readonly Immutable<Item>[] {
   return ackAllByTopic(session).get(topicId) ?? NO_ITEMS;
 }
-const proposal = (item: Immutable<Item>) => JSON.stringify([item.revision, item.type, item.topic_id,
-  item.question, item.ask, item.ack_to, item.outcome, item.why]);
 interface PendingAck { readonly id: string; readonly reviewed: Immutable<Item> }
-/** A manual Ack changes only the reviewed result's acknowledgement state. */
-function alreadyAcknowledged(item: Immutable<Item>, reviewed: Immutable<Item>): boolean {
-  const terminal = ['decided', 'done', 'dropped'].includes(reviewed.ack_to!);
-  return item.revision === reviewed.revision + 1 && item.ack_to == null && item.status === reviewed.ack_to
-    && item.type === reviewed.type && item.topic_id === reviewed.topic_id
-    && item.question === reviewed.question && item.ask === reviewed.ask
-    && item.outcome === (terminal ? reviewed.outcome ?? 'Acknowledged by the owner.' : reviewed.outcome)
-    && item.why === (terminal ? reviewed.why ?? 'The owner read this item.' : reviewed.why);
-}
 export interface AckAllState {
   readonly phase: 'idle' | 'holding' | 'saving' | 'failed' | 'done' | 'cancelled';
   readonly topicId: string | null;
@@ -91,8 +80,11 @@ export class AckAllController {
     if (!session || this.actions.getSnapshot().writing || this.actions.getSnapshot().pending) return false;
     const eligible = new Map(ackAllItems(session, topicId).map(item => [item.id, item]));
     if (reviewed.some(item => !eligible.has(item.id) || proposal(eligible.get(item.id)!) !== proposal(item))) return false;
-    this.queue = reviewed.map(item => ({ id: item.id, reviewed: item }));
-    this.publish({ phase: 'holding', topicId, topicName, total: reviewed.length, completed: 0, error: null });
+    // Results a single Ack holds belong to it: Ack all leaves them out, so nothing is acknowledged twice.
+    const claimed = ackClaimed(this.actions), batch = reviewed.filter(item => !claimed.has(item.id));
+    if (!batch.length) return false;
+    this.queue = batch.map(item => ({ id: item.id, reviewed: item }));
+    this.publish({ phase: 'holding', topicId, topicName, total: batch.length, completed: 0, error: null });
     this.timer = setTimeout(() => { this.timer = undefined; void this.retry(); }, ACK_ALL_HOLD_MS);
     return true;
   }
@@ -113,13 +105,19 @@ export class AckAllController {
     if (this.flight) return this.running ?? Promise.resolve();
     if (!this.queue.length || !['holding', 'failed'].includes(this.state.phase)) return Promise.resolve();
     clearTimeout(this.timer); this.timer = undefined; this.flight = true;
-    this.running = this.save();
+    this.publish({ phase: 'saving', error: null });
+    // Single Acks write through the same lane, so only one Ack write of the session is ever in flight.
+    this.running = ackLane(this.actions, () => this.save());
     return this.running;
   }
   private async save(): Promise<void> {
-    this.publish({ phase: 'saving', error: null });
     try {
       while (this.queue.length) {
+        if (ackClaimed(this.actions).has(this.queue[0].id)) {
+          this.queue.shift();
+          this.publish({ total: this.state.total - 1 });
+          continue;
+        }
         const next = this.queue[0], pending = this.actions.getSnapshot().pending;
         let saved: boolean;
         if (pending) {
