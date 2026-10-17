@@ -59,10 +59,15 @@ impl Shared {
 }
 
 /// Writers resend the same operation on a busy store; that is always safe.
-fn retry<T>(mut write: impl FnMut() -> Result<T, CoreError>) -> T {
+fn retry<T>(write: impl FnMut() -> Result<T, CoreError>) -> T {
+    retry_noting(&AtomicUsize::new(0), write)
+}
+/// `retry`, counting each store_busy answer in `busy`.
+fn retry_noting<T>(busy: &AtomicUsize, mut write: impl FnMut() -> Result<T, CoreError>) -> T {
     loop {
         match write() {
             Err(error) if error.code == CoreErrorCode::StoreBusy => {
+                busy.fetch_add(1, Ordering::SeqCst);
                 std::thread::sleep(Duration::from_millis(5))
             }
             other => return other.unwrap(),
@@ -95,7 +100,8 @@ fn setup() -> Arc<Shared> {
     shared
 }
 
-fn queue(shared: &Shared, n: u64) {
+/// The owner queues input `n`, resending the same op on store_busy (counted in `busy`).
+fn queue(shared: &Shared, n: u64, busy: &AtomicUsize) {
     let command = OwnerCommand::InputSubmit {
         api_version: SchemaVersion::new(1).unwrap(),
         op_id: id(n),
@@ -113,7 +119,7 @@ fn queue(shared: &Shared, n: u64) {
         },
     };
     let registry = shared.registry();
-    retry(|| {
+    retry_noting(busy, || {
         InputService::new(&registry)
             .execute(
                 &OwnerContext::from_trusted_entrypoint(OwnerScope::Session(route())),
@@ -218,19 +224,26 @@ fn complete(shared: &Shared, prepared: &PreparedAttempt) {
     });
 }
 
-#[test]
-fn pollers_and_readers_together_lose_no_read_and_claim_each_input_once() {
-    let shared = setup();
-    let done = Arc::new(AtomicBool::new(false));
-    let claimed = Arc::new(Mutex::new(Vec::new()));
-    let read_failures = Arc::new(Mutex::new(Vec::new()));
-    let reads = Arc::new(AtomicUsize::new(0));
-    let polls = Arc::new(AtomicUsize::new(0));
+/// What the pollers and the owner saw during one run.
+#[derive(Default)]
+struct Tally {
+    /// Each claimed input with the claim request id that claimed it.
+    claimed: Mutex<Vec<(UuidV4, UuidV4)>>,
+    /// Claim request ids that got store_busy and were resent unchanged.
+    resent: Mutex<Vec<UuidV4>>,
+    polls: AtomicUsize,
+    /// store_busy answers to the owner's queue writes.
+    busy_owner_writes: AtomicUsize,
+}
 
-    let pollers: Vec<_> = (0..POLLERS)
+fn spawn_pollers(
+    shared: &Arc<Shared>,
+    done: &Arc<AtomicBool>,
+    tally: &Arc<Tally>,
+) -> Vec<std::thread::JoinHandle<()>> {
+    (0..POLLERS)
         .map(|_| {
-            let (shared, done, claimed, polls) =
-                (shared.clone(), done.clone(), claimed.clone(), polls.clone());
+            let (shared, done, tally) = (shared.clone(), done.clone(), tally.clone());
             std::thread::spawn(move || {
                 let registry = shared.registry();
                 let lease = ValidatedDispatchContext::from_trusted_current_lease(
@@ -244,22 +257,111 @@ fn pollers_and_readers_together_lose_no_read_and_claim_each_input_once() {
                         generation: shared.generation.clone(),
                         request_id: shared.uuid(),
                     };
-                    polls.fetch_add(1, Ordering::SeqCst);
+                    tally.polls.fetch_add(1, Ordering::SeqCst);
                     // A busy claim is resent with its same request id.
-                    let prepared = retry(|| {
+                    let busy = AtomicUsize::new(0);
+                    let prepared = retry_noting(&busy, || {
                         DeliveryService::new(&registry)
                             .claim(&lease, &request, || shared.uuid(), at())
                             .map_err(core_error)
                     });
+                    if busy.load(Ordering::SeqCst) > 0 {
+                        tally
+                            .resent
+                            .lock()
+                            .unwrap()
+                            .push(request.request_id.clone());
+                    }
                     if let Some(prepared) = prepared {
-                        claimed.lock().unwrap().push(prepared.input_id.clone());
+                        tally
+                            .claimed
+                            .lock()
+                            .unwrap()
+                            .push((prepared.input_id.clone(), request.request_id.clone()));
                         complete(&shared, &prepared);
                     }
                     std::thread::sleep(Duration::from_millis(2));
                 }
             })
         })
-        .collect();
+        .collect()
+}
+
+/// A long write (a large session) holds the session lock for 2.3 s, past the
+/// store's 2 s lock deadline. `held` is true while the lock is taken.
+fn hold(shared: &Shared, n: u64, held: &AtomicBool) {
+    let _ = shared.store().transact(
+        &id(2),
+        &ReceiptActorScope::Owner {},
+        &id(90_000 + n),
+        &serde_json::json!({"hold": n}),
+        |_| {
+            held.store(true, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(2_300));
+            Err::<SavedReceiptData, _>(())
+        },
+    );
+    held.store(false, Ordering::SeqCst);
+}
+
+/// Wait until all `INPUTS` are handled (or 120 s pass), then stop `threads`.
+fn finish(shared: &Shared, done: &AtomicBool, threads: Vec<std::thread::JoinHandle<()>>) -> bool {
+    let started = Instant::now();
+    let finished = loop {
+        let session = shared.saved();
+        let open = session
+            .inputs
+            .0
+            .values()
+            .filter(|input| input.state != InputState::Handled)
+            .count();
+        if open == 0 && session.inputs.0.len() as u64 == INPUTS {
+            break true;
+        }
+        if started.elapsed() > Duration::from_secs(120) {
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    done.store(true, Ordering::SeqCst);
+    for thread in threads {
+        thread.join().unwrap();
+    }
+    finished
+}
+
+/// Every queued input was claimed exactly once, by the request that saved its attempt.
+fn assert_claimed_once(shared: &Shared, tally: &Tally) {
+    let session = shared.saved();
+    let claimed = tally.claimed.lock().unwrap().clone();
+    let unique: BTreeSet<_> = claimed.iter().map(|(input, _)| input.clone()).collect();
+    assert_eq!(unique.len(), claimed.len(), "no input claimed twice");
+    assert_eq!(
+        unique,
+        session.inputs.0.keys().cloned().collect::<BTreeSet<_>>(),
+        "every queued input claimed"
+    );
+    for input in session.inputs.0.values() {
+        assert_eq!(input.attempts.len(), 1, "one attempt per input");
+    }
+    for (input, request) in &claimed {
+        assert_eq!(
+            &session.inputs.0[input].attempts[0].claim_request_id, request,
+            "the attempt records the claim request that claimed it"
+        );
+    }
+    assert!(tally.polls.load(Ordering::SeqCst) as u64 > INPUTS);
+}
+
+#[test]
+fn pollers_and_readers_together_lose_no_read_and_claim_each_input_once() {
+    let shared = setup();
+    let done = Arc::new(AtomicBool::new(false));
+    let tally = Arc::new(Tally::default());
+    let read_failures = Arc::new(Mutex::new(Vec::new()));
+    let reads = Arc::new(AtomicUsize::new(0));
+
+    let pollers = spawn_pollers(&shared, &done, &tally);
 
     let readers: Vec<_> = (0..READERS)
         .map(|_| {
@@ -306,25 +408,13 @@ fn pollers_and_readers_together_lose_no_read_and_claim_each_input_once() {
         })
         .collect();
 
-    // A long write (a large session) holds the lock past the store's 2 s lock
-    // deadline: a read without the retry would fail with store_busy here.
+    // Long holds: a read without the retry would fail with store_busy here.
     let holding = Arc::new(AtomicBool::new(false));
     let holder = {
         let (shared, holding) = (shared.clone(), holding.clone());
         std::thread::spawn(move || {
-            for hold in 0..2 {
-                holding.store(true, Ordering::SeqCst);
-                let _ = shared.store().transact(
-                    &id(2),
-                    &ReceiptActorScope::Owner {},
-                    &id(90_000 + hold),
-                    &serde_json::json!({"hold": hold}),
-                    |_| {
-                        std::thread::sleep(Duration::from_millis(2_300));
-                        Err::<SavedReceiptData, _>(())
-                    },
-                );
-                holding.store(false, Ordering::SeqCst);
+            for n in 0..2 {
+                hold(&shared, n, &holding);
                 // Room for the queued writers between long holds.
                 std::thread::sleep(Duration::from_millis(1_000));
             }
@@ -332,6 +422,8 @@ fn pollers_and_readers_together_lose_no_read_and_claim_each_input_once() {
     };
     // The owner queues inputs between the holds, spaced like a person typing,
     // so no artificial burst of claims lands in a reader's one retry window.
+    // (`claims_and_owner_writes_resent_through_a_long_hold_claim_each_input_once`
+    // queues and claims during the holds.)
     while !holding.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(1));
     }
@@ -339,47 +431,68 @@ fn pollers_and_readers_together_lose_no_read_and_claim_each_input_once() {
         while holding.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(5));
         }
-        queue(&shared, 1_000 + n);
+        queue(&shared, 1_000 + n, &tally.busy_owner_writes);
         std::thread::sleep(Duration::from_millis(175));
     }
     holder.join().unwrap();
-    let started = Instant::now();
-    let finished = loop {
-        let session = shared.saved();
-        let open = session
-            .inputs
-            .0
-            .values()
-            .filter(|input| input.state != InputState::Handled)
-            .count();
-        if open == 0 && session.inputs.0.len() as u64 == INPUTS {
-            break true;
-        }
-        if started.elapsed() > Duration::from_secs(120) {
-            break false;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    done.store(true, Ordering::SeqCst);
-    for thread in pollers.into_iter().chain(readers) {
-        thread.join().unwrap();
-    }
+    let finished = finish(&shared, &done, pollers.into_iter().chain(readers).collect());
     assert!(finished, "every queued input was handled");
 
-    let session = shared.saved();
-    let claimed = claimed.lock().unwrap().clone();
-    let unique: BTreeSet<_> = claimed.iter().cloned().collect();
-    assert_eq!(unique.len(), claimed.len(), "no input claimed twice");
-    assert_eq!(
-        unique,
-        session.inputs.0.keys().cloned().collect::<BTreeSet<_>>(),
-        "every queued input claimed"
-    );
-    for input in session.inputs.0.values() {
-        assert_eq!(input.attempts.len(), 1, "one attempt per input");
-    }
+    assert_claimed_once(&shared, &tally);
     let failures = read_failures.lock().unwrap();
     assert!(failures.is_empty(), "read failures: {failures:?}");
     assert!(reads.load(Ordering::SeqCst) > 0);
-    assert!(polls.load(Ordering::SeqCst) as u64 > INPUTS);
+}
+
+#[test]
+fn claims_and_owner_writes_resent_through_a_long_hold_claim_each_input_once() {
+    let shared = setup();
+    let done = Arc::new(AtomicBool::new(false));
+    let tally = Arc::new(Tally::default());
+
+    // Inputs wait to be claimed when the first hold starts.
+    for n in 0..3 {
+        queue(&shared, 1_000 + n, &tally.busy_owner_writes);
+    }
+    let holding = Arc::new(AtomicBool::new(false));
+    let holder = {
+        let (shared, holding) = (shared.clone(), holding.clone());
+        std::thread::spawn(move || {
+            for n in 0..2 {
+                hold(&shared, n, &holding);
+                std::thread::sleep(Duration::from_millis(1_000));
+            }
+        })
+    };
+    while !holding.load(Ordering::SeqCst) {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    // Pollers start inside the hold: their claims wait out the lock deadline,
+    // get store_busy and are resent with the same request id.
+    let pollers = spawn_pollers(&shared, &done, &tally);
+    // The owner keeps queueing 20 ms apart, into the holds.
+    for n in 3..INPUTS {
+        queue(&shared, 1_000 + n, &tally.busy_owner_writes);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    holder.join().unwrap();
+    let finished = finish(&shared, &done, pollers);
+    assert!(finished, "every queued input was handled");
+
+    assert_claimed_once(&shared, &tally);
+    assert!(
+        tally.busy_owner_writes.load(Ordering::SeqCst) > 0,
+        "an owner write met a hold"
+    );
+    let resent: BTreeSet<_> = tally.resent.lock().unwrap().iter().cloned().collect();
+    assert!(!resent.is_empty(), "a claim met a hold");
+    assert!(
+        tally
+            .claimed
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, request)| resent.contains(request)),
+        "a resent claim request claimed its input once"
+    );
 }
