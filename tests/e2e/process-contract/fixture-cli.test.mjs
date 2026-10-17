@@ -155,7 +155,7 @@ for (const scenario of ['delayed-readiness', 'wrong-text', 'disabled-send', 'fro
           } };
         },
         waitUntil: async (condition, options) => {
-          assert.equal(options.timeout, 20000); assert.equal(options.interval, 100);
+          assert.equal(options.timeout, 60000); assert.equal(options.interval, 100);
           if (options.timeoutMsg.startsWith('Detail Reply')) {
             assert.equal(await condition(), false); assert.equal(clicks, 0);
             value = text; assert.equal(await condition(), false); assert.equal(clicks, 0);
