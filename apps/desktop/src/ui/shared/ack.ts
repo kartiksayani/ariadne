@@ -174,7 +174,7 @@ class SessionAckHold implements AckHold {
     return JSON.stringify(['item-ack', route.project_id, route.session_id, itemId]);
   }
   private refuse(itemId: string, text: string, retry?: Immutable<Item>) {
-    notices.push({ id: this.noticeId(itemId), icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text,
+    notices.push({ id: this.noticeId(itemId), icon: 'ph ph-warning-circle', tone: 'problem', text,
       // SPEC 11.1: a save that definitely failed can be tried again; the toast "Saved your Ack on “x”." follows the retry's save.
       ...(retry ? { actions: [{ label: 'Try again', dismissOnRun: true, run: () => { this.retried.add(itemId); this.ack(retry); if (!this.entries.has(itemId)) this.retried.delete(itemId); } }] } : {}) });
   }

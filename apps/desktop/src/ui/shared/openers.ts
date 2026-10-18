@@ -9,7 +9,7 @@ export const FILE_NOT_OPENED = 'That file didn’t open.';
 const NOTICE_MS = 6000;
 
 const failed = (store: NoticeStore, id: string, text: string) =>
-  store.push({ id, icon: 'ph ph-warning', iconColor: 'var(--a-warn)', text, dismissible: true }, NOTICE_MS);
+  store.push({ id, icon: 'ph ph-warning', iconColor: 'var(--a-warn)', text }, NOTICE_MS);
 
 type Opening = Pick<RendererService, 'openLink' | 'resolveFileReferences' | 'openFileReference'>;
 

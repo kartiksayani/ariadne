@@ -26,7 +26,7 @@ export function useSessionSnapshots(service: RendererService | null, summaries: 
         }, (error: unknown) => {
           if (!current) return;
           // One note per session; a later successful read does not clear it, the owner dismisses it.
-          notices.push({ id: `session-read-failed:${sessionKey(summary)}`, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
+          notices.push({ id: `session-read-failed:${sessionKey(summary)}`, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)',
             text: `A session could not be read, so its card is incomplete. ${plainFailure(error)}` });
         });
     }

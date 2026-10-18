@@ -15,6 +15,7 @@ import { ItemRefs } from '../shared/MarkdownText';
 import { ItemRefSession } from '../peek/context';
 import { Chat } from './Chat';
 import { Composer } from './Composer';
+import { useHidden } from '../remove/queue';
 import { topicChat } from './model';
 import type { Words } from './submit';
 import './detail.css';
@@ -34,6 +35,8 @@ export function TopicConversation({ drafts, store, topicId, onOpenItem }: TopicC
   const session = useSession(store).snapshot?.session, draftState = useOwnerDrafts(drafts, session);
   const actions = useMemo(() => sessionActionsFor(drafts.service, store), [drafts, store]);
   const topic = session?.topics[topicId];
+  // The topic is in a pending removal's window: its box says so and nothing goes out until Undo (alpha.21 E28).
+  const hidden = useHidden(), removing = !!session && hidden.topic({ project_id: session.project_id, session_id: session.id }, topicId);
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : null;
   const agent = binding ? agentName(binding.adapter_id) : 'the agent';
   const reply = useTopicReply(drafts, store, topicId, agent);
@@ -58,7 +61,7 @@ export function TopicConversation({ drafts, store, topicId, onOpenItem }: TopicC
       if (row) row.focus({ preventScroll: true });
       else if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-      event.stopPropagation(); event.preventDefault(); if (!reply.sendOff) void reply.send();
+      event.stopPropagation(); event.preventDefault(); if (!reply.sendOff && !removing) void reply.send();
     }
   };
   const showBox = reply.entry !== undefined;
@@ -79,8 +82,8 @@ export function TopicConversation({ drafts, store, topicId, onOpenItem }: TopicC
         onOpenEditor={target => { if (target === 'topic_reply') focusBox(); }} /></ItemRefs.Provider></ItemRefSession.Provider>}
     </div>
     <div className="detail-dock">
-      <Composer kind="topic" ownerKey={topicId} actions={actions} sentAs={showBox ? 'reply' : null} slots={[slot]} slotKey={() => SLOT_KEY}
-        sendOff={() => reply.sendOff} closable={false} register={() => {}} onEdit={(_slot, text) => reply.edit(text)} onKeyDown={keys}
+      <Composer kind="topic" removing={removing} ownerKey={topicId} actions={actions} sentAs={showBox ? 'reply' : null} slots={[slot]} slotKey={() => SLOT_KEY}
+        sendOff={() => removing || reply.sendOff} closable={false} register={() => {}} onEdit={(_slot, text) => reply.edit(text)} onKeyDown={keys}
         onSend={() => { void reply.send(); }} onCancel={() => {}} onReview={() => {}}
         before={reply.unavailable && <p className="detail-topic-why" role="status"><i className="ph ph-info" aria-hidden="true" />{reply.unavailable}</p>}>
         {reply.retry && <button type="button" className="btn btn-secondary" disabled={reply.preferenceUncertain} onClick={() => { void reply.sendAgain(); }}>Try sending again</button>}

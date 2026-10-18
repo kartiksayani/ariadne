@@ -39,6 +39,7 @@ import { SessionClosedChip } from '../shared/SessionClosedChip';
 import { CopyMessage } from './CopyMessage';
 import { StatusBadge } from '../shared/StatusBadge';
 import { hiddenSource } from '../tree/hidden';
+import { useHidden } from '../remove/queue';
 import { actionText, closedStatus, detailModel, type ActionKey, type Kid, type LinkView, type OpenMode } from './model';
 import { useDetailSubmit, type DraftTarget, type Words } from './submit';
 import './detail.css';
@@ -186,6 +187,7 @@ function ItemLink({ link }: { readonly link: LinkView }) {
 
 export function ItemConversation({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds, seen, answerJump, onAnswerJumpConsumed, onOpenAnswer, expanded = false, onOpenConversation, dividerId, dividerAt, onHide, onRemove, onActions, onMarkSeen }: ItemDetailProps) {
   const current = useSession(store), session = current.snapshot?.session;
+  const pendingRemoval = useHidden();
   const item = session?.items[itemId];
   const submit = useDetailSubmit(drafts, store, itemId);
   const draftState = useOwnerDrafts(drafts, session);
@@ -234,7 +236,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   useEffect(() => () => notices.dismiss(laterNoticeId), [laterNoticeId]);
   useEffect(() => {
     if (!laterError) { notices.dismiss(laterNoticeId); return; }
-    notices.push({ id: laterNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: 'Later was not saved. Keep the current view and try again.' });
+    notices.push({ id: laterNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', text: 'Later was not saved. Keep the current view and try again.' });
   }, [laterNoticeId, laterError]);
   const binding = session?.active_binding_id ? session.bindings[session.active_binding_id] : undefined;
   const health = useSupervisorHealth(drafts.service, binding?.id, binding?.generation);
@@ -407,9 +409,9 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     const attempt = ++copyAttempt.current;
     const currentCopy = () => copyMounted.current && attempt === copyAttempt.current;
     void copyText(`${item.id} — ${item.question}`).then(() => {
-      if (currentCopy()) notices.push({ id: `detail-copy:${noticeKey}`, icon: 'ph ph-check', dismissible: true, text: 'Item copied.' });
+      if (currentCopy()) notices.push({ id: `detail-copy:${noticeKey}`, icon: 'ph ph-check', text: 'Item copied.' });
     }, () => {
-      if (currentCopy()) notices.push({ id: `detail-copy:${noticeKey}`, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: 'Copy failed. Try again.' });
+      if (currentCopy()) notices.push({ id: `detail-copy:${noticeKey}`, icon: 'ph ph-warning-circle', tone: 'problem', text: 'Copy failed. Try again.' });
     });
   };
   // One list of actions feeds the actions row here and the head's "…" menu (W2 renders it from `onActions`). Each action goes
@@ -479,7 +481,9 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   const sendHeld = !!fit && !!model.open?.actions.find(value => value.action === fit)?.disabled;
   const closable = submit.written.length === 0 && !standingEmpty;
   // The Send button and the keys follow one rule: nothing goes out while this says no.
-  const sendOff = (slot: Words) => !submit.ready || submit.saving !== null || slot.changed || sendHeld || !slot.text.trim();
+  // An item (or one above it, or its topic) in a pending removal's window sends nothing until Undo (alpha.21 E28).
+  const removing = !!session && pendingRemoval.item({ project_id: session.project_id, session_id: session.id }, session, itemId);
+  const sendOff = (slot: Words) => removing || !submit.ready || submit.saving !== null || slot.changed || sendHeld || !slot.text.trim();
   const wordsKey = (slot: Words) => (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Escape') { event.stopPropagation(); event.preventDefault(); closeBox(); return; }
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.stopPropagation(); event.preventDefault(); if (!sendOff(slot)) sendWords(slot); }
@@ -492,7 +496,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   };
   const dropOff = !submit.ready || submit.saving !== null || submit.locked('drop') || submit.changed('drop');
   const owner = !answerOnly && (slots.length > 0 || dropOpen || reopenStale);
-  const composer = owner && <Composer kind={model.status === 'waiting' ? 'waiting' : 'plain'} expanded={expanded} sending={submit.saving !== null} ownerKey={itemId} actions={actions} sentAs={fit} slots={slots} slotKey={slotKey}
+  const composer = owner && <Composer kind={model.status === 'waiting' ? 'waiting' : 'plain'} expanded={expanded} removing={removing} sending={submit.saving !== null} ownerKey={itemId} actions={actions} sentAs={fit} slots={slots} slotKey={slotKey}
     sendOff={sendOff} closable={closable} register={(key, element) => { if (element) boxes.current.set(key, element); else boxes.current.delete(key); }}
     onEdit={(slot, value) => { edited.current = slotKey(slot); submit.edit(slot, value); }} onKeyDown={wordsKey} onSend={sendWords} onCancel={closeBox}
     onReview={slot => submit.review(slot)}

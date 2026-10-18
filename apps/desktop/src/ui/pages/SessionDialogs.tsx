@@ -123,7 +123,7 @@ export function announceClosed(actions: SessionActions, agent: string, name: str
   const cancelled = data?.kind === 'session_lifecycle' ? data.cancelled_input_ids?.length ?? 0 : 0;
   const state = actions.session.getSnapshot(), route = state.route;
   const when = state.snapshot ? sessionWhen(Date.parse(state.snapshot.session.created_at), Date.now()) : 'earlier';
-  if (cancelled) notices.push({ id: `session-closed:${route.project_id}:${route.session_id}`, icon: 'ph ph-x-circle', dismissible: true,
+  if (cancelled) notices.push({ id: `session-closed:${route.project_id}:${route.session_id}`, icon: 'ph ph-x-circle',
     text: `Closed ${sessionPhrase({ name }, agent, when)}. ${cancelled} unsent message${cancelled === 1 ? ' was' : 's were'} cancelled.` }, 8000);
 }
 

@@ -220,7 +220,7 @@ export function TreeView(props: TreeViewProps) {
   useEffect(() => () => noticeStore.dismiss(lifecycleNoticeId), [lifecycleNoticeId]);
   useEffect(() => {
     if (!lifecycleNotice) { noticeStore.dismiss(lifecycleNoticeId); return; }
-    noticeStore.push({ id: lifecycleNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: lifecycleNotice });
+    noticeStore.push({ id: lifecycleNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', text: lifecycleNotice });
   }, [lifecycleNoticeId, lifecycleNotice]);
   const elements = useRef(new Map<string, HTMLDivElement>()), scroller = useRef<HTMLDivElement>(null);
   const scrollRequested = useRef<string | null>(null);
@@ -363,7 +363,7 @@ export function TreeView(props: TreeViewProps) {
     const groupKey = hiddenGroupKey(row.item.topic_id, row.item.parent);
     if (!row.hidden && !expandedHiddenGroups.has(groupKey) && element?.contains(document.activeElement)) hiddenFocus.current = groupKey;
     void navigation.setHidden({ ...route, item_id: row.item.id }, !row.hidden, current.preferences.revision).then(saved => {
-      if (!saved) { hiddenFocus.current = null; noticeStore.push({ id: 'hide-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
+      if (!saved) { hiddenFocus.current = null; noticeStore.push({ id: 'hide-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)',
         text: 'The hidden items preference could not be saved. Try again.' }); }
       else if (!row.hidden) props.onHid?.(row.item.id);
     });
@@ -391,7 +391,7 @@ export function TreeView(props: TreeViewProps) {
         return;
       }
       edits.forEach(edit => edit.done(saved));
-      if (!saved && mounted.current) noticeStore.push({ id: 'tree-view-save-failed', icon: 'ph ph-warning-circle', dismissible: true,
+      if (!saved && mounted.current) noticeStore.push({ id: 'tree-view-save-failed', icon: 'ph ph-warning-circle',
         text: 'The view preference could not be saved. Try again.' });
     }).finally(() => { if (mounted.current) setWritingEdits([]); });
   }, [pendingEdits, writingEdits, viewBusy, savedView, preferences, navigation]);
@@ -453,7 +453,7 @@ export function TreeView(props: TreeViewProps) {
     }).catch((error: unknown) => {
       if (opening || !mounted.current || call !== request.current) return;
       focusRequested.current = null;
-      noticeStore.push({ id: 'tree-reveal-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
+      noticeStore.push({ id: 'tree-reveal-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)',
         text: `“${latest.current.session?.items[id] ? shortLabel(latest.current.session.items[id]!) : 'This item'}” could not be opened. ${plainFailure(error, 'Try again.')}` });
     }).finally(() => {
       clearTimeout(timeout);
@@ -617,7 +617,7 @@ export function TreeView(props: TreeViewProps) {
     answer: onRow((row, _index, _intent, event) => {
       if (row.kind === 'item' && row.item.id === selectedId && session && ackTarget(session, row.item)) {
         if (!event.repeat) {
-          if (viewBusy) noticeStore.push({ id: 'tree-ack-view-saving', icon: 'ph ph-warning-circle', dismissible: true,
+          if (viewBusy) noticeStore.push({ id: 'tree-ack-view-saving', icon: 'ph ph-warning-circle',
             text: 'Another view change is being saved. Wait for it, then try Ack again.' });
           else runAck(row.item.id);
         }
@@ -1126,7 +1126,7 @@ export function TreeView(props: TreeViewProps) {
     setNextRevealId(id);
     if (!id) {
       setNextTarget(null); setNextPulse(false); nextScroll.current = null;
-      noticeStore.push({ id: 'tree-no-unseen', icon: 'ph ph-check', dismissible: true, text: 'No unseen items.' });
+      noticeStore.push({ id: 'tree-no-unseen', icon: 'ph ph-check', text: 'No unseen items.' });
       return;
     }
     noticeStore.dismiss('tree-no-unseen');

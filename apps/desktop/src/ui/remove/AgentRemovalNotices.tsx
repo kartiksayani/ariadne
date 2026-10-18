@@ -40,11 +40,11 @@ export function AgentRemovalNotices({ waiting, controllers, navigation, selected
         if (seenRemovals.current.has(id)) continue;
         seenRemovals.current.add(id);
         const route = { project_id: session.project_id, session_id: session.id };
-        notices.push({ id, icon: 'ph ph-trash', text: removalNotice(session, removal, agentOf(session)), dismissible: true, actions: [
+        notices.push({ id, icon: 'ph ph-trash', text: removalNotice(session, removal, agentOf(session)), actions: [
           { label: 'Restore', run: () => {
             const actions = controllers.forSession(navigation.opened.open(route));
             void restoreConfirmation.restore(actions, removal.topic_id, removal.item_id).then(({ error, restored }) => {
-              if (error) notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: error, dismissible: true });
+              if (error) notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: error });
               else if (restored) notices.dismiss(id);
             });
           } },
@@ -56,13 +56,13 @@ export function AgentRemovalNotices({ waiting, controllers, navigation, selected
             void navigation.getNavigationCompletion(request).then(async saved => {
               if (!current()) return;
               if (!saved) {
-                if (failure) notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: navigationFailure(failure), dismissible: true });
+                if (failure) notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: navigationFailure(failure) });
                 return;
               }
               const actions = controllers.forSession(navigation.opened.open(route));
               const ready = await waitForLifecycleReady(actions);
               if (!current()) return;
-              if (!ready.ok) { if (ready.error) notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: ready.error, dismissible: true }); return; }
+              if (!ready.ok) { if (ready.error) notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: ready.error }); return; }
               const topic = ready.session.topics[removal.topic_id], scope = removal.item_id && !topic?.removed_at ? removal.topic_id : null;
               onTree(route);
               const preferences = navigation.getSnapshot().preferences;
@@ -76,7 +76,7 @@ export function AgentRemovalNotices({ waiting, controllers, navigation, selected
               } }, preferences.revision);
               if (!current()) return;
               if (!opened) {
-                notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: 'The bin could not be opened. Try Open the bin again.', dismissible: true }); return;
+                notices.push({ id: `${id}:error`, icon: 'ph ph-warning-circle', text: 'The bin could not be opened. Try Open the bin again.' }); return;
               }
               binView.reveal(route, scope);
             });

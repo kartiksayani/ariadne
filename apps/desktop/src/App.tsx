@@ -548,7 +548,7 @@ function Workspace({ application }: { application: Application }) {
     const ask = () => {
       // Asked, or read but nothing to ask about (gone, or already being removed).
       if (asker.current(target) || store.getSnapshot().snapshot) return;
-      notices.push({ id: `remove-read-failed:${target.session.session_id}:${target.topic_id}`, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true,
+      notices.push({ id: `remove-read-failed:${target.session.session_id}:${target.topic_id}`, icon: 'ph ph-warning-circle', tone: 'problem',
         text: 'Ariadne couldn’t read that session, so it can’t show what removing the topic deletes. Nothing was removed. Try again.' });
     };
     if (store.getSnapshot().snapshot) ask();
@@ -595,7 +595,7 @@ function Workspace({ application }: { application: Application }) {
     if (want !== undefined && want === isHidden) return true;
     setDismissedReveal(currentReveal);
     void navigation.setHidden(target, !isHidden, current.preferences.revision).then(saved => {
-      if (!saved) notices.push({ id: 'hide-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
+      if (!saved) notices.push({ id: 'hide-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)',
         text: 'The hidden items preference could not be saved. Try again.' });
       else if (!isHidden) announceHid(target);
     });
@@ -720,7 +720,7 @@ function Workspace({ application }: { application: Application }) {
         onHide={() => hideItem(selectedId)} onRemove={() => removeItem(selectedId)} onActions={actionsFrom(selectedId)}
         dividerId={dividerFor(selectedId).id} dividerAt={dividerFor(selectedId).at}
         later={later} onAgentNotRunning={onAgentNotRunning} earlierAgent={earlier}
-        hiddenItemIds={view?.hidden_item_ids} seen={readingSeen}
+        hiddenItemIds={view?.hidden_item_ids} seen={readingSeen} onMarkSeen={(itemId, revision) => { navigation.markItemSeen(route, itemId, revision); }}
         answerJump={answerJump?.route === key && answerJump.itemId === selectedId ? answerJump : undefined}
         onAnswerJumpConsumed={consumeAnswerJump}
         onOpenAnswer={(itemId, messageId) => { setAnswerJump({ route: key, itemId, messageId, token: ++answerJumpSequence.current }); revealItem({ ...route, item_id: itemId }); }}
@@ -732,7 +732,7 @@ function Workspace({ application }: { application: Application }) {
         onClose={closeConversation} head={biggerHead} onTopic={toTopicTop}
         onHide={() => hideItem(conversation.itemId)} onRemove={() => removeItem(conversation.itemId)} onActions={actionsFrom(conversation.itemId)}
         onBring={() => { void queueBring({ ...route, item_id: conversation.itemId }); }} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })}
-        dividerId={dividerFor(conversation.itemId).id ?? conversation.dividerId} dividerAt={dividerFor(conversation.itemId).at} seen={readingSeen} hiddenItemIds={view?.hidden_item_ids}
+        dividerId={dividerFor(conversation.itemId).id ?? conversation.dividerId} dividerAt={dividerFor(conversation.itemId).at} seen={readingSeen} onMarkSeen={(itemId, revision) => { navigation.markItemSeen(route, itemId, revision); }} hiddenItemIds={view?.hidden_item_ids}
         focusRequest={ownerFocus?.route === key && ownerFocus.itemId === conversation.itemId ? ownerFocus : undefined}
         onFocusRequestConsumed={consumeOwnerRequest} onAgentNotRunning={onAgentNotRunning}
         onLater={value => preferences ? navigation.setLater({ ...route, item_id: conversation.itemId }, value, preferences.revision) : Promise.resolve(false)} /> : undefined}

@@ -289,20 +289,20 @@ export class RemovalQueue {
     let notice: NoticeInput;
     if (entry.stage === 'failed') {
       notice = { id, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', text: `Couldn’t remove ${entry.label}. ${failure ?? ''}`.trim(),
-        actions: [{ label: 'Retry', run: () => { void this.retry(entry.opId); } }], dismissible: true, onDismiss: dismiss };
+        actions: [{ label: 'Retry', run: () => { void this.retry(entry.opId); } }], onDismiss: dismiss };
     } else if (entry.mode === 'local' || entry.mode === 'closed') {
       notice = { id, icon: 'ph ph-trash', text: entry.mode === 'closed' ? `${base} The session is closed, so ${agent} isn’t told.` : base,
-        actions: [undo], dismissible: true, onDismiss: dismiss };
+        actions: [undo], onDismiss: dismiss };
     } else if (entry.stage === 'pending') {
-      notice = { id, icon: 'ph ph-hourglass', text: `${base} ${agent} is told in 5 seconds unless you undo.`, actions: [undo], dismissible: false };
+      notice = { id, icon: 'ph ph-hourglass', text: `${base} ${agent} is told in 5 seconds unless you undo.`, actions: [undo] };
     } else if (entry.mode === 'queued') {
       notice = { id, icon: 'ph ph-hourglass-medium', iconColor: 'var(--st-open)', text: `${base} ${agent} isn’t running; it’s told when it runs again.`,
-        dismissible: entry.stage === 'done', onDismiss: dismiss };
+        onDismiss: dismiss };
     } else if (entry.stage === 'sending') {
       notice = { id, icon: 'ph ph-paper-plane-right', iconColor: 'var(--st-progress)', text: `${base} Telling ${agent}…` };
     } else {
       notice = { id, icon: 'ph-fill ph-check-circle', iconColor: 'var(--st-done)', text: `${base} ${agent} was told and won’t bring ${entry.pronoun} up again.`,
-        dismissible: true, onDismiss: dismiss };
+        onDismiss: dismiss };
     }
     this.deps.notices.push(notice);
   }

@@ -435,14 +435,14 @@ describe('toast region', () => {
     expect(screen.getByText('Still unavailable.')).toBeTruthy();
   });
 
-  it('ignores dismissible: false (every notice has × and Escape) and runs dismiss callbacks', () => {
+  it('gives every notice × and Escape, and runs dismiss callbacks', () => {
     const onDismiss = vi.fn();
     render(<Notices store={store} />);
-    const id = push({ ...info, dismissible: false });
+    const id = push({ ...info });
     expect(screen.getByRole('button', { name: 'Dismiss' })).toBeTruthy();
     fireEvent.keyDown(screen.getByText(info.text).closest('.pw-note')!, { key: 'Escape' });
     expect(store.getSnapshot()).toEqual([]);
-    act(() => { store.push({ ...info, id, onDismiss, dismissible: false }); });
+    act(() => { store.push({ ...info, id, onDismiss }); });
     advance(300);
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     expect(onDismiss).toHaveBeenCalledOnce();

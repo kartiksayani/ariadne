@@ -65,9 +65,9 @@ export class AckAllController {
     // The Undo window ends the moment the batch leaves 'holding': the toast keeps its text but loses Undo.
     if (phase !== 'holding') toasts.expire(this.noticeId);
     if (phase === 'holding') notices.dismiss(this.noticeId);
-    else if (phase === 'saving') notices.push({ id: this.noticeId, icon: 'ph ph-check', dismissible: false,
+    else if (phase === 'saving') notices.push({ id: this.noticeId, icon: 'ph ph-check',
       text: `Acknowledging results in “${topicName}”: ${completed} of ${total} saved.` });
-    else if (phase === 'failed') notices.push({ id: this.noticeId, icon: 'ph ph-warning', tone: 'problem', dismissible: false,
+    else if (phase === 'failed') notices.push({ id: this.noticeId, icon: 'ph ph-warning', tone: 'problem',
       text: `${completed} of ${total} results saved in “${topicName}”; ${remaining} remain. ${error}`,
       actions: [{ label: 'Retry', run: () => { void this.retry(); } },
         { label: 'Cancel remaining', disabled: !!this.actions.getSnapshot().pending, run: () => { this.cancelRemaining(); } }] });

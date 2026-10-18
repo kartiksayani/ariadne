@@ -160,7 +160,7 @@ export function GraphView({ store, routes, view, later, local = NO_LOCAL, reveal
   useEffect(() => () => notices.dismiss(errorNoticeId), [errorNoticeId]);
   useEffect(() => {
     if (!error) { notices.dismiss(errorNoticeId); return; }
-    notices.push({ id: errorNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', dismissible: true, text: error });
+    notices.push({ id: errorNoticeId, icon: 'ph ph-warning-circle', tone: 'problem', text: error });
   }, [errorNoticeId, error]);
   const [scrollTarget, setScrollTarget] = useState<{ id: string; center: boolean; focus?: boolean } | null>(null);
   const mounted = useRef(true), request = useRef(0);

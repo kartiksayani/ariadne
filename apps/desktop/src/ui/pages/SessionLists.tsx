@@ -25,7 +25,7 @@ type Dialog = { kind: 'dispatch' | 'archive'; store: SessionStore; agent: string
 
 const sessionFailure = (summary: Immutable<SessionSummary>, now: number, error: unknown, fallback?: string) =>
   `For ${sessionPhrase(summary, agentOf(summary), sessionWhen(Date.parse(summary.created_at), now))}: ${plainFailure(error, fallback)}`;
-const failed = (summary: Immutable<SessionSummary>, now: number, error: unknown, fallback = 'The session could not be changed. Try again.') => notices.push({ id: `session-lifecycle-failed:${sessionKey(summary)}`, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
+const failed = (summary: Immutable<SessionSummary>, now: number, error: unknown, fallback = 'The session could not be changed. Try again.') => notices.push({ id: `session-lifecycle-failed:${sessionKey(summary)}`, icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)',
   text: sessionFailure(summary, now, error, fallback) });
 
 /** The receipt outlives this page; dismiss it only after an authoritative restore. */
@@ -72,7 +72,7 @@ export function useSessionArchive({ navigation, actions, now, disabled }: Sessio
     const name = ownerName(summary), subject = name ? `“${name}”` : sessionPhrase(summary, agentOf(summary), sessionWhen(Date.parse(summary.created_at), now));
     notices.dismiss(`session-archive:${summary.project_id}:${summary.session_id}`);
     notices.dismiss(`session-lifecycle-failed:${sessionKey(summary)}`);
-    notices.push({ id: `session-restored:${sessionKey(summary)}`, icon: 'ph ph-arrow-counter-clockwise', dismissible: true,
+    notices.push({ id: `session-restored:${sessionKey(summary)}`, icon: 'ph ph-arrow-counter-clockwise',
       text: reopen ? `Restored and reopened ${subject}.` : `Restored ${subject}; it stays closed.` });
   };
   const announceArchive = (summary: Immutable<SessionSummary>, wasActive: boolean, controller: ReturnType<SessionActionControllers['forSession']>) => {
@@ -85,7 +85,7 @@ export function useSessionArchive({ navigation, actions, now, disabled }: Sessio
     const id = `session-archive:${summary.project_id}:${summary.session_id}`;
     const text = `Archived${wasActive ? ' and closed' : ''} ${subject}.${cancelled ? ` ${cancelled} unsent message${cancelled === 1 ? ' was' : 's were'} cancelled.${wasActive ? ' Undo resumes sending, even if you paused it.' : ''} Cancelled messages stay cancelled.` : ''}`;
     const show = (error?: string) => { if (used) return; notices.push({ id, icon: error ? 'ph ph-warning-circle' : 'ph ph-archive',
-      ...(error ? { iconColor: 'var(--a-danger)' } : {}), text: error ?? text, dismissible: true,
+      ...(error ? { iconColor: 'var(--a-danger)' } : {}), text: error ?? text,
       actions: [{ label: controller.getSnapshot().pending?.command.command === 'session_restore' ? 'Check again' : 'Undo', run: undo }] }); };
     const undo = async () => {
       if (used || restoring) return;

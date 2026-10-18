@@ -78,7 +78,7 @@ export function ArchivePage({ navigation, actions, projects, sessions, snapshots
     } catch (error: unknown) {
       const summary = summaryOf(sessionKey(topic.source));
       const subject = sessionPhrase(summary, topic.sourceAgent, summary ? sessionWhen(Date.parse(summary.created_at), now) : 'earlier');
-      if (!isViewConflict(error)) notices.push({ id: `topic-restore-failed:${sessionKey(topic.source)}:${topic.topic.id}`, icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)', dismissible: true,
+      if (!isViewConflict(error)) notices.push({ id: `topic-restore-failed:${sessionKey(topic.source)}:${topic.topic.id}`, icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)',
         text: `For “${topic.name}” in ${subject}: ${plainFailure(error, 'The topic could not be restored. Try again.')}` });
     } finally { setBusy(null); }
   };

@@ -73,4 +73,59 @@ describe('topic mode in Details', () => {
     await waitFor(() => expect(topicBox()).toBeNull());
     await waitFor(() => expect(transport.preferences.drafts.find(draft => draft.target.item_id === null)).toMatchObject({ intent: 'topic_reply', text: 'Typed in the Graph.' }));
   });
+
+  // The topic of item 8 gets a reply to the whole topic that is queued (the agent has not taken it yet).
+  const words = 'Keep the retry limits as they are';
+  const queuedReply = (transport: AppTransport) => {
+    const session = transport.sessions.get(route.session_id)!, topic = session.items['8']!.topic_id;
+    const input = Object.values(session.inputs).find(value => value?.target.topic_id === topic)!;
+    input.state = 'queued'; input.kind = 'topic_reply'; input.target = { topic_id: topic, item_id: null }; input.attempts = []; input.active_attempt_id = null;
+    input.binding_id = session.active_binding_id!; input.payload.text = words; input.payload.selected_option_id = null;
+    input.payload.target_snapshot.question_revision = null; input.payload.target_snapshot.item_question = null;
+    return input.id;
+  };
+  const cancels = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'input_cancel');
+  // A queued reply cannot be taken back from the band (its "Reply to topic" waits while a reply is on its way): it is taken back from the
+  // stuck notice's Edit (2 minutes on), which opens the topic's Details, or from the bubble's Undo once Details is open.
+  const staleQueued = (transport: AppTransport) => {
+    const id = queuedReply(transport), session = transport.sessions.get(route.session_id)!, input = session.inputs[id]!;
+    input.created_at = new Date(Date.now() - 3 * 60_000).toISOString();
+    // Alone in the session, so it is not "behind" another message (which would explain the wait and raise no notice).
+    session.inputs = { [id]: input };
+    return id;
+  };
+  const draftWith = (transport: AppTransport, text: string) => transport.preferences.drafts.some(draft => draft.target.item_id === null && draft.intent === 'topic_reply' && draft.text === text);
+
+  it('takes a queued topic reply back from the stuck notice: the queued reply is cancelled first, then its words are in the topic box', async () => {
+    const transport = new AppTransport(); const id = staleQueued(transport);
+    await mount(transport);
+    const edit = await screen.findByRole('button', { name: 'Edit' });
+    fireEvent.click(edit);
+    await waitFor(() => expect(topicBox()).not.toBeNull());
+    await waitFor(() => expect((within(topicBox()!).getByRole('textbox') as HTMLTextAreaElement).value).toBe(words));
+    expect(cancels(transport).map(request => request.command.params)).toMatchObject([{ input_id: id, purpose: 'edit' }]);
+    // No draft held the words before the cancel went out: they could have been sent twice.
+    const cancelAt = transport.mutations.findIndex(request => request.command.command === 'input_cancel');
+    const holdsWords = (request: (typeof transport.mutations)[number]) => request.command.command === 'preferences_patch'
+      && request.command.params.entries.some(entry => entry.kind === 'upsert_draft' && entry.draft.text === words);
+    expect(transport.mutations.slice(0, cancelAt).some(holdsWords)).toBe(false);
+    await waitFor(() => expect(draftWith(transport, words)).toBe(true));
+  });
+
+  it('never overwrites a topic reply the owner already started: the queued one stays and its words are offered to copy', async () => {
+    const transport = new AppTransport(); staleQueued(transport);
+    const session = transport.sessions.get(route.session_id)!, topic = session.items['8']!.topic_id;
+    transport.preferences.drafts = [{ submission_attempted: false, op_id: '00000000-0000-4000-8000-0000000000d5', session: route, binding_id: session.active_binding_id!,
+      target: { topic_id: topic, item_id: null }, intent: 'topic_reply', text: 'Something else', selected_option_id: null,
+      target_revision: session.topics[topic]!.revision, question_revision: null, supersedes_answer_id: null }];
+    await mount(transport);
+    // The recovered words' notice opens the topic; the queued reply's bubble is there with its Undo.
+    fireEvent.click(await screen.findByRole('button', { name: 'Show it' }));
+    await waitFor(() => expect(topicBox()).not.toBeNull());
+    const status = await screen.findByText(/Sent .*waiting for the agent/u);
+    fireEvent.click(within(status.closest('.detail-bubble-status') as HTMLElement).getByRole('button', { name: 'Undo' }));
+    expect((await screen.findByLabelText('Your earlier message') as HTMLTextAreaElement).value).toBe(words);
+    expect((within(topicBox()!).getByRole('textbox') as HTMLTextAreaElement).value).toBe('Something else');
+    expect(cancels(transport)).toHaveLength(0);
+  });
 });

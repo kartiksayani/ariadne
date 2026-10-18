@@ -18,8 +18,6 @@ export interface Notice {
   readonly tone?: NoticeTone;
   readonly text: string;
   readonly actions?: readonly NoticeAction[];
-  /** Accepted for existing producers; E20 gives every notice × and Escape, and W1 removes the field after the last merge. */
-  readonly dismissible?: boolean;
   /** Runs on owner dismissal, before the notice goes. */
   readonly onDismiss?: () => void;
 }

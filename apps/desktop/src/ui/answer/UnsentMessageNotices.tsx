@@ -71,7 +71,6 @@ export function UnsentMessageNotices({ waiting, drafts, opened, selectedStore, n
         const quote = firstLine.length > 72 ? `${firstLine.slice(0, 70).trimEnd()}…` : firstLine;
         notices.push({ id, icon: 'ph ph-chat-text',
         text: `Your unsent message to ${name} was kept${quote ? `: “${quote}”` : ''}${detail ? `. ${detail}` : ''}`,
-        dismissible: !flights.current.has(inputId),
         onDismiss: () => { void resolve(false); },
         actions: [{ label: 'Put back in reply box', disabled: !!blocked || flights.current.has(inputId), run: () => {
           if (flights.current.has(inputId)) return;

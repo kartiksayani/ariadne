@@ -220,6 +220,15 @@ async function delivery(configuration) {
   const item = await browser.$(`.tree-item[data-item-id="${configuration.itemId}"]`);
   await item.waitForDisplayed(); await item.waitForEnabled(); await item.click();
   await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === configuration.itemId, 'Selected item detail did not load');
+  // The dock's Sent chip lists only answers the agent has not picked up. Where the answer lives now is its bubble in Details: the chosen option,
+  // then a status line "✓ Sent at … · waiting for the agent" before the pickup, or "✓ Picked up at …" after it (alpha.21 E16).
+  await wait(async () => {
+    for (const turn of await browser.$$('.item-detail li[data-owner-said="true"]')) {
+      const text = await turn.getText();
+      if (text.includes(configuration.options[0].label) && /✓ (Sent at|Picked up)/.test(text)) return true;
+    }
+    return false;
+  }, 'The answer showed no "Sent" or "Picked up" status line under its bubble in Details');
   let replyTarget = ownerReplyTarget(await snapshot(configuration), configuration.itemId);
   for (const [index, text] of ownerTexts.slice(1).entries()) {
     if (index === 0) {

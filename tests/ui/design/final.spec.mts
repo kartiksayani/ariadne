@@ -102,6 +102,12 @@ async function perform(page: Page, step: Step): Promise<void> {
       await more.click();
       if (!(await named(true).isVisible())) await page.keyboard.press('Escape');
     }
+    // With a menu open, its own row wins over a same-named button elsewhere (the agent-removed notice has an "Open the bin" button too).
+    const open = page.getByRole('menu').first();
+    if (await open.isVisible()) {
+      const row = open.getByRole('menuitem', { name: step.click, exact: true });
+      if (await row.count()) { await row.first().click({ timeout: 20_000 }); return; }
+    }
     // A control the app does not draw yet (a pending Map state) fails here in 20 s, not at the test's 240 s.
     await ((await named(true).isVisible()) ? named(true) : named(false)).click({ timeout: 20_000 });
   }
