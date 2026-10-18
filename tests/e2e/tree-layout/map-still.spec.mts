@@ -9,6 +9,7 @@ import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 import type { Server } from 'node:http';
 import { viewportPlace } from '../map-viewport.mts';
+import { closeDetails } from './closeDetails';
 
 /** `pinned`: a topic bar stuck to the Map's top edge, which goes where the Map's edge goes. */
 interface Placed { readonly key: string; readonly top: number; readonly height: number; readonly text: number; readonly pinned: boolean }
@@ -79,9 +80,7 @@ const click = (control: Locator) => control.evaluate(element => (element as HTML
 /** Selects the reading row (its Details opens, then closes again, so the Map is as wide as before). Focus acts on it. */
 const selectReading = async (page: Page) => {
   await press(row(page, '10').getByText('Another item 10'));
-  const close = page.getByRole('button', { name: 'Close detail' });
-  await expect(close).toBeVisible();
-  await close.click();
+  await closeDetails(page, true);
   await settle(page);
   await page.mouse.move(2, 690);
 };
@@ -213,8 +212,7 @@ async function open(page: Page, origin: string, under = 4) {
   await expect(session).toBeEnabled(); await session.click();
   await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-busy', 'false');
   await page.evaluate(async () => { await document.fonts.ready; });
-  const close = page.getByRole('button', { name: 'Close detail' });
-  if (await close.count()) await close.click();
+  await closeDetails(page);
   // Item 10 (a four-line finding that folds behind Show more) is the reading row: its top just under the band.
   await row(page, '10').evaluate((element, covered) => {
     const box = element.closest('.tree-scroll')!, header = element.closest('.tree-topic-group')!.querySelector('.tree-topic')!;
@@ -351,8 +349,7 @@ async function prepare(page: Page, origin: string, view: View) {
   await expect(session).toBeEnabled(); await session.click();
   await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-busy', 'false');
   await page.evaluate(async () => { await document.fonts.ready; });
-  const close = page.getByRole('button', { name: 'Close detail' });
-  if (await close.count()) await close.click();
+  await closeDetails(page);
   if (view === 'Graph') {
     await page.getByRole('button', { name: 'Graph', exact: true }).click();
     await expect(page.locator('.graph-scroll')).toBeVisible();
@@ -500,9 +497,7 @@ test.describe('the filter row never moves the Map', () => {
     expect((await viewportPlace(page, cellOf('Tree', reader.id)))!.y - before.y, 'the band took the row down with it').toBeGreaterThan(5);
     const at = (await row(page, reader.id).boundingBox())!;
     await page.mouse.click(at.x + 100, at.y + 10);
-    const close = page.getByRole('button', { name: 'Close detail' });
-    await expect(close).toBeVisible();
-    await close.click();
+    await closeDetails(page, true);
     await settle(page);
     const closed = (await viewportPlace(page, cellOf('Tree', reader.id)))!.y;
     await funnel(page).click();
@@ -518,9 +513,7 @@ test.describe('the filter row never moves the Map', () => {
     await scrollTo(page, 'Tree', 'middle');
     const cell =(await wholeCells(page, 'Tree'))[3]!;
     await page.mouse.click(cell.left + 100, cell.top + 10);
-    const close = page.getByRole('button', { name: 'Close detail' });
-    await expect(close).toBeVisible();
-    await close.click();
+    await closeDetails(page, true);
     await page.mouse.move(2, 690);
     await settle(page);
     const before = (await viewportPlace(page, cellOf('Tree', cell.id)))!, band = await bandBottom(page);
@@ -574,8 +567,7 @@ const goes = (page: Page, reading: string) => expect(row(page, reading)).toHaveC
 /** Item 12 is selected with Details closed, below the first row in view, and the owner has scrolled a little since. */
 const selectTwelve = async (page: Page) => {
   await press(row(page, '12').getByText('Another item 12'));
-  const close = page.getByRole('button', { name: 'Close detail' });
-  if (await close.count()) await close.click();
+  await closeDetails(page);
   await expect(row(page, '12')).toHaveAttribute('aria-selected', 'true');
   await page.mouse.wheel(0, 20);
   await settle(page);

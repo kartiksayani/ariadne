@@ -233,7 +233,7 @@ async function delivery(configuration) {
   let replyTarget = ownerReplyTarget(await snapshot(configuration), configuration.itemId);
   for (const [index, text] of ownerTexts.slice(1).entries()) {
     if (index === 0) {
-      const expand = await browser.$('.item-detail button[aria-label="Open the conversation in a bigger view"]');
+      const expand = await browser.$('.shell-detail-head button[aria-label="Read in a bigger view"]');
       await expand.waitForDisplayed(); await expand.waitForEnabled(); await expand.click();
       await browser.$('section[aria-label="Item conversation"]').waitForDisplayed();
     }
@@ -259,7 +259,7 @@ async function delivery(configuration) {
       catch { assert.fail(`The bigger conversation view did not show a delivery state for the saved reply; it had ${viewShown.facts}`); }
       const expected = viewShown.state;
       await browser.saveScreenshot(join(evidence, 'native-item-conversation.png'));
-      const back = await browser.$('section[aria-label="Item conversation"]').$('button=Back to Map');
+      const back = await browser.$('section[aria-label="Item conversation"]').$('button[aria-label="Back to Map"]');
       await back.waitForDisplayed(); await back.waitForEnabled(); await back.click();
       await wait(async () => !(await browser.$('section[aria-label="Item conversation"]').isExisting()), 'Back to Map did not close the bigger conversation view');
       assert.equal(await browser.$('.item-detail').getAttribute('data-detail-item-id'), configuration.itemId,

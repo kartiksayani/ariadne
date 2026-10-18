@@ -599,7 +599,7 @@ for (const id of dockFrameIds) {
     await openApp(page, origin, spec);
     const pane = page.locator('.item-detail'), dock = pane.locator('.detail-dock');
     const detail = page.getByRole('complementary', { name: 'Item detail', exact: true });
-    const detailBox = (await detail.boundingBox())!, headerAction = (await detail.getByRole('button', { name: 'Hide item', exact: true }).boundingBox())!;
+    const detailBox = (await detail.boundingBox())!, headerAction = (await detail.getByRole('button', { name: 'More actions', exact: true }).boundingBox())!;
     expect(headerAction.y).toBeGreaterThanOrEqual(detailBox.y);
     expect(headerAction.y - detailBox.y, 'detail header action starts within 5px of the pane top').toBeLessThanOrEqual(5);
     const composer = dock.getByRole('textbox', { name: 'Reply message', exact: true });

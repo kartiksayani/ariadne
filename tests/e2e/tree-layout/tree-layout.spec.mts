@@ -3,6 +3,7 @@ import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 import type { Server } from 'node:http';
+import { closeDetails } from './closeDetails';
 
 for (const theme of ['light', 'dark'] as const) test(`N wraps unread Map targets without opening them and clears sticky bars in ${theme}`, async ({ page }) => {
   const server = await createServer({ configFile: false, root: resolve('.'), publicDir: resolve('apps/desktop/public'), plugins: [react()],
@@ -380,8 +381,7 @@ test('holds the reading anchor when a row click opens detail and when the window
     if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
     await openTree(page, `http://127.0.0.1:${address.port}`);
     await page.evaluate(async () => { await document.fonts.ready; });
-    const close = page.getByRole('button', { name: 'Close detail' });
-    if (await close.count()) await close.click();
+    await closeDetails(page);
     const scroller = page.locator('.tree-scroll'), anchored = page.locator('.tree-item[data-item-id="7"]');
     await anchored.evaluate(element => {
       const box = element.closest('.tree-scroll')!;
@@ -668,8 +668,7 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: boxes, thread, c
 async function readingSetup(page: Page, origin: string) {
   await openTree(page, origin);
   await page.evaluate(async () => { await document.fonts.ready; });
-  const close = page.getByRole('button', { name: 'Close detail' });
-  if (await close.count()) await close.click();
+  await closeDetails(page);
   const scroller = page.locator('.tree-scroll'), anchored = page.locator('.tree-item[data-item-id="7"]');
   await anchored.evaluate(element => {
     const box = element.closest('.tree-scroll')!;
@@ -794,11 +793,10 @@ async function openNarrowBand(page: Page, mapWidth: number, query = '?still') {
   if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
   await openTree(page, `http://127.0.0.1:${address.port}`, query);
   await page.evaluate(async () => { await document.fonts.ready; });
-  const close = page.getByRole('button', { name: 'Close detail' });
-  if (await close.count()) await close.click();
+  await closeDetails(page);
   // Select item 10 while it is in plain view: Focus acts on it, so the band draws it. Closing its Details gives the Map its width back.
   await page.locator('.tree-item[data-item-id="10"]').getByText('Another item 10').click();
-  await close.click();
+  await closeDetails(page, true);
   for (let step = 0; step < 5; step++) await page.keyboard.press('Meta+=');
   await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--text-scale').trim())).toBe('1.2');
   const scroller = page.locator('.tree-scroll');
@@ -883,8 +881,7 @@ test('the Focus slot keeps Ack all in place and Unfocus leaves keyboard focus on
     const address = (server.httpServer as Server).address();
     if (!address || typeof address === 'string') throw new Error('Missing layout fixture server address');
     await openTree(page, `http://127.0.0.1:${address.port}`, '?still');
-    const close = page.getByRole('button', { name: 'Close detail' });
-    if (await close.count()) await close.click();
+    await closeDetails(page);
     const root = page.locator('.tree-item[data-item-id="10"]');
     // By name: Focus hides the topic's other rows, and item 10 is removed below.
     const band = page.getByRole('treeitem', { name: 'Continued context', exact: true });
@@ -894,7 +891,7 @@ test('the Focus slot keeps Ack all in place and Unfocus leaves keyboard focus on
     await expect(band.getByRole('button', { name: 'Focus', exact: true })).toHaveCount(0);
     const slot = await reach();
     await root.getByText('Another item 10').click();
-    await close.click();
+    await closeDetails(page, true);
     await expect(band.getByRole('button', { name: 'Focus', exact: true })).toBeVisible();
     expect(await reach()).toBe(slot);
     await band.getByRole('button', { name: 'Focus', exact: true }).click();
