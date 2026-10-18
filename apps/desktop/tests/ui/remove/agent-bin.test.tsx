@@ -506,7 +506,7 @@ describe('agent removal bin', () => {
     let bin = await openBin();
     fireEvent.click(bin.getByRole('button', { name: 'Empty the bin…' }));
     let confirm = within(await screen.findByRole('dialog', { name: /^Empty the bin for “/ }));
-    expect(confirm.getByText('The removed item in it is deleted for good, along with one message of yours that was cancelled when they were removed. This can’t be undone.')).toBeTruthy();
+    expect(confirm.getByText('The removed item in it is deleted for good, along with one message of yours that was cancelled when it was removed. This can’t be undone.')).toBeTruthy();
     expect(quotes()).toEqual([input.payload.text]);
     expect(document.activeElement).toBe(confirm.getByRole('button', { name: /^Keep them/ }));
     fireEvent.click(confirm.getByRole('button', { name: /^Keep them/ }));

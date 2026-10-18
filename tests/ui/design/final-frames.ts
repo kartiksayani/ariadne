@@ -479,22 +479,47 @@ const removeRow: Step = { hover: '[role="treeitem"][data-item-id="a2.2.1"]' };
 const binned = [{ item: 'a11', words: 'Skip the script; the deploy job can warm the cache. Keep the twenty-minute budget in mind.' }] as const;
 const openBin: readonly Step[] = [{ click: 'More actions for' }, { click: 'Open the bin' }];
 const removeStateList: readonly FinalState[] = [
-  { id: '10.1', part: 'R4-Dialogs', sid: 'd-confirm', owner: 'remove', pending: true, title: 'Confirm, for what can’t be undone: emptying the bin',
+  { id: '10.1', part: 'R4-Dialogs', sid: 'd-confirm', owner: 'remove', pending: false, title: 'Confirm, for what can’t be undone: emptying the bin',
     app: { items: { binned }, view: { selected: null, dock: 'line' }, map: {}, act: [...openBin, { click: 'Empty the bin…' }] } },
-  { id: '10.11', part: 'R4-Dialogs', sid: 'd-bin', owner: 'remove', pending: true, title: 'The bin, from the topic’s … menu',
+  { id: '10.11', part: 'R4-Dialogs', sid: 'd-bin', owner: 'remove', pending: false, title: 'The bin, from the topic’s … menu',
     app: { items: { binned }, view: { selected: null, dock: 'line' }, map: {}, act: openBin } },
+  // 11.3 stays pending: the notice is drawn where W5's notice placement (E20) puts it, which this piece does not have; it also keeps Restore.
   { id: '11.3', part: 'R4-Notices', sid: 'n-agentrm', owner: 'remove', pending: true, title: 'The agent removed items: a notice, and a strip marks the spot',
     app: { items: { binned }, view: { selected: null, dock: 'line' }, map: {} } },
-  { id: '10.2', part: 'R4-Dialogs', sid: 'd-remove', owner: 'remove', pending: true, title: 'Remove an item and everything below it',
+  { id: '10.2', part: 'R4-Dialogs', sid: 'd-remove', owner: 'remove', pending: false, title: 'Remove an item and everything below it',
     app: { view: { selected: null, dock: 'line' }, map: {}, act: [removeRow, { click: 'Remove (⌫)' }] } },
   { id: '10.3', part: 'R4-Dialogs', sid: 'd-removed', owner: 'remove', pending: true, title: 'After Remove: Undo for 5 seconds, a strip keeps the spot',
     app: { view: { selected: null, dock: 'line' }, map: {}, act: [removeRow, { click: 'Remove (⌫)' }, { click: 'Remove 5 items' }] } },
-  { id: '10.13', part: 'R4-Dialogs', sid: 'd-tarchive', owner: 'remove', pending: true, title: 'Archive a topic',
+  { id: '10.13', part: 'R4-Dialogs', sid: 'd-tarchive', owner: 'remove', pending: false, title: 'Archive a topic',
     app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'More actions for' }, { click: 'Archive topic…' }] } },
-  { id: '10.14', part: 'R4-Dialogs', sid: 'd-tremove', owner: 'remove', pending: true, title: 'Remove a topic',
+  { id: '10.14', part: 'R4-Dialogs', sid: 'd-tremove', owner: 'remove', pending: false, title: 'Remove a topic',
     app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'More actions for' }, { click: 'Remove topic…' }] } }
 ];
-const removeRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = {};
+/**
+ * A horizontal slice of a centred dialog `width` wide: from `top` (px below the dialog's top edge in the app) for `height` px. The app centres
+ * its dialog by its own height, so where the app's dialog is shorter than the board's (a data difference) a slice is moved by `dy`.
+ */
+const dialogSlice = (name: string, width: number, app: readonly [wideTop: number, narrowTop: number], top: number, height: number,
+  dy: readonly [wide: number, narrow: number] = [0, 0], limits: Limits = TEXT): FrameRegion[] => [
+  { name, rect: [640 - width / 2, app[0] + top, width, height], variants: WIDE, threshold: limits[0], ...(dy[0] ? { dy: dy[0] } : {}) },
+  { name: `${name} (narrow)`, rect: [450 - width / 2, app[1] + top, width, height], variants: NARROW, threshold: limits[1], ...(dy[1] ? { dy: dy[1] } : {}) }];
+const removeRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
+  '10.13': dialogSlice('archive dialog', 520, [292, 217], 0, 215),
+  '10.14': dialogSlice('remove topic dialog', 520, [286, 211], 0, 228),
+  // (b) The app's world has no unsent message on "write the SOP", so its warning is one line (the board's two): the dialog is 14px shorter
+  // and centred 7px lower. The head and the list with the buttons are compared, each where the board draws it.
+  '10.2': [...dialogSlice('remove dialog head', 520, [215, 140], 0, 120, [-7, -7]), // The board's rows sit at fractional heights (12.5px at 80% text): a row a pixel apart is sub-pixel noise, measured 2.6%.
+    ...dialogSlice('remove dialog list', 520, [215, 140], 168, 137, [7, 7], [0.03, 0.03]),
+    ...dialogSlice('remove dialog buttons', 520, [215, 140], 308, 62, [7, 7])],
+  // (b) and §3a.3: the bin holds the agent's removal only (no "removed by you" row), and the world's "cache warm-up script" has nothing below it
+  // (the board's "3 items in all"), so the dialog is shorter. Its head and its buttons are compared.
+  '10.11': [...dialogSlice('bin head', 560, [271, 196], 0, 90, [-34, -34]), ...dialogSlice('bin buttons', 560, [271, 196], 193, 63, [34, 34])],
+  // (b) "The 2 removed items" on the board, "The removed item" in the app: the title, and the quote with the buttons, are compared.
+  '10.1': [...dialogSlice('empty dialog title', 520, [283, 208], 0, 52), ...dialogSlice('empty dialog quote and buttons', 520, [283, 208], 100, 130)],
+  // The strip alone (D1 puts the app's rows 7px higher here). 10.3 stays pending: the toast is W5's (no trash icon, a text Undo), and the
+  // narrow strip's "· 5 items" wording is not built.
+  '10.3': [{ name: 'removed strip', rect: [75, 353, 325, 24], variants: WIDE, threshold: TEXT[0], dy: 7 }]
+};
 
 export const finalStates: readonly FinalState[] = [...stateList.map(state => regionsById[state.id] ? { ...state, regions: regionsById[state.id]! } : state),
   ...mapStateList.map(state => ({ ...state, regions: mapRegionsById[state.id]!.filter(withoutFirstRow).flatMap(bandPieces) })),

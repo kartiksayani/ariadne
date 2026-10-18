@@ -68,7 +68,7 @@ export function emptyText(count: number, words: readonly WordsEntry[]): string {
   if (!words.length) return `${items}. This can’t be undone.`;
   const cancelled = words.every(entry => entry.kind === 'input' && entry.state === 'cancelled');
   const what = words.length === 1 ? 'one message of yours' : `${words.length} messages of yours`;
-  return `${items}, along with ${what}${cancelled ? ` that ${words.length === 1 ? 'was' : 'were'} cancelled when they were removed` : ', quoted below'}. This can’t be undone.`;
+  return `${items}, along with ${what}${cancelled ? ` that ${words.length === 1 ? 'was' : 'were'} cancelled when ${count === 1 ? 'it was' : 'they were'} removed` : ', quoted below'}. This can’t be undone.`;
 }
 
 type Open = { readonly topicId: string | null; readonly step: 'bin' | 'empty' };
@@ -108,7 +108,8 @@ export function BinDialog({ session, route, actions, queue, drafts }: {
   if (!open) return null;
   const binding = session.active_binding_id ? session.bindings[session.active_binding_id] : null;
   const agent = binding ? agentName(binding.adapter_id) : 'the agent';
-  const topicName = topicId ? session.topics[topicId]?.name ?? 'this topic' : null;
+  const binTopic = topicId ? session.topics[topicId] : undefined;
+  const topicName = topicId ? binTopic ? binTopic.short?.trim() || binTopic.name : 'this topic' : null;
   const familyOf = (entry: BinEntry) => entry.itemId === null && families !== null && families !== 'checking' && families.get(entry.topicId)?.family;
   const eligible = entries.filter(entry => !restored.has(entry.key) && (entry.itemId !== null || families !== null && families !== 'checking' && !familyOf(entry)));
   const close = () => { if (!busy) { setOpen(null); confirmation.confirmation?.resolve(false); } };
@@ -179,7 +180,7 @@ export function BinDialog({ session, route, actions, queue, drafts }: {
         return <DialogListRow key={entry.key} name={entry.name} dim={back}
           sub={family ? `${binSub(entry, agent)} · Continues in another session` : binSub(entry, agent)}
           action={back ? <span className="bin-back">✓ Back in the Map</span>
-            : <OutlineButton icon="ph ph-arrow-counter-clockwise" title="Put it back where it was" disabled={busy} onClick={() => { void restore(entry); }}>Restore</OutlineButton>}>
+            : <OutlineButton icon="ph ph-arrow-u-up-left" title="Put it back where it was" disabled={busy} onClick={() => { void restore(entry); }}>Restore</OutlineButton>}>
           {!back && entry.words.map(words => <DialogQuote key={words.key} inList text={words.text} />)}
         </DialogListRow>;
       })}</DialogList>}
