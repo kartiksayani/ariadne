@@ -9,6 +9,10 @@ import { useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
 import { useTopicReply } from '../answer/useTopicReply';
 import { clockTime } from '../changes/clock';
 import { agentName } from '../shell/model';
+import { itemRemoved } from '../../selectors/removed';
+import { displayStatus } from '../../selectors/waiting/replied';
+import { ItemRefs } from '../shared/MarkdownText';
+import { ItemRefSession } from '../peek/context';
 import { Chat } from './Chat';
 import { Composer } from './Composer';
 import { topicChat } from './model';
@@ -41,7 +45,8 @@ export function TopicConversation({ drafts, store, topicId, onOpenItem }: TopicC
     if (pane && (shownEntries.current === 0 || atEnd.current)) pane.scrollTop = pane.scrollHeight;
     shownEntries.current = entries.length;
   }, [entries]);
-  useEffect(() => { document.querySelector<HTMLTextAreaElement>(`[data-owner-input="${CSS.escape(topicId)}"] textarea`)?.focus({ preventScroll: true }); }, [topicId]);
+  const focusBox = () => document.querySelector<HTMLTextAreaElement>(`[data-owner-input="${CSS.escape(topicId)}"] textarea`)?.focus({ preventScroll: true });
+  useEffect(() => { focusBox(); }, [topicId]);
   if (!session || !topic) return <p role="status">This topic is unavailable.</p>;
   const slot: Words = { id: reply.entry?.draft.op_id ?? null, kind: 'reply', text: reply.text, locked: reply.locked, changed: false };
   // Esc leaves the box for the topic's row, so the next Esc closes Details with the words kept.
@@ -63,8 +68,12 @@ export function TopicConversation({ drafts, store, topicId, onOpenItem }: TopicC
         </div>
         <h2 className="detail-question" title={topic.name}>{topic.name}</h2>
       </div>
-      {entries.length > 0 && <Chat entries={entries} session={session} topicId={topicId} drafts={drafts} draftState={draftState} actions={actions} onOpenItem={onOpenItem}
-        onOpenEditor={() => {}} />}
+      {entries.length > 0 && <ItemRefSession.Provider value={{ project_id: session.project_id, session_id: session.id }}><ItemRefs.Provider value={{
+        lookup: id => { const target = session.items[id]; return target && !itemRemoved(session, target.id) ? { label: target.question, status: displayStatus(session, target) } : null; },
+        route: id => ({ project_id: session.project_id, session_id: session.id, item_id: id }), onOpenItem,
+      }}><Chat entries={entries} session={session} topicId={topicId} drafts={drafts} draftState={draftState} actions={actions}
+        // A taken-back or put-back topic reply: its words are in the composer below, which is worth focusing.
+        onOpenEditor={target => { if (target === 'topic_reply') focusBox(); }} /></ItemRefs.Provider></ItemRefSession.Provider>}
     </div>
     <div className="detail-dock">
       <Composer kind="topic" ownerKey={topicId} actions={actions} sentAs={showBox ? 'reply' : null} slots={[slot]} slotKey={() => SLOT_KEY}
