@@ -4,7 +4,7 @@ import { activeItems, itemRemoved, removedRoots, removedSubtree } from '../../se
 // banners, topic bands and item rows, with the tree keyboard
 // and the empty and loading states. Selection, expansion, topic folds and filters
 // persist through navigation's preference writer.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { OwnFailure, plainFailure, useSession, type Immutable, type SessionStore } from '../../data';
 import type { RevealedItem } from '../../data/routes';
@@ -43,6 +43,8 @@ import { FilterRow } from './FilterRow';
 import { useLocalChips } from './useLocalChips';
 import { chipCounts, filterActive, filterOf, filterSignature, isLocalChip, pickedChips, summaryCounts, toggleLocalChip, toggleSavedChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
 import { useSessionLifecycleFor } from '../shared/SessionLifecycleOwner';
+import { ConnectionLineShown } from '../shared/connection';
+import { UnreadableMap } from './UnreadableMap';
 import { ItemRefs } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
 import { peekNames } from '../peek/names';
@@ -1267,11 +1269,15 @@ export function TreeView(props: TreeViewProps) {
   </div></ItemRefs.Provider></TreeFonts.Provider>;
 
   const loading = !session && state.status === 'loading';
+  // No session and no read to show: the Map's place says so (SPEC 12.7); the line above carries the state.
+  const unreadable = !session && state.status === 'inaccessible';
+  // Where the line above the Map is on screen it reports an unsure save, and its "Try again" is the one place to check again.
+  const lineShown = useContext(ConnectionLineShown);
   // Stopped deliveries answered on a row the owner can see; the recovery banner lists the rest
   // (none in the graph, which has no rows; a filtered-out or folded row is not here).
   const inline: ReadonlySet<string> = new Set(graph && !loading ? [] : rows.flatMap(row => row.delivery?.stuck ? [row.delivery.stuck.input.id] : []));
   const filtersShown = !archivedMode && (props.filterOpen ?? true);
-  const graphShown = !!graph && !loading;
+  const graphShown = !!graph && !loading && !unreadable;
   const chips = useMemo(() => scope && filtersShown ? { counts: chipCounts(scope), picked: pickedChips(scope), active: filterActive(scope), ...summaryCounts(scope) } : null,
     [scope, filtersShown]);
   const filterRow = chips && <FilterRow counts={chips.counts} picked={chips.picked} active={chips.active} shown={chips.shown} total={chips.total}
@@ -1284,7 +1290,8 @@ export function TreeView(props: TreeViewProps) {
         <span className="tree-skeleton-badge" style={{ width: row.badge }} /></div>)}
       <div className="tree-loading-text" role="status"><i className="ph ph-circle-notch" />Reading the session…</div>
     </div>;
-  } else if (graph) body = null;
+  } else if (unreadable) body = <UnreadableMap error={state.error ? plainFailure(state.error) : null} />;
+  else if (graph) body = null;
   else if (model?.empty && !archivedMode) {
     body = <div className="tree-empty" role="status">
       <i className="ph ph-spiral" />
@@ -1330,7 +1337,7 @@ export function TreeView(props: TreeViewProps) {
     {filterRow}
     {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>
       Showing an item outside your current filters.</Banner>}
-    {lifecycle.pending && <Banner icon="ph ph-warning" alert actions={<button type="button" className="btn btn-ghost" onClick={lifecycle.reconcile}>Check again</button>}>
+    {lifecycle.pending && !lineShown && <Banner icon="ph ph-warning" alert actions={<button type="button" className="btn btn-ghost" onClick={lifecycle.reconcile}>Check again</button>}>
       {lifecycle.pending}. Check whether your last change was saved before making another.</Banner>}
     <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
     {/* The graph keeps its own scroller (ui/graph/graph.css). */}

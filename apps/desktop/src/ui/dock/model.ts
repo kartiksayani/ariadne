@@ -8,6 +8,7 @@ import type { DockQuestion } from '../../state/dock/store';
 import { detailPath } from '../detail/model';
 import { peekNames } from '../peek/names';
 import { dayWord } from '../shell/model';
+import type { ConnectionKind } from '../topbar/model';
 
 export const dockQuestionId = (session: Immutable<Session>, itemId: string) => `${itemId}:${session.items[itemId]?.question_revision}`;
 
@@ -69,4 +70,22 @@ export function dockPath(session: Immutable<Session>, itemId: string, expanded =
     : name(crumb.itemId))];
   if (expanded || parts.length <= 3) return parts;
   return [parts[0]!, parts[1]!, { label: '…', full: 'Show the full path', itemId: null, more: true }, parts[parts.length - 1]!];
+}
+
+/** The dock line's chip while the connection is not live: where answers wait (SPEC 5.12, "Dock line"). The narrow label is the 900px one. */
+export interface DockStateChip { readonly icon: string; readonly wide: string; readonly narrow: string }
+const chips: Partial<Record<ConnectionKind, DockStateChip>> = {
+  none: { icon: 'ph ph-plugs', wide: 'Answers wait here until an agent connects', narrow: 'Held here' },
+  off: { icon: 'ph ph-hourglass', wide: 'Answers queue until it runs', narrow: 'Answers queue' },
+  reconnect: { icon: 'ph ph-hourglass', wide: 'Answers wait until it’s back', narrow: 'Answers wait' },
+  stale: { icon: 'ph ph-clock-counter-clockwise', wide: 'Answers wait until it can be read again', narrow: 'Answers wait' },
+  // Unreadable with a last read still shown: its questions stay in the dock, and answers wait like a stale read's.
+  unreadable: { icon: 'ph ph-clock-counter-clockwise', wide: 'Answers wait until it can be read again', narrow: 'Answers wait' },
+};
+export const dockStateChip = (kind: ConnectionKind): DockStateChip | null => chips[kind] ?? null;
+
+/** "Read-only. 2 questions were waiting when this session closed." The count is the questions still marked waiting on me. */
+export function closedLine(session: Immutable<Session> | null | undefined): string {
+  const count = session ? Object.values(session.items).filter(item => item && item.status === 'waiting_on_me' && !itemRemoved(session, item.id)).length : 0;
+  return count ? `Read-only. ${count} question${count === 1 ? ' was' : 's were'} waiting when this session closed.` : 'Read-only.';
 }

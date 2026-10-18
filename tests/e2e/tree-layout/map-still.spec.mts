@@ -642,6 +642,82 @@ for (const [name, where, expectation, before, change, done] of holds) {
   }));
 }
 
+// The line above the Map (SPEC 5.12) opens and clears outside the Map's own column, so the Map's top edge moves and the rows must go
+// with it: the reading row keeps its distance under the edge, at the top, middle and bottom of the Map and on a short Map. An ordinary
+// change hint is no state at all: it opens no line and moves nothing. One place differs: a line clearing while the Map is at its foot cannot
+// pull the rows up with the edge (the Map is already as far down as it goes), so there the rows keep their window place.
+const connectionLine = (page: Page) => page.getByRole('status', { name: 'Connection' });
+const lineOpens = (change: string, words: RegExp) => async (page: Page) => { await agent(page, change); await expect(connectionLine(page)).toContainText(words); };
+const lineRows: readonly (readonly [name: string, before: (page: Page) => Promise<void>, change: (page: Page) => Promise<void>, done: (page: Page) => Promise<void>])[] = [
+  ['the agent stops running and its line opens', nothing, page => agent(page, 'agent-stops'), page => expect(connectionLine(page)).toContainText('isn’t running')],
+  ['the agent comes back and its line clears', lineOpens('agent-stops', /isn’t running/), page => agent(page, 'agent-returns'), page => expect(connectionLine(page)).toHaveCount(0)],
+  ['the connection drops and its line opens', nothing, page => agent(page, 'connection-drops'), page => expect(connectionLine(page)).toContainText('Reconnecting')],
+  ['a read fails and the last-good-copy line opens', nothing, page => agent(page, 'read-fails'), page => expect(connectionLine(page)).toContainText('last good copy')],
+  ['the read comes back and the line clears', lineOpens('read-fails', /last good copy/), page => agent(page, 'read-returns'), page => expect(connectionLine(page)).toHaveCount(0)],
+  ['an ordinary change hint arrives (no line)', nothing, page => stale(page),
+    async page => { await expect(page.getByRole('region', { name: 'Session tree' })).toHaveAttribute('data-session-status', 'stale'); await expect(connectionLine(page)).toHaveCount(0); }],
+];
+for (const where of ['top', 'middle', 'bottom'] as const) for (const [name, before, change, done] of lineRows) {
+  test(`the Map keeps the reading row under its edge when ${name} at the ${where}`, ({ page }) => served(page, async () => {
+    await before(page);
+    await settle(page);
+    await goTo(page, where);
+    await settle(page);
+    const read = await readingRow(page), edge = await mapTop(page), place = (await windowTop(page, read.key))!;
+    await change(page);
+    await done(page);
+    await settle(page);
+    const moved = where === 'bottom' && name.includes('clears') ? 0 : await mapTop(page) - edge;
+    await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - place - moved), `${read.key} keeps its place`).toBeLessThanOrEqual(3);
+  }));
+}
+for (const [name, before, change, done] of lineRows) {
+  test(`the Map keeps the reading row under its edge on a short Map when ${name}`, ({ page }) => served(page, async () => {
+    await page.setViewportSize({ width: 1000, height: 4400 });
+    await before(page);
+    await goTo(page, 'top');
+    await settle(page);
+    const read = await readingRow(page), edge = await mapTop(page), place = (await windowTop(page, read.key))!;
+    await change(page);
+    await done(page);
+    await settle(page);
+    const moved = await mapTop(page) - edge;
+    await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - place - moved), `${read.key} keeps its place under the Map's edge`).toBeLessThanOrEqual(3);
+  }));
+}
+
+// 12.9: a save whose outcome is unknown opens a line above the Map; Try again checks it, and the line stays up while the check is in
+// flight (it neither closes nor reopens), then clears when the check lands. The reading row keeps its distance under the edge throughout.
+// (The line opening is the lineRows' job; here the owner's Later on a middle row is lost, then the Map is taken to the place under test.)
+for (const where of ['top', 'middle', 'bottom'] as const) {
+  test(`the Map keeps the reading row, and the unsure-save line stays up through Try again, at the ${where}`, ({ page }) => served(page, async () => {
+    const first = await readingRow(page);
+    await agent(page, 'save-unsure');
+    await point(page, first.key);
+    await press(row(page, first.key).getByRole('button', { name: /^Later/ }));
+    await expect(connectionLine(page)).toContainText('isn’t sure your last change was saved');
+    await goTo(page, where);
+    await settle(page);
+    const read = await readingRow(page), edge = await mapTop(page), place = (await windowTop(page, read.key))!;
+    // Try again: the check is in flight (held), and the line is the same line, in the same place, for as long as it runs.
+    await agent(page, 'save-hold');
+    const line = await connectionLine(page).elementHandle();
+    await press(connectionLine(page).getByRole('button', { name: 'Try again' }));
+    for (let frame = 0; frame < 12; frame++) {
+      await settle(page);
+      expect(await line!.evaluate(node => node.isConnected), 'the line is never taken down and put up again').toBe(true);
+      await expect(connectionLine(page)).toContainText('isn’t sure your last change was saved');
+      expect(await mapTop(page) - edge, 'the Map’s edge does not move while the check runs').toBeCloseTo(0, 0);
+      expect(Math.abs((await windowTop(page, read.key))! - place)).toBeLessThanOrEqual(3);
+    }
+    await agent(page, 'save-release');
+    await expect(connectionLine(page)).toHaveCount(0);
+    await settle(page);
+    const moved = where === 'bottom' ? 0 : await mapTop(page) - edge;
+    await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - place - moved), `${read.key} keeps its place when the line clears`).toBeLessThanOrEqual(3);
+  }));
+}
+
 test('the Map holds at the bottom: an owner scroll trims the spacer and moves the Map only as far as it scrolls', ({ page }) => served(page, async () => {
   await goTo(page, 'bottom');
   await settle(page);
@@ -701,7 +777,7 @@ test('the Map holds when a tall clipped row grows while it is the only row on sc
 const stale = (page: Page) => page.evaluate(() => (window as unknown as { treeLayout: { stale(): void } }).treeLayout.stale());
 const shortMap: readonly (readonly [name: string, change: (page: Page) => Promise<void>, done: (page: Page) => Promise<void>])[] = [
   ['a row is added above', page => agent(page, 'add-top'), page => expect(row(page, '0')).toHaveCount(1)],
-  ['a notice opens above', stale, page => expect(page.getByText('Showing last valid data')).toBeVisible()],
+  ['the last-good-copy line opens above', page => agent(page, 'read-fails'), page => expect(page.getByRole('status', { name: 'Connection' })).toContainText('last good copy')],
 ];
 for (const [name, change, done] of shortMap) test(`the Map holds on a short Map when ${name}`, ({ page }) => served(page, async () => {
   await page.setViewportSize({ width: 1000, height: 4400 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AdapterConfig, ProjectSummary, SummaryCounts } from '../../generated/domain/models';
 import type { SessionPreferences, SessionRef } from '../../generated/core';
 import { plainFailure } from '../../data/plain';
@@ -35,6 +35,7 @@ import { conflictNotice, isViewConflict } from '../../ui/shared/conflictNotice';
 import { useSessionSnapshots } from '../../ui/pages/snapshots';
 import { useHidden } from '../../ui/remove/queue';
 import { SessionLifecycleOwner } from '../../ui/shared/SessionLifecycleOwner';
+import { ConnectionLineShown, connectionKind } from '../../ui/shared/connection';
 import type { MapSearchStatus } from '../../ui/tree/mapSearch';
 import '../../styles/navigation.css';
 
@@ -165,14 +166,17 @@ function SelectedSession({ navigation, renderSession }: { navigation: Navigation
   return <SessionView key={key(selected.session)} navigation={state} store={store} renderSession={renderSession} />;
 }
 function SessionView({ navigation, store, renderSession }: { navigation: NavigationState; store: SessionStore; renderSession: NavigationWorkspaceProps['renderSession'] }) {
-  const session = useSession(store);
+  const session = useSession(store), lineShown = useContext(ConnectionLineShown);
+  // The line above the Map carries a failed read only as the last good copy or as an unreadable session; over a closed session
+  // (whose line says it is read-only) the failure still needs its own word.
+  const kind = connectionKind(session), carried = lineShown && (kind === 'stale' || kind === 'unreadable');
   const preferences = navigation.preferences?.sessions.find(view => key(view.session) === key(session.route)) ?? null;
   const reveal = navigation.reveal;
   const matchingReveal = reveal?.store === store ? reveal : null;
   // 1h: the skeleton stands in for the session until its first snapshot.
   if (session.status === 'loading' && !session.snapshot) return <LoadingSession />;
   return <>
-    {session.error && <p role="alert">{plainFailure(session.error)}</p>}
+    {session.error && !carried && <p role="alert">{plainFailure(session.error)}</p>}
     {matchingReveal?.kind === 'missing_item' && <p className="nav-banner" role="status">{matchingReveal.banner}</p>}
     {renderSession({ store, preferences, temporaryExpandedItemIds: matchingReveal?.kind === 'item' ? matchingReveal.temporaryExpandedItemIds : [],
       missingItemBanner: matchingReveal?.kind === 'missing_item' ? matchingReveal.banner : null })}
@@ -270,6 +274,23 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
     try { await store.refresh(); }
     finally { setRefreshPending(false); }
   };
+  // On the session view the top bar's line above the Map reports an unsaved change and a failed read, so the page banner
+  // below goes (SPEC 12.9): the pending save is the line's "Try again"; any other failure is a notice with "Refresh".
+  const lineShown = view.kind === 'session' && !!store.selectedSession();
+  // An unsure save is reported while it has an error; once reported, it stays through Try again (the retry clears the error while
+  // it writes), so the line neither closes nor reopens.
+  const unsure = !!state.error && state.pendingOperationId !== null;
+  const [reported, setReported] = useState(false);
+  const unsavedWrite = unsure || reported && state.writing && state.pendingOperationId !== null;
+  if (reported !== unsavedWrite) setReported(unsavedWrite);
+  const refreshFailure = lineShown && state.error && !transientError && state.pendingOperationId === null ? state.error : null;
+  useEffect(() => {
+    const id = 'navigation-refresh-failed';
+    if (refreshFailure) {
+      notices.push({ id, icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)', text: plainFailure(refreshFailure), actions: [{ label: 'Refresh', run: () => { void refresh(); } }] });
+    } else notices.dismiss(id);
+  }, [refreshFailure]);
+  useEffect(() => () => notices.dismiss('navigation-refresh-failed'), [store]);
   const showPage = (page: PageName, projectId?: string) => { store.openPage({ kind: 'page', page, ...(projectId ? { projectId } : {}) }); };
   // Layout choices apply at once; the saved preferences catch up when the write lands.
   const [layout, setLayout] = useState<LayoutChange>({});
@@ -321,7 +342,7 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
     disabled={disabled || selectedProject.availability !== 'available' || adapterChoices.length === 0}
     onClick={() => setBinding(selectedProject)}><i className="ph ph-plugs-connected" aria-hidden="true" />Connect existing session</button></div>;
   const notes = <>
-    {state.error && !transientError && <div className="nav-banner" role="alert"><p>{plainFailure(state.error)}</p>
+    {state.error && !transientError && !lineShown && <div className="nav-banner" role="alert"><p>{plainFailure(state.error)}</p>
       {state.pendingOperationId ? <><p>Ariadne isn’t sure your last change was saved. Check before changing anything else.</p>
         <button type="button" className="btn btn-secondary" disabled={state.writing} onClick={() => { void store.retryMutation(); }}>Check again</button></>
         : <button type="button" className="btn btn-secondary" disabled={mutationDisabled} onClick={() => { void refresh(); }}>{refreshPending ? 'Refreshing…' : 'Refresh'}</button>}
@@ -355,7 +376,7 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
     </SessionLists>;
   const center = <>
     {page && <div className="pw-page-notes">{notes}</div>}
-    {page ?? <div className="nav-content nav-session-content">{notes}<div className="nav-connection-line" ref={setLineHost} /><SelectedSession navigation={store} renderSession={renderSession} /></div>}
+    {page ?? <div className="nav-content nav-session-content">{notes}<div className="nav-connection-line" ref={setLineHost} /><ConnectionLineShown.Provider value={lineShown}><SelectedSession navigation={store} renderSession={renderSession} /></ConnectionLineShown.Provider></div>}
     {state.pendingNavigation && <p className="nav-opening" role="status">{state.pendingNavigation.kind === 'all_sessions'
       ? 'Opening All sessions…' : state.pendingNavigation.kind === 'projects' ? 'Opening Projects…'
         : state.pendingNavigation.kind === 'project' ? 'Opening the project…' : 'Opening the session…'}</p>}
@@ -387,6 +408,7 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
   return <NavigationProvider store={store} waiting={waiting}><SessionLifecycleOwner actions={barActions}>
     <DetailsColumnProvider saved={shown.detail_width ?? null} unfoldWhen={detailAsked} onFolded={onDetailsFolded} onSave={width => saveLayout({ detail_width: width })}>
     <Shell topBar={<WorkspaceTopBar bar={bar} store={barSession} controllers={actions} line={onSession ? lineHost : null}
+      unsaved={lineShown && unsavedWrite ? { retry: () => { void store.retryMutation(); } } : null}
       setup={setup?.data.kind === 'binding_connect' ? { sessionId: setup.session_id, instruction: setup.data.setup_instruction } : null} />}
     main={center}
     side={detail && !page ? <DetailsColumn path={detailPath} rail={detailRail} head={detailHead} hidden={hiddenItem}>{detail}</DetailsColumn> : undefined}

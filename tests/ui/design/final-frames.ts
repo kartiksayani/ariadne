@@ -27,7 +27,9 @@ export type Step =
   | { readonly type: string }
   /** The Map's own scroller (the Tree's, or the Graph's), moved to its top: 8.5 (the selected row is out of view below) and the Graph states
    * (ALPHA20-REPLAN §3a: the app opens the Graph scrolled to the selected node, the board at the canvas top). */
-  | { readonly scroll: 'top' };
+  | { readonly scroll: 'top' }
+  /** The app's transport changes under it (12.8: a read fails after a good one; 12.9: the next save is lost on its way back). */
+  | { readonly drive: 'read-fails' | 'save-unsure' };
 
 /** Fields of a world item (final-world.ts) a state changes. */
 export interface ItemEdit { readonly s?: 'decided' | 'done' | 'in_progress' | 'open' | 'waiting_on_me' | 'replaced'; readonly q?: string; readonly o?: string; readonly why?: string }
@@ -87,7 +89,7 @@ export const notYet = {
   // Every overlay renders (the switcher, Help, the connection card, the Projects menu): the dock, the other-sessions popover
   // and the overlays are reached by the fixture and the spec's steps, and a mismatch in them is a real difference.
   overlay: [] as readonly Overlay[],
-  connection: ['unreadable', 'stale', 'unsaved'] as readonly Connection[]
+  connection: [] as readonly Connection[]
 };
 
 /**
@@ -196,17 +198,19 @@ const stateList: readonly FinalState[] = [
   { id: '3.1', part: 'Conversation', sid: 'c-details', owner: 'details', pending: false, title: 'Details beside the Map', app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' } } },
   { id: '3.2', part: 'Conversation', sid: 'c-read', owner: 'details', pending: false, title: 'A bigger view for a long thread', app: { view: { selected: 'a2.2.1', details: 'bigger', dock: 'line' } } },
   { id: '3.6', part: 'Conversation', sid: 'c-fold', owner: 'details', pending: false, title: 'Details folded to a strip, dock open', app: { view: { selected: 'a2.2.1.1', details: 'folded', dock: 'open', dockQuestion: 0 }, act: [{ click: 'Fold Details' }] } },
-  // 12. Connection. 12.2 to 12.9 stay pending: the connection states and their banners (the connect guide, the last good copy, the unsaved-change notice,
-  // the loading skeleton, "This session can't be read") are release 3 (ENGINEERING-PLAN: D3); 12.1's card is above.
-  { id: '12.1', part: 'R4-Connection', sid: 'c-live', owner: 'topbar', pending: true, title: 'Live', app: { sessions: { connection: 'live' }, chrome: { overlay: 'connection-card' }, act: [{ click: 'Live' }] } },
-  { id: '12.2', part: 'R4-Connection', sid: 'c-none', owner: 'topbar', pending: true, title: 'Not connected', app: { sessions: { connection: 'none' } } },
-  { id: '12.3', part: 'R4-Connection', sid: 'c-off', owner: 'topbar', pending: true, title: 'Agent not running', app: { sessions: { connection: 'off' } } },
-  { id: '12.4', part: 'R4-Connection', sid: 'c-closed', owner: 'topbar', pending: true, title: 'Session closed', app: { sessions: { connection: 'closed' } } },
+  // 12. Connection (alpha.21 D3): the top bar, the line above the Map, the dock line and, for 12.7, the Map's panel are held to the board (`regionsById`).
+  // 12.5 stays pending: the app reads the selected session before it draws anything (a hung read leaves the Projects page up), so the board's
+  // loading frame (Map skeleton, "Connecting…", the dock's skeleton) cannot be reached at start; the dock's skeleton is a unit test's
+  // (tests/ui/app/connection-line.test.tsx).
+  { id: '12.1', part: 'R4-Connection', sid: 'c-live', owner: 'topbar', pending: false, title: 'Live', app: { sessions: { connection: 'live' }, chrome: { overlay: 'connection-card' }, act: [{ click: 'Live' }] } },
+  { id: '12.2', part: 'R4-Connection', sid: 'c-none', owner: 'topbar', pending: false, title: 'Not connected', app: { sessions: { connection: 'none' }, act: [{ click: 'How to connect' }] } },
+  { id: '12.3', part: 'R4-Connection', sid: 'c-off', owner: 'topbar', pending: false, title: 'Agent not running', app: { sessions: { connection: 'off' } } },
+  { id: '12.4', part: 'R4-Connection', sid: 'c-closed', owner: 'topbar', pending: false, title: 'Session closed', app: { sessions: { connection: 'closed' } } },
   { id: '12.5', part: 'R4-Connection', sid: 'c-loading', owner: 'topbar', pending: true, title: 'Loading', app: { sessions: { connection: 'loading' } } },
-  { id: '12.6', part: 'R4-Connection', sid: 'c-reconnect', owner: 'topbar', pending: true, title: 'Reconnecting', app: { sessions: { connection: 'reconnecting' } } },
-  { id: '12.7', part: 'R4-Connection', sid: 'c-unreadable', owner: 'topbar', pending: true, title: 'This session can’t be read', app: { sessions: { connection: 'unreadable' } } },
-  { id: '12.8', part: 'R4-Connection', sid: 'c-stale', owner: 'topbar', pending: true, title: 'Showing the last good copy', app: { sessions: { connection: 'stale' } } },
-  { id: '12.9', part: 'R4-Connection', sid: 'c-unsaved', owner: 'topbar', pending: true, title: 'Your last change may not be saved', app: { sessions: { connection: 'unsaved' }, items: { later: ['a8'] } } },
+  { id: '12.6', part: 'R4-Connection', sid: 'c-reconnect', owner: 'topbar', pending: false, title: 'Reconnecting', app: { sessions: { connection: 'reconnecting' } } },
+  { id: '12.7', part: 'R4-Connection', sid: 'c-unreadable', owner: 'topbar', pending: false, title: 'This session can’t be read', app: { sessions: { connection: 'unreadable' } } },
+  { id: '12.8', part: 'R4-Connection', sid: 'c-stale', owner: 'topbar', pending: false, title: 'Showing the last good copy', app: { sessions: { connection: 'stale' }, act: [{ drive: 'read-fails' }] } },
+  { id: '12.9', part: 'R4-Connection', sid: 'c-unsaved', owner: 'topbar', pending: false, title: 'Your last change may not be saved', app: { sessions: { connection: 'unsaved' }, items: { later: ['a8'] }, act: [{ drive: 'save-unsure' }, { hover: '.tree-item[data-item-id="a2.2.2"]' }, { click: 'Later' }, { hover: '.tb' }, { hover: '.tb' }] } },
   // 13. Session and project switcher
   { id: '13.1', part: 'R4-Switcher', sid: 's-open', owner: 'nav-state', pending: false, title: 'Open', app: { chrome: { overlay: 'switcher' }, act: [{ key: 'Meta+o' }] } },
   { id: '13.2', part: 'R4-Switcher', sid: 's-search', owner: 'nav-state', pending: false, title: 'Typing finds sessions and projects by name', app: { chrome: { overlay: 'switcher-search' }, act: [{ key: 'Meta+o' }, { type: 'sch' }] } },
@@ -301,6 +305,8 @@ const topBarMain = (limits?: Limits) => [...box('top bar left', [0, 0, 276, 40],
 const topBarUnnamed = (limits?: Limits) => [...box('top bar logo', [0, 0, 40, 40], [0, 0, 40, 40], limits), ...box('top bar controls', [560, 0, 720, 40], [690, 0, 210, 40], limits)];
 /** The dock line's text and its other-sessions chip, without the sent chip: the board's token for the sent chip's colour resolves with dark-theme values in light frames. */
 const dockLineQuiet = (limits?: Limits) => [...box('dock line text', [0, 760, 700, 40], [0, 610, 690, 40], limits), ...box('dock line other-sessions chip', [1130, 760, 150, 40], [790, 610, 110, 40], limits)];
+/** Where the dock line says where answers wait: between the question's text and the other-sessions chip. */
+const dockChip = (limits?: Limits) => box('dock line chip: where answers wait', [700, 760, 390, 40], [600, 610, 160, 40], limits);
 /** The dock line's two ends: its pill and its chips. The text between is left out where the board's own files disagree (see `regionsById`). */
 const dockLineEnds = (limits?: Limits) => [...box('dock line pill', [0, 760, 100, 40], [0, 610, 100, 40], limits), ...box('dock line chip', [1090, 760, 150, 40], [740, 610, 128, 40], limits)];
 
@@ -339,8 +345,28 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   // The board's second file (R4, states 12 to 16) draws the dock line's question in 72% text; its first file (1 to 3) in full text.
   // The app draws it as the first file does, so these states hold the line's pill and chips and leave the text between.
   // The board's R4 file also draws the dock's chevron in full text colour (the first file and the app: muted), so the chip region stops before it.
-  // 12.1 stays pending: the connection card says other things (its last-message time, the queue sentence, "Disconnect" for "Close session" and "Copy session ID").
-  '12.1': [...topBar(), ...dockLineEnds(), ...box('connection card', [316, 36, 324, 142], [316, 36, 324, 142])],
+  // The line above the Map (D3) is held to the board's size and marks; its words differ from the board's only where data is missing (§3a: 12.6
+  // has no drop time, 12.7 no line number, path chip or "Show the file", 12.9 no data folder: the app says it isn't sure the change was saved).
+  // The dock's chip sits between the question's text (72% in R4's file, full in the app: left out) and the other-sessions chip.
+  // 12.1 holds the card's title row only: the card's lines name the last message and what is on its way, which the frame's data does not have, and
+  // its buttons say "Close session" and "Copy session ID" where the board says "Disconnect".
+  '12.1': [...topBar(BAR), ...dockLineEnds(), ...box('connection card title', [316, 36, 324, 34], [316, 36, 324, 34], [0.01, 0.01])],
+  // 12.2's steps: the head and the first step hold. The second step says where Codex's instruction comes from when no setup receipt is at hand
+  // (the board's has a Copy instruction button), so it and the foot below it sit at another height.
+  '12.2': [...topBar(BAR), ...box('connection line, head and first step', [0, 40, 1280, 82], [0, 40, 900, 82]), ...dockLineEnds(), ...dockChip([0.002, 0.002])],
+  '12.3': [...topBar(BAR), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56]), ...dockLineEnds(), ...dockChip([0.002, 0.002])],
+  '12.4': [...topBar(BAR), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56]), ...dockLine()],
+  // 12.6 holds the line's icon and title and its button: the sentence between has no drop time (§3a).
+  '12.6': [...topBar(BAR), ...box('connection line title', [0, 40, 260, 56], [0, 40, 260, 56]), ...box('connection line button', [1180, 40, 100, 56], [800, 40, 100, 56]),
+    ...dockLineEnds(), ...dockChip([0.002, 0.002])],
+  // 12.7 holds the line's icon and title and the dock's words. Left out: the top bar's chip of waiting questions in other sessions and the dock's chip of
+  // them (not held here; the waiting list no longer gives up when one session can't be read), the line's sentence (no line number), its second
+  // button, and the Map panel (no path chip, so its centred lines sit higher).
+  '12.7': [...box('top bar left', [0, 0, 210, 40], [0, 0, 40, 40]), ...box('connection line title', [0, 40, 260, 56], [0, 40, 200, 32]),
+    ...box('dock line text', [0, 760, 700, 40], [0, 610, 690, 40])],
+  '12.8': [...topBar(BAR), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56], [0.001, 0.001]), ...dockLineEnds(), ...dockChip([0.002, 0.002])],
+  // 12.9: the top bar's right-hand controls are disabled while the save is unsure (the board draws them live), and the line says less (§3a).
+  '12.9': [...box('top bar left', [0, 0, 700, 40], [0, 0, 700, 40]), ...dockLineEnds()],
   '13.1': [...topBar(BAR), ...dockLineEnds(), ...box('switcher card', [31, 39, 398, 454], [31, 39, 398, 454], [0.004, 0.004])],
   '13.2': [...topBar(BAR), ...dockLineEnds(), ...box('switcher card', [31, 39, 398, 218], [31, 39, 398, 218], [0.003, 0.003])],
   // The R4 board's dock path runs to the question itself ("note on workspace keys"), the first file's and the app's to its parent ("which cache keys"): about 0.25% of the dock.
