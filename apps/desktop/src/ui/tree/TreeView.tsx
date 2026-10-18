@@ -224,7 +224,8 @@ export function TreeView(props: TreeViewProps) {
   }, [lifecycleNoticeId, lifecycleNotice]);
   const elements = useRef(new Map<string, HTMLDivElement>()), scroller = useRef<HTMLDivElement>(null);
   const scrollRequested = useRef<string | null>(null);
-  const revealedAnchor = useRef<{ readonly key: string; readonly offset: number } | null>(null);
+  /** A row the app brought into view, held at `offset` below the reading edge while the scroller stays at `scrollTop` (or moves only by the hold's own correction). */
+  const revealedAnchor = useRef<{ readonly key: string; readonly offset: number; readonly scrollTop: number } | null>(null);
   const focusRequested = useRef<string | null>(null);
   const mounted = useRef(true), request = useRef(0);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, [store]);
@@ -676,6 +677,7 @@ export function TreeView(props: TreeViewProps) {
   const [openingFinished, setOpeningFinished] = useState(0);
   // Show more / Show less on a long preview. The owner is steering, so the view stops holding its anchor; folding
   // a preview the owner has read down to its end keeps that row's top in sight rather than leaving the tree below it.
+  // A Show less out of view, above the reading row, folds what is above it: the reading row stays put, as for Show more.
   const folding = useRef<string | null>(null);
   const unfold = (id: string) => {
     // The hold stays: Show more above the reading row grows what is above it, and the row the owner reads stays put.
@@ -689,10 +691,11 @@ export function TreeView(props: TreeViewProps) {
       return place.bottom > readingTop() && place.top < visibleBottom(box!);
     });
     if (box && rect && clicked) {
-      revealedAnchor.current = { key: id, offset: rect.top - readingTop() };
+      revealedAnchor.current = { key: id, offset: rect.top - readingTop(), scrollTop: box.scrollTop };
       remembering();
     }
-    if (isUnfolded(id)) folding.current = id;
+    // Only a Show less on screen brings its row's top into sight (an app scroll for the owner, which ends that row's hold).
+    if (clicked && isUnfolded(id)) folding.current = id;
     toggleUnfolded(id);
   };
   useLayoutEffect(() => {
@@ -897,6 +900,11 @@ export function TreeView(props: TreeViewProps) {
     }
     // What the scroller has carried the row since: forgotten when the owner scrolled (the row is somewhere else now).
     const driven = before && (box.scrollTop === before.scrollTop || box.scrollTop === ownScroll.current);
+    // A reveal holds while the scroller stays where the row was revealed, or moves by the hold's own correction. Any other move
+    // is the owner's (a wheel, keys, the scrollbar, or the app's own scroll for the owner), even one whose scroll event has not
+    // arrived yet when a render runs the hold: the reveal ends here, so no later render puts its row back.
+    const pinned = revealedAnchor.current;
+    if (pinned && box.scrollTop !== pinned.scrollTop && box.scrollTop !== ownScroll.current) revealedAnchor.current = null;
     ownScroll.current = null;
     const step = before && driven ? restored ?? carried(box, before, before.offset) : 0;
     const carry = before && driven ? Math.max(0, before.carried + step) : 0;
@@ -905,6 +913,7 @@ export function TreeView(props: TreeViewProps) {
     if (revealedAnchor.current && before?.key === revealedAnchor.current.key && driven) {
       revealedAnchor.current = { ...revealedAnchor.current, offset: revealedAnchor.current.offset + step - (box.getBoundingClientRect().top - before.boxTop) };
     }
+    if (revealedAnchor.current) revealedAnchor.current = { ...revealedAnchor.current, scrollTop: box.scrollTop };
     // An owner scroll back up (or rows growing into it) gives the spacer's room back; what is on screen stays.
     trimSpacer(box);
     const top = readingTop(), list = latest.current.rows.filter(row => row.kind === 'item');
@@ -966,7 +975,7 @@ export function TreeView(props: TreeViewProps) {
     const target = panelTarget.current;
     if (previous.detailOpen && !current.detailOpen && target && target.key === current.selectedId) {
       const offset = Math.max(target.top, readingTop() + 8) - readingTop();
-      revealedAnchor.current = { key: target.key, offset };
+      revealedAnchor.current = { key: target.key, offset, scrollTop: target.scrollTop };
       held.current = { key: target.key, offset, y: readingTop() + offset, boxTop: scroller.current?.getBoundingClientRect().top ?? 0,
         // The carry stays while the scroller has not moved: closing Details re-places the row, not the band.
         carried: scroller.current?.scrollTop === target.scrollTop ? held.current?.carried ?? 0 : 0, lead: Infinity,
@@ -981,7 +990,11 @@ export function TreeView(props: TreeViewProps) {
     // (A scroller with no layout yet, zero high, has no end to clamp to.)
     const clamped = !!box && !!before && box.clientHeight > 0 && box.scrollTop < before.scrollTop && box.scrollTop >= box.scrollHeight - box.clientHeight - 1;
     const back = box && before && (box.scrollTop === before.scrollTop || clamped) && (settled.current || !placed.current) ? heldRow(before) : null;
-    remembering(box && before && back ? restoreHeld(box, before, back.offset, back.element) : undefined);
+    const restored = box && before && back ? restoreHeld(box, before, back.offset, back.element) : undefined;
+    // A clamp that left the held row in place needed no correction, yet the scroller moved: that move is the browser's, not
+    // the owner's, so a pinned reveal must not end on it (`remembering` ends the pin on any move the hold did not make).
+    if (box && clamped && back) ownScroll.current = box.scrollTop;
+    remembering(restored);
   };
   useLayoutEffect(holding);
   const hasRows = rows.length > 0 && !graph;
@@ -1030,7 +1043,8 @@ export function TreeView(props: TreeViewProps) {
   useLayoutEffect(updateEdge);
   const retainReveal = (key: string) => {
     const element = elements.current.get(key);
-    revealedAnchor.current = element ? { key, offset: element.getBoundingClientRect().top - readingTop() } : null;
+    revealedAnchor.current = element && scroller.current
+      ? { key, offset: element.getBoundingClientRect().top - readingTop(), scrollTop: scroller.current.scrollTop } : null;
     remembering(); updateEdge();
   };
   const revealSelected = (returnFocus = false) => {
@@ -1299,9 +1313,8 @@ export function TreeView(props: TreeViewProps) {
     {/* The graph keeps its own scroller (ui/graph/graph.css). */}
     {graphShown ? graph : <div className="tree-scroll-shell">
       <div ref={scroller} className="tree-scroll" data-testid="map-scroll" onScroll={() => {
-        // At the held scrollTop this can be our own correction's delayed event;
-        // remembering restores any intervening reflow before capturing again.
-        if (held.current?.scrollTop !== scroller.current?.scrollTop) revealedAnchor.current = null;
+        // At the held scrollTop this can be our own correction's delayed event; remembering restores any intervening reflow
+        // before capturing again, and ends a reveal the owner scrolled away from.
         openingPlacement.current = null; settled.current = true; remembering(); updateEdge();
       }}>{body}</div>
       {backPill}

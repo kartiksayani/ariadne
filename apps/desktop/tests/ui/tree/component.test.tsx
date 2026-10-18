@@ -2182,6 +2182,8 @@ describe('item details in the tree', () => {
       deliver();
       expect(box.scrollTop).toBe(scroll + 200);
       expect(row('4').getBoundingClientRect().top).toBe(40);
+      // Show less out of view above the reading row folds what is above it: the reading row stays put (only a Show less on
+      // screen brings its own row's top into sight).
       fireEvent.click(more('3')!);
       deliver();
       expect(row('4').getBoundingClientRect().top).toBe(40);
