@@ -8,7 +8,7 @@ import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type
 import { OwnFailure, plainFailure, useSession, type Immutable, type SessionStore } from '../../data';
 import type { RevealedItem } from '../../data/routes';
 import type { ItemRoute, SessionPreferences } from '../../generated/core';
-import type { Input, SessionSummary } from '../../generated/domain/models';
+import type { SessionSummary } from '../../generated/domain/models';
 import { NavigationStore, useNavigation } from '../../state/navigation/store';
 import { useReadingSeen } from '../../state/preferences/reading';
 import { OwnerDraftStore, useOwnerDrafts } from '../../state/drafts/store';
@@ -34,9 +34,6 @@ import { NextUnseen } from './band/NextUnseen';
 import { ChangesOpener } from '../changes/ChangesOpener';
 import { TopicMenu } from './band/TopicMenu';
 import type { OpenTopicInDetails } from '../shell/detailTarget';
-import { StuckNote } from '../answer/StuckNote';
-import { editQueued, inEditor } from '../answer/held';
-import { InlineRecovery } from '../../components/recovery/RecoveryPanel';
 import { Banner } from './Banner';
 import { FilterRow, chipLabel } from './FilterRow';
 import { useLocalChips } from './useLocalChips';
@@ -1225,16 +1222,6 @@ export function TreeView(props: TreeViewProps) {
         remove={{ run: () => onRemove({ kind: 'topic', session: route, topic_id: id }), items: activeItems(session).filter(item => item.topic_id === id).length }} />,
     };
   };
-  // A stopped delivery, or a topic reply not sent yet, is answered on its row; keys there stay off the tree's shortcuts.
-  // Edit puts a topic reply back in the topic's composer in Details and opens it there.
-  const editTopicReply = (input: Immutable<Input>) => async () => {
-    const outcome = await editQueued(drafts, store.getSnapshot().snapshot?.session, input, actions);
-    if (inEditor(outcome)) props.onOpenTopic?.(input.target.topic_id);
-    return outcome;
-  };
-  const fixOf = (row: Row) => row.delivery?.stuck ? <div className="tree-fix" onKeyDown={event => event.stopPropagation()}>
-    <StuckNote actions={actions} input={row.delivery.stuck.input} stuck={row.delivery.stuck.note}
-      onEdit={row.kind === 'topic' ? editTopicReply(row.delivery.stuck.input) : undefined} /></div> : null;
   const tree = model && rows.length > 0 && <TreeFonts.Provider value={fontEpoch}><ItemRefs.Provider value={{ route: id => ({ ...route, item_id: id }), lookup: id => {
     const item = session?.items[id];
     return item && session && !itemRemoved(session, item.id) ? { label: names.get(id) ?? shortLabel(item), status: displayStatus(session, item) } : null;
@@ -1246,13 +1233,13 @@ export function TreeView(props: TreeViewProps) {
         ackAll={!archivedMode ? <AckAll actions={actions} topicId={row.topic.id} topicName={shortLabel(row.topic)} items={eligible} disabled={viewBusy} /> : undefined}
         prompt={row.allClosed && !archivedMode ? () => lifecycle.archive(row.topic.id) : null}
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
-        fix={fixOf(row)} />
+        />
       {items.map(row => row.kind === 'strip'
         ? <Strip key={row.key} variant="row" row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleStrip} />
         : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={focusDisabled} closedReason={session ? sessionAnswerBlocked(session) : undefined}
         changeMarker={changes?.markers.get(row.key)} nextUnseen={nextTarget?.id === row.key} nextUnseenPulse={nextPulse && nextTarget?.id === row.key}
         note={row.collapsed ? collapsedNote(row.collapsed) : null}
-        actions={itemActions(row)} fix={fixOf(row)}
+        actions={itemActions(row)}
         unfolded={isUnfolded(row.key)} onUnfold={unfold}
         acked={ackHeld.has(row.key)} onUndoAck={id => { hold.undo(id); }}
         onPeekHover={(id, event) => { const handlers = peek?.chipProps({ ...route, item_id: id });
@@ -1269,9 +1256,6 @@ export function TreeView(props: TreeViewProps) {
   const unreadable = !session && state.status === 'inaccessible';
   // Where the line above the Map is on screen it reports an unsure save, and its "Try again" is the one place to check again.
   const lineShown = useContext(ConnectionLineShown);
-  // Stopped deliveries answered on a row the owner can see; the recovery banner lists the rest
-  // (none in the graph, which has no rows; a filtered-out or folded row is not here).
-  const inline: ReadonlySet<string> = new Set(graph && !loading ? [] : rows.flatMap(row => row.delivery?.stuck ? [row.delivery.stuck.input.id] : []));
   const filtersShown = !archivedMode && (props.filterOpen ?? true);
   const graphShown = !!graph && !loading && !unreadable;
   const chips = useMemo(() => scope && filtersShown ? { counts: chipCounts(scope), picked: pickedChips(scope), active: filterActive(scope), ...summaryCounts(scope) } : null,
@@ -1349,7 +1333,7 @@ export function TreeView(props: TreeViewProps) {
     {filterRow}
     {lifecycle.pending && !lineShown && <Banner icon="ph ph-warning" alert actions={<button type="button" className="btn btn-ghost" onClick={lifecycle.reconcile}>Check again</button>}>
       {lifecycle.pending}. Check whether your last change was saved before making another.</Banner>}
-    <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
+    {notices}
     {/* The graph keeps its own scroller (ui/graph/graph.css). */}
     {graphShown ? graph : <div className="tree-scroll-shell">
       <div ref={scroller} className="tree-scroll" data-testid="map-scroll" onScroll={() => {

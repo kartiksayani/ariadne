@@ -235,6 +235,12 @@ const pickedUpAt = (input: Immutable<Input>): string => {
   const attempt = input.attempts.find(value => value.id === input.active_attempt_id && agentReceived(value)) ?? [...input.attempts].reverse().find(value => agentReceived(value));
   return timeOf(attempt?.acceptance_observed_at ?? attempt?.turn_observed_at);
 };
+/** The agent's turn is running on an in-flight message (the delivery line says "received"): the bubble reads "Picked up", and a stuck notice has nothing to add. */
+export function agentHasIt(input: Immutable<Input>): boolean {
+  const kind = deliveryEvidence(input, null).kind;
+  return kind === 'received' || kind === 'published' || kind === 'waiting_result';
+}
+
 /**
  * The status line under an owner bubble (alpha.21 E16). A held message, a stopped one the agent already has, and anything else
  * whose fix is StuckNote's keep their existing wording and controls (null here); Undo shows only while the message is queued
@@ -245,12 +251,15 @@ export function bubbleStatus(input: Immutable<Input>, stuck: Stuck | null): Bubb
     ? { kind: 'sent', input, at: timeOf(input.created_at), undo: true } : null;
   if (input.state === 'in_flight') {
     // Picked up once the agent's turn is running (the delivery line says "received"); a host that only accepted it has not got it yet.
-    const kind = deliveryEvidence(input, null).kind;
-    return kind === 'received' || kind === 'published' || kind === 'waiting_result' ? { kind: 'picked_up', at: pickedUpAt(input) }
-      : { kind: 'sent', input, at: timeOf(input.created_at), undo: false };
+    return agentHasIt(input) ? { kind: 'picked_up', at: pickedUpAt(input) } : { kind: 'sent', input, at: timeOf(input.created_at), undo: false };
   }
   if (input.state === 'handled') return { kind: 'picked_up', at: pickedUpAt(input) };
-  if (input.state === 'needs_attention' && stuck?.retry && !agentReceived(input.attempts.find(value => value.id === input.active_attempt_id))) return { kind: 'not_sent', input, stuck };
+  if (input.state === 'needs_attention' && stuck?.retry) {
+    // "Not sent" is a claim: only for a delivery the host refused, or one that never reached a host turn and is not in doubt.
+    // An uncertain or being-checked delivery is StuckNote's to word ("isn't sure it reached").
+    const attempt = input.attempts.find(value => value.id === input.active_attempt_id);
+    if (attempt && !agentReceived(attempt) && (attempt.acceptance === 'rejected' || !attempt.host_turn_id && attempt.acceptance !== 'uncertain')) return { kind: 'not_sent', input, stuck };
+  }
   return null;
 }
 

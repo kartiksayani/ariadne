@@ -10,6 +10,7 @@ import type { DraftState, OwnerDraftStore } from '../../state/drafts/store';
 import { editable, editQueued, inEditor, putBackBlocked, putBackCancelled, sendingAgain, type EditTarget, type ReviewOutcome } from '../answer/held';
 import { NotSentLine } from '../answer/NotSentLine';
 import { ReviewResult, StuckNote, useStuckRetry } from '../answer/StuckNote';
+import { ActionFailure } from '../../components/edge-states/EdgeState';
 import { peekNames } from '../peek/names';
 import { ItemReference, ItemRefs, Markdown, singleParagraph } from '../shared/MarkdownText';
 import { STATUS } from '../shared/status';
@@ -65,10 +66,16 @@ interface StatusLineProps {
   readonly onUndo: (input: Immutable<Input>) => Promise<ReviewOutcome>;
 }
 
-/** Retry on a stopped delivery the agent never received: one resend of the same message (StuckNote's own Retry, lifted). */
-function NotSentRetry({ status, actions }: { readonly status: Extract<BubbleStatus, { kind: 'not_sent' }>; readonly actions: SessionActions }) {
+/** Retry on a stopped delivery the agent never received: one resend of the same message (StuckNote's own Retry, lifted). A failed write shows under the line. */
+function NotSent({ status, actions }: { readonly status: Extract<BubbleStatus, { kind: 'not_sent' }>; readonly actions: SessionActions }) {
   const retry = useStuckRetry(actions, status.input, status.stuck);
-  return retry && <button type="button" className="btn btn-ghost detail-status-action" disabled={retry.disabled} title={retry.title} onClick={retry.run}>Retry</button>;
+  return <>
+    <div className="detail-bubble-status detail-bubble-status-problem" data-status="not_sent" role="status">
+      <span>⚠ Not sent. Your words are kept.</span>
+      {retry && <button type="button" className="btn btn-ghost detail-status-action" disabled={retry.disabled} title={retry.title} onClick={retry.run}>Retry</button>}
+    </div>
+    {retry?.acted && <div className="stuck-failure"><ActionFailure actions={actions} /></div>}
+  </>;
 }
 
 /** Under an owner bubble: "✓ Sent at 21:25 · waiting for the agent Undo", "✓ Picked up at 21:26" or "⚠ Not sent. Your words are kept. Retry". */
@@ -76,8 +83,7 @@ function StatusLine({ status, actions, onUndo }: StatusLineProps) {
   const [undoing, setUndoing] = useState(false);
   const [result, setResult] = useState<ReviewOutcome | null>(null);
   if (status.kind === 'picked_up') return <div className="detail-bubble-status" data-status="picked_up" role="status">{`✓ Picked up${status.at ? ` at ${status.at}` : ''}`}</div>;
-  if (status.kind === 'not_sent') return <div className="detail-bubble-status detail-bubble-status-problem" data-status="not_sent" role="status">
-    <span>⚠ Not sent. Your words are kept.</span><NotSentRetry status={status} actions={actions} /></div>;
+  if (status.kind === 'not_sent') return <NotSent status={status} actions={actions} />;
   const undo = () => {
     if (undoing) return;
     setUndoing(true);

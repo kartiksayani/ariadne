@@ -1016,52 +1016,14 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
     input.payload.target_snapshot.question_revision = null; input.payload.target_snapshot.item_question = null;
     return input.id;
   };
-  const cancels = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'input_cancel');
-  it('deletes a topic reply not sent yet from its band in one click', async () => {
-    let id = '';
-    const { transport } = await mount({ configure: value => { id = queuedReply(value); } });
-    const band = topicRow('Continued context');
-    expect(within(band).getByRole('button', { name: /^More actions for/ })).toBeTruthy();
-    await act(async () => { fireEvent.click(within(band.parentElement!).getByRole('button', { name: 'Delete' })); });
-    expect(cancels(transport).map(request => request.command.params)).toMatchObject([{ input_id: id }]);
-    await waitFor(() => expect(within(topicRow('Continued context').parentElement!).queryByRole('button', { name: 'Delete' })).toBeNull());
-    expect(transport.preferences.drafts.filter(draft => draft.target.item_id === null)).toHaveLength(0);
-  });
-  it('keeps topic delivery status sticky while its recovery controls remain in the topic flow', async () => {
+  it('keeps topic delivery status sticky and offers no controls under the band: Undo and Retry are in the topic’s Details', async () => {
     await mount({ configure: queuedReply });
     const band = topicRow('Continued context'), group = band.parentElement!;
     expect(band.querySelector('.tree-topic-status')).not.toBeNull();
-    expect(band.querySelector('.stuck-note')).toBeNull();
-    const content = group.querySelector('.tree-topic-content')!;
-    expect(content.previousElementSibling).toBe(band);
-    expect(content.querySelector('.stuck-note')).not.toBeNull();
+    expect(group.querySelector('.stuck-note')).toBeNull();
+    expect(within(group).queryByRole('button', { name: 'Delete' })).toBeNull();
+    expect(within(group).queryByRole('button', { name: 'Edit' })).toBeNull();
     expect(group.contains(row('8'))).toBe(true);
-  });
-  it('edits a topic reply not sent yet: the queued reply is taken back first, then its text goes into the topic’s reply box', async () => {
-    let id = '';
-    const view = await mount({ configure: value => { id = queuedReply(value); } }), { transport } = view;
-    await act(async () => { fireEvent.click(within(topicRow('Continued context').parentElement!).getByRole('button', { name: 'Edit' })); });
-    await waitFor(() => expect((within(box()!).getByRole('textbox') as HTMLTextAreaElement).value).toBe(text));
-    expect(topicRow('Continued context').getAttribute('data-topic-id')).toBe(view.calls.topics.at(-1));
-    expect(transport.preferences.drafts.find(draft => draft.target.item_id === null)).toMatchObject({ intent: 'topic_reply', text });
-    expect(cancels(transport).map(request => request.command.params)).toMatchObject([{ input_id: id, purpose: 'edit' }]);
-    // No draft held the words before the cancel went out: they could have been sent twice.
-    const cancelAt = transport.mutations.findIndex(request => request.command.command === 'input_cancel');
-    expect(transport.mutations.slice(0, cancelAt).some(request => request.command.command === 'preferences_patch'
-      && request.command.params.entries.some(entry => entry.kind === 'upsert_draft' && entry.draft.text === text))).toBe(false);
-    expect(transport.mutations.slice(cancelAt).some(request => request.command.command === 'preferences_patch'
-      && request.command.params.entries.some(entry => entry.kind === 'upsert_draft' && entry.draft.text === text))).toBe(true);
-  });
-  it('never overwrites a topic reply the owner already started: the queued one stays and its text is offered to copy', async () => {
-    const { transport, drafts, store } = await mount({ configure: queuedReply });
-    const session = store.getSnapshot().snapshot!.session, topic = session.items['8']!.topic_id;
-    await act(async () => { await drafts.load(); });
-    const started = drafts.beginTopic(session, topic)!;
-    await act(async () => { await drafts.editSaved(started, { text: 'Something else' }); });
-    await act(async () => { fireEvent.click(within(topicRow('Continued context').parentElement!).getByRole('button', { name: 'Edit' })); });
-    expect((await screen.findByLabelText('Your earlier message') as HTMLTextAreaElement).value).toBe(text);
-    expect(drafts.findTopic(route, topic)?.draft.text).toBe('Something else');
-    expect(cancels(transport)).toHaveLength(0);
   });
   it('offers the row actions for the item status and routes them to the workspace', async () => {
     const { calls } = await mount();
@@ -1649,59 +1611,30 @@ describe('stopped deliveries in the tree', () => {
     const band = topicRow(topicName), line = band.querySelector<HTMLElement>('.tree-topic-status')!;
     expect(line.textContent).toBe('demo.local has your message but hasn’t saved its answer yet. It may still be working.');
     expect(line.style.color).not.toBe('var(--a-warn)');
-    const fix = band.parentElement!.querySelector<HTMLElement>('.stuck-note[data-stuck="answer"]')!;
-    expect(fix.textContent).not.toMatch(/Couldn’t deliver|Not delivered/);
-    expect(within(fix).getByRole('button', { name: 'Ask for the answer' })).toBeTruthy();
-    expect(within(fix).queryByRole('button', { name: 'Cancel message' })).toBeNull();
+    // The decision lives in Details (and the banner), not under the row or the band (alpha.21 E17).
+    expect(band.parentElement!.querySelector('.stuck-note')).toBeNull();
   });
-  it('answers it on the item row: Couldn’t deliver, Retry in one click, without selecting the row', async () => {
-    // On its own (old) binding there is no presence: Retry is the owner's word that the agent is idle.
-    const { transport, calls } = await mount();
-    const fix = row('7').querySelector<HTMLElement>('.stuck-note[data-stuck="decision"]')!;
-    expect(fix.textContent).toContain('Couldn’t deliver “Followup request for item 7. Preserve…”. Ariadne isn’t sure it reached demo.local.');
-    expect(within(fix).getByRole('button', { name: 'Mark as done' })).toBeTruthy();
-    expect((within(fix).getByRole('button', { name: 'Retry' }) as HTMLButtonElement).disabled).toBe(false);
-    await act(async () => { fireEvent.click(within(fix).getByRole('button', { name: 'Retry' })); });
-    expect(transport.mutations.find(request => request.command.command === 'input_resolve')!.command).toMatchObject({ params: {
-      input_id: stopped, attempt_id: '00000000-0000-4000-8000-000000000063', decision: 'resend', reason: '', evidence: { source: 'owner_attestation', owner_attested_idle: true } } });
+  it('shows a stopped delivery as a plain line on the item row, with no controls and without selecting it', async () => {
+    const { calls } = await mount();
+    expect(row('7').querySelector('.stuck-note')).toBeNull();
+    expect(row('7').querySelector('.tree-delivery')?.textContent).toMatch(/^Couldn’t deliver/);
+    expect(within(row('7').querySelector<HTMLElement>('.tree-delivery')!).queryAllByRole('button')).toHaveLength(0);
     expect(calls.selected).toHaveLength(0);
   });
-  it('keeps the decision on the row when a later message is queued behind it on the same item', async () => {
-    const { transport } = await mount({ configure: transport => {
-      const session = transport.sessions.get(route.session_id)!, successor = structuredClone(session.inputs[stopped]!);
-      successor.id = '00000000-0000-4000-8000-0000000000f4'; successor.seq = Math.max(...Object.values(session.inputs).map(value => value?.seq ?? 0)) + 1;
-      successor.state = 'queued'; successor.attempts = []; successor.active_attempt_id = null;
-      session.inputs[successor.id] = successor;
-    } });
-    const fix = row('7').querySelector<HTMLElement>('.stuck-note[data-stuck="decision"]')!;
-    expect(fix.getAttribute('data-stuck-input')).toBe(stopped);
-    fireEvent.click(within(fix).getByRole('button', { name: 'Mark as done' }));
-    await waitFor(() => expect(transport.mutations.find(request => request.command.command === 'input_resolve')).toBeTruthy());
-  });
-  it('opens the audited form from More options, and keys typed there never reach the tree', async () => {
-    const { transport } = await mount({ configure: active });
-    fireEvent.click(within(row('7')).getByRole('button', { name: 'More options' }));
-    const dialog = screen.getByRole('dialog', { name: 'Resolve delivery' });
-    fireEvent.keyDown(within(dialog).getByLabelText('Reason'), { key: 'e' });
-    expect(screen.queryByRole('dialog', { name: /^Archive “/ })).toBeNull();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByRole('dialog', { name: 'Resolve delivery' })).toBeNull(); expect(transport.mutations).toHaveLength(0);
-  });
-  it('shows no recovery banner while the row is visible, and the banner when a filter hides the row', async () => {
+  it('lists a stopped delivery in the recovery banner whether or not its row is visible, and its audited form never leaks keys to the tree', async () => {
     const view = await mount({ configure: active });
     view.rerender({ notices: <RecoveryPanel actions={view.actions} /> });
-    const fix = row('7').querySelector<HTMLElement>('.stuck-note[data-stuck="decision"]')!;
-    expect(banner()).toBeNull();
-    // The agent is running on the active binding: Retry and Mark as done wait, and say why.
-    const retry = within(fix).getByRole('button', { name: 'Retry' }) as HTMLButtonElement;
-    expect(retry.disabled).toBe(true); expect(retry.title).toBe('demo.local is still working. Wait, or stop it in the terminal first.');
-    expect((within(fix).getByRole('button', { name: 'Mark as done' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(chip('Open'));
-    await waitFor(() => expect(ids()).toEqual(['1', '1.1', '4', '8']));
     await waitFor(() => expect(banner()).not.toBeNull());
     expect(within(banner()!).getByText('A message needs your decision')).toBeTruthy();
+    fireEvent.click(chip('Open'));
+    await waitFor(() => expect(ids()).toEqual(['1', '1.1', '4', '8']));
+    expect(banner()).not.toBeNull();
     clearChips();
-    await waitFor(() => expect(banner()).toBeNull());
+    fireEvent.click(within(banner()!).getByRole('button', { name: 'Review recovery' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.keyDown(within(dialog).getAllByRole('textbox')[0]!, { key: 'e' });
+    expect(screen.queryByRole('dialog', { name: /^Archive “/ })).toBeNull();
+    expect(view.transport.mutations.filter(request => request.command.command.startsWith('input_'))).toHaveLength(0);
   });
 });
 
@@ -2474,9 +2407,10 @@ describe('item details in the tree', () => {
     // An item being worked on keeps its note beside its reply in flight.
     expect(row('3').textContent).toContain('Receipt lookup is underway.');
     expect(row('3').querySelector('.tree-delivery')?.textContent).toMatch(/^Your reply was received/);
-    // A stopped delivery shows its fix under the details, not in their place.
+    // A stopped delivery shows as a line under the details (its fix is in Details, alpha.21 E17).
     expect(row('7').textContent).toContain('Replaced by');
-    expect(row('7').querySelector('.stuck-note')).not.toBeNull();
+    expect(row('7').querySelector('.stuck-note')).toBeNull();
+    expect(row('7').querySelector('.tree-delivery')).not.toBeNull();
   });
 
   it('floats the shortcut icons over the row so the text never changes width on hover', async () => {

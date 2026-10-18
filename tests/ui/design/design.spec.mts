@@ -507,11 +507,12 @@ for (const width of [1920, 1600, 1280]) for (const acceptedFailure of [false, tr
     const denied: string[] = [];
     await route(page.context(), origin, denied);
     await openApp(page, origin, { ...frameSpec(acceptedFailure ? 'delivery-stopped' : '1m'), width });
-    for (const selector of ['.tree-item[data-item-id="3.1"]', '.shell-detail-scroll']) {
+    // Only Details carries the note now (alpha.21 E17); a never-received delivery has its Retry in the bubble's "Not sent" line above it.
+    for (const selector of ['.shell-detail-scroll']) {
       const note = page.locator(`${selector} .stuck-note[data-stuck="${acceptedFailure ? 'stopped' : 'decision'}"]`).first();
       await expect(note).toBeVisible();
       await expect(note.locator(':scope > [role="status"]')).toContainText(acceptedFailure ? 'got your message but stopped before answering' : 'Couldn’t deliver');
-      await expect(note.getByRole('button', { name: acceptedFailure ? 'Send again' : 'Retry', exact: true })).toBeVisible();
+      await expect((acceptedFailure ? note : note.locator('xpath=ancestor::li[1]')).getByRole('button', { name: acceptedFailure ? 'Send again' : 'Retry', exact: true })).toBeVisible();
       const layout = await note.evaluate(element => {
         const status = element.querySelector<HTMLElement>(':scope > [role="status"]')!;
         const actions = element.querySelector<HTMLElement>(':scope > .stuck-actions')!;

@@ -265,15 +265,15 @@ describe('finding 5: a refill of an answer the agent already had never goes twic
     const observation = { ...structuredClone(sessionsFixture.items[0].active_binding.presence), execution_state: 'idle',
       generation: binding.generation, last_seen_at: '2026-10-03T12:01:00.000Z' } as PresenceObservation;
     await act(async () => { transport.emit('ariadne://presence_changed', { binding_id: binding.id, generation: binding.generation, observation }); });
-    // A stopped answer is settled where its message shows: Details' conversation, or its row on the Map.
-    const where = place === 'Details' ? '[data-detail-item-id="2"]' : '[role="tree"]';
+    // A stopped answer is settled in Details' conversation (neither the Map row nor the dock carries it any more, alpha.21 E17).
+    if (place === 'dock') fireEvent.click(treeRow('2'));
     const stuck = await waitFor(() => {
-      const found = document.querySelector<HTMLElement>(`${where} [data-stuck-input="${input.id}"]`); expect(found).toBeTruthy(); return found!;
+      const found = document.querySelector<HTMLElement>(`[data-detail-item-id="2"] [data-stuck-input="${input.id}"]`); expect(found).toBeTruthy(); return found!;
     });
     await waitFor(() => expect(within(stuck).getByRole('button', { name: button }).hasAttribute('disabled')).toBe(false));
     fireEvent.click(within(stuck).getByRole('button', { name: button }));
     await waitFor(() => expect(session.inputs[input.id]?.state).toBe('skipped'));
-    if (place === 'dock') await openDock();
+    if (place === 'dock') { fireEvent.click(screen.getByRole('button', { name: 'Close detail' })); await openDock(); }
     // The words and the choice stay recoverable in the reopened cards, in every case.
     await waitFor(() => expect(option(scope()!, 1)?.getAttribute('aria-pressed')).toBe('true'));
     expect(answerWords(scope()!).value).toBe(note);

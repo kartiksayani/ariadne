@@ -89,6 +89,7 @@ async function setup(saved: OwnerDraft[] = [], change: (session: Session) => voi
   let cancelOutcome: 'ok' | 'refused' | 'uncertain' = 'ok';
   // What happened, in order: a confirmed cancel, and each draft text saved.
   const events: string[] = [];
+  const listeners = new Map<string, Set<(hint: never) => void>>();
   const transport: DesktopTransport = {
     async invoke<T>(command: string, args: Parameters<DesktopTransport['invoke']>[1]): Promise<T> {
       const envelope = (data: unknown) => ({ api_version: 1, ok: true, data }) as T;
@@ -152,12 +153,14 @@ async function setup(saved: OwnerDraft[] = [], change: (session: Session) => voi
       return envelope({ operation_id: request.command.op_id, session_id: session.id, revision: session.revision + 1,
         data: { kind: outcome === 'malformed' ? 'input_cancel' : 'input_submit', input_id: uuid(70), message_id: uuid(71), message_number: 40, answer_id: null, input_seq: 4 } });
     },
-    async listen() { return () => {}; },
+    async listen(event, receive) { const set = listeners.get(event) ?? new Set(); set.add(receive as (hint: never) => void); listeners.set(event, set); return () => { set.delete(receive as (hint: never) => void); }; },
   };
   let counter = 0;
   const service = createDesktopService(transport), drafts = new OwnerDraftStore(service, () => uuid(++counter)), sessions = new OpenSessions(service);
   opened.push(sessions); const store = sessions.open(route); await Promise.all([store.refresh(), drafts.load()]);
-  return { session, prefs, calls, writes, events, drafts, store, service, sessions, outcome: (value: typeof outcome) => { outcome = value; },
+  /** Pushes a hint the way core's event stream would (a presence change, for instance). */
+  const emit = (event: string, hint: unknown) => listeners.get(event)?.forEach(receive => receive(hint as never));
+  return { session, prefs, calls, writes, events, emit, drafts, store, service, sessions, outcome: (value: typeof outcome) => { outcome = value; },
     gateCancel: () => { let resolve!: () => void; cancelGate = new Promise<void>(done => { resolve = () => { cancelGate = null; done(); }; }); return resolve; },
     preferenceOutcome: (value: typeof preferenceOutcome) => { preferenceOutcome = value; }, cancelOutcome: (value: typeof cancelOutcome) => { cancelOutcome = value; }, unavailable: () => { readError = true; }, available: () => { readError = false; }, conflictDeletes: (count: number) => { deleteConflicts = count; },
     gate: () => { let resolve!: () => void; submitGate = new Promise<void>(done => { resolve = done; }); return resolve; },
@@ -2054,8 +2057,8 @@ describe('the item detail reads like a chat', () => {
   });
 
   it.each([
-    { state: 'queued' as const, source: '76', caption: 'Not sent yet' },
-    { state: 'needs_attention' as const, source: '74', caption: '⚠ Not sent. Your words are kept.' },
+    { state: 'queued' as const, source: '76', caption: 'Not sent yet' as string | null },
+    { state: 'needs_attention' as const, source: '74', caption: null },
   ])('keeps an Open item’s $state message evidence without an on-the-way dock claim', async ({ state, source, caption }) => {
     const { dock, chat } = await view('8', session => {
       const input = structuredClone(session.inputs[demoId(source)]!);
@@ -2064,7 +2067,8 @@ describe('the item detail reads like a chat', () => {
       session.inputs[input.id] = input;
     });
     const pending = chat()!.querySelector<HTMLElement>(`[data-pending="${uuid(90)}"]`)!;
-    expect(within(pending).getByText(caption)).toBeTruthy();
+    // An uncertain stopped delivery is not claimed as "Not sent": StuckNote words it (below).
+    if (caption) expect(within(pending).getByText(caption)).toBeTruthy(); else expect(pending.textContent).not.toContain('Not sent');
     if (state === 'queued') expect(pending.textContent).toContain('Queued behind your message on “Implement receipt lookup”');
     else expect(pending.textContent).toContain('Ariadne isn’t sure it reached');
     expect(dock!.querySelector('.detail-delivery-hint')).toBeNull();
@@ -2125,14 +2129,43 @@ describe('the item detail reads like a chat', () => {
       expect(within(turn).queryByRole('button', { name: 'Undo' })).toBeNull();
     });
 
-    it('offers Retry on “Not sent” only for a delivery the agent never received', async () => {
-      const never = await view('8', reply('needs_attention'));
+    const refused = (_session: Session, input: Session['inputs'][string] & object) => {
+      const attempt = input.attempts.find(value => value.id === input.active_attempt_id)!;
+      Object.assign(attempt, { acceptance: 'rejected', error: null, host_turn_id: null });
+    };
+    it('offers Retry on “Not sent” only for a delivery the host refused', async () => {
+      const never = await view('8', reply('needs_attention', refused));
       const line = never.chat()!.querySelector<HTMLElement>('[data-status="not_sent"]')!;
       expect(line.textContent).toMatch(/^⚠ Not sent\. Your words are kept\.Retry$/u);
       // StuckNote keeps its explanation and its other controls; the Retry is not shown twice.
       const turn = never.chat()!.querySelector<HTMLElement>(`[data-pending="${uuid(90)}"]`)!;
       expect(within(turn).getAllByRole('button', { name: 'Retry' })).toHaveLength(1);
+      expect(turn.querySelector('.stuck-note')).not.toBeNull();
+    });
+
+    it('says nothing is “Not sent” when the delivery is uncertain: StuckNote words it, with its own Retry', async () => {
+      const unsure = await view('8', reply('needs_attention'));
+      const turn = unsure.chat()!.querySelector<HTMLElement>(`[data-pending="${uuid(90)}"]`)!;
+      expect(turn.querySelector('[data-status="not_sent"]')).toBeNull();
+      expect(turn.textContent).not.toContain('Not sent');
       expect(turn.querySelector('.stuck-note')!.textContent).toContain('Ariadne isn’t sure it reached');
+      expect(within(turn).getAllByRole('button', { name: 'Retry' })).toHaveLength(1);
+    });
+
+    it('shows a failed Retry from the “Not sent” line under it', async () => {
+      const never = await view('8', reply('needs_attention', refused));
+      never.value.outcome('error');
+      // The agent is idle, so a resend needs no extra word from the owner.
+      const binding = never.value.session.bindings[never.value.session.active_binding_id!]!;
+      await act(async () => { never.value.emit('ariadne://presence_changed', { binding_id: binding.id, generation: binding.generation, observation: { instance_id: 'i2', generation: binding.generation,
+        connection_state: 'connected', execution_state: 'idle', source: 'host_poll', last_seen_at: new Date().toISOString(), process_identity: null, freshness: 'fresh' } }); });
+      const turn = never.chat()!.querySelector<HTMLElement>(`[data-pending="${uuid(90)}"]`)!;
+      const retry = () => within(turn.querySelector<HTMLElement>('[data-status="not_sent"]')!).getByRole('button', { name: 'Retry' }) as HTMLButtonElement;
+      await waitFor(() => expect(retry().title).not.toMatch(/still working/u));
+      expect(retry().disabled).toBe(false);
+      fireEvent.click(retry());
+      await waitFor(() => expect(turn.querySelector('[data-status="not_sent"]')!.parentElement!.querySelector('.stuck-failure')).not.toBeNull());
+      expect(within(turn.querySelector<HTMLElement>('.stuck-failure')!).getByRole('alert')).toBeTruthy();
     });
 
     it('keeps StuckNote’s own wording and controls, and no “Not sent” line, once the agent has the message', async () => {

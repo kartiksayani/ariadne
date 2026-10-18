@@ -542,10 +542,6 @@
   }
 }
 
-.tree-topic-fix {
-  padding-left: 26px;
-}
-
 .tree-prompt {
   gap: 8px;
   color: color-mix(in srgb, var(--color-text) 64%, transparent);

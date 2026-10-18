@@ -25,7 +25,8 @@ const receiptPath = join(root, 'smoke/receipt.json');
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 60000, interval: 100, timeoutMsg: message });
 async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.click(); }
-// What one surface shows for a saved reply's delivery: its stuck note (when it has words) or else the dock's delivery line.
+// What one surface shows for a saved reply's delivery: its stuck note (when it has words), else the status line under its bubble
+// (alpha.21 E16), else the dock's delivery line.
 // `facts` lists every stuck note and delivery line present, so a failure says what was actually there.
 const replyDelivery = (root, inputId) => browser.execute((root, inputId) => {
   const scope = document.querySelector(root), shown = element => !!element && element.getClientRects().length > 0;
@@ -33,10 +34,13 @@ const replyDelivery = (root, inputId) => browser.execute((root, inputId) => {
     input: note.getAttribute('data-stuck-input'), stuck: note.getAttribute('data-stuck'),
     text: (note.querySelector('[role="status"]')?.textContent ?? '').trim() }));
   const delivery = [...(scope?.querySelectorAll('.detail-delivery[role="status"]') ?? [])].filter(shown).map(line => (line.textContent ?? '').trim());
+  const bubble = [...(scope?.querySelectorAll(`[data-pending="${inputId}"] .detail-bubble-status[data-status]`) ?? [])].filter(shown)
+    .map(line => ({ status: line.getAttribute('data-status'), text: (line.querySelector('span')?.textContent ?? line.textContent ?? '').trim() }));
   const own = notes.find(note => note.input === inputId && note.text !== '');
   const shownState = own ? { kind: 'stuck-note', stuck: own.stuck, text: own.text }
+    : bubble.length ? { kind: 'bubble-status', stuck: bubble[0].status, text: bubble[0].text }
     : delivery.find(text => text !== '') ? { kind: 'delivery', stuck: null, text: delivery.find(text => text !== '') } : null;
-  return { state: shownState, facts: `stuck notes ${JSON.stringify(notes)}; delivery lines ${JSON.stringify(delivery)}` };
+  return { state: shownState, facts: `stuck notes ${JSON.stringify(notes)}; bubble status ${JSON.stringify(bubble)}; delivery lines ${JSON.stringify(delivery)}` };
 }, root, inputId);
 const invoke = (command, request) => browser.execute(async (command, request) => {
   try { return { ok: true, data: await window.__TAURI_INTERNALS__.invoke(command, { request }) }; }
@@ -249,15 +253,17 @@ async function delivery(configuration) {
       assert.equal(saved.state, 'queued', 'The conversation reply queues behind the held answer');
       const pending = await browser.$(`section[aria-label="Item conversation"] [data-pending="${saved.id}"]`);
       await pending.waitForExist(); await pending.scrollIntoView({ block: 'center' });
-      await wait(async () => await pending.isDisplayed() && folded(await pending.getText()).includes(folded(text))
-        && (await pending.getText()).includes('Not sent yet'), 'The conversation reply and its queued delivery were not visible');
-      // Behind the held answer the reply shows a stuck note instead of the dock line, and the wording depends on the stage.
+      await wait(async () => await pending.isDisplayed() && folded(await pending.getText()).includes(folded(text)), 'The conversation reply was not visible');
+      // Behind the held answer the reply shows a stuck note or its bubble status instead of the dock line, and the wording depends on the stage.
       // So capture whichever the view shows for the reply and require the detail pane to show the same kind with the same text.
       const viewRoot = 'section[aria-label="Item conversation"]', paneRoot = '.item-detail:not(.item-conversation)';
       let viewShown = await replyDelivery(viewRoot, saved.id);
       try { await wait(async () => (viewShown = await replyDelivery(viewRoot, saved.id)).state !== null, 'unused'); }
       catch { assert.fail(`The bigger conversation view did not show a delivery state for the saved reply; it had ${viewShown.facts}`); }
       const expected = viewShown.state;
+      // A reply still queued behind the held answer is "Sent" or has a stuck note; it is never "Picked up".
+      assert.ok(expected.kind === 'stuck-note' || expected.kind === 'delivery' || expected.kind === 'bubble-status' && expected.stuck === 'sent',
+        `A queued reply must read as sent or stuck, never picked up; the view showed ${JSON.stringify(expected)}`);
       await browser.saveScreenshot(join(evidence, 'native-item-conversation.png'));
       const back = await browser.$('section[aria-label="Item conversation"]').$('button[aria-label="Back to Map"]');
       await back.waitForDisplayed(); await back.waitForEnabled(); await back.click();
