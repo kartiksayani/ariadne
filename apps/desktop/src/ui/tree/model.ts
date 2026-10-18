@@ -206,6 +206,8 @@ export interface ItemRow {
   readonly hasKids: boolean;
   readonly expanded: boolean;
   readonly context: boolean;
+  /** Shown only because it was revealed or selected: the filter would leave it out (SPEC 11.4). */
+  readonly outside?: boolean;
   readonly guides: readonly Guide[];
   readonly later: boolean;
   readonly hidden: boolean;
@@ -291,7 +293,7 @@ export interface TreeModel {
   readonly rows: readonly Row[];
   /** A status, owner or Later filter scopes the rows. A search never does. */
   readonly filtering: boolean;
-  /** "Showing an item outside your current filters." */
+  /** An item is shown that the filters would leave out (SPEC 11.4): the Map raises a notice and tags the row. */
   readonly outside: boolean;
   readonly noMatch: boolean;
   /** The session has no items at all. */
@@ -423,7 +425,7 @@ export function treeModel(input: TreeInput): TreeModel {
         if (holdsTerms(item.question, terms)) matches.push('question');
         if (outcomeShown(item, parked, replacedBy) && holdsTerms(item.outcome, terms)) matches.push('outcome');
         built.push({ kind: 'item', key: item.id, item, sessionClosed: closedSessionQuestion(session, item), status: display(item), ack: ackTarget(session, item), depth, hasKids: children.length > 0, expanded: open,
-          hidden: hidden.has(item.id), context: filtering && !matched.has(item.id) && !forced.has(item.id), later: parked,
+          hidden: hidden.has(item.id), context: filtering && !matched.has(item.id) && !forced.has(item.id), outside: filtering && forced.has(item.id) && !matched.has(item.id), later: parked,
           segments: matches.includes('question') ? hitSegments(item.question, terms) : [{ text: item.question, hit: false }], matches,
           replacedBy,
           relatedCount: connectedItems(session, item.id).length,

@@ -88,6 +88,9 @@ function inTree(id: string) {
   expect(rectangle.bottom).toBeLessThanOrEqual(400);
 }
 
+/** SPEC 11.4: the notice for an item the filter would leave out. */
+const outsideNotice = /^Showing “.+”, which is outside your filter\b.*\.$/;
+
 describe('composed item navigation', () => {
   it('opens and focuses the owner answer behind a change, then consumes the jump', async () => {
     const value = changesFixture(), transport = new AppTransport();
@@ -318,7 +321,7 @@ describe('composed map reveal scrolling', () => {
     await click(control('Graph'));
     const target = () => document.querySelector<HTMLElement>('.graph-node[data-item-id="1.1"]');
     expect(target()).toBeNull();
-    expect(screen.queryByText('Showing an item outside your current filters.')).toBeNull();
+    expect(screen.queryByText(outsideNotice)).toBeNull();
     const before = transport.queries.filter(query => query.request.command === 'reveal_item').length;
     // The Graph has no Reveal selected button (SPEC 1.3); an outside route (a link, the dock, a native route) reveals it.
     await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '1.1' }); });
@@ -344,10 +347,10 @@ describe('composed map reveal scrolling', () => {
     expect((await searchBox()).value).toBe(saved.filters.search);
     // Only a status filter puts the item outside the filters; a search, matching or not, filters nothing.
     if (cause === 'status') {
-      expect(screen.getByText('Showing an item outside your current filters.')).toBeTruthy();
-      await click(screen.getByRole('button', { name: 'Resume filtered view' }));
+      expect(await screen.findByText(outsideNotice)).toBeTruthy();
+      await click(screen.getByRole('button', { name: 'Hide it again' }));
       expect(target()).toBeNull();
-      expect(screen.queryByText('Showing an item outside your current filters.')).toBeNull();
+      expect(screen.queryByText(outsideNotice)).toBeNull();
       expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!.filters).toEqual(saved.filters);
     }
   });

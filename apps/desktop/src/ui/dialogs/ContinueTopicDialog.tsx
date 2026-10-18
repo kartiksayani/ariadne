@@ -1,26 +1,26 @@
-// "Continue in this session" (frame 1y), ported from Ariadne.dc.html:509-520 and
-// projectVals 1743-1760. The preview and its checks are those of the former
-// Continue topic dialog: both sessions are refreshed, `topic_continue_preview`
-// is validated against the source snapshot, and Send runs `topic_continue`
-// with the reviewed source and target revisions. A topic continued from its own
-// session first picks the session that takes it over (ContinuePicker).
-import { useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
+// Two-step Continue (SPEC 10.7, 10.8, E26). Step 1 asks which session takes the topic over (ContinuePicker); step 2 reviews the
+// summary, which is editable and is exactly the text that Send hands over. Both are one flow in ContinueTopicHost, so Back works.
+// The preview and its checks are those of the former Continue topic dialog: both sessions are refreshed,
+// `topic_continue_preview` is validated against the source snapshot, and Send runs `topic_continue` with the reviewed
+// source and target revisions. Never send twice: an uncertain Send freezes the summary and the target; Check again retries it.
+import { useEffect, useId, useMemo, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import { immutable, plainFailure, ServiceFailure, useSession, type Immutable } from '../../data';
 import type { ContinuePreview, SessionRef } from '../../generated/core';
-import type { Session, SessionSummary } from '../../generated/domain/models';
-import type { NavigationStore } from '../../state/navigation/store';
+import type { ProjectSummary, Session, SessionSummary } from '../../generated/domain/models';
+import { useNavigation, type NavigationStore } from '../../state/navigation/store';
 import { useSessionActions, type SessionActionControllers } from '../../components/bindings/actions';
 import { sameRoute } from '../../components/history-actions/selectors';
-import { continueGroups } from '../pages/model';
+import { clockTime } from '../changes/clock';
 import { agentName, ownerDescription, ownerName } from '../shell/model';
-import { Dialog } from './Dialog';
+import { DialogActions, DialogButton, DialogError, DialogFrame, DialogText, DialogTitle } from './DialogFrame';
+import './continue.css';
 
 export interface ContinueRequest {
   /** The session that holds the topic. */
   readonly source: SessionRef;
   readonly topicId: string;
-  /** The session that continues it. */
-  readonly target: SessionRef;
+  /** The session that continues it. Without one, the flow starts at the picker. */
+  readonly target?: SessionRef;
   /** Runs once after this request's topic was sent, before the host's onSent. */
   readonly onSent?: (target: SessionRef) => void;
 }
@@ -31,46 +31,51 @@ const publish = (next: ContinueRequest | null) => { current = next; listeners.fo
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
 const snapshot = () => current;
 
-/** Opens the Continue dialog for `topicId` of `source` in `target`. */
+/** Opens Continue for `topicId` of `source`: at the picker, or at the summary when `target` is given. */
 export function openContinueTopic(request: ContinueRequest): void { publish(request); }
 
 /** A session that can take a topic over. */
 export interface ContinueTarget { readonly route: SessionRef; readonly label: string; readonly detail: string }
 
 /** The sessions a topic of `source` can continue in: the other active sessions, those of its own project first. */
-export function continueTargets(source: SessionRef, sessions: readonly Immutable<SessionSummary>[]): ContinueTarget[] {
+export function continueTargets(source: SessionRef, sessions: readonly Immutable<SessionSummary>[], projects: readonly Immutable<ProjectSummary>[] = []): ContinueTarget[] {
   const own = (session: Immutable<SessionSummary>) => session.project_id === source.project_id;
+  const where = (session: Immutable<SessionSummary>) => own(session) ? 'this project'
+    : projects.find(project => project.project_id === session.project_id)?.project?.display_name ?? 'another project';
   return sessions.filter(session => session.archived_at == null && session.state === 'active' && !sameRoute(session, source))
     .sort((a, b) => Number(own(b)) - Number(own(a)))
     .map(session => {
       const binding = session.active_binding;
       const agent = binding ? agentName(binding.adapter_id) : 'No agent connected';
-      const running = binding?.connection_state === 'connected' ? 'running' : 'not running';
+      const running = binding?.connection_state === 'connected' ? 'running' : 'not running, so the summary queues';
       return { route: { project_id: session.project_id, session_id: session.session_id }, label: ownerName(session) ?? session.title,
-        detail: [binding ? `${agent} · ${running}` : agent, ownerDescription(session), own(session) ? null : 'another project'].filter(Boolean).join(' · ') };
+        detail: [binding ? `${agent} · ${running}` : agent, ownerDescription(session), where(session)].filter(Boolean).join(' · ') };
     });
 }
 
-/** Asks which session takes the topic over; Continue then reviews the summary for that session. */
-export function ContinuePicker({ topicName, targets, onPick, onCancel }: {
+/** Step 1 (SPEC 10.7): asks which session picks the topic up. Nothing is sent from here. */
+export function ContinuePicker({ topicName, targets, unlisted, onPick, onCancel }: {
   readonly topicName: string; readonly targets: readonly ContinueTarget[];
+  /** A closed or archived session that can't take a topic, named in the note under the list. */
+  readonly unlisted?: string;
   readonly onPick: (target: SessionRef) => void; readonly onCancel: () => void;
 }) {
   const id = useId(), title = `Continue “${topicName}” in another session`;
-  return <Dialog label={title} width={520} onCancel={onCancel}>
-    <div className="dialog-title">{title}</div>
-    <div className="pw-dialog-lead">Choose the session that picks this topic up. You review the summary before anything is sent.</div>
+  return <DialogFrame label={title} onCancel={onCancel}>
+    <DialogTitle>{title}</DialogTitle>
+    <DialogText>Choose the session that picks this topic up. You review the summary before anything is sent.</DialogText>
     {targets.length
-      ? <div className="pw-continue-targets" role="group" aria-label="Sessions"><div className="pw-dialog-options">
+      ? <div className="dg-continue-targets" role="group" aria-label="Sessions">
         {targets.map((target, index) => <button key={`${target.route.project_id}/${target.route.session_id}`} type="button"
-          className="btn btn-secondary pw-dialog-option" aria-labelledby={`${id}-${index}`} aria-describedby={`${id}-${index}-detail`}
+          className="dg-continue-option" aria-labelledby={`${id}-${index}`} aria-describedby={`${id}-${index}-detail`}
           onClick={() => onPick(target.route)}>
-          <span id={`${id}-${index}`} className="pw-dialog-option-label"><i className="ph ph-arrow-bend-down-right" aria-hidden="true" />{target.label}</span>
-          <span id={`${id}-${index}-detail`} className="pw-dialog-option-desc">{target.detail}</span></button>)}
-      </div></div>
-      : <div className="pw-continue-status">No other open session can take this topic.</div>}
-    <div className="dialog-actions"><button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button></div>
-  </Dialog>;
+          <span id={`${id}-${index}`} className="dg-continue-option-label"><i className="ph ph-arrow-bend-down-right" aria-hidden="true" />{target.label}</span>
+          <span id={`${id}-${index}-detail`} className="dg-continue-option-desc">{target.detail}</span></button>)}
+      </div>
+      : <DialogText>No other open session can take this topic.</DialogText>}
+    {unlisted && <div className="dg-hint dg-continue-note"><i className="ph ph-info" aria-hidden="true" />{`Closed and archived sessions can’t take a topic, so “${unlisted}” isn’t listed.`}</div>}
+    <DialogActions><DialogButton kind="ghost" kbd="esc" onClick={onCancel}>Cancel</DialogButton></DialogActions>
+  </DialogFrame>;
 }
 
 interface Prepared { readonly preview: Immutable<ContinuePreview>; readonly source: Immutable<Session>; readonly targetRevision: number }
@@ -90,18 +95,30 @@ const blockedText = (reasons: readonly string[], agent: string) => reasons.inclu
   ? 'This topic is already in this session. Restore it from the archive instead.'
   : `${agent} can’t take this topic now: ${reasons.map(reason => blockedWords[reason] ?? 'something changed').join(', ')}.`;
 
-function ContinueTopicDialog({ request, navigation, actions, onSent, onClose }: {
-  readonly request: ContinueRequest; readonly navigation: NavigationStore; readonly actions: SessionActionControllers;
-  readonly onSent?: (target: SessionRef) => void; readonly onClose: () => void;
+const topicKey = (source: SessionRef, topicId: string) => `${source.project_id}/${source.session_id}/${topicId}`;
+const summaryKey = (source: SessionRef, topicId: string, target: SessionRef) => `${topicKey(source, topicId)}/${target.project_id}/${target.session_id}`;
+/** The owner's edited summary per (session, topic, target): Esc, Back and a closed dialog keep it until it is sent. */
+const summaryDrafts = new Map<string, string>();
+/** A Send whose result is uncertain: reopening the topic goes straight back to it, on the same target. */
+const uncertainTargets = new Map<string, SessionRef>();
+
+/** Step 2 (SPEC 10.8): the editable summary. Send hands over exactly the text in the box. */
+function ContinueReview({ request, target, navigation, actions, summaries, onBack, onSent, onClose }: {
+  readonly request: ContinueRequest; readonly target: SessionRef; readonly navigation: NavigationStore; readonly actions: SessionActionControllers;
+  readonly summaries: readonly Immutable<SessionSummary>[];
+  readonly onBack: () => void; readonly onSent?: (target: SessionRef) => void; readonly onClose: () => void;
 }) {
   const sourceStore = useMemo(() => navigation.opened.open(request.source), [navigation, request.source]);
-  const targetStore = useMemo(() => navigation.opened.open(request.target), [navigation, request.target]);
+  const targetStore = useMemo(() => navigation.opened.open(target), [navigation, target]);
   const sourceState = useSession(sourceStore), targetState = useSession(targetStore);
   const targetActions = actions.forSession(targetStore), operation = useSessionActions(targetActions);
   const [prepared, setPrepared] = useState<Prepared | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [sentAt, setSentAt] = useState<string | null>(null);
+  const key = summaryKey(request.source, request.topicId, target), topic = topicKey(request.source, request.topicId);
+  const [edited, setEdited] = useState<string | null>(() => summaryDrafts.get(key) ?? null);
   useEffect(() => {
     let cancelled = false;
     setLoading(true); setError(null); setPrepared(null);
@@ -109,80 +126,128 @@ function ContinueTopicDialog({ request, navigation, actions, onSent, onClose }: 
       await Promise.all([targetStore.refresh(), sourceStore.refresh()]);
       const route = sourceStore.getSnapshot().route;
       const preview = await navigation.service.query({ session: null, request: { command: 'topic_continue_preview', params: {
-        source: structuredClone(route), source_topic_id: request.topicId, target: structuredClone(request.target),
+        source: structuredClone(route), source_topic_id: request.topicId, target: structuredClone(target),
       } } });
       const read = await navigation.service.query({ session: structuredClone(route), request: { command: 'session_get', params: {} } });
-      const source = read.session, target = targetStore.getSnapshot();
-      if (!sameRoute(preview.source, route) || !sameRoute(preview.target, request.target)
+      const source = read.session, current = targetStore.getSnapshot();
+      if (!sameRoute(preview.source, route) || !sameRoute(preview.target, target)
           || preview.source_topic_id !== request.topicId || source.id !== preview.source.session_id || source.project_id !== preview.source.project_id
           || source.revision !== preview.source_revision || !source.topics[request.topicId]
-          || !target.snapshot || target.status !== 'ready' || target.error
+          || !current.snapshot || current.status !== 'ready' || current.error
           || preview.mapping.some(mapping => source.items[mapping.source_item_id]?.topic_id !== request.topicId)) {
         throw new ServiceFailure('invalid_response');
       }
-      if (!cancelled) setPrepared({ preview: immutable(preview), source: immutable(source), targetRevision: target.snapshot.session.revision });
+      if (!cancelled) setPrepared({ preview: immutable(preview), source: immutable(source), targetRevision: current.snapshot.session.revision });
     })().catch((failure: unknown) => { if (!cancelled) setError(plainFailure(failure, 'The summary could not be prepared. Try again.')); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [navigation, sourceStore, targetStore, request, attempt]);
+  }, [navigation, sourceStore, targetStore, request, target, attempt]);
   const preview = prepared?.preview;
   const source = prepared?.source ?? sourceState.snapshot?.session;
-  const topic = source?.topics[request.topicId];
-  const agent = agentOf(targetState.snapshot?.session), fromAgent = agentOf(source);
-  const stale = !!prepared && (sourceState.snapshot?.session.revision !== preview?.source_revision
+  const sourceTopic = source?.topics[request.topicId];
+  const agent = agentOf(targetState.snapshot?.session);
+  const summary = summaries.find(value => sameRoute(value, target));
+  const targetName = (summary ? ownerName(summary) ?? summary.title : null) ?? targetState.snapshot?.session.title ?? 'that session';
+  // An unconfirmed write of the target belongs to this flow only when it is this topic's own Send to this target.
+  // Any other (another topic's Continue, a rename) is still being checked by someone else: Check again would retry that, not this.
+  const pendingCommand = operation.pending?.command;
+  const pendingContinue = pendingCommand?.command === 'topic_continue' && sameRoute(pendingCommand.params.source, request.source)
+    && pendingCommand.params.source_topic_id === request.topicId && sameRoute(pendingCommand.params.target, target) ? pendingCommand : null;
+  const foreign = !!operation.pending && !pendingContinue;
+  // An uncertain Send keeps its exact words and its target: the summary shows what was sent, not what is in the draft.
+  const value = pendingContinue ? pendingContinue.params.summary : edited ?? preview?.summary ?? '';
+  useEffect(() => {
+    if (pendingContinue) uncertainTargets.set(topic, target);
+    else if (uncertainTargets.has(topic) && !operation.writing && sentAt === null) uncertainTargets.delete(topic);
+  }, [pendingContinue, topic, target, operation.writing, sentAt]);
+  const stale = !!prepared && !pendingContinue && (sourceState.snapshot?.session.revision !== preview?.source_revision
     || targetState.snapshot?.session.revision !== prepared.targetRevision);
-  const disabled = loading || !prepared || preview?.readiness.kind !== 'ready' || stale || operation.writing || !!operation.pending
+  const blocked = loading || !prepared || preview?.readiness.kind !== 'ready' || stale || operation.writing || !!operation.pending
     || sourceState.status !== 'ready' || !!sourceState.error || targetState.status !== 'ready' || !!targetState.error;
-  const close = () => { if (!operation.writing) onClose(); };
+  const disabled = blocked || !value.trim();
+  const writing = operation.writing;
+  const close = () => { if (!writing) onClose(); };
+  const done = (when: Date) => { summaryDrafts.delete(key); uncertainTargets.delete(topic); setSentAt(clockTime(when)); onSent?.(target); };
   const send = async () => {
-    if (disabled || !prepared || prepared.preview.readiness.kind !== 'ready') return;
-    const value = prepared.preview;
+    if (sentAt !== null || disabled || !prepared || prepared.preview.readiness.kind !== 'ready') return;
+    const reviewed = prepared.preview;
     if (await targetActions.execute({ command: 'topic_continue', api_version: 1, op_id: '', params: {
-      source: structuredClone(value.source), source_topic_id: value.source_topic_id, source_revision: value.source_revision,
-      source_sha256: value.source_sha256, target: structuredClone(value.target), target_binding_id: prepared.preview.readiness.binding_id,
-      summary: value.summary,
-    } }, prepared.targetRevision)) { onClose(); onSent?.(request.target); }
+      source: structuredClone(reviewed.source), source_topic_id: reviewed.source_topic_id, source_revision: reviewed.source_revision,
+      source_sha256: reviewed.source_sha256, target: structuredClone(reviewed.target), target_binding_id: prepared.preview.readiness.binding_id,
+      summary: value,
+    } }, prepared.targetRevision)) done(new Date());
   };
-  const title = `Continue “${topic?.name ?? 'this topic'}” in this session`;
-  return <Dialog label={title} width={580} onCancel={close} onConfirm={() => { void send(); }}>
-    <div className="dialog-title">{title}</div>
-    <div className="pw-dialog-lead">{`Ariadne sends ${agent} this summary so it can pick up where ${fromAgent} left off. Item references stay the same, and new items join this topic.`}</div>
-    {/* data-summary is the exact text Send hands over; the groups below are its readable form. */}
-    <div className="pw-continue-summary" aria-label="Summary" data-summary={preview?.summary}>
-      {loading && <div className="pw-continue-status" role="status">Preparing the summary…</div>}
-      {error && <div className="pw-dialog-error" role="alert">{error}</div>}
-      {prepared && preview && continueGroups(prepared.source, preview).map(group => <div key={group.title} className="pw-continue-group">
-        <div className="pw-continue-group-title" style={{ color: group.color }}><i className={group.icon} aria-hidden="true" />{group.title}</div>
-        {group.lines.map(line => <div key={line.id} className="pw-continue-line"><span>{line.text}</span></div>)}
-      </div>)}
-      {preview?.readiness.kind === 'blocked' && <div className="pw-dialog-error" role="alert">{blockedText(preview.readiness.reasons, agent)}</div>}
-      {preview?.readiness.kind === 'ready' && !preview.readiness.host_available
-        && <div className="pw-continue-status">{`${agent} isn’t running, so the summary waits until it runs again.`}</div>}
+  const title = `Continue “${sourceTopic?.name ?? 'this topic'}” in “${targetName}”`;
+  const sentLine = `✓ Sent once at ${sentAt}. ${agent} in “${targetName}” ${preview?.readiness.kind === 'ready' && !preview.readiness.host_available
+    ? 'will pick the topic up when it runs' : 'is picking the topic up'}.`;
+  const keys = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void send(); }
+  };
+  return <DialogFrame label={title} width={560} onCancel={close}>
+    <div className="dg-continue" onKeyDown={keys}>
+      <DialogTitle>{title}</DialogTitle>
+      <DialogText>{`${agent} in “${targetName}” gets this summary as one message, then picks the topic up. Edit it first if you like.`}</DialogText>
+      <div className="dg-field">
+        <label className="dg-label" htmlFor="dg-continue-summary">Summary</label>
+        {loading && !pendingContinue
+          ? <div className="dg-continue-status" role="status">Preparing the summary…</div>
+          : <textarea id="dg-continue-summary" className="dg-input dg-textarea" rows={7} aria-label="Summary" data-summary={preview?.summary}
+            value={value} readOnly={!!operation.pending || writing || sentAt !== null} onChange={event => { setEdited(event.target.value); summaryDrafts.set(key, event.target.value); }} />}
+      </div>
+      {error && <DialogError>{error}</DialogError>}
+      {preview?.readiness.kind === 'blocked' && <DialogError>{blockedText(preview.readiness.reasons, agent)}</DialogError>}
+      {preview?.readiness.kind === 'ready' && !preview.readiness.host_available && sentAt === null
+        && <div className="dg-continue-status">{`${agent} isn’t running, so the summary waits until it runs again.`}</div>}
+      {stale && <DialogError>The topic or this session changed. Prepare the summary again before sending.</DialogError>}
+      {foreign && <div className="dg-continue-status" role="status">{pendingCommand?.command === 'topic_continue'
+        ? 'Another continue to this session is still being checked.' : 'Another change to this session is still being checked.'}</div>}
+      {operation.error && !foreign && <div style={{ display: 'contents' }} data-operation-id={operation.pending?.command.op_id}><DialogError>{`${plainFailure(operation.error)} ${operation.pending
+        ? 'Ariadne isn’t sure the summary was sent. Check again before sending it a second time.' : 'Nothing was sent.'}`}</DialogError></div>}
+      {sentAt === null && !writing && <div className="dg-hint dg-continue-note"><i className="ph ph-info" aria-hidden="true" />{`The topic stays here too, marked “Continued in ${targetName}”.`}</div>}
+      {writing && <div className="dg-continue-status" role="status">{`Sending to ${agent}…`}</div>}
+      {sentAt !== null && <div className="dg-continue-sent" role="status">{sentLine}</div>}
+      <DialogActions>
+        {sentAt !== null ? <DialogButton kind="primary" autoFocus onClick={onClose}>Done</DialogButton> : <>
+          <span className="dg-continue-back"><DialogButton kind="ghost" disabled={writing || !!pendingContinue} onClick={onBack}>← Back</DialogButton></span>
+          {(stale || error) && !operation.pending && <DialogButton kind="ghost" disabled={loading || writing} onClick={() => setAttempt(count => count + 1)}>Prepare again</DialogButton>}
+          <DialogButton kind="ghost" kbd="esc" disabled={writing} onClick={close}>Cancel</DialogButton>
+          {foreign ? null : operation.pending && !writing
+            ? <DialogButton kind="primary" onClick={() => {
+              void targetActions.retry().then(saved => { if (saved) done(new Date()); });
+            }}>Check again</DialogButton>
+            : <DialogButton kind="primary" icon="ph ph-paper-plane-right" kbd="⌘↵" disabled={disabled} onClick={() => { void send(); }}>{writing ? 'Sending…' : 'Send summary'}</DialogButton>}
+        </>}
+      </DialogActions>
     </div>
-    {stale && <div className="pw-dialog-error" role="alert">The topic or this session changed. Prepare the summary again before sending.</div>}
-    {operation.error && <div className="pw-dialog-error" role="alert" data-operation-id={operation.pending?.command.op_id}>{plainFailure(operation.error)} {operation.pending
-      ? 'Ariadne isn’t sure the summary was sent. Check again before sending it a second time.' : 'Nothing was sent.'}</div>}
-    <div className="dialog-actions">
-      {(stale || error) && !operation.pending && <button type="button" className="btn btn-ghost" disabled={loading || operation.writing}
-        onClick={() => setAttempt(value => value + 1)}>Prepare again</button>}
-      <button type="button" className="btn btn-ghost" disabled={operation.writing} onClick={close}>Cancel</button>
-      {operation.pending
-        ? <button type="button" className="btn btn-primary" disabled={operation.writing} onClick={() => {
-          void targetActions.retry().then(saved => { if (saved) { onClose(); onSent?.(request.target); } });
-        }}>Check again</button>
-        : <button type="button" className="btn btn-primary" disabled={disabled} onClick={() => { void send(); }}>
-          <i className="ph ph-paper-plane-right" aria-hidden="true" />{`Send to ${agent}`}</button>}
-    </div>
-  </Dialog>;
+  </DialogFrame>;
 }
 
-/** Mount once in the app; shows the dialog while a request is open. */
+/** The whole flow: the picker, then the review; Back returns to the picker unless a Send is uncertain. */
+function ContinueFlow({ request, navigation, actions, onSent, onClose }: {
+  readonly request: ContinueRequest; readonly navigation: NavigationStore; readonly actions: SessionActionControllers;
+  readonly onSent?: (target: SessionRef) => void; readonly onClose: () => void;
+}) {
+  const catalogue = useNavigation(navigation);
+  const summaries = catalogue.sessions?.sessions.items ?? [], projects = catalogue.projects?.projects.items ?? [];
+  // A topic with an uncertain Send reopens on that target: another target would send it twice.
+  const [target, setTarget] = useState<SessionRef | null>(() => uncertainTargets.get(topicKey(request.source, request.topicId)) ?? request.target ?? null);
+  const sourceState = useSession(useMemo(() => navigation.opened.open(request.source), [navigation, request.source]));
+  if (target) return <ContinueReview key={`${target.project_id}/${target.session_id}`} request={request} target={target} navigation={navigation} actions={actions}
+    summaries={summaries} onBack={() => setTarget(null)} onSent={onSent} onClose={onClose} />;
+  const unlisted = summaries.find(session => !sameRoute(session, request.source) && (session.archived_at != null || session.state !== 'active'));
+  return <ContinuePicker topicName={sourceState.snapshot?.session.topics[request.topicId]?.name ?? 'this topic'} targets={continueTargets(request.source, summaries, projects)}
+    unlisted={unlisted ? ownerName(unlisted) ?? unlisted.title : undefined} onPick={setTarget} onCancel={onClose} />;
+}
+
+/** Mount once in the app; shows the flow while a request is open. */
 export function ContinueTopicHost({ navigation, actions, onSent }: {
   readonly navigation: NavigationStore; readonly actions: SessionActionControllers; readonly onSent?: (target: SessionRef) => void;
 }) {
   const request = useSyncExternalStore(subscribe, snapshot, snapshot);
+  // The request belongs to this host: an app that goes away takes an open flow with it.
+  useEffect(() => () => { if (current) publish(null); }, []);
   if (!request) return null;
-  return <ContinueTopicDialog key={JSON.stringify(request)} request={request} navigation={navigation} actions={actions}
+  return <ContinueFlow key={JSON.stringify([request.source, request.topicId, request.target])} request={request} navigation={navigation} actions={actions}
     onSent={target => { request.onSent?.(target); onSent?.(target); }}
     onClose={() => { if (current === request) publish(null); }} />;
 }

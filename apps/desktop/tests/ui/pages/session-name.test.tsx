@@ -69,7 +69,7 @@ describe('every place that names a session shows the name', () => {
     const other = summary({ session_id: secondId, name: 'Sync fixes', description: 'Retries' });
     const [target] = continueTargets({ project_id: route.project_id, session_id: '00000000-0000-4000-8000-0000000000aa' }, [other]);
     expect(target!.label).toBe('Sync fixes');
-    expect(target!.detail).toBe('demo.local · running · Retries');
+    expect(target!.detail).toBe('demo.local · running · Retries · this project');
     const [plain] = continueTargets({ project_id: route.project_id, session_id: '00000000-0000-4000-8000-0000000000aa' }, [summary({ session_id: secondId })]);
     expect(plain!.label).toBe(sessionsFixture.items[0]!.title);
   });

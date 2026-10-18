@@ -5,7 +5,6 @@ import { activeItems, itemRemoved, removedRoots, removedSubtree } from '../../se
 // and the empty and loading states. Selection, expansion, topic folds and filters
 // persist through navigation's preference writer.
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import { OwnFailure, plainFailure, useSession, type Immutable, type SessionStore } from '../../data';
 import type { RevealedItem } from '../../data/routes';
 import type { ItemRoute, SessionPreferences } from '../../generated/core';
@@ -39,7 +38,7 @@ import { StuckNote } from '../answer/StuckNote';
 import { editQueued, inEditor } from '../answer/held';
 import { InlineRecovery } from '../../components/recovery/RecoveryPanel';
 import { Banner } from './Banner';
-import { FilterRow } from './FilterRow';
+import { FilterRow, chipLabel } from './FilterRow';
 import { useLocalChips } from './useLocalChips';
 import { chipCounts, filterActive, filterOf, filterSignature, isLocalChip, pickedChips, summaryCounts, toggleLocalChip, toggleSavedChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
 import { useSessionLifecycleFor } from '../shared/SessionLifecycleOwner';
@@ -54,7 +53,7 @@ import { displayStatus } from '../../selectors/waiting/replied';
 import { sessionAnswerBlocked } from '../../selectors/sessionClosed';
 import { useUnfolded } from './unfold';
 import type { RemoveTarget } from '../dialogs/remove';
-import { ContinuePicker, continueTargets, openContinueTopic } from '../dialogs/ContinueTopicDialog';
+import { openContinueTopic } from '../dialogs/ContinueTopicDialog';
 import { useHidden } from '../remove/queue';
 import { visibleSession } from '../remove/model';
 import { useFilterFolds } from '../shared/filterFolds';
@@ -103,7 +102,7 @@ export interface TreeViewProps {
   /** The tree selected an item; restoration preserves the current detail state. */
   readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
   readonly onDismissReveal: () => void;
-  /** "Resume filtered view": drop the reveal and close its detail. */
+  /** "Hide it again" on the outside-filter notice: drop the reveal and close its detail. */
   readonly onResume: () => void;
   readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
   readonly onClearFilters: () => void;
@@ -188,7 +187,6 @@ export function TreeView(props: TreeViewProps) {
   const seen = useReadingSeen(navigation.reading, preferences, route);
   const changes = useMemo(() => session ? mapChanges(session, seen) : null, [session, seen]);
   const [kbd, setKbd] = useState(false);
-  const [continuing, setContinuing] = useState<string | null>(null);
   const [replying, setReplying] = useState<string | null>(null);
   useEffect(() => navigationVisits.bind(navigation), [navigation]);
   useOwnerDrafts(drafts, raw);
@@ -535,8 +533,6 @@ export function TreeView(props: TreeViewProps) {
 
   // ⇧F and c act on the current view's selected item: the bigger view's item while it covers the tree.
   const actingItem = () => { const id = covered ? props.actingId ?? null : selectedId; return id ? session?.items[id] : undefined; };
-  // The bigger view makes the Map inert; the dialogs its keys open (Recent, Continue) show above it instead.
-  const lift = (node: ReactNode) => covered ? createPortal(node, scroller.current?.closest('.product-app') ?? document.body) : node;
   const toggleSelectedFocus = () => {
     if (focusDisabled) return false;
     if (focusedId) { focusBranch(null); return true; }
@@ -551,7 +547,7 @@ export function TreeView(props: TreeViewProps) {
     // As the topic band offers it: not for a topic continued from elsewhere, nor while a topic reply is on its way.
     if (session?.topics[item.topic_id]?.origin) return false;
     if (latest.current.rows.some(row => row.kind === 'topic' && row.topic.id === item.topic_id && row.delivery)) return false;
-    setContinuing(item.topic_id); return true;
+    openContinueTopic({ source: route, topicId: item.topic_id }); return true;
   };
   useIntents({
     'focus.toggle': toggleSelectedFocus,
@@ -1215,7 +1211,7 @@ export function TreeView(props: TreeViewProps) {
       next: <NextUnseen position={at >= 0 ? at + 1 : null} total={unseen.length} onNext={() => nextCallbacks.current()} />,
       focus: <FocusButton focusedName={focusedName} canFocus={!!actingItem()} busy={focusDisabled} onToggle={() => { toggleSelectedFocus(); }} />,
       continue: row.topic.origin ? undefined
-        : <ContinueButton disabled={!!row.delivery} title="A reply to this topic is on its way" onContinue={() => setContinuing(id)} />,
+        : <ContinueButton disabled={!!row.delivery} title="A reply to this topic is on its way" onContinue={() => openContinueTopic({ source: route, topicId: id })} />,
       menu: <TopicMenu topicName={row.topic.name} dismissKey={row.key}
         reply={{ run: () => setReplying(id), unavailable: replyBlocked }}
         bin={{ count: binItems, open: () => binView.reveal(route, id) }}
@@ -1310,6 +1306,22 @@ export function TreeView(props: TreeViewProps) {
     body = <div className="tree-no-match"><div className="tree-no-match-title">No archived topics in this session.</div></div>;
   } else body = tree;
 
+  // SPEC 11.4: an item shown only because it was opened. The notice floats, so the Map never moves; the row carries the tag.
+  const outsideRow = model?.rows.find(row => row.kind === 'item' && row.outside);
+  const outsideName = outsideRow?.kind === 'item' ? names.get(outsideRow.item.id) ?? shortLabel(outsideRow.item) : null;
+  const outsideFilter = scope ? pickedChips(scope).map(chipLabel).join(', ') : '';
+  const outsideNoticeId = JSON.stringify(['tree-outside-filter', route.project_id, route.session_id]);
+  const outsideCallbacks = useRef({ resume, clearChips });
+  outsideCallbacks.current = { resume, clearChips };
+  useEffect(() => () => noticeStore.dismiss(outsideNoticeId), [outsideNoticeId]);
+  useEffect(() => {
+    if (outsideName === null) { noticeStore.dismiss(outsideNoticeId); return; }
+    noticeStore.push({ id: outsideNoticeId, icon: 'ph ph-funnel', tone: 'neutral',
+      text: `Showing “${outsideName}”, which is outside your filter${outsideFilter ? ` (${outsideFilter})` : ''}.`,
+      actions: [{ label: 'Hide it again', dismissOnRun: true, run: () => { outsideCallbacks.current.resume(); } },
+        { label: 'Clear filter', dismissOnRun: true, run: () => { outsideCallbacks.current.clearChips(); } }] });
+  }, [outsideNoticeId, outsideName, outsideFilter]);
+
   // "↓ Back to “name” ." (SPEC §5.8 8.5): floats over the Map while the selected row is out of view, at the top or above the
   // dock by the side it went; `.` does the same. It covers rows rather than moving them. Not in the Graph.
   const selectedItem = selectedId ? session?.items[selectedId] : undefined;
@@ -1330,8 +1342,6 @@ export function TreeView(props: TreeViewProps) {
     <span role="status" className="tree-unseen-announcement">{noUnseen ? 'No unseen items.' : ''}</span>
     {/* The chip row sits in flow above both the Tree and the Graph (D13); the hold keeps the reading row's viewport place when it opens or closes. */}
     {filterRow}
-    {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>
-      Showing an item outside your current filters.</Banner>}
     {lifecycle.pending && !lineShown && <Banner icon="ph ph-warning" alert actions={<button type="button" className="btn btn-ghost" onClick={lifecycle.reconcile}>Check again</button>}>
       {lifecycle.pending}. Check whether your last change was saved before making another.</Banner>}
     <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
@@ -1346,8 +1356,5 @@ export function TreeView(props: TreeViewProps) {
     </div>}
     {session && <AgentBin session={session} actions={actions} onRemove={onRemove} />}
     {lifecycle.dialog}
-    {continuing && lift(<ContinuePicker topicName={session?.topics[continuing]?.name ?? 'this topic'} targets={continueTargets(route, summaries)}
-      onCancel={() => setContinuing(null)}
-      onPick={target => { setContinuing(null); openContinueTopic({ source: route, topicId: continuing, target }); }} />)}
   </section></MapSearchContext.Provider>;
 }

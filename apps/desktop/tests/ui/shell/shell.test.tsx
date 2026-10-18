@@ -144,7 +144,8 @@ describe('Paperwhite shell', () => {
     expect(Number(rules(shell, '.shell-notices').match(/z-index: (\d+)/)![1])).toBeGreaterThan(Number(rules(shell, '.shell-conversation').match(/z-index: (\d+)/)![1]));
     expect(rules(notes, '.pw-notices')).toContain('position: absolute;');
     expect(rules(notes, '.pw-notices')).toContain('width: min(480px, calc(100% - 32px));');
-    expect(notes).toContain('@container shell-center (max-width: 400px)');
+    // Over a Map (or the bigger view) the stack hangs from --notice-top at left/right 10, clear of the dock; on a page it keeps the bottom right.
+    expect(rules(notes, '.shell-notices[data-placement] .pw-notices')).toContain('inset: var(--notice-top, 8px) 10px calc(var(--notice-bottom, 8px) + var(--dock-inset, 0px)) 10px;');
   });
 
   it('keeps notification actions opaque throughout their entrance, including a suspended first frame', () => {

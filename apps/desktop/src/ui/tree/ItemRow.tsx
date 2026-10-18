@@ -177,6 +177,7 @@ export function ItemRow({ row, selected, focused, changeMarker, nextUnseen, next
         bar floats left of it (absolute), so showing it never moves or rewraps anything. */}
     <div className="tree-end">
       {hover.length > 0 && <span className="tree-actions">{hover.map(actionButton)}</span>}
+      {row.outside && <span className="tree-outside-tag" title="Outside your filter"><i className="ph ph-funnel" aria-hidden="true" />Outside filter</span>}
       <span className="tree-end-slot tree-end-marker" data-marker={changeMarker}>
         {changeMarker && <ChangeMarker kind={changeMarker} />}
       </span>

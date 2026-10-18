@@ -6,6 +6,7 @@ import { ackTarget } from '../../selectors/ack';
 import { activeItems } from '../../selectors/removed';
 import { acknowledge, ackClaimed, ackFailure, ackLane, ackProposal as proposal, alreadyAcknowledged } from '../shared/ack';
 import { notices } from '../pages/notices';
+import { toasts } from '../shell/toast';
 import { navigationVisits } from './visits';
 
 export const ACK_ALL_HOLD_MS = 8000;
@@ -60,7 +61,9 @@ export class AckAllController {
     this.state = Object.freeze({ ...this.state, ...update, remaining: this.queue.length });
     this.listeners.forEach(listener => listener());
     const { phase, topicName, completed, total, remaining, error } = this.state;
-    // While held, the band shows "Acked N results · Undo"; a notice carries the Undo only if the band goes away (see announce).
+    // While held, the band shows "Acked N results · Undo"; a toast carries the Undo only if the band goes away (see announce).
+    // The Undo window ends the moment the batch leaves 'holding': the toast keeps its text but loses Undo.
+    if (phase !== 'holding') toasts.expire(this.noticeId);
     if (phase === 'holding') notices.dismiss(this.noticeId);
     else if (phase === 'saving') notices.push({ id: this.noticeId, icon: 'ph ph-check', dismissible: false,
       text: `Acknowledging results in “${topicName}”: ${completed} of ${total} saved.` });
@@ -68,9 +71,11 @@ export class AckAllController {
       text: `${completed} of ${total} results saved in “${topicName}”; ${remaining} remain. ${error}`,
       actions: [{ label: 'Retry', run: () => { void this.retry(); } },
         { label: 'Cancel remaining', disabled: !!this.actions.getSnapshot().pending, run: () => { this.cancelRemaining(); } }] });
-    else if (phase === 'done' || phase === 'cancelled') notices.push({ id: this.noticeId, icon: 'ph ph-check',
-      text: phase === 'done' ? `Acknowledged ${completed} results in “${topicName}”.`
+    else if (phase === 'done' || phase === 'cancelled') {
+      notices.dismiss(this.noticeId);
+      toasts.show({ text: phase === 'done' ? `Acknowledged ${completed} results in “${topicName}”.`
         : `Cancelled Ack all in “${topicName}”. ${completed ? `${completed} results were already saved.` : 'No acknowledgements were saved.'}` });
+    }
   }
   /** The exact displayed list is reviewed at confirmation, never expanded later. */
   confirm(topicId: string, topicName: string, reviewed: readonly Immutable<Item>[]): boolean {
@@ -88,14 +93,13 @@ export class AckAllController {
     this.timer = setTimeout(() => { this.timer = undefined; void this.retry(); }, ACK_ALL_HOLD_MS);
     return true;
   }
-  /** The band that shows the Undo is going away (the Graph, a removed topic): keep the Undo reachable in a notice. */
+  /** The band that shows the Undo is going away (the Graph, a removed topic): keep the Undo reachable in a toast. */
   announce(): void {
     if (this.state.phase !== 'holding') return;
-    notices.push({ id: this.noticeId, icon: 'ph ph-check', dismissible: false,
-      text: `Acked ${this.state.total} results in “${this.state.topicName}”`, actions: [{ label: 'Undo', run: () => { this.undo(); } }] });
+    toasts.show({ id: this.noticeId, text: `Acked ${this.state.total} results in “${this.state.topicName}”`, ms: ACK_ALL_HOLD_MS, undo: () => { this.undo(); } });
   }
   /** The band is back and shows the Undo itself. */
-  withdraw(): void { if (this.state.phase === 'holding') notices.dismiss(this.noticeId); }
+  withdraw(): void { if (this.state.phase === 'holding') toasts.dismiss(this.noticeId); }
   undo(): boolean {
     if (this.state.phase !== 'holding') return false;
     clearTimeout(this.timer); this.timer = undefined; this.queue = [];

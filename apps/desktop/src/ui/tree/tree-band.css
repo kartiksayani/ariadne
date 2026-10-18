@@ -261,6 +261,41 @@
   cursor: pointer;
 }
 
+/* Retry and Cancel remaining after a failed Ack all, in the disabled opener's place. They are words on a wide band and icons on a
+   narrow one (the title and the name carry the words), so the progress text keeps room beside them. */
+.ack-all-act {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: max(22px, calc(22px * var(--text-scale)));
+  padding: 0 5px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: calc(12px * var(--text-scale));
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--a-edge);
+}
+
+.ack-all-act i {
+  font-size: calc(12px * var(--text-scale));
+}
+
+.ack-all-act:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ack-all-act:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
 /* Next unseen: 20px, an arrow, "Next unseen" (or "Next · 5 of 10") and an `n` keycap. */
 .tree-band-next {
   display: inline-flex;

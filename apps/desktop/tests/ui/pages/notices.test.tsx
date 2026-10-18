@@ -6,6 +6,7 @@ import { NoticeStore, Notices } from '../../../src/ui/pages/notices';
 import { Dialog } from '../../../src/ui/dialogs/Dialog';
 
 const info = { icon: 'ph ph-check', text: 'Saved.' };
+const visual = () => screen.getAllByTestId('notice').sort((a, b) => Number(a.style.order) - Number(b.style.order));
 const advance = (ms: number) => act(() => { vi.advanceTimersByTime(ms); });
 
 describe('toast store', () => {
@@ -154,48 +155,149 @@ describe('toast region', () => {
     return id;
   };
 
-  it('keeps one persistent region with polite information and assertive problems', () => {
+  it('keeps one persistent region; a neutral notice is a status and a warn or problem notice is an alert', () => {
     render(<Notices store={store} />);
     const region = screen.getByRole('region', { name: 'Notifications' });
-    const polite = region.querySelector('[aria-live="polite"]');
-    const assertive = region.querySelector('[aria-live="assertive"]');
-    expect(polite).not.toBeNull();
-    expect(assertive).not.toBeNull();
     expect(within(region).queryByRole('alert')).toBeNull();
-    push(info);
+    expect(within(region).queryByRole('status')).toBeNull();
     push({ ...info, text: 'Retry needed.', iconColor: 'var(--a-danger)' });
+    push({ ...info, text: 'Be careful.', tone: 'warn' });
+    push(info);
+    fireEvent.click(screen.getByRole('button', { name: '⌄ 1 more' }));
     expect(within(screen.getByRole('status')).getByText('Saved.')).toBeTruthy();
-    expect(within(screen.getByRole('alert')).getByText('Retry needed.')).toBeTruthy();
+    expect(within(screen.getByText('Retry needed.').closest<HTMLElement>('[role="alert"]')!).getByText('Retry needed.')).toBeTruthy();
+    expect(screen.getByText('Be careful.').closest('[data-tone="warn"]')?.getAttribute('role')).toBe('alert');
     act(() => { store.clear(); });
     expect(screen.getByRole('region', { name: 'Notifications' })).toBe(region);
-    expect(region.querySelector('[aria-live="polite"]')).toBe(polite);
-    expect(region.querySelector('[aria-live="assertive"]')).toBe(assertive);
     expect(within(region).queryByRole('alert')).toBeNull();
   });
 
-  it('keeps live regions as layout boxes and spaces groups only when both contain notices', () => {
+  it('lays the stack out as one column with a 6px gap, newest on top', () => {
     const css = readFileSync(resolve(__dirname, '../../../src/ui/pages/notices.css'), 'utf8');
     render(<><style>{css}</style><Notices store={store} /></>);
     const region = screen.getByRole('region', { name: 'Notifications' });
     const stack = region.querySelector('.pw-notice-stack')!;
-    const polite = region.querySelector('[aria-live="polite"]')!;
-    const assertive = region.querySelector('[aria-live="assertive"]')!;
     expect(getComputedStyle(region).position).toBe('absolute');
-    expect(getComputedStyle(stack).gap).toBe('0px');
-    for (const group of [polite, assertive]) {
-      expect(group.matches(':empty')).toBe(true);
-      expect(getComputedStyle(group).display).toBe('flex');
-      expect(getComputedStyle(group).flexDirection).toBe('column');
-      expect(getComputedStyle(group).gap).toBe('8px');
-    }
-    expect(parseFloat(getComputedStyle(assertive).marginTop || '0')).toBe(0);
-    const problem = push({ ...info, text: 'Retry needed.', tone: 'problem' });
-    expect(parseFloat(getComputedStyle(assertive).marginTop || '0')).toBe(0);
-    push(info);
-    expect(getComputedStyle(assertive).marginTop).toBe('8px');
-    act(() => { store.dismiss(problem); });
-    expect(assertive.matches(':empty')).toBe(true);
-    expect(parseFloat(getComputedStyle(assertive).marginTop || '0')).toBe(0);
+    expect(getComputedStyle(stack).display).toBe('flex');
+    expect(getComputedStyle(stack).flexDirection).toBe('column');
+    expect(getComputedStyle(stack).gap).toBe('6px');
+    push({ ...info, text: 'First.' });
+    push({ ...info, text: 'Second.', tone: 'problem' });
+    // Newest on top, whatever the tone: the live regions split the DOM by tone, so the stack orders by CSS `order`.
+    expect(visual().map(card => card.textContent)).toEqual([expect.stringContaining('Second.'), expect.stringContaining('First.')]);
+  });
+
+  it('keeps one polite and one assertive live region mounted, empty or not, so the first notice is announced', () => {
+    render(<Notices store={store} />);
+    const region = screen.getByRole('region', { name: 'Notifications' });
+    const polite = region.querySelector<HTMLElement>('[aria-live="polite"]'), assertive = region.querySelector<HTMLElement>('[aria-live="assertive"]');
+    expect(polite).not.toBeNull();
+    expect(assertive).not.toBeNull();
+    expect(polite!.children).toHaveLength(0);
+    expect(assertive!.children).toHaveLength(0);
+    push({ ...info, id: 'n', text: 'Neutral.' });
+    expect(within(polite!).getByText('Neutral.')).toBeTruthy();
+    expect(within(assertive!).queryByText('Neutral.')).toBeNull();
+    push({ ...info, id: 'w', text: 'Warned.', tone: 'warn' });
+    push({ ...info, id: 'p', text: 'Problem.', tone: 'problem' });
+    expect(within(assertive!).getByText('Warned.')).toBeTruthy();
+    expect(within(assertive!).getByText('Problem.')).toBeTruthy();
+    expect(within(polite!).queryByText('Problem.')).toBeNull();
+    act(() => { store.clear(); });
+    expect(region.querySelector('[aria-live="polite"]')).toBe(polite);
+    expect(region.querySelector('[aria-live="assertive"]')).toBe(assertive);
+    expect(polite!.children).toHaveLength(0);
+    expect(assertive!.children).toHaveLength(0);
+  });
+
+  it('F6 enters the newest card even when it sits in the other live region', () => {
+    render(<Notices store={store} />);
+    push({ ...info, id: 'old', text: 'Old.' });
+    push({ ...info, id: 'new', text: 'New.', tone: 'problem' });
+    fireEvent.keyDown(document, { key: 'F6' });
+    expect((document.activeElement as HTMLElement).dataset.noticeId).toBe('new');
+  });
+
+  it('moves focus to the pill when a new notice folds the focused card behind it', () => {
+    render(<><button type="button">Editor</button><Notices store={store} /></>);
+    push({ ...info, id: 'a', text: 'A.', tone: 'warn' });
+    push({ ...info, id: 'b', text: 'B.', tone: 'warn' });
+    act(() => { document.querySelector<HTMLElement>('[data-notice-id="a"]')!.focus(); });
+    push({ ...info, id: 'c', text: 'C.', tone: 'warn' });
+    expect(document.querySelector('[data-notice-id="a"]')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '⌄ 1 more' }));
+    // Focus on a card that stays shown is left alone.
+    act(() => { document.querySelector<HTMLElement>('[data-notice-id="c"]')!.focus(); });
+    push({ ...info, id: 'd', text: 'D.', tone: 'warn' });
+    expect(document.querySelector('[data-notice-id="c"]')).not.toBeNull();
+    expect((document.activeElement as HTMLElement).dataset.noticeId).toBe('c');
+  });
+
+  it('a focused card that is dismissed (not folded) still returns focus to the previous control', () => {
+    render(<><button type="button">Editor</button><Notices store={store} /></>);
+    const editor = screen.getByRole('button', { name: 'Editor' });
+    editor.focus();
+    push({ ...info, id: 'a', text: 'A.', tone: 'warn' });
+    push({ ...info, id: 'b', text: 'B.', tone: 'warn' });
+    push({ ...info, id: 'c', text: 'C.', tone: 'warn' });
+    fireEvent.keyDown(document, { key: 'F6' });
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(document.activeElement).toBe(editor);
+  });
+
+  it('focus on a folded-away card with focus outside the stack is not stolen', () => {
+    render(<><button type="button">Editor</button><Notices store={store} /></>);
+    push({ ...info, id: 'a', text: 'A.', tone: 'warn' });
+    push({ ...info, id: 'b', text: 'B.', tone: 'warn' });
+    const editor = screen.getByRole('button', { name: 'Editor' });
+    act(() => { editor.focus(); });
+    push({ ...info, id: 'c', text: 'C.', tone: 'warn' });
+    expect(document.activeElement).toBe(editor);
+  });
+
+  it('shows two cards, folds the rest into “⌄ N more”, expands all, and Dismiss all clears the stack', () => {
+    const dismissed = vi.fn();
+    render(<Notices store={store} />);
+    expect(screen.queryByTestId('notice-pill')).toBeNull();
+    push({ ...info, id: 'a', text: 'A.', tone: 'warn' });
+    push({ ...info, id: 'b', text: 'B.', tone: 'warn' });
+    expect(screen.queryByTestId('notice-pill')).toBeNull();
+    push({ ...info, id: 'c', text: 'C.', tone: 'warn', onDismiss: dismissed });
+    push({ ...info, id: 'd', text: 'D.', tone: 'warn' });
+    expect(screen.getAllByTestId('notice').map(card => card.dataset.noticeId)).toEqual(['d', 'c']);
+    const more = screen.getByRole('button', { name: '⌄ 2 more' });
+    fireEvent.click(more);
+    expect(screen.getAllByTestId('notice').map(card => card.dataset.noticeId)).toEqual(['d', 'c', 'b', 'a']);
+    fireEvent.click(screen.getByRole('button', { name: '⌃ Show fewer' }));
+    expect(screen.getAllByTestId('notice')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss all' }));
+    expect(dismissed).toHaveBeenCalledOnce();
+    expect(store.getSnapshot()).toEqual([]);
+    expect(screen.queryByTestId('notice')).toBeNull();
+    expect(screen.queryByTestId('notice-pill')).toBeNull();
+  });
+
+  it('F6 enters the newest card and Tab reaches the pill', () => {
+    render(<Notices store={store} />);
+    for (const id of ['a', 'b', 'c']) push({ ...info, id, text: `${id.toUpperCase()}.`, tone: 'warn' });
+    fireEvent.keyDown(document, { key: 'F6' });
+    expect(document.activeElement).toBe(screen.getAllByTestId('notice')[0]);
+    const pill = screen.getByRole('button', { name: '⌄ 1 more' });
+    pill.focus();
+    expect(document.activeElement).toBe(pill);
+    fireEvent.click(pill);
+    expect(screen.getAllByTestId('notice')).toHaveLength(3);
+  });
+
+  it('gives every card × and Escape; the pill goes when the stack is down to two', () => {
+    render(<Notices store={store} />);
+    push({ ...info, id: 'a', text: 'A.', tone: 'warn' });
+    push({ ...info, id: 'b', text: 'B.', tone: 'warn' });
+    push({ ...info, id: 'c', text: 'C.', tone: 'warn' });
+    expect(screen.getAllByRole('button', { name: 'Dismiss' })).toHaveLength(2);
+    fireEvent.keyDown(screen.getAllByTestId('notice')[0]!, { key: 'Escape' });
+    expect(store.getSnapshot().map(notice => notice.id)).toEqual(['a', 'b']);
+    expect(screen.queryByTestId('notice-pill')).toBeNull();
   });
 
   it('preserves a visible card and focus when identical content refreshes', () => {
@@ -287,7 +389,7 @@ describe('toast region', () => {
     push({ ...info, id: 'session-two', actions: [{ label: 'View', run: secondRun, dismissOnRun: true }] });
     act(() => { store.push({ ...info, id: 'session-one', actions: [{ label: 'View', run: latestFirstRun, dismissOnRun: true }] }); });
     expect(screen.getAllByText(info.text)).toHaveLength(2);
-    fireEvent.click(screen.getAllByRole('button', { name: 'View' })[0]!);
+    fireEvent.click(within(document.querySelector<HTMLElement>('[data-notice-id="session-one"]')!).getByRole('button', { name: 'View' }));
     expect(latestFirstRun).toHaveBeenCalledOnce();
     expect(firstRun).not.toHaveBeenCalled();
     expect(secondRun).not.toHaveBeenCalled();
@@ -333,14 +435,15 @@ describe('toast region', () => {
     expect(screen.getByText('Still unavailable.')).toBeTruthy();
   });
 
-  it('honors explicit nondismissibility and dismiss callbacks', () => {
+  it('ignores dismissible: false (every notice has × and Escape) and runs dismiss callbacks', () => {
     const onDismiss = vi.fn();
     render(<Notices store={store} />);
     const id = push({ ...info, dismissible: false });
-    expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeTruthy();
     fireEvent.keyDown(screen.getByText(info.text).closest('.pw-note')!, { key: 'Escape' });
-    expect(store.getSnapshot()).toHaveLength(1);
-    act(() => { store.push({ ...info, id, onDismiss }); });
+    expect(store.getSnapshot()).toEqual([]);
+    act(() => { store.push({ ...info, id, onDismiss, dismissible: false }); });
+    advance(300);
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     expect(onDismiss).toHaveBeenCalledOnce();
     expect(store.getSnapshot()).toEqual([]);

@@ -55,12 +55,13 @@ async function continuePreview(sourceSession, topicName, targetTitle) {
   await topicAction(topicName, 'Continue here');
   // The picker lists each other active session by title, with its agent and state under it.
   await click(await dialog().$(`button*=${targetTitle}`));
-  const send = await dialog().$('button*=Send to');
+  const send = await dialog().$('button*=Send summary');
   try { await send.waitForEnabled(); } catch (failure) {
     throw new Error(`${failure.message}\nDialog text: ${await dialog().getText().catch(() => '(unavailable)')}`, { cause: failure });
   }
   const text = await dialog().getText();
-  for (const label of [`Continue “${topicName}” in this session`, 'WAITING ON YOU ·', 'Item references stay the same'])
+  // Step 2 (SPEC 10.8): the title names both sides, the editable summary is the exact text Send hands over, and the note says the topic stays.
+  for (const label of [`Continue “${topicName}” in “`, 'Summary', 'The topic stays here too'])
     assert.ok(text.toUpperCase().includes(label.toUpperCase()), `Preview omitted ${label}`);
   return send;
 }
@@ -200,6 +201,8 @@ export async function runHistoryActionsAcceptance(configuration) {
   }
   await click(await dialog().$('button=Check again'));
   await wait(async () => Object.keys((await readJson(targetPath)).continuations).length === Object.keys(targetBefore.continuations).length + 1, 'Explicit reconciliation did not save one continuation');
+  await wait(async () => (await dialog().getText()).includes('Sent once at'), 'Reconciled Continue dialog did not say it was sent');
+  await click(await dialog().$('button=Done'));
   await wait(async () => !(await dialog().isExisting()), 'Reconciled Continue dialog did not close');
   const finalTarget = await readJson(targetPath), copied = Object.values(finalTarget.continuations).find(value => !targetBefore.continuations[value.operation_id]);
   assert.ok(copied); assert.equal(copied.source_project_id, source.project_id); assert.equal(copied.source_session_id, source.id);

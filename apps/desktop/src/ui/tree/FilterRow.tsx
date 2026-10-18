@@ -16,6 +16,9 @@ const CHIP_VIEW: Readonly<Record<Chip, { readonly label: string; readonly icon: 
   replaced: { label: STATUS.replaced.label, icon: STATUS.replaced.icon, color: 'var(--st-replaced)' },
 };
 
+/** The chip's name, as the notices say it ("Waiting on me"). */
+export const chipLabel = (chip: Chip): string => CHIP_VIEW[chip].label;
+
 /** `active` is the filter itself (picked chips, owners, hide-later or a leftover saved status), so Clear shows whenever the
  * Map is filtered, even with no chip picked. */
 export function FilterRow({ counts, picked, active, shown, total, disabled, onChip, onClear }: {

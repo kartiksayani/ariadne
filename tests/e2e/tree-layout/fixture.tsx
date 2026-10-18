@@ -13,6 +13,8 @@ import { DetailsColumn } from '../../../apps/desktop/src/ui/shell/DetailsColumn'
 import { DockInsetProvider } from '../../../apps/desktop/src/ui/shell/dockInset';
 import { DetailsColumnProvider } from '../../../apps/desktop/src/state/details/column';
 import '../../../apps/desktop/src/ui/detail/detail.css';
+import { notices } from '../../../apps/desktop/src/ui/pages/notices';
+import { toasts } from '../../../apps/desktop/src/ui/shell/toast';
 
 // The ordinary App over its real stores; only the native transport is replaced.
 // Item 1 carries a long finding (it must fold to three lines), item 5 a paragraph that
@@ -233,6 +235,8 @@ const query = new URLSearchParams(window.location.search);
 const transport = new TreeLayoutTransport({ gettingAround: query.has('nav'), changes: query.has('changes'), card: query.has('card'), still: query.has('still'), filter: query.has('filter'), continuable: query.has('continuable') });
 // The specs drive agent writes and seen marks through this handle.
 (window as unknown as { treeLayout: TreeLayoutTransport }).treeLayout = transport;
+// The notice stack and the toast, which the Map must never move for (notices-still.spec.mts).
+(window as unknown as { floating: { notices: typeof notices; toasts: typeof toasts } }).floating = { notices, toasts };
 createRoot(document.getElementById('root')!).render(query.has('details') ? <DetailsFixture dock={Number(query.get('dock') ?? 0)} bigger={query.has('bigger')} />
   : query.has('grid') ? <ActionGridFixture />
   : <DesktopApp service={createDesktopService(transport)} />);

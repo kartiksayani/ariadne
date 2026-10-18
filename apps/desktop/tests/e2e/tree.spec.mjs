@@ -623,17 +623,18 @@ async function treeAcceptance(configuration) {
   const child = await browser.$('[aria-label="Child items"]').$('button[aria-label^="Native sentence 1.2\\a "]');
   await child.waitForDisplayed(); assert.equal(await child.getAttribute('aria-label'), initialSession.items['1.2'].question); await child.click();
   await goToPeekItem(initialSession.items['1.2'], '1');
-  await wait(async () => (await browser.$('.tree-column').getText()).includes('Showing an item outside your current filters.'), 'Detail child reveal did not preserve the filter and expose an outside-filter row');
+  // SPEC 11.4: a notice over the Map says so, and the row carries the tag.
+  await wait(async () => (await browser.$('.pw-notices').getText()).includes('which is outside your filter'), 'Detail child reveal did not preserve the filter and expose an outside-filter row');
   await wait(async () => (await focusedId()) === '1.2', 'Peek Go to did not focus the revealed row');
   assert.equal(await focusedId(), '1.2');
   // Expanding the detail title deliberately moves focus to its own button.
   await showFullItemQuestion(initialSession.items['1.2']);
   const revealed = (await preferences(tree)).view;
   assert.deepEqual(revealed.filters, beforeReveal.filters); assert.deepEqual(revealed.expanded_item_ids, beforeReveal.expanded_item_ids);
-  await browser.$('button=Resume filtered view').click();
+  await browser.$('.pw-notices').$('button=Hide it again').click();
   await wait(async () => JSON.stringify(await visibleIds()) === JSON.stringify(doneIds), 'Resume must remove only temporary outside-filter reveal');
   assert.deepEqual(await visibleIds(), doneIds, 'Resume must leave exactly the rows the Done filter showed before the reveal');
-  assert.equal(await browser.$('button=Resume filtered view').isExisting(), false);
+  assert.equal(await browser.$('button=Hide it again').isExisting(), false);
   await choose('clear', true); await wait(async () => (await visibleIds()).length === 1901, 'Clear did not restore the saved collapsed branch');
   // The search only marks: 1.1 sits inside the collapsed root 1, so the top bar names it and "Show them" shows it in memory.
   await setSearch(tree, 'ＮＡＴＩＶＥ café needle');
@@ -659,7 +660,7 @@ async function treeAcceptance(configuration) {
   await setSearch(tree, 'No canonical native tree question matches this phrase');
   await wait(async () => await searchCount() === 'No matches', 'A search with no match must say so');
   assert.deepEqual(await visibleIds(), beforeNoMatch, 'A search with no match must not hide any row');
-  assert.equal(await browser.$('button=Resume filtered view').isExisting(), false);
+  assert.equal(await browser.$('button=Hide it again').isExisting(), false);
   await setSearch(tree, '');
   // The selected row 1.1 was opened by the owner's click, so its branch stays open under it: clearing the search never moves the Map.
   // The saved fold is untouched, and the branch folds back through its own toggle.

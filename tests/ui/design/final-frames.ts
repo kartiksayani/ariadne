@@ -28,6 +28,8 @@ export type Step =
   /** The Map's own scroller (the Tree's, or the Graph's), moved to its top: 8.5 (the selected row is out of view below) and the Graph states
    * (ALPHA20-REPLAN §3a: the app opens the Graph scrolled to the selected node, the board at the canvas top). */
   | { readonly scroll: 'top' }
+  /** A notice the app raises by itself in real life (alpha.21 W5, final.spec.mts `noticeSpecs`), put in the store with the board's words. */
+  | { readonly notice: 'save' | 'recovered' | 'agentrm' | 'stuck' }
   /** The app's transport changes under it (12.8: a read fails after a good one; 12.9: the next save is lost on its way back). */
   | { readonly drive: 'read-fails' | 'save-unsure' };
 
@@ -494,8 +496,26 @@ const bandPieces = (region: FrameRegion): FrameRegion[] => {
  */
 const withoutFirstRow = (region: FrameRegion): boolean => !region.name.startsWith('first row');
 
+// alpha.21 W5: the notice stack (11.1, 11.4, 11.6) and two-step Continue (10.7, 10.8). Notices float over the Map below the topic band (ALPHA21-PLAN
+// §3a.1, E20), where the board draws them in flow above it, so the Map under them differs by design: these frames stay `pending` and are read from
+// the side-by-side PNGs (FINAL_APP=1), not asserted. 10.7's and 10.8's dialogs are compared where they sit (the card is centred).
+const noticeStateList: readonly FinalState[] = [
+  { id: '11.1', part: 'R4-Notices', sid: 'n-save', owner: 'shell', pending: true, title: 'A change that couldn’t be saved',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ notice: 'save' }] } },
+  { id: '11.4', part: 'R4-Notices', sid: 'n-outside', owner: 'shell', pending: true, title: 'Showing an item outside my filter',
+    app: { view: { selected: 'a4', details: 'open', dock: 'line' }, map: { filter: ['waiting_on_me'] } } },
+  // The board lists the notices recovered, agentrm, save and shows the first two; the app shows the newest on top, so they are raised in the reverse order.
+  { id: '11.6', part: 'R4-Notices', sid: 'n-many', owner: 'shell', pending: true, title: 'Several at once, with Details open',
+    app: { view: { selected: 'a2.2.1', details: 'open', dock: 'line' }, map: {}, act: [{ notice: 'save' }, { notice: 'agentrm' }, { notice: 'recovered' }] } },
+  { id: '10.7', part: 'R4-Dialogs', sid: 'd-continue', owner: 'shell', pending: true, title: 'Continue a topic: pick a session',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'Continue elsewhere' }] } },
+  { id: '10.8', part: 'R4-Dialogs', sid: 'd-continue2', owner: 'shell', pending: true, title: 'Continue: review the summary',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'Continue elsewhere' }, { click: 'schema review' }] } }
+];
+
 export const finalStates: readonly FinalState[] = [...stateList.map(state => regionsById[state.id] ? { ...state, regions: regionsById[state.id]! } : state),
-  ...mapStateList.map(state => ({ ...state, regions: mapRegionsById[state.id]!.filter(withoutFirstRow).flatMap(bandPieces) }))];
+  ...mapStateList.map(state => ({ ...state, regions: mapRegionsById[state.id]!.filter(withoutFirstRow).flatMap(bandPieces) })),
+  ...noticeStateList];
 
 export const finalIds: readonly string[] = finalStates.map(state => state.id);
 
