@@ -45,6 +45,7 @@ import { peekNames } from '../peek/names';
 import { navigationVisits } from '../navigation/visits';
 import { useClipped } from './useClipped';
 import { useDockBudget } from './useDockBudget';
+import type { ItemActionsProps } from './itemActions';
 
 /** The pane is scrolled to (nearly) its end. */
 const nearEnd = (pane: HTMLElement) => pane.scrollHeight - pane.scrollTop - pane.clientHeight < 80;
@@ -106,7 +107,7 @@ export function DetailPath({ store, itemId, onOpenItem }: { readonly store: Sess
   </nav></ItemRefs.Provider></ItemRefSession.Provider>;
 }
 
-export interface ItemDetailProps {
+export interface ItemDetailProps extends ItemActionsProps {
   readonly expanded?: boolean;
   readonly onOpenConversation?: () => void;
   readonly dividerId?: string | null;
