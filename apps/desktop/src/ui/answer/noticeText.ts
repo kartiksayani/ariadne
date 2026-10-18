@@ -1,14 +1,7 @@
-// The words the stuck and recovered notices share (alpha.21 E17, E18): what an owner message is called, and the agent's name.
+// The words the stuck and recovered notices share (alpha.21 E17, E18): what an owner message is called. The agent's name is `agentName` in ../shell/model.
 import type { Immutable } from '../../data';
 import type { Input } from '../../generated/domain/models';
 import { inputAbout, quoted } from '../../selectors/waiting/stuck';
-
-/** "Claude Code" for the binding's adapter id; other adapters read as their id with spaces ("codex" becomes "Codex"). */
-export function agentLabel(adapterId: string): string {
-  const id = adapterId.toLowerCase().replace(/[_-]+/g, ' ').trim();
-  if (id === 'claude code' || id === 'claude code mod') return 'Claude Code';
-  return id.replace(/^./u, letter => letter.toUpperCase());
-}
 
 /** What the owner sent, as a noun phrase that ends before the name: "reply about", "answer on". */
 export function sentNoun(kind: Input['kind'] | string): string {

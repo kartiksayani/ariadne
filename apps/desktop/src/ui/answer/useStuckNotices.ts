@@ -12,10 +12,10 @@ import { stuckInput, type Stuck, type StuckKind } from '../../selectors/waiting/
 import type { OwnerDraftStore } from '../../state/drafts/store';
 import { notices, type Notice, type NoticeAction } from '../pages/notices';
 import { toasts } from '../shell/toast';
-import { clock } from '../shell/model';
+import { agentName, clock } from '../shell/model';
 import type { OpenTopicInDetails } from '../shell/detailTarget';
 import { ALREADY_SENT, editable, editQueued, inEditor, NOT_TAKEN_BACK, TAKEN_BACK_NOT_LOADED, type ReviewOutcome } from './held';
-import { agentLabel, sentPhrase, yourSent } from './noticeText';
+import { sentPhrase, yourSent } from './noticeText';
 import { resendPlan } from './StuckNote';
 
 export interface StuckNoticesOptions {
@@ -77,7 +77,7 @@ export function useStuckNotices({ session, actions, drafts, openItem, openTopic 
       const open = () => { if (input.target.item_id) openItem(input.target.item_id); else openTopic(input.target.topic_id); };
       const show = (hint?: string) => {
         if (hint !== undefined) hints.current.set(input.id, hint);
-        const built = build(input, stuck, agentLabel(binding.adapter_id), hints.current.get(input.id));
+        const built = build(input, stuck, agentName(binding.adapter_id), hints.current.get(input.id));
         const signature = JSON.stringify([built.tone, built.text, built.actions.map(action => [action.label, action.disabled])]);
         if (shown.current.get(id) === signature) return;
         shown.current.set(id, signature);
