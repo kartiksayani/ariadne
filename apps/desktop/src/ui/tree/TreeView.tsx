@@ -360,7 +360,9 @@ export function TreeView(props: TreeViewProps) {
   // ------------------------------------------------------------ writes
   const saveView = (change: (next: SessionPreferences) => void) => {
     const snapshot = navigation.getSnapshot();
-    if (!latest.current.view || snapshot.pendingOperationId !== null && !snapshot.writing) return Promise.resolve(false);
+    // An unconfirmed Recent write is automatic and the owner never waits on it: the edit queues and the flush effect
+    // saves it once that write settles. Any other unconfirmed write is the owner's own and still refuses.
+    if (!latest.current.view || snapshot.pendingOperationId !== null && !snapshot.writing && !navigation.isRecentPending()) return Promise.resolve(false);
     return new Promise<boolean>(done => { setPendingEdits(previous => [...previous, { change, done }]); });
   };
   useEffect(() => {

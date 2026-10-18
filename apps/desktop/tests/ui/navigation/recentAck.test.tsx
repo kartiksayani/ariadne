@@ -321,6 +321,36 @@ it('another writer holding the store is not reported as a failed Recent save', a
   release(); navigation.stop();
 });
 
+it('a miss behind another writer resets the count, so a later own miss is still retried quietly', async () => {
+  const other = { ...route, session_id: '00000000-0000-4000-8000-0000000000aa' };
+  const state = { writing: false, pendingOperationId: null as string | null, error: null as { code: string } | null, preferences: { revision: 1, sessions: [] as unknown[] } };
+  const listeners = new Set<() => void>();
+  const outcomes: ('own miss' | 'behind another writer' | 'saved')[] = ['own miss', 'behind another writer', 'own miss', 'saved'];
+  const calls: string[] = [];
+  const stub = {
+    getSnapshot: () => state,
+    subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    isRecentPending: () => false,
+    retryMutation: async () => false,
+    // Visits other tests left queued share the module's queue; this writer saves them so only `other` is scripted.
+    saveRecentItems: async (session: { session_id: string }) => {
+      if (session.session_id !== other.session_id) return true;
+      const outcome = outcomes.shift()!;
+      calls.push(outcome);
+      state.writing = outcome === 'behind another writer';
+      state.error = outcome === 'own miss' ? { code: 'invalid_response' } : null;
+      return outcome === 'saved';
+    },
+  };
+  const release = navigationVisits.bind(stub as unknown as NavigationStore);
+  navigationVisits.record(other, '1', 'viewed');
+  await vi.waitFor(() => expect(calls).toEqual(['own miss', 'behind another writer']));
+  state.writing = false; listeners.forEach(listener => { listener(); });
+  await vi.waitFor(() => expect(calls).toEqual(['own miss', 'behind another writer', 'own miss', 'saved']));
+  expect(notices.getSnapshot().find(notice => notice.id === 'recent-save')).toBeUndefined();
+  release();
+});
+
 it('Waiting visits persist a never-opened session without opening its tab or changing navigation', async () => {
   const { transport, service } = await ready();
   const otherRoute = { ...route, session_id: '00000000-0000-4000-8000-000000000003' };

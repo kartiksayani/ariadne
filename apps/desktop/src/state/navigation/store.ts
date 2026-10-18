@@ -120,7 +120,6 @@ export class NavigationStore {
   private pending: PendingMutation | null = null;
   private activeMutation: Promise<boolean> | null = null;
   private preparingRecent = false;
-  private recentFlight: Promise<boolean> | null = null;
   private textScaleTarget: { value: number; expectedRevision: number | null } | null = null;
   private textScaleFlight: Promise<boolean> | null = null;
   private readonly seenQueue = new Map<string, SeenPatch>();
@@ -155,7 +154,6 @@ export class NavigationStore {
   readonly getWritingCompletion = () => !this.stopped && this.state.writing ? this.activeMutation : null;
   /** True while the unsettled preferences write (running or unconfirmed) is the automatic Recent trail. */
   readonly isRecentPending = () => this.pending?.recent === true;
-  readonly isWritingRecent = () => this.state.writing && this.activeMutation !== null && this.activeMutation === this.recentFlight;
   readonly getRefreshCompletion = () => this.flight;
   readonly hasQueuedTextScale = () => this.textScaleTarget !== null;
   readonly subscribe = (receive: () => void): Unsubscribe => {
@@ -950,7 +948,6 @@ export class NavigationStore {
     const operation: Promise<boolean> = Promise.resolve().then(() => this.completeMutation(pending));
     this.activeMutation = operation;
     if (this.preparingRecent) {
-      this.recentFlight = operation;
       // A background visit can invalidate an in-flight catalogue capture.
       // Retain its requested refresh rather than waiting for the next poll.
       if (this.flight) this.requested = true;

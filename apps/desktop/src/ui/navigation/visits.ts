@@ -56,7 +56,7 @@ export const navigationVisits = {
                   text: 'Recent visits could not be saved yet. Your visits are still waiting to be saved.',
                   actions: [{ label: 'Retry recent save', run: () => { void retry(); } }] });
               }
-            }
+            } else owned.misses = 0;
           }
         } finally {
           owned.flight = false;

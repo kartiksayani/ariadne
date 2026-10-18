@@ -277,7 +277,7 @@ describe('session tree rows', () => {
     let saving!: Promise<boolean>;
     act(() => { saving = view.navigation.saveSessionView(structuredClone(viewOf(view.transport)), view.transport.preferences.revision); });
     await waitFor(() => expect(view.navigation.getSnapshot().writing).toBe(true));
-    expect(view.navigation.isWritingRecent()).toBe(false);
+    expect(view.navigation.isRecentPending()).toBe(false);
     expect(focusButton().disabled).toBe(true);
     fireEvent.click(focusButton());
     expect(focusButton().getAttribute('aria-label')).toMatch(/^Unfocus /);
@@ -297,7 +297,7 @@ describe('session tree rows', () => {
     });
     let saving!: Promise<boolean>;
     act(() => { saving = view.navigation.saveRecentItems(route, [{ item_id: '1', action: 'peeked', visited_at: '2026-10-13T12:00:00.000Z' }], view.transport.preferences.revision); });
-    await waitFor(() => expect(view.navigation.isWritingRecent()).toBe(true));
+    await waitFor(() => expect(view.navigation.isRecentPending()).toBe(true));
     expect(view.navigation.getSnapshot().writing).toBe(true);
     expect(focusButton().disabled).toBe(false);
     fireEvent.click(focusButton());
@@ -474,7 +474,7 @@ describe('session tree rows', () => {
     const selectionsBefore = view.calls.selected.length;
     const saving = view.navigation.saveRecentItems(route, [{ item_id: '1', action: 'peeked', visited_at: '2026-10-13T12:00:00.000Z' }], view.transport.preferences.revision);
     await waitFor(() => expect(entered).toBe(true));
-    expect(view.navigation.isWritingRecent()).toBe(true);
+    expect(view.navigation.isRecentPending()).toBe(true);
     if (surface === 'row') fireEvent.click(row('3'));
     else {
       const tag = backPill('below');
@@ -502,21 +502,84 @@ describe('session tree rows', () => {
     };
     const opened = (view: Awaited<ReturnType<typeof mount>>, id: string) => view.calls.selected.some(result => result.kind === 'item' && result.route.item_id === id);
 
-    it('opens the row while a failed Recent save is still unconfirmed', async () => {
-      const view = await mount({ props: { selectedId: '8' } });
-      await settled(view);
+    /** Leaves the Recent write unconfirmed (lost response). The returned `settle` lets the retry through and confirms it. */
+    const unconfirmedRecent = async (view: Awaited<ReturnType<typeof mount>>) => {
+      let lose = true;
       const invoke = view.transport.invoke.bind(view.transport);
       vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
-        if (isRecentPatch(args)) throw new Error('Lost response');
+        if (lose && isRecentPatch(args)) throw new Error('Lost response');
         return invoke(name, args);
       });
       await act(async () => { await view.navigation.saveRecentItems(route, recentVisit, view.transport.preferences.revision); });
       expect(view.navigation.getSnapshot().writing).toBe(false);
       expect(view.navigation.getSnapshot().pendingOperationId).not.toBeNull();
       expect(view.navigation.isRecentPending()).toBe(true);
+      return async () => {
+        lose = false;
+        await act(async () => { expect(await view.navigation.retryMutation()).toBe(true); });
+        expect(view.navigation.isRecentPending()).toBe(false);
+      };
+    };
+
+    it('opens the row while a failed Recent save is still unconfirmed, and saves the selection once it settles', async () => {
+      const view = await mount({ props: { selectedId: '8' } });
+      await settled(view);
+      const settle = await unconfirmedRecent(view);
       fireEvent.click(row('3'));
       await waitFor(() => expect(opened(view, '3')).toBe(true));
       expect(notices.getSnapshot().some(notice => notice.id === 'tree-reveal-failed')).toBe(false);
+      expect(viewOf(view.transport).selected_item_id).not.toBe('3');
+      await settle();
+      await waitFor(() => expect(viewOf(view.transport).selected_item_id).toBe('3'));
+      expect(notices.getSnapshot().some(notice => notice.id === 'tree-view-save-failed')).toBe(false);
+    });
+
+    // Every owner view change goes through saveView; during an unconfirmed Recent write each one queues and lands once it settles.
+    const viewChanges: readonly { name: string; configure?: (transport: AppTransport) => void; props?: Partial<TreeViewProps>;
+      act: () => void; saved: (view: SessionPreferences) => boolean }[] = [
+      { name: 'Focus', props: { selectedId: '8' }, act: () => { fireEvent.click(focusButton()); }, saved: saved => saved.focused_item_id === '8' },
+      { name: 'Unfocus', configure: transport => { viewOf(transport).focused_item_id = '1'; }, act: () => { fireEvent.click(focusButton()); }, saved: saved => saved.focused_item_id === undefined },
+      { name: 'folding an item', act: () => { fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' })); }, saved: saved => !saved.expanded_item_ids.includes('1') },
+      { name: 'folding a topic', act: () => { fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Expand or collapse topic' })); },
+        saved: saved => (saved.collapsed_topic_ids ?? []).length === 1 },
+    ];
+    it.each(viewChanges)('$name takes effect once an unconfirmed Recent save settles', async change => {
+      const view = await mount({ props: change.props, configure: change.configure });
+      await settled(view);
+      const settle = await unconfirmedRecent(view);
+      act(() => { change.act(); });
+      expect(change.saved(viewOf(view.transport))).toBe(false);
+      await settle();
+      await waitFor(() => expect(change.saved(viewOf(view.transport))).toBe(true));
+      expect(notices.getSnapshot().some(notice => notice.id === 'tree-view-save-failed')).toBe(false);
+    });
+
+    it('keeps the filter chips visibly disabled, never silently dropped, while a Recent save is unconfirmed', async () => {
+      const view = await mount({ configure: transport => { viewOf(transport).filters.statuses = ['open']; } });
+      await settled(view);
+      const settle = await unconfirmedRecent(view);
+      expect(chip('Open').hasAttribute('disabled')).toBe(true);
+      expect(within(filterRow()).getByRole('button', { name: 'Clear' }).hasAttribute('disabled')).toBe(true);
+      await settle();
+      await waitFor(() => expect(chip('Open').hasAttribute('disabled')).toBe(false));
+    });
+
+    it('still refuses an owner view change while the owner\'s own write is unconfirmed', async () => {
+      const view = await mount();
+      await settled(view);
+      let lose = true;
+      const invoke = view.transport.invoke.bind(view.transport);
+      vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+        if (lose && name === 'preferences_patch') throw new Error('Lost response');
+        return invoke(name, args);
+      });
+      await act(async () => { await view.navigation.saveTheme('dark', view.transport.preferences.revision); });
+      lose = false;
+      expect(view.navigation.getSnapshot().pendingOperationId).not.toBeNull();
+      expect(view.navigation.isRecentPending()).toBe(false);
+      fireEvent.click(within(row('1')).getByRole('button', { name: 'Expand or collapse' }));
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+      expect(viewOf(view.transport).expanded_item_ids).toContain('1');
     });
 
     it('opens the row when a held Recent save then fails', async () => {
