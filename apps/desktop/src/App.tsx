@@ -647,7 +647,7 @@ function Workspace({ application }: { application: Application }) {
         onClearFilters={clearFilters} onShowArchive={() => showView('archive')}
         onRemove={target => { askRemove(target); }} />} />
     {asking && <RemoveDialog subject={asking.subject} onCancel={() => setAsking(null)} onConfirm={() => removeTarget(asking.target, asking.subject)} />}
-    <ContinueTopicHost navigation={navigation} actions={application.actions} summaries={state.sessions?.sessions.items ?? []} onSent={target => {
+    <ContinueTopicHost navigation={navigation} actions={application.actions} onSent={target => {
       // The continued topic now lives in the target session: show it there in the tree.
       if (route && routeKey(target) === key && archived) showView('tree');
     }} />

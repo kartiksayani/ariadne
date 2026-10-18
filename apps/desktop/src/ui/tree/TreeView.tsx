@@ -100,7 +100,7 @@ export interface TreeViewProps {
   /** The tree selected an item; restoration preserves the current detail state. */
   readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
   readonly onDismissReveal: () => void;
-  /** "Resume filtered view": drop the reveal and close its detail. */
+  /** "Hide it again" on the outside-filter notice: drop the reveal and close its detail. */
   readonly onResume: () => void;
   readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
   readonly onClearFilters: () => void;

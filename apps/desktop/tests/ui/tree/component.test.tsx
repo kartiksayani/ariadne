@@ -1578,13 +1578,13 @@ describe('session tree lifecycle', () => {
     const summaries = navigation.getSnapshot().sessions!.sessions.items;
     rerender({ summaries });
     // Continue is one flow in the app's host, not in the Map (SPEC 10.7, 10.8).
-    render(<ContinueTopicHost navigation={navigation} actions={new SessionActionControllers(navigation.service)} summaries={summaries} />);
+    render(<ContinueTopicHost navigation={navigation} actions={new SessionActionControllers(navigation.service)} />);
     expect(within(topicRow('Continued context')).queryByRole('button', { name: 'Continue elsewhere' })).toBeNull();
     fireEvent.click(within(topicRow('Delivery decisions')).getByRole('button', { name: 'Continue elsewhere' }));
     const dialog = within(screen.getByRole('dialog', { name: 'Continue “Delivery decisions” in another session' }));
     expect(dialog.getAllByRole('button').map(button => button.getAttribute('aria-labelledby') ? button.textContent : null).filter(Boolean))
       .toEqual([expect.stringMatching(/^Separate session/)]);
-    fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(dialog.getByRole('button', { name: /^Cancel/ }));
     expect(screen.queryByRole('dialog')).toBeNull();
   });
   it('offers Continue elsewhere on a topic from a session created today', async () => {

@@ -350,14 +350,18 @@
   opacity: .58;
 }
 
-/* "Outside filter" (SPEC 11.4): the filter would leave this item out; it shows because it was opened. */
+/* "Outside filter" (SPEC 11.4, R4 board): the filter would leave this item out; it shows because it was opened. */
 .tree-outside-tag {
-  display: inline-block;
-  align-self: flex-start;
-  margin-top: 3px;
-  padding: 1px 7px;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px 0 4px;
   border-radius: 4px;
   font-size: calc(11.5px * var(--text-scale));
-  color: color-mix(in srgb, var(--color-text) 72%, transparent);
-  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+  white-space: nowrap;
+  color: var(--a-acc-text);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 42%, transparent);
 }

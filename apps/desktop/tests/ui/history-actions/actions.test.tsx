@@ -629,7 +629,7 @@ describe('explicit Continue preview and request identity', () => {
     expect(sent).toEqual([targetRoute]);
     expect(screen.queryByRole('button', { name: /^Send summary/ })).toBeNull();
     expect(screen.queryByRole('button', { name: '← Back' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Cancel/ })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Done' }));
     expect(screen.queryByRole('dialog')).toBeNull();
   });
@@ -650,7 +650,7 @@ describe('explicit Continue preview and request identity', () => {
     act(() => { openContinueTopic({ source: route, topicId: topic.id, target: targetRoute }); });
     await waitFor(() => expect(screen.queryByText('Preparing the summary…')).toBeNull());
     expect(summaryBox().value).toBe('Edited before Esc.');
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Cancel/ }));
     act(() => { openContinueTopic({ source: route, topicId: topic.id, target: targetRoute }); });
     await waitFor(() => expect(screen.queryByText('Preparing the summary…')).toBeNull());
     expect(summaryBox().value).toBe('Edited before Esc.');
@@ -676,7 +676,7 @@ describe('explicit Continue preview and request identity', () => {
     await act(async () => { fireEvent.click(send()); });
     expect(screen.getByRole('button', { name: /^Sending…/ }).hasAttribute('disabled')).toBe(true);
     expect((screen.getByRole('button', { name: '← Back' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: /^Cancel/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(summaryBox().readOnly).toBe(true);
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
     expect(screen.getByRole('dialog')).toBeDefined();
@@ -750,7 +750,7 @@ describe('Continue target picker', () => {
     const targets = continueTargets(route, [elsewhere, summary(route.session_id), summary('00000000-0000-4000-8000-000000000006', { state: 'closed' }),
       summary(secondId, { active_binding: null })]);
     expect(targets.map(target => target.route.session_id)).toEqual([secondId, elsewhere.session_id]);
-    expect(targets.map(target => target.detail)).toEqual(['No agent connected', 'codex · running · another project']);
+    expect(targets.map(target => target.detail)).toEqual(['No agent connected · this project', 'Codex · running · another project']);
   });
   it('picks a session or cancels, and says when no session can take the topic', () => {
     const picked: SessionRef[] = []; let cancelled = 0;
@@ -758,9 +758,9 @@ describe('Continue target picker', () => {
       onPick={target => { picked.push(target); }} onCancel={() => { cancelled++; }} />);
     const dialog = screen.getByRole('dialog', { name: 'Continue “Delivery decisions” in another session' });
     const option = within(dialog).getByRole('button', { name: 'Session 3' });
-    expect(option.getAttribute('aria-describedby') && document.getElementById(option.getAttribute('aria-describedby')!)?.textContent).toBe('codex · running');
+    expect(option.getAttribute('aria-describedby') && document.getElementById(option.getAttribute('aria-describedby')!)?.textContent).toBe('Codex · running · this project');
     fireEvent.click(option); expect(picked).toEqual([targetRoute]);
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' })); expect(cancelled).toBe(1);
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Cancel/ })); expect(cancelled).toBe(1);
     rerender(<ContinuePicker topicName="Delivery decisions" targets={[]} onPick={() => {}} onCancel={() => {}} />);
     expect(screen.getByText('No other open session can take this topic.')).toBeDefined();
   });

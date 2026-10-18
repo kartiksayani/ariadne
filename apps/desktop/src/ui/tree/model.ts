@@ -293,7 +293,7 @@ export interface TreeModel {
   readonly rows: readonly Row[];
   /** A status, owner or Later filter scopes the rows. A search never does. */
   readonly filtering: boolean;
-  /** "Showing an item outside your current filters." */
+  /** An item is shown that the filters would leave out (SPEC 11.4): the Map raises a notice and tags the row. */
   readonly outside: boolean;
   readonly noMatch: boolean;
   /** The session has no items at all. */
