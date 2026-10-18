@@ -361,7 +361,7 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   // 12.7 holds the line's icon and title and the dock's words. Left out: the top bar's chip of waiting questions in other sessions and the dock's chip of
   // them (the waiting list is one read of every session, and it gives up when one can't be read), the line's sentence (no line number), its second
   // button, and the Map panel (no path chip, so its centred lines sit higher).
-  '12.7': [...box('top bar left', [0, 0, 210, 40], [0, 0, 40, 40]), ...box('connection line title', [0, 40, 260, 56], [0, 40, 200, 38]),
+  '12.7': [...box('top bar left', [0, 0, 210, 40], [0, 0, 40, 40]), ...box('connection line title', [0, 40, 260, 56], [0, 40, 200, 32]),
     ...box('dock line text', [0, 760, 700, 40], [0, 610, 690, 40])],
   '12.8': [...topBar(BAR), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56], [0.001, 0.001]), ...dockLineEnds(), ...dockChip([0.002, 0.002])],
   // 12.9: the top bar's right-hand controls are disabled while the save is unsure (the board draws them live), and the line says less (§3a).
