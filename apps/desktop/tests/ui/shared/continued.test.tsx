@@ -10,10 +10,10 @@ const summary = (patch: Partial<SessionSummary>) => ({
 
 describe('continuedLabel', () => {
   it('names the origin session by agent and day', () => {
-    expect(continuedLabel(origin, [summary({})], now)).toBe('Continued from codex · yesterday');
+    expect(continuedLabel(origin, [summary({})], now)).toBe('Continued from Codex · yesterday');
   });
   it('drops the day for a session from today and the agent when none is bound', () => {
-    expect(continuedLabel(origin, [summary({ created_at: new Date(2026, 9, 7, 9, 0).toISOString() })], now)).toBe('Continued from codex');
+    expect(continuedLabel(origin, [summary({ created_at: new Date(2026, 9, 7, 9, 0).toISOString() })], now)).toBe('Continued from Codex');
     expect(continuedLabel(origin, [summary({ active_binding: null })], now)).toBe('Continued from an earlier session · yesterday');
   });
   it('falls back when the catalogue does not know the session', () => {
