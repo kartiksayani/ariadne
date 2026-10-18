@@ -60,6 +60,7 @@
   color: color-mix(in srgb, var(--color-text) 62%, transparent);
   font: inherit;
   font-size: calc(11.5px * var(--text-scale));
+  line-height: 1.5; /* its own, so the link is the same size in the timeline and in the popover */
   cursor: pointer;
 }
 
@@ -120,10 +121,21 @@
 }
 
 .change-box-title {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-weight: 600;
+}
+
+/* A narrow Details or a larger text size shortens the words with "…", never a second line: the head keeps its height. */
+.change-box-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .change-box[data-state="unseen"] .change-box-title { color: var(--attention); }

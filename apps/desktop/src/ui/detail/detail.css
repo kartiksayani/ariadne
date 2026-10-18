@@ -115,6 +115,13 @@
   flex: none;
 }
 
+/* New, Changed and Seen swap in this slot: one width fits the widest (Changed), so the swap never moves the words after it. */
+.detail-marker-slot {
+  flex: none;
+  display: inline-flex;
+  width: calc(72px * var(--text-scale));
+}
+
 .detail-badge-session-closed {
   display: flex;
   flex-wrap: wrap;

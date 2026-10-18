@@ -465,7 +465,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   useEffect(() => () => emitActions.current?.(null), []);
   const marker = useDetailMarker(item, seen);
   // The Because card shows once, under the newest answer that changed something (SPEC 5.3 item 8).
-  const becauseAt = useMemo(() => session && model ? latestChangedAnswer(session, model.chat) : null, [session, model?.chat]);
+  const becauseAt = useMemo(() => session && model ? latestChangedAnswer(session, model.chat) : null, [session, chatKey]);
   const becauseInput = session && becauseAt ? answerInputId(session, becauseAt) : null;
 
   useEffect(() => {
@@ -563,7 +563,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
       {/* The badge row (SPEC 5.3 item 1): status, New / Changed / Seen, and who raised it and when. */}
       <div className="detail-status"><div className={`detail-badge${closedSessionQuestion(session, item) ? ' detail-badge-session-closed' : ''}`}><StatusBadge status={model.display} label={model.badgeLabel} />
         {closedSessionQuestion(session, item) && <SessionClosedChip reason={sessionAnswerBlocked(session)} />}</div>
-        {marker && <ChangeMarker kind={marker} seenWhere="details" />}
+        {marker && <span className="detail-marker-slot"><ChangeMarker kind={marker} seenWhere="details" /></span>}
         <span className="detail-meta" title={model.meta}>{model.meta}</span></div>
       <h2 className="detail-question" title={model.question}><Markdown text={model.question} inline compact={!titleExpanded} /></h2>
       <button type="button" className="btn btn-ghost detail-title-toggle" aria-label={titleExpanded ? 'Collapse title' : 'Expand title'}

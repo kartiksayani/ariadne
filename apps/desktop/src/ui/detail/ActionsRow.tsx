@@ -12,6 +12,9 @@ export interface AckControl {
   readonly onUndo: () => void;
 }
 
+/** A greyed Ack says why, in place of "Ack → Done": the item is being written to or a message for it is on its way. */
+const ACK_WAITS = 'A change is being saved';
+
 /** What the slots say when the item's status has no use for them, and while they wait. */
 const TITLE: Readonly<Partial<Record<ItemActionId, string>>> = {
   bring: 'Ask the agent to raise this as a question for you',
@@ -48,7 +51,7 @@ export function ActionsRow({ actions, ack, statusLabel, closed = false, hint, pr
     {ack && (ack.held
       ? <button type="button" className="btn btn-secondary detail-primary detail-acked" title="Undo Ack" aria-label="Undo Ack" onClick={ack.onUndo}>
         <i className="ph ph-arrow-counter-clockwise" aria-hidden="true" />Acked · Undo</button>
-      : <button type="button" className="btn btn-primary detail-primary" title={ack.title} aria-label={ack.title} disabled={ack.disabled} onClick={ack.onAck}>
+      : <button type="button" className="btn btn-primary detail-primary" title={ack.disabled ? ACK_WAITS : ack.title} aria-label={ack.title} disabled={ack.disabled} onClick={ack.onAck}>
         <i className="ph ph-check" aria-hidden="true" />Ack</button>)}
     {promoted && <button type="button" className="btn btn-primary detail-primary" title={promoted.disabledReason ?? TITLE.bring} disabled={!!promoted.disabledReason} onClick={promoted.run}>
       <i className={promoted.icon} aria-hidden="true" />{promoted.label}</button>}

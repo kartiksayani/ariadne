@@ -180,13 +180,18 @@ for (const theme of ['dark', 'light'] as const) {
     await current.getByRole('button', { name: /^Older history/ }).click();
     const older = current.locator('.change-event').first();
     await expect(older).toContainText('not counted as a change');
-    await expect(older.getByRole('button', { name: 'Before → after', exact: true })).toBeVisible();
+    const timelineLink = older.getByRole('button', { name: 'Before → after', exact: true });
+    await expect(timelineLink).toBeVisible();
+    const linkSize = (link: Locator) => link.evaluate(element => { const rect = element.getBoundingClientRect(); return { width: rect.width, height: rect.height }; });
+    const timelineSize = await linkSize(timelineLink);
     await openChanges(page);
     const sinceCard = page.getByRole('dialog', { name: 'What changed', exact: true }).getByTestId('changes-row')
       .filter({ has: page.getByRole('button', { name: 'Retry schedule', exact: true }) });
     // The popover's rows use the board's "› Before → after" line instead of the compact icon (SPEC 5.3).
     const sinceLink = sinceCard.getByRole('button', { name: 'Before → after', exact: true });
     await expect(sinceLink).toHaveAttribute('aria-expanded', 'false');
+    // One control, one size: the timeline's "Before → after" is the popover's, and the answer card's compact control keeps its own 24-32 px target.
+    expect(await linkSize(sinceLink)).toEqual(timelineSize);
     const sinceComparison = page.locator(`[id="${await sinceLink.getAttribute('aria-controls')}"]`);
     await sinceLink.click();
     await expect(sinceComparison.locator('del').first()).toBeVisible();
@@ -615,12 +620,16 @@ for (const id of dockFrameIds) {
         padding: parseFloat(style.paddingTop) + parseFloat(style.paddingBottom), border: parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth) };
     });
     expect(lines.height, 'resting composer is two rows (alpha.21 E15)').toBeLessThanOrEqual(Math.max(lines.minimum, Math.ceil(lines.line * 2 + lines.padding + lines.border)));
-    // The actions sit in the body, in one row under the outcome (SPEC 5.3 item 5): they scroll with it, so the resting view (open at the end of the
-    // conversation) has them above the fold; the pinned dock holds only the composer.
+    // The actions sit in the body, in one row under the outcome (SPEC 5.3 item 5): they scroll with it and the pinned dock holds only the
+    // composer. Details opens 140px above the New divider or at the latest message (E13), so on a long conversation the row has scrolled
+    // up out of view at rest, by design: it is drawn, and scrolling the body to its top brings it into the viewport.
     const actions = pane.getByRole('group', { name: 'Item actions', exact: true });
-    await expect(actions.getByRole('button', { name: 'Ack → Decided', exact: true })).toBeVisible();
-    await expect(actions.getByRole('button', { name: 'Reply', exact: true })).toBeVisible();
-    await expect(actions.getByRole('button', { name: 'Later', exact: true })).toBeVisible();
+    const actionButtons = [actions.getByRole('button', { name: 'Ack → Decided', exact: true }), actions.getByRole('button', { name: 'Reply', exact: true }),
+      actions.getByRole('button', { name: 'Later', exact: true })];
+    for (const button of actionButtons) await expect(button).toBeVisible();
+    const resting = await pane.locator('.detail-body').evaluate(element => { const place = element.scrollTop; element.scrollTop = 0; return place; });
+    for (const button of actionButtons) await expect(button).toBeInViewport();
+    await pane.locator('.detail-body').evaluate((element, place) => { element.scrollTop = place; }, resting);
     if (spec.dockState === 'pending') {
       const pending = pane.getByRole('region', { name: 'Conversation', exact: true }).locator('li[data-pending]');
       await expect(pending).toContainText('Keep the captions with the examples.');

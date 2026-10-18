@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import type { SessionSeen } from '../../../src/generated/core';
 import type { ItemChangeRecord } from '../../../src/generated/domain/models';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
+import { ActionsRow } from '../../../src/ui/detail/ActionsRow';
 import { ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import type { ItemActionView } from '../../../src/ui/detail/itemActions';
 import { clockTime } from '../../../src/ui/changes/clock';
@@ -37,6 +38,8 @@ describe('the badge row and Mark seen', () => {
     expect(within(head).getByRole('img', { name: 'Changed' })).toBeTruthy();
     const box = screen.getByRole('region', { name: 'What changed' });
     expect(within(box).getByText(`Changed since you looked · ${clockTime(CHANGED_AT)}`)).toBeTruthy();
+    // The title keeps one line and shortens with "…" when narrow, so its full words ride in its tooltip.
+    expect(within(box).getByTitle(`Changed since you looked · ${clockTime(CHANGED_AT)}`)).toBeTruthy();
     fireEvent.click(within(box).getByRole('button', { name: 'Mark seen' }));
     expect(onMarkSeen).toHaveBeenCalledExactlyOnceWith('1.1', item.revision);
     // The dwell or Mark seen advances `seen`: only the head text and the pill change.
@@ -97,6 +100,19 @@ describe('the actions row', () => {
     expect(lists().length).toBe(before);
     view.unmount();
     expect(onActions).toHaveBeenLastCalledWith(null);
+  });
+});
+
+describe('the Ack button in the actions row', () => {
+  const ack = (disabled: boolean) => ({ title: 'Ack → Done', held: false, disabled, onAck: vi.fn(), onUndo: vi.fn() });
+  it.each([
+    ['ready', false, 'Ack → Done'],
+    ['greyed while a change is being saved', true, 'A change is being saved'],
+  ] as const)('%s: its tooltip is %s, and its name stays "Ack → Done"', (_name, disabled, title) => {
+    render(<ActionsRow actions={[]} ack={ack(disabled)} statusLabel="Open" />);
+    const button = screen.getByRole('button', { name: 'Ack → Done' });
+    expect(button.getAttribute('title')).toBe(title);
+    expect((button as HTMLButtonElement).disabled).toBe(disabled);
   });
 });
 

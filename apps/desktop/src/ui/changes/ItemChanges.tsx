@@ -122,9 +122,10 @@ export function ItemChanges({ service, store, session, item, seen, onOpenAnswer,
   const timeline = historyOpen && <Timeline session={session} item={item} records={older} loading={history.loading} error={history.error} retry={history.retry} onOpenAnswer={onOpenAnswer} />;
   if (!drawn) return null;
   const at = clockTime(currentRecords.at(-1)?.at ?? item.updated_at ?? Date.now());
+  const title = unseen ? `Changed since you looked · ${at}` : `Changed at ${at}`;
   if (showBox) return <section className="change-box" data-state={unseen ? 'unseen' : 'seen'} data-testid="change-box" aria-label="What changed">
     <div className="change-box-head">
-      <span className="change-box-title">{unseen ? <><i className="change-diamond" aria-hidden="true" />Changed since you looked · {at}</> : `Changed at ${at}`}</span>
+      <span className="change-box-title" title={title}>{unseen && <i className="change-diamond" aria-hidden="true" />}<span className="change-box-title-text">{title}</span></span>
       {unseen && onMarkSeen && <button type="button" className="btn btn-secondary change-box-mark" onClick={() => onMarkSeen(item.id, item.revision)}>
         <i className="ph ph-check" aria-hidden="true" />Mark seen</button>}
     </div>
