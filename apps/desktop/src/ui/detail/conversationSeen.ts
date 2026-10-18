@@ -83,3 +83,11 @@ export function conversationDivider(session: Immutable<Session>, itemId: string,
   if (first <= 0 || chat.slice(first).some((entry, index) => entry.message.author !== 'me' && !unread[first + index])) return null;
   return chat[first].id;
 }
+
+/** The time "New since you last looked at …" names: the topic's last look, else the session's baseline; null when unknown. */
+export function conversationBaseline(session: Immutable<Session>, itemId: string, seen: SeenState): number | null {
+  const item = session.items[itemId];
+  if (!item || !seen) return null;
+  const at = Date.parse(seen.topics.find(topic => topic.topic_id === item.topic_id)?.at ?? seen.since);
+  return Number.isFinite(at) ? at : null;
+}

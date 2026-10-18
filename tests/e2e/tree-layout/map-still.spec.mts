@@ -84,6 +84,8 @@ const selectReading = async (page: Page) => {
   await settle(page);
   await page.mouse.move(2, 690);
 };
+/** Selects the reading row and leaves its Details open beside the Map. */
+const openDetails = async (page: Page) => { await press(row(page, '10').getByText('Another item 10')); await settle(page); };
 const bandButton = (page: Page, name: string | RegExp) => band(page).getByRole('button', { name });
 const moreActions = (page: Page) => bandButton(page, /^More actions for/);
 
@@ -100,6 +102,11 @@ const triggers: readonly Trigger[] = [
   // The popovers open over the Map and take no room in it (D18, D19).
   ['What changed opens', 'still', '12', nothing, page => press(bandButton(page, /new|changed|changes since/)),
     page => expect(page.getByRole('dialog', { name: 'What changed' })).toBeVisible()],
+  // The bigger view covers the Map and never resizes or unmounts it (alpha.21 E4): its rows keep their place as it opens and closes.
+  ['the bigger view opens', 'still', '11', openDetails, page => page.getByRole('button', { name: 'Read in a bigger view' }).click(),
+    page => expect(page.getByRole('region', { name: 'Item conversation' })).toBeVisible()],
+  ['the bigger view closes', 'still', '11', async page => { await openDetails(page); await page.getByRole('button', { name: 'Read in a bigger view' }).click(); await settle(page); },
+    page => page.getByRole('button', { name: 'Back to Map' }).click(), page => expect(page.getByRole('region', { name: 'Item conversation' })).toHaveCount(0)],
   ['Recent opens', 'still', '12', nothing, page => page.getByRole('button', { name: 'Recent' }).click(),
     page => expect(page.getByRole('dialog', { name: 'Recent items' })).toBeVisible()],
   // The band's Ack all goes with the topic's only result to ack.

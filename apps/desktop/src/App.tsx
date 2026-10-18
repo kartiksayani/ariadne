@@ -25,7 +25,7 @@ import { NavigationGraph } from './ui/graph/NavigationGraph';
 import type { OwnerFocusRequest, PendingSubmission } from './ui/answer/useSubmit';
 import { agentNotRunning } from './ui/answer/notRunning';
 import { ConversationView } from './ui/detail/ConversationView';
-import { conversationDivider } from './ui/detail/conversationSeen';
+import { conversationBaseline, conversationDivider } from './ui/detail/conversationSeen';
 import { DetailPath, ItemDetail } from './ui/detail/ItemDetail';
 import type { DetailHeadControls } from './ui/shell/DetailHead';
 import type { ItemActionView } from './ui/detail/itemActions';
@@ -205,10 +205,21 @@ function Workspace({ application }: { application: Application }) {
   }, [navigation, route?.project_id, route?.session_id, readingId, seenRevision]);
   // Folded Details shows only its rail, so its item is not seen: the dwell waits, and starts from zero on unfold.
   useSeenDwell((!!conversation || detailOpen && !detailsFolded && !topicMode) && detailNeedsRead && route && readingId && sessionState?.status === 'ready' && !sessionState.error ? `${key}:${readingId}` : null, seenRevision, observeDetail);
+  // The "New since you last looked" divider and its time are worked out once per selection, from what was seen before this look
+  // (the 1 s dwell would erase it), and kept for the pane, the bigger view and a round trip between them (E13).
+  const dividers = useRef(new Map<string, { id: string | null; at: number | null }>());
+  const dividerFor = (itemId: string) => {
+    const at = `${key}:${itemId}`, kept = dividers.current.get(at), session = sessionState?.snapshot?.session;
+    if (kept) return kept;
+    if (!session?.items[itemId] || !observedSeen) return { id: null, at: null };
+    const made = { id: conversationDivider(session, itemId, observedSeen), at: conversationBaseline(session, itemId, observedSeen) };
+    dividers.current.set(at, made);
+    return made;
+  };
   const openConversation = (itemId: string) => {
     const session = store?.getSnapshot().snapshot?.session;
     if (!session?.items[itemId] || !route) return;
-    if (showConversation(itemId, () => conversationDivider(session, itemId, observedSeen))) navigationVisits.record(route, itemId, 'viewed');
+    if (showConversation(itemId, () => dividerFor(itemId).id)) navigationVisits.record(route, itemId, 'viewed');
   };
   const [answerJump, setAnswerJump] = useState<{ route: string; itemId: string; messageId: string; token: number } | null>(null);
   const answerJumpSequence = useRef(0);
@@ -664,6 +675,7 @@ function Workspace({ application }: { application: Application }) {
         onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined}
         onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onBring={() => { void queueBring({ ...route, item_id: selectedId }); }}
         onHide={() => hideItem(selectedId)} onRemove={() => removeItem(selectedId)} onActions={setItemActions}
+        dividerId={dividerFor(selectedId).id} dividerAt={dividerFor(selectedId).at}
         later={later} onAgentNotRunning={onAgentNotRunning} earlierAgent={earlier}
         hiddenItemIds={view?.hidden_item_ids} seen={readingSeen}
         answerJump={answerJump?.route === key && answerJump.itemId === selectedId ? answerJump : undefined}
@@ -677,7 +689,7 @@ function Workspace({ application }: { application: Application }) {
         onClose={closeConversation} head={biggerHead} onTopic={toTopicTop}
         onHide={() => hideItem(conversation.itemId)} onRemove={() => removeItem(conversation.itemId)} onActions={setItemActions}
         onBring={() => { void queueBring({ ...route, item_id: conversation.itemId }); }} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })}
-        dividerId={conversation.dividerId} seen={readingSeen} hiddenItemIds={view?.hidden_item_ids}
+        dividerId={dividerFor(conversation.itemId).id ?? conversation.dividerId} dividerAt={dividerFor(conversation.itemId).at} seen={readingSeen} hiddenItemIds={view?.hidden_item_ids}
         focusRequest={ownerFocus?.route === key && ownerFocus.itemId === conversation.itemId ? ownerFocus : undefined}
         onFocusRequestConsumed={consumeOwnerRequest} onAgentNotRunning={onAgentNotRunning}
         onLater={value => preferences ? navigation.setLater({ ...route, item_id: conversation.itemId }, value, preferences.revision) : Promise.resolve(false)} /> : undefined}

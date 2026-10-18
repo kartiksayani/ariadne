@@ -447,16 +447,33 @@ describe('desktop item conversation', () => {
 
   it('keeps the opening divider anchored after the conversation dwell marks its item seen', async () => {
     const transport = await setup({ baseline: true }); await expand(); await switchQuestion();
-    const divider = within(conversation()).getByText('New since you last looked');
+    const divider = within(conversation()).getByTestId('new-divider');
+    expect(divider.textContent).toMatch(/^New since you last looked at \d{1,2}:\d{2}/);
     const message = divider.closest('[data-message-id]')!;
     expect(message.getAttribute('data-message-id')).toBe('00000000-0000-4000-8000-000000000114');
     expect(transport.preferences.seen![0].items.some(item => item.item_id === '2')).toBe(false);
     await waitFor(() => expect(transport.preferences.seen![0].items).toContainEqual({
       item_id: '2', revision: transport.sessions.get(route.session_id)!.items['2']!.revision,
     }), { timeout: 3000 });
-    expect(within(conversation()).getByText('New since you last looked')).toBe(divider);
+    expect(within(conversation()).getByTestId('new-divider')).toBe(divider);
     expect(divider.closest('[data-message-id]')).toBe(message);
     expect(selected(transport)).toBe('4');
+  });
+
+  it('draws the divider in the Details pane too, and keeps it through the dwell and a round trip to the bigger view (E13)', async () => {
+    const transport = await setup({ baseline: true });
+    fireEvent.click(row('2'));
+    const pane = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
+    const divider = within(pane).getByTestId('new-divider');
+    expect(divider.closest('[data-message-id]')!.getAttribute('data-message-id')).toBe('00000000-0000-4000-8000-000000000114');
+    await waitFor(() => expect(transport.preferences.seen![0].items).toContainEqual({
+      item_id: '2', revision: transport.sessions.get(route.session_id)!.items['2']!.revision,
+    }), { timeout: 3000 });
+    expect(within(pane).getByTestId('new-divider')).toBe(divider);
+    await expand();
+    const there = within(conversation()).getByTestId('new-divider');
+    expect(there.closest('[data-message-id]')!.getAttribute('data-message-id')).toBe('00000000-0000-4000-8000-000000000114');
+    expect(there.textContent).toBe(divider.textContent);
   });
 
   // ⌥digit quick-send is gone (SPEC 6.1); the other fast send is Enter on a focused option card.
