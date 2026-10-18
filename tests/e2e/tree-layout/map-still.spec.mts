@@ -947,3 +947,43 @@ test('a row above that shrinks at the bottom is clamped by the browser, and the 
   // One step up only: back down at the Map's end the rows no longer reach the row's old place (pinned or not), a separate matter.
   await pinHolds(page, '17', place, 'after a row above shrank at the bottom', [1.2]);
 }));
+
+// Details' body below the head never moves when the dwell clears the head's marker (alpha.21 E7-E9): the marker slot has one width
+// for New, Changed and Seen, and the change box's title keeps one line. Measured at the narrowest Details and a larger text size,
+// where the title and the badge row would otherwise wrap.
+test('Details keeps the change box and what is below it still when the head goes from unseen to seen, at 320px and text size 1.2', ({ page }) => served(page, async () => {
+  const detail = page.locator('.item-detail');
+  // Item 10 opens Details first, so the column can be narrowed and the text enlarged before the item with a change box is chosen.
+  await press(row(page, '10').getByText('Another item 10'));
+  await expect(detail).toBeVisible();
+  const edge = page.getByRole('separator', { name: 'Resize detail panel' });
+  await edge.focus();
+  await page.keyboard.press('Home');
+  await expect.poll(async () => (await page.locator('.shell-detail').boundingBox())!.width).toBeLessThanOrEqual(320);
+  await textScale(page, 1.2);
+  await settle(page);
+  await press(row(page, '12').getByText('Another item 12'));
+  const box = detail.getByTestId('change-box'), marker = detail.locator('.detail-status').getByTestId('change-marker');
+  await expect(box).toHaveAttribute('data-state', 'unseen');
+  await expect(marker).toHaveAttribute('data-kind', 'changed');
+  const places = () => detail.evaluate(element => {
+    const top = (selector: string) => element.querySelector(selector)?.getBoundingClientRect().top ?? null;
+    const height = (selector: string) => element.querySelector(selector)?.getBoundingClientRect().height ?? null;
+    const left = (selector: string) => element.querySelector(selector)?.getBoundingClientRect().left ?? null;
+    const width = (selector: string) => element.querySelector(selector)?.getBoundingClientRect().width ?? null;
+    return { slot: width('.detail-marker-slot'), pill: width('[data-testid="change-marker"]'), meta: left('.detail-meta'), metaTop: top('.detail-meta'), head: height('.detail-head'), box: height('[data-testid="change-box"]'), title: height('.change-box-title'),
+      actions: top('.detail-actions-row'), chat: top('[aria-label="Conversation"]') };
+  });
+  const unseen = await places();
+  expect(unseen.actions, 'the actions row is drawn').not.toBeNull();
+  expect(unseen.slot, 'the marker has its own slot').not.toBeNull();
+  expect(unseen.pill!, 'the Changed pill fits its slot').toBeLessThanOrEqual(unseen.slot!);
+  expect(unseen.title, 'the title keeps one line (within the head\'s 26px)').toBeLessThanOrEqual(26);
+  // The dwell clears the head: the change box says "Changed at", the marker becomes Seen, and nothing below moves.
+  await expect(box).toHaveAttribute('data-state', 'seen');
+  await expect(marker).toHaveAttribute('data-kind', 'seen');
+  await settle(page);
+  const after = await places();
+  expect(after.pill!, 'the Seen pill fits the same slot').toBeLessThanOrEqual(after.slot!);
+  expect({ ...after, pill: 0 }).toEqual({ ...unseen, pill: 0 });
+}));

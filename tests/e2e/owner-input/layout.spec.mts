@@ -426,10 +426,9 @@ test('reads as a chat: oldest exchange first with no round headers, quick replie
     expect(await pane.innerText()).not.toMatch(/Round \d|Back and forth/);
     await expect(pane.getByRole('textbox')).toHaveCount(0);
     await expect(pane.locator('.answer')).toHaveCount(0);
-    const dock = pane.locator('.detail-dock');
-    await expect(dock.getByRole('region', { name: 'Revisit' })).toBeVisible();
-    const [dockBox, paneBox] = [(await dock.boundingBox())!, (await pane.boundingBox())!];
-    expect(dockBox.y + dockBox.height, 'revisit actions docked at the pane bottom').toBeGreaterThan(paneBox.y + paneBox.height - 2);
+    // The revisit actions are a row in the body (SPEC 5.3 item 5); a closed item has no composer, so nothing is pinned.
+    await expect(pane.getByRole('group', { name: 'Item actions' }).getByRole('button', { name: 'Back to Open' })).toBeVisible();
+    await expect(pane.locator('.detail-dock')).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally { await server.close(); }
 });

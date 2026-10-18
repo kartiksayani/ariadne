@@ -51,14 +51,12 @@ describe('the single item chat', () => {
     expect(title.closest('.detail-head-expanded')).toBeNull();
     expect(value.transport.calls.some(request => 'command' in request)).toBe(false);
     const css = readFileSync(resolve(__dirname, '../../../src/ui/detail/detail.css'), 'utf8');
-    expect(css).toMatch(/\.detail-head\s*\{[^}]*position:\s*sticky/s);
     // Browser anchoring must not change an app-selected position and imitate an owner scroll away.
     expect(css).toMatch(/\.detail-body\s*\{[^}]*overflow-anchor:\s*none/s);
-    expect(css).toMatch(/\.detail-question\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap/s);
     expect(css).toMatch(/\.detail-dock\s*\{[^}]*max-height:\s*40%;[^}]*overflow-y:\s*auto/s);
   });
 
-  it('opens at the latest unanswered ask after a long earlier conversation and keeps the sticky title clear', async () => {
+  it('opens at the latest unanswered ask after a long earlier conversation and leaves nothing pinned above it', async () => {
     const value = setup(); opened.push(value);
     const session = value.transport.session, item = session.items['2']!;
     const first = session.rounds[item.current_round_id!]!;
@@ -72,13 +70,12 @@ describe('the single item chat', () => {
     vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(1800);
     vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(400);
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-      return { top: this.closest('[data-message-id="new-opening"]') ? 800 : 100,
-        height: this.classList.contains('detail-head') ? 36 : 0 } as DOMRect;
+      return { top: this.closest('[data-message-id="new-opening"]') ? 800 : 100, height: 0 } as DOMRect;
     });
     await value.store.refresh();
     render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="2" later={false} onOpenItem={vi.fn()} />);
     await screen.findByRole('region', { name: 'Conversation' });
-    await waitFor(() => expect(document.querySelector<HTMLElement>('.detail-body')!.scrollTop).toBe(664));
+    await waitFor(() => expect(document.querySelector<HTMLElement>('.detail-body')!.scrollTop).toBe(700));
     const current = document.querySelector<HTMLElement>('[data-message-id="new-opening"]')!;
     expect(within(current).getByText('Waiting on you')).toBeTruthy();
     expect(current.querySelectorAll('.detail-bubble-agent')).toHaveLength(2);
@@ -86,7 +83,7 @@ describe('the single item chat', () => {
   });
 
   it.each([
-    { askHeight: 120, opening: 764, smaller: 764, reflowed: 884 },
+    { askHeight: 120, opening: 800, smaller: 800, reflowed: 920 },
     { askHeight: 700, opening: 1078, smaller: 1228, reflowed: 1348 },
   ])('keeps a $askHeight px current ask visible through composer growth and content reflow until the owner scrolls away', async ({ askHeight, opening, smaller, reflowed }) => {
     const value = setup(); opened.push(value);
@@ -111,7 +108,6 @@ describe('the single item chat', () => {
       const pane = document.querySelector<HTMLElement>('.detail-body'), scroll = pane?.scrollTop ?? 0;
       let top = 100, height = 0;
       if (this.classList.contains('detail-body')) height = viewportHeight;
-      else if (this.classList.contains('detail-head')) height = 36;
       else if (this.classList.contains('detail-why')) height = 120;
       else if (this.classList.contains('detail-waiting-tag')) { top += askTop + askHeight - 42 - scroll; height = 20; }
       else if (this.classList.contains('detail-bubble-agent') && this.querySelector('.detail-waiting-tag')) { top += askTop - scroll; height = askHeight; }
@@ -123,11 +119,11 @@ describe('the single item chat', () => {
     const pane = document.querySelector<HTMLElement>('.detail-body')!, marker = pane.querySelector('.detail-waiting-tag')!;
     const visible = () => {
       const question = marker.getBoundingClientRect(), bounds = pane.getBoundingClientRect();
-      expect(question.top).toBeGreaterThanOrEqual(bounds.top + 36);
+      expect(question.top).toBeGreaterThanOrEqual(bounds.top);
       expect(question.bottom).toBeLessThanOrEqual(bounds.bottom);
       if (askHeight === 120) {
         const bubble = marker.closest('.detail-bubble-agent')!.getBoundingClientRect();
-        expect(bubble.top).toBeGreaterThanOrEqual(bounds.top + 36);
+        expect(bubble.top).toBeGreaterThanOrEqual(bounds.top);
         expect(bubble.bottom).toBeLessThanOrEqual(bounds.bottom);
       }
     };
@@ -180,7 +176,7 @@ describe('the single item chat', () => {
       disconnect() {}
     });
     let viewportHeight = 400;
-    const scrollHeight = askAtEnd ? 1164 : 2500;
+    const scrollHeight = askAtEnd ? 1200 : 2500;
     vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(scrollHeight);
     vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) {
       return this.classList.contains('detail-body') ? viewportHeight : 0;
@@ -189,7 +185,6 @@ describe('the single item chat', () => {
       const scroll = document.querySelector<HTMLElement>('.detail-body')?.scrollTop ?? 0;
       let top = 100, height = 0;
       if (this.classList.contains('detail-body')) height = viewportHeight;
-      else if (this.classList.contains('detail-head')) height = 36;
       else if (this.classList.contains('detail-waiting-tag')) { top += 878 - scroll; height = 20; }
       else if (this.classList.contains('detail-bubble-agent') && this.querySelector('.detail-waiting-tag')) { top += 800 - scroll; height = 120; }
       return { top, bottom: top + height, width: 500, height } as DOMRect;
@@ -201,7 +196,7 @@ describe('the single item chat', () => {
     const box = await screen.findByLabelText<HTMLTextAreaElement>('Reply in your own words');
     await waitFor(() => expect(box.disabled).toBe(false));
     const pane = document.querySelector<HTMLElement>('.detail-body')!;
-    expect(pane.scrollTop).toBe(764);
+    expect(pane.scrollTop).toBe(800);
     if (askAtEnd) {
       expect(pane.scrollTop).toBe(pane.scrollHeight - pane.clientHeight);
       expect(screen.getByText('A later update after the question.')).toBeTruthy();
@@ -218,11 +213,11 @@ describe('the single item chat', () => {
     act(() => resize());
     expect(created).toHaveBeenCalledTimes(1);
     expect(setScroll).not.toHaveBeenCalled();
-    expect(pane.scrollTop).toBe(position === 'transcript end' ? 2100 : 764);
+    expect(pane.scrollTop).toBe(position === 'transcript end' ? 2100 : 800);
     // Growing the dock reduces the transcript's viewport: preserve end or ask following.
     viewportHeight = 250;
     act(() => resize());
-    expect(pane.scrollTop).toBe(position === 'transcript end' ? 2250 : 764);
+    expect(pane.scrollTop).toBe(position === 'transcript end' ? 2250 : 800);
     if (askAtEnd) {
       const head = pane.querySelector('.detail-head')!.getBoundingClientRect();
       const marker = pane.querySelector('.detail-waiting-tag')!;
@@ -251,11 +246,11 @@ describe('the single item chat', () => {
     binding.connection_state = 'reconnecting';
     await value.store.refresh();
     render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1.1" later={false} onOpenItem={vi.fn()} />);
-    const dock = document.querySelector<HTMLElement>('.detail-dock')!;
-    expect(within(dock).getByText(/Reconnecting to .+These come back with the connection/).closest('[hidden], details')).toBeNull();
-    expect(within(dock).getByRole<HTMLButtonElement>('button', { name: 'Bring it up' }).disabled).toBe(true);
-    expect(within(dock).getByRole<HTMLButtonElement>('button', { name: 'Reply' }).disabled).toBe(true);
-    expect(within(dock).getByRole<HTMLButtonElement>('button', { name: 'Later' }).disabled).toBe(false);
+    const detail = document.querySelector<HTMLElement>('.item-detail')!;
+    expect(within(detail).getByText(/Reconnecting to .+These come back with the connection/).closest('[hidden], details')).toBeNull();
+    expect(within(detail).getByRole<HTMLButtonElement>('button', { name: 'Bring it up' }).disabled).toBe(true);
+    expect(within(detail).getByRole<HTMLButtonElement>('button', { name: 'Reply' }).disabled).toBe(true);
+    expect(within(detail).getByRole<HTMLButtonElement>('button', { name: 'Later' }).disabled).toBe(false);
   });
 
   it('keeps the full reply once and shows both the choice and exact note in each owner bubble', async () => {
@@ -322,7 +317,7 @@ describe('the single item chat', () => {
     const ask = session.items['2']!.ask!;
     expect(chat.filter(entry => entry.message.body.includes(ask))).toHaveLength(1);
     expect(chat.flatMap(entry => entry.asks).some(value => value.text === ask)).toBe(false);
-    expect(model(session, '1.1').chat.some(entry => entry.marker.includes('Parent raised here'))).toBe(true);
+    expect(model(session, '1.1').chat.some(entry => entry.id === session.items['1']!.created_message_id)).toBe(true);
     expect(model(session).chat.flatMap(entry => entry.forks).map(fork => fork.id)).toEqual(['1.1']);
   });
 

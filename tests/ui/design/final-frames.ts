@@ -17,7 +17,8 @@ export const variantNames = Object.keys(variants) as readonly Variant[];
 export const finalNow = Date.UTC(2026, 9, 7, 21, 25);
 
 /** What the owner has typed in one waiting question's box (the board's `drafts`). `own` is "Write my own answer". */
-export interface Draft { readonly item: string; readonly pick?: number; readonly note?: string; readonly own?: string }
+export interface Draft { readonly item: string; readonly pick?: number; readonly note?: string; readonly own?: string;
+  /** Words typed in the item's Details composer (the reply, note or follow-up box), not in an answer's cards (3.3). */ readonly reply?: string }
 
 /** A step taken in the app after it mounts, to reach a state that is not data (an open menu, a hover). */
 export type Step =
@@ -25,6 +26,8 @@ export type Step =
   | { readonly click: string }
   | { readonly hover: string }
   | { readonly type: string }
+  /** Time passing in the app: milliseconds waited, for what a dwell does (the 1 s that clears a marker, 9.10). */
+  | { readonly wait: number }
   /** The Map's own scroller (the Tree's, or the Graph's), moved to its top: 8.5 (the selected row is out of view below) and the Graph states
    * (ALPHA20-REPLAN §3a: the app opens the Graph scrolled to the selected node, the board at the canvas top). */
   | { readonly scroll: 'top' }
@@ -201,7 +204,22 @@ const stateList: readonly FinalState[] = [
   { id: '3.1', part: 'Conversation', sid: 'c-details', owner: 'details', pending: false, title: 'Details beside the Map', app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' } } },
   // 3.2 stays pending: the bigger view of Details is release 3.
   { id: '3.2', part: 'Conversation', sid: 'c-read', owner: 'details', pending: true, title: 'A bigger view for a long thread', app: { view: { selected: 'a2.2.1', details: 'bigger', dock: 'line' } } },
+  // 3.3, 3.4, 3.5 and 3.7 stay pending (alpha.21 W4). The composer, the labels and the status line are built; what keeps the frame from matching is
+  // outside them: the Details body above (W3's badge row, change box, actions and Related), and in 3.3 the fixture's frozen clock, which reads the agent as
+  // reconnecting and greys Send. Run with FINAL_APP=1 to see them.
+  { id: '3.3', part: 'Conversation', sid: 'c-reply', owner: 'details', pending: true, title: 'Replying to an item from Details', app: { view: { selected: 'a6', details: 'open', dock: 'line' },
+    // Typed, not a saved draft: a draft the app loads at start is "back after a restart" (11.2), with its own chip and bar.
+    act: [{ key: 'r' }, { type: 'Also mention the per-workspace fallback, and link to the SOP once it’s on the wiki.' }] } },
+  { id: '3.4', part: 'Conversation', sid: 'c-wait', owner: 'details', pending: true, title: 'The item is waiting on me: answer it from Details', app: { view: { selected: Q1, details: 'open', dock: 'line' }, drafts: [d(Q1, { pick: 0 })] } },
+  // 3.5: the app's fixture has no "queued" delivery stage (a sent answer is "received", which reads "Picked up"), so "Sent at … Undo" cannot be reached by data.
+  { id: '3.5', part: 'Conversation', sid: 'c-sent', owner: 'details', pending: true, title: 'Answered from Details: my answer shows as a sent message', app: { view: { selected: Q1, details: 'open', dock: 'line' }, drafts: [d(Q1, { pick: 0, note: note1 })],
+    questions: { sent: [Q1] } } },
   { id: '3.6', part: 'Conversation', sid: 'c-fold', owner: 'details', pending: false, title: 'Details folded to a strip, dock open', app: { view: { selected: 'a2.2.1.1', details: 'folded', dock: 'open', dockQuestion: 0 }, act: [{ click: 'Fold Details' }] } },
+  { id: '3.7', part: 'Conversation', sid: 'c-picked', owner: 'details', pending: true, title: 'After the agent picks the answer up', app: { view: { selected: Q1, details: 'open', dock: 'line' }, drafts: [d(Q1, { pick: 0, note: note1 })],
+    questions: { sent: [Q1] } } },
+  // 11.2 and 11.5 stay pending: the notices come from the 5.7 hooks, which App.tsx mounts in W2's piece (the app side cannot show them before it).
+  { id: '11.2', part: 'R4-Notices', sid: 'n-recovered', owner: 'details', pending: true, title: 'Unsent words back after a restart', app: { view: { selected: 'a2.2.1', details: 'open', dock: 'line' }, drafts: [d('a2.2.1', { reply: 'Keep the SOP short.' })] } },
+  { id: '11.5', part: 'R4-Notices', sid: 'n-stuck', owner: 'details', pending: true, title: 'A reply that’s stuck', app: { view: { selected: 'a2.2.1', details: 'open', dock: 'line' } } },
   // 12. Connection (alpha.21 D3): the top bar, the line above the Map, the dock line and, for 12.7, the Map's panel are held to the board (`regionsById`).
   // 12.5 stays pending: the app reads the selected session before it draws anything (a hung read leaves the Projects page up), so the board's
   // loading frame (Map skeleton, "Connecting…", the dock's skeleton) cannot be reached at start; the dock's skeleton is a unit test's
@@ -293,6 +311,16 @@ const mapStateList: readonly FinalState[] = [
     app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ key: 'n' }, { key: 'n' }, { key: 'n' }, { key: 'n' }, { key: 'n' }] } },
   { id: '9.9', part: 'Markers', sid: 'm-graph', owner: 'graph', pending: false, title: 'On Graph cards: the diamond alone, same shapes',
     app: { view: { selected: 'a6', mode: 'graph', details: 'folded', dock: 'line' }, map: marked('base'), act: [{ click: 'Graph' }, { click: 'Fold Details' }, { scroll: 'top' }] } },
+  // alpha.21 W3 (Details body): the markers in the dock and in Details. Pending until W2's head is merged: the body starts where the head ends, so
+  // the regions (the badge row, the change box, the actions row) are set on the integrated frame, not on this branch's.
+  { id: '9.7', part: 'Markers', sid: 'm-dock', owner: 'changes', pending: true, title: 'In the answer dock: a question that changed since I last saw it',
+    app: { view: { selected: null, dock: 'open', dockQuestion: 0 }, map: marked('base') } },
+  { id: '9.8', part: 'Markers', sid: 'm-details', owner: 'changes', pending: true, title: 'In Details: the marker beside the status, and what changed',
+    app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' }, map: marked('base') } },
+  { id: '9.10', part: 'Markers', sid: 'm-seen', owner: 'changes', pending: true, title: 'Clearing: a second in Details clears it and shows Seen',
+    app: { view: { selected: 'a6', details: 'open', dock: 'line' }, map: marked('base'), act: [{ wait: 1500 }] } },
+  { id: '9.11', part: 'Markers', sid: 'm-reword', owner: 'changes', pending: true, title: 'A rewording alone: no marker anywhere, noted in the item’s history',
+    app: { view: { selected: 'a8', details: 'open', dock: 'line' }, map: marked('base') } },
   { id: '10.12', part: 'R4-Dialogs', sid: 'd-tmenu', owner: 'band', pending: false, title: 'The topic’s … menu',
     // The board's R4 file draws this menu over the same marked Map as 5.1.
     app: { view: { selected: null, dock: 'line' }, map: marked('base'), act: [{ click: 'More actions for' }] } }
@@ -450,6 +478,7 @@ const mapRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '8.5': [...box('topic band', [0, 40, 880, 62], [0, 40, 560, 114], MAP), // The pill's inside only: its rounded corners show the Map's rows behind it, which differ by D1 (row padding) and the scroll that follows.
     ...box('Back to selected pill', [336, 718, 208, 26], [176, 568, 208, 26], MAP),
     wideOnly('first row', [0, 102, 880, 66], 0.01)],
+  '9.7': [], '9.8': [], '9.10': [], '9.11': [],
   '9.2': [...box('topic band', [0, 40, 1280, 62], [0, 40, 900, 62], MAP), ...box('first row', [0, 102, 1280, 66], [0, 102, 900, 66], MAP)],
   // The "…" menu, from its first row ("Reply to topic"); the band is compared left of the menu.
   '10.12': [...box('topic band', [0, 40, 1280, 38], [0, 40, 586, 62], MAP), ...box('menu: Reply to topic', [970, 78, 300, 58], [590, 78, 300, 58], TEXT),

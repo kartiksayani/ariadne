@@ -232,7 +232,7 @@ export async function runRecoveryAcceptance(configuration) {
   const lateWorkText = `native-stop-waiting-work-${nonce}\nSave the original answer when it becomes available.`;
   // Nothing is held once the successor has finished, but the item's one answer stays sealed: this reply goes out through
   // "Add a reply". The window may still be switching from the held follow-up; wait for that action before choosing an editor.
-  await wait(async () => (await browser.$('.item-detail [aria-label="Reply"] [aria-label="Item actions"] button').isExisting())
+  await wait(async () => (await browser.$('.item-detail [aria-label="Item actions"] button[aria-label="Add a reply"]').isExisting())
     && !(await browser.$('.item-detail [data-owner-input] .detail-box textarea').isExisting()), '"Add a reply" did not return after the successor finished');
   await ownerReply(configuration, lateWorkText, await snapshot(configuration));
   await wait(async () => (await admissions(configuration)).length === queuedBefore.length + 4, 'Stop-waiting input did not reach the real provider');

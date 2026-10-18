@@ -234,8 +234,10 @@ export function finalFixture(state: Pick<FinalState, 'id' | 'app'>, variant: Var
     const owner = session.items[draft.item] ? session : [...fixture.transport.sessions.values()].find(value => value.items[draft.item]);
     const item = owner?.items[draft.item];
     if (!owner || !item) throw new Error(`final ${state.id}: draft on an item that is in no session: ${draft.item}`);
-    return { op_id: uuid(100 + at), session: { project_id: owner.project_id, session_id: owner.id }, binding_id: owner.active_binding_id!, target: { topic_id: item.topic_id, item_id: item.id }, intent: 'answer',
-      text: draft.own ?? draft.note ?? '', selected_option_id: draft.pick === undefined ? null : item.options[draft.pick]?.id ?? null,
+    return { op_id: uuid(100 + at), session: { project_id: owner.project_id, session_id: owner.id }, binding_id: owner.active_binding_id!, target: { topic_id: item.topic_id, item_id: item.id },
+      // Words typed in the Details composer go out as what fits the item (a note on one in progress, a reply on an open or waiting one).
+      intent: draft.reply === undefined ? 'answer' : item.status === 'in_progress' ? 'note' : item.status === 'waiting_on_me' || item.status === 'open' ? 'reply' : 'followup',
+      text: draft.reply ?? draft.own ?? draft.note ?? '', selected_option_id: draft.pick === undefined ? null : item.options[draft.pick]?.id ?? null,
       target_revision: item.revision, question_revision: item.question_revision, supersedes_answer_id: null };
   });
   return fixture;

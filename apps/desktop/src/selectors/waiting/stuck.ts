@@ -28,7 +28,7 @@ export interface Stuck {
   readonly settle: 'skip' | 'accept_result' | null;
 }
 
-const quoted = (text: string) => `“${text.length > 40 ? `${text.slice(0, 38).trimEnd()}…` : text}”`;
+export const quoted = (text: string) => `“${text.length > 40 ? `${text.slice(0, 38).trimEnd()}…` : text}”`;
 /** What the message was about: its question, else its topic. */
 export const inputAbout = (input: Immutable<Input>) => input.payload.target_snapshot.item_question ?? input.payload.target_snapshot.topic_name;
 /** What the owner sent, on one line: the chosen option, else the text. */

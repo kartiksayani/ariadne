@@ -104,6 +104,7 @@ async function perform(page: Page, step: Step): Promise<void> {
     // A control the app does not draw yet (a pending Map state) fails here in 20 s, not at the test's 240 s.
     await ((await named(true).isVisible()) ? named(true) : named(false)).click({ timeout: 20_000 });
   }
+  else if ('wait' in step) await page.waitForTimeout(step.wait);
   else if ('hover' in step) await page.locator(step.hover).first().hover();
   else if ('scroll' in step) {
     // The Map's scroller is the nearest ancestor of the item tree (or of the Graph's topic) that scrolls.
