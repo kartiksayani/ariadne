@@ -121,6 +121,9 @@ export async function runGraphAcceptance(configuration) {
   await click('.graph-node[data-item-id="10.80"]'); await detail(canonical, '10.80');
   await wait(async () => (await sample()).focused === '10.80', 'Clicking a native graph node focuses it');
   await browser.keys('ArrowLeft'); await selectedIn('10');
+  // The parent selection finishes saving before the second ←: a press that lands mid-write still sees the old selection.
+  await wait(async () => (await view(tree)).selected_item_id === '10' && await views().$('button[aria-label="Graph"]').isEnabled(),
+    'The ← to the parent must finish saving before the fold');
   await browser.keys('ArrowLeft');
   await wait(async () => (await sample()).nodes.find(value => value.id === '10')?.below === '+99', 'Native ← did not fold item 10');
   await wait(async () => !(await view(tree)).expanded_item_ids.includes('10'), 'Native fold was not persisted');

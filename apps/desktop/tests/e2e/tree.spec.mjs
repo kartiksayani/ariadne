@@ -220,10 +220,16 @@ async function open(tree) {
   await catalogue(); const button = await readySessionButton(tree); await button.click();
   await wait(async () => (await visibleIds()).includes('20.99'), 'The real native 2,000-item tree did not open');
 }
+// The items that carry a search highlight, once each, in Map order. Search marks matches in place: it never hides a row.
+const hitIds = () => browser.execute(() => [...new Set([...document.querySelectorAll('.tree-rows .tree-hit')]
+  .map(element => element.closest('[data-item-id]')?.dataset.itemId))]);
+// The top bar's match count ("1 of 1", "No matches"); null while there is no search.
+const searchCount = () => browser.execute(() => document.querySelector('.tb-search-count')?.textContent ?? null);
 // Passive WebView measurement starts at the real driver-generated click/input,
-// stops after the expected canonical rows render and a layout frame completes.
-async function measureAction(eventName, selector, expectedIds, action, tree) {
-  await browser.execute(({ eventName, selector, expectedIds }) => {
+// stops after the expected canonical rows render (and, for a search, exactly the expected items are highlighted)
+// and a layout frame completes.
+async function measureAction(eventName, selector, expectedIds, action, tree, expectedHits = null) {
+  await browser.execute(({ eventName, selector, expectedIds, expectedHits }) => {
     const target = document.querySelector(selector), bounds = target?.getBoundingClientRect();
     const sample = { started: null, elapsed: null, target: target ? { disabled: target.disabled,
       bounds: { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right },
@@ -238,6 +244,10 @@ async function measureAction(eventName, selector, expectedIds, action, tree) {
     const observer = new window.MutationObserver(() => {
       const ids = [...document.querySelectorAll('.tree-rows .tree-item')].map(element => element.dataset.itemId);
       if (sample.started === null || ids.length !== expectedIds.length || ids.some((id, index) => id !== expectedIds[index])) return;
+      if (expectedHits) {
+        const hits = [...new Set([...document.querySelectorAll('.tree-rows .tree-hit')].map(element => element.closest('[data-item-id]')?.dataset.itemId))];
+        if (hits.length !== expectedHits.length || hits.some((id, index) => id !== expectedHits[index])) return;
+      }
       observer.disconnect(); document.removeEventListener(eventName, start, true);
       window.__ariadneSearchTimingObservation?.mark('result');
       requestAnimationFrame(() => {
@@ -246,7 +256,7 @@ async function measureAction(eventName, selector, expectedIds, action, tree) {
       });
     });
     observer.observe(document.body, { childList: true, subtree: true, attributes: true });
-  }, { eventName, selector, expectedIds });
+  }, { eventName, selector, expectedIds, expectedHits });
   await action();
   try {
     await wait(async () => typeof await browser.execute(() => window.__ariadneTreeMeasurement.elapsed) === 'number', 'Native layout measurement did not reach its exact expected rows');
@@ -259,7 +269,7 @@ async function measureAction(eventName, selector, expectedIds, action, tree) {
       statuses: [...document.querySelectorAll('[role="status"]')].slice(0, 12).map(element => element.textContent.slice(0, 500)),
       sessions: [...document.querySelectorAll('button[data-session-id]')].map(element => ({ id: element.dataset.sessionId, text: element.textContent, disabled: element.disabled })),
       current: [...document.querySelectorAll('[aria-current]')].map(element => element.outerHTML.slice(0, 1000)) }));
-    await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-measurement-failure.json'), JSON.stringify({ eventName, selector, expectedIds,
+    await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-measurement-failure.json'), JSON.stringify({ eventName, selector, expectedIds, expectedHits,
       observed, preferences: tree ? await cliRequest(tree.cli, ['preferences', 'get', '--json-stdin'],
         { session: null, request: { command: 'preferences_get', params: {} } }) : null }, null, 2));
     await browser.saveScreenshot(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-measurement-failure.png'));
@@ -575,7 +585,8 @@ async function treeAcceptance(configuration) {
   try {
     await searchBox();
     for (const id of measuredIds) {
-      searchMs.push(await measureAction('input', searchField, [id.split('.')[0], id], async () => { const input = await searchBox(); await input.waitForEnabled(); await input.setValue(`Native token_${id.replace('.', '_')}_end`); }, tree));
+      // The search is in place: every row stays and only the one match is highlighted.
+      searchMs.push(await measureAction('input', searchField, expectedIds, async () => { const input = await searchBox(); await input.waitForEnabled(); await input.setValue(`Native token_${id.replace('.', '_')}_end`); }, tree, [id]));
     }
   } catch (error) { searchFailure = error;
   } finally {
@@ -587,20 +598,24 @@ async function treeAcceptance(configuration) {
   if (searchFailure) throw searchFailure;
   await writeFile(join(process.env.ARIADNE_E2E_EVIDENCE, 'tree-performance-samples.json'), JSON.stringify({ rows: 2000,
     messages: initialSession.messages.length, viewport, firstUsableMs: usableMs, localSearchSamplesMs: searchMs }, null, 2));
+  // Search marks matches in place (SPEC 6.9): all 2,000 rows stay, only the matching item is highlighted, and the top bar counts it.
   await setSearch(tree, 'ＮＡＴＩＶＥ café needle');
-  await wait(async () => JSON.stringify(await visibleIds()) === JSON.stringify(['1', '1.1']), 'NFKC/lowercase AND-token search did not retain the contextual ancestor');
+  await wait(async () => JSON.stringify(await hitIds()) === JSON.stringify(['1.1']) && await searchCount() === '1 of 1', 'NFKC/lowercase AND-token search did not highlight exactly the one matching item');
+  assert.deepEqual(await visibleIds(), expectedIds, 'A search must not hide any row');
   assert.equal((await snapshot(tree)).items['1.1'].question, initialSession.items['1.1'].question, 'Search normalization must not rewrite stored text');
-  await setSearch(tree, ''); await wait(async () => (await visibleIds()).length === 2000, 'Clear search did not restore the complete tree');
-  // Chip counts follow the search and topic, never the chip itself. Open keeps
-  // its 1,320 matches plus the 20 done roots as context; Closed matches 680 rows.
+  await setSearch(tree, ''); await wait(async () => (await hitIds()).length === 0 && await searchCount() === null, 'Clear search did not remove the highlights');
+  assert.deepEqual(await visibleIds(), expectedIds, 'Clear search did not leave the complete tree');
+  // Chip counts follow the topic, never the chip itself. Open keeps its 1,320
+  // matches plus the 20 done roots as context; Done matches 680 rows.
   await assertStatusFilters(tree, expectedIds);
 
   await (await row('1')).click(); await showFullItemQuestion(initialSession.items['1']);
   const firstToggle = await (await row('1')).$('button[aria-label="Expand or collapse"]');
   await firstToggle.waitForEnabled(); await firstToggle.click();
   await wait(async () => !(await preferences(tree)).view.expanded_item_ids.includes('1'), 'Explicit collapse was not persisted');
-  await setSearch(tree, 'ＮＡＴＩＶＥ café needle');
-  await wait(async () => (await visibleIds()).includes('1.1'), 'Filtered context must temporarily expose its ancestry');
+  // A status chip is a filter: it omits what does not match. The collapsed root 1 is Done, so it stays; its open children do not match.
+  await choose('done', true);
+  await wait(async () => { const ids = await visibleIds(); return ids.includes('1') && !ids.includes('1.2') && ids.length < 700; }, 'The Done chip did not filter the Map');
   await (await search()).waitForEnabled();
   const beforeReveal = (await preferences(tree)).view;
   const child = await browser.$('[aria-label="Child items"]').$('button[aria-label^="Native sentence 1.2\\a "]');
@@ -614,11 +629,20 @@ async function treeAcceptance(configuration) {
   const revealed = (await preferences(tree)).view;
   assert.deepEqual(revealed.filters, beforeReveal.filters); assert.deepEqual(revealed.expanded_item_ids, beforeReveal.expanded_item_ids);
   await browser.$('button=Resume filtered view').click();
-  await wait(async () => JSON.stringify(await visibleIds()) === JSON.stringify(['1', '1.1']), 'Resume must remove only temporary outside-filter reveal');
+  await wait(async () => { const ids = await visibleIds(); return ids.includes('1') && !ids.includes('1.2') && ids.length < 700; }, 'Resume must remove only temporary outside-filter reveal');
+  assert.equal(await browser.$('button=Resume filtered view').isExisting(), false);
+  await choose('clear', true); await wait(async () => (await visibleIds()).length === 1901, 'Clear did not restore the saved collapsed branch');
+  // The search only marks: 1.1 sits inside the collapsed root 1, so the top bar names it and "Show them" shows it in memory.
+  await setSearch(tree, 'ＮＡＴＩＶＥ café needle');
+  await wait(async () => (await browser.execute(() => document.querySelector('.tb-note-text')?.textContent ?? '')).includes('collapsed'), 'The search did not name its match inside the collapsed item');
+  assert.equal((await visibleIds()).length, 1901, 'A search must not open a collapsed item');
+  await browser.$('button=Show them').click();
+  await wait(async () => (await visibleIds()).includes('1.1'), 'Show them did not reveal the matching item');
+  assert.equal((await preferences(tree)).view.expanded_item_ids.includes('1'), false, 'Show them must not save a fold');
   await (await search()).waitForEnabled(); await (await row('1.1')).click(); await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'Selected item preference did not persist');
   const beforeKeys = (await preferences(tree)).view;
   // Home lands on the topic band (no item id); → steps into its first row; ← goes back to the parent (h and l are gone: SPEC 6.1).
-  for (const [key, id] of [['ArrowUp', '1'], ['j', '1.1'], ['k', '1'], ['End', '1.1'], ['Home', null], ['ArrowRight', '1'], ['ArrowRight', '1.1'], ['ArrowLeft', '1']]) {
+  for (const [key, id] of [['ArrowUp', '1'], ['j', '1.1'], ['k', '1'], ['End', '20.99'], ['Home', null], ['ArrowRight', '1'], ['ArrowRight', '1.1'], ['ArrowLeft', '1']]) {
     await browser.keys(key); assert.equal(await focusedId(), id); await roving();
   }
   assert.equal((await preferences(tree)).view.selected_item_id, beforeKeys.selected_item_id, 'Focus movement alone must not select or mutate preferences');
@@ -627,13 +651,21 @@ async function treeAcceptance(configuration) {
   await wait(async () => (await preferences(tree)).view.selected_item_id === '1.1', 'The explicit selection must finish before the separate Later key');
   await (await search()).waitForEnabled(); await browser.keys('z');
   await wait(async () => (await preferences(tree)).snapshot.later.some(value => value.session_id === tree.sessionId && value.item_id === '1.1'), 'Later keyboard action did not persist canonical local preferences');
-  // A plain selection outside new filters stays as its own row with its
-  // ancestry; only a reveal raises the banner (Ariadne.dc.html:2169).
+  // A search it does not match hides nothing and raises no banner; the selection stays.
+  const beforeNoMatch = await visibleIds();
   await setSearch(tree, 'No canonical native tree question matches this phrase');
-  await wait(async () => JSON.stringify(await visibleIds()) === JSON.stringify(['1', '1.1']), 'The selected item must stay visible under a search it does not match');
+  await wait(async () => await searchCount() === 'No matches', 'A search with no match must say so');
+  assert.deepEqual(await visibleIds(), beforeNoMatch, 'A search with no match must not hide any row');
   assert.equal(await browser.$('button=Resume filtered view').isExisting(), false);
   await setSearch(tree, '');
-  await wait(async () => (await visibleIds()).length === 1901, 'Clearing the search must preserve the saved collapsed branch');
+  // The selected row 1.1 was opened by the owner's click, so its branch stays open under it: clearing the search never moves the Map.
+  // The saved fold is untouched, and the branch folds back through its own toggle.
+  assert.equal((await preferences(tree)).view.expanded_item_ids.includes('1'), false, 'Clearing the search must preserve the saved collapsed branch');
+  assert.equal((await visibleIds()).length, 2000, 'Clearing the search must not move the selected row');
+  const heldToggle = await (await row('1')).$('button[aria-label="Expand or collapse"]');
+  await heldToggle.waitForEnabled(); await heldToggle.click();
+  await wait(async () => (await visibleIds()).length === 1901, 'Folding the held branch did not return to the saved collapsed branch');
+  assert.equal((await preferences(tree)).view.expanded_item_ids.includes('1'), false, 'Folding a held branch must keep the saved collapse');
 
   // Reopen the explicitly collapsed branch through its visible toggle, then
   // collapse a different branch so restart can prove this exact saved choice.

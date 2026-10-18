@@ -47,6 +47,15 @@ const sameRoute = (left: ItemRoute, right: ItemRoute) => left.project_id === rig
 /** A row or node may mark its name; the card sits under the name rather than the whole row. */
 const anchorRect = (anchor: HTMLElement) => (anchor.querySelector<HTMLElement>('[data-peek-anchor]') ?? anchor).getBoundingClientRect();
 const modal = () => !!document.querySelector('[aria-modal="true"]');
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
+/** The scrollable ancestors of a name: what the owner's wheel or touch scrolls to move it. */
+function scrollersOf(anchor: HTMLElement): HTMLElement[] {
+  const found: HTMLElement[] = [];
+  for (let parent = anchor.parentElement; parent && parent !== document.body && parent !== document.documentElement; parent = parent.parentElement) {
+    if (/^(auto|scroll|overlay)$/.test(getComputedStyle(parent).overflowY)) found.push(parent);
+  }
+  return found;
+}
 
 export function PeekProvider({ lookup, drafts, navigation, answerTarget, onGoTo, onOpenDetails, onAgentNotRunning, onVisit, children }: PeekProviderProps) {
   const [shown, setShown] = useState<OpenPeek | null>(null);
@@ -125,6 +134,7 @@ export function PeekProvider({ lookup, drafts, navigation, answerTarget, onGoTo,
   useEffect(() => {
     const keydown = (event: globalThis.KeyboardEvent) => {
       if (modal()) { cancelOpen(); return; }
+      scrollKey(event);
       if (event.key !== 'Escape' || !card.current) return;
       if (event.target instanceof Element && event.target.closest('.pw-note')) return;
       // An open top-bar menu owns Escape before the peek. Peek lives in a portal,
@@ -148,20 +158,40 @@ export function PeekProvider({ lookup, drafts, navigation, answerTarget, onGoTo,
       if (!live.current) { cancelOpen(); return; }
       if (event.target instanceof Node && !card.current?.contains(event.target) && !shown?.anchor.contains(event.target)) close(false);
     };
-    // Scrolling whatever holds the card's name (the Map, the Graph, Details) closes it; scrolling inside the card does not.
+    // A hover card closes on any scroll of whatever holds its name (the Map, the Graph, Details); scrolling inside the card does not.
+    // A card the owner opened (click or key) ignores scroll events: Details and the Map scroll themselves (opening a conversation,
+    // a row growing), and that must not take the card away. It closes on the owner's own scrolling instead (`ownerScroll`, below).
     const scrolled = (event: Event) => {
       const target = event.target, anchor = origin.current?.anchor;
-      if (!live.current || target instanceof Node && card.current?.contains(target)) return;
+      if (!live.current || live.current.explicit || target instanceof Node && card.current?.contains(target)) return;
       if (target === document || target === document.documentElement || target instanceof Node && !!anchor && target.contains(anchor)) closeAll();
+    };
+    // The owner's scrolling: a wheel or touch over a scroller that holds the card's name, or a scrolling key while focus is outside the card.
+    const ownerScroll = (event: Event) => {
+      const target = event.target, anchor = origin.current?.anchor;
+      if (!live.current?.explicit || !anchor || !(target instanceof Node) || card.current?.contains(target)) return;
+      if (scrollersOf(anchor).some(scroller => scroller.contains(target))) closeAll();
+    };
+    const scrollKey = (event: globalThis.KeyboardEvent) => {
+      const target = event.target;
+      if (!live.current?.explicit || !card.current || event.altKey || event.ctrlKey || event.metaKey || !SCROLL_KEYS.has(event.key)) return;
+      if (!(target instanceof Element) || card.current.contains(target) || shown?.anchor.contains(target)) return;
+      // Space only scrolls from the page itself: on a control or a row it activates or peeks.
+      if (target.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (event.key === ' ' && target.closest('button, a, [role="button"], [role="treeitem"], [role="link"]')) return;
+      closeAll();
     };
     const blurred = () => { hover.current = null; cancelOpen(); };
     document.addEventListener('keydown', keydown, true);
     document.addEventListener('mousedown', outside);
     document.addEventListener('scroll', scrolled, true);
+    document.addEventListener('wheel', ownerScroll, { capture: true, passive: true });
+    document.addEventListener('touchmove', ownerScroll, { capture: true, passive: true });
     window.addEventListener('blur', blurred);
     return () => {
       document.removeEventListener('keydown', keydown, true); document.removeEventListener('mousedown', outside);
       document.removeEventListener('scroll', scrolled, true); window.removeEventListener('blur', blurred);
+      document.removeEventListener('wheel', ownerScroll, true); document.removeEventListener('touchmove', ownerScroll, true);
     };
   }, [shown, cancelOpen, close, closeAll, focusInside]);
   useEffect(() => () => { cancelOpen(); cancelClose(); }, [cancelOpen, cancelClose]);

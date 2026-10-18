@@ -72,8 +72,16 @@ describe('peek in the Map: never marks seen, Recent only on an explicit open, th
     await sleep(1100);
     if (close === 'pointer') {
       if (open === 'hover') { fireEvent.mouseLeave(value.row); await sleep(300); } else fireEvent.mouseDown(document.body);
-    } else if (close === 'scroll') fireEvent.scroll(value.scroller);
-    else fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    } else if (close === 'scroll') {
+      if (open === 'hover') fireEvent.scroll(value.scroller);
+      else {
+        // A card the owner opened ignores the page's own scrolling and closes on the owner's wheel.
+        fireEvent.scroll(value.scroller); fireEvent.scroll(document);
+        expect(card()).not.toBeNull();
+        value.scroller.style.overflowY = 'auto';
+        fireEvent.wheel(value.scroller);
+      }
+    }    else fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     await waitFor(() => expect(card()).toBeNull());
     await sleep(50);
     expect(marks.mock.calls.filter(call => call[1] === '2')).toEqual([]);
@@ -148,8 +156,9 @@ describe('answering in the peek: one send, and the owner’s words and pick surv
       if (again) fireEvent.click(again);
     } else {
       fireEvent.click(button);
-      // A send in flight keeps the card on a Map scroll, so its outcome stays in sight.
-      fireEvent.scroll(value.map());
+      // A send in flight keeps the card on the owner's scroll too, so its outcome stays in sight.
+      value.map().style.overflowY = 'auto';
+      fireEvent.scroll(value.map()); fireEvent.wheel(value.map());
       expect(card()).not.toBeNull();
     }
     await waitFor(() => expect(value.sent).toHaveLength(1));
@@ -171,7 +180,7 @@ describe('answering in the peek: one send, and the owner’s words and pick surv
     expect(card()).not.toBeNull();
     pick();
     if (closing === 'Escape') fireEvent.keyDown(document.body, { key: 'Escape' });
-    else if (closing === 'scroll') fireEvent.scroll(value.map());
+    else if (closing === 'scroll') { value.map().style.overflowY = 'auto'; fireEvent.wheel(value.map()); }
     else if (closing === 'outside click') fireEvent.mouseDown(document.body);
     else if (closing === 'close all') act(() => { closeAll(); });
     else { fireEvent.mouseLeave(value.chip()); fireEvent.mouseLeave(card()!); await sleep(300); }

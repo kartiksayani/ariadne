@@ -214,21 +214,91 @@ describe('name chips and item peek', () => {
     expect(screen.getByRole('dialog', { name: `Peek: ${value.source.items['8']!.question}` })).toBeTruthy();
   });
 
-  it('closes on a scroll of what holds the name, not on a scroll inside the card or elsewhere', async () => {
+  // The owner's scrolling closes a card they opened; a scroll the page makes by itself does not (Details and the Map scroll
+  // themselves, and the card must survive the click that opened it).
+  it('an opened card survives a programmatic scroll of what holds its name', async () => {
+    const value = await setup(), { chip } = mount(value);
+    fireEvent.click(chip());
+    const card = screen.getByRole('dialog');
+    fireEvent.scroll(chip().parentElement!); fireEvent.scroll(document); fireEvent.scroll(document.documentElement);
+    expect(screen.getByRole('dialog')).toBe(card);
+  });
+
+  it.each(['wheel', 'touchmove'] as const)('an opened card closes on the owner\'s %s over a scroller that holds its name, not inside the card or elsewhere', async kind => {
     const value = await setup(), { chip } = mount(value);
     const unrelated = document.createElement('div'); document.body.append(unrelated);
+    const scroller = chip().parentElement!; scroller.style.overflowY = 'auto';
+    const fire = (target: Element) => kind === 'wheel' ? fireEvent.wheel(target) : fireEvent.touchMove(target);
     try {
       fireEvent.click(chip());
+      const card = screen.getByRole('dialog');
+      fire(card); fire(unrelated);
+      expect(screen.getByRole('dialog')).toBe(card);
+      fire(scroller);
+      expect(screen.queryByRole('dialog')).toBeNull();
+      // The card had focus: it goes back to the name, without a scroll.
+      expect(document.activeElement).toBe(chip());
+      fireEvent.click(chip()); fire(chip());
+      expect(screen.queryByRole('dialog')).toBeNull();
+    } finally { unrelated.remove(); }
+  });
+
+  it('a wheel over a part of the page that does not hold its name leaves the card', async () => {
+    const value = await setup(), { chip } = mount(value);
+    chip().parentElement!.style.overflowY = 'hidden';
+    fireEvent.click(chip());
+    fireEvent.wheel(chip().parentElement!);
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  it('a hover card still closes on any scroll of what holds its name, not inside the card or elsewhere', async () => {
+    const value = await setup(); vi.useFakeTimers();
+    const { chip } = mount(value);
+    const unrelated = document.createElement('div'); document.body.append(unrelated);
+    try {
+      fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350));
       const card = screen.getByRole('dialog');
       fireEvent.scroll(card); fireEvent.scroll(unrelated);
       expect(screen.getByRole('dialog')).toBe(card);
       fireEvent.scroll(chip().parentElement!);
       expect(screen.queryByRole('dialog')).toBeNull();
-      // The card had focus: it goes back to the name, without a scroll.
-      expect(document.activeElement).toBe(chip());
-      fireEvent.click(chip()); fireEvent.scroll(document);
+      fireEvent.mouseLeave(chip()); fireEvent.mouseEnter(chip()); act(() => vi.advanceTimersByTime(350));
+      fireEvent.scroll(document);
       expect(screen.queryByRole('dialog')).toBeNull();
     } finally { unrelated.remove(); }
+  });
+
+  it.each(['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End'])('an opened card closes on %s while focus is outside it, and keeps focus inside it', async key => {
+    const value = await setup(), { chip } = mount(value);
+    fireEvent.click(chip());
+    const card = screen.getByRole('dialog');
+    fireEvent.keyDown(card, { key });
+    expect(screen.getByRole('dialog')).toBe(card);
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Outside control' }), { key });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('Space closes an opened card from the page, but on a control or the name itself it keeps its own meaning', async () => {
+    const value = await setup(), { chip } = mount(value);
+    fireEvent.click(chip());
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Outside control' }), { key: ' ' });
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    // Space on the name toggles: one press closes, and it does not reopen.
+    chip().focus(); fireEvent.keyDown(chip(), { key: ' ' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(chip());
+    fireEvent.keyDown(document.body, { key: ' ' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('typing in a field outside the card keeps it: arrow keys move the caret there', async () => {
+    const value = await setup(), { chip } = mount(value);
+    const field = document.createElement('textarea'); document.body.append(field);
+    try {
+      fireEvent.click(chip());
+      fireEvent.keyDown(field, { key: 'ArrowDown' }); fireEvent.keyDown(field, { key: 'Home' });
+      expect(screen.getByRole('dialog')).toBeTruthy();
+    } finally { field.remove(); }
   });
 
   it('a press cancels a pending hover until the pointer leaves the name and rests again', async () => {
