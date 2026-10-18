@@ -273,9 +273,21 @@
   cursor: default;
 }
 
+/* A strip in an item's or topic's place (E29) is a button: Undo, or open the bin. */
+.tree-place .tree-strip {
+  background: transparent;
+  font: inherit;
+  font-size: calc(11.5px * var(--text-scale));
+  color: inherit;
+  cursor: pointer;
+}
+
+.tree-place .tree-strip:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+
 .tree-hidden-group[data-strip="hidden"]:hover .tree-strip {
   background: color-mix(in srgb, var(--color-text) 7%, transparent);
 }
+
 
 /* The Map's status badge (D22): 18px high, 11.5px text, radius 4. The shared badge is unchanged. */
 .tree-end-badge .status-badge {

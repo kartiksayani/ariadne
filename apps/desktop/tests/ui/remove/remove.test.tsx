@@ -10,10 +10,10 @@ import type { Immutable } from '../../../src/data/session-store';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { SessionActionControllers } from '../../../src/components/bindings/actions';
-import { NoticeStore, Notices } from '../../../src/ui/pages/notices';
+import { NoticeStore } from '../../../src/ui/pages/notices';
 import { removeCopy, type RemoveSubject, type RemoveTarget } from '../../../src/ui/dialogs/remove';
 import { projectRemoval, sessionRemoval } from '../../../src/ui/pages/model';
-import { RemovalContext, RemovalQueue, UNDO_MS } from '../../../src/ui/remove/queue';
+import { RemovalContext, RemovalQueue, UNDO_MS, type Pinned } from '../../../src/ui/remove/queue';
 import { Hidden, hiddenKey, nextSelection, removeLabel, removeSubject, tellOf, visibleSession } from '../../../src/ui/remove/model';
 import { TreeView } from '../../../src/ui/tree/TreeView';
 import { AppTransport, route } from '../app/transport';
@@ -31,10 +31,18 @@ function harness(read: (route: SessionRef) => Promise<Immutable<Session> | null>
     removeSession: vi.fn(async () => ({})), removeProject: vi.fn(async () => ({})),
   };
   const notices = new NoticeStore(), removed = vi.fn(async () => {});
-  const queue = new RemovalQueue({ service: service as unknown as RendererService, notices, read, removed, operationId: ops() });
+  // The toast store as the queue sees it: what it showed, and when the Undo window ended.
+  const shown: { id: string; text: string; undo?: () => void | Promise<void> }[] = [];
+  const toasts = { show: vi.fn((spec: { text: string; undo?: () => void | Promise<void> }) => { const id = `toast-${shown.length + 1}`; shown.push({ id, ...spec }); return id; }),
+    expire: vi.fn(), dismiss: vi.fn() };
+  const settled = vi.fn(async () => {}), again = vi.fn();
+  let review: Pinned | null = null;
+  const queue = new RemovalQueue({ service: service as unknown as RendererService, notices, read, removed, operationId: ops(), toasts, settled, again,
+    review: () => review });
   const text = () => notices.getSnapshot().map(notice => notice.text);
   const notice = () => notices.getSnapshot()[0]!;
-  return { service, notices, queue, removed, text, notice };
+  const toast = () => shown.at(-1)!;
+  return { service, notices, queue, removed, text, notice, toasts, toast, settled, again, setReview: (value: Pinned | null) => { review = value; } };
 }
 const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(0); });
 
@@ -43,38 +51,52 @@ describe('the removal queue', () => {
   afterEach(() => { vi.useRealTimers(); });
 
   it('hides an item at once and tells the agent only after 5 seconds without Undo', async () => {
-    const { service, queue, text, removed } = harness();
+    const { service, queue, text, removed, toast, toasts } = harness();
     const op = queue.schedule(itemTarget('1'), itemSubject());
     expect(queue.getSnapshot().item(route, session, '1.1')).toBe(true);
-    expect(text()).toEqual(['Removed “Stale plans” and 1 item below it. claude-code is told in 5 seconds unless you undo.']);
+    expect(toast().text).toBe('Removed “stale plans” and the 1 item below it. claude-code is told in 5 s.');
+    expect(text()).toEqual([]);
     await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS - 1); });
     expect(service.removeItem).not.toHaveBeenCalled();
+    expect(toasts.expire).not.toHaveBeenCalled();
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    // The producer ends the toast's Undo when its window ends.
+    expect(toasts.expire).toHaveBeenCalledWith(toast().id);
     expect(service.removeItem).toHaveBeenCalledWith(route, { item_id: '1', expected_revision: session.items['1']!.revision }, op);
-    expect(text()).toEqual(['Removed “Stale plans” and 1 item below it. claude-code was told and won’t bring them up again.']);
+    expect(text()).toEqual([]);
     expect(removed).toHaveBeenCalledWith(itemTarget('1'));
     expect(queue.getSnapshot().empty).toBe(true);
   });
 
-  it('Undo in the window sends nothing, restores the rows and runs the restore', async () => {
-    const { service, queue, notices } = harness(), restore = vi.fn();
-    render(<Notices store={notices} />);
-    act(() => { queue.schedule(itemTarget('2'), itemSubject('tell', 1), { restore }); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
-    expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
-    const undo = screen.getByRole('button', { name: 'Undo' });
-    undo.focus();
-    fireEvent.keyDown(undo, { key: 'Escape' });
-    await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS - 301); });
-    expect(service.removeItem).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Undo' })).toBe(undo);
-    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+  it('Undo in the window (the toast or the strip) sends nothing, restores the rows and runs the restore', async () => {
+    const { service, queue, notices, toast, toasts } = harness(), restore = vi.fn();
+    queue.schedule(itemTarget('2'), itemSubject('tell', 1), { restore });
+    await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS - 1); });
+    await act(async () => { await toast().undo!(); });
     await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS * 2); });
     expect(service.removeItem).not.toHaveBeenCalled();
     expect(restore).toHaveBeenCalledOnce();
+    expect(toasts.dismiss).toHaveBeenCalledWith(toast().id);
     expect(queue.getSnapshot().empty).toBe(true);
     expect(notices.getSnapshot()).toEqual([]);
-    cleanup();
+    queue.schedule(itemTarget('2'), itemSubject('tell', 1));
+    queue.undoKey(hiddenKey.item(route, '2'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS * 2); });
+    expect(service.removeItem).not.toHaveBeenCalled();
+  });
+
+  // E28: one deadline, 5 s, in every connection state.
+  it.each([
+    ['tell', 'Removed “stale plans”. claude-code is told in 5 s.'],
+    ['queued', 'Removed “stale plans”. claude-code is told when it runs again.'],
+    ['closed', 'Removed “stale plans”. The session is closed, so claude-code isn’t told.'],
+  ] as const)('a %s removal says so in its toast and runs after 5 s', async (mode, words) => {
+    const { service, queue, toast, text } = harness();
+    queue.schedule(itemTarget('2'), itemSubject(mode, 1));
+    expect(toast().text).toBe(words);
+    await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS); });
+    expect(service.removeItem).toHaveBeenCalledOnce();
+    expect(text()).toEqual([]);
   });
 
   it('gives each removal its own timer and op id', async () => {
@@ -90,26 +112,53 @@ describe('the removal queue', () => {
     expect(service.removeTopic).toHaveBeenCalledWith(route, { topic_id: topicId, expected_revision: session.topics[topicId]!.revision }, second);
   });
 
-  it('says when the agent is not running and that it is told later', async () => {
-    const { queue, text, notice } = harness();
-    queue.schedule(itemTarget('2'), itemSubject('queued', 1));
+  // Never lose typed text (E28): the commit compares a fresh read with what the owner reviewed.
+  it.each([
+    ['a draft typed in scope', { scope: ['1', '1.1'], words: ['draft:new'] }],
+    ['an input saved in scope', { scope: ['1', '1.1'], words: ['input:new'] }],
+    ['an item added below it', { scope: ['1', '1.1', '1.2'], words: [] }],
+  ] as const)('%s during the window stops the commit and puts the rows back', async (_, now) => {
+    const { service, queue, text, notices, again, setReview } = harness(), restore = vi.fn();
+    queue.schedule(itemTarget('1'), itemSubject(), { restore, pinned: { scope: ['1', '1.1'], words: [] } });
+    setReview(now);
     await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS); });
-    expect(text()).toEqual(['Removed “Stale plans”. claude-code isn’t running; it’s told when it runs again.']);
-    expect(notice().dismissible).toBe(true);
+    expect(service.removeItem).not.toHaveBeenCalled();
+    expect(queue.getSnapshot().empty).toBe(true);
+    expect(restore).toHaveBeenCalledOnce();
+    expect(text()).toEqual(['“Stale plans” changed while you were removing it. Nothing was removed.']);
+    expect(notices.getSnapshot()[0]!.tone).toBe('problem');
+    notices.getSnapshot()[0]!.actions![0]!.run();
+    expect(again).toHaveBeenCalledWith(itemTarget('1'));
   });
 
-  it('keeps Undo for a closed session until Dismiss or the next remove, then runs', async () => {
-    const { service, queue, text, notice } = harness();
-    const op = queue.schedule(itemTarget('2'), itemSubject('closed', 1));
-    expect(text()).toEqual(['Removed “Stale plans”. The session is closed, so claude-code isn’t told.']);
-    await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS * 4); });
+  it('commits when the fresh read finds only what was reviewed, or less', async () => {
+    const { service, queue, setReview } = harness();
+    queue.schedule(itemTarget('1'), itemSubject(), { pinned: { scope: ['1', '1.1'], words: ['input:a', 'draft:b'] } });
+    setReview({ scope: ['1'], words: ['input:a'] });
+    await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS); });
+    expect(service.removeItem).toHaveBeenCalledOnce();
+  });
+
+  it('waits for a send being saved in the session before it reads and commits', async () => {
+    const { service, queue, settled } = harness();
+    let land!: () => void;
+    settled.mockImplementationOnce(() => new Promise<void>(resolve => { land = resolve; }));
+    queue.schedule(itemTarget('2'), itemSubject('tell', 1), { pinned: { scope: ['2'], words: [] } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS * 3); });
+    expect(settled).toHaveBeenCalledWith(route);
     expect(service.removeItem).not.toHaveBeenCalled();
-    notice().onDismiss!(); await settle();
-    expect(service.removeItem).toHaveBeenCalledWith(route, expect.objectContaining({ item_id: '2' }), op);
-    queue.schedule(itemTarget('4'), itemSubject('closed', 1));
-    queue.schedule(itemTarget('5'), itemSubject('closed', 1)); await settle();
-    expect(service.removeItem).toHaveBeenLastCalledWith(route, expect.objectContaining({ item_id: '4' }), expect.any(String));
-    expect(queue.pending()).toHaveLength(1);
+    await act(async () => { land(); await vi.advanceTimersByTimeAsync(0); });
+    expect(service.removeItem).toHaveBeenCalledOnce();
+  });
+
+  it('commits early when the window hides, with the same recheck', async () => {
+    const { service, queue, setReview } = harness();
+    const detach = queue.attach(window);
+    queue.schedule(itemTarget('1'), itemSubject(), { pinned: { scope: ['1', '1.1'], words: [] } });
+    setReview({ scope: ['1', '1.1'], words: ['draft:late'] });
+    window.dispatchEvent(new Event('pagehide')); await settle();
+    expect(service.removeItem).not.toHaveBeenCalled();
+    detach();
   });
 
   it('removes a session and a project from Ariadne only, with Undo until the next remove', async () => {
@@ -154,48 +203,24 @@ describe('the removal queue', () => {
     expect(service.removeItem.mock.calls.map(call => ((call as unknown[])[1] as { expected_revision: number }).expected_revision)).toEqual([3, 3]);
   });
 
-  it.each(['item', 'topic'] as const)('drops queued permanent %s deletion when its bin work is restored during Undo', async kind => {
+  // E31: Empty deletes at once, one fresh op id each, no window and no note per entry; what left the bin is not deleted.
+  it('deletes bin entries at once and reports what it could not delete', async () => {
     const binned = structuredClone(demo) as Session;
-    if (kind === 'item') binned.items['1']!.removed_at = binned.updated_at;
-    else binned.topics[topicId]!.removed_at = binned.updated_at;
-    let current = binned;
-    const { service, queue, notices, removed } = harness(async () => current);
-    const target = kind === 'item' ? itemTarget('1') : { kind: 'topic' as const, session: route, topic_id: topicId };
-    queue.schedule(target, removeSubject(binned, target as Extract<RemoveTarget, { kind: 'item' | 'topic' }>)!);
-    current = structuredClone(binned);
-    if (kind === 'item') { delete current.items['1']!.removed_at; ++current.items['1']!.revision; }
-    else { delete current.topics[topicId]!.removed_at; ++current.topics[topicId]!.revision; }
-    await queue.flush();
-    expect(service.removeItem).not.toHaveBeenCalled(); expect(service.removeTopic).not.toHaveBeenCalled();
-    expect(removed).not.toHaveBeenCalled(); expect(notices.getSnapshot()).toEqual([]);
-    expect(queue.pending()).toEqual([]); expect(queue.getSnapshot().empty).toBe(true);
-  });
-
-  it.each(['item', 'topic'] as const)('permanently removes %s work that remains in the bin', async kind => {
-    const binned = structuredClone(demo) as Session;
-    if (kind === 'item') binned.items['1']!.removed_at = binned.updated_at;
-    else binned.topics[topicId]!.removed_at = binned.updated_at;
-    const { service, queue, removed } = harness(async () => binned);
-    const target = kind === 'item' ? itemTarget('1') : { kind: 'topic' as const, session: route, topic_id: topicId };
-    queue.schedule(target, removeSubject(binned, target as Extract<RemoveTarget, { kind: 'item' | 'topic' }>)!);
-    await queue.flush();
-    expect(kind === 'item' ? service.removeItem : service.removeTopic).toHaveBeenCalledOnce();
-    expect(removed).toHaveBeenCalledWith(target);
-  });
-
-  it('retries an uncertain permanent deletion with its exact command even after an apparent restore', async () => {
-    const binned = structuredClone(demo) as Session;
-    binned.items['1']!.removed_at = binned.updated_at;
-    let current = binned;
-    const { service, queue } = harness(async () => current);
-    service.removeItem.mockRejectedValueOnce(new Error('Desktop service is unavailable.'));
-    const target = { kind: 'item' as const, item: { ...route, item_id: '1' } };
-    const op = queue.schedule(target, removeSubject(binned, target)!);
-    await queue.flush();
-    current = structuredClone(binned); delete current.items['1']!.removed_at; ++current.items['1']!.revision;
-    await queue.retry(op);
-    expect(service.removeItem).toHaveBeenCalledTimes(2);
-    expect(service.removeItem.mock.calls[1]).toEqual(service.removeItem.mock.calls[0]);
+    const continued = Object.keys(binned.topics).find(id => id !== topicId)!;
+    binned.items['1']!.removed_at = binned.updated_at; binned.topics[continued]!.removed_at = binned.updated_at;
+    const { service, queue, notices, removed } = harness(async () => binned);
+    service.removeTopic.mockRejectedValueOnce(new CoreFailure({ code: 'revision_conflict', message: 'changed', hint: '', retryable: false, field_errors: [] }));
+    const item = itemTarget('1') as Extract<RemoveTarget, { kind: 'item' }>, topic = { kind: 'topic' as const, session: route, topic_id: continued };
+    const result = await queue.deleteNow([item, topic, itemTarget('2') as Extract<RemoveTarget, { kind: 'item' }>]);
+    expect(service.removeItem).toHaveBeenCalledOnce();
+    const op = (mock: { mock: { calls: unknown[][] } }) => mock.mock.calls[0]![2];
+    expect(op(service.removeItem)).not.toBe(op(service.removeTopic));
+    expect(result.deleted).toEqual([item]);
+    expect(result.failed.map(value => value.target)).toEqual([topic, itemTarget('2')]);
+    expect(result.failed[1]!.error).toBe('It isn’t in the bin any more.');
+    expect(notices.getSnapshot()).toEqual([]);
+    expect(queue.pending()).toEqual([]);
+    expect(removed).toHaveBeenCalledOnce();
   });
 
   it('flushes pending removals when the window hides or the page goes, and skips what is already gone', async () => {

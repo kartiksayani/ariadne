@@ -47,10 +47,13 @@ import type { MapSearchStatus } from './ui/tree/mapSearch';
 import { AgentNotRunningHost } from './ui/dialogs/AgentNotRunning';
 import { ContinueTopicHost } from './ui/dialogs/ContinueTopicDialog';
 import type { RemoveHandler, RemoveSubject, RemoveTarget } from './ui/dialogs/remove';
-import { RemoveDialog } from './ui/dialogs/RemoveDialog';
+import { RemoveDialog, type FamilyState, type RemoveReview } from './ui/dialogs/RemoveDialog';
+import { againRequests, archiveRequests } from './ui/remove/requests';
+import { draftsSettled, removeReview } from './ui/remove/review';
+import type { Pinned } from './ui/remove/queue';
 import { notices } from './ui/pages/notices';
 import { RemovalContext, RemovalQueue } from './ui/remove/queue';
-import { nextSelection, removeSubject, subtree, targetSession } from './ui/remove/model';
+import { nextSelection, subtree, targetSession } from './ui/remove/model';
 import { themeToggle } from './ui/shell/model';
 import { useAppliedTheme } from './ui/shell/theme';
 import { useWindowKeys } from './ui/shell/windowKeys';
@@ -439,15 +442,27 @@ function Workspace({ application }: { application: Application }) {
   // The Map publishes its search count, arrows and note here for the top bar.
   const [searchStatus, setSearchStatus] = useState<MapSearchStatus | null>(null);
 
-  // Remove (handoff README "Remove"): ask, then hide at once and run after the undo window (ui/remove/queue).
-  const [asking, setAsking] = useState<{ target: RemoveTarget; subject: RemoveSubject } | null>(null);
+  // Remove (E28, E34): a leaf with no waiting question and none of the owner's words goes at once; anything else asks,
+  // quoting every word that goes. Either way the rows hide at once and the command runs after the undo window.
+  const [asking, setAsking] = useState<{ readonly review: RemoveReview; readonly family: FamilyState | null } | null>(null);
   const askRemove = (target: TreeRemoveTarget): boolean => {
     const at = targetSession(target), session = navigation.opened.open(at).getSnapshot().snapshot?.session;
     if (!session) return false;
     if (target.kind === 'item' ? hidden.item(at, session, target.item.item_id) : hidden.topic(at, target.topic_id)) return false;
-    const subject = removeSubject(session, target);
-    if (!subject) return false;
-    setAsking({ target, subject }); return true;
+    const review = removeReview(session, target, application.drafts.getSnapshot());
+    if (!review) return false;
+    if (review.subject.kind === 'item' && review.subject.items === 1 && !review.subject.waiting && !review.words.length) {
+      removeTarget(target, review.subject, review.pinned); return true;
+    }
+    const topic = target.kind === 'topic' ? session.topics[target.topic_id] : null;
+    setAsking({ review, family: topic ? 'checking' : null });
+    if (topic) {
+      // E34: a continued topic can't be removed here. Archived sessions are read now, with a 5 s limit; unknown counts as family.
+      void removals.family(topic, session).then(family => {
+        setAsking(current => current?.review === review ? { review, family } : current);
+      });
+    }
+    return true;
   };
   // The selection moves to the next row, else the parent, else none; detail closes when it showed what goes.
   const moveSelection = (at: SessionRef, next: string | null) => {
@@ -456,7 +471,7 @@ function Workspace({ application }: { application: Application }) {
     if (next) void navigation.routes.revealItem({ ...at, item_id: next }).then(result => { if (result?.kind === 'item') selected(result, false); }).catch(() => {});
     saveView({ selected_item_id: next });
   };
-  const removeTarget: RemoveHandler = (target, subject) => {
+  const removeTarget = (target: RemoveTarget, subject: RemoveSubject, pinned?: Pinned) => {
     let restore: (() => void) | undefined;
     if (target.kind === 'item' || target.kind === 'topic') {
       const at = targetSession(target), session = navigation.opened.open(at).getSnapshot().snapshot?.session;
@@ -476,8 +491,12 @@ function Workspace({ application }: { application: Application }) {
         restore = () => { navigation.openPage({ kind: 'page', page: 'sessions', projectId: target.project_id }); };
       }
     }
-    removals.schedule(target, subject, { restore });
+    removals.schedule(target, subject, { restore, pinned });
   };
+  const removeHandler: RemoveHandler = (target, subject) => removeTarget(target, subject);
+  const asker = useRef(askRemove);
+  asker.current = askRemove;
+  useEffect(() => { const again = (target: TreeRemoveTarget) => { asker.current(target); }; againRequests.add(again); return () => { againRequests.delete(again); }; }, []);
   const showView = (mode: 'tree' | 'graph' | 'archive') => {
     if (conversation) closeConversation();
     setGraphModes(previous => ({ ...previous, [key]: mode === 'graph' }));
@@ -588,7 +607,7 @@ function Workspace({ application }: { application: Application }) {
     <AgentRemovalNotices waiting={application.waiting} controllers={application.actions} navigation={navigation}
       selectedSession={sessionState?.snapshot?.session ?? null} onTree={showBinTree} />
     <NavigationWorkspace store={navigation} adapterChoices={adapterChoices} discovery={application.discovery} actions={application.actions}
-      onRemoveTarget={removeTarget} waitingStore={application.waiting}
+      onRemoveTarget={removeHandler} waitingStore={application.waiting}
       chrome={{ query, searchStatus, graph: graph && !archived, onView: store ? showView : undefined, theme: shown, searchBlocked: conversationOpen,
         filter: store ? { active: filterOpen, count: view ? filterCount({ view, local: localChips.chips }) : localChips.chips.length, onToggle: () => setFilterOpen(value => !value) } : undefined,
         onRecent: store ? () => setRecentOpen(value => !value) : undefined, recentOpen,
@@ -646,7 +665,10 @@ function Workspace({ application }: { application: Application }) {
         onClearSearch={clearSearch}
         onClearFilters={clearFilters} onShowArchive={() => showView('archive')}
         onRemove={target => { askRemove(target); }} />} />
-    {asking && <RemoveDialog subject={asking.subject} onCancel={() => setAsking(null)} onConfirm={() => removeTarget(asking.target, asking.subject)} />}
+    {asking && <RemoveDialog review={asking.review} family={asking.family} onCancel={() => setAsking(null)}
+      onConfirm={() => removeTarget(asking.review.target, asking.review.subject, asking.review.pinned)}
+      onArchiveInstead={asking.review.target.kind === 'topic' ? (() => { const target = asking.review.target as Extract<RemoveTarget, { kind: 'topic' }>;
+        archiveRequests.request({ route: target.session, topicId: target.topic_id }); }) : undefined} />}
     <ContinueTopicHost navigation={navigation} actions={application.actions} onSent={target => {
       // The continued topic now lives in the target session: show it there in the tree.
       if (route && routeKey(target) === key && archived) showView('tree');
@@ -662,6 +684,7 @@ export function DesktopApp({ service }: { service: RendererService }) {
   const [application, setApplication] = useState<Application | null>(null);
   useEffect(() => {
     const navigation = new NavigationStore(service), waiting = new WaitingStore(service, navigation.opened), actions = new SessionActionControllers(service);
+    const drafts = new OwnerDraftStore(service, undefined, navigation.preferenceWrites);
     const removals = new RemovalQueue({ service, notices,
       read: async route => {
         const store = navigation.opened.open(route);
@@ -669,6 +692,10 @@ export function DesktopApp({ service }: { service: RendererService }) {
         if (!ready.ok) throw new Error(ready.error ?? 'The latest changes could not be loaded.');
         return ready.session;
       },
+      // E28: the commit waits for any send being saved in the session, then compares a fresh read with the review.
+      settled: route => draftsSettled(drafts, route), waiting: () => waiting.getSnapshot(),
+      review: (session, target) => removeReview(session, target, drafts.getSnapshot())?.pinned ?? null,
+      again: target => { againRequests.forEach(ask => ask(target)); },
       // After the command: the tree drops the rows, removed sessions lose their tabs, the pages recount.
       removed: async target => {
         if (target.kind === 'item' || target.kind === 'topic') await navigation.opened.open(targetSession(target)).refresh();
@@ -680,7 +707,7 @@ export function DesktopApp({ service }: { service: RendererService }) {
         void waiting.refresh();
       } });
     const next: Application = { service, navigation, waiting, removals,
-      drafts: new OwnerDraftStore(service, undefined, navigation.preferenceWrites), actions, discovery: new DiscoveryController(service) };
+      drafts, actions, discovery: new DiscoveryController(service) };
     const detach = removals.attach();
     const detachAckAll = attachAckAll(service), detachAckHolds = attachAckHolds(service);
     const detachLinkFailures = listenForLinkFailures(service);

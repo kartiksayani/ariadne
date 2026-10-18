@@ -19,9 +19,12 @@ import { sentRows, waitingRows } from '../../../src/selectors/waiting/rows';
 import { sessionGraph } from '../../../src/ui/graph/model';
 import { shimTree } from '../tree/shimTree';
 import { projectRemoval, sessionRemoval } from '../../../src/ui/pages/model';
-import { Notices, notices } from '../../../src/ui/pages/notices';
-import { AgentBin, binView, removalNotice, restoreRemoved } from '../../../src/ui/remove/AgentBin';
-import type { RemoveTarget } from '../../../src/ui/dialogs/remove';
+import { notices } from '../../../src/ui/pages/notices';
+import { binView, removalNotice, restoreRemoved } from '../../../src/ui/remove/AgentBin';
+import { BinDialog } from '../../../src/ui/remove/BinDialog';
+import { agentName } from '../../../src/ui/shell/model';
+import { OwnerDraftStore } from '../../../src/state/drafts/store';
+import { useState } from 'react';
 import { AppTransport, route } from '../app/transport';
 import { goToSession } from '../app/open';
 import { graphSession, preferences, topicA, topicB } from '../graph/fixture';
@@ -56,6 +59,11 @@ function queuedInput(session: Session, id: string, itemId: string | null, topicI
   input.target = { topic_id: topicId, item_id: itemId }; input.payload.text = `Retained words for ${id}.`;
   return input;
 }
+/** Notice 11.3 as the app words it: the session's agent by name. */
+const noticeText = (session: Session, removal = notice()) => {
+  const binding = session.active_binding_id ? session.bindings[session.active_binding_id] : null;
+  return removalNotice(session, removal, binding ? agentName(binding.adapter_id) : 'The agent');
+};
 const ids = (items: readonly { readonly id: string }[]) => items.map(item => item.id);
 const notice = (overrides: Partial<AgentRemoval> = {}): AgentRemoval => ({ topic_id: topicA, item_id: '1',
   message_id: '00000000-0000-4000-8000-000000000090', item_ids: ['1', '1.1', '1.1.1', '1.2'],
@@ -130,11 +138,11 @@ async function setup(session = removedSession()) {
   const actions = new SessionActionControllers(service, () => `00000000-0000-4000-8000-0000000009${String(++operation).padStart(2, '0')}`).forSession(store);
   return { transport, service, store, actions };
 }
-function LiveBin({ actions, topicId = topicA, onRemove = () => {} }: {
-  readonly actions: SessionActions; readonly topicId?: string | null; readonly onRemove?: (target: RemoveTarget) => void;
-}) {
-  const session = useSession(actions.session).snapshot?.session;
-  return session ? <AgentBin session={session} actions={actions} topicId={topicId} onRemove={onRemove} /> : null;
+/** The bin dialog over one session; a test opens it as the band's menu or a strip does (`binView.reveal`). */
+function LiveBin({ actions }: { readonly actions: SessionActions; readonly topicId?: string | null }) {
+  const state = useSession(actions.session), session = state.snapshot?.session;
+  const [drafts] = useState(() => new OwnerDraftStore(actions.service));
+  return session ? <BinDialog session={session} route={state.route} actions={actions} queue={null} drafts={drafts} /> : null;
 }
 async function staleRefresh(value: Awaited<ReturnType<typeof setup>>) {
   let release!: () => void;
@@ -277,12 +285,13 @@ describe('agent removal notices', () => {
       .toBe('The agent removed “Old delivery plans”.');
   });
   it('names removed work and explains the waiting questions and preserved cancelled words', () => {
-    expect(removalNotice(removedSession(), notice())).toBe('The agent removed “Old delivery plans” and its work (4 items). 2 waiting questions left your panel. 1 unsent message was cancelled. Your words are kept in the bin.');
+    expect(removalNotice(removedSession(), notice())).toBe('The agent removed “Old delivery plans” and its work (4 items). 2 waiting questions left your panel. 1 unsent message was cancelled; your words are kept in the bin.');
+    expect(removalNotice(removedSession(), notice(), 'Claude Code')).toMatch(/^Claude Code removed “Old delivery plans”/);
   });
   it('uses singular question/item wording and plural cancelled messages for a topic', () => {
     const session = removedSession();
     expect(removalNotice(session, notice({ item_id: null, topic_id: topicB, item_ids: ['8'], waiting_questions: 1, cancelled_input_ids: ['one', 'two'] })))
-      .toBe(`The agent removed “${session.topics[topicB]!.name}” and its work (1 item). 1 waiting question left your panel. 2 unsent messages were cancelled. Your words are kept in the bin.`);
+      .toBe(`The agent removed “${session.topics[topicB]!.name}” and its work (1 item). 1 waiting question left your panel. 2 unsent messages were cancelled; your words are kept in the bin.`);
   });
 });
 
@@ -302,35 +311,40 @@ describe('agent removal bin', () => {
     expect(heldInputs(session).map(value => value.id)).toEqual([input.id]);
   });
 
+  const openBin = async (topicId: string | null = topicA) => {
+    act(() => { binView.reveal(route, topicId); });
+    return within(await screen.findByRole('dialog', { name: topicId === null ? 'The bin for this session' : /^The bin for “/ }));
+  };
+  const quotes = () => screen.queryAllByTestId('dialog-quote').map(quote => quote.querySelector('blockquote')!.textContent);
+
   it('cancels a pending confirmation when the session actions change', async () => {
     const session = removedSession(), input = queuedInput(session, 'held-before-navigation', '1'); session.inputs = { [input.id]: input };
     const previous = await setup(session), next = await setup();
     const view = render(<LiveBin actions={previous.actions} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    fireEvent.click((await openBin()).getByRole('button', { name: 'Restore' }));
     await screen.findByRole('dialog', { name: 'Restore work' });
     view.rerender(<LiveBin actions={next.actions} />);
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Restore work' })).toBeNull());
     expect(previous.transport.mutations).toEqual([]); expect(session.items['1']!.removed_at).toBeTruthy();
   });
 
-  it('shows held queued messages and counts only the messages released by restoring the selected marker', async () => {
+  it('quotes held messages and counts only the messages released by restoring the selected marker', async () => {
     const session = removedSession();
     const inputs = [queuedInput(session, 'root-message', '1'), queuedInput(session, 'visible-child-message', '1.2'),
       queuedInput(session, 'nested-message', '1.1.1')];
     session.inputs = Object.fromEntries(inputs.map(input => [input.id, input]));
     const value = await setup(session); render(<LiveBin actions={value.actions} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
-    for (const input of inputs) expect(screen.getByText(`Held — sends if you restore: ${input.payload.text}`)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    const bin = await openBin();
+    expect(quotes()).toEqual(inputs.map(input => input.payload.text));
+    expect(bin.getAllByRole('button', { name: 'Copy' })).toHaveLength(3);
+    fireEvent.click(bin.getByRole('button', { name: 'Restore' }));
     const confirm = within(await screen.findByRole('dialog', { name: 'Restore work' }));
     expect(confirm.getByText('Restoring this work makes 2 held messages visible again. They will send when sending can resume.')).toBeTruthy();
     expect(value.transport.mutations).toEqual([]);
     fireEvent.click(confirm.getByRole('button', { name: 'Restore' }));
     await waitFor(() => expect(value.transport.mutations).toHaveLength(1));
-    await screen.findByRole('button', { name: 'Removed by agent · 2' });
-    expect(screen.queryByText(`Held — sends if you restore: ${inputs[0].payload.text}`)).toBeNull();
-    expect(screen.getByText(`Held — sends if you restore: ${inputs[2].payload.text}`)).toBeTruthy();
+    // Restore has no Undo; the row says where it went (E30).
+    expect(await screen.findByText('✓ Back in the Map')).toBeTruthy();
     expect(inputs.every(input => session.inputs[input.id]!.state === 'queued')).toBe(true);
   });
 
@@ -342,12 +356,10 @@ describe('agent removal bin', () => {
     repair.resolution_history = [{ op_id: '00000000-0000-4000-8000-000000000092', attempt_id: attempt.id, kind: 'request_result_repair', reason: '', at: session.updated_at, evidence: null }];
     session.inputs = Object.fromEntries([topic, nested, notification, repair].map(input => [input.id, input]));
     const value = await setup(session); render(<LiveBin actions={value.actions} topicId={null} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 1' }));
-    expect(screen.getByText(`Held — sends if you restore: ${topic.payload.text}`)).toBeTruthy();
-    expect(screen.getByText(`Held — sends if you restore: ${nested.payload.text}`)).toBeTruthy();
-    expect(screen.queryByText(`Held — sends if you restore: ${repair.payload.text}`)).toBeNull();
-    expect(screen.queryByText(`Held — sends if you restore: ${notification.payload.text}`)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    const bin = await openBin(null);
+    // Every word the bin would delete is quoted, a held result repair too; a removal notice is not the owner's.
+    expect(quotes()).toEqual([topic, nested, repair].map(input => input.payload.text));
+    fireEvent.click(bin.getByRole('button', { name: 'Restore' }));
     const confirm = within(await screen.findByRole('dialog', { name: 'Restore work' }));
     expect(confirm.getByText('Restoring this work makes 1 held message visible again. It will send when sending can resume.')).toBeTruthy();
     fireEvent.click(confirm.getByRole('button', { name: 'Restore' }));
@@ -358,16 +370,15 @@ describe('agent removal bin', () => {
   it('rechecks held counts after the session changes while Restore confirmation is open', async () => {
     const session = removedSession(), input = queuedInput(session, 'first-message', '1'); session.inputs = { [input.id]: input };
     const value = await setup(session); render(<LiveBin actions={value.actions} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    fireEvent.click((await openBin()).getByRole('button', { name: 'Restore' }));
     await screen.findByRole('dialog', { name: 'Restore work' });
     const second = queuedInput(session, 'second-message', '1.2'); session.inputs[second.id] = second;
     ++session.revision; await act(async () => { await value.store.refresh(); });
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Restore' }));
     expect(await screen.findByText('Restoring this work makes 2 held messages visible again. They will send when sending can resume.')).toBeTruthy();
     expect(value.transport.mutations).toEqual([]);
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Cancel/ }));
+    await screen.findByRole('dialog', { name: /^The bin for “/ });
     expect(session.items['1']!.removed_at).toBeTruthy(); expect(value.transport.mutations).toEqual([]);
   });
 
@@ -378,158 +389,76 @@ describe('agent removal bin', () => {
     expect(value.transport.mutations).toEqual([]);
   });
 
-  it('only labels owner messages cancelled by agent removal as cancelled bin messages', async () => {
+  it('lists each removed root once with its count, when and who removed it, and its cancelled words', async () => {
     const session = removedSession(), removed = cancelledInput(session), other = structuredClone(removed), notification = structuredClone(removed);
-    other.id = '00000000-0000-4000-8000-000000000097'; other.cancel_cause = 'owner';
-    other.payload.text = 'I cancelled this message myself.';
-    notification.id = '00000000-0000-4000-8000-000000000096'; notification.kind = 'removed';
-    notification.payload.text = 'Automatic removal notice.';
+    other.id = '00000000-0000-4000-8000-000000000097'; other.cancel_cause = 'owner'; other.payload.text = 'I cancelled this message myself.';
+    notification.id = '00000000-0000-4000-8000-000000000096'; notification.kind = 'removed'; notification.payload.text = 'Automatic removal notice.';
     session.inputs = { [removed.id]: removed, [other.id]: other, [notification.id]: notification };
     const { actions } = await setup(session); render(<LiveBin actions={actions} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
-    expect(screen.getByText(`Cancelled unsent message: ${removed.payload.text}`)).toBeTruthy();
-    expect(screen.queryByText(`Cancelled unsent message: ${other.payload.text}`)).toBeNull();
-    expect(screen.queryByText(`Cancelled unsent message: ${notification.payload.text}`)).toBeNull();
-  });
-  it('keeps earlier agent replies and handled owner words in the expanded read-only conversation', async () => {
-    const session = removedSession(), handled = cancelledInput(session), cancelled = structuredClone(handled);
-    handled.id = '00000000-0000-4000-8000-000000000096'; handled.state = 'handled';
-    handled.payload.text = 'My earlier answer reached the agent.';
-    cancelled.id = '00000000-0000-4000-8000-000000000097'; cancelled.state = 'cancelled';
-    session.inputs = { [handled.id]: handled, [cancelled.id]: cancelled };
-    const template = session.messages[0], number = Math.max(...session.messages.map(message => message.number));
-    const owner = { ...structuredClone(template), id: '00000000-0000-4000-8000-000000000098', number: number + 1,
-      author: 'owner' as const, kind: 'owner_input' as const, body: handled.payload.text, item_id: '1.1.1', topic_id: topicA,
-      input_id: handled.id, round_id: null, items_touched: [] };
-    handled.message_id = owner.id;
-    const reply = { ...structuredClone(template), id: '00000000-0000-4000-8000-000000000099', number: number + 2,
-      author: 'agent' as const, kind: 'reply' as const, body: 'I retained your answer and completed the earlier investigation.',
-      item_id: '1.1.1', topic_id: topicA, input_id: handled.id, round_id: null, items_touched: [] };
-    session.messages.push(owner, reply);
-    const before = structuredClone(session), value = await setup(session); render(<LiveBin actions={value.actions} />);
-    expect(screen.queryByText(reply.body)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
-    const bin = within(document.querySelector<HTMLElement>('[data-agent-bin]')!);
-    expect(bin.getByRole('heading', { name: 'Conversation' })).toBeTruthy();
-    expect(bin.getByText(owner.body)).toBeTruthy(); expect(bin.getByText(reply.body)).toBeTruthy();
-    expect(bin.getAllByText('You').length).toBeGreaterThan(0); expect(bin.getAllByText('The agent').length).toBeGreaterThan(0);
-    expect(bin.getByText(`Cancelled unsent message: ${cancelled.payload.text}`)).toBeTruthy();
-    expect(bin.queryByRole('textbox')).toBeNull(); expect(bin.queryByRole('button', { name: /Send|Reply|Answer/ })).toBeNull();
-    expect(session.messages).toEqual(before.messages); expect(session.inputs).toEqual(before.inputs);
+    const bin = await openBin();
+    const rows = within(bin.getByRole('list', { name: 'Removed items' })).getAllByRole('listitem');
+    expect(rows).toHaveLength(1);
+    // Every cancelled message with words is counted and quoted: Empty would delete them all.
+    expect(rows[0]!.textContent).toMatch(/^Old delivery plans4 items in all · removed by .+ at \d\d:\d\d · 2 messages of yours were cancelled/);
+    expect(quotes()).toEqual([removed.payload.text, other.payload.text]);
+    expect(bin.queryByRole('textbox')).toBeNull();
   });
 
-  it('starts folded, counts descendants once, preserves cancelled text and dispatches Delete forever to the existing removal path', async () => {
-    const session = removedSession(), input = cancelledInput(session); session.inputs = { [input.id]: input };
-    const { actions } = await setup(session), onRemove = vi.fn(); render(<LiveBin actions={actions} onRemove={onRemove} />);
-    const fold = screen.getByRole('button', { name: 'Removed by agent · 4' });
-    expect(fold.getAttribute('aria-expanded')).toBe('false'); expect(screen.queryByText(/Cancelled unsent message:/)).toBeNull();
-    fireEvent.click(fold);
-    expect(screen.getByText('Old delivery plans · 4 items').className).toBe('agent-bin-name');
-    expect(screen.getByText(`Cancelled unsent message: ${input.payload.text}`)).toBeTruthy();
-    expect(screen.getByText('Which delivery window: morning or evening?')).toBeTruthy();
-    expect(screen.getByText('Waiting on me')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Delete forever' }));
-    await waitFor(() => expect(onRemove).toHaveBeenCalledWith({ kind: 'item', item: { ...route, item_id: '1' } }));
+  it('opens the session bin for removed topics and a topic bin for its items; an empty bin says so', async () => {
+    const value = await setup(); render(<LiveBin actions={value.actions} topicId={null} />);
+    const bin = await openBin(null);
+    expect(bin.getByText(value.transport.source.topics[topicB]!.name)).toBeTruthy();
+    fireEvent.click(bin.getByRole('button', { name: /^Done/ }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    const empty = await openBin(topicB);
+    expect(empty.getByText('✓ The bin is empty.')).toBeTruthy();
+    expect(empty.getByRole('button', { name: 'Empty the bin…' })).toHaveProperty('disabled', true);
   });
 
-  it('counts removed topics at session level and keeps them out of a topic item bin', async () => {
-    const value = await setup(), onRemove = vi.fn(); render(<LiveBin actions={value.actions} topicId={null} onRemove={onRemove} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 1' }));
-    expect(screen.getByText(value.transport.source.topics[topicB]!.name)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Delete forever' }));
-    await waitFor(() => expect(onRemove).toHaveBeenCalledWith({ kind: 'topic', session: route, topic_id: topicB }));
-    cleanup(); render(<LiveBin actions={value.actions} topicId={topicB} />);
-    expect(screen.queryByRole('button', { name: /Removed by agent/ })).toBeNull();
-  });
-
-  it('opens the requested bin when View navigates before the bin mounts', async () => {
+  it('opens a bin asked for before it mounts, once', async () => {
     const value = await setup(); act(() => { binView.reveal(route, topicA); });
-    render(<LiveBin actions={value.actions} />);
-    expect(screen.getByRole('button', { name: 'Removed by agent · 4' }).getAttribute('aria-expanded')).toBe('true');
-    act(() => { binView.reveal({ ...route, session_id: 'another-session' }, topicB); });
-  });
-
-  it('scrolls the bin into view when it is asked for, folded or already open, and only then', async () => {
-    const scroll = vi.fn();
-    Element.prototype.scrollIntoView = scroll;
-    const value = await setup(); render(<LiveBin actions={value.actions} />);
-    expect(scroll).not.toHaveBeenCalled();                       // mounting the bin does not move the Map
-    act(() => { binView.reveal(route, topicA); });
-    expect(screen.getByRole('button', { name: 'Removed by agent · 4' }).getAttribute('aria-expanded')).toBe('true');
-    expect(scroll).toHaveBeenCalledTimes(1);
-    expect(scroll.mock.contexts[0]).toBe(screen.getByRole('button', { name: 'Removed by agent · 4' }).parentElement);
-    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });  // nothing moves when it is already in view
-    act(() => { binView.reveal(route, topicA); });
-    expect(scroll).toHaveBeenCalledTimes(2);                     // asked again while open: scrolls again, stays open
-    expect(screen.getByRole('button', { name: 'Removed by agent · 4' }).getAttribute('aria-expanded')).toBe('true');
-    act(() => { binView.reveal(route, topicB); });
-    expect(scroll).toHaveBeenCalledTimes(2);                     // another topic's bin is not this one
-    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    const view = render(<LiveBin actions={value.actions} />);
+    expect(await screen.findByRole('dialog', { name: /^The bin for “/ })).toBeTruthy();
+    view.unmount(); render(<LiveBin actions={value.actions} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('waits for a stale item refresh, then restores once against the fresh item revision', async () => {
     const value = await setup(); render(<LiveBin actions={value.actions} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
+    const bin = await openBin();
     ++value.transport.source.items['1']!.revision; const revision = value.transport.source.items['1']!.revision;
-    const release = await staleRefresh(value), restore = screen.getByRole('button', { name: 'Restore' });
+    const release = await staleRefresh(value), restore = bin.getByRole('button', { name: 'Restore' });
     fireEvent.click(restore); fireEvent.click(restore);
     expect(value.transport.mutations).toEqual([]);
     await act(async () => { release(); });
     await waitFor(() => expect(value.transport.mutations).toHaveLength(1));
     expect(value.transport.mutations[0]!.command).toMatchObject({ command: 'item_restore', params: { item_id: '1', expected_revision: revision } });
-    await screen.findByRole('button', { name: 'Removed by agent · 2' });
     const restored = value.store.getSnapshot().snapshot!.session;
     expect(itemRemoved(restored, '1')).toBe(false); expect(itemRemoved(restored, '1.2')).toBe(false);
     expect(restored.items['1.1']!.removed_at).toBeTruthy(); expect(itemRemoved(restored, '1.1.1')).toBe(true);
   });
-  it('publishes immediate restore failure as a toast while keeping the bin available', async () => {
+
+  it('keeps a refused restore in the bin with the reason', async () => {
     const value = await setup(), invoke = value.transport.invoke.bind(value.transport);
     vi.spyOn(value.transport, 'invoke').mockImplementation(async (name, args) => {
       if (name === 'item_restore') return { api_version: 1, ok: false,
         error: { code: 'invalid_argument', message: 'Restore was refused.', hint: '', retryable: false, field_errors: [] } };
       return invoke(name, args);
     });
-    const view = render(<LiveBin actions={value.actions} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
-    await waitFor(() => expect(notices.getSnapshot().map(notice => notice.text)).toEqual(['Something in that isn’t valid. Check it and try again.']));
-    expect(screen.queryByRole('alert')).toBeNull();
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Restore' })).toHaveProperty('disabled', false));
-    act(() => notices.dismiss(notices.getSnapshot()[0]!.id));
-    view.rerender(<LiveBin actions={value.actions} onRemove={vi.fn()} />);
-    expect(notices.getSnapshot()).toEqual([]);
-    render(<Notices />);
-    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
-    expect(await screen.findByText('Something in that isn’t valid. Check it and try again.')).toBeTruthy();
-    view.unmount();
-    expect(notices.getSnapshot()).toEqual([]);
-    expect(screen.queryByText('Something in that isn’t valid. Check it and try again.')).toBeNull();
-  });
-  it('keeps an unresolved restore error in the bin and locks further changes', async () => {
-    const value = await setup(), invoke = value.transport.invoke.bind(value.transport);
-    vi.spyOn(value.transport, 'invoke').mockImplementation(async (name, args) => {
-      if (name === 'item_restore') return { api_version: 1, ok: false,
-        error: { code: 'not_found', message: 'Removed work disappeared.', hint: '', retryable: false, field_errors: [] } };
-      return invoke(name, args);
-    });
     render(<LiveBin actions={value.actions} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
-    expect((await screen.findByRole('alert')).textContent).toBe('Ariadne can’t find that any more. It may have been removed.');
-    expect(value.actions.getSnapshot().pending).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Restore' })).toHaveProperty('disabled', true);
-    expect(screen.getByRole('button', { name: 'Delete forever' })).toHaveProperty('disabled', true);
-    expect(notices.getSnapshot()).toEqual([]);
+    fireEvent.click((await openBin()).getByRole('button', { name: 'Restore' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('Something in that isn’t valid. Check it and try again.');
+    expect(screen.queryByText('✓ Back in the Map')).toBeNull();
   });
 
   it('restores a topic using its fresh revision while leaving cancelled owner messages cancelled', async () => {
     const session = removedSession(), input = cancelledInput(session, '8'); session.inputs = { [input.id]: input };
     const value = await setup(session); render(<LiveBin actions={value.actions} topicId={null} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 1' }));
+    const bin = await openBin(null);
     ++session.topics[topicB]!.revision; const revision = session.topics[topicB]!.revision, release = await staleRefresh(value);
-    fireEvent.click(screen.getByRole('button', { name: 'Restore' })); expect(value.transport.mutations).toEqual([]);
+    fireEvent.click(bin.getByRole('button', { name: 'Restore' })); expect(value.transport.mutations).toEqual([]);
     await act(async () => { release(); });
-    await waitFor(() => expect(screen.queryByRole('button', { name: /Removed by agent/ })).toBeNull());
+    expect(await screen.findByText('✓ Back in the Map')).toBeTruthy();
     expect(value.transport.mutations[0]!.command).toMatchObject({ command: 'topic_removed_restore', params: { topic_id: topicB, expected_revision: revision } });
     expect(session.inputs[input.id]!.state).toBe('cancelled'); expect(session.inputs[input.id]!.payload.text).toBe(input.payload.text);
   });
@@ -561,80 +490,48 @@ describe('agent removal bin', () => {
     expect(value.transport.mutations).toEqual([]);
   });
 
-  it('keeps Delete forever behind the ordinary app confirmation and preserves Undo before permanent removal', async () => {
+  it.each(['ancestor', 'topic', 'restored'] as const)('refuses an item restore after its %s state has changed', async state => {
+    const session = removedSession();
+    if (state === 'topic') session.topics[topicA]!.removed_at = session.updated_at;
+    if (state === 'restored') delete session.items['1']!.removed_at;
+    const value = await setup(session), itemId = state === 'ancestor' ? '1.1' : '1';
+    expect(await restoreRemoved(value.actions, topicA, itemId)).toBe('This work has already changed. View the bin and try again.');
+    expect(value.transport.mutations).toEqual([]);
+  });
+
+  // E31: Empty quotes every word it deletes; Keep them goes back to the bin; Delete for good runs at once, no Undo.
+  it('empties a topic bin after quoting the words, at once and with one toast', async () => {
     const session = removedSession(), input = cancelledInput(session); session.inputs = { [input.id]: input };
-    const transport = new BinTransport(session); render(<DesktopApp service={createDesktopService(transport)} />);
-    await goToSession(route); await screen.findByRole('tree', { name: 'Session items' });
-    await waitFor(() => {
-        expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-        expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
-      });
-    fireEvent.click(screen.getByRole('button', { name: 'Removed by agent · 4' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete forever' }));
-    const confirm = within(await screen.findByRole('alertdialog'));
-    expect(confirm.getByRole('button', { name: 'Remove 4 items' })).toBeTruthy();
-    expect(confirm.getByText('1 question waiting on you goes with it. Your 1 cancelled message is deleted forever.')).toBeTruthy();
+    const transport = new BinTransport(session); await openApp(transport);
+    let bin = await openBin();
+    fireEvent.click(bin.getByRole('button', { name: 'Empty the bin…' }));
+    let confirm = within(await screen.findByRole('dialog', { name: /^Empty the bin for “/ }));
+    expect(confirm.getByText('The removed item in it is deleted for good, along with one message of yours that was cancelled when they were removed. This can’t be undone.')).toBeTruthy();
+    expect(quotes()).toEqual([input.payload.text]);
+    expect(document.activeElement).toBe(confirm.getByRole('button', { name: /^Keep them/ }));
+    fireEvent.click(confirm.getByRole('button', { name: /^Keep them/ }));
+    bin = within(await screen.findByRole('dialog', { name: /^The bin for “/ }));
+    fireEvent.click(bin.getByRole('button', { name: 'Empty the bin…' }));
+    confirm = within(await screen.findByRole('dialog', { name: /^Empty the bin for “/ }));
     expect(transport.mutations.filter(request => request.command.command === 'item_remove')).toEqual([]);
-    fireEvent.click(confirm.getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByRole('alertdialog')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Delete forever' }));
-    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove 4 items' }));
-    expect(await screen.findByRole('button', { name: 'Undo' })).toBeTruthy();
-    await act(async () => { window.dispatchEvent(new Event('pagehide')); });
+    await act(async () => { fireEvent.click(confirm.getByRole('button', { name: 'Delete for good' })); });
     await waitFor(() => expect(transport.mutations.filter(request => request.command.command === 'item_remove')).toHaveLength(1));
     expect(transport.mutations.find(request => request.command.command === 'item_remove') as OwnerMutationRequest)
       .toMatchObject({ session: route, command: { command: 'item_remove', params: { item_id: '1' } } });
-    expect(transport.source.items['1']).toBeUndefined(); expect(transport.source.items['1.1.1']).toBeUndefined();
-  });
-
-  it('warns about binned waiting questions and cancelled owner words before permanently deleting a topic', async () => {
-    const session = removedSession(), input = cancelledInput(session, '8'); session.inputs = { [input.id]: input };
-    session.items['8']!.status = 'waiting_on_me';
-    const transport = new BinTransport(session); await openApp(transport);
-    const bin = within(document.querySelector<HTMLElement>('[data-agent-bin="topics"]')!);
-    fireEvent.click(bin.getByRole('button', { name: 'Removed by agent · 1' }));
-    fireEvent.click(bin.getByRole('button', { name: 'Delete forever' }));
-    const confirm = within(await screen.findByRole('alertdialog'));
-    expect(confirm.getByText('1 question waiting on you goes with it. Your 1 cancelled message is deleted forever.')).toBeTruthy();
-    expect(confirm.getByRole('button', { name: 'Remove topic' })).toBeTruthy();
-    fireEvent.click(confirm.getByRole('button', { name: 'Cancel' }));
-    expect(transport.mutations.filter(request => request.command.command === 'topic_remove')).toEqual([]);
-  });
-
-  it('keeps work restored from the bin while Delete forever is waiting for Undo', async () => {
-    const session = receiptSession(), transport = new BinTransport(session); await openApp(transport);
-    const removal = within((await screen.findByText(removalNotice(session, notice()))).closest<HTMLElement>('.pw-note')!);
-    const bin = within(document.querySelector<HTMLElement>(`[data-agent-bin="${topicA}"]`)!);
-    fireEvent.click(bin.getByRole('button', { name: 'Removed by agent · 4' }));
-    fireEvent.click(bin.getByRole('button', { name: 'Delete forever' }));
-    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove 4 items' }));
-    await screen.findByRole('button', { name: 'Undo' });
-    const restore = removal.getByRole('button', { name: 'Restore' });
-    await waitFor(() => expect(restore.hasAttribute('disabled')).toBe(false));
-    fireEvent.click(restore);
-    await waitFor(() => expect(transport.source.items['1']!.removed_at).toBeUndefined());
-    await waitFor(() => {
-        expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
-        expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-busy')).toBe('false');
-      });
-    await act(async () => { window.dispatchEvent(new Event('pagehide')); });
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull());
-    await screen.findByRole('button', { name: 'Removed by agent · 2' });
-    expect(transport.mutations.filter(request => request.command.command === 'item_remove')).toEqual([]);
-    expect(transport.source.items['1']).toBeDefined(); expect(transport.source.items['1']!.removed_at).toBeUndefined();
-    expect(transport.source.items['1.1']!.removed_at).toBeTruthy();
+    expect(await screen.findByText('Deleted the removed item for good.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
   });
 });
 
 describe('agent removal receipts in the composed app', () => {
   it('confirms held messages from notice Restore and preserves the notice when confirmation is cancelled', async () => {
     const session = receiptSession(), input = queuedInput(session, 'notice-held-message', '1'); session.inputs = { [input.id]: input };
-    const transport = new BinTransport(session), text = removalNotice(session, notice()); await openApp(transport);
+    const transport = new BinTransport(session), text = noticeText(session); await openApp(transport);
     const removal = within((await screen.findByText(text)).closest<HTMLElement>('.pw-note')!);
     fireEvent.click(removal.getByRole('button', { name: 'Restore' }));
     const confirm = within(await screen.findByRole('dialog', { name: 'Restore work' }));
     expect(confirm.getByText('Restoring this work makes 1 held message visible again. It will send when sending can resume.')).toBeTruthy();
-    fireEvent.click(confirm.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(confirm.getByRole('button', { name: /^Cancel/ }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(screen.getByText(text)).toBeTruthy(); expect(transport.mutations.filter(request => request.command.command === 'item_restore')).toEqual([]);
     fireEvent.click(removal.getByRole('button', { name: 'Restore' }));
@@ -649,16 +546,17 @@ describe('agent removal receipts in the composed app', () => {
     const transport = new BinTransport(session); await openApp(transport);
     expect(await screen.findByText('No items yet')).toBeTruthy();
     expect(screen.getByText(/waiting for the agent’s first message|items appear when it writes/)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /Removed by agent/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /removed “/ })).toBeNull();
     session.topics[topicA]!.removed_at = session.updated_at; ++session.topics[topicA]!.revision;
     await refreshApp(transport);
-    const fold = await screen.findByRole('button', { name: 'Removed by agent · 1' });
+    // E32: the removed topic's place keeps a strip; it opens the session's bin.
+    const strip = await screen.findByRole('button', { name: new RegExp(`removed “${session.topics[topicA]!.name}”`) });
     expect(screen.queryByText('No items yet')).toBeNull();
-    expect(fold.getAttribute('aria-expanded')).toBe('false'); fireEvent.click(fold);
-    const bin = within(fold.closest<HTMLElement>('[data-agent-bin]')!);
+    fireEvent.click(strip);
+    const bin = within(await screen.findByRole('dialog', { name: 'The bin for this session' }));
     expect(bin.getByText(session.topics[topicA]!.name)).toBeTruthy();
     expect(bin.getByRole('button', { name: 'Restore' })).toBeTruthy();
-    expect(bin.getByRole('button', { name: 'Delete forever' })).toBeTruthy();
+    expect(bin.getByRole('button', { name: 'Empty the bin…' })).toBeTruthy();
   });
 
   it('resumes the filtered tree rows and preserved search after an outside reveal', async () => {
@@ -683,7 +581,7 @@ describe('agent removal receipts in the composed app', () => {
   });
 
   it('shows the current marked receipt once, deduplicates refreshes and respects owner dismissal', async () => {
-    const session = receiptSession(), text = removalNotice(session, notice()), transport = new BinTransport(session);
+    const session = receiptSession(), text = noticeText(session), transport = new BinTransport(session);
     const push = vi.spyOn(notices, 'push'); await openApp(transport);
     expect(await screen.findByText(text)).toBeTruthy();
     await refreshApp(transport); await refreshApp(transport);
@@ -695,7 +593,7 @@ describe('agent removal receipts in the composed app', () => {
   });
 
   it('dismisses the current receipt when an external restore removes its marker while historical receipts remain', async () => {
-    const session = receiptSession(), text = removalNotice(session, notice()), transport = new BinTransport(session);
+    const session = receiptSession(), text = noticeText(session), transport = new BinTransport(session);
     await openApp(transport); await screen.findByText(text);
     delete session.items['1']!.removed_at; delete session.items['1']!.removed_by;
     await refreshApp(transport);
@@ -704,7 +602,7 @@ describe('agent removal receipts in the composed app', () => {
   });
 
   it.each(['restored', 'deleted', 'different removal'] as const)('does not replay a historical notice after work is %s', async state => {
-    const session = receiptSession(), text = removalNotice(session, notice());
+    const session = receiptSession(), text = noticeText(session);
     if (state === 'restored') { delete session.items['1']!.removed_at; delete session.items['1']!.removed_by; }
     if (state === 'deleted') for (const item of removedSubtree(session, '1')) delete session.items[item.id];
     if (state === 'different removal') session.items['1']!.removed_by!.message_id = '00000000-0000-4000-8000-000000000094';
@@ -720,22 +618,21 @@ describe('agent removal receipts in the composed app', () => {
     await openApp(transport);
     fireEvent.click(within(screen.getByRole('group', { name: 'View' })).getByRole('button', { name: 'Graph' }));
     await waitFor(() => expect(document.querySelector('.graph-view')).not.toBeNull());
-    const text = removalNotice(session, notice()), receipt = within((await screen.findByText(text)).closest<HTMLElement>('.pw-note')!);
-    fireEvent.click(receipt.getByRole('button', { name: 'View' }));
-    const fold = await screen.findByRole('button', { name: 'Removed by agent · 4' });
-    await waitFor(() => expect(fold.getAttribute('aria-expanded')).toBe('true'));
+    const text = noticeText(session), receipt = within((await screen.findByText(text)).closest<HTMLElement>('.pw-note')!);
+    fireEvent.click(receipt.getByRole('button', { name: 'Open the bin' }));
+    await screen.findByRole('dialog', { name: /^The bin for “/ });
     expect(document.querySelector('.graph-view')).toBeNull();
     expect(searchValue()).toBe('');
     expect(transport.preferences.sessions.find(view => view.session.session_id === session.id)!.filters)
       .toEqual({ search: '', statuses: [], owners: [], topic_id: null, archived: false, hide_later: false });
-    expect(screen.getByText('Old delivery plans · 4 items')).toBeTruthy();
+    expect(within(screen.getByRole('list', { name: 'Removed items' })).getByText('Old delivery plans')).toBeTruthy();
   });
 
   it.each([false, true])('retains a delayed View continuation unless superseded (superseded: %s)', async superseded => {
     const session = receiptSession(), transport = new BinTransport(session);
     transport.preferences.sessions[0]!.filters.search = 'a question that does not match';
     await openApp(transport);
-    const receipt = within((await screen.findByText(removalNotice(session, notice()))).closest<HTMLElement>('.pw-note')!);
+    const receipt = within((await screen.findByText(noticeText(session))).closest<HTMLElement>('.pw-note')!);
     const theme = within(document.querySelector<HTMLElement>('.tb')!).getByRole<HTMLButtonElement>('button', { name: 'Switch to light' });
     await waitFor(() => expect(theme.disabled).toBe(false));
     let release!: () => void, writing = false;
@@ -753,7 +650,7 @@ describe('agent removal receipts in the composed app', () => {
       fireEvent.click(theme);
       await waitFor(() => expect(writing).toBe(true));
       vi.useFakeTimers();
-      fireEvent.click(receipt.getByRole('button', { name: 'View' }));
+      fireEvent.click(receipt.getByRole('button', { name: 'Open the bin' }));
       await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
       expect(screen.getByText('Opening the session…')).toBeTruthy();
       expect(transport.preferences.sessions[0].filters.search).toBe('a question that does not match');
@@ -769,12 +666,11 @@ describe('agent removal receipts in the composed app', () => {
         await waitFor(() => expect(screen.queryByText('Opening the session…')).toBeNull());
         expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
         expect(transport.preferences.sessions[0].filters.search).toBe('a question that does not match');
-        expect(screen.queryByText('Old delivery plans · 4 items')).toBeNull();
+        expect(screen.queryByRole('list', { name: 'Removed items' })).toBeNull();
       } else {
-        const fold = await screen.findByRole('button', { name: 'Removed by agent · 4' });
-        await waitFor(() => expect(fold.getAttribute('aria-expanded')).toBe('true'));
+        await screen.findByRole('dialog', { name: /^The bin for “/ });
         expect(transport.preferences.sessions[0].filters.search).toBe('');
-        expect(screen.getByText('Old delivery plans · 4 items')).toBeTruthy();
+        expect(within(screen.getByRole('list', { name: 'Removed items' })).getByText('Old delivery plans')).toBeTruthy();
       }
     } finally { vi.useRealTimers(); await act(async () => { release(); }); }
   });
@@ -782,14 +678,14 @@ describe('agent removal receipts in the composed app', () => {
   it('reports the specific project-folder failure when removal View cannot open its session', async () => {
     const session = receiptSession(), transport = new BinTransport(session);
     await openApp(transport);
-    const receipt = within((await screen.findByText(removalNotice(session, notice()))).closest<HTMLElement>('.pw-note')!);
+    const receipt = within((await screen.findByText(noticeText(session))).closest<HTMLElement>('.pw-note')!);
     const invoke = transport.invoke.bind(transport);
     vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
       if (name === 'session_get') return { api_version: 1, ok: false,
         error: { code: 'io_error', message: 'Folder missing', hint: '', retryable: false, field_errors: [] } };
       return invoke(name, args);
     });
-    fireEvent.click(receipt.getByRole('button', { name: 'View' }));
+    fireEvent.click(receipt.getByRole('button', { name: 'Open the bin' }));
     const message = 'This session could not be opened. Check that its project folder is available, then try again.';
     await screen.findByText(message);
     expect(screen.queryByText(/Opening the session/)).toBeNull();
@@ -802,7 +698,7 @@ describe('agent removal receipts in the composed app', () => {
     const session = receiptSession(), transport = new BinTransport(session);
     transport.preferences.sessions[0]!.filters.search = 'a question that does not match';
     await openApp(transport);
-    const receipt = within((await screen.findByText(removalNotice(session, notice()))).closest<HTMLElement>('.pw-note')!);
+    const receipt = within((await screen.findByText(noticeText(session))).closest<HTMLElement>('.pw-note')!);
     const navigations = vi.spyOn(NavigationStore.prototype, 'navigate');
     let releaseCapture!: () => void, releaseSave!: () => void, capturing = false, writing = false, captures = 0;
     const heldCapture = new Promise<void>(resolve => { releaseCapture = resolve; });
@@ -822,7 +718,7 @@ describe('agent removal receipts in the composed app', () => {
     });
     let save!: Promise<boolean>;
     try {
-      fireEvent.click(receipt.getByRole('button', { name: 'View' }));
+      fireEvent.click(receipt.getByRole('button', { name: 'Open the bin' }));
       await waitFor(() => expect(capturing).toBe(true));
       const navigation = navigations.mock.contexts.at(-1) as NavigationStore;
       expect(navigation).toBeInstanceOf(NavigationStore);
@@ -834,26 +730,24 @@ describe('agent removal receipts in the composed app', () => {
       expect(screen.queryByText(/The bin could not be opened|This session could not be opened/)).toBeNull();
       expect(transport.preferences.sessions[0]!.filters.search).toBe('a question that does not match');
       await act(async () => { releaseSave(); await save; });
-      const fold = await screen.findByRole('button', { name: 'Removed by agent · 4' });
-      await waitFor(() => expect(fold.getAttribute('aria-expanded')).toBe('true'));
+      await screen.findByRole('dialog', { name: /^The bin for “/ });
       expect(captures).toBeGreaterThan(1);
       expect(navigation.getNavigationRequest()).toBe(request);
       expect(transport.preferences.sessions[0]!.filters.search).toBe('');
-      expect(screen.getByText('Old delivery plans · 4 items')).toBeTruthy();
+      expect(within(screen.getByRole('list', { name: 'Removed items' })).getByText('Old delivery plans')).toBeTruthy();
       expect(screen.queryByText(/The bin could not be opened|This session could not be opened/)).toBeNull();
     } finally { await act(async () => { releaseCapture(); releaseSave(); }); }
   });
 
   it('uses the live archived topic state when View opens a notice created before that topic was archived', async () => {
     const session = receiptSession(), transport = new BinTransport(session); await openApp(transport);
-    const text = removalNotice(session, notice()); await screen.findByText(text);
+    const text = noticeText(session); await screen.findByText(text);
     session.topics[topicA]!.archived_at = session.updated_at; ++session.topics[topicA]!.revision;
     await refreshApp(transport);
-    fireEvent.click(within(screen.getByText(text).closest<HTMLElement>('.pw-note')!).getByRole('button', { name: 'View' }));
-    const fold = await screen.findByRole('button', { name: 'Removed by agent · 4' });
-    await waitFor(() => expect(fold.getAttribute('aria-expanded')).toBe('true'));
+    fireEvent.click(within(screen.getByText(text).closest<HTMLElement>('.pw-note')!).getByRole('button', { name: 'Open the bin' }));
+    await screen.findByRole('dialog', { name: /^The bin for “/ });
     expect(transport.preferences.sessions.find(view => view.session.session_id === session.id)!.filters.archived).toBe(true);
-    expect(screen.getByText('Old delivery plans · 4 items')).toBeTruthy();
+    expect(within(screen.getByRole('list', { name: 'Removed items' })).getByText('Old delivery plans')).toBeTruthy();
     // Removing the archived topic for good is asked from its row on the Archive page (SPEC §5.14: one Archive page for sessions and topics), not from the Map.
     fireEvent.click(document.querySelector<HTMLButtonElement>('[data-popover-trigger="switcher"]')!);
     fireEvent.click(within(await screen.findByRole('dialog', { name: 'Switch session or project' })).getByRole('button', { name: 'Archive' }));
@@ -862,11 +756,11 @@ describe('agent removal receipts in the composed app', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /^Remove from Ariadne/ }));
     const confirm = within(await screen.findByRole('alertdialog'));
     expect(confirm.getByText(/The topic and its 6 items are removed from Ariadne/)).toBeTruthy();
-    fireEvent.click(confirm.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(confirm.getByRole('button', { name: /^Cancel/ }));
   });
 
   it('opens the session topic bin from an older item notice after the whole topic is later removed', async () => {
-    const session = receiptSession(), transport = new BinTransport(session), text = removalNotice(session, notice());
+    const session = receiptSession(), transport = new BinTransport(session), text = noticeText(session);
     await openApp(transport); await screen.findByText(text);
     const topicRemoval = notice({ item_id: null, message_id: '00000000-0000-4000-8000-000000000093',
       item_ids: ['1', '1.1', '1.1.1', '1.2', '2', '3'], waiting_questions: 1, cancelled_input_ids: [] });
@@ -877,20 +771,18 @@ describe('agent removal receipts in the composed app', () => {
     receipt.operation_id = operationId; receipt.result.operation_id = operationId;
     if (receipt.result.data.kind !== 'apply') throw new Error('Expected removal apply receipt');
     receipt.result.data.agent_removals = [topicRemoval]; session.operation_receipts[operationId] = [receipt];
-    await refreshApp(transport); await screen.findByText(removalNotice(session, topicRemoval));
-    fireEvent.click(within(screen.getByText(text).closest<HTMLElement>('.pw-note')!).getByRole('button', { name: 'View' }));
-    const fold = await screen.findByRole('button', { name: 'Removed by agent · 2' });
-    await waitFor(() => expect(fold.getAttribute('aria-expanded')).toBe('true'));
-    expect(fold.closest<HTMLElement>('[data-agent-bin]')!.dataset.agentBin).toBe('topics');
-    expect(screen.getByText(`${session.topics[topicA]!.name} · 6 items`)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Removed by agent · 4' })).toBeNull();
+    await refreshApp(transport); await screen.findByText(noticeText(session, topicRemoval));
+    fireEvent.click(within(screen.getByText(text).closest<HTMLElement>('.pw-note')!).getByRole('button', { name: 'Open the bin' }));
+    await screen.findByRole('dialog', { name: 'The bin for this session' });
+    expect(within(screen.getByRole('list', { name: 'Removed items' })).getByText(session.topics[topicA]!.name)).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: /^The bin for “/ })).toBeNull();
   });
 
   it('reports a refused View filter save and preserves the current filters without opening an invisible bin', async () => {
     const session = receiptSession(), transport = new BinTransport(session);
     transport.preferences.sessions[0]!.filters.search = 'keep the current search';
     await openApp(transport);
-    const invoke = transport.invoke.bind(transport), text = removalNotice(session, notice());
+    const invoke = transport.invoke.bind(transport), text = noticeText(session);
     vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
       const request = args.request;
       if ('command' in request && request.command.command === 'preferences_patch'
@@ -899,11 +791,11 @@ describe('agent removal receipts in the composed app', () => {
       }
       return invoke(name, args);
     });
-    fireEvent.click(within((await screen.findByText(text)).closest<HTMLElement>('.pw-note')!).getByRole('button', { name: 'View' }));
-    expect(await screen.findByText('The bin could not be opened. Try View again.')).toBeTruthy();
+    fireEvent.click(within((await screen.findByText(text)).closest<HTMLElement>('.pw-note')!).getByRole('button', { name: 'Open the bin' }));
+    expect(await screen.findByText('The bin could not be opened. Try Open the bin again.')).toBeTruthy();
     expect(transport.preferences.sessions.find(view => view.session.session_id === session.id)!.filters.search).toBe('keep the current search');
     // A search hides no row, so the bin's fold stays in the Map (SPEC §4); the refused View leaves it folded.
-    expect(screen.getByRole('button', { name: 'Removed by agent · 4' }).getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
 
@@ -948,7 +840,7 @@ describe('permanent removal scope with only binned work', () => {
     expect(confirm.getByText(/and the 2 topics only it has \(7 items\)/)).toBeTruthy();
     expect(confirm.getByRole('button', { name: 'Remove session' })).toBeTruthy();
     expect(transport.mutations.some(request => request.command.command === 'session_remove')).toBe(false);
-    fireEvent.click(confirm.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(confirm.getByRole('button', { name: /^Cancel/ }));
     expect(transport.source.items['1']).toBeTruthy();
   });
 

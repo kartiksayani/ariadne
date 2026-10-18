@@ -61,6 +61,7 @@
 }
 
 .dg-warn { background: color-mix(in srgb, var(--a-warn) 11%, transparent); }
+.dg-warn-danger { background: color-mix(in srgb, var(--a-danger) 11%, transparent); }
 .dg-error { background: color-mix(in srgb, var(--a-danger) 11%, transparent); }
 
 .dg-warn > i,
@@ -70,6 +71,7 @@
 }
 
 .dg-warn > i { color: var(--a-warn); }
+.dg-warn-danger > i { color: var(--a-danger); }
 .dg-error > i { color: var(--a-danger); }
 
 .dg-warn > span,
@@ -116,6 +118,25 @@
 }
 
 .dg-actions > :first-child { margin-left: auto; }
+
+.dg-actions > .dg-btn-left {
+  margin-right: auto;
+  margin-left: 0;
+}
+
+.dg-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: calc(12.5px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+.dg-note > i {
+  flex: none;
+  margin-top: 3px;
+}
 
 .dg-btn {
   display: inline-flex;

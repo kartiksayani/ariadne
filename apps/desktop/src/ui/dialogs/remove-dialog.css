@@ -1,0 +1,52 @@
+/* "REMOVED TOGETHER" in dialog 10.2: indented names and their statuses. */
+.rm-together {
+  padding: 8px 12px 6px;
+  border-radius: 7px;
+  background: var(--a-bg);
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+}
+
+.rm-together-head {
+  margin-bottom: 4px;
+  font-size: calc(11px * var(--text-scale));
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.rm-together ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rm-together li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  font-size: calc(12.5px * var(--text-scale));
+}
+
+.rm-together-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rm-together-status {
+  flex: none;
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+
+.rm-together-status[data-status="waiting"] { color: var(--a-acc-text); }
+
+/* The bin's row after Restore (10.11). */
+.bin-back {
+  font-size: calc(12px * var(--text-scale));
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+  white-space: nowrap;
+}

@@ -25,12 +25,42 @@ export interface RemoveCopy {
 /** How the session's agent learns about an item or topic removal. */
 export type RemoveTell = { readonly agent: string; readonly mode: 'tell' | 'queued' | 'closed' } | null;
 
-function tellText(tell: RemoveTell, them: boolean): string {
+function tellText(tell: RemoveTell, them: boolean, topic = false): string {
   if (!tell) return '';
   const pronoun = them ? 'them' : 'it';
-  if (tell.mode === 'tell') return ` ${tell.agent} is told, so it stops working on ${pronoun} and won’t bring ${pronoun} up again. The conversation so far doesn’t change. You have 5 seconds to undo before it’s told.`;
-  if (tell.mode === 'queued') return ` ${tell.agent} isn’t running, so it’s told when it runs again. The conversation so far doesn’t change.`;
-  return ` The session is closed, so ${tell.agent} isn’t told. The conversation doesn’t change.`;
+  const conversation = topic ? '' : ' The conversation so far doesn’t change.', end = topic ? '; after that it can’t be undone.' : '.';
+  if (tell.mode === 'tell') return ` ${tell.agent} is told, so it stops working on ${pronoun} and won’t bring ${pronoun} up again.${conversation} You have 5 seconds to undo before it’s told${end}`;
+  if (tell.mode === 'queued') return ` ${tell.agent} isn’t running, so it’s told when it runs again.${conversation} You have 5 seconds to undo${end}`;
+  return ` The session is closed, so ${tell.agent} isn’t told.${conversation} You have 5 seconds to undo${end}`;
+}
+
+/** What the owner's words in a removal are (E27), for the warning: how many haven't reached the agent, and whether any are listed. */
+export interface RemoveWords { readonly pending: number; readonly any: boolean }
+/**
+ * The danger warning of dialogs 10.2 and 10.14: the questions that go unanswered, then the words. Every word is quoted
+ * below it, so the warning only asks the owner to copy them first. Empty when nothing goes.
+ */
+export function removeWarning(subject: Extract<RemoveSubject, { kind: 'item' | 'topic' }>, words: RemoveWords): string {
+  const waiting = subject.waiting;
+  const questions = !waiting ? '' : `${plural(waiting, 'question')} waiting on you ${waiting === 1 ? 'goes' : 'go'} with it${subject.kind === 'topic' ? ', unanswered' : ''}.`;
+  const agent = subject.tell?.agent ?? 'the agent';
+  const messages = words.pending === 1 ? `1 of your messages hasn’t reached ${agent} yet; removing cancels it; copy your words below first.`
+    : words.pending > 1 ? `${words.pending} of your messages haven’t reached ${agent} yet; removing cancels them; copy your words below first.`
+    : words.any ? 'Your words below go with it; copy them first.' : '';
+  return [questions, messages].filter(Boolean).join(' ');
+}
+
+/** Dialogs 10.2 (an item and what's below it) and 10.14 (a topic), Round 4 copy (SPEC §8 q5). */
+export function removePlacedCopy(subject: Extract<RemoveSubject, { kind: 'item' | 'topic' }>, words: RemoveWords): RemoveCopy {
+  const warn = removeWarning(subject, words);
+  if (subject.kind === 'topic') {
+    return { title: `Remove the “${subject.name}” topic?`, warn, confirm: 'Remove topic',
+      body: `The topic and its ${plural(subject.items, 'item')} are removed from Ariadne, with its bin.${tellText(subject.tell, true, true)}` };
+  }
+  const below = subject.items - 1;
+  return { title: `Remove “${capital(subject.short)}”?`, warn, confirm: subject.items > 1 ? `Remove ${subject.items} items` : 'Remove item',
+    body: (below > 0 ? `This item and the ${plural(below, 'item')} below it are removed from Ariadne.` : 'This item is removed from Ariadne.')
+      + tellText(subject.tell, subject.items > 1) };
 }
 
 /** The owner's queued messages in what is removed: they haven't reached `agent` yet, and removing cancels them. */

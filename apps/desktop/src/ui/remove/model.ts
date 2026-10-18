@@ -1,4 +1,6 @@
-import { removedSubtree, itemRemoved } from '../../selectors/removed';
+import { removedSubtree, itemRemoved, removedRoots } from '../../selectors/removed';
+import type { PlaceStrip } from '../tree/model';
+import type { Archived } from '../shared/useSessionLifecycle';
 // Remove (handoff README "Remove", Ariadne.dc.html:1255-1368) as data: what a
 // pending removal hides, the dialog subject of an item or topic, the note's
 // label and the row selected after an item goes. Nothing here touches React.
@@ -132,4 +134,41 @@ export function nextSelection(session: Immutable<Session>, view: Immutable<Sessi
   const at = rows.findIndex(row => row.id === itemId);
   const next = rows.slice(at + 1).find(row => !gone.has(row.id));
   return next?.id ?? item.parent ?? null;
+}
+
+/**
+ * The Map's strips in the place of rows it no longer shows (E29, E32, E33): items and topics in a pending removal's Undo
+ * window, what the agent removed (while it is in the bin), and the topic archived this visit. `archivedView` (the
+ * Archive filter) shows archived topics as rows, so no archive strip and no strips for removed topics there.
+ */
+export function placeStrips(session: Immutable<Session>, route: SessionRef, hidden: Hidden, archived: Archived | null, archivedView = false): readonly PlaceStrip[] {
+  const binding = session.active_binding_id ? session.bindings[session.active_binding_id] : null;
+  const agent = binding ? agentName(binding.adapter_id) : 'The agent';
+  const topicItems = (topicId: string) => itemList(session).filter(item => item.topic_id === topicId);
+  const topicPlace = (topic: Immutable<Topic>, reason: PlaceStrip['reason']): PlaceStrip => {
+    const items = topicItems(topic.id);
+    return { reason, topicId: topic.id, itemId: null, parent: null, order: topic.order, name: topicName(topic), count: items.length,
+      ...(reason === 'agent-removed' ? { agent } : {}), covers: [topic.id, ...items.map(item => item.id)] };
+  };
+  const itemPlace = (item: Immutable<Item>, reason: PlaceStrip['reason']): PlaceStrip => {
+    const below = subtree(session, item.id);
+    return { reason, topicId: item.topic_id, itemId: item.id, parent: item.parent, order: item.ordinal, name: shortLabel(item), count: below.length,
+      ...(reason === 'agent-removed' ? { agent } : {}), covers: below.map(value => value.id) };
+  };
+  const places: PlaceStrip[] = [];
+  for (const topic of Object.values(session.topics)) {
+    if (!topic) continue;
+    if (hidden.topic(route, topic.id)) { if (!hidden.session(route)) places.push(topicPlace(topic, 'removed')); continue; }
+    if (topic.removed_at) { if (!archivedView) places.push(topicPlace(topic, 'agent-removed')); continue; }
+    if (archived?.topicId === topic.id && topic.archived_at !== null) { places.push(topicPlace(topic, 'archived')); continue; }
+    if ((topic.archived_at !== null) !== archivedView) continue;
+    for (const root of removedRoots(session, topic.id)) if (!hidden.item(route, session, root.id)) places.push(itemPlace(root, 'agent-removed'));
+    // A pending removal's root: hidden, with no hidden ancestor (an ancestor's strip covers it).
+    for (const item of topicItems(topic.id)) {
+      if (itemRemoved(session, item.id) || !hidden.keys.has(hiddenKey.item(route, item.id))) continue;
+      if (item.parent && hidden.item(route, session, item.parent)) continue;
+      places.push(itemPlace(item, 'removed'));
+    }
+  }
+  return places;
 }

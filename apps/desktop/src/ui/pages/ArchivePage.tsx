@@ -7,7 +7,7 @@ import type { SessionRef } from '../../generated/core';
 import type { ProjectSummary, Session, SessionSummary } from '../../generated/domain/models';
 import type { NavigationStore } from '../../state/navigation/store';
 import type { SessionActionControllers } from '../../components/bindings/actions';
-import { RemoveDialog } from '../dialogs/RemoveDialog';
+import { ConfirmRemoveDialog } from '../dialogs/RemoveDialog';
 import type { RemoveHandler, RemoveSubject, RemoveTarget } from '../dialogs/remove';
 import { agentOf, archivedTopics, continuationLinks, routeOf, sessionKey, sessionRemoval, type ArchivedTopic } from './model';
 import { notices } from './notices';
@@ -118,6 +118,6 @@ export function ArchivePage({ navigation, actions, projects, sessions, snapshots
     <ArchiveList back={back} sub={`${plural(shownSessions.length, 'session')} · ${plural(shownTopics.length, 'topic')}`}
       sessions={shownSessions} topics={shownTopics} onRestore={restore} onOpen={open} onRemove={remove} />
     {archive.dialogs}
-    {removing && <RemoveDialog subject={removing.subject} onCancel={() => setRemoving(null)} onConfirm={() => onRemove(removing.target, removing.subject)} />}
+    {removing && <ConfirmRemoveDialog subject={removing.subject} onCancel={() => setRemoving(null)} onConfirm={() => onRemove(removing.target, removing.subject)} />}
   </>;
 }
