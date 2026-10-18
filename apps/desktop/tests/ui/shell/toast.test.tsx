@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { Toast } from '../../../src/ui/shell/ToastView';
 import { toasts } from '../../../src/ui/shell/toast';
 import { NoticeStore } from '../../../src/ui/pages/notices';
@@ -102,6 +102,18 @@ describe('<Toast/>', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     expect(undo).not.toHaveBeenCalled();
     expect(screen.queryByTestId('toast')).toBeNull();
+  });
+
+  it('keeps one polite live region mounted, empty or not, so the first toast is announced', () => {
+    const { container } = render(<Toast />);
+    const live = container.querySelector<HTMLElement>('[aria-live="polite"]');
+    expect(live).not.toBeNull();
+    expect(live!.children).toHaveLength(0);
+    act(() => { toasts.show({ text: 'First.' }); });
+    expect(within(live!).getByTestId('toast').textContent).toContain('First.');
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(container.querySelector('[aria-live="polite"]')).toBe(live);
+    expect(live!.children).toHaveLength(0);
   });
 
   it('Undo runs once and closes', () => {

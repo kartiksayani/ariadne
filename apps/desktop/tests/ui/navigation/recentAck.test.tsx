@@ -9,7 +9,7 @@ import { ackAllFor, ackAllItems, attachAckAll, stopAckAll, ACK_ALL_HOLD_MS } fro
 import { RecentPopover, recentEntries, recordRecent } from '../../../src/ui/navigation/Recent';
 import { navigationVisits } from '../../../src/ui/navigation/visits';
 import { NavigationStore } from '../../../src/state/navigation/store';
-import { notices } from '../../../src/ui/pages/notices';
+import { Notices, notices } from '../../../src/ui/pages/notices';
 import { AppTransport, route } from '../app/transport';
 import * as ack from '../../../src/selectors/ack';
 
@@ -239,6 +239,64 @@ it('uncertain first saves keep remaining work and retry only the exact operation
   expect(transport.receipts.size).toBe(2);
 });
 
+const ackAllNotice = () => notices.getSnapshot().find(notice => notice.id === JSON.stringify(['ack-all', route.project_id, route.session_id]));
+
+it.each([
+  ['a result changed', false],
+  ['an uncertain save', true],
+] as const)('a failed Ack all (%s) keeps Retry and Cancel remaining on the band after its notice is dismissed', async (_name, uncertain) => {
+  const { actions, controller, transport, store, topicId } = await ready(); vi.useFakeTimers();
+  const session = store.getSnapshot().snapshot!.session;
+  render(<AckAll actions={actions} topicId={topicId} topicName="Results" items={ackAllItems(session, topicId)} />);
+  // Nothing to retry before a failure, and none while the batch is held.
+  expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Cancel remaining' })).toBeNull();
+  if (uncertain) transport.loseResponse = true;
+  act(() => { controller.confirm(topicId, 'Results', ackAllItems(session, topicId)); });
+  expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  if (!uncertain) {
+    transport.sessions.get(route.session_id)!.items['1']!.question = 'A changed proposal';
+    transport.sessions.get(route.session_id)!.items['1']!.revision++;
+    transport.sessions.get(route.session_id)!.revision++;
+    await act(async () => { await actions.session.refresh(true); });
+  }
+  await act(async () => { await vi.advanceTimersByTimeAsync(ACK_ALL_HOLD_MS); });
+  expect(controller.getSnapshot().phase).toBe('failed');
+  expect(ackAllNotice()?.actions?.map(action => action.label)).toEqual(['Retry', 'Cancel remaining']);
+  // The notice can be dismissed; the band is the way back.
+  act(() => { notices.dismiss(ackAllNotice()!.id); });
+  expect(ackAllNotice()).toBeUndefined();
+  expect(screen.getByText('0 saved · 2 to finish')).toBeTruthy();
+  const retry = screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement, cancel = screen.getByRole('button', { name: 'Cancel remaining' }) as HTMLButtonElement;
+  expect(retry.disabled).toBe(false);
+  // An unconfirmed write is settled only by its exact Retry, as in the notice.
+  expect(cancel.disabled).toBe(uncertain);
+  if (uncertain) {
+    await act(async () => { fireEvent.click(retry); await vi.advanceTimersByTimeAsync(0); });
+    expect(controller.getSnapshot()).toMatchObject({ phase: 'done', completed: 2 });
+    expect(transport.receipts.size).toBe(2);
+  } else {
+    fireEvent.click(cancel);
+    expect(controller.getSnapshot()).toMatchObject({ phase: 'cancelled', remaining: 0 });
+  }
+  expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Cancel remaining' })).toBeNull();
+});
+
+it('another topic’s band shows no Retry or Cancel remaining for a failed batch', async () => {
+  const { actions, controller, transport, store, topicId } = await ready(); vi.useFakeTimers();
+  const session = store.getSnapshot().snapshot!.session;
+  render(<AckAll actions={actions} topicId="other-topic" topicName="Elsewhere" items={ackAllItems(session, topicId)} />);
+  act(() => { controller.confirm(topicId, 'Results', ackAllItems(session, topicId)); });
+  transport.sessions.get(route.session_id)!.items['1']!.question = 'A changed proposal';
+  transport.sessions.get(route.session_id)!.items['1']!.revision++;
+  transport.sessions.get(route.session_id)!.revision++;
+  await act(async () => { await actions.session.refresh(true); await vi.advanceTimersByTimeAsync(ACK_ALL_HOLD_MS); });
+  expect(controller.getSnapshot().phase).toBe('failed');
+  expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Cancel remaining' })).toBeNull();
+});
+
 it('does not adopt another pending same-item acknowledgement during the hold', async () => {
   const { actions, controller, transport, topicId } = await ready(); vi.useFakeTimers(); transport.loseResponse = true;
   const session = actions.session.getSnapshot().snapshot!.session;
@@ -297,6 +355,89 @@ it('a Recent write that fails twice shows one notice, and its retry saves', asyn
   notices.getSnapshot().find(notice => notice.id === 'recent-save')!.actions![0]!.run();
   await vi.waitFor(() => expect(transport.preferences.sessions[0]!.recent_items?.[0]).toMatchObject({ item_id: '1.1', action: 'answered' }));
   expect(notices.getSnapshot().find(notice => notice.id === 'recent-save')).toBeUndefined();
+  release(); navigation.stop();
+});
+
+const recentSave = () => notices.getSnapshot().filter(notice => notice.id === 'recent-save');
+const dismissRecentSave = async () => {
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 320)); });
+  fireEvent.click(within(screen.getByTestId('notice')).getByRole('button', { name: 'Dismiss' }));
+};
+
+it.each(['Dismiss button', 'Escape'] as const)('dismissing the failed Recent save notice (%s) retries once, quietly, and the visits are saved', async how => {
+  const { transport, service } = await ready();
+  const navigation = new NavigationStore(service);
+  await navigation.refresh();
+  const release = navigationVisits.bind(navigation);
+  const invoke = transport.invoke.bind(transport);
+  let failures = 2;
+  vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+    if (name === 'preferences_patch' && failures > 0) { failures--; transport.mutations.push(structuredClone(args.request) as OwnerMutationRequest); throw new Error('Lost response'); }
+    return invoke(name, args);
+  });
+  render(<Notices />);
+  navigationVisits.record(route, '1.1', 'answered');
+  await vi.waitFor(() => expect(recentSave()).toHaveLength(1));
+  const firstId = navigation.getSnapshot().pendingOperationId;
+  expect(firstId).not.toBeNull();
+  if (how === 'Dismiss button') await dismissRecentSave();
+  else {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 320)); });
+    fireEvent.keyDown(screen.getByTestId('notice'), { key: 'Escape' });
+  }
+  // The writer is not left failed for the session: the exact unconfirmed operation is retried and the visit is saved.
+  await vi.waitFor(() => expect(transport.preferences.sessions[0]!.recent_items?.[0]).toMatchObject({ item_id: '1.1', action: 'answered' }));
+  expect(recentSave()).toEqual([]);
+  expect(transport.mutations.filter(request => request.command.command === 'preferences_patch' && request.command.op_id === firstId).length).toBeGreaterThanOrEqual(2);
+  // A later visit is written too: drain is not stuck behind `failed`.
+  navigationVisits.record(route, '1', 'peeked');
+  await vi.waitFor(() => expect(transport.preferences.sessions[0]!.recent_items?.[0]).toMatchObject({ item_id: '1', action: 'peeked' }));
+  release(); navigation.stop();
+});
+
+it('if the quiet retry after a dismissal fails too, the notice shows again and its Retry still saves', async () => {
+  const { transport, service } = await ready();
+  const navigation = new NavigationStore(service);
+  await navigation.refresh();
+  const release = navigationVisits.bind(navigation);
+  const invoke = transport.invoke.bind(transport);
+  let failures = 3;
+  vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+    if (name === 'preferences_patch' && failures > 0) { failures--; transport.mutations.push(structuredClone(args.request) as OwnerMutationRequest); throw new Error('Lost response'); }
+    return invoke(name, args);
+  });
+  render(<Notices />);
+  navigationVisits.record(route, '1.1', 'answered');
+  await vi.waitFor(() => expect(recentSave()).toHaveLength(1));
+  await dismissRecentSave();
+  await vi.waitFor(() => expect(failures).toBe(0));
+  await vi.waitFor(() => expect(recentSave()).toHaveLength(1));
+  expect(transport.preferences.sessions[0]!.recent_items?.[0]?.item_id).not.toBe('1.1');
+  recentSave()[0]!.actions![0]!.run();
+  await vi.waitFor(() => expect(transport.preferences.sessions[0]!.recent_items?.[0]).toMatchObject({ item_id: '1.1', action: 'answered' }));
+  expect(recentSave()).toEqual([]);
+  release(); navigation.stop();
+});
+
+it('a saved Recent write dismisses the notice without a second retry', async () => {
+  const { transport, service } = await ready();
+  const navigation = new NavigationStore(service);
+  await navigation.refresh();
+  const release = navigationVisits.bind(navigation);
+  const invoke = transport.invoke.bind(transport);
+  let failures = 2;
+  vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+    if (name === 'preferences_patch' && failures > 0) { failures--; transport.mutations.push(structuredClone(args.request) as OwnerMutationRequest); throw new Error('Lost response'); }
+    return invoke(name, args);
+  });
+  navigationVisits.record(route, '1.1', 'answered');
+  await vi.waitFor(() => expect(recentSave()).toHaveLength(1));
+  recentSave()[0]!.actions![0]!.run();
+  await vi.waitFor(() => expect(recentSave()).toEqual([]));
+  const patches = () => transport.mutations.filter(request => request.command.command === 'preferences_patch').length;
+  const settled = patches();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(patches()).toBe(settled);
   release(); navigation.stop();
 });
 

@@ -6,6 +6,7 @@ import { NoticeStore, Notices } from '../../../src/ui/pages/notices';
 import { Dialog } from '../../../src/ui/dialogs/Dialog';
 
 const info = { icon: 'ph ph-check', text: 'Saved.' };
+const visual = () => screen.getAllByTestId('notice').sort((a, b) => Number(a.style.order) - Number(b.style.order));
 const advance = (ms: number) => act(() => { vi.advanceTimersByTime(ms); });
 
 describe('toast store', () => {
@@ -182,7 +183,76 @@ describe('toast region', () => {
     expect(getComputedStyle(stack).gap).toBe('6px');
     push({ ...info, text: 'First.' });
     push({ ...info, text: 'Second.', tone: 'problem' });
-    expect(screen.getAllByTestId('notice').map(card => card.textContent)).toEqual([expect.stringContaining('Second.'), expect.stringContaining('First.')]);
+    // Newest on top, whatever the tone: the live regions split the DOM by tone, so the stack orders by CSS `order`.
+    expect(visual().map(card => card.textContent)).toEqual([expect.stringContaining('Second.'), expect.stringContaining('First.')]);
+  });
+
+  it('keeps one polite and one assertive live region mounted, empty or not, so the first notice is announced', () => {
+    render(<Notices store={store} />);
+    const region = screen.getByRole('region', { name: 'Notifications' });
+    const polite = region.querySelector<HTMLElement>('[aria-live="polite"]'), assertive = region.querySelector<HTMLElement>('[aria-live="assertive"]');
+    expect(polite).not.toBeNull();
+    expect(assertive).not.toBeNull();
+    expect(polite!.children).toHaveLength(0);
+    expect(assertive!.children).toHaveLength(0);
+    push({ ...info, id: 'n', text: 'Neutral.' });
+    expect(within(polite!).getByText('Neutral.')).toBeTruthy();
+    expect(within(assertive!).queryByText('Neutral.')).toBeNull();
+    push({ ...info, id: 'w', text: 'Warned.', tone: 'warn' });
+    push({ ...info, id: 'p', text: 'Problem.', tone: 'problem' });
+    expect(within(assertive!).getByText('Warned.')).toBeTruthy();
+    expect(within(assertive!).getByText('Problem.')).toBeTruthy();
+    expect(within(polite!).queryByText('Problem.')).toBeNull();
+    act(() => { store.clear(); });
+    expect(region.querySelector('[aria-live="polite"]')).toBe(polite);
+    expect(region.querySelector('[aria-live="assertive"]')).toBe(assertive);
+    expect(polite!.children).toHaveLength(0);
+    expect(assertive!.children).toHaveLength(0);
+  });
+
+  it('F6 enters the newest card even when it sits in the other live region', () => {
+    render(<Notices store={store} />);
+    push({ ...info, id: 'old', text: 'Old.' });
+    push({ ...info, id: 'new', text: 'New.', tone: 'problem' });
+    fireEvent.keyDown(document, { key: 'F6' });
+    expect((document.activeElement as HTMLElement).dataset.noticeId).toBe('new');
+  });
+
+  it('moves focus to the pill when a new notice folds the focused card behind it', () => {
+    render(<><button type="button">Editor</button><Notices store={store} /></>);
+    push({ ...info, id: 'a', text: 'A.', tone: 'warn' });
+    push({ ...info, id: 'b', text: 'B.', tone: 'warn' });
+    act(() => { document.querySelector<HTMLElement>('[data-notice-id="a"]')!.focus(); });
+    push({ ...info, id: 'c', text: 'C.', tone: 'warn' });
+    expect(document.querySelector('[data-notice-id="a"]')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '⌄ 1 more' }));
+    // Focus on a card that stays shown is left alone.
+    act(() => { document.querySelector<HTMLElement>('[data-notice-id="c"]')!.focus(); });
+    push({ ...info, id: 'd', text: 'D.', tone: 'warn' });
+    expect(document.querySelector('[data-notice-id="c"]')).not.toBeNull();
+    expect((document.activeElement as HTMLElement).dataset.noticeId).toBe('c');
+  });
+
+  it('a focused card that is dismissed (not folded) still returns focus to the previous control', () => {
+    render(<><button type="button">Editor</button><Notices store={store} /></>);
+    const editor = screen.getByRole('button', { name: 'Editor' });
+    editor.focus();
+    push({ ...info, id: 'a', text: 'A.', tone: 'warn' });
+    push({ ...info, id: 'b', text: 'B.', tone: 'warn' });
+    push({ ...info, id: 'c', text: 'C.', tone: 'warn' });
+    fireEvent.keyDown(document, { key: 'F6' });
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(document.activeElement).toBe(editor);
+  });
+
+  it('focus on a folded-away card with focus outside the stack is not stolen', () => {
+    render(<><button type="button">Editor</button><Notices store={store} /></>);
+    push({ ...info, id: 'a', text: 'A.', tone: 'warn' });
+    push({ ...info, id: 'b', text: 'B.', tone: 'warn' });
+    const editor = screen.getByRole('button', { name: 'Editor' });
+    act(() => { editor.focus(); });
+    push({ ...info, id: 'c', text: 'C.', tone: 'warn' });
+    expect(document.activeElement).toBe(editor);
   });
 
   it('shows two cards, folds the rest into “⌄ N more”, expands all, and Dismiss all clears the stack', () => {

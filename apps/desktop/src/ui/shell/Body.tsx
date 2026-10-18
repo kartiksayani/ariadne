@@ -37,9 +37,9 @@ function useWidth(ref: RefObject<HTMLDivElement | null>): number | null {
  * While the conversation view is open, notices keep to the band between its header and its footer, so a notice that never
  * auto-dismisses (an actionable one) can never cover Back to Map, own words or Send. The band follows both as they resize.
  */
-function useNoticeBand(view: RefObject<HTMLElement | null>, layer: RefObject<HTMLElement | null>, open: boolean) {
+function useNoticeBand(view: RefObject<HTMLElement | null>, layer: RefObject<HTMLElement | null>, toast: RefObject<HTMLElement | null>, open: boolean) {
   useLayoutEffect(() => {
-    const host = view.current, notices = layer.current;
+    const host = view.current, notices = layer.current, lifted = toast.current;
     if (!open || !host || !notices) return undefined;
     let frame = 0;
     const place = () => {
@@ -47,7 +47,10 @@ function useNoticeBand(view: RefObject<HTMLElement | null>, layer: RefObject<HTM
       const bounds = host.getBoundingClientRect();
       const header = host.querySelector('.conversation-header')?.getBoundingClientRect(), dock = host.querySelector('.detail-dock')?.getBoundingClientRect();
       notices.style.setProperty('--notice-top', `${Math.max(0, (header?.bottom ?? bounds.top) - bounds.top) + 8}px`);
-      notices.style.setProperty('--notice-bottom', `${Math.max(0, bounds.bottom - (dock?.top ?? bounds.bottom)) + 8}px`);
+      const bottom = `${Math.max(0, bounds.bottom - (dock?.top ?? bounds.bottom)) + 8}px`;
+      notices.style.setProperty('--notice-bottom', bottom);
+      // The toast keeps clear of the composer the same way.
+      lifted?.style.setProperty('--notice-bottom', bottom);
     };
     // Placing in a frame keeps the observers from reporting a resize loop.
     const schedule = () => { if (!frame) frame = requestAnimationFrame(place); };
@@ -67,8 +70,9 @@ function useNoticeBand(view: RefObject<HTMLElement | null>, layer: RefObject<HTM
       if (frame) cancelAnimationFrame(frame);
       resize?.disconnect(); mutate.disconnect(); window.removeEventListener('resize', schedule);
       notices.style.removeProperty('--notice-top'); notices.style.removeProperty('--notice-bottom');
+      lifted?.style.removeProperty('--notice-bottom');
     };
-  }, [view, layer, open]);
+  }, [view, layer, toast, open]);
 }
 
 /**
@@ -77,8 +81,8 @@ function useNoticeBand(view: RefObject<HTMLElement | null>, layer: RefObject<HTM
  * rail while Details is folded.
  */
 export function Body({ main, side, dock, conversation }: BodyProps) {
-  const ref = useRef<HTMLDivElement>(null), view = useRef<HTMLDivElement>(null), layer = useRef<HTMLDivElement>(null);
-  useNoticeBand(view, layer, !!conversation);
+  const ref = useRef<HTMLDivElement>(null), view = useRef<HTMLDivElement>(null), layer = useRef<HTMLDivElement>(null), toast = useRef<HTMLDivElement>(null);
+  useNoticeBand(view, layer, toast, !!conversation);
   const mapTop = useMapNoticeTop(ref, !conversation);
   const width = useWidth(ref);
   // No dock (a page), no room under it.
@@ -97,6 +101,6 @@ export function Body({ main, side, dock, conversation }: BodyProps) {
     {dock && <div className="shell-dock">{dock}</div>}
     <div ref={layer} className="shell-notices" data-placement={conversation ? 'conversation' : mapTop !== null ? 'map' : undefined}
       style={{ left: 0, right: conversation ? 0 : sideWidth, ...(mapTop !== null ? { '--notice-top': `${mapTop}px` } : {}) } as CSSProperties}><Notices /></div>
-    <div className="shell-toast" style={{ left: 0, right: conversation ? 0 : sideWidth }}><Toast /></div>
+    <div ref={toast} className="shell-toast" data-placement={conversation ? 'conversation' : undefined} style={{ left: 0, right: conversation ? 0 : sideWidth }}><Toast /></div>
   </div>;
 }

@@ -125,10 +125,10 @@ export class NoticeStore {
 
 export const notices = new NoticeStore();
 
-function NoticeCard({ notice, store }: { readonly notice: Notice; readonly store: NoticeStore }) {
+function NoticeCard({ notice, store, order }: { readonly notice: Notice; readonly store: NoticeStore; readonly order: number }) {
   useEffect(() => () => { store.resume(notice.id, 'hover'); store.resume(notice.id, 'focus'); }, [notice.id, store]);
   const dismiss = () => { notice.onDismiss?.(); if (store.getSnapshot().includes(notice)) store.dismiss(notice.id); };
-  return <div className="pw-note" data-testid="notice" role={toneOf(notice) === 'neutral' ? 'status' : 'alert'} aria-atomic="false" data-tone={toneOf(notice)} data-notice-id={notice.id} tabIndex={-1}
+  return <div className="pw-note" data-testid="notice" role={toneOf(notice) === 'neutral' ? 'status' : 'alert'} aria-atomic="false" data-tone={toneOf(notice)} data-notice-id={notice.id} tabIndex={-1} style={{ order }}
     onMouseEnter={() => store.pause(notice.id, 'hover')} onMouseLeave={() => store.resume(notice.id, 'hover')}
     onFocusCapture={() => store.pause(notice.id, 'focus')}
     onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) store.resume(notice.id, 'focus'); }}
@@ -161,6 +161,9 @@ export function Notices({ store = notices }: { readonly store?: NoticeStore }) {
   const region = useRef<HTMLDivElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
   const focusedNotice = useRef<string | null>(null);
+  const pill = useRef<HTMLButtonElement>(null);
+  const newest = useRef<string | undefined>(undefined);
+  newest.current = list[0]?.id;
   const restoreFocus = () => {
     const previous = previousFocus.current;
     previousFocus.current = null;
@@ -170,7 +173,10 @@ export function Notices({ store = notices }: { readonly store?: NoticeStore }) {
   useEffect(() => { if (!folded) setExpanded(false); }, [folded]);
   useLayoutEffect(() => {
     if (focusedNotice.current && !shown.some(notice => notice.id === focusedNotice.current)) {
-      if (document.activeElement === document.body || region.current?.contains(document.activeElement)) restoreFocus();
+      const here = document.activeElement === document.body || region.current?.contains(document.activeElement);
+      // A card a newer notice folded away is still there behind "N more": focus follows it to the pill, not out of the stack.
+      if (here && pill.current && list.some(notice => notice.id === focusedNotice.current)) { focusedNotice.current = null; pill.current.focus(); }
+      else if (here) restoreFocus();
       else { previousFocus.current = null; focusedNotice.current = null; }
     }
   }, [shown]);
@@ -178,7 +184,9 @@ export function Notices({ store = notices }: { readonly store?: NoticeStore }) {
     const keydown = (event: KeyboardEvent) => {
       if (event.key !== 'F6' || event.altKey || event.ctrlKey || event.metaKey) return;
       if (document.querySelector('[aria-modal="true"]')) return;
-      const first = region.current?.querySelector<HTMLElement>('.pw-note');
+      // The newest card is on top, in whichever live region its tone put it.
+      const cards = [...region.current?.querySelectorAll<HTMLElement>('.pw-note') ?? []];
+      const first = cards.find(card => card.dataset.noticeId === newest.current) ?? cards[0];
       if (!first) return;
       event.preventDefault();
       if (region.current?.contains(document.activeElement) && previousFocus.current?.isConnected) restoreFocus();
@@ -200,9 +208,13 @@ export function Notices({ store = notices }: { readonly store?: NoticeStore }) {
       focusedNotice.current = (event.target as HTMLElement).closest<HTMLElement>('[data-notice-id]')?.dataset.noticeId ?? null;
     }}>
     <div className="pw-notice-stack">
-      {shown.map(notice => <NoticeCard key={notice.id} notice={notice} store={store} />)}
+      {/* Two live regions stay mounted so the first notice of either tone is announced; CSS `order` keeps the stack newest on top. */}
+      {(['polite', 'assertive'] as const).map(mode => <div key={mode} className="pw-notice-live" aria-live={mode} aria-atomic="false" aria-relevant="additions text">
+        {shown.map((notice, order) => ({ notice, order })).filter(({ notice }) => (toneOf(notice) === 'neutral') === (mode === 'polite'))
+          .map(({ notice, order }) => <NoticeCard key={notice.id} notice={notice} store={store} order={order} />)}
+      </div>)}
       {folded && <div className="pw-notice-pill" data-testid="notice-pill">
-        <button type="button" className="pw-notice-more" aria-expanded={expanded} onClick={() => setExpanded(open => !open)}>
+        <button type="button" ref={pill} className="pw-notice-more" aria-expanded={expanded} onClick={() => setExpanded(open => !open)}>
           {expanded ? '⌃ Show fewer' : `⌄ ${list.length - NOTICES_SHOWN} more`}</button>
         <button type="button" className="pw-notice-all" onClick={dismissAll}>Dismiss all</button>
       </div>}

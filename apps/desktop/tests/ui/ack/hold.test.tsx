@@ -211,6 +211,26 @@ describe('the single-Ack hold', () => {
     expect(toasts.current()?.undo).toBeUndefined();
   });
 
+  it('Undo after Try again forgets the retry: a later plain Ack of that result does not say “Saved your Ack”', async () => {
+    const r = await ready(); vi.useFakeTimers();
+    r.transport.refuse = true;
+    r.hold.ack(itemOf(r));
+    await vi.advanceTimersByTimeAsync(ACK_HOLD_MS + 1);
+    await vi.advanceTimersByTimeAsync(0);
+    const failure = notices.getSnapshot().find(notice => notice.text.includes('can’t be acknowledged now'))!;
+    r.transport.refuse = false;
+    failure.actions![0]!.run();
+    r.hold.undo('1');
+    await vi.advanceTimersByTimeAsync(ACK_HOLD_MS * 2);
+    expect(acks(r.transport)).toHaveLength(1);
+    expect(toasts.current()).toBeNull();
+    r.hold.ack(itemOf(r));
+    await vi.advanceTimersByTimeAsync(ACK_HOLD_MS + 1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(acks(r.transport)).toHaveLength(2);
+    expect(toasts.current()).toBeNull();
+  });
+
   it('a plain Ack that saves says nothing in a toast', async () => {
     const r = await ready(); vi.useFakeTimers();
     r.hold.ack(itemOf(r));

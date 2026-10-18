@@ -85,8 +85,14 @@
 
 .pw-notices .pw-note-dismiss { margin-left: auto; }
 
+/* The live regions only announce: they add no box, and each card's `order` keeps the stack newest on top across both. */
+.pw-notice-live {
+  display: contents;
+}
+
 /* "⌄ N more" expands all; "Dismiss all" clears the stack. Left-aligned, so it never sits under a card's ×. */
 .pw-notice-pill {
+  order: 1000;
   display: inline-flex;
   flex: none;
   align-items: center;

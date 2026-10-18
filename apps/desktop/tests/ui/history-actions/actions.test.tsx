@@ -726,6 +726,78 @@ describe('explicit Continue preview and request identity', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Check again' })); });
     expect(transport.mutations).toEqual([request, request]);
   });
+  const another = (transport: HistoryTransport, source = transport.source) => {
+    const [first] = Object.values(source.topics), id = '00000000-0000-4000-8000-0000000000b1';
+    source.topics[id] = { ...structuredClone(first!), id, name: 'Another topic' };
+    return source.topics[id]!;
+  };
+  const ctrlEnter = () => fireEvent.keyDown(summaryBox(), { key: 'Enter', ctrlKey: true });
+  it('another topic’s uncertain Send to the same session is not this flow’s: it says so, offers Cancel only and does not pin this topic', async () => {
+    const { transport, topic, targetActions } = await previewSetup();
+    fireEvent.change(summaryBox(), { target: { value: 'Words of the first topic.' } });
+    transport.replies.push(new Error('Lost acknowledgement'));
+    await act(async () => { fireEvent.click(send()); });
+    const request = structuredClone(transport.mutations[0]);
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    const second = another(transport);
+    act(() => { openContinueTopic({ source: route, topicId: second.id, target: targetRoute }); });
+    await waitFor(() => expect(screen.queryByText('Preparing the summary…')).toBeNull());
+    expect(screen.getByText('Another continue to this session is still being checked.')).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Send summary/ })).toBeNull();
+    expect(screen.queryByText(/isn’t sure the summary was sent/)).toBeNull();
+    expect(summaryBox().value).not.toBe('Words of the first topic.');
+    expect(summaryBox().readOnly).toBe(true);
+    expect(screen.getByRole('button', { name: /^Cancel/ })).toBeDefined();
+    // ⌘↵ cannot send it either, and nothing retries the other topic's operation.
+    ctrlEnter();
+    expect(transport.mutations).toEqual([request]);
+    expect(targetActions.getSnapshot().pending).toEqual(request);
+    // Not pinned: the second topic reopens at the picker, while the first still returns to its Check again.
+    fireEvent.click(screen.getByRole('button', { name: /^Cancel/ }));
+    act(() => { openContinueTopic({ source: route, topicId: second.id }); });
+    expect(screen.getByRole('dialog', { name: /in another session$/ })).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: /^Cancel/ }));
+    act(() => { openContinueTopic({ source: route, topicId: topic.id }); });
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeDefined();
+    expect(summaryBox().value).toBe('Words of the first topic.');
+  });
+  it('the same topic’s uncertain Send still offers Check again, and a Back to the picker then another topic is not blocked from other sessions', async () => {
+    const { transport, topic } = await previewSetup();
+    transport.replies.push(new Error('Lost acknowledgement'));
+    await act(async () => { fireEvent.click(send()); });
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    act(() => { openContinueTopic({ source: route, topicId: topic.id, target: targetRoute }); });
+    await waitFor(() => expect(screen.queryByText('Preparing the summary…')).toBeNull());
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeDefined();
+    expect(screen.queryByText(/Another (continue|change) to this session/)).toBeNull();
+  });
+  it('another kind of uncertain change on the target is not retried by Continue’s Check again', async () => {
+    const { transport, topic, targetActions } = await previewSetup();
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    transport.replies.push(new Error('Lost acknowledgement'));
+    await act(async () => { await targetActions.execute({ command: 'session_label_set', api_version: 1, op_id: '', params: { name: 'Renamed', description: null } },
+      transport.target.revision); });
+    const pending = structuredClone(targetActions.getSnapshot().pending);
+    expect(pending?.command.command).toBe('session_label_set');
+    const calls = transport.mutations.length;
+    act(() => { openContinueTopic({ source: route, topicId: topic.id, target: targetRoute }); });
+    await waitFor(() => expect(screen.queryByText('Preparing the summary…')).toBeNull());
+    expect(screen.getByText('Another change to this session is still being checked.')).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Send summary/ })).toBeNull();
+    ctrlEnter();
+    expect(transport.mutations).toHaveLength(calls);
+  });
+  it('⌘↵ on the Done screen sends nothing more', async () => {
+    const { transport, sent } = await previewSetup();
+    await act(async () => { fireEvent.click(send()); });
+    expect(screen.getByRole('button', { name: 'Done' })).toBeDefined();
+    ctrlEnter();
+    await act(async () => { await Promise.resolve(); });
+    expect(transport.mutations).toHaveLength(1);
+    expect(sent).toEqual([targetRoute]);
+  });
   it('disables Send for an unknown target binding', async () => {
     const { transport } = await previewSetup(true);
     expect(screen.getByRole('alert').textContent).toMatch(/can’t take this topic now: Ariadne can’t tell which agent is connected\./);

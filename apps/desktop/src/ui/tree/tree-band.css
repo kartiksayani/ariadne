@@ -261,6 +261,19 @@
   cursor: pointer;
 }
 
+/* Retry and Cancel remaining after a failed Ack all: the Undo's quiet look, never shrunk off the band. */
+.ack-all-act {
+  flex: none;
+  white-space: nowrap;
+  font-size: calc(12px * var(--text-scale));
+}
+
+.ack-all-act:disabled {
+  opacity: 0.55;
+  cursor: default;
+  text-decoration: none;
+}
+
 /* Next unseen: 20px, an arrow, "Next unseen" (or "Next · 5 of 10") and an `n` keycap. */
 .tree-band-next {
   display: inline-flex;

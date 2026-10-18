@@ -53,4 +53,31 @@ describe('notice placement (E20)', () => {
     const { container } = render(<DockInsetProvider height={0}><Body main={<div className="graph-view" />} conversation={<div className="conversation-header" />} /></DockInsetProvider>);
     expect(container.querySelector<HTMLElement>('.shell-notices')!.dataset.placement).toBe('conversation');
   });
+
+  it('lifts the toast above the bigger view’s composer by the measured --notice-bottom, and lets go when the view closes', async () => {
+    frames();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('shell-conversation') ? { ...rect(0), bottom: 600 } as DOMRect
+        : this.classList.contains('detail-dock') ? { ...rect(520), bottom: 600 } as DOMRect : rect(0) as DOMRect;
+    });
+    const view = <div><div className="conversation-header" /><div className="detail-dock" /></div>;
+    const { container, rerender } = render(<DockInsetProvider height={0}><Body main={<div className="graph-view" />} conversation={view} /></DockInsetProvider>);
+    const toast = container.querySelector<HTMLElement>('.shell-toast')!;
+    expect(toast.dataset.placement).toBe('conversation');
+    // Composer top at 520 in a 600px view: 80px of composer plus the 8px gap, the same as for the notices.
+    expect(toast.style.getPropertyValue('--notice-bottom')).toBe('88px');
+    expect(container.querySelector<HTMLElement>('.shell-notices')!.style.getPropertyValue('--notice-bottom')).toBe('88px');
+    rerender(<DockInsetProvider height={0}><Body main={<div className="graph-view" />} /></DockInsetProvider>);
+    await act(async () => { await Promise.resolve(); });
+    expect(toast.dataset.placement).toBeUndefined();
+    expect(toast.style.getPropertyValue('--notice-bottom')).toBe('');
+  });
+
+  it('keeps the toast at the dock on the Map and on a page', () => {
+    frames();
+    const { container } = render(<DockInsetProvider height={0}><Body main={<div className="graph-view" />} /></DockInsetProvider>);
+    const toast = container.querySelector<HTMLElement>('.shell-toast')!;
+    expect(toast.dataset.placement).toBeUndefined();
+    expect(toast.style.getPropertyValue('--notice-bottom')).toBe('');
+  });
 });

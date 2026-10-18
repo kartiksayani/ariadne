@@ -148,7 +148,12 @@ function ContinueReview({ request, target, navigation, actions, summaries, onBac
   const agent = agentOf(targetState.snapshot?.session);
   const summary = summaries.find(value => sameRoute(value, target));
   const targetName = (summary ? ownerName(summary) ?? summary.title : null) ?? targetState.snapshot?.session.title ?? 'that session';
-  const pendingContinue = operation.pending?.command.command === 'topic_continue' ? operation.pending.command : null;
+  // An unconfirmed write of the target belongs to this flow only when it is this topic's own Send to this target.
+  // Any other (another topic's Continue, a rename) is still being checked by someone else: Check again would retry that, not this.
+  const pendingCommand = operation.pending?.command;
+  const pendingContinue = pendingCommand?.command === 'topic_continue' && sameRoute(pendingCommand.params.source, request.source)
+    && pendingCommand.params.source_topic_id === request.topicId && sameRoute(pendingCommand.params.target, target) ? pendingCommand : null;
+  const foreign = !!operation.pending && !pendingContinue;
   // An uncertain Send keeps its exact words and its target: the summary shows what was sent, not what is in the draft.
   const value = pendingContinue ? pendingContinue.params.summary : edited ?? preview?.summary ?? '';
   useEffect(() => {
@@ -164,7 +169,7 @@ function ContinueReview({ request, target, navigation, actions, summaries, onBac
   const close = () => { if (!writing) onClose(); };
   const done = (when: Date) => { summaryDrafts.delete(key); uncertainTargets.delete(topic); setSentAt(clockTime(when)); onSent?.(target); };
   const send = async () => {
-    if (disabled || !prepared || prepared.preview.readiness.kind !== 'ready') return;
+    if (sentAt !== null || disabled || !prepared || prepared.preview.readiness.kind !== 'ready') return;
     const reviewed = prepared.preview;
     if (await targetActions.execute({ command: 'topic_continue', api_version: 1, op_id: '', params: {
       source: structuredClone(reviewed.source), source_topic_id: reviewed.source_topic_id, source_revision: reviewed.source_revision,
@@ -187,24 +192,26 @@ function ContinueReview({ request, target, navigation, actions, summaries, onBac
         {loading && !pendingContinue
           ? <div className="dg-continue-status" role="status">Preparing the summary…</div>
           : <textarea id="dg-continue-summary" className="dg-input dg-textarea" rows={7} aria-label="Summary" data-summary={preview?.summary}
-            value={value} readOnly={!!pendingContinue || writing || sentAt !== null} onChange={event => { setEdited(event.target.value); summaryDrafts.set(key, event.target.value); }} />}
+            value={value} readOnly={!!operation.pending || writing || sentAt !== null} onChange={event => { setEdited(event.target.value); summaryDrafts.set(key, event.target.value); }} />}
       </div>
       {error && <DialogError>{error}</DialogError>}
       {preview?.readiness.kind === 'blocked' && <DialogError>{blockedText(preview.readiness.reasons, agent)}</DialogError>}
       {preview?.readiness.kind === 'ready' && !preview.readiness.host_available && sentAt === null
         && <div className="dg-continue-status">{`${agent} isn’t running, so the summary waits until it runs again.`}</div>}
       {stale && <DialogError>The topic or this session changed. Prepare the summary again before sending.</DialogError>}
-      {operation.error && <div style={{ display: 'contents' }} data-operation-id={operation.pending?.command.op_id}><DialogError>{`${plainFailure(operation.error)} ${operation.pending
+      {foreign && <div className="dg-continue-status" role="status">{pendingCommand?.command === 'topic_continue'
+        ? 'Another continue to this session is still being checked.' : 'Another change to this session is still being checked.'}</div>}
+      {operation.error && !foreign && <div style={{ display: 'contents' }} data-operation-id={operation.pending?.command.op_id}><DialogError>{`${plainFailure(operation.error)} ${operation.pending
         ? 'Ariadne isn’t sure the summary was sent. Check again before sending it a second time.' : 'Nothing was sent.'}`}</DialogError></div>}
       {sentAt === null && !writing && <div className="dg-hint dg-continue-note"><i className="ph ph-info" aria-hidden="true" />{`The topic stays here too, marked “Continued in ${targetName}”.`}</div>}
       {writing && <div className="dg-continue-status" role="status">{`Sending to ${agent}…`}</div>}
       {sentAt !== null && <div className="dg-continue-sent" role="status">{sentLine}</div>}
       <DialogActions>
         {sentAt !== null ? <DialogButton kind="primary" autoFocus onClick={onClose}>Done</DialogButton> : <>
-          <span className="dg-continue-back"><DialogButton kind="ghost" disabled={writing || !!operation.pending} onClick={onBack}>← Back</DialogButton></span>
+          <span className="dg-continue-back"><DialogButton kind="ghost" disabled={writing || !!pendingContinue} onClick={onBack}>← Back</DialogButton></span>
           {(stale || error) && !operation.pending && <DialogButton kind="ghost" disabled={loading || writing} onClick={() => setAttempt(count => count + 1)}>Prepare again</DialogButton>}
           <DialogButton kind="ghost" kbd="esc" disabled={writing} onClick={close}>Cancel</DialogButton>
-          {operation.pending && !writing
+          {foreign ? null : operation.pending && !writing
             ? <DialogButton kind="primary" onClick={() => {
               void targetActions.retry().then(saved => { if (saved) done(new Date()); });
             }}>Check again</DialogButton>

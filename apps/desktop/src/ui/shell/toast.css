@@ -7,6 +7,11 @@
   pointer-events: none;
 }
 
+/* In the bigger view the composer sits at the bottom: the toast rises above it by the measured --notice-bottom (Body). */
+.shell-toast[data-placement="conversation"] {
+  bottom: max(0px, calc(var(--notice-bottom, 8px) + var(--dock-inset, 0px) - 12px));
+}
+
 .toast {
   display: inline-flex;
   align-items: center;

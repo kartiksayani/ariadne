@@ -201,6 +201,8 @@ class SessionAckHold implements AckHold {
     if (!entry || entry.saving) return;
     clearTimeout(entry.timer);
     this.entries.delete(itemId);
+    // Undo ends the retry too: a later Ack of this result is a plain one and says nothing in a toast.
+    this.retried.delete(itemId);
     toasts.dismiss(this.heldNoticeId(itemId));
     this.publish();
   };

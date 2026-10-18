@@ -25,6 +25,21 @@ export const navigationVisits = {
         if (navigation.getSnapshot().pendingOperationId && !await navigation.retryMutation()) return;
         owned.failed = false; owned.misses = 0; notices.dismiss('recent-save'); owned.schedule();
       };
+      /** The owner dismissed the notice: the writer is not left failed for the session. One quiet retry; a later failure shows the notice again. */
+      const dismissed = async () => {
+        owned.failed = false; owned.misses = 0;
+        if (navigation.getSnapshot().pendingOperationId && !await navigation.retryMutation() && navigation.getSnapshot().pendingOperationId) {
+          report();
+          return;
+        }
+        owned.schedule();
+      };
+      const report = () => {
+        owned.failed = true;
+        notices.push({ id: 'recent-save', icon: 'ph ph-warning', tone: 'problem', onDismiss: () => { void dismissed(); },
+          text: 'Recent visits could not be saved yet. Your visits are still waiting to be saved.',
+          actions: [{ label: 'Retry recent save', run: () => { void retry(); } }] });
+      };
       const drain = async () => {
         if (owned.flight || owned.failed || owned.refs === 0) return;
         const state = navigation.getSnapshot();
@@ -51,10 +66,7 @@ export const navigationVisits = {
               if (owned.misses === 1 && navigation.isRecentPending() && await navigation.retryMutation()) {
                 saved = true; owned.misses = 0; captured.forEach(visit => navigationVisits.acknowledge(visit));
               } else if (owned.misses > 1 || navigation.isRecentPending()) {
-                owned.failed = true;
-                notices.push({ id: 'recent-save', icon: 'ph ph-warning', tone: 'problem', dismissible: false,
-                  text: 'Recent visits could not be saved yet. Your visits are still waiting to be saved.',
-                  actions: [{ label: 'Retry recent save', run: () => { void retry(); } }] });
+                report();
               }
             } else owned.misses = 0;
           }
