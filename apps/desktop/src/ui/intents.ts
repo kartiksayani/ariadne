@@ -7,7 +7,7 @@ import { useEffect, useRef } from 'react';
 export type Intent =
   | 'switcher.open' | 'help.toggle' | 'focus.toggle' | 'recent.open' | 'topic.continue'
   | 'item.ack' | 'item.drop' | 'item.hide' | 'item.remove' | 'item.bring' | 'item.respond' | 'item.later' | 'item.reopen'
-  | 'view.toggleGraph' | 'search.focus' | 'filter.toggle' | 'map.nextUnseen' | 'map.backToSelected'
+  | 'view.toggleGraph' | 'search.focus' | 'filter.toggle' | 'map.nextUnseen' | 'map.backToSelected' | 'map.top'
   | 'dock.prev' | 'dock.next' | 'dock.fold';
 
 /** Returns true when it handled the intent. `repeat` is true for a held key. */

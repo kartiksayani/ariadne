@@ -3,8 +3,13 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService, type DesktopTransport } from '../../../src/data/service';
 import { AppTransport, route } from './transport';
+import { toasts } from '../../../src/ui/shell/toast';
 
 afterEach(cleanup);
+/** Hide and Unhide are rows of the Details head's "…" menu (alpha.21 E1, E2). */
+const moreActions = () => screen.getByRole('button', { name: 'More actions' });
+const pressRow = (name: string) => { fireEvent.click(moreActions()); fireEvent.click(screen.getByRole('menuitem', { name })); };
+const hasRow = (name: string) => { fireEvent.click(moreActions()); const present = !!screen.queryByRole('menuitem', { name }); fireEvent.click(moreActions()); return present; };
 const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`);
 const saved = (transport: AppTransport) => transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!;
 const group = (count = 1) => screen.getByRole('treeitem', { name: new RegExp(`^${count} hidden`) });
@@ -42,29 +47,45 @@ describe('owner hide and unhide actions', () => {
     { selected: '1.1.1', hidden: ['1', '1.1', '3'], parent: '1.1' },
     { selected: '1.1', hidden: ['1', '1.1', '3'], parent: '1' },
     { selected: '1.1.1', hidden: ['1', '1.1', '1.1.1', '3'], parent: '1.1' },
-  ])('explains hiding in the pane and restores the item and its parents without moving the reader: %o', async ({ selected, hidden, parent }) => {
+  ])('explains hiding in the pane and restores the item and its parents without moving the reader: %o', async ({ selected, hidden }) => {
     const transport = new AppTransport(), session = transport.sessions.get(route.session_id)!;
     session.items['1.1.1'] = { ...session.items['1.1']!, id: '1.1.1', parent: '1.1', ordinal: 1 };
     saved(transport).selected_item_id = selected; saved(transport).hidden_item_ids = hidden;
     await mount(transport);
     const pane = await screen.findByLabelText(/^Detail of /, { selector: `[data-detail-item-id="${selected}"]` }), detail = screen.getByRole('complementary', { name: 'Item detail' });
-    const notice = within(detail).getByRole('status'), body = pane.querySelector<HTMLElement>('.detail-body')!;
-    const message = parent ? hidden.includes(selected) ? `Hidden, along with its parent “${session.items[parent]!.question}”.`
-      : `Hidden with its parent “${session.items[parent]!.question}”` : 'Hidden — this item is hidden from the list.';
-    expect(notice.textContent).toContain(message);
-    expect(detail.classList.contains('shell-detail-hidden')).toBe(true);
-    const toggle = within(detail).getByRole('button', { name: 'Unhide item' });
-    const title = parent ? 'Unhide this item and its hidden parents' : 'Unhide';
-    expect(toggle.title).toBe(title); expect(toggle.getAttribute('aria-pressed')).toBe('true');
-    expect(within(notice).getByRole('button', { name: 'Unhide' }).title).toBe(title);
-    body.scrollTop = 120; fireEvent.scroll(body);
-    fireEvent.click(within(notice).getByRole('button', { name: 'Unhide' }));
-    await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['3'])); await ready();
+    const body = pane.querySelector<HTMLElement>('.detail-body')!;
+    // The head's "Hidden — … Unhide" line is gone: the item reads dimmed and its "…" menu offers Unhide.
     expect(within(detail).queryByRole('status')).toBeNull();
+    expect(detail.classList.contains('shell-detail-hidden')).toBe(true);
+    expect(hasRow('Unhide')).toBe(true); expect(hasRow('Hide')).toBe(false);
+    body.scrollTop = 120; fireEvent.scroll(body);
+    pressRow('Unhide');
+    await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['3'])); await ready();
     expect(detail.classList.contains('shell-detail-hidden')).toBe(false);
     expect(screen.getByLabelText(/^Detail of /, { selector: `[data-detail-item-id="${selected}"]` })).toBe(pane);
     expect(body.scrollTop).toBe(120); expect(saved(transport).selected_item_id).toBe(selected);
-    expect(within(detail).getByRole('button', { name: 'Hide item' }).getAttribute('aria-pressed')).toBe('false');
+    expect(hasRow('Hide')).toBe(true);
+  });
+
+  it('says "Hid “x”." with an Undo that unhides once, and does nothing more when the item was unhidden another way', async () => {
+    const { transport } = await mount();
+    const name = transport.sessions.get(route.session_id)!.items['4']!.short ?? transport.sessions.get(route.session_id)!.items['4']!.question;
+    await hide('4');
+    await waitFor(() => expect(toasts.current()).not.toBeNull());
+    const first = toasts.current();
+    expect(first?.text).toMatch(/^Hid “.+”\.$/); expect(first?.text).toContain(name.slice(0, 8));
+    act(() => toasts.runUndo(first!.id));
+    await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([])); await ready();
+    expect(row('4')).not.toBeNull(); expect(toasts.current()).toBeNull();
+    // Hidden again, then unhidden by hand: a late Undo must not hide it again.
+    await hide('4');
+    const second = toasts.current()!;
+    fireEvent.click(screen.getByRole('treeitem', { name: /^1 hidden/ }));
+    fireEvent.click(within(row('4')!).getByRole('button', { name: 'Unhide (h)' }));
+    await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([])); await ready();
+    act(() => toasts.runUndo(second.id));
+    await ready();
+    expect(saved(transport).hidden_item_ids ?? []).toEqual([]);
   });
 
   it.each([false, true])('does not confuse a topic or its archive with owner hiding (archived: %s)', async archived => {
@@ -74,7 +95,7 @@ describe('owner hide and unhide actions', () => {
     await mount(transport); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     const detail = screen.getByRole('complementary', { name: 'Item detail' });
     expect(within(detail).queryByText(/^Hidden/)).toBeNull();
-    expect(within(detail).getByRole('button', { name: 'Hide item' }).getAttribute('aria-pressed')).toBe('false');
+    expect(hasRow('Hide')).toBe(true); expect(hasRow('Unhide')).toBe(false);
   });
 
   it.each([null, '1'])('moves Up and Down through visible siblings, the hidden group and its items (parent: %s)', async parent => {
@@ -193,16 +214,16 @@ describe('owner hide and unhide actions', () => {
     expect(row('1.1')!.classList.contains('tree-item-hidden')).toBe(false);
   });
 
-  it('persists hidden preferences through an app restart and offers the detail header action', async () => {
+  it('persists hidden preferences through an app restart and offers Unhide in the detail head menu', async () => {
     const { transport, unmount } = await mount();
     fireEvent.click(row('4')!); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' }); await ready();
-    fireEvent.click(screen.getByRole('button', { name: 'Hide item' }));
+    pressRow('Hide');
     await waitFor(() => expect(saved(transport).hidden_item_ids).toEqual(['4'])); await ready();
-    expect(screen.getByRole('button', { name: 'Unhide item' })).toBeTruthy();
+    expect(hasRow('Unhide')).toBe(true);
     unmount(); await mount(transport);
     expect(saved(transport).hidden_item_ids).toEqual(['4']); expect(group()).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Unhide item' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Unhide item' }));
+    expect(hasRow('Unhide')).toBe(true);
+    pressRow('Unhide');
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([])); await ready();
     expect(row('4')!.classList.contains('tree-item-hidden')).toBe(false);
   });
@@ -225,7 +246,7 @@ describe('owner hide and unhide actions', () => {
     fireEvent.click(group());
     await waitFor(() => expect(group().getAttribute('aria-expanded')).toBe('false'));
     expect(row('2')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Unhide item' }));
+    pressRow('Unhide');
     await waitFor(() => expect(saved(transport).hidden_item_ids ?? []).toEqual([]));
     expect(row('2')).not.toBeNull();
   });

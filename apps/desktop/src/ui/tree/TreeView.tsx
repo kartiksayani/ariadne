@@ -33,7 +33,7 @@ import { FocusButton } from './band/FocusButton';
 import { NextUnseen } from './band/NextUnseen';
 import { ChangesOpener } from '../changes/ChangesOpener';
 import { TopicMenu } from './band/TopicMenu';
-import { TopicReply } from '../answer/TopicReply';
+import type { OpenTopicInDetails } from '../shell/detailTarget';
 import { StuckNote } from '../answer/StuckNote';
 import { editQueued, inEditor } from '../answer/held';
 import { InlineRecovery } from '../../components/recovery/RecoveryPanel';
@@ -93,6 +93,10 @@ export interface TreeViewProps {
   readonly actingId?: string | null;
   /** Shows an item picked from Recent while the bigger view covers the tree (it leaves the bigger view). */
   readonly onOpenItem?: (itemId: string) => void;
+  /** "Reply to topic" and an Edit on a stuck topic reply open Details on the topic (alpha.21 E6). */
+  readonly onOpenTopic?: OpenTopicInDetails;
+  /** An item was hidden from the Map (saved): App says so with an Undo toast. */
+  readonly onHid?: (itemId: string) => void;
   /** Graph content shown in place of the rows. */
   readonly graph?: ReactNode;
   /** Notices above the rows: stale data, recovery. */
@@ -187,7 +191,6 @@ export function TreeView(props: TreeViewProps) {
   const seen = useReadingSeen(navigation.reading, preferences, route);
   const changes = useMemo(() => session ? mapChanges(session, seen) : null, [session, seen]);
   const [kbd, setKbd] = useState(false);
-  const [replying, setReplying] = useState<string | null>(null);
   useEffect(() => navigationVisits.bind(navigation), [navigation]);
   useOwnerDrafts(drafts, raw);
   const lifecycle = useSessionLifecycleFor(actions);
@@ -354,6 +357,7 @@ export function TreeView(props: TreeViewProps) {
     void navigation.setHidden({ ...route, item_id: row.item.id }, !row.hidden, current.preferences.revision).then(saved => {
       if (!saved) { hiddenFocus.current = null; noticeStore.push({ id: 'hide-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
         text: 'The hidden items preference could not be saved. Try again.' }); }
+      else if (!row.hidden) props.onHid?.(row.item.id);
     });
   };
 
@@ -555,6 +559,8 @@ export function TreeView(props: TreeViewProps) {
     // n outlines the next unseen row; the Graph and the bigger view have none.
     'map.nextUnseen': ({ repeat }) => { if (graph || covered) return false; if (!repeat) nextCallbacks.current(); return true; },
     'map.backToSelected': () => { if (graph || covered || !selectedId) return false; revealSelected(true); return true; },
+    // The Details path's topic segment: the Tree scrolls back to its top (the owner asked; the Map never does it by itself).
+    'map.top': () => { if (graph || !scroller.current) return false; scroller.current.scrollTop = 0; return true; },
   });
 
   // ------------------------------------------------------------ keyboard
@@ -1213,17 +1219,17 @@ export function TreeView(props: TreeViewProps) {
       continue: row.topic.origin ? undefined
         : <ContinueButton disabled={!!row.delivery} title="A reply to this topic is on its way" onContinue={() => openContinueTopic({ source: route, topicId: id })} />,
       menu: <TopicMenu topicName={row.topic.name} dismissKey={row.key}
-        reply={{ run: () => setReplying(id), unavailable: replyBlocked }}
+        reply={{ run: () => props.onOpenTopic?.(id), unavailable: replyBlocked }}
         bin={{ count: binItems, open: () => binView.reveal(route, id) }}
         archive={() => lifecycle.archive(id)}
         remove={{ run: () => onRemove({ kind: 'topic', session: route, topic_id: id }), items: activeItems(session).filter(item => item.topic_id === id).length }} />,
     };
   };
   // A stopped delivery, or a topic reply not sent yet, is answered on its row; keys there stay off the tree's shortcuts.
-  // Edit puts a topic reply back in the topic's reply box and opens it.
+  // Edit puts a topic reply back in the topic's composer in Details and opens it there.
   const editTopicReply = (input: Immutable<Input>) => async () => {
     const outcome = await editQueued(drafts, store.getSnapshot().snapshot?.session, input, actions);
-    if (inEditor(outcome)) setReplying(input.target.topic_id);
+    if (inEditor(outcome)) props.onOpenTopic?.(input.target.topic_id);
     return outcome;
   };
   const fixOf = (row: Row) => row.delivery?.stuck ? <div className="tree-fix" onKeyDown={event => event.stopPropagation()}>
@@ -1240,8 +1246,7 @@ export function TreeView(props: TreeViewProps) {
         ackAll={!archivedMode ? <AckAll actions={actions} topicId={row.topic.id} topicName={shortLabel(row.topic)} items={eligible} disabled={viewBusy} /> : undefined}
         prompt={row.allClosed && !archivedMode ? () => lifecycle.archive(row.topic.id) : null}
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
-        reply={replying === row.topic.id && !archivedMode ? <TopicReply drafts={drafts} store={store} actions={actions} topicId={row.topic.id}
-          agent={bar?.agent ?? 'the agent'} onClose={() => { setReplying(null); focusRow(row.key); }} /> : null} fix={fixOf(row)} />
+        fix={fixOf(row)} />
       {items.map(row => row.kind === 'strip'
         ? <Strip key={row.key} variant="row" row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleStrip} />
         : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={focusDisabled} closedReason={session ? sessionAnswerBlocked(session) : undefined}

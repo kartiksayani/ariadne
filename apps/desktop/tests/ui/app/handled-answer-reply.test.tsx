@@ -79,7 +79,7 @@ async function setup(state: AnswerState) {
 }
 
 async function expand() {
-  fireEvent.click(screen.getByRole('button', { name: 'Open the conversation in a bigger view' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Read in a bigger view' }));
   await screen.findByRole('region', { name: 'Item conversation' });
 }
 

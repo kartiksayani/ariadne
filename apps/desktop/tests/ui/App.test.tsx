@@ -11,6 +11,9 @@ import { TreeView } from '../../src/ui/tree/TreeView';
 import { AppTransport, route, secondId } from './app/transport';
 import { goToPage, goToSession } from './app/open';
 import { page as historyPage, projections } from './history/fixtures';
+import { closeDetails } from './shell/closeDetails';
+import { useWideWindow } from './shell/wideWindow';
+useWideWindow();
 
 vi.mock('react-dom/client', async importOriginal => {
   const actual = await importOriginal<typeof ReactDOM>();
@@ -382,7 +385,7 @@ describe('ordinary desktop composition', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Graph' }));
     await screen.findAllByRole('tree', { name: / graph$/ });
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
-    fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
+    closeDetails();
     expect(screen.queryByRole('group', { name: 'Item actions' })).toBeNull();
     fireEvent.click(document.querySelector('.graph-node[data-item-id="1"]')!);
     expect(await screen.findByRole('group', { name: 'Item actions' })).toBeTruthy();
@@ -396,7 +399,7 @@ describe('ordinary desktop composition', () => {
     const writes = mutations(transport, 'preferences_patch').length;
     fireEvent.keyDown(document.querySelector('.product-app')!, { key: 'm' });
     expect(mutations(transport, 'preferences_patch')).toHaveLength(writes);
-    fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
+    closeDetails();
     expect(screen.queryByRole('group', { name: 'Item actions' })).toBeNull();
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
   });
@@ -760,7 +763,7 @@ describe('ordinary desktop composition', () => {
     await screen.findByRole('group', { name: 'Item actions' });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('1'));
     const filters = structuredClone(transport.preferences.sessions[0].filters);
-    fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
+    closeDetails();
     expect(screen.queryByRole('group', { name: 'Item actions' })).toBeNull();
     await act(async () => { transport.emit('ariadne://route', { ...route, item_id: '2' }); });
     await waitFor(() => expect(transport.preferences.sessions[0].selected_item_id).toBe('2'));
@@ -1183,7 +1186,7 @@ describe('ordinary desktop composition', () => {
     expect(document.activeElement?.getAttribute('data-item-id')).toBe('8');
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('group', { name: 'Item actions' })).toBeNull());
-    expect(screen.queryByRole('button', { name: 'Close detail' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
     fireEvent.click(document.querySelector('[data-item-id="8"]')!);
     fireEvent.click(await screen.findByRole('button', { name: 'Reply' }));
     expect((await screen.findByLabelText('Reply message') as HTMLTextAreaElement).value).toBe('Retain this draft when Escape closes detail.');

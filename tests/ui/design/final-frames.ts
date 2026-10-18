@@ -99,15 +99,14 @@ export const notYet = {
 
 /**
  * The values a state's fixture sets that the fixture builder (final-fixtures.ts) accepts but cannot yet put the current app
- * in: the "Show more" links, a bigger Details, the connection states the app has no data for, and an open session other than
+ * in: the "Show more" links, the connection states the app has no data for, and an open session other than
  * the default. It is derived from the values the state sets: a field is flagged when its value is on the `notYet` list (`shown`
- * and `bigger` whenever set). A state that lists any of them cannot match the board until the app grows the feature; its frame
+ * whenever set). A state that lists any of them cannot match the board until the app grows the feature; its frame
  * JSON records them as `unhonoured`, so a builder knows the mismatch is the feature, not a fixture mistake.
  */
 export function unhonoured(app: AppFixture, list: typeof notYet = notYet): string[] {
   const { view, chrome, sessions } = app, out: string[] = [];
   if (view?.shown) out.push(`view.shown=${view.shown.join(',')}`);
-  if (view?.details === 'bigger') out.push('view.details=bigger');
   if (chrome?.overlay && list.overlay.includes(chrome.overlay)) out.push(`chrome.overlay=${chrome.overlay}`);
   if (sessions?.connection && list.connection.includes(sessions.connection)) out.push(`sessions.connection=${sessions.connection}`);
   if (sessions?.current && sessions.current !== 's2') out.push(`sessions.current=${sessions.current}`);
@@ -202,8 +201,7 @@ const stateList: readonly FinalState[] = [
   { id: '2.10', part: 'Answering', sid: 'd-short', owner: 'dock', pending: false, title: 'The dock dragged short', app: { view: { selected: Q2, dock: 'open', dockQuestion: 1, dockHeight: 'short' }, drafts: [d(Q2, { pick: 0 })] } },
   // 3. An item's conversation: where Details sits (its content is a later release)
   { id: '3.1', part: 'Conversation', sid: 'c-details', owner: 'details', pending: false, title: 'Details beside the Map', app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' } } },
-  // 3.2 stays pending: the bigger view of Details is release 3.
-  { id: '3.2', part: 'Conversation', sid: 'c-read', owner: 'details', pending: true, title: 'A bigger view for a long thread', app: { view: { selected: 'a2.2.1', details: 'bigger', dock: 'line' } } },
+  { id: '3.2', part: 'Conversation', sid: 'c-read', owner: 'details', pending: false, title: 'A bigger view for a long thread', app: { view: { selected: 'a2.2.1', details: 'bigger', dock: 'line' } } },
   // 3.3, 3.4, 3.5 and 3.7 stay pending (alpha.21 W4). The composer, the labels and the status line are built; what keeps the frame from matching is
   // outside them: the Details body above (W3's badge row, change box, actions and Related), and in 3.3 the fixture's frozen clock, which reads the agent as
   // reconnecting and greys Send. Run with FINAL_APP=1 to see them.
@@ -371,6 +369,9 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   '2.10': [...topBarMain(BAR), ...dockOpen(600, 450, [0.002, 0.002])],
   '3.1': [...topBarMain(BAR), ...dockLine([0.003, 0.004]), ...detailsEdge([0.002, 0.002])],
   '3.6': [...topBarMain(BAR), ...dockOpen(572, 351, [0.002, 0.002]), ...detailsRail(572, 351)],
+  // The bigger view's head: the right-hand controls (Back and Forward draw greyed here, the board's enabled: under 1%). Masked: "← Map" (the app's button differs from the board's 26px ring button by about 12% of
+  // its pixels, a visual nit for alpha.22) and the path between (the app's own text). The body (badge row, title, chat) is W3's and W4's.
+  '3.2': [...topBarMain(BAR), ...dockLine([0.003, 0.004]), ...box('details head, right', [1080, 40, 200, 40], [700, 40, 200, 40], [0.01, 0.012])],
   // The board's second file (R4, states 12 to 16) draws the dock line's question in 72% text; its first file (1 to 3) in full text.
   // The app draws it as the first file does, so these states hold the line's pill and chips and leave the text between.
   // The board's R4 file also draws the dock's chevron in full text colour (the first file and the app: muted), so the chip region stops before it.

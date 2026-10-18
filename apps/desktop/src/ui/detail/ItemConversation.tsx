@@ -38,7 +38,7 @@ import { closedSessionQuestion, sessionAnswerBlocked } from '../../selectors/ses
 import { SessionClosedChip } from '../shared/SessionClosedChip';
 import { CopyMessage } from './CopyMessage';
 import { StatusBadge } from '../shared/StatusBadge';
-import { actionText, closedStatus, detailModel, detailPath, type ActionKey, type Kid, type LinkView, type OpenMode } from './model';
+import { actionText, closedStatus, detailModel, type ActionKey, type Kid, type LinkView, type OpenMode } from './model';
 import { useDetailSubmit, type DraftTarget, type Words } from './submit';
 import './detail.css';
 import { ItemRefSession, usePeek } from '../peek/context';
@@ -88,28 +88,6 @@ function focusRoot(itemId: string) {
   const row = [...document.querySelectorAll<HTMLElement>(`[data-item-id="${CSS.escape(itemId)}"]`)].find(element => !element.closest('.shell-detail'));
   if (row) row.focus();
   else if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-}
-
-export function DetailPath({ store, itemId, onOpenItem }: { readonly store: SessionStore; readonly itemId: string; readonly onOpenItem: (itemId: string) => void }) {
-  const session = useSession(store).snapshot?.session;
-  const path = session ? detailPath(session, itemId) : [];
-  const labels = session ? peekNames(session) : new Map<string, string>();
-  const topicId = session?.items[itemId]?.topic_id;
-  const topicName = topicId ? session?.topics[topicId]?.name : undefined;
-  return <ItemRefSession.Provider value={session ? { project_id: session.project_id, session_id: session.id } : null}><ItemRefs.Provider value={{
-    lookup: id => { const target = session?.items[id]; return session && target && !itemRemoved(session, id) ? { label: target.question, status: displayStatus(session, target) } : null; },
-    route: id => ({ project_id: session!.project_id, session_id: session!.id, item_id: id }), onOpenItem,
-  }}><nav className="detail-path" aria-label="Item location">
-    {path.map((crumb, index) => {
-      const full = crumb.itemId ? session?.items[crumb.itemId]?.question : topicName;
-      return <span className="detail-crumb" key={crumb.itemId ?? 'topic'}>
-      {/* The topic crumb has no reveal target yet; item crumbs open their item. */}
-      {crumb.itemId !== null ? <ItemReference itemId={crumb.itemId} title={full} ariaLabel={full} inline preserveContent>{labels.get(crumb.itemId)}</ItemReference>
-        : <button type="button" title={full} aria-label={full}>{crumb.label}</button>}
-      {index < path.length - 1 && <i className="ph ph-caret-right" aria-hidden="true" />}
-    </span>;
-    })}
-  </nav></ItemRefs.Provider></ItemRefSession.Provider>;
 }
 
 export interface ItemDetailProps extends ItemActionsProps {

@@ -32,7 +32,7 @@ async function enter(where: 'tree' | 'graph' | 'bigger', selected: string): Prom
     await waitFor(() => expect(document.querySelector('.graph-scroll')).not.toBeNull());
     return document.querySelector<HTMLElement>('.graph-scroll [tabindex="0"]') ?? document.querySelector<HTMLElement>('.graph-scroll')!;
   }
-  fireEvent.click(screen.getByRole('button', { name: 'Open the conversation in a bigger view' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Read in a bigger view' }));
   return screen.findByRole('region', { name: 'Item conversation' });
 }
 /** Another window selects a different Map item while the bigger view stays on its own. */

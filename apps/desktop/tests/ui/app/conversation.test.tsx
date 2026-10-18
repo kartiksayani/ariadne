@@ -90,7 +90,7 @@ async function setup({ otherSession = false, baseline = false, dropReady = false
 }
 
 async function expand() {
-  const button = screen.getByRole('button', { name: 'Open the conversation in a bigger view' });
+  const button = screen.getByRole('button', { name: 'Read in a bigger view' });
   button.focus(); fireEvent.click(button);
   await screen.findByRole('region', { name: 'Item conversation' });
   return button;
@@ -122,7 +122,7 @@ describe('desktop item conversation', () => {
     const scroller = tree.querySelector<HTMLElement>('.tree-scroll')!;
     scroller.scrollTop = 173;
     const expandButton = await expand();
-    expect(within(conversation()).getByRole('heading', { level: 1 }).textContent).toBe('Record retry limits');
+    expect(within(conversation()).getByLabelText('Detail of Record retry limits')).toBeTruthy();
     expect(document.activeElement).toBe(conversation());
     expect(document.querySelectorAll('[data-detail-item-id]')).toHaveLength(1);
     expect(document.querySelector('[data-covered-detail]')).not.toBeNull();
@@ -132,8 +132,9 @@ describe('desktop item conversation', () => {
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Item conversation' })).toBeNull());
     expect(screen.getByRole('region', { name: 'Session tree' })).toBe(tree);
     expect(row('4')).toBe(selectedRow); expect(scroller.scrollTop).toBe(173); expect(selected(transport)).toBe('4');
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open the conversation in a bigger view' }));
-    expect(expandButton.isConnected).toBe(false);
+    // The Read toggle lives in the column's head, which the bigger view never unmounts: focus returns to the same button.
+    expect(document.activeElement).toBe(expandButton);
+    expect(expandButton.isConnected).toBe(true);
   });
 
   it('closes a peek before the conversation, including Escape in a typed editor, and keeps the draft', async () => {
@@ -149,7 +150,7 @@ describe('desktop item conversation', () => {
     words.focus(); key(words, 'Escape');
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Item conversation' })).toBeNull());
     expect(within(detail('4')).getByLabelText<HTMLTextAreaElement>('Reply message').value).toBe('Keep this draft when I leave.');
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open the conversation in a bigger view' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Read in a bigger view' }));
   });
 
   // Rename is a modal dialog now, opened only from a row on a page (SPEC 5.14), so it can never be open under the
@@ -321,11 +322,11 @@ describe('desktop item conversation', () => {
     expect(selected(transport)).toBe('4');
   });
 
-  it('keeps the header, the dock and the pin aligned before and after an owner reply', async () => {
+  it('keeps the status, the dock and the pin aligned before and after an owner reply', async () => {
     const transport = await setup(); await expand(); await switchQuestion();
     fireEvent.click(within(dock()).getByRole('button', { name: 'Fold the dock' }));
-    const header = () => conversation().querySelector('.conversation-header .status-badge')!;
-    expect(header().textContent).toBe('Waiting on me');
+    // The bigger view's head has no status badge now (it is in the body); the Map's row says it.
+    expect(row('2').querySelector('.status-badge')?.textContent).toBe('Waiting on me');
     // The conversation answers 2, so the dock holds only 8.
     expect(pill()?.textContent).toBe('1 more waiting'); expect(conversation().querySelector('.conversation-pin')).toBeTruthy();
     // The footer keys strip is gone (SPEC, Removed): the conversation advertises no key legend of its own.
@@ -336,7 +337,6 @@ describe('desktop item conversation', () => {
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     await waitFor(() => {
       // Saved and not attempted yet: Queued, as core counts it, and "1 sent" in the dock until the agent picks it up.
-      expect(header().textContent).toBe('Queued');
       expect(within(dock()).getByRole('button', { name: '1 sent, waiting for the agent' })).toBeTruthy();
       expect(conversation().querySelector('.conversation-pin')).toBeNull();
     });
@@ -447,16 +447,64 @@ describe('desktop item conversation', () => {
 
   it('keeps the opening divider anchored after the conversation dwell marks its item seen', async () => {
     const transport = await setup({ baseline: true }); await expand(); await switchQuestion();
-    const divider = within(conversation()).getByText('New since you last looked');
+    const divider = within(conversation()).getByTestId('new-divider');
+    expect(divider.textContent).toMatch(/^New since you last looked at \d{1,2}:\d{2}/);
     const message = divider.closest('[data-message-id]')!;
     expect(message.getAttribute('data-message-id')).toBe('00000000-0000-4000-8000-000000000114');
     expect(transport.preferences.seen![0].items.some(item => item.item_id === '2')).toBe(false);
     await waitFor(() => expect(transport.preferences.seen![0].items).toContainEqual({
       item_id: '2', revision: transport.sessions.get(route.session_id)!.items['2']!.revision,
     }), { timeout: 3000 });
-    expect(within(conversation()).getByText('New since you last looked')).toBe(divider);
+    expect(within(conversation()).getByTestId('new-divider')).toBe(divider);
     expect(divider.closest('[data-message-id]')).toBe(message);
     expect(selected(transport)).toBe('4');
+  });
+
+  it('draws the divider in the Details pane too, and keeps it through the dwell and a round trip to the bigger view (E13)', async () => {
+    const transport = await setup({ baseline: true });
+    fireEvent.click(row('2'));
+    const pane = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
+    const divider = within(pane).getByTestId('new-divider');
+    expect(divider.closest('[data-message-id]')!.getAttribute('data-message-id')).toBe('00000000-0000-4000-8000-000000000114');
+    await waitFor(() => expect(transport.preferences.seen![0].items).toContainEqual({
+      item_id: '2', revision: transport.sessions.get(route.session_id)!.items['2']!.revision,
+    }), { timeout: 3000 });
+    expect(within(pane).getByTestId('new-divider')).toBe(divider);
+    await expand();
+    const there = within(conversation()).getByTestId('new-divider');
+    expect(there.closest('[data-message-id]')!.getAttribute('data-message-id')).toBe('00000000-0000-4000-8000-000000000114');
+    expect(there.textContent).toBe(divider.textContent);
+  });
+
+  it('works out a new divider when an item is selected again after new messages came, not the one it had', async () => {
+    const transport = await setup({ baseline: true });
+    fireEvent.click(row('2'));
+    let pane = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
+    expect(within(pane).getByTestId('new-divider').closest('[data-message-id]')!.getAttribute('data-message-id')).toBe('00000000-0000-4000-8000-000000000114');
+    const session = transport.sessions.get(route.session_id)!, item = session.items['2']!;
+    await waitFor(() => expect(transport.preferences.seen![0].items).toContainEqual({ item_id: '2', revision: item.revision }), { timeout: 3000 });
+    // Look at another item, and let the agent say something new about item 2 meanwhile.
+    fireEvent.click(row('4'));
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' });
+    const fresh = structuredClone(session.messages.find(message => message.id.endsWith('0115'))!);
+    Object.assign(fresh, { id: '00000000-0000-4000-8000-000000000130', number: 30, body: 'A new thought.', created_at: '2026-10-03T12:05:00.000Z' });
+    session.messages.push(fresh); item.updated_message_ids.push(fresh.id);
+    item.revision += 1; item.updated_at = fresh.created_at; ++session.revision;
+    // The apply receipts that date each agent message to an item revision (the divider needs them to tell what was read).
+    const base = structuredClone(Object.values(session.operation_receipts).flat().find(value => value?.result.data.kind === 'apply' && value.result.data.item_revisions['2'] === 2)!);
+    [['00000000-0000-4000-8000-000000000231', '00000000-0000-4000-8000-000000000114', 14, 2], ['00000000-0000-4000-8000-000000000230', fresh.id, fresh.number, item.revision]].forEach(([operation, id, number, revision]) => {
+      const receipt = structuredClone(base);
+      receipt.operation_id = receipt.result.operation_id = operation as string;
+      if (receipt.result.data.kind === 'apply') {
+        receipt.result.data.messages = [{ id: id as string, number: number as number }]; receipt.result.data.item_revisions = { '2': revision as number };
+        receipt.result.data.allocated_refs = { reply: { kind: 'message', id: id as string } };
+      }
+      session.operation_receipts[receipt.operation_id] = [receipt];
+    });
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    fireEvent.click(row('2'));
+    pane = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
+    await waitFor(() => expect(within(pane).getByTestId('new-divider').closest('[data-message-id]')!.getAttribute('data-message-id')).toBe(fresh.id));
   });
 
   // ⌥digit quick-send is gone (SPEC 6.1); the other fast send is Enter on a focused option card.

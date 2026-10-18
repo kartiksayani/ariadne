@@ -61,6 +61,20 @@ export interface ItemActionsProps {
   readonly onActions?: (actions: readonly ItemActionView[] | null) => void;
 }
 
+/** The list an item's Details emitted, with the item it belongs to. */
+export interface ReportedActions { readonly itemId: string; readonly list: readonly ItemActionView[] }
+
+/**
+ * What the owner of `itemId` reports: its list replaces the held one; its `null` (unmount, no item) clears the held list only
+ * when that list is the item's own, so a late `null` from the item just left cannot wipe the new item's list. The same list again keeps the held value (no re-render).
+ */
+export const reportActions = (held: ReportedActions | null, itemId: string, list: readonly ItemActionView[] | null): ReportedActions | null =>
+  list ? (held?.itemId === itemId && held.list === list ? held : { itemId, list }) : held?.itemId === itemId ? null : held;
+
+/** The held list when it is `itemId`'s; null for any other item, so the "…" menu never runs against the previous item. */
+export const actionsOf = (held: ReportedActions | null, itemId: string | null | undefined): readonly ItemActionView[] | null =>
+  held && itemId && held.itemId === itemId ? held.list : null;
+
 const LABEL: Readonly<Record<'open' | 'progress' | 'waiting', string>> = { open: 'Reply', progress: 'Add a note', waiting: 'Answer' };
 
 /** Draws an action's icon, including Hide / Unhide, which use the app's own outline eye. */

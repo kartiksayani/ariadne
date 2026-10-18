@@ -31,6 +31,7 @@ import { ackAllFor } from '../../../src/ui/navigation/ackAllController';
 import { ACK_HOLD_MS } from '../../../src/ui/shared/ack';
 import { SessionRowAction } from '../../../src/ui/pages/SessionRowAction';
 import { dispatchIntent } from '../../../src/ui/intents';
+import { TopicConversation } from '../../../src/ui/detail/TopicConversation';
 
 const stores: NavigationStore[] = [];
 const removals = new Set<RemovalQueue>();
@@ -58,6 +59,8 @@ interface Recorded {
   selected: RevealedItem[]; acts: [RowIntent, ItemRoute][];
   openedDetail: boolean[];
   dismissed: number; resumed: number; cleared: number; archive: number; removed: number;
+  /** The topics "Reply to topic" and a stuck reply's Edit asked Details to open (alpha.21 E6). */
+  topics: string[];
 }
 async function mount({ transport = new AppTransport(), configure, props = {}, load = true, removal = null }: {
   transport?: AppTransport; configure?: (transport: AppTransport) => void; props?: Partial<TreeViewProps>; load?: boolean; removal?: RemovalQueue | null;
@@ -70,16 +73,20 @@ async function mount({ transport = new AppTransport(), configure, props = {}, lo
   const store = navigation.opened.open(route);
   if (load) await store.refresh();
   const actions = new SessionActionControllers(service).forSession(store), drafts = new OwnerDraftStore(service);
-  const calls: Recorded = { selected: [], openedDetail: [], acts: [], dismissed: 0, resumed: 0, cleared: 0, archive: 0, removed: 0 };
+  const calls: Recorded = { selected: [], openedDetail: [], acts: [], dismissed: 0, resumed: 0, cleared: 0, archive: 0, removed: 0, topics: [] };
   const openLink = vi.fn();
   function Harness(extra: Partial<TreeViewProps>) {
     const [selected, setSelected] = useState<string | null>(null);
+    const [topic, setTopic] = useState<string | null>(null);
     return <RemovalContext.Provider value={removal}><LinkOpener.Provider value={openLink}><TreeView navigation={navigation} store={store} actions={actions} drafts={drafts} query="" reveal={null} selectedId={selected}
       detailOpen={false} summaries={[]} now={now}
       onSelected={(result, openDetail = true) => { calls.selected.push(result); calls.openedDetail.push(openDetail); if (result.kind === 'item') setSelected(result.route.item_id); }}
       onDismissReveal={() => { calls.dismissed++; }} onResume={() => { calls.resumed++; }} onAct={(intent, target) => { calls.acts.push([intent, target]); }}
       onClearFilters={() => { calls.cleared++; }} onShowArchive={() => { calls.archive++; }}
-      onRemove={() => { calls.removed++; }} {...props} {...extra} /></LinkOpener.Provider></RemovalContext.Provider>;
+      onOpenTopic={topicId => { calls.topics.push(topicId); setTopic(topicId); }}
+      onRemove={() => { calls.removed++; }} {...props} {...extra} />
+      {/* Details' topic mode, beside the tree: the reply composer the menu opens. */}
+      {topic && <TopicConversation drafts={drafts} store={store} topicId={topic} onOpenItem={() => {}} />}</LinkOpener.Provider></RemovalContext.Provider>;
   }
   const view = render(<Harness />);
   return { transport, navigation, store, actions, drafts, calls, openLink, rerender: (extra: Partial<TreeViewProps>) => view.rerender(<Harness {...extra} />) };
@@ -88,6 +95,8 @@ async function mount({ transport = new AppTransport(), configure, props = {}, lo
 const outsideNotice = /^Showing “.+”, which is outside your filter \(Waiting on me\)\.$/;
 const row = (id: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-item-id="${id}"]`)!;
 const topicRow = (name: string) => screen.getByRole('treeitem', { name });
+/** The topic reply composer in Details' topic mode (the harness shows it beside the tree once the tree asks to open the topic). */
+const box = () => document.querySelector<HTMLElement>('[data-composer="topic"]');
 /** An entry of a topic band's "…" menu (Reply to topic, Open the bin, Archive topic…, Remove topic…). */
 const bandMenu = (band: HTMLElement, entry: RegExp) => {
   fireEvent.click(within(band).getByRole('button', { name: /^More actions for/ }));
@@ -1030,9 +1039,10 @@ expect(screen.queryByRole('dialog', { name: 'Name this session' })).toBeNull();
   });
   it('edits a topic reply not sent yet: the queued reply is taken back first, then its text goes into the topic’s reply box', async () => {
     let id = '';
-    const { transport } = await mount({ configure: value => { id = queuedReply(value); } });
+    const view = await mount({ configure: value => { id = queuedReply(value); } }), { transport } = view;
     await act(async () => { fireEvent.click(within(topicRow('Continued context').parentElement!).getByRole('button', { name: 'Edit' })); });
-    await waitFor(() => expect((screen.getByLabelText('Reply to this topic') as HTMLTextAreaElement).value).toBe(text));
+    await waitFor(() => expect((within(box()!).getByRole('textbox') as HTMLTextAreaElement).value).toBe(text));
+    expect(topicRow('Continued context').getAttribute('data-topic-id')).toBe(view.calls.topics.at(-1));
     expect(transport.preferences.drafts.find(draft => draft.target.item_id === null)).toMatchObject({ intent: 'topic_reply', text });
     expect(cancels(transport).map(request => request.command.params)).toMatchObject([{ input_id: id, purpose: 'edit' }]);
     // No draft held the words before the cancel went out: they could have been sent twice.
@@ -1696,19 +1706,18 @@ describe('stopped deliveries in the tree', () => {
 });
 
 describe('Reply to topic', () => {
-  const box = () => document.querySelector<HTMLElement>('[data-owner-input^="topic:"]');
-  it('keeps the reply composer and closed-topic prompt outside the sticky header in the same topic section', async () => {
-    await mount({ configure: transport => {
+  it('opens Details on the topic from the band menu, and keeps the closed-topic prompt in the topic section outside the sticky header', async () => {
+    const { calls } = await mount({ configure: transport => {
       for (const item of Object.values(transport.sessions.get(route.session_id)!.items)) if (item) item.status = 'done';
     } });
     const band = topicRow('Delivery decisions'), group = band.parentElement!;
     bandMenu(band, /^Reply to topic/);
+    expect(calls.topics).toEqual([band.getAttribute('data-topic-id')]);
     await waitFor(() => expect(box()).not.toBeNull());
+    expect(group.contains(box())).toBe(false);
     expect(band.querySelector('.tree-prompt')).toBeNull();
-    expect(band.contains(box())).toBe(false);
     const content = group.querySelector('.tree-topic-content')!;
     expect(content.previousElementSibling).toBe(band);
-    expect(content.contains(box())).toBe(true);
     expect(content.querySelector('.tree-prompt')).not.toBeNull();
     expect(group.contains(row('1'))).toBe(true);
     const css = ['tree.css', 'tree-band.css'].map(name => readFileSync(resolve(__dirname, '../../../src/ui/tree', name), 'utf8')).join('\n');
@@ -1722,7 +1731,7 @@ describe('Reply to topic', () => {
     bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
     await waitFor(() => expect(box()).not.toBeNull());
     await waitFor(() => expect(drafts.getSnapshot().ready).toBe(true));
-    const text = within(box()!).getByLabelText('Reply to this topic');
+    const text = within(box()!).getByRole('textbox');
     await waitFor(() => expect((text as HTMLTextAreaElement).disabled).toBe(false));
     fireEvent.change(text, { target: { value: 'Keep the retry limit at three across this topic.' } });
     fireEvent.keyDown(text, { key: 'Enter', metaKey: true });
@@ -1732,24 +1741,25 @@ describe('Reply to topic', () => {
       kind: 'topic_reply', target: { topic_id: topicId, item_id: null }, text: 'Keep the retry limit at three across this topic.',
       expected_question_revision: null, supersedes_answer_id: null, selected_option_id: null,
     } });
-    await waitFor(() => expect(box()).toBeNull());
+    await waitFor(() => expect((within(box()!).getByRole('textbox') as HTMLTextAreaElement).value).toBe(''));
   });
-  it('closes on Escape and keeps the draft for next time', async () => {
-    await mount();
+  it('leaves the box on Escape for the topic’s row, and keeps the draft in the store', async () => {
+    const { drafts } = await mount();
     bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
-    await waitFor(() => expect((within(box()!).getByLabelText('Reply to this topic') as HTMLTextAreaElement).disabled).toBe(false));
-    const text = within(box()!).getByLabelText('Reply to this topic');
+    await waitFor(() => expect((within(box()!).getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(false));
+    const text = within(box()!).getByRole('textbox');
     fireEvent.change(text, { target: { value: 'Half a thought' } });
     fireEvent.keyDown(text, { key: 'Escape' });
-    expect(box()).toBeNull(); expect(document.activeElement).toBe(topicRow('Delivery decisions'));
-    bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
-    await waitFor(() => expect((within(box()!).getByLabelText('Reply to this topic') as HTMLTextAreaElement).value).toBe('Half a thought'));
+    expect(document.activeElement).toBe(topicRow('Delivery decisions'));
+    expect((within(box()!).getByRole('textbox') as HTMLTextAreaElement).value).toBe('Half a thought');
+    // The words are the stored draft, so closing Details loses nothing.
+    expect(drafts.findTopic(route, topicRow('Delivery decisions').getAttribute('data-topic-id')!)?.draft.text).toBe('Half a thought');
   });
   it('keeps the words and the focus when typed while the session view refreshes, with no shortcut firing, and holds Send until it is fresh', async () => {
     const { transport, store, calls } = await mount(), user = userEvent.setup();
     bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
     await waitFor(() => expect(box()).not.toBeNull());
-    const text = within(box()!).getByLabelText('Reply to this topic') as HTMLTextAreaElement;
+    const text = within(box()!).getByRole('textbox') as HTMLTextAreaElement;
     await waitFor(() => expect(text.disabled).toBe(false));
     // The app's window-level routing, and every key that reaches something other than the box.
     const root = document.body.firstElementChild as HTMLElement, elsewhere: Element[] = [];
@@ -3009,9 +3019,11 @@ describe('scrolling the tree', () => {
       if (this.matches('.tree-topic-content')) return new DOMRect(0, 60, 300, 360);
       return rect.call(this);
     });
-    const view = await mount();
-    bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
-    await waitFor(() => expect(document.querySelector('.tree-topic-reply')).not.toBeNull());
+    // A closed topic's "Everything here is closed" prompt is the block under the band (it was the open reply box before alpha.21).
+    const view = await mount({ configure: transport => {
+      for (const item of Object.values(transport.sessions.get(route.session_id)!.items)) if (item) item.status = 'done';
+    } });
+    await waitFor(() => expect(document.querySelector('.tree-topic-content')).not.toBeNull());
     scroller().scrollTop = 190;
     const target = link(view, '2'); // top 10: on screen, but behind the 60 px band.
     view.rerender({ reveal: target, historyReveal: target, selectedId: '2' });

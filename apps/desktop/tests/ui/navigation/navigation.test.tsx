@@ -898,19 +898,18 @@ describe('source-backed navigation views and explicit registration', () => {
     expect(within(card).queryByRole('button', { name: 'Copy instruction' })).toBeNull();
     expect(card.querySelector('pre')).toBeNull();
   });
-  it('passes the hidden item and unhide action to the detail header', async () => {
+  it('passes the head controls to the detail column: Unhide is a row of its "…" menu', async () => {
     // Details sits beside a session's Map; pages take its place.
     const { transport, store } = setup(); const prefs = preferences(); prefs.global.selected_navigation = { kind: 'session', session: route };
     read(transport, prefs); transport.enqueue('session_get', loaded());
-    const hide = vi.fn();
-    render(<NavigationWorkspace store={store} waitingStore={quietWaiting()} onRemoveTarget={() => {}} adapterChoices={[adapter]} hidden onHide={hide}
+    const unhide = vi.fn();
+    render(<NavigationWorkspace store={store} waitingStore={quietWaiting()} onRemoveTarget={() => {}} adapterChoices={[adapter]} hidden
+      detailHead={{ actions: [{ id: 'unhide', label: 'Unhide', icon: '', run: unhide, applies: true }] }}
       detail={<p>Hidden item detail</p>} renderSession={() => null} />);
-    const button = await screen.findByRole('button', { name: 'Unhide item' });
-    expect(button.title).toBe('Unhide');
-    expect(button.getAttribute('aria-pressed')).toBe('true');
-    expect(within(screen.getByRole('complementary', { name: 'Item detail' })).getByRole('status').textContent)
-      .toContain('Hidden — this item is hidden from the list.');
-    fireEvent.click(button); expect(hide).toHaveBeenCalledOnce();
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Unhide' }));
+    expect(unhide).toHaveBeenCalledOnce();
+    expect(within(screen.getByRole('complementary', { name: 'Item detail' })).queryByRole('status')).toBeNull();
   });
 
   it('saves the detail width with the global preferences and applies it at once', async () => {

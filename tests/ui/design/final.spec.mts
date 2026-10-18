@@ -143,6 +143,8 @@ async function renderApp(page: Page, origin: string, state: FinalState, variant:
     await page.getByRole('button', { name: other.q }).click();
     await settle(page);
   }
+  // The bigger view opens from the Read toggle in Details' head, as the owner opens it.
+  if (view.details === 'bigger') { await page.getByRole('button', { name: 'Read in a bigger view' }).click(); await settle(page); }
   for (const step of state.app.act ?? []) await perform(page, step);
   await page.mouse.move(0, 0);
   return page.screenshot({ animations: 'disabled' });

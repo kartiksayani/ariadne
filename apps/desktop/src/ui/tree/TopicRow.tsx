@@ -33,8 +33,6 @@ export interface TopicRowProps {
   readonly onFocus: (key: string) => void;
   readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
   readonly onToggle: (topicId: string) => void;
-  /** The open "Reply to topic" box (ui/answer/TopicReply), under the band. */
-  readonly reply?: ReactNode;
   /** A stopped delivery's inline fix (ui/answer/StuckNote), below the sticky status. */
   readonly fix?: ReactNode;
   /** The Ack all slot, on the title line before Focus. */
@@ -47,7 +45,7 @@ const WIDE_TAIL = ' on you';
 const countText = (text: string): ReactNode => text.endsWith(WIDE_TAIL)
   ? <>{text.slice(0, -WIDE_TAIL.length)}<span className="tree-wide-only">{WIDE_TAIL}</span></> : text;
 
-export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onKeyDown, onToggle, reply, fix, ackAll, slots = {} }: TopicRowProps) {
+export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onKeyDown, onToggle, fix, ackAll, slots = {} }: TopicRowProps) {
   const topic = row.topic;
   const counts = row.counts;
   // A click focuses the band, which tints it and shows its actions; the chevron folds.
@@ -73,10 +71,9 @@ export function TopicRow({ row, focused, actions, prompt, remember, onFocus, onK
       {slots.changes}{slots.next}</div>}
     {row.delivery && <div className="tree-topic-line tree-topic-status" style={{ color: row.delivery.color }}><i className={row.delivery.icon} /><span>{row.delivery.text}</span></div>}
   </div>
-  {(fix || prompt || reply) && <div className="tree-topic-content"><Guides guides={row.guides.filter(guide => guide.kind === 'line').map(guide => ({ ...guide, fromBullet: false }))} />
+  {(fix || prompt) && <div className="tree-topic-content"><Guides guides={row.guides.filter(guide => guide.kind === 'line').map(guide => ({ ...guide, fromBullet: false }))} />
     {row.delivery?.stuck && fix && <div className="tree-topic-fix">{fix}</div>}
     {prompt && <div className="tree-topic-line tree-prompt"><i className="ph ph-check-circle" /><span>Everything here is closed.</span>
       <button type="button" className="btn btn-ghost" onClick={event => { event.stopPropagation(); prompt(); }}><i className="ph ph-archive" />Archive topic</button></div>}
-    {reply}
   </div>}</>;
 }

@@ -1089,3 +1089,32 @@
 .detail-related-item.name-chip:hover {
   background: color-mix(in srgb, var(--color-text) 6%, transparent);
 }
+
+/* — a topic in Details (alpha.21 E5) — */
+.detail-topic-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 4px;
+}
+
+.detail-badge-topic {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--a-acc-text);
+  font-size: calc(12px * var(--text-scale));
+  font-weight: 500;
+}
+
+.detail-topic-why {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+  font-size: calc(12.5px * var(--text-scale));
+}

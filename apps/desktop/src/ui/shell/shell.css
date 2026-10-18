@@ -212,61 +212,89 @@
   background: linear-gradient(to right, transparent 3px, var(--color-accent) 3px, var(--color-accent) 5px, transparent 5px);
 }
 
+/* The head (SPEC 5.3): 38px, padding 4 6 0 12, gap 2. The path takes what the buttons leave. */
 .shell-detail-head {
   display: flex;
+  flex: none;
   align-items: flex-start;
-  gap: 8px;
-  padding: 4px 12px 0;
+  gap: 2px;
+  height: 38px;
+  box-sizing: border-box;
+
+  /* The board's buttons sit 8px under the head's top edge (measured on 3.2: its 26px controls centre at y 61). */
+  padding: 8px 6px 0 12px;
 }
 
 .shell-detail-path {
   position: relative;
-  min-height: 28px;
+  min-height: 26px;
   flex: 1;
   min-width: 0;
-}
-
-/* The notice replaces the breadcrumb without moving the pane or its scroll position. */
-.shell-detail-hidden .shell-detail-path-content {
-  visibility: hidden;
-}
-
-.shell-detail-hidden-notice {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 100%;
-  color: var(--a-label);
-  font-size: calc(11px * var(--text-scale));
-  line-height: 1.25;
+  margin-right: 4px;
 }
 
-.shell-detail-hidden-notice > span {
-  flex: 1;
+.shell-detail-path-content {
   min-width: 0;
-  max-height: 100%;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  width: 100%;
+}
+
+/* Segments before the last keep at least 6ch and shrink first; the last shrinks last. */
+.shell-detail-head .detail-path {
+  flex-wrap: nowrap;
+  font-size: calc(12px * var(--text-scale));
   overflow: hidden;
 }
 
-.shell-detail-hidden-notice > button {
-  flex: none;
-  padding: 3px 5px;
-  font-size: inherit;
+.shell-detail-head .detail-crumb {
+  display: flex;
+  flex: 0 100 auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 6ch;
+  overflow: hidden;
 }
 
+.shell-detail-head .detail-crumb:last-child {
+  flex-shrink: 1;
+}
+
+.shell-detail-head .detail-crumb > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A hidden item's title reads dimmed; "Unhide" is in the head's "…". */
 .shell-detail-hidden .detail-question {
   color: color-mix(in srgb, var(--color-text) 58%, transparent);
 }
 
 .shell-detail-hidden .shell-detail-head {
   box-shadow: inset 3px 0 var(--color-divider);
+}
+
+/* The bigger view's head: the same row, with "← Map" first (the board draws no rule under it). */
+.shell-detail-head.conversation-header {
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 2px;
+  padding: 8px 6px 0 12px;
+}
+
+.shell-detail-map.btn {
+  flex: none;
+  height: 26px;
+  margin-right: 6px;
+  padding: 0 8px 0 7px;
+  font-size: calc(12px * var(--text-scale));
+}
+
+.detail-head-key {
+  font-weight: 400;
+  opacity: 0.6;
 }
 
 .shell-detail-action[aria-pressed="true"] {
@@ -281,8 +309,8 @@
 }
 
 .shell-detail-head .shell-detail-action {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   color: color-mix(in srgb, var(--color-text) 65%, transparent);
 }
 

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { immutable } from '../../../src/data';
 import type { Session } from '../../../src/generated/domain/models';
-import { useItemActions, type ItemActionHandlers, type ItemActionId } from '../../../src/ui/detail/itemActions';
+import { actionsOf, reportActions, useItemActions, type ItemActionHandlers, type ItemActionId, type ItemActionView } from '../../../src/ui/detail/itemActions';
 import { sessionFixture } from '../history/fixtures';
 
 const handlers = (): ItemActionHandlers => ({ hide: vi.fn(), unhide: vi.fn(), remove: vi.fn(), bring: vi.fn(), later: vi.fn(), reopen: vi.fn(), followUp: vi.fn(), drop: vi.fn(), copyRef: vi.fn() });
@@ -76,4 +76,33 @@ describe('useItemActions', () => {
     const { result } = renderHook(() => useItemActions({ session: undefined, item: undefined, on: handlers() }));
     expect(result.current).toEqual([]);
   });
+});
+
+describe('the list held for the head\'s "…" menu', () => {
+  const list = (name: string): readonly ItemActionView[] => [{ id: 'copyRef', label: name, icon: '', run: vi.fn(), applies: true }];
+  const [first, second] = [list('first'), list('second')];
+
+  it.each([
+    ['nothing held, an item reports', null, 'a', first, { itemId: 'a', list: first }],
+    ['the same item reports a new list', { itemId: 'a', list: first }, 'a', second, { itemId: 'a', list: second }],
+    ['another item reports', { itemId: 'a', list: first }, 'b', second, { itemId: 'b', list: second }],
+    ['the item held reports null (unmount)', { itemId: 'a', list: first }, 'a', null, null],
+    ['an item just left reports null late', { itemId: 'b', list: second }, 'a', null, { itemId: 'b', list: second }],
+  ])('%s', (_name, held, itemId, reported, next) => {
+    expect(reportActions(held, itemId, reported)).toEqual(next);
+  });
+
+  it('keeps the held value when the same list is reported again, so an effect that re-reports cannot loop', () => {
+    const held = { itemId: 'a', list: first };
+    expect(reportActions(held, 'a', first)).toBe(held);
+  });
+
+  it.each([
+    ['the item shown is the item that reported', 'a', first],
+    ['another item is shown (the previous item\'s list must not run)', 'b', null],
+    ['no item is shown', null, null],
+  ])('offers the list when %s', (_name, shown, expected) => {
+    expect(actionsOf({ itemId: 'a', list: first }, shown)).toBe(expected);
+  });
+  it('offers nothing before any list was reported', () => { expect(actionsOf(null, 'a')).toBeNull(); });
 });

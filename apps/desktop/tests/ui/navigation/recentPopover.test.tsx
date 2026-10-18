@@ -109,7 +109,7 @@ describe('the Recent popover from the top bar', () => {
       Object.assign(viewOf(transport), { tab_open: true, selected_item_id: '4' });
       viewOf(transport).recent_items = [{ item_id: '2', action: 'viewed', visited_at: '2026-10-13T11:00:00.000Z' }];
     });
-    fireEvent.click(await screen.findByRole('button', { name: 'Open the conversation in a bigger view' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Read in a bigger view' }));
     const bigger = await screen.findByRole('region', { name: 'Item conversation' });
     fireEvent.keyDown(bigger, { key: 'e', metaKey: true });
     const viewed = within(await screen.findByRole('dialog', { name: 'Recent items' })).getByRole('region', { name: 'Viewed' });

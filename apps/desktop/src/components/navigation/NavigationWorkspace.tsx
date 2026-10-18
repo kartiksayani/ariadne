@@ -13,6 +13,7 @@ import { RegisterProject, BindSession } from './Registration';
 import type { DiscoveryController } from '../../data/discovery';
 import { Shell } from '../../ui/shell/Shell';
 import { DetailsColumn } from '../../ui/shell/DetailsColumn';
+import type { DetailHeadControls } from '../../ui/shell/DetailHead';
 import { DetailsColumnProvider } from '../../state/details/column';
 import type { ShellTheme } from '../../ui/shell/model';
 import type { TextSize } from '../../ui/shell/textScale';
@@ -65,12 +66,10 @@ export interface NavigationWorkspaceProps {
   readonly onDetailsFolded?: (folded: boolean) => void;
   /** Top bar controls owned by the composition: search, views, filter, Recent, text size and theme. */
   readonly chrome?: WorkspaceChrome;
-  readonly onCloseDetail?: () => void;
-  /** The detail column's trash button: asks to remove the item it shows. */
-  readonly onRemove?: () => void;
+  /** The head's Read, Focus and "…" controls, in the column. */
+  readonly detailHead?: DetailHeadControls;
+  /** The item Details shows is hidden from the Map: its title reads dimmed. */
   readonly hidden?: boolean;
-  readonly hiddenNotice?: string;
-  readonly onHide?: () => void;
   /** Runs after the owner confirms a project or session Remove on the pages. Required: the triggers always render. */
   readonly onRemoveTarget: RemoveHandler;
   /** Session dispatch and lifecycle actions for the project page; one per app. */
@@ -184,7 +183,7 @@ function SessionView({ navigation, store, renderSession }: { navigation: Navigat
   </>;
 }
 
-export function NavigationWorkspace({ store, discovery, dockContent, waitingStore, conversation, detail, detailPath, detailRail, detailAsked, onDetailsFolded, chrome = defaultChrome, onCloseDetail, onRemove, hidden: hiddenItem, hiddenNotice, onHide, onRemoveTarget,
+export function NavigationWorkspace({ store, discovery, dockContent, waitingStore, conversation, detail, detailPath, detailRail, detailAsked, onDetailsFolded, chrome = defaultChrome, detailHead, hidden: hiddenItem, onRemoveTarget,
   actions: injectedActions, now = Date.now, adapterChoices, renderSession }: NavigationWorkspaceProps) {
   const state = useNavigation(store);
   const dock = useDock();
@@ -412,7 +411,7 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
       unsaved={lineShown && unsavedWrite ? { retry: () => { void store.retryMutation(); } } : null}
       setup={setup?.data.kind === 'binding_connect' ? { sessionId: setup.session_id, instruction: setup.data.setup_instruction } : null} />}
     main={center}
-    side={detail && !page ? <DetailsColumn path={detailPath} rail={detailRail} onClose={onCloseDetail} onRemove={onRemove} hidden={hiddenItem} hiddenNotice={hiddenNotice} onHide={onHide}>{detail}</DetailsColumn> : undefined}
+    side={detail && !page ? <DetailsColumn path={detailPath} rail={detailRail} head={detailHead} hidden={hiddenItem}>{detail}</DetailsColumn> : undefined}
     dock={page ? undefined : dockContent}
     legacy={page ? undefined : { conversation }}
     overlay={<>{switcherOpen && <SwitcherMenu projects={switcher.projects} onClose={closeSwitcher}
