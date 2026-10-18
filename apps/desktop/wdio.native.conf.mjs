@@ -18,5 +18,6 @@ export const config = {
   connectionRetryTimeout: 60000, connectionRetryCount: 0,
   // waitForDisplayed, waitForEnabled and the like give up after this; they return the moment the element is ready,
   // so a loaded machine gets time to draw it and a missing element still fails.
-  waitforTimeout: 30000, specFileRetries: 0, mochaOpts: { timeout: 480000, parallel: false },
+  // CI runs the native delivery phase about 1.7x slower than a local Mac (its slowest phase took ~500 s against the old 480 s budget).
+  waitforTimeout: 30000, specFileRetries: 0, mochaOpts: { timeout: 900000, parallel: false },
 };
