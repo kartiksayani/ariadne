@@ -1,9 +1,8 @@
 import { useContext, useEffect, useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
-import { ItemHistoryContext } from './itemHistory';
+import { DetailHead, type DetailHeadControls } from './DetailHead';
 import { useDockInset } from './dockInset';
 import { SideCovered } from './sideCovered';
 import { useDetailsColumn, useDetailsRange } from '../../state/details/column';
-import { HideIcon } from '../shared/HideIcon';
 
 export interface DetailsColumnProps {
   /** The column's content: the item's details. */
@@ -12,23 +11,21 @@ export interface DetailsColumnProps {
   readonly path?: ReactNode;
   /** The item's status icon (and its New marker), shown in the rail while Details is folded. */
   readonly rail?: ReactNode;
-  readonly onClose?: () => void;
-  readonly onRemove?: () => void;
+  /** The head's Read, Focus and "…" controls; none, the head shows the path and Fold only. */
+  readonly head?: DetailHeadControls;
+  /** The item is hidden from the Map: its title reads dimmed. "Unhide" is in the head's "…". */
   readonly hidden?: boolean;
-  readonly hiddenNotice?: string;
-  readonly onHide?: () => void;
 }
 
 const STEP = 16;
 
 /**
- * The Details column, in the shell's side slot: the resize edge, the head (history, path, Hide, Remove, Fold, Close) and the
+ * The Details column, in the shell's side slot: the resize edge, the head (path, history, Read, Focus, "…", Fold) and the
  * scroll area, or the 36px rail it folds to. Its width and fold come from `useDetailsColumn` (C9); the shell body lays the
  * column out at that width. The dock floats over the bottom of the window, so the column leaves the dock's height free at
  * its bottom and its composer sits above the dock.
  */
-export function DetailsColumn({ children, path, rail, onClose, onRemove, hidden = false, hiddenNotice, onHide }: DetailsColumnProps) {
-  const history = useContext(ItemHistoryContext);
+export function DetailsColumn({ children, path, rail, head, hidden = false }: DetailsColumnProps) {
   const covered = useContext(SideCovered);
   const column = useDetailsColumn(), range = useDetailsRange();
   const inset = useDockInset();
@@ -76,29 +73,8 @@ export function DetailsColumn({ children, path, rail, onClose, onRemove, hidden 
         title="Drag to change the width of Details. Ariadne remembers it."
         onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onKeyDown={keyDown}
         onDoubleClick={() => column.setWidth(range.standard)} />
-      <div className="shell-detail-head">
-        {history && <div className="shell-detail-history" role="group" aria-label="Item navigation">
-          <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Back (⌘[)" aria-label="Back"
-            disabled={!history.canBack} onClick={history.back}><i className="ph ph-arrow-left" aria-hidden="true" /></button>
-          <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Forward (⌘])" aria-label="Forward"
-            disabled={!history.canForward} onClick={history.forward}><i className="ph ph-arrow-right" aria-hidden="true" /></button>
-        </div>}
-        <div className="shell-detail-path">
-          <div className="shell-detail-path-content" aria-hidden={hidden || undefined} inert={hidden || undefined}>{path}</div>
-          {hidden && <div className="shell-detail-hidden-notice" role="status">
-            <span title={hiddenNotice ?? 'Hidden — this item is hidden from the list.'}>{hiddenNotice ?? 'Hidden — this item is hidden from the list.'}</span>
-            {onHide && <button type="button" className="btn btn-ghost" title={hiddenNotice ? 'Unhide this item and its hidden parents' : 'Unhide'} onClick={onHide}>Unhide</button>}
-          </div>}
-        </div>
-        {onHide && <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title={hidden ? hiddenNotice ? 'Unhide this item and its hidden parents' : 'Unhide' : 'Hide (h)'}
-          aria-label={hidden ? 'Unhide item' : 'Hide item'} aria-pressed={hidden} onClick={onHide}><HideIcon /></button>}
-        <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Remove (⌫)" aria-label="Remove item" onClick={onRemove}>
-          <i className="ph ph-trash" aria-hidden="true" /></button>
-        <button ref={foldButton} type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Fold Details" aria-label="Fold Details" onClick={() => change(true)}>
-          <i className="ph ph-caret-double-right" aria-hidden="true" /></button>
-        <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Close (Esc)" aria-label="Close detail" onClick={onClose}>
-          <i className="ph ph-x" aria-hidden="true" /></button>
-      </div>
+      <DetailHead path={path} hidden={hidden} {...head} fold={<button ref={foldButton} type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Fold Details"
+        aria-label="Fold Details" onClick={() => change(true)}><i className="ph ph-caret-double-right" aria-hidden="true" /></button>} />
       <div className="shell-detail-scroll">{children}</div>
     </div>
     {folded && <button ref={railButton} type="button" className="shell-detail-rail" title="Show Details" aria-label="Show Details" onClick={() => change(false)}>
