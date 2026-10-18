@@ -4,6 +4,7 @@
 // the card that opened it and is the same review the Map shows.
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
+import { CoreFailure } from '../../data/service';
 import type { SessionState, SessionStore } from '../../data/session-store';
 import type { SessionActionControllers } from '../bindings/actions';
 import { TopBar } from '../../ui/topbar/TopBar';
@@ -26,7 +27,10 @@ export function connectionView(state: SessionState, unsaved?: { readonly at?: nu
   const kind = connectionKind(state);
   // Every read is stamped when first seen (even while all is well), so a later failed read can name the last good one.
   const readTime = state.snapshot ? readAt(state.snapshot) : null;
-  if (!session) return kind === 'loading' ? { kind } : { kind, ...unsaved ? { unsavedToo: true, ...unsaved.at ? { unsavedAt: clock(unsaved.at) } : {} } : {} };
+  // Only a file that is cut off (core's `corrupt_session`) is described as cut off; any other cause is said plainly.
+  const corrupt = kind === 'unreadable' && state.error instanceof CoreFailure && state.error.error.code === 'corrupt_session' ? { corrupt: true } : {};
+  // An unsure save has its surface even before the first read lands: its line sits under the state, whatever that is.
+  if (!session) return { kind, ...corrupt, ...unsaved ? { unsavedToo: true, ...unsaved.at ? { unsavedAt: clock(unsaved.at) } : {} } : {} };
   const binding = session.active_binding_id ? session.bindings[session.active_binding_id] ?? null : null;
   const agent = binding ? agentProduct(binding.adapter_id) : undefined;
   const where = agent && binding?.host_location ? `${agent} in ${binding.host_location}` : agent;
@@ -40,7 +44,7 @@ export function connectionView(state: SessionState, unsaved?: { readonly at?: nu
     ...kind === 'stale' && readTime !== null ? { lastGoodAt: clock(readTime) } : {},
     ...kind === 'live' ? { sending: { onItsWay, queued } } : {} };
   const closed = kind === 'closed' ? { closedAt: session.closed_at ? clock(Date.parse(session.closed_at)) : undefined, ...session.archived_at != null ? { archived: true } : {} } : {};
-  const view = { ...base, ...closed };
+  const view = { ...base, ...closed, ...corrupt };
   if (!unsaved) return view;
   const at = unsaved.at ? { unsavedAt: clock(unsaved.at) } : {};
   return kind === 'live' ? { ...view, kind: 'unsaved', ...at } : { ...view, unsavedToo: true, ...at };
@@ -76,9 +80,17 @@ export function WorkspaceTopBar({ bar, store: given, controllers, line, setup, u
   const [open, setOpen] = useState(false), [sending, setSending] = useState(false);
   const [shownFor, setShownFor] = useState(store);
   if (shownFor !== store) { setShownFor(store); setOpen(false); setSending(false); }
-  // "Ariadne isn't sure your last change was saved": a lifecycle save or a workspace save whose outcome is unknown. The time
-  // is when the bar first sees the report.
-  const flagged = !!lifecycle.pending || !!unsaved;
+  // "Ariadne isn't sure your last change was saved": a lifecycle save or a workspace save whose outcome is unknown. A write that
+  // is merely in flight (an Ack, a Pause, Try now) is no report: only a save that failed without settling is. Once reported, it
+  // stays up while its check runs again (Try again), so the line neither closes nor reopens and keeps the time it was noticed.
+  // The time is when the bar first sees the report.
+  const operation = useSyncExternalStore(actions?.subscribe ?? idleSubscribe, actions?.getSnapshot ?? idleSnapshot, actions?.getSnapshot ?? idleSnapshot);
+  const unsure = !!lifecycle.pending && !!operation && !operation.writing && !!operation.error;
+  const checking = !!operation && !!operation.pending && operation.writing;
+  const [reported, setReported] = useState(false);
+  const saveUnsure = unsure || reported && checking;
+  if (reported !== saveUnsure) setReported(saveUnsure);
+  const flagged = saveUnsure || !!unsaved;
   const [unsavedSince, setUnsavedSince] = useState<number | null>(null);
   useEffect(() => { setUnsavedSince(since => flagged ? since ?? Date.now() : null); }, [flagged]);
   // The same children in the same places either way, so the bar itself is never remounted.

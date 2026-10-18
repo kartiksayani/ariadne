@@ -687,6 +687,38 @@ for (const [name, before, change, done] of lineRows) {
   }));
 }
 
+// 12.9: a save whose outcome is unknown opens a line above the Map; Try again checks it, and the line stays up while the check is in
+// flight (it neither closes nor reopens), then clears when the check lands. The reading row keeps its distance under the edge throughout.
+// (The line opening is the lineRows' job; here the owner's Later on a middle row is lost, then the Map is taken to the place under test.)
+for (const where of ['top', 'middle', 'bottom'] as const) {
+  test(`the Map keeps the reading row, and the unsure-save line stays up through Try again, at the ${where}`, ({ page }) => served(page, async () => {
+    const first = await readingRow(page);
+    await agent(page, 'save-unsure');
+    await point(page, first.key);
+    await press(row(page, first.key).getByRole('button', { name: /^Later/ }));
+    await expect(connectionLine(page)).toContainText('isn’t sure your last change was saved');
+    await goTo(page, where);
+    await settle(page);
+    const read = await readingRow(page), edge = await mapTop(page), place = (await windowTop(page, read.key))!;
+    // Try again: the check is in flight (held), and the line is the same line, in the same place, for as long as it runs.
+    await agent(page, 'save-hold');
+    const line = await connectionLine(page).elementHandle();
+    await press(connectionLine(page).getByRole('button', { name: 'Try again' }));
+    for (let frame = 0; frame < 12; frame++) {
+      await settle(page);
+      expect(await line!.evaluate(node => node.isConnected), 'the line is never taken down and put up again').toBe(true);
+      await expect(connectionLine(page)).toContainText('isn’t sure your last change was saved');
+      expect(await mapTop(page) - edge, 'the Map’s edge does not move while the check runs').toBeCloseTo(0, 0);
+      expect(Math.abs((await windowTop(page, read.key))! - place)).toBeLessThanOrEqual(3);
+    }
+    await agent(page, 'save-release');
+    await expect(connectionLine(page)).toHaveCount(0);
+    await settle(page);
+    const moved = where === 'bottom' ? 0 : await mapTop(page) - edge;
+    await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - place - moved), `${read.key} keeps its place when the line clears`).toBeLessThanOrEqual(3);
+  }));
+}
+
 test('the Map holds at the bottom: an owner scroll trims the spacer and moves the Map only as far as it scrolls', ({ page }) => served(page, async () => {
   await goTo(page, 'bottom');
   await settle(page);

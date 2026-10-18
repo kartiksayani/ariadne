@@ -17,9 +17,21 @@ afterEach(() => { cleanup(); notices.clear(); vi.resetAllMocks(); });
 /** A transport whose session reads can be made to fail, as a locked or damaged session file does. */
 class Flaky extends AppTransport {
   failReads = false;
+  /** What a failed read says: a cut-off file (core's `corrupt_session`), or no cause at all. */
+  failure: 'unknown' | 'corrupt' = 'unknown';
+  /** A write named here waits for `release()` before it lands: it is "in flight". */
+  hold: string | null = null;
+  private gate: Promise<void> | null = null;
+  held = 0;
+  release = () => {};
+  holdWrites(name: string) { this.hold = name; this.gate = new Promise<void>(resolve => { this.release = () => { this.hold = null; resolve(); }; }); }
   async invoke<T>(name: string, args: Parameters<AppTransport['invoke']>[1]): Promise<T> {
     const { request } = args;
-    if (this.failReads && !('command' in request) && request.request.command === 'session_get') throw new Error('The session file could not be read.');
+    if ('command' in request && request.command.command === this.hold) { ++this.held; await this.gate; }
+    if (this.failReads && !('command' in request) && request.request.command === 'session_get') {
+      if (this.failure === 'corrupt') return { api_version: 1, ok: false, error: { code: 'corrupt_session', message: 'The session file is cut off.', hint: '', retryable: false, field_errors: [] } } as T;
+      throw new Error('The session file could not be read.');
+    }
     return super.invoke<T>(name, args);
   }
 }
@@ -86,7 +98,8 @@ describe('a session that can’t be read at all', () => {
     transport.failReads = true;
     render(<DesktopApp service={createDesktopService(transport)} />);
     const shown = await screen.findByRole('status', { name: 'Connection' });
-    expect(shown.textContent).toContain('This session can’t be read.');
+    expect(shown.textContent).toContain('This session can’t be read right now. Nothing in the file was changed, and Ariadne tries again when it changes.');
+    expect(shown.textContent).not.toContain('partway');
     expect(await screen.findByText('No Map to show')).toBeTruthy();
     expect(screen.queryByText('Session unavailable')).toBeNull();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy the error' })); });
@@ -100,7 +113,85 @@ describe('a session that can’t be read at all', () => {
   });
 });
 
+describe('a session whose file is cut off (corrupt_session)', () => {
+  it('is the only cause the line says ends partway through a line', async () => {
+    const transport = new Flaky();
+    transport.preferences.global.selected_navigation = { kind: 'session', session: route };
+    Object.assign(transport.preferences.sessions[0]!, { tab_open: true });
+    transport.failReads = true; transport.failure = 'corrupt';
+    render(<DesktopApp service={createDesktopService(transport)} />);
+    const shown = await screen.findByRole('status', { name: 'Connection' });
+    expect(shown.textContent).toContain('This session can’t be read.');
+    expect(shown.textContent).toContain('Its file ends partway through a line, so there’s no Map to show. Nothing in the file was changed');
+  });
+});
+
+describe('a closed session whose reads fail', () => {
+  it('is not left silent: the line is the closed one, so the failure shows as the page alert', async () => {
+    const transport = await open(value => { Object.assign(session(value), { state: 'closed', closed_at: session(value).updated_at }); });
+    expect(screen.queryByRole('alert')).toBeNull();
+    transport.failReads = true;
+    await act(async () => { hint(transport); });
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent!.length).toBeGreaterThan(0);
+    expect(line()?.textContent).toContain('This session is closed.');
+    transport.failReads = false; session(transport).revision += 1;
+    await act(async () => { hint(transport); });
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  });
+
+  it('an open session’s failed read stays on the line alone: no second alert', async () => {
+    const transport = await open();
+    transport.failReads = true;
+    await act(async () => { hint(transport); });
+    await screen.findByRole('status', { name: 'Connection' });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+});
+
 describe('a save Ariadne isn’t sure of', () => {
+  it('Try again keeps the line on screen (the same node) while the check is in flight, and clears it when the check lands', async () => {
+    const transport = await open();
+    transport.failNext = 'preferences_patch';
+    await act(async () => { fireEvent.keyDown(document.body, { key: '=', metaKey: true }); });
+    const shown = await screen.findByRole('status', { name: 'Connection' });
+    expect(shown.textContent).toContain('isn’t sure your last change was saved');
+    transport.holdWrites('preferences_patch');
+    const seen: (Element | null)[] = [];
+    const watch = new MutationObserver(() => { seen.push(line()); });
+    watch.observe(document.body, { childList: true, subtree: true });
+    await act(async () => { fireEvent.click(within(shown).getByRole('button', { name: 'Try again' })); });
+    await waitFor(() => expect(transport.held).toBe(1));
+    expect(line()).toBe(shown);
+    expect(shown.textContent).toContain('isn’t sure your last change was saved');
+    expect(document.querySelector('.nav-banner')).toBeNull();
+    await act(async () => { transport.release(); });
+    await waitFor(() => expect(line()).toBeNull());
+    watch.disconnect();
+    // Never gone while the check ran: no mutation in between saw the line missing before it was cleared for good.
+    const firstGone = seen.indexOf(null);
+    expect(firstGone === -1 || seen.slice(firstGone).every(node => node === null)).toBe(true);
+  });
+
+  it('a lost Pause: Try again keeps the line while the same write is in flight again', async () => {
+    const transport = await open();
+    transport.failNext = 'binding_pause';
+    fireEvent.click(dot());
+    fireEvent.click(await screen.findByRole('button', { name: 'Sending…' }));
+    const dialog = await screen.findByRole('dialog', { name: /Sending to / });
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Pause sending' })); });
+    const shown = await screen.findByRole('status', { name: 'Connection' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+    transport.holdWrites('binding_pause');
+    await act(async () => { fireEvent.click(within(shown).getByRole('button', { name: 'Try again' })); });
+    await waitFor(() => expect(transport.held).toBe(1));
+    expect(line()).toBe(shown);
+    expect(dot().getAttribute('aria-label')).toMatch(/^Live/);
+    await act(async () => { transport.release(); });
+    await waitFor(() => expect(line()).toBeNull());
+    expect(binding(transport).owner_paused).toBe(true);
+  });
+
   it('is the line’s report, not a banner; Try again checks the same write once more', async () => {
     const transport = await open();
     transport.failNext = 'preferences_patch';
@@ -120,6 +211,51 @@ describe('a save Ariadne isn’t sure of', () => {
   });
 });
 
+describe('a write in flight is not an unsure save (SPEC 12.9)', () => {
+  const unsure = () => screen.queryByText(/isn’t sure your last change was saved/);
+  it('Pause in flight draws no line and keeps the Live dot; it lands without ever flagging', async () => {
+    const transport = await open();
+    transport.holdWrites('binding_pause');
+    fireEvent.click(dot());
+    fireEvent.click(await screen.findByRole('button', { name: 'Sending…' }));
+    const dialog = await screen.findByRole('dialog', { name: /Sending to / });
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Pause sending' })); });
+    await waitFor(() => expect(transport.held).toBe(1));
+    expect(line()).toBeNull();
+    expect(unsure()).toBeNull();
+    expect(dot().getAttribute('aria-label')).toMatch(/^Live/);
+    expect(dot().getAttribute('aria-label')).not.toMatch(/not saving/i);
+    await act(async () => { transport.release(); });
+    await waitFor(() => expect(binding(transport).owner_paused).toBe(true));
+    expect(line()?.textContent ?? '').not.toMatch(/isn’t sure/);
+    expect(dot().getAttribute('aria-label')).not.toMatch(/not saving/i);
+  });
+
+  it('Try now in flight keeps the Reconnecting line as it was and adds no unsure-save text', async () => {
+    const transport = await open();
+    await act(async () => { reconnecting(transport); });
+    const shown = await screen.findByRole('status', { name: 'Connection' });
+    transport.holdWrites('binding_connect');
+    await act(async () => { fireEvent.click(within(shown).getByRole('button', { name: 'Try now' })); });
+    await waitFor(() => expect(transport.held).toBe(1));
+    expect(line()?.textContent).toContain('Reconnecting to');
+    expect(unsure()).toBeNull();
+    expect(dot().getAttribute('aria-label')).not.toMatch(/not saving/i);
+    await act(async () => { transport.release(); });
+  });
+
+  it('an unsure Pause (lost response) does flag, and Try again with the write in flight again unflags nothing early', async () => {
+    const transport = await open();
+    transport.failNext = 'binding_pause';
+    fireEvent.click(dot());
+    fireEvent.click(await screen.findByRole('button', { name: 'Sending…' }));
+    const dialog = await screen.findByRole('dialog', { name: /Sending to / });
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Pause sending' })); });
+    await waitFor(() => expect(unsure()).not.toBeNull());
+    expect(dot().getAttribute('aria-label')).toMatch(/^Live/);
+  });
+});
+
 describe('Try now', () => {
   it('reconnects the same agent session once and waits while a save is in flight', async () => {
     const transport = await open();
@@ -131,6 +267,24 @@ describe('Try now', () => {
     const connects = transport.mutations.filter(request => request.command.command === 'binding_connect');
     expect(connects).toHaveLength(1);
     expect(connects[0]!.command.command === 'binding_connect' && connects[0]!.command.params.existing_session_id).toBe(route.session_id);
+  });
+});
+
+describe('the dock keeps the owner’s draft in sight when the session can’t be read', () => {
+  it('12.7: “Draft kept” stays beside the other-sessions chip', async () => {
+    const transport = new Flaky();
+    transport.preferences.global.selected_navigation = { kind: 'session', session: route };
+    Object.assign(transport.preferences.sessions[0]!, { tab_open: true });
+    const first = session(transport), item = first.items['2']!;
+    transport.preferences.drafts = [{ op_id: '00000000-0000-4000-8000-000000000101', session: { project_id: first.project_id, session_id: first.id },
+      binding_id: first.active_binding_id!, target: { topic_id: item.topic_id, item_id: item.id }, intent: 'answer', text: 'My words survive.',
+      selected_option_id: null, target_revision: item.revision, question_revision: item.question_revision, supersedes_answer_id: null }];
+    transport.failReads = true;
+    render(<DesktopApp service={createDesktopService(transport)} />);
+    await screen.findByRole('status', { name: 'Connection' });
+    await waitFor(() => expect(dockLine().querySelector('.dock-line-text')?.textContent).toMatch(/can’t be read/));
+    await waitFor(() => expect(dockLine().querySelector('.dock-draft')).not.toBeNull());
+    expect(dockLine().querySelector('.dock-draft')!.textContent).toContain('Draft kept');
   });
 });
 

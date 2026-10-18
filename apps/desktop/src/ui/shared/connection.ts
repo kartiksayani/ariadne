@@ -49,13 +49,7 @@ export function connectionKind(state: Pick<SessionState, 'snapshot' | 'status' |
   return connection === 'connected' ? 'live' : connection === 'reconnecting' ? 'reconnect' : connection === 'not_running' ? 'off' : 'none';
 }
 
-const readTimes = new WeakMap<object, number>();
-/** When this read of the session was first seen: "the last good copy, from 21:24" names it while later reads fail. */
-export function readAt(snapshot: object): number {
-  let at = readTimes.get(snapshot);
-  if (at === undefined) { at = Date.now(); readTimes.set(snapshot, at); }
-  return at;
-}
+export { readAt } from '../../data/session-store';
 
 /**
  * True where the line above the Map is on screen. It then carries the state of a failed read and an unsure save (SPEC 12.7-12.9),

@@ -419,7 +419,10 @@ export class DesignTransport extends AppTransport {
     // The loading frame: the session read never completes.
     if (request.request.command === 'session_get' && request.session?.session_id === this.hang?.session_id) return new Promise<T>(() => {});
     // Final 12.7 and 12.8: the session file can't be read, from the start or after a good read.
-    if (request.request.command === 'session_get' && this.failReads && request.session?.session_id === this.unreadable?.session_id) throw new Error('The session file could not be read.');
+    if (request.request.command === 'session_get' && this.failReads && request.session?.session_id === this.unreadable?.session_id) {
+      // A file cut off partway through a line, as the board draws (core's `corrupt_session`): the only cause the line says so for.
+      return { api_version: 1, ok: false, error: { code: 'corrupt_session', message: 'The session file ends partway through a line.', hint: '', retryable: false, field_errors: [] } } as T;
+    }
     return { api_version: 1, ok: true, data: { kind: name, data: structuredClone(this.answer(request)) } } as T;
   }
   /** Set while session reads fail, as a locked or damaged session file does. */

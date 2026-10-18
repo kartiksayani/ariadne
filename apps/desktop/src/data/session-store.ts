@@ -159,6 +159,7 @@ export class SessionStore {
         // immutable session identity when polling only refreshes qualification.
         const next = previous && previous.session.revision === revision
           ? Object.freeze({ session: previous.session, freshness: snapshot.freshness }) : immutable(snapshot);
+        readAt(next);
         this.publish({ snapshot: next, presence: Object.freeze(presence), error: null,
           status: revision < this.hintedRevision || snapshot.freshness !== 'fresh' ? 'stale' : 'ready' });
         // Presence is volatile and separate from durable session freshness. A
@@ -184,6 +185,17 @@ export class SessionStore {
     this.listeners.forEach((receive) => receive());
     this.listeners.clear();
   }
+}
+
+const readTimes = new WeakMap<object, number>();
+/**
+ * When this read of the session was taken. The store stamps each read as it publishes it, so "the last good copy, from 21:24"
+ * names the read and not the moment something first drew it; a snapshot built elsewhere is stamped by its first ask.
+ */
+export function readAt(snapshot: object): number {
+  let at = readTimes.get(snapshot);
+  if (at === undefined) { at = Date.now(); readTimes.set(snapshot, at); }
+  return at;
 }
 
 export class OpenSessions {

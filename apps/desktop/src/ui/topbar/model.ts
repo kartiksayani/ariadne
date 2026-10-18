@@ -69,6 +69,8 @@ export interface ConnectionView {
   readonly unsavedAt?: string;
   /** Set when the last change may not be saved while another state is on show (the top bar's dot says only one thing): the line adds the report under that state's line. */
   readonly unsavedToo?: boolean;
+  /** Set when the file is cut off (core's `corrupt_session`): only then do the words say it ends partway through a line. */
+  readonly corrupt?: boolean;
   /** The line the session file ends partway through. */
   readonly unreadableLine?: number;
   /** "Claude Code" */

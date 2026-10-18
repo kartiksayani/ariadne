@@ -213,7 +213,7 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
         <i className="ph-fill ph-question" aria-hidden="true" />Answering {quote(nameOf(answering))} in Details</span>
         : <span className="dock-line-text dock-line-quiet"><i className="ph ph-check-circle dock-done" aria-hidden="true" /><span>Nothing waiting on you<span className="dock-wide">. New questions open here.</span></span></span>}
       <span className="dock-spacer" />
-      {blind ? othersChip : kind === 'closed' ? keptChip : replaced ? null : <>{stateNote}{keptChip}{sentChip}{othersChip}</>}
+      {blind ? <>{keptChip}{othersChip}</> : kind === 'closed' ? keptChip : replaced ? null : <>{stateNote}{keptChip}{sentChip}{othersChip}</>}
       {waitingNow && <button type="button" className="dock-icon" aria-label="Open the answer dock" title="Open the answer dock at the next waiting question ( ] )"
         onClick={() => model.show()}><i className="ph ph-caret-up" aria-hidden="true" /></button>}
     </div> : <>

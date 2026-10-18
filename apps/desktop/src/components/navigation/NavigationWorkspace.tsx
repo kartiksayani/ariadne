@@ -34,7 +34,7 @@ import { conflictNotice, isViewConflict } from '../../ui/shared/conflictNotice';
 import { useSessionSnapshots } from '../../ui/pages/snapshots';
 import { useHidden } from '../../ui/remove/queue';
 import { SessionLifecycleOwner } from '../../ui/shared/SessionLifecycleOwner';
-import { ConnectionLineShown } from '../../ui/shared/connection';
+import { ConnectionLineShown, connectionKind } from '../../ui/shared/connection';
 import type { MapSearchStatus } from '../../ui/tree/mapSearch';
 import '../../styles/navigation.css';
 
@@ -168,13 +168,16 @@ function SelectedSession({ navigation, renderSession }: { navigation: Navigation
 }
 function SessionView({ navigation, store, renderSession }: { navigation: NavigationState; store: SessionStore; renderSession: NavigationWorkspaceProps['renderSession'] }) {
   const session = useSession(store), lineShown = useContext(ConnectionLineShown);
+  // The line above the Map carries a failed read only as the last good copy or as an unreadable session; over a closed session
+  // (whose line says it is read-only) the failure still needs its own word.
+  const kind = connectionKind(session), carried = lineShown && (kind === 'stale' || kind === 'unreadable');
   const preferences = navigation.preferences?.sessions.find(view => key(view.session) === key(session.route)) ?? null;
   const reveal = navigation.reveal;
   const matchingReveal = reveal?.store === store ? reveal : null;
   // 1h: the skeleton stands in for the session until its first snapshot.
   if (session.status === 'loading' && !session.snapshot) return <LoadingSession />;
   return <>
-    {session.error && !lineShown && <p role="alert">{plainFailure(session.error)}</p>}
+    {session.error && !carried && <p role="alert">{plainFailure(session.error)}</p>}
     {matchingReveal?.kind === 'missing_item' && <p className="nav-banner" role="status">{matchingReveal.banner}</p>}
     {renderSession({ store, preferences, temporaryExpandedItemIds: matchingReveal?.kind === 'item' ? matchingReveal.temporaryExpandedItemIds : [],
       missingItemBanner: matchingReveal?.kind === 'missing_item' ? matchingReveal.banner : null })}
@@ -275,7 +278,12 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
   // On the session view the top bar's line above the Map reports an unsaved change and a failed read, so the page banner
   // below goes (SPEC 12.9): the pending save is the line's "Try again"; any other failure is a notice with "Refresh".
   const lineShown = view.kind === 'session' && !!store.selectedSession();
-  const unsavedWrite = !!state.error && state.pendingOperationId !== null;
+  // An unsure save is reported while it has an error; once reported, it stays through Try again (the retry clears the error while
+  // it writes), so the line neither closes nor reopens.
+  const unsure = !!state.error && state.pendingOperationId !== null;
+  const [reported, setReported] = useState(false);
+  const unsavedWrite = unsure || reported && state.writing && state.pendingOperationId !== null;
+  if (reported !== unsavedWrite) setReported(unsavedWrite);
   const refreshFailure = lineShown && state.error && !transientError && state.pendingOperationId === null ? state.error : null;
   useEffect(() => {
     const id = 'navigation-refresh-failed';

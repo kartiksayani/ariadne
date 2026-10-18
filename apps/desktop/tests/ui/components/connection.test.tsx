@@ -28,7 +28,7 @@ describe('connection card wording', () => {
     ['none', 'Not connected', 'No agent is connected to this session. Answers you write wait here until one connects.'],
     ['closed', 'Closed', 'It’s read-only.'],
     ['loading', 'Connecting…', 'Looking for Claude Code in iTerm window 1.'],
-    ['unreadable', 'Can’t read this session', 'The session file ends partway through a line, so Ariadne can’t build the Map. Nothing in the file was changed.'],
+    ['unreadable', 'Can’t read this session', 'Ariadne can’t read this session right now, so it can’t build the Map. Nothing in the file was changed.'],
   ] as const)('%s reads as the board says', (kind, title, line) => {
     const copy = connectionCopy(view(kind));
     expect(copy.title).toBe(title);
@@ -45,9 +45,25 @@ describe('connection card wording', () => {
 
   it('the line above the Map exists for each state that changes what I can do, and for no other', () => {
     expect(kinds.filter(kind => connectionLine(view(kind)) === null)).toEqual(['live', 'loading']);
-    expect(connectionLine(view('unreadable', { unreadableLine: 1204 }))!.text).toContain('line 1,204');
+    expect(connectionLine(view('unreadable', { corrupt: true, unreadableLine: 1204 }))!.text).toContain('line 1,204');
     expect(connectionLine(view('unsaved', { unsavedAt: '21:31' }))).toMatchObject({ title: 'Ariadne isn’t sure your last change was saved.', text: 'It checks again when you press Try again.' });
     expect(connectionLine(view('stale', { lastGoodAt: '21:24' }))!.title).toBe('Showing the last good copy, from 21:24.');
+  });
+});
+
+describe('12.7 names a cut-off file only when the file is cut off', () => {
+  const neutral = 'Nothing in the file was changed, and Ariadne tries again when it changes.';
+  it('corrupt_session: the line and the card say the file ends partway through a line', () => {
+    const line = connectionLine(view('unreadable', { corrupt: true }))!;
+    expect(line.title).toBe('This session can’t be read.');
+    expect(line.text).toBe(`Its file ends partway through a line, so there’s no Map to show. ${neutral}`);
+    expect(connectionCopy(view('unreadable', { corrupt: true })).lines).toEqual(['The session file ends partway through a line, so Ariadne can’t build the Map. Nothing in the file was changed.']);
+  });
+  it.each([undefined, false])('any other cause (corrupt: %s) is neutral on the line and the card', corrupt => {
+    const line = connectionLine(view('unreadable', corrupt === undefined ? {} : { corrupt }))!;
+    expect(`${line.title} ${line.text}`).toBe(`This session can’t be read right now. ${neutral}`);
+    expect(`${line.title} ${line.text}`).not.toMatch(/partway/);
+    expect(connectionCopy(view('unreadable', corrupt === undefined ? {} : { corrupt })).lines.join(' ')).not.toMatch(/partway/);
   });
 });
 
