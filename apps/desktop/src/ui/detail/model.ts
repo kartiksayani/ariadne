@@ -443,3 +443,15 @@ export function actionText(kind: 'drop' | 'reopen', question: string, reason = '
   if (kind === 'reopen') return `Let’s reopen this: ${question}`;
   return `Let’s drop this${reason.trim() ? ` (${reason.trim()})` : ''}: ${question}`;
 }
+
+/**
+ * The chat entries of a topic's own conversation: its messages (no item, this topic), oldest first. Still to come in this
+ * function: the owner's pending topic replies that have no message row yet, and cancelled and taken-back states.
+ */
+export function topicChat(session: Immutable<Session>, topicId: string, now: number): readonly ChatEntry[] {
+  return session.messages.filter(message => message.item_id === null && message.topic_id === topicId && !withdrawn(session, message))
+    .sort((a, b) => a.number - b.number)
+    .map(message => ({ id: message.id, message: excerptView(message, now), marker: '', note: '', asks: [],
+      you: message.author === 'owner' ? { how: 'said' as const, text: message.body, note: '' } : null,
+      pending: null, unsent: notSent(session, message), result: '', forks: [] }));
+}
