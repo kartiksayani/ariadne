@@ -645,7 +645,8 @@ for (const [name, where, expectation, before, change, done] of holds) {
 
 // The line above the Map (SPEC 5.12) opens and clears outside the Map's own column, so the Map's top edge moves and the rows must go
 // with it: the reading row keeps its distance under the edge, at the top, middle and bottom of the Map and on a short Map. An ordinary
-// change hint is no state at all: it opens no line and moves nothing.
+// change hint is no state at all: it opens no line and moves nothing. One place differs: a line clearing while the Map is at its foot cannot
+// pull the rows up with the edge (the Map is already as far down as it goes), so there the rows keep their window place.
 const connectionLine = (page: Page) => page.getByRole('status', { name: 'Connection' });
 const lineOpens = (change: string, words: RegExp) => async (page: Page) => { await agent(page, change); await expect(connectionLine(page)).toContainText(words); };
 const lineRows: readonly (readonly [name: string, before: (page: Page) => Promise<void>, change: (page: Page) => Promise<void>, done: (page: Page) => Promise<void>])[] = [
@@ -667,8 +668,8 @@ for (const where of ['top', 'middle', 'bottom'] as const) for (const [name, befo
     await change(page);
     await done(page);
     await settle(page);
-    const moved = await mapTop(page) - edge;
-    await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - place - moved), `${read.key} keeps its place under the Map's edge`).toBeLessThanOrEqual(3);
+    const moved = where === 'bottom' && name.includes('clears') ? 0 : await mapTop(page) - edge;
+    await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - place - moved), `${read.key} keeps its place`).toBeLessThanOrEqual(3);
   }));
 }
 for (const [name, before, change, done] of lineRows) {

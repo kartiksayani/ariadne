@@ -125,8 +125,12 @@ class TreeLayoutTransport extends AppTransport {
     // (the Map keeps its last good copy) and comes back.
     const binding = session.bindings[session.active_binding_id!]!;
     if (change === 'agent-stops') { binding.connection_state = 'disconnected'; binding.dispatch_state = 'disconnected'; }
-    if (change === 'connection-drops') binding.connection_state = 'reconnecting';
-    if (change === 'agent-returns') { binding.connection_state = 'connected'; binding.dispatch_state = 'enabled'; }
+    // The host's own report outranks the stored state, so the drop and the return are reported as the host would.
+    const reported = (connection_state: 'connected' | 'reconnecting') => this.emit('ariadne://presence_changed', { binding_id: binding.id, generation: binding.generation,
+      observation: { instance_id: crypto.randomUUID(), generation: binding.generation, connection_state, execution_state: 'idle', last_seen_at: new Date().toISOString(),
+        source: 'bridge_heartbeat', process_identity: null, freshness: 'fresh' } as never });
+    if (change === 'connection-drops') { binding.connection_state = 'reconnecting'; reported('reconnecting'); return; }
+    if (change === 'agent-returns') { binding.connection_state = 'connected'; binding.dispatch_state = 'enabled'; reported('connected'); }
     if (change === 'read-fails') { this.failReads = true; this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision + 1 }); return; }
     if (change === 'read-returns') this.failReads = false;
     // The dependency of the last Blocked item is done: it leaves the Blocked filter by itself.

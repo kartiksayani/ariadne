@@ -1,6 +1,6 @@
 // Where a session stands (SPEC 5.12; alpha.21 E22, E23): a stale read counts only when a refresh failed, and an unsure save is
 // the live state's own report or a second line under another state.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import demo from '../../../../../fixtures/domain/demo/session.json';
 import type { SessionState } from '../../../src/data/session-store';
 import { CoreFailure, ServiceFailure } from '../../../src/data/service';
@@ -40,13 +40,18 @@ describe('connectionKind', () => {
 });
 
 describe('connectionView', () => {
-  it('names the last good copy by the time that read was first seen, and keeps it while later reads fail', () => {
-    const snapshot = { session: base(), freshness: 'fresh' } as const;
-    const first = readAt(snapshot);
-    expect(readAt(snapshot)).toBe(first);
-    const view = connectionView(state({ snapshot: snapshot as never, status: 'stale', error: failure }));
-    expect(view.kind).toBe('stale');
-    expect(view.lastGoodAt).toMatch(/^\d\d:\d\d$/);
+  it('names the last good copy by the time that read was first seen, not the time the failure was', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-10-07T21:24:00'));
+      const snapshot = { session: base(), freshness: 'fresh' } as const;
+      expect(connectionView(state({ snapshot: snapshot as never })).kind).toBe('live');
+      expect(readAt(snapshot)).toBe(Date.now());
+      vi.setSystemTime(new Date('2026-10-07T21:31:00'));
+      const view = connectionView(state({ snapshot: snapshot as never, status: 'stale', error: failure }));
+      expect(view.kind).toBe('stale');
+      expect(view.lastGoodAt).toBe('21:24');
+    } finally { vi.useRealTimers(); }
   });
 
   it('an unsure save is the live state itself, so the dot says "not saving"', () => {

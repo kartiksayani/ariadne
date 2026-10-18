@@ -24,6 +24,8 @@ import { agentProduct } from '../../state/navigation/switcher';
 export function connectionView(state: SessionState, unsaved?: { readonly at?: number } | null): ConnectionView {
   const session = state.snapshot?.session;
   const kind = connectionKind(state);
+  // Every read is stamped when first seen (even while all is well), so a later failed read can name the last good one.
+  const readTime = state.snapshot ? readAt(state.snapshot) : null;
   if (!session) return kind === 'loading' ? { kind } : { kind, ...unsaved ? { unsavedToo: true, ...unsaved.at ? { unsavedAt: clock(unsaved.at) } : {} } : {} };
   const binding = session.active_binding_id ? session.bindings[session.active_binding_id] ?? null : null;
   const agent = binding ? agentProduct(binding.adapter_id) : undefined;
@@ -35,7 +37,7 @@ export function connectionView(state: SessionState, unsaved?: { readonly at?: nu
   const onItsWay = waiting.filter(input => input?.state === 'in_flight').length, queued = waiting.filter(input => input?.state === 'queued').length;
   const base: ConnectionView = { kind, agent, where, lastMessageAt: last ? clock(Date.parse(last.created_at)) : undefined,
     ...Number.isFinite(seenAt) ? { lastSeenAt: clock(seenAt) } : {},
-    ...kind === 'stale' && state.snapshot ? { lastGoodAt: clock(readAt(state.snapshot)) } : {},
+    ...kind === 'stale' && readTime !== null ? { lastGoodAt: clock(readTime) } : {},
     ...kind === 'live' ? { sending: { onItsWay, queued } } : {} };
   const closed = kind === 'closed' ? { closedAt: session.closed_at ? clock(Date.parse(session.closed_at)) : undefined, ...session.archived_at != null ? { archived: true } : {} } : {};
   const view = { ...base, ...closed };
