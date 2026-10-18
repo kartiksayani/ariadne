@@ -349,13 +349,21 @@ const regionsById: Readonly<Record<string, readonly FrameRegion[]>> = {
   // The dock's chip sits between the question's text (72% in R4's file, full in the app: left out) and the other-sessions chip.
   // 12.1 holds the card's title row only: the card's lines name the last message and what is on its way, which the frame's data does not have, and
   // its buttons say "Close session" and "Copy session ID" where the board says "Disconnect".
-  '12.1': [...topBar(), ...dockLineEnds(), ...box('connection card title', [316, 36, 324, 34], [316, 36, 324, 34])],
-  '12.2': [...topBar(), ...box('connection line', [0, 40, 1280, 150], [0, 40, 900, 150]), ...dockLineEnds(), ...dockChip()],
-  '12.3': [...topBar(), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56]), ...dockLineEnds(), ...dockChip()],
-  '12.4': [...topBar(), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56]), ...dockLine()],
-  '12.6': [...topBar(), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56]), ...dockLineEnds(), ...dockChip()],
-  '12.7': [...topBar(), ...box('connection line and the Map panel', [0, 40, 1280, 720], [0, 40, 900, 570]), ...dockLine()],
-  '12.8': [...topBar(), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56]), ...dockLineEnds(), ...dockChip()],
+  '12.1': [...topBar(BAR), ...dockLineEnds(), ...box('connection card title', [316, 36, 324, 34], [316, 36, 324, 34], [0.01, 0.01])],
+  // 12.2's steps: the head and the first step hold. The second step says where Codex's instruction comes from when no setup receipt is at hand
+  // (the board's has a Copy instruction button), so it and the foot below it sit at another height.
+  '12.2': [...topBar(BAR), ...box('connection line, head and first step', [0, 40, 1280, 82], [0, 40, 900, 82]), ...dockLineEnds(), ...dockChip([0.002, 0.002])],
+  '12.3': [...topBar(BAR), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56]), ...dockLineEnds(), ...dockChip([0.002, 0.002])],
+  '12.4': [...topBar(BAR), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56]), ...dockLine()],
+  // 12.6 holds the line's icon and title and its button: the sentence between has no drop time (§3a).
+  '12.6': [...topBar(BAR), ...box('connection line title', [0, 40, 260, 56], [0, 40, 260, 56]), ...box('connection line button', [1180, 40, 100, 56], [800, 40, 100, 56]),
+    ...dockLineEnds(), ...dockChip([0.002, 0.002])],
+  // 12.7 holds the line's icon and title and the dock's words. Left out: the top bar's chip of waiting questions in other sessions and the dock's chip of
+  // them (the waiting list is one read of every session, and it gives up when one can't be read), the line's sentence (no line number), its second
+  // button, and the Map panel (no path chip, so its centred lines sit higher).
+  '12.7': [...box('top bar left', [0, 0, 210, 40], [0, 0, 40, 40]), ...box('connection line title', [0, 40, 260, 56], [0, 40, 200, 38]),
+    ...box('dock line text', [0, 760, 700, 40], [0, 610, 690, 40])],
+  '12.8': [...topBar(BAR), ...box('connection line', [0, 40, 1280, 56], [0, 40, 900, 56], [0.001, 0.001]), ...dockLineEnds(), ...dockChip([0.002, 0.002])],
   // 12.9: the top bar's right-hand controls are disabled while the save is unsure (the board draws them live), and the line says less (§3a).
   '12.9': [...box('top bar left', [0, 0, 700, 40], [0, 0, 700, 40]), ...dockLineEnds()],
   '13.1': [...topBar(BAR), ...dockLineEnds(), ...box('switcher card', [31, 39, 398, 454], [31, 39, 398, 454], [0.004, 0.004])],

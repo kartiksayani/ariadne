@@ -138,6 +138,7 @@
   align-items: center;
   gap: 5px;
   font-size: calc(12px * var(--text-scale));
+  margin-right: 8px;
   white-space: nowrap;
   color: color-mix(in srgb, var(--color-text) 66%, transparent);
 }
