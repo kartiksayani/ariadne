@@ -13,17 +13,17 @@ export interface NavigationVisit {
 const listeners = new Set<(visit: NavigationVisit) => void>();
 const queued = new Map<string, NavigationVisit[]>();
 const routeKey = (session: Immutable<SessionRef>) => JSON.stringify([session.project_id, session.session_id]);
-interface Writer { refs: number; flight: boolean; failed: boolean; unsubscribe: () => void; schedule: () => void }
+interface Writer { refs: number; flight: boolean; failed: boolean; misses: number; unsubscribe: () => void; schedule: () => void }
 const writers = new Map<NavigationStore, Writer>();
 /** All navigation surfaces share the canonical writer, including visits to another session. */
 export const navigationVisits = {
   bind(navigation: NavigationStore) {
     let writer = writers.get(navigation);
     if (!writer) {
-      const owned: Writer = { refs: 0, flight: false, failed: false, unsubscribe: () => {}, schedule: () => {} };
+      const owned: Writer = { refs: 0, flight: false, failed: false, misses: 0, unsubscribe: () => {}, schedule: () => {} };
       const retry = async () => {
         if (navigation.getSnapshot().pendingOperationId && !await navigation.retryMutation()) return;
-        owned.failed = false; notices.dismiss('recent-save'); owned.schedule();
+        owned.failed = false; owned.misses = 0; notices.dismiss('recent-save'); owned.schedule();
       };
       const drain = async () => {
         if (owned.flight || owned.failed || owned.refs === 0) return;
@@ -39,17 +39,29 @@ export const navigationVisits = {
         let saved = false;
         try {
           saved = await navigation.saveRecentItems(structuredClone(session), recentItems, state.preferences.revision);
-          if (saved) captured.forEach(visit => navigationVisits.acknowledge(visit));
-          else if (!navigation.getSnapshot().writing && (navigation.getSnapshot().error || navigation.getSnapshot().pendingOperationId)) {
-            owned.failed = true;
-            notices.push({ id: 'recent-save', icon: 'ph ph-warning', tone: 'problem', dismissible: false,
-              text: 'Recent visits could not be saved yet. Your visits are still waiting to be saved.',
-              actions: [{ label: 'Retry recent save', run: () => { void retry(); } }] });
+          if (saved) { owned.misses = 0; captured.forEach(visit => navigationVisits.acknowledge(visit)); }
+          else {
+            const after = navigation.getSnapshot();
+            // Not admitted behind another writer is not a failed save. Only this writer's own unsettled
+            // write, or a rejection with nothing pending, counts as a miss.
+            const own = !after.writing && (navigation.isRecentPending() || !after.pendingOperationId && !!after.error);
+            if (own) {
+              // The first miss is retried quietly: the exact operation if one is unconfirmed, else a fresh save.
+              owned.misses++;
+              if (owned.misses === 1 && navigation.isRecentPending() && await navigation.retryMutation()) {
+                saved = true; owned.misses = 0; captured.forEach(visit => navigationVisits.acknowledge(visit));
+              } else if (owned.misses > 1 || navigation.isRecentPending()) {
+                owned.failed = true;
+                notices.push({ id: 'recent-save', icon: 'ph ph-warning', tone: 'problem', dismissible: false,
+                  text: 'Recent visits could not be saved yet. Your visits are still waiting to be saved.',
+                  actions: [{ label: 'Retry recent save', run: () => { void retry(); } }] });
+              }
+            }
           }
         } finally {
           owned.flight = false;
           const current = navigation.getSnapshot();
-          if (saved || !owned.failed && !current.writing && !current.pendingOperationId && current.preferences?.revision !== state.preferences.revision) owned.schedule();
+          if (saved || !owned.failed && !current.writing && !current.pendingOperationId && (owned.misses > 0 || current.preferences?.revision !== state.preferences.revision)) owned.schedule();
         }
       };
       owned.schedule = () => { void Promise.resolve().then(drain); };

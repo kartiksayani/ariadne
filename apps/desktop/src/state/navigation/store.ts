@@ -23,6 +23,8 @@ type PendingMutation = { request: OwnerMutationRequest; confirmed: (receipt: Mut
   retrySeen?: (preferences: PreferencesSnapshot) => Promise<PendingMutation | null>;
   prepare?: () => Promise<PendingMutation>;
   followupIntent?: number;
+  /** Written by the automatic Recent trail, never by an owner edit. */
+  recent?: boolean;
   attempted?: boolean;
   current?: () => boolean };
 type QueuedNavigation = { selection: NavigationSelection; reveal: RevealedItem | null; isCurrent: () => boolean;
@@ -151,6 +153,8 @@ export class NavigationStore {
   // Observe only the already executing write; uncertain operations still need
   // explicit reconciliation. This neither schedules nor retries a mutation.
   readonly getWritingCompletion = () => !this.stopped && this.state.writing ? this.activeMutation : null;
+  /** True while the unsettled preferences write (running or unconfirmed) is the automatic Recent trail. */
+  readonly isRecentPending = () => this.pending?.recent === true;
   readonly isWritingRecent = () => this.state.writing && this.activeMutation !== null && this.activeMutation === this.recentFlight;
   readonly getRefreshCompletion = () => this.flight;
   readonly hasQueuedTextScale = () => this.textScaleTarget !== null;
@@ -935,7 +939,7 @@ export class NavigationStore {
   }
   private async execute(mutation: PendingMutation): Promise<boolean> {
     if (this.stopped || this.pending) return false;
-    this.pending = { ...mutation, followupIntent: this.navigationIntent, request: structuredClone(mutation.request) };
+    this.pending = { ...mutation, recent: this.preparingRecent, followupIntent: this.navigationIntent, request: structuredClone(mutation.request) };
     return this.retryMutation();
   }
   retryMutation(): Promise<boolean> {
@@ -967,8 +971,10 @@ export class NavigationStore {
     try {
       if (!pending.attempted && pending.current && !pending.current()) return this.discardNavigation();
       if (pending.prepare) {
+        const recent = pending.recent;
         pending = await pending.prepare();
         if (this.stopped) return false;
+        pending.recent = recent;
         this.pending = pending;
         this.publish({ pendingOperationId: pending.request.command.op_id });
       }
@@ -1022,6 +1028,7 @@ export class NavigationStore {
           if (this.onlySeenSince(command.params.expected_preferences_revision, fresh.revision)) {
             const next = await pending.retrySeen(fresh);
             if (next) {
+              next.recent = pending.recent;
               this.pending = next;
               this.publish({ pendingOperationId: next.request.command.op_id });
               return this.completeMutation(next);
@@ -1041,6 +1048,7 @@ export class NavigationStore {
             && this.onlySeenSince(command.params.expected_preferences_revision, current.revision)
             ? await pending.retrySeen(structuredClone(current) as PreferencesSnapshot) : await pending.retry?.();
           if (next) {
+            next.recent = pending.recent;
             this.pending = next;
             this.publish({ pendingOperationId: next.request.command.op_id });
             return this.completeMutation(next);

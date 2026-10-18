@@ -488,6 +488,75 @@ describe('session tree rows', () => {
     } else await waitFor(() => expect(view.calls.selected.at(-1)).toMatchObject({ kind: 'item', route: { item_id: '3' } }));
   });
 
+  describe('a Recent save never blocks opening a clicked row', () => {
+    const recentVisit = [{ item_id: '1', action: 'peeked' as const, visited_at: '2026-10-13T12:00:00.000Z' }];
+    const isRecentPatch = (args: { request: unknown }) => {
+      const request = args.request as { command?: { command?: string; params?: { entries?: { kind: string; preferences?: { recent_items?: { item_id: string }[] } }[] } } };
+      return request.command?.command === 'preferences_patch'
+        && !!request.command.params?.entries?.some(entry => entry.kind === 'set_session_view' && entry.preferences?.recent_items?.[0]?.item_id === '1');
+    };
+    /** The mount's own opening of the selected row finishes saving first, so the Recent save is the only writer. */
+    const settled = async (view: Awaited<ReturnType<typeof mount>>) => {
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+      await waitFor(() => expect(view.navigation.getSnapshot().writing || view.navigation.getSnapshot().pendingOperationId !== null).toBe(false));
+    };
+    const opened = (view: Awaited<ReturnType<typeof mount>>, id: string) => view.calls.selected.some(result => result.kind === 'item' && result.route.item_id === id);
+
+    it('opens the row while a failed Recent save is still unconfirmed', async () => {
+      const view = await mount({ props: { selectedId: '8' } });
+      await settled(view);
+      const invoke = view.transport.invoke.bind(view.transport);
+      vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+        if (isRecentPatch(args)) throw new Error('Lost response');
+        return invoke(name, args);
+      });
+      await act(async () => { await view.navigation.saveRecentItems(route, recentVisit, view.transport.preferences.revision); });
+      expect(view.navigation.getSnapshot().writing).toBe(false);
+      expect(view.navigation.getSnapshot().pendingOperationId).not.toBeNull();
+      expect(view.navigation.isRecentPending()).toBe(true);
+      fireEvent.click(row('3'));
+      await waitFor(() => expect(opened(view, '3')).toBe(true));
+      expect(notices.getSnapshot().some(notice => notice.id === 'tree-reveal-failed')).toBe(false);
+    });
+
+    it('opens the row when a held Recent save then fails', async () => {
+      const view = await mount({ props: { selectedId: '8' } });
+      await settled(view);
+      let fail!: () => void, entered = false;
+      const gate = new Promise<void>((_resolve, reject) => { fail = () => { reject(new Error('Lost response')); }; }), invoke = view.transport.invoke.bind(view.transport);
+      vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+        if (isRecentPatch(args)) { entered = true; await gate; }
+        return invoke(name, args);
+      });
+      const saving = view.navigation.saveRecentItems(route, recentVisit, view.transport.preferences.revision);
+      await waitFor(() => expect(entered).toBe(true));
+      fireEvent.click(row('3'));
+      await act(async () => { fail(); await saving; });
+      await waitFor(() => expect(opened(view, '3')).toBe(true));
+      expect(notices.getSnapshot().some(notice => notice.id === 'tree-reveal-failed')).toBe(false);
+    });
+
+    it('opens the row without waiting out a Recent save that does not finish', async () => {
+      const view = await mount({ props: { selectedId: '8' } });
+      await settled(view);
+      let release!: () => void, entered = false;
+      const gate = new Promise<void>(resolve => { release = resolve; }), invoke = view.transport.invoke.bind(view.transport);
+      vi.spyOn(view.transport, 'invoke').mockImplementation(async (name, args) => {
+        if (isRecentPatch(args)) { entered = true; await gate; }
+        return invoke(name, args);
+      });
+      const saving = view.navigation.saveRecentItems(route, recentVisit, view.transport.preferences.revision);
+      await waitFor(() => expect(entered).toBe(true));
+      vi.useFakeTimers();
+      fireEvent.click(row('3'));
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(opened(view, '3')).toBe(true);
+      expect(notices.getSnapshot().some(notice => notice.id === 'tree-reveal-failed')).toBe(false);
+      vi.useRealTimers();
+      await act(async () => { release(); await saving; });
+    });
+  });
+
   it('subscribes to font loading once for the whole Map, including after row rerenders', async () => {
     const previous = Object.getOwnPropertyDescriptor(document, 'fonts');
     const fonts = new EventTarget();
