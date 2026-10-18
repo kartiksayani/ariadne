@@ -91,3 +91,11 @@ export function conversationBaseline(session: Immutable<Session>, itemId: string
   const at = Date.parse(seen.topics.find(topic => topic.topic_id === item.topic_id)?.at ?? seen.since);
   return Number.isFinite(at) ? at : null;
 }
+
+/** The item's messages are all in the session: until they are, a divider worked out for it is not final and must not be kept. */
+export function messagesLoaded(session: Immutable<Session>, itemId: string): boolean {
+  const item = session.items[itemId];
+  if (!item) return false;
+  const present = new Set(session.messages.map(message => message.id));
+  return [item.created_message_id, ...item.updated_message_ids].every(id => present.has(id));
+}

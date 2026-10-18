@@ -49,11 +49,14 @@ export function TopicConversation({ drafts, store, topicId, onOpenItem }: TopicC
   useEffect(() => { focusBox(); }, [topicId]);
   if (!session || !topic) return <p role="status">This topic is unavailable.</p>;
   const slot: Words = { id: reply.entry?.draft.op_id ?? null, kind: 'reply', text: reply.text, locked: reply.locked, changed: false };
-  // Esc leaves the box for the topic's row, so the next Esc closes Details with the words kept.
+  // Esc leaves the box for the topic's row (or, with no row, for nothing), so the next Esc closes Details with the words kept.
   const keys = () => (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Escape') {
       event.stopPropagation(); event.preventDefault();
-      document.querySelector<HTMLElement>(`[data-topic-id="${CSS.escape(topicId)}"].tree-topic`)?.focus({ preventScroll: true });
+      const row = document.querySelector<HTMLElement>(`[data-topic-id="${CSS.escape(topicId)}"].tree-topic`);
+      // The Graph has no topic row: the box lets go of focus instead, so the next Esc reaches the workspace and closes Details.
+      if (row) row.focus({ preventScroll: true });
+      else if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.stopPropagation(); event.preventDefault(); if (!reply.sendOff) void reply.send();
     }

@@ -28,11 +28,14 @@ export interface TopicReplyState {
   readonly retryPreferences: () => void;
 }
 
-const why = (session: NonNullable<ReturnType<typeof useSession>['snapshot']>['session'], topicId: string, agent: string): string | null => {
+/** Why no reply can go out now, or null; `boxShown`: a box is there (a stored draft), so typing is kept. */
+export const topicReplyReason = (session: NonNullable<ReturnType<typeof useSession>['snapshot']>['session'], topicId: string, agent: string, boxShown: boolean): string | null => {
   const topic = session.topics[topicId];
   if (!topic || topic.removed_at) return 'This topic was removed, so it takes no reply.';
   if (topic.archived_at !== null) return 'This topic is archived. Restore it to reply.';
-  if (session.state !== 'active' || !session.active_binding_id) return `${agent === 'the agent' ? 'The agent' : agent} isn’t running, so a reply can’t go out yet. Whatever you type here is kept.`;
+  // Without a binding no draft can start, so a box shows only when a stored draft is there to keep; then typing is kept.
+  if (!session.active_binding_id && !boxShown) return 'You can write here once an agent is connected.';
+  if (session.state !== 'active' || !session.active_binding_id) return `${agent === 'the agent' ? 'The agent' : agent} isn’t running, so a reply can’t go out yet.${boxShown ? ' Whatever you type here is kept.' : ''}`;
   return null;
 };
 
@@ -56,7 +59,7 @@ export function useTopicReply(drafts: OwnerDraftStore, store: SessionStore, topi
   const rebased = entry && session && !entry.receipt && entry.draft.binding_id !== session.active_binding_id
     ? { ...entry.draft, binding_id: session.active_binding_id ?? '' } : entry?.draft;
   const blocked = rebased && session ? blockedDraft(rebased, session) : null;
-  const unavailable = session ? why(session, topicId, agent) : null;
+  const unavailable = session ? topicReplyReason(session, topicId, agent, entry !== undefined) : null;
   const send = async () => {
     if (!entry || !session || sendOff || blocked) return false;
     if (entry.draft.binding_id !== session.active_binding_id) drafts.review(entry.draft.op_id, session);

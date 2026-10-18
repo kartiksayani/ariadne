@@ -55,4 +55,22 @@ describe('topic mode in Details', () => {
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' });
     expect(topicBox()).toBeNull();
   });
+  it('lets go of the topic box on Esc in the Graph, where there is no topic row, so the next Esc closes Details', async () => {
+    const { transport } = await mount();
+    openTopic();
+    await waitFor(() => expect(topicBox()).not.toBeNull());
+    fireEvent.click(screen.getByLabelText('Graph', { selector: 'button' }));
+    await screen.findAllByRole('tree', { name: / graph$/ });
+    expect(document.querySelector('.tree-topic')).toBeNull();
+    const text = within(topicBox()!).getByRole('textbox') as HTMLTextAreaElement;
+    await waitFor(() => expect(text.disabled).toBe(false));
+    fireEvent.change(text, { target: { value: 'Typed in the Graph.' } });
+    text.focus();
+    fireEvent.keyDown(text, { key: 'Escape' });
+    expect(document.activeElement).not.toBe(text);
+    // Focus is on the page now, so Esc reaches the workspace keys and closes Details; the words stay saved.
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await waitFor(() => expect(topicBox()).toBeNull());
+    await waitFor(() => expect(transport.preferences.drafts.find(draft => draft.target.item_id === null)).toMatchObject({ intent: 'topic_reply', text: 'Typed in the Graph.' }));
+  });
 });

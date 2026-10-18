@@ -476,6 +476,37 @@ describe('desktop item conversation', () => {
     expect(there.textContent).toBe(divider.textContent);
   });
 
+  it('works out a new divider when an item is selected again after new messages came, not the one it had', async () => {
+    const transport = await setup({ baseline: true });
+    fireEvent.click(row('2'));
+    let pane = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
+    expect(within(pane).getByTestId('new-divider').closest('[data-message-id]')!.getAttribute('data-message-id')).toBe('00000000-0000-4000-8000-000000000114');
+    const session = transport.sessions.get(route.session_id)!, item = session.items['2']!;
+    await waitFor(() => expect(transport.preferences.seen![0].items).toContainEqual({ item_id: '2', revision: item.revision }), { timeout: 3000 });
+    // Look at another item, and let the agent say something new about item 2 meanwhile.
+    fireEvent.click(row('4'));
+    await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="4"]' });
+    const fresh = structuredClone(session.messages.find(message => message.id.endsWith('0115'))!);
+    Object.assign(fresh, { id: '00000000-0000-4000-8000-000000000130', number: 30, body: 'A new thought.', created_at: '2026-10-03T12:05:00.000Z' });
+    session.messages.push(fresh); item.updated_message_ids.push(fresh.id);
+    item.revision += 1; item.updated_at = fresh.created_at; ++session.revision;
+    // The apply receipts that date each agent message to an item revision (the divider needs them to tell what was read).
+    const base = structuredClone(Object.values(session.operation_receipts).flat().find(value => value?.result.data.kind === 'apply' && value.result.data.item_revisions['2'] === 2)!);
+    [['00000000-0000-4000-8000-000000000231', '00000000-0000-4000-8000-000000000114', 14, 2], ['00000000-0000-4000-8000-000000000230', fresh.id, fresh.number, item.revision]].forEach(([operation, id, number, revision]) => {
+      const receipt = structuredClone(base);
+      receipt.operation_id = receipt.result.operation_id = operation as string;
+      if (receipt.result.data.kind === 'apply') {
+        receipt.result.data.messages = [{ id: id as string, number: number as number }]; receipt.result.data.item_revisions = { '2': revision as number };
+        receipt.result.data.allocated_refs = { reply: { kind: 'message', id: id as string } };
+      }
+      session.operation_receipts[receipt.operation_id] = [receipt];
+    });
+    await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
+    fireEvent.click(row('2'));
+    pane = await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
+    await waitFor(() => expect(within(pane).getByTestId('new-divider').closest('[data-message-id]')!.getAttribute('data-message-id')).toBe(fresh.id));
+  });
+
   // ⌥digit quick-send is gone (SPEC 6.1); the other fast send is Enter on a focused option card.
   it.each(['Command Enter', 'Enter on an option'])('sends only once during a held %s burst', async shortcut => {
     const transport = await setup(); await expand(); await switchQuestion();

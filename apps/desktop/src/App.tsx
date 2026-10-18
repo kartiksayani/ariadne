@@ -25,10 +25,10 @@ import { NavigationGraph } from './ui/graph/NavigationGraph';
 import type { OwnerFocusRequest, PendingSubmission } from './ui/answer/useSubmit';
 import { agentNotRunning } from './ui/answer/notRunning';
 import { ConversationView } from './ui/detail/ConversationView';
-import { conversationBaseline, conversationDivider } from './ui/detail/conversationSeen';
+import { conversationBaseline, conversationDivider, messagesLoaded } from './ui/detail/conversationSeen';
 import { DetailPath, ItemDetail } from './ui/detail/ItemDetail';
 import type { DetailHeadControls } from './ui/shell/DetailHead';
-import type { ItemActionView } from './ui/detail/itemActions';
+import { actionsOf, reportActions, type ReportedActions } from './ui/detail/itemActions';
 import { useDetailTarget, type OpenTopicInDetails } from './ui/shell/detailTarget';
 import { TopicConversation } from './ui/detail/TopicConversation';
 import { NoticeHooks } from './ui/answer/NoticeHooks';
@@ -213,9 +213,17 @@ function Workspace({ application }: { application: Application }) {
     if (kept) return kept;
     if (!session?.items[itemId] || !observedSeen) return { id: null, at: null };
     const made = { id: conversationDivider(session, itemId, observedSeen), at: conversationBaseline(session, itemId, observedSeen) };
-    dividers.current.set(at, made);
+    // Worked out before the item's messages page has loaded, a divider is not final (a missing message gives null): do not keep it.
+    if (messagesLoaded(session, itemId)) dividers.current.set(at, made);
     return made;
   };
+  // Leaving an item drops its divider, so looking at it again works one out from what was seen since. The Details pane and the
+  // bigger view of an item keep theirs while either shows it.
+  const conversationItem = conversation?.route === key ? conversation.itemId : null;
+  useEffect(() => {
+    const live = new Set([selectedId, conversationItem].flatMap(id => id ? [`${key}:${id}`] : []));
+    for (const at of [...dividers.current.keys()]) if (!live.has(at)) dividers.current.delete(at);
+  }, [key, selectedId, conversationItem]);
   const openConversation = (itemId: string) => {
     const session = store?.getSnapshot().snapshot?.session;
     if (!session?.items[itemId] || !route) return;
@@ -565,13 +573,14 @@ function Workspace({ application }: { application: Application }) {
   const hiddenBy = selectedSession && selectedId ? hiddenSource(selectedSession, explicitHidden, selectedId) : null;
   const selectedHidden = hiddenBy !== null;
   // The action list Details emits feeds the head's "…" menu (E2); it is the list the actions row shows.
-  const [itemActions, setItemActions] = useState<readonly ItemActionView[] | null>(null);
+  const [reportedActions, setReportedActions] = useState<ReportedActions | null>(null);
+  const actionsFrom = (itemId: string) => (list: Parameters<typeof reportActions>[2]) => setReportedActions(held => reportActions(held, itemId, list));
   // The path's topic segment scrolls the Map to its top; from the bigger view, which covers the Map, it goes back to it first.
   const toTopicTop = () => { dispatchIntent('map.top'); if (conversationOpen) closeConversation(); };
   const focusControl = { on: !!view?.focused_item_id, toggle: () => { dispatchIntent('focus.toggle'); } };
   const columnHead: DetailHeadControls = topicMode ? { close: closeDetail }
-    : { read: { open: false, toggle: () => { if (selectedId) openConversation(selectedId); } }, focus: focusControl, actions: itemActions, close: closeDetail };
-  const biggerHead: DetailHeadControls = { read: { open: true, toggle: closeConversation }, focus: focusControl, actions: itemActions,
+    : { read: { open: false, toggle: () => { if (selectedId) openConversation(selectedId); } }, focus: focusControl, actions: actionsOf(reportedActions, selectedId), close: closeDetail };
+  const biggerHead: DetailHeadControls = { read: { open: true, toggle: closeConversation }, focus: focusControl, actions: actionsOf(reportedActions, conversation?.itemId),
     close: () => { closeConversation(); closeDetail(); } };
   const hideItem = (itemId: string) => { if (route) toggleHidden({ ...route, item_id: itemId }); };
   const removeItem = (itemId: string) => { if (route) askRemove({ kind: 'item', item: { ...route, item_id: itemId } }); };
@@ -674,7 +683,7 @@ function Workspace({ application }: { application: Application }) {
         : store && selectedId && detailOpen && route ? <ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}
         onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined}
         onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onBring={() => { void queueBring({ ...route, item_id: selectedId }); }}
-        onHide={() => hideItem(selectedId)} onRemove={() => removeItem(selectedId)} onActions={setItemActions}
+        onHide={() => hideItem(selectedId)} onRemove={() => removeItem(selectedId)} onActions={actionsFrom(selectedId)}
         dividerId={dividerFor(selectedId).id} dividerAt={dividerFor(selectedId).at}
         later={later} onAgentNotRunning={onAgentNotRunning} earlierAgent={earlier}
         hiddenItemIds={view?.hidden_item_ids} seen={readingSeen}
@@ -687,7 +696,7 @@ function Workspace({ application }: { application: Application }) {
       conversation={conversation?.route === key && store && route ? <ConversationView key={`${key}:${conversation.itemId}`} drafts={application.drafts}
         store={store} itemId={conversation.itemId} later={preferences?.later.some(value => sameSession(value, route) && value.item_id === conversation.itemId) ?? false}
         onClose={closeConversation} head={biggerHead} onTopic={toTopicTop}
-        onHide={() => hideItem(conversation.itemId)} onRemove={() => removeItem(conversation.itemId)} onActions={setItemActions}
+        onHide={() => hideItem(conversation.itemId)} onRemove={() => removeItem(conversation.itemId)} onActions={actionsFrom(conversation.itemId)}
         onBring={() => { void queueBring({ ...route, item_id: conversation.itemId }); }} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })}
         dividerId={dividerFor(conversation.itemId).id ?? conversation.dividerId} dividerAt={dividerFor(conversation.itemId).at} seen={readingSeen} hiddenItemIds={view?.hidden_item_ids}
         focusRequest={ownerFocus?.route === key && ownerFocus.itemId === conversation.itemId ? ownerFocus : undefined}
