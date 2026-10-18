@@ -103,7 +103,7 @@ function occupied(existing: DraftEntry | undefined, { intent, text, selected }: 
  * Saves the words in their editor. Call only when `input` can no longer be sent (it is cancelled). The editor is checked
  * again right before writing, with no wait in between: a message the owner started meanwhile is never overwritten.
  */
-async function load(drafts: OwnerDraftStore, session: Immutable<Session>, input: Immutable<Input>, planned: Plan): Promise<ReviewOutcome> {
+async function load(drafts: OwnerDraftStore, session: Immutable<Session>, input: Immutable<Input>, planned: Plan, origin?: 'taken_back'): Promise<ReviewOutcome> {
   const { intent, text, selected } = planned, unavailable = { kind: 'unavailable' } as const;
   if (drafts.getSnapshot().preferenceUncertain) return unavailable;
   const existing = find(drafts, session, input, intent), blocked = occupied(existing, planned);
@@ -118,6 +118,7 @@ async function load(drafts: OwnerDraftStore, session: Immutable<Session>, input:
   if (!await drafts.editSaved(id, { text, selected_option_id: selected })) return unavailable;
   // The owner may have typed while it saved: their words stay.
   if (drafts.getSnapshot().entries[id]?.draft.text !== text) return { kind: 'kept', intent, text };
+  if (origin) drafts.markOrigin(id, origin);
   return { kind: 'moved', intent };
 }
 
@@ -183,6 +184,6 @@ export async function editQueued(drafts: OwnerDraftStore, session: Immutable<Ses
     if (pending?.command === 'input_cancel' && pending.params.input_id === input.id) return { kind: 'not_taken_back' };
     return state && state !== 'queued' && state !== 'cancelled' ? { kind: 'already_sent' } : { kind: 'not_taken_back' };
   }
-  const outcome = await load(drafts, now, input, planned);
+  const outcome = await load(drafts, now, input, planned, 'taken_back');
   return outcome.kind === 'unavailable' ? { kind: 'taken_back' } : outcome;
 }
