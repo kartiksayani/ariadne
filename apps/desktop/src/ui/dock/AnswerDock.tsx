@@ -1,7 +1,7 @@
 // The answer dock (board screen 2, §5.2, §6.4): a 40px line, or the open dock at one waiting question of this session,
 // floating over the Map and Details. It never opens by itself, and it never selects, focuses or scrolls anything in the
 // Map: only the owner's own clicks on a path segment or on the question's title do (`onOpenItem`).
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent, type ReactNode } from 'react';
 import { useSession, type SessionStore } from '../../data/session-store';
 import { useWaiting, type WaitingStore } from '../../selectors/waiting/store';
 import { receiptWithdrawn, useOwnerDrafts, type OwnerDraftStore } from '../../state/drafts/store';
@@ -12,6 +12,12 @@ import { AnswerSlot } from '../detail/AnswerSlot';
 import { QuestionDelivery } from '../answer/QuestionDelivery';
 import type { PendingSubmission } from '../answer/useSubmit';
 import { useSeenDwell } from '../changes/useSeenDwell';
+import { ChangeMarker } from '../changes/ChangeMarker';
+import { useDetailMarker } from '../changes/useDetailMarker';
+import { peekChange } from '../peek/change';
+import type { SeenState } from '../../selectors/changes/seen';
+import type { Immutable } from '../../data/session-store';
+import type { Item, Session } from '../../generated/domain/models';
 import { peekNames } from '../peek/names';
 import { navigationVisits } from '../navigation/visits';
 import { ownerName } from '../shell/model';
@@ -31,6 +37,8 @@ export interface AnswerDockProps {
   readonly answering?: string | null;
   readonly onAgentNotRunning?: (submission: PendingSubmission) => void;
   readonly onSeen?: (itemId: string, revision: number) => void;
+  /** What the owner has seen (the reading lane): the question's New / Changed / Seen pill and its change strip read it. */
+  readonly seen?: SeenState;
   /** A path segment: select that item. */
   readonly onOpenItem?: (itemId: string) => void;
   /** Test clock. */
@@ -40,7 +48,21 @@ export interface AnswerDockProps {
 const editable = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[role="dialog"],[role="alertdialog"]';
 const quote = (text: string) => `“${text}”`;
 
-export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNotRunning, onSeen, onOpenItem, now = Date.now }: AnswerDockProps) {
+/**
+ * The question's title with its marker at the right (SPEC 9.7): New or Changed, then "Seen" once the dock's 1 s dwell has cleared
+ * it. For a change, the strip under the title ("Options changed at 21:12. …") stays for as long as this question is open. Mounted
+ * per question, so what it opened with is this visit's.
+ */
+function DockQuestionHead({ session, item, seen, children }: { readonly session: Immutable<Session>; readonly item: Immutable<Item>; readonly seen: SeenState; readonly children: ReactNode }) {
+  const marker = useDetailMarker(item, seen), [opening] = useState(seen);
+  const strip = useMemo(() => peekChange(session, item, opening).strip, [session, item, opening]);
+  return <>
+    <div className="dock-question-head">{children}{marker && <ChangeMarker kind={marker} seenWhere="dock" />}</div>
+    {strip && <p className="dock-question-change"><strong>{strip.label.replace(' · ', ' at ')}</strong> {strip.text}</p>}
+  </>;
+}
+
+export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNotRunning, onSeen, seen, onOpenItem, now = Date.now }: AnswerDockProps) {
   const context = useDockModel();
   const [local] = useState(() => context ? null : new DockStore());
   const model = context?.store ?? local!;
@@ -229,9 +251,11 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
       {/* Keyed by item, not question revision: a revised question keeps the owner's field, its text and its focus. */}
       {item && <div className="answer-dock-current" key={state.current!.itemId}>
         <div className="dock-question">
-          <h2 className="dock-question-title">{onOpenItem
-            ? <button type="button" className="dock-question-open" aria-label={`Open ${item.question}`} title={`Go to “${item.question}”`} onClick={() => onOpenItem(item.id)}>{item.question}</button>
-            : item.question}</h2>
+          <DockQuestionHead session={session!} item={item} seen={seen}>
+            <h2 className="dock-question-title">{onOpenItem
+              ? <button type="button" className="dock-question-open" aria-label={`Open ${item.question}`} title={`Go to “${item.question}”`} onClick={() => onOpenItem(item.id)}>{item.question}</button>
+              : item.question}</h2>
+          </DockQuestionHead>
           {item.ask && <p className="dock-question-ask">{item.ask}</p>}
           {item.note && item.note.split(/\n{2,}/).map((paragraph, at) => <p key={at} className="dock-question-body">{paragraph}</p>)}
         </div>

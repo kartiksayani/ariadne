@@ -9,7 +9,7 @@ import { connectionOf, reconnectingNote } from '../shared/connection';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
 import { agentName } from '../shell/model';
 import { shortLabel } from '../shared/short';
-import { excerptView, messageNumber, type ExcerptView } from '../shared/excerpt';
+import { excerptView, type ExcerptView } from '../shared/excerpt';
 import { statusKey, type StatusKey } from '../shared/status';
 import { deliveryLine as deliveryText, deliveryStage, deliverySteps, type DeliveryStage } from '../answer/delivery';
 import { displayStatus, ownerReplied } from '../../selectors/waiting/replied';
@@ -17,6 +17,7 @@ import { sessionAnswerBlocked, sessionEnded } from '../../selectors/sessionClose
 import { agentReceived, counted, heldInput, notSent, stoppedAttempt, stuckInput, withdrawn, type NotSent, type Stuck } from '../../selectors/waiting/stuck';
 import { relatedItems, type LinkDirection } from '../../selectors/related';
 import { hiddenItems } from '../tree/hidden';
+import { clockTime } from '../changes/clock';
 
 export { statusKey, type StatusKey };
 export const closedStatus: ReadonlySet<StatusKey> = new Set(['decided', 'done', 'dropped', 'replaced']);
@@ -206,6 +207,12 @@ function caption(input: Immutable<Input>): string {
   return agentReceived(attempt) ? attempt?.result_state === 'committed' ? 'Delivered' : 'Delivered · no answer yet' : CAPTION[input.state] ?? '';
 }
 
+/** "Question · raised by the agent at 20:44", "Finding · by the agent at 21:16"; "Raised by the agent" with no creating message. No message numbers. */
+function metaLine(type: Item['type'], created: Immutable<Message> | undefined, who: string): string {
+  if (!created) return 'Raised by the agent';
+  return `${TYPE[type]} · ${type === 'finding' ? 'by' : 'raised by'} ${who} at ${clockTime(created.created_at)}`;
+}
+
 const kid = (item: Immutable<Item>): Kid => ({ id: item.id, question: item.question, status: statusKey[item.status], closed: closedStatus.has(statusKey[item.status]) });
 
 /** The breadcrumb above an item: its topic, then each ancestor, by short label. */
@@ -248,7 +255,6 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
     stuck: saving ? null : stuckInput(session, input, presence, health) }));
   const pending = !!sub?.stage && sub.stage !== 'failed' && !held;
   const outLabel = status === 'done' && item.type === 'explanation' ? 'Explained' : OUTLBL[status];
-  const ownerLabel = item.owner.kind === 'me' ? 'you' : item.owner.kind === 'agent' ? 'the agent' : item.owner.name;
   const showSteps = sub && (sub.stage !== null || (status !== 'waiting' && status !== 'open'));
 
   let open: OpenSection | null = null;
@@ -399,7 +405,7 @@ export function detailModel({ session, itemId, now, mode, later, saving, presenc
 
   return {
     id: item.id, question: item.question, status, display: statusKey[displayStatus(session, item)], badgeLabel: outLabel ?? '',
-    meta: `${TYPE[item.type]} · next action: ${ownerLabel} · raised in ${created ? messageNumber(created, earlierAgent) : 'an earlier session'}`,
+    meta: metaLine(item.type, created, earlierAgent ?? 'the agent'),
     path,
     stepsTitle: sub && sub.kind !== 'answer' ? 'Your request' : 'Your answer',
     steps: showSteps ? stepsOf(sub.stage, status) : null,

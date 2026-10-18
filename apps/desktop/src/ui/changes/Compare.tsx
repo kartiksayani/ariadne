@@ -6,9 +6,9 @@ import { shortLabel } from '../shared/short';
 import { STATUS } from '../shared/status';
 import './changes.css';
 
-const fieldNames: Record<ChangedField['field'], string> = { question: 'Name', short: 'Short name', type: 'Kind', status: 'Status',
+export const fieldNames: Record<ChangedField['field'], string> = { question: 'Name', short: 'Short name', type: 'Kind', status: 'Status',
   note: 'Note', ask: 'Question for you', options: 'Choices', outcome: 'Outcome', why: 'Why', links: 'Links', related: 'Related', affects: 'Affects', depends_on: 'Depends on' };
-function valueText(value: ChangedField['before'], field: ChangedField['field'], session: Immutable<Session>): string {
+export function valueText(value: ChangedField['before'], field: ChangedField['field'], session: Immutable<Session>): string {
   if (value === null || value === undefined || value === '') return 'None';
   if (typeof value === 'string') return field === 'status' && value in STATUS ? STATUS[value as keyof typeof STATUS].label : value;
   if (Array.isArray(value)) return value.length ? value.map(entry => {

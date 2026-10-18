@@ -4,6 +4,7 @@ import { DetailPath, ItemDetail } from '../../../src/ui/detail/ItemDetail';
 import { OwnerDraftStore } from '../../../src/state/drafts/store';
 import { withdrawn } from '../../../src/selectors/waiting/stuck';
 import { immutable } from '../../../src/data';
+import { clockTime } from '../../../src/ui/changes/clock';
 import { setup } from './fixtures';
 import { notices } from '../../../src/ui/pages/notices';
 
@@ -55,7 +56,7 @@ describe('item detail panel', () => {
     const created = session.messages.find(message => message.id === item.created_message_id)!;
     render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={vi.fn()} earlierAgent="codex" />);
     await screen.findByRole('heading', { name: item.question });
-    expect(screen.getByText(`Decision · next action: you · raised in codex #${created.number}`)).toBeTruthy();
+    expect(screen.getByText(`Decision · raised by codex at ${clockTime(created.created_at)}`)).toBeTruthy();
     expect(within(screen.getByRole('region', { name: 'Conversation' })).getAllByText(`codex #${created.number}`).length).toBeGreaterThan(0);
   });
 
@@ -64,7 +65,7 @@ describe('item detail panel', () => {
     render(panel(value, '1', open));
     await screen.findByRole('heading', { name: item.question });
     const created = session.messages.find(message => message.id === item.created_message_id)!;
-    expect(screen.getByText(`Decision · next action: you · raised in #${created.number}`)).toBeTruthy();
+    expect(screen.getByText(`Decision · raised by the agent at ${clockTime(created.created_at)}`)).toBeTruthy();
     expect(within(screen.getByRole('region', { name: 'Conversation' })).getAllByText(`#${created.number}`).length).toBeGreaterThan(0);
     expect(screen.getByRole('region', { name: 'Current outcome' }).textContent).toBe(`Done${item.outcome}`);
     expect(screen.getByText(item.why!)).toBeTruthy();
