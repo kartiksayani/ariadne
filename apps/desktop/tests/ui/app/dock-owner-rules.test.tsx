@@ -273,7 +273,7 @@ describe('finding 5: a refill of an answer the agent already had never goes twic
     await waitFor(() => expect(within(stuck).getByRole('button', { name: button }).hasAttribute('disabled')).toBe(false));
     fireEvent.click(within(stuck).getByRole('button', { name: button }));
     await waitFor(() => expect(session.inputs[input.id]?.state).toBe('skipped'));
-    if (place === 'dock') { fireEvent.click(screen.getByRole('button', { name: 'Close detail' })); await openDock(); }
+    if (place === 'dock') { closeDetails(); await openDock(); }
     // The words and the choice stay recoverable in the reopened cards, in every case.
     await waitFor(() => expect(option(scope()!, 1)?.getAttribute('aria-pressed')).toBe('true'));
     expect(answerWords(scope()!).value).toBe(note);
