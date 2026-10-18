@@ -23,7 +23,11 @@ describe('topic brief and shared catch-up', () => {
     expect(brief.textContent).toContain('1 decided · 0 your turn · 1 replaced');
     fireEvent.click(within(brief).getByRole('button', { name: /Brief/ }));
     expect(within(brief).getByText(/by the agent · updated/)).toBeTruthy();
-    // SPEC 5.2: grouped, each name with its one-line text; the agent's paragraph is not shown, and "Replaced" reads "old → new".
+    // The agent's own paragraph leads the open brief (three lines, then Show more), above the groups.
+    const lead = within(brief).getByText(/The agent’s complete brief\./);
+    expect(lead.textContent).toBe(value.session.topics[value.topic.id]!.brief);   // Every line is kept.
+    expect(lead.compareDocumentPosition(within(brief).getByRole('heading', { name: 'Decided' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // SPEC 5.2: grouped, each name with its one-line text, and "Replaced" reads "old → new".
     expect(within(brief).getByRole('heading', { name: 'Decided' })).toBeTruthy(); expect(within(brief).getByRole('heading', { name: 'Your turn' })).toBeTruthy();
     expect(within(brief).getByRole('heading', { name: 'Replaced' })).toBeTruthy();
     const decided = within(brief).getByRole('heading', { name: 'Decided' }).parentElement!;

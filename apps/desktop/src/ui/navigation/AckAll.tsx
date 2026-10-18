@@ -109,7 +109,8 @@ export function AckAll({ actions, topicId, topicName, items, disabled = false }:
         aria-haspopup="dialog" aria-expanded={!!reviewed}
         disabled={disabled || busy || actionState.writing || !!actionState.pending || sessionState.status !== 'ready' || !!sessionState.error}
         onClick={() => { if (reviewed) close(); else { setReviewed(eligible); setError(null); } }}><i className="ph ph-check" aria-hidden="true" />Ack all ({eligible.length})</button>}
-    {mine && state.phase === 'failed' && <span className="ack-all-progress" role="status">{state.completed} saved · {state.remaining} to finish</span>}
+    {mine && state.phase === 'failed' && <span className="ack-all-progress" role="status"
+      title={`${state.completed} saved · ${state.remaining} to finish`}>{state.completed} saved · {state.remaining} to finish</span>}
     {reviewed && !(mine && state.phase === 'holding') && <AckAllReview anchor={opener.current} label={`Acknowledge results in ${topicName}`} topicName={topicName}
       items={reviewed} error={error} onConfirm={confirm} onCancel={close} />}
   </>;

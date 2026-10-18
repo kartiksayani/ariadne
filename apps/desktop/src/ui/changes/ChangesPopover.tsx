@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Immutable } from '../../data/session-store';
 import type { SessionRef } from '../../generated/core';
 import type { Item, Session } from '../../generated/domain/models';
@@ -31,6 +31,26 @@ function Names({ items, session, route, onOpen }: { readonly items: readonly Imm
   const shown = items.slice(0, 3);
   return <>{shown.map(item => <ItemName key={item.id} item={item} route={route} label={labels.get(item.id)} onOpen={onOpen} />)}
     {items.length > shown.length && <span className="change-muted">and {items.length - shown.length} more</span>}</>;
+}
+
+/** The agent's own paragraph, folded to three lines; "Show more" appears only when the text is cut. */
+function BriefLead({ text }: { readonly text: string }) {
+  const box = useRef<HTMLParagraphElement>(null);
+  const [open, setOpen] = useState(false);
+  const [cut, setCut] = useState(false);
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!element) return;
+    const measure = () => { if (!open) setCut(element.scrollHeight > element.clientHeight + 1); };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(element);
+    return () => observer?.disconnect();
+  }, [text, open]);
+  return <div className="brief-lead">
+    <p ref={box} className="brief-text" data-open={open || undefined}>{text}</p>
+    {cut && <button type="button" className="brief-more" aria-expanded={open} onClick={() => setOpen(value => !value)}>{open ? 'Show less' : 'Show more'}</button>}
+  </div>;
 }
 
 /** What changed in one topic (SPEC 5.5, D18): the brief, then what moved since the owner was last here. */
@@ -92,6 +112,7 @@ export function ChangesPopover({ session, topicId, route, navigation, data, undo
     </button>
     {!briefOpen && <p className="change-muted changes-brief-counts">{lists.decided.length} decided · {lists.yourTurn.length} your turn · {lists.replaced.length} replaced</p>}
     {briefOpen && <div className="changes-brief-body">
+      {topic.brief && <BriefLead text={topic.brief} />}
       {briefGroups.map(group => <div className="brief-group" key={group.label}>
         <h3 className="brief-group-label"><i className={STATUS[group.status].icon} style={{ color: statusColor(group.status) }} aria-hidden="true" />{group.label}</h3>
         <ul>{group.rows.length ? group.rows.map(row => <li key={row.item.id}>

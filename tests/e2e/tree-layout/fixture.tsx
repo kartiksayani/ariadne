@@ -18,9 +18,11 @@ import '../../../apps/desktop/src/ui/detail/detail.css';
 // Item 1 carries a long finding (it must fold to three lines), item 5 a paragraph that
 // wraps over a few lines (hover must not rewrap it), the rest keep their short text.
 class TreeLayoutTransport extends AppTransport {
-  constructor({ gettingAround = false, changes = false, card = false, still = false, filter = false } = {}) {
+  constructor({ gettingAround = false, changes = false, card = false, still = false, filter = false, continuable = false } = {}) {
     super();
     const session = this.sessions.get(route.session_id)!;
+    // A topic that began here, not one continued from another session: its band draws Continue elsewhere.
+    if (continuable) for (const topic of Object.values(session.topics)) if (topic) topic.origin = null;
     if (card) { // An archived session with a long name: the top bar and its connection card must still fit a narrow window.
       session.name = 'A long session name that needs to fit in a narrow window';
       session.state = 'closed'; session.closed_at = session.updated_at; session.archived_at = session.updated_at;
@@ -91,10 +93,13 @@ class TreeLayoutTransport extends AppTransport {
       items['38']!.depends_on = ['2'];
     }
   }
+  /** Set by a spec: every Ack is refused, so an Ack all batch stops in its failed state ("0 saved · N to finish"). */
+  failAck = false;
   /** The owner's Ack lands: the proposal is accepted, so the item takes its target status and leaves "to ack". */
   async invoke<T>(name: string, args: Parameters<AppTransport['invoke']>[1]): Promise<T> {
     const { request } = args;
     if ('command' in request && request.command.command === 'ack') {
+      if (this.failAck) throw new Error('The Ack could not be saved.');
       const session = this.sessions.get(request.session!.session_id)!, item = session.items[request.command.params.item_id]!;
       item.status = item.ack_to!; item.ack_to = null; ++item.revision; ++session.revision;
       this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision });
@@ -198,7 +203,7 @@ function DetailsFixture({ dock, bigger }: { dock: number; bigger: boolean }) {
 }
 
 const query = new URLSearchParams(window.location.search);
-const transport = new TreeLayoutTransport({ gettingAround: query.has('nav'), changes: query.has('changes'), card: query.has('card'), still: query.has('still'), filter: query.has('filter') });
+const transport = new TreeLayoutTransport({ gettingAround: query.has('nav'), changes: query.has('changes'), card: query.has('card'), still: query.has('still'), filter: query.has('filter'), continuable: query.has('continuable') });
 // The specs drive agent writes and seen marks through this handle.
 (window as unknown as { treeLayout: TreeLayoutTransport }).treeLayout = transport;
 createRoot(document.getElementById('root')!).render(query.has('details') ? <DetailsFixture dock={Number(query.get('dock') ?? 0)} bigger={query.has('bigger')} />

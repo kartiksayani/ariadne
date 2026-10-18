@@ -182,6 +182,44 @@
   color: inherit;
 }
 
+/* The agent's paragraph: three lines, then "Show more" when the text is longer. */
+.brief-lead {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.brief-text {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+  line-height: 1.45;
+}
+
+.brief-text[data-open] {
+  display: block;
+  overflow: visible;
+}
+
+.brief-more {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--a-acc-text);
+  font: inherit;
+  font-size: calc(12px * var(--text-scale));
+  cursor: pointer;
+}
+
+.brief-more:hover {
+  text-decoration: underline;
+}
+
 .changes-brief-counts {
   margin: 2px 0 0 calc(12px * var(--text-scale) + 8px);
 }

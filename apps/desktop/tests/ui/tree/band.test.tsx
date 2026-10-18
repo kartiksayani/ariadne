@@ -36,10 +36,33 @@ describe('Focus button (D9)', () => {
     { name: 'focused with the selection gone', focusedName: 'Cache', canFocus: false, busy: false, disabled: false, label: 'Unfocus “Cache”', title: 'Show the whole Map again ( ⇧F )' },
     { name: 'a view change being saved', focusedName: null, canFocus: true, busy: true, disabled: true, label: 'Focus', title: 'Focus on the selected item and its branch ( ⇧F )' },
   ] as const;
-  it('is not drawn at all while nothing is focused and nothing is selected', () => {
+  it('holds its 92px slot as a hidden, unfocusable placeholder while nothing is focused and nothing is selected', () => {
     const { container } = render(<FocusButton focusedName={null} canFocus={false} busy={false} onToggle={vi.fn()} />);
-    expect(container.childElementCount).toBe(0);
     expect(screen.queryByRole('button', { name: /Focus/ })).toBeNull();
+    const slot = container.querySelector<HTMLButtonElement>('[data-testid="band-focus"]')!;
+    expect(slot.getAttribute('aria-hidden')).toBe('true');
+    expect(slot.tabIndex).toBe(-1);
+    expect(slot.disabled).toBe(true);
+    expect(slot.dataset.hidden).toBeDefined();
+  });
+  const band = (focusedName: string | null, canFocus: boolean, selected: boolean) => <div role="tree">
+    <div role="treeitem" aria-label="Topic" tabIndex={-1}><FocusButton focusedName={focusedName} canFocus={canFocus} busy={false} onToggle={vi.fn()} /></div>
+    <div role="treeitem" aria-label="Row" aria-selected={selected} tabIndex={-1} />
+  </div>;
+  it.each([
+    { name: 'the band when nothing is selected', selected: false, landed: 'Topic' },
+    { name: 'the selected row when one is', selected: true, landed: 'Row' },
+  ])('moves keyboard focus to $name when the button goes while it has focus', ({ selected, landed }) => {
+    const { rerender } = render(band('Cache', true, selected));
+    screen.getByRole('button', { name: 'Unfocus “Cache”' }).focus();
+    rerender(band(null, false, selected));
+    expect(document.activeElement).toBe(screen.getByRole('treeitem', { name: landed }));
+  });
+  it('leaves focus alone when the button goes while something else has it', () => {
+    const { rerender } = render(<><input aria-label="Elsewhere" />{band('Cache', true, false)}</>);
+    screen.getByRole('textbox', { name: 'Elsewhere' }).focus();
+    rerender(<><input aria-label="Elsewhere" />{band(null, false, false)}</>);
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Elsewhere' }));
   });
   it.each(cases)('$name', ({ focusedName, canFocus, busy, disabled, label, title }) => {
     const toggle = vi.fn();

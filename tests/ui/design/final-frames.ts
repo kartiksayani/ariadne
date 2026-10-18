@@ -449,10 +449,15 @@ const bandPieces = (region: FrameRegion): FrameRegion[] => {
   const piece = (label: string, left: number, span: number): FrameRegion => ({ ...region, name: `${region.name} (${label})`, rect: [x + left, y, span, line] });
   const onTitleLine = region.name.includes('counts on the title line');
   const wideMap = onTitleLine || (region.variants?.includes('light') && (width >= 1200 || region.name.includes('left of the popover')));
-  // Where the buttons start: right of the counts' end (x 870 with Details folded; with no item selected, no Focus, so x 1000 in a 1280 Map).
-  const buttons = onTitleLine && width < 1000 ? 735 : width >= 1270 ? 1000 : 870;
+  // Where the buttons start: right of the counts' end (x 870 with Details folded). With no item selected the board draws no Focus and Ack all
+  // sits beside Continue; the app holds Focus's 92px slot (alpha.20 final fix: the Map never moves on its own, so Ack all never slides into it).
+  // Ack all (and, held, "Acked N Undo") is therefore 100px left of the board's, and the region starts at Continue (x 1100 in a 1280 Map, 830 in 900).
+  const buttons = onTitleLine && width < 1000 ? 830 : width >= 1270 ? 1100 : 870;
   if (wideMap) return [piece('chevron and name', 0, 400), ...(width >= 1200 || onTitleLine ? [piece('buttons', buttons, width - buttons)] : [])];
   if (region.variants?.includes('narrow') && width <= 600) return [piece('chevron', 0, 36), piece('buttons', 290, width - 290)];
+  // A 900px Map with no item selected: the board draws no Focus, so its Ack all (x 736 to 831) sits beside Continue; the app holds Focus's slot,
+  // so its Ack all is 100px left. The name (x 0 to 600) and the buttons from Continue (x 830) are compared; Ack all goes to the side-by-side PNGs.
+  if (region.variants?.includes('narrow') && width === 900) return [piece('chevron and name', 0, 600), piece('buttons', 830, 70)];
   return [{ ...region, rect: [x, y, width, line] }];
 };
 

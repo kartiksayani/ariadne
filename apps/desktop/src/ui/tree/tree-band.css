@@ -358,6 +358,10 @@
   font-size: calc(14px * var(--text-scale));
 }
 
+.tree-band-focus[data-hidden] {
+  visibility: hidden;
+}
+
 .tree-band-focus:disabled,
 .tree-band-continue:disabled,
 .tree-band-menu:disabled {
@@ -472,6 +476,15 @@
 
 .ack-all-progress {
   font-size: calc(12px * var(--text-scale));
+}
+
+/* The Ack all failed-state text shrinks with an ellipsis (its title has it whole), so Continue and "…" always fit. */
+.tree-topic-head > .ack-all-progress {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* Narrow band (D10): the counts say "2 waiting", the opener drops "since …", and Continue is its icon. Two things make a band narrow:
