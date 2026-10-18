@@ -24,6 +24,12 @@ export interface DraftEntry {
   readonly holding?: boolean;
   /** What a saved input carried; the draft itself is cleared once the receipt arrives. */
   readonly sent?: { readonly text: string; readonly selected_option_id: string | null } | null;
+  /**
+   * Where the words in the draft came from, for the composer's chip (alpha.21 E16, E18). `recovered`: they were saved before an
+   * Ariadne restart and never sent (no submit attempt). `taken_back`: the owner took a queued message back to edit it. In memory
+   * only; it clears when the owner edits the words or sends them.
+   */
+  readonly origin?: 'recovered' | 'taken_back';
 }
 /** What a draft says when the same words are already queued or on their way. */
 export const ALREADY_WAITING = 'This same message is already waiting to be sent. Delete it first if you want to change it.';
@@ -171,7 +177,8 @@ export class OwnerDraftStore {
       const preferences = await this.service.query({ session: null, request: { command: 'preferences_get', params: {} } });
       const entries = { ...this.state.entries };
       for (const draft of preferences.drafts) if (!entries[draft.op_id]) {
-        entries[draft.op_id] = Object.freeze({ draft: immutable(draft), saving: false, uncertain: draft.submission_attempted ?? false, error: null, receipt: null, rejected: false });
+        entries[draft.op_id] = Object.freeze({ draft: immutable(draft), saving: false, uncertain: draft.submission_attempted ?? false, error: null, receipt: null, rejected: false,
+          ...(!draft.submission_attempted && typed.has(draft.intent) && (draft.text.trim() || draft.selected_option_id) ? { origin: 'recovered' as const } : {}) });
         if (draft.submission_attempted) this.pendingInputs.set(draft.op_id, this.inputRequest(draft));
       }
       this.publish({ entries: Object.freeze(entries), ready: true, error: null });
@@ -267,7 +274,12 @@ export class OwnerDraftStore {
     const entry = this.state.entries[id];
     if (!entry || entry.holding || entry.saving || entry.uncertain || entry.receipt || this.state.preferenceUncertain) return Promise.resolve(false);
     const draft = { ...structuredClone(entry.draft), ...change } as OwnerDraft;
-    this.entry(id, { draft: immutable(draft), error: null }); return this.save([{ kind: 'upsert_draft', draft }]);
+    const edited = draft.text !== entry.draft.text || draft.selected_option_id !== entry.draft.selected_option_id;
+    this.entry(id, { draft: immutable(draft), error: null, ...(edited ? { origin: undefined } : {}) }); return this.save([{ kind: 'upsert_draft', draft }]);
+  }
+  /** Marks where a draft's words came from, for the composer's chip. The next edit or send clears it. */
+  markOrigin(id: string, origin: 'taken_back'): void {
+    if (this.state.entries[id]) this.entry(id, { origin });
   }
   review(id: string, session: Immutable<Session>): void {
     const entry = this.state.entries[id], itemId = entry?.draft.target.item_id, item = itemId ? session.items[itemId] : null;
@@ -434,7 +446,7 @@ export class OwnerDraftStore {
       && other.draft.intent === 'answer' && sameSession(other.draft.session, entry.draft.session)
       && other.draft.target.item_id === entry.draft.target.item_id && other.draft.question_revision === entry.draft.question_revision
       && (other.holding || other.saving || other.uncertain && !other.rejected || !!other.receipt))) return Promise.resolve(false);
-    this.entry(id, { saving: true, error: null });
+    this.entry(id, { saving: true, error: null, origin: undefined });
     const next = this.send(id, as).finally(() => { this.flights.delete(id); this.entry(id, { saving: false }); });
     this.flights.set(id, next); return next;
   }
