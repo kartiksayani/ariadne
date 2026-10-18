@@ -46,7 +46,9 @@ export interface ItemEdit { readonly s?: 'decided' | 'done' | 'in_progress' | 'o
 export interface AppFixture {
   readonly sessions?: { readonly current?: string; readonly connection?: Connection; readonly unnamed?: boolean };
   readonly items?: { readonly edit?: Readonly<Record<string, ItemEdit>>; readonly afterAnswer?: boolean; readonly longText?: boolean; readonly hidden?: readonly string[]; readonly empty?: boolean;
-    /** Items the owner parked ("Later"): kept in the preferences, not on the item. */ readonly later?: readonly string[] };
+    /** Items the owner parked ("Later"): kept in the preferences, not on the item. */ readonly later?: readonly string[];
+    /** Items the agent removed into the bin at 21:19, each with the owner's unsent message the removal cancelled (10.1, 10.11, 11.3). */
+    readonly binned?: readonly { readonly item: string; readonly words?: string }[] };
   readonly questions?: { readonly sent?: readonly string[]; readonly failed?: readonly string[]; readonly othersSent?: boolean };
   readonly drafts?: readonly Draft[];
   readonly view?: {
@@ -122,7 +124,9 @@ export interface FinalState {
   /** Which release 1 builder turns `pending` off. */
   readonly owner: 'shell' | 'dock' | 'nav-state' | 'topbar' | 'details'
     // alpha.20, the Map: its rows (W2), the topic band (W3), the filter (W4), the changes (W5), the Graph (W1).
-    | 'rows' | 'band' | 'filter' | 'changes' | 'graph';
+    | 'rows' | 'band' | 'filter' | 'changes' | 'graph'
+    // alpha.21: remove, archive and the bin (W7).
+    | 'remove';
   readonly app: AppFixture;
   /**
    * The parts of the frame the app is held to. Absent: the whole frame is compared against the state's threshold. Present: only
@@ -468,8 +472,33 @@ const bandPieces = (region: FrameRegion): FrameRegion[] => {
  */
 const withoutFirstRow = (region: FrameRegion): boolean => !region.name.startsWith('first row');
 
+// alpha.21 remove, archive and the bin (W7). The dialogs sit over the Map, whose rows never line up (D1), so each state compares its dialog,
+// toast or strip only (`removeRegionsById`).
+const removeRow: Step = { hover: '[role="treeitem"][data-item-id="a2.2.1"]' };
+/** The board's bin: the agent removed "cache warm-up script", which cancelled one message of mine. */
+const binned = [{ item: 'a11', words: 'Skip the script; the deploy job can warm the cache. Keep the twenty-minute budget in mind.' }] as const;
+const openBin: readonly Step[] = [{ click: 'More actions for' }, { click: 'Open the bin' }];
+const removeStateList: readonly FinalState[] = [
+  { id: '10.1', part: 'R4-Dialogs', sid: 'd-confirm', owner: 'remove', pending: true, title: 'Confirm, for what can’t be undone: emptying the bin',
+    app: { items: { binned }, view: { selected: null, dock: 'line' }, map: {}, act: [...openBin, { click: 'Empty the bin…' }] } },
+  { id: '10.11', part: 'R4-Dialogs', sid: 'd-bin', owner: 'remove', pending: true, title: 'The bin, from the topic’s … menu',
+    app: { items: { binned }, view: { selected: null, dock: 'line' }, map: {}, act: openBin } },
+  { id: '11.3', part: 'R4-Notices', sid: 'n-agentrm', owner: 'remove', pending: true, title: 'The agent removed items: a notice, and a strip marks the spot',
+    app: { items: { binned }, view: { selected: null, dock: 'line' }, map: {} } },
+  { id: '10.2', part: 'R4-Dialogs', sid: 'd-remove', owner: 'remove', pending: true, title: 'Remove an item and everything below it',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [removeRow, { click: 'Remove (⌫)' }] } },
+  { id: '10.3', part: 'R4-Dialogs', sid: 'd-removed', owner: 'remove', pending: true, title: 'After Remove: Undo for 5 seconds, a strip keeps the spot',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [removeRow, { click: 'Remove (⌫)' }, { click: 'Remove 5 items' }] } },
+  { id: '10.13', part: 'R4-Dialogs', sid: 'd-tarchive', owner: 'remove', pending: true, title: 'Archive a topic',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'More actions for' }, { click: 'Archive topic…' }] } },
+  { id: '10.14', part: 'R4-Dialogs', sid: 'd-tremove', owner: 'remove', pending: true, title: 'Remove a topic',
+    app: { view: { selected: null, dock: 'line' }, map: {}, act: [{ click: 'More actions for' }, { click: 'Remove topic…' }] } }
+];
+const removeRegionsById: Readonly<Record<string, readonly FrameRegion[]>> = {};
+
 export const finalStates: readonly FinalState[] = [...stateList.map(state => regionsById[state.id] ? { ...state, regions: regionsById[state.id]! } : state),
-  ...mapStateList.map(state => ({ ...state, regions: mapRegionsById[state.id]!.filter(withoutFirstRow).flatMap(bandPieces) }))];
+  ...mapStateList.map(state => ({ ...state, regions: mapRegionsById[state.id]!.filter(withoutFirstRow).flatMap(bandPieces) })),
+  ...removeStateList.map(state => removeRegionsById[state.id] ? { ...state, regions: removeRegionsById[state.id]! } : state)];
 
 export const finalIds: readonly string[] = finalStates.map(state => state.id);
 

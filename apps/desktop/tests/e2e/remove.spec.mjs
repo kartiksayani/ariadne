@@ -18,6 +18,14 @@ async function confirm(label) {
   await click(await dialog().$(`button=${label}`));
   await wait(async () => !(await dialog().isExisting()), `${label} confirmation did not close`);
 }
+// Remove for an item or a topic (10.2, 10.14) quotes the owner's words before anything runs; a leaf with none goes at once.
+const removeDialog = () => browser.$('[role="dialog"][aria-label^="Remove "]');
+async function confirmRemove(label) {
+  await click(await removeDialog().$(`button*=${label}`));
+  await wait(async () => !(await removeDialog().isExisting()), `${label} confirmation did not close`);
+}
+const toastText = async () => (await browser.$('[data-testid="toast"]').isExisting()) ? browser.$('[data-testid="toast"]').getText() : '';
+const strip = text => browser.$('.tree-rows').$(`button*=${text}`);
 // The item and topic notes stay listed (dismissible, no timeout), so the × is scoped to the note's own text.
 async function dismissNote(matches, description) {
   let note;
@@ -81,10 +89,13 @@ export async function runRemoveAcceptance(configuration) {
   await wait(async () => await browser.$('.item-detail').getAttribute('data-detail-item-id') === item.id, 'Selecting the row did not open its detail');
   await browser.execute(selector => document.querySelector(selector).focus(), row);
   await browser.keys('Backspace');
-  await confirm('Remove item');
+  // A leaf with none of the owner's words goes at once (E28); anything else asks first.
+  await browser.pause(300);
+  if (await removeDialog().isExisting()) await confirmRemove('Remove');
   await wait(async () => !(await browser.$(row).isExisting()), 'The removed row stayed in the tree');
-  // Notices arrive as toasts after a short settle, so wait for the text rather than reading it once.
-  await wait(async () => (await notices().getText()).includes('unless you undo'), 'Item remove did not offer Undo', 4000);
+  // The rows give way to a strip in their place, and the toast says when the agent is told.
+  await (await strip('Removed “')).waitForDisplayed();
+  await wait(async () => (await toastText()).includes('is told in 5 s'), 'Item remove did not offer Undo', 4000);
   assert.ok((await readJson(sessionPath)).items[item.id], 'Item remove ran before the Undo window ended');
   await wait(async () => !(await readJson(sessionPath)).items[item.id], 'Item remove did not run after the Undo window', 30000);
   const afterItem = await readJson(sessionPath);
@@ -93,8 +104,10 @@ export async function runRemoveAcceptance(configuration) {
   // Topic: the band's Remove, same deferred command. ⌫ no longer removes a topic (SPEC 6.1: it acts on the selected item
   // only), so the band's own button is the path; it shows while the band holds focus.
   await topicAction(topicName, 'Remove');
-  await confirm('Remove topic');
+  // The dialog checks other sessions for copies first (E34); Remove enables once none is found.
+  await confirmRemove('Remove topic');
   await wait(async () => !(await topicBand(topicName).isExisting()), 'The removed topic stayed in the tree');
+  await (await strip(`Removed “${topicName}”`)).waitForDisplayed();
   await wait(async () => !(await readJson(sessionPath)).topics[topic.id], 'Topic remove did not run after the Undo window', 30000);
 
   // Session: only an archived session is removed for good, from the Archive page's "…". Archive it from All sessions first.

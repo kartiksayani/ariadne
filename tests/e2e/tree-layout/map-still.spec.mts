@@ -180,14 +180,11 @@ const triggers: readonly Trigger[] = [
   ['the Next label changes while stepping', 'still', '11', nothing, page => press(bandButton(page, 'Next unseen')),
     page => expect(bandButton(page, /^Next unseen, 1 of 2/)).toBeVisible()],
   ['the "…" menu opens', 'still', null, nothing, page => press(moreActions(page)), page => expect(page.getByRole('menu')).toBeVisible()],
-  ['Open the bin is chosen in the "…" menu: the bin opens and scrolls into view', 'goes', null, nothing, async page => {
+  // E30: the bin is a dialog over the Map; opening it moves nothing.
+  ['Open the bin is chosen in the "…" menu: the bin dialog opens over the Map', 'still', null, nothing, async page => {
     await press(moreActions(page));
     await page.getByRole('menuitem', { name: /^Open the bin/ }).click();
-  }, async page => {
-    const fold = page.getByRole('button', { name: /^Removed by agent/ });
-    await expect(fold).toHaveAttribute('aria-expanded', 'true');
-    await expect(fold).toBeInViewport();
-  }],
+  }, page => expect(page.getByRole('dialog', { name: /^The bin for “/ })).toBeVisible()],
   ['a topic reply opens under the band', 'held', null, nothing, async page => {
     await press(moreActions(page));
     await page.getByRole('menuitem', { name: /^Reply to topic/ }).click();
@@ -588,7 +585,6 @@ const holds: readonly Hold[] = [
     page => expect(row(page, '0')).toHaveCount(1)),
   ...everywhere('the reading row leaves the filter on its own', risesAtTop, page => filter(page, ['open']), leave, goes),
   ...everywhere('the owner hides the reading row', risesAtTop, nothing, hide, goes),
-  ...everywhere('the agent removes the reading row', risesAtTop, nothing, (page, reading) => agent(page, `remove:${reading}`), goes),
   // Rows above the reading row go or come back. While the "Showing N of M" banner shows a status filter, it opens or closes
   // above the Map too, so the scroller itself moves (D13); the chip row's own rows are the filter row block's.
   ...everywhere('a saved filter lands', held, nothing, page => filter(page, ['open']),
@@ -871,3 +867,64 @@ test('a row above that shrinks at the bottom is clamped by the browser, and the 
   // One step up only: back down at the Map's end the rows no longer reach the row's old place (pinned or not), a separate matter.
   await pinHolds(page, '17', place, 'after a row above shrank at the bottom', [1.2]);
 }));
+
+// E29: a removed row's place keeps a strip, and the hold hands the reading row's place to it, at the top, the middle and the
+// bottom; at commit the strip goes and the row the owner now reads keeps its place.
+const placeTop = async (page: Page, text: RegExp, skip: readonly string[] = []) => {
+  const strips = page.locator('.tree-place', { hasText: text });
+  for (const strip of await strips.all()) if (!skip.includes((await strip.getAttribute('data-row')) ?? '')) return (await strip.boundingBox())?.y ?? null;
+  return null;
+};
+/** The strips already in the Map (the fixture's own agent-removed item has one). */
+const stripKeys = async (page: Page) => page.locator('.tree-place').evaluateAll(strips => strips.map(strip => strip.getAttribute('data-row') ?? ''));
+/** The owner removes `id` from its hover bar; an item with others below it asks first. */
+const ownerRemoves = async (page: Page, id: string) => {
+  await point(page, id);
+  await press(row(page, id).getByRole('button', { name: /^Remove/ }));
+  const asking = page.getByRole('dialog', { name: /^Remove “/ });
+  if (await asking.count()) await asking.getByRole('button', { name: /^Remove (item|\d+ items)$/ }).click();
+};
+const stripCases: readonly (readonly [name: string, text: RegExp, change: (page: Page, reading: string) => Promise<void>])[] = [
+  ['the owner removes the reading row', /^Removed “/, ownerRemoves],
+  ['the agent removes the reading row', /removed “/, (page, reading) => agent(page, `remove:${reading}`)],
+];
+test.describe('strips hold the removed row\'s place', () => {
+  for (const where of ['top', 'middle', 'bottom'] as const) for (const [name, text, change] of stripCases) {
+    test(`${name} at the ${where}: its strip takes its window place`, ({ page }) => served(page, async () => {
+      await goTo(page, where);
+      await settle(page);
+      const read = await readingRow(page), was = (await windowTop(page, read.key))!, earlier = await stripKeys(page);
+      await change(page, read.key);
+      await expect(row(page, read.key)).toHaveCount(0);
+      await expect.poll(async () => (await stripKeys(page)).length, 'a new strip shows').toBe(earlier.length + 1);
+      await settle(page);
+      await expect.poll(async () => Math.abs((await placeTop(page, text, earlier))! - was), 'the strip is where the row was').toBeLessThanOrEqual(3);
+    }));
+  }
+  for (const where of ['top', 'middle', 'bottom'] as const) {
+    test(`the owner's removal commits at the ${where}: the strip goes and the row read now keeps its place`, ({ page }) => served(page, async () => {
+      await goTo(page, where);
+      await settle(page);
+      const read = await readingRow(page);
+      await ownerRemoves(page, read.key);
+      await expect(page.locator('.tree-place', { hasText: /^Removed “/ })).toBeVisible();
+      await settle(page);
+      const now = await readingRow(page), y = (await windowTop(page, now.key))!;
+      await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); });
+      await expect(page.locator('.tree-place', { hasText: /^Removed “/ })).toHaveCount(0);
+      await settle(page);
+      await expect.poll(async () => Math.abs((await windowTop(page, now.key))! - y), `${now.key} keeps its window place`).toBeLessThanOrEqual(3);
+    }));
+  }
+  test('Undo on the strip puts the row back where the strip was', ({ page }) => served(page, async () => {
+    const read = await readingRow(page), was = (await windowTop(page, read.key))!;
+    await ownerRemoves(page, read.key);
+    const strip = page.locator('.tree-place', { hasText: /^Removed “/ });
+    await expect(strip).toBeVisible();
+    await press(strip.getByRole('button'));
+    await expect(row(page, read.key)).toHaveCount(1);
+    await settle(page);
+    await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - was), 'the row is back in its place').toBeLessThanOrEqual(3);
+    await expect(strip).toHaveCount(0);
+  }));
+});

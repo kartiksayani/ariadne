@@ -136,21 +136,19 @@ export async function runHistoryActionsAcceptance(configuration) {
   assert.equal(target.items[created.id].status, 'done'); assert.equal(target.items[created.id].ack_to ?? null, null);
   await wait(async () => await topicBand(topicName).isExisting(), 'Agent-created terminal topic did not refresh in App');
   const targetHistory = { items: target.items, messages: target.messages, rounds: target.rounds, answers: target.answers, bindings: target.bindings };
-  // Nothing blocks an all-closed topic, so its prompt archives at once and the
-  // toast offers Undo, which restores it (no confirmation dialog either way).
+  // Archive always asks (E33, SPEC 10.13), an all-closed topic too. After it, the topic's place keeps one strip,
+  // "Archived “T” · N items · Undo", and a toast; the strip's click is Undo, which restores it.
   await archiveClosedTopic(terminalTopic.id);
+  await dialog().waitForDisplayed();
+  assert.ok((await dialog().getText()).includes(`Archive the “${topicName}” topic?`), 'Archive confirmation did not name the topic');
+  await click(await dialog().$('button*=Archive topic'));
   try {
-    await wait(async () => (await readJson(targetPath)).topics[terminalTopic.id].archived_at !== null, 'Direct topic archive was not visible on disk');
+    await wait(async () => (await readJson(targetPath)).topics[terminalTopic.id].archived_at !== null, 'Topic archive was not visible on disk');
   } catch (failure) { throw await archiveDiagnostics(failure); }
-  assert.equal(await dialog().isExisting(), false, 'An unblocked archive must not open the review');
-  let archiveNotice;
-  await wait(async () => {
-    for (const notice of await browser.$$('.pw-notices .pw-note')) {
-      if ((await notice.$('.pw-note-text').getText()).startsWith(`Archived “${topicName}”.`)) { archiveNotice = notice; return true; }
-    }
-    return false;
-  }, 'Archive did not show its Undo notification');
-  await click(await archiveNotice.$('button=Undo'));
+  await wait(async () => (await browser.$('[data-testid="toast"]').getText()).includes(`Archived “${topicName}”. It’s in Archive with all its history.`),
+    'Archive did not show its toast');
+  const archivedStrip = await browser.$('.tree-rows').$(`button*=Archived “${topicName}”`);
+  await click(archivedStrip);
   await wait(async () => (await readJson(targetPath)).topics[terminalTopic.id].archived_at === null, 'Undo did not restore the topic on disk');
   await wait(async () => await topicBand(topicName).isExisting(), 'Restored topic did not return to the tree');
   target = await readJson(targetPath);
@@ -159,17 +157,17 @@ export async function runHistoryActionsAcceptance(configuration) {
   await openSession(source.id);
   const sourceTopic = Object.values(source.topics).find(topic => Object.values(source.items).some(item => item.topic_id === topic.id && item.status === 'waiting_on_me'));
   assert.ok(sourceTopic);
-  // Archive never refuses a topic with open work: it asks once, in plain words, what stays and what is cancelled (ADR-0090).
+  // Archive never refuses a topic with open work: it asks once (SPEC 10.13), naming the questions waiting on the owner.
   await topicAction(sourceTopic.name, 'Archive');
   await dialog().waitForDisplayed();
   const archiveText = await dialog().getText();
-  assert.ok(archiveText.includes(`Archive “${sourceTopic.name}”?`), 'Archive confirmation did not name the topic');
-  assert.match(archiveText, /open items? stays? as (it is|they are)\./);
-  assert.ok(archiveText.includes('You can restore it any time.'));
+  assert.ok(archiveText.includes(`Archive the “${sourceTopic.name}” topic?`), 'Archive confirmation did not name the topic');
+  assert.match(archiveText, /questions? waiting on you go(es)? with it, unanswered/);
+  assert.ok(archiveText.includes('you can restore it any time from Archive'));
   assert.doesNotMatch(archiveText, /[0-9a-f]{8}-[0-9a-f]{4}-/);
-  assert.equal(await dialog().$('button=Archive topic').isEnabled(), true);
+  assert.equal(await dialog().$('button*=Archive topic').isEnabled(), true);
   // Cancel leaves it as it is; the source is continued below.
-  await click(await dialog().$('button=Cancel'));
+  await click(await dialog().$('button*=Cancel'));
   await wait(async () => !(await dialog().isExisting()), 'Archive confirmation did not close on Cancel');
   assert.deepEqual(await readFile(sourcePath), sourceBytes);
 

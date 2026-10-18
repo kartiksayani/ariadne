@@ -206,6 +206,39 @@ function mapWorld(fixture: DesignFixture, app: AppFixture): void {
     filters: { ...view.filters, ...(map.filter ? { statuses: [...map.filter] } : {}) } });
 }
 
+/**
+ * The bin (10.1, 10.11, 11.3): the agent removed each `binned` item, and what is below it, at 21:19. Each removal leaves the receipt notice
+ * 11.3 reads, and the owner's unsent message on the item that it cancelled (its words stay in the bin).
+ */
+function binWorld(fixture: DesignFixture, app: AppFixture, id: string): void {
+  const binned = app.items?.binned ?? [], route = fixture.route;
+  if (!binned.length || !route) return;
+  const session = fixture.transport.sessions.get(route.session_id)!, binding = session.bindings[session.active_binding_id!]!, removedAt = today('21:19');
+  const under = (root: string, itemId: string): boolean => {
+    for (let at: string | null = itemId; at; at = session.items[at]?.parent ?? null) if (at === root) return true;
+    return false;
+  };
+  binned.forEach((entry, at) => {
+    const item = session.items[entry.item];
+    if (!item) throw new Error(`final ${id}: binned item that is not in the session: ${entry.item}`);
+    const messageId = uuid(200 + at * 4), inputId = uuid(201 + at * 4), operationId = uuid(202 + at * 4);
+    item.removed_at = removedAt; item.removed_by = { binding_id: binding.id, message_id: messageId };
+    if (entry.words) {
+      session.inputs[inputId] = { id: inputId, seq: session.counters.next_input++, binding_id: binding.id, kind: 'reply',
+        target: { topic_id: item.topic_id, item_id: item.id }, message_id: uuid(203 + at * 4), answer_id: null, created_at: today('21:12'), expected_question_revision: null,
+        payload: { text: entry.words, intent: 'reply', selected_option_id: null,
+          target_snapshot: { topic_name: session.topics[item.topic_id]!.name, item_question: item.question, question_revision: item.question_revision, ask: null, options: [] },
+          context: { message_ids: [], item_ids: [item.id], round_id: null, continuation_operation_id: null } },
+        state: 'cancelled', cancel_cause: 'agent_removed', attempts: [], active_attempt_id: null, resolution_history: [] };
+    }
+    session.operation_receipts[operationId] = [{ operation_id: operationId, actor_scope: { kind: 'agent', binding_id: binding.id }, command_digest: 'a'.repeat(64),
+      result: { operation_id: operationId, session_id: session.id, revision: session.revision, data: { kind: 'apply',
+        agent_removals: [{ topic_id: item.topic_id, item_id: item.id, message_id: messageId, item_ids: Object.keys(session.items).filter(key => under(item.id, key)),
+          waiting_questions: 0, cancelled_input_ids: entry.words ? [inputId] : [] }],
+        allocated_refs: {}, messages: [], item_revisions: {}, topic_revisions: {}, input_result_state: null, queue_join_state: null } } }];
+  });
+}
+
 /** The app's state for one final-board state at one size: sessions and items from the world, the drafts typed in. */
 export function finalFixture(state: Pick<FinalState, 'id' | 'app'>, variant: Variant): DesignFixture {
   const spec = finalSpec(state, variant), fixture = buildFixture(spec, worldData(state.app));
@@ -219,6 +252,7 @@ export function finalFixture(state: Pick<FinalState, 'id' | 'app'>, variant: Var
   // The board's agent is running and waiting for me: idle, so an answer sent now reads "Sent at", not queued behind a turn.
   fixture.transport.idle(route.session_id);
   mapWorld(fixture, state.app);
+  binWorld(fixture, state.app, state.id);
   // "Later" is the owner's own mark (a preference), not a status of the item.
   fixture.transport.preferences.later = (state.app.items?.later ?? []).map(item => {
     if (!session.items[item]) throw new Error(`final ${state.id}: later on an item that is not in the session: ${item}`);

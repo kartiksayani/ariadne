@@ -904,12 +904,19 @@ export function TreeView(props: TreeViewProps) {
     const anchor = current?.id === before.sessionId ? stripAnchorFor(now, before.key) : null, strip = anchor ? elements.current.get(anchor) : undefined;
     if (strip) return { element: strip, offset: before.offset };
     if (!current || current.id !== before.sessionId) return null;
+    // A strip that went on Undo hands the hold back to the row whose place it kept.
+    const gone = before.rows.find(row => row.key === before.key);
+    if (gone?.kind === 'strip' && gone.place) for (const key of gone.place.covers) {
+      const back = elements.current.get(key);
+      if (back) return { element: back, offset: before.offset };
+    }
     const shown = new Map(now.map(row => [row.key, row]));
     for (let key = item ? item.parent ?? item.topic_id : null; key; key = current.items[key]?.parent ?? current.items[key]?.topic_id ?? null) {
       const row = shown.get(key);
       if (row?.kind === 'topic' ? !row.expanded : row?.kind === 'item' && row.hasKids && !row.expanded) return null;
     }
-    const keys = before.rows.flatMap(row => row.kind === 'item' ? [row.key] : []), at = keys.indexOf(before.key);
+    // A strip that went at commit keeps its order here, so the hold goes to the survivor next to it.
+    const keys = before.rows.flatMap(row => row.kind === 'item' || row.key === before.key ? [row.key] : []), at = keys.indexOf(before.key);
     for (const key of [...keys.slice(at + 1), ...keys.slice(0, Math.max(at, 0)).reverse()]) {
       const survivor = elements.current.get(key);
       if (survivor) return { element: survivor, offset: before.offsets.get(key) ?? before.offset };
@@ -948,7 +955,8 @@ export function TreeView(props: TreeViewProps) {
     if (revealedAnchor.current) revealedAnchor.current = { ...revealedAnchor.current, scrollTop: box.scrollTop };
     // An owner scroll back up (or rows growing into it) gives the spacer's room back; what is on screen stays.
     trimSpacer(box);
-    const top = readingTop(), list = latest.current.rows.filter(row => row.kind === 'item');
+    // A strip in a removed or archived row's place (E29) can be the reading row too: Undo puts the row back where it is.
+    const top = readingTop(), list = latest.current.rows.filter(row => row.kind === 'item' || row.kind === 'strip' && !!row.place);
     const panelKey = latest.current.selectedId;
     const panelRect = panelKey ? elements.current.get(panelKey)?.getBoundingClientRect() : undefined;
     panelTarget.current = panelKey && panelRect && panelRect.top >= top && panelRect.top < visibleBottom(box)

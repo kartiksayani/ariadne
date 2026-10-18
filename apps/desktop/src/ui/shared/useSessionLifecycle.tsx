@@ -193,7 +193,7 @@ export function useSessionLifecycle(input: SessionActions | null): SessionLifecy
     const saved = await run({ command: 'topic_archive', api_version: 1, op_id: '', params: { topic_id: topicId, expected_revision: topic.revision } }, current);
     if (saved) {
       const receipt = actions.getSnapshot().receipt, data = receipt && 'data' in receipt ? receipt.data : undefined;
-      setArchived({ topicId, name: topic.name, waiting, cancelled: data?.kind === 'topic_lifecycle' ? data.cancelled_input_ids?.length ?? 0 : 0 });
+      setArchived({ topicId, name: topic.short?.trim() || topic.name, waiting, cancelled: data?.kind === 'topic_lifecycle' ? data.cancelled_input_ids?.length ?? 0 : 0 });
     }
     return saved;
   };
@@ -251,7 +251,7 @@ export function useSessionLifecycle(input: SessionActions | null): SessionLifecy
         });
       };
     confirmArchive = confirm;
-    dialog = <ArchiveTopicDialog name={confirmed.name} items={Object.values(session.items).filter(item => item?.topic_id === confirmed.id && !itemRemoved(session, item.id)).length}
+    dialog = <ArchiveTopicDialog name={confirmed.short?.trim() || confirmed.name} items={Object.values(session.items).filter(item => item?.topic_id === confirmed.id && !itemRemoved(session, item.id)).length}
       waiting={waitingNow} agent={agent} busy={disabled} error={confirming.error} onCancel={() => { if (cancelWait()) setConfirming(null); }} onConfirm={confirm} />;
   } else if (review && session) {
     const closing = review.kind === 'session_close';
