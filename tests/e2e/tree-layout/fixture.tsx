@@ -28,6 +28,8 @@ class TreeLayoutTransport extends AppTransport {
       session.state = 'closed'; session.closed_at = session.updated_at; session.archived_at = session.updated_at;
       this.preferences.global.selected_navigation = { kind: 'session', session: route };
     }
+    // These tests measure the Map, not the stuck-reply notice (alpha.21 E17): the demo's old queued replies stay "just sent".
+    for (const input of Object.values(session.inputs)) if (input) input.created_at = '2099-01-01T00:00:00.000Z';
     const items = session.items;
     items['1']!.question = 'A long item title with enough words to span several lines in a narrow tree. '.repeat(5);
     for (let n = 9; n <= 18; n++) items[String(n)] = { ...items['8']!, id: String(n), ordinal: n, question: `Another item ${n}`, outcome: 'A short result.' };

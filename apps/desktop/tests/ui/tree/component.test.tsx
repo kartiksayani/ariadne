@@ -3010,9 +3010,11 @@ describe('scrolling the tree', () => {
       if (this.matches('.tree-topic-content')) return new DOMRect(0, 60, 300, 360);
       return rect.call(this);
     });
-    const view = await mount();
-    bandMenu(topicRow('Delivery decisions'), /^Reply to topic/);
-    await waitFor(() => expect(document.querySelector('.tree-topic-reply')).not.toBeNull());
+    // A closed topic's "Everything here is closed" prompt is the block under the band (it was the open reply box before alpha.21).
+    const view = await mount({ configure: transport => {
+      for (const item of Object.values(transport.sessions.get(route.session_id)!.items)) if (item) item.status = 'done';
+    } });
+    await waitFor(() => expect(document.querySelector('.tree-topic-content')).not.toBeNull());
     scroller().scrollTop = 190;
     const target = link(view, '2'); // top 10: on screen, but behind the 60 px band.
     view.rerender({ reveal: target, historyReveal: target, selectedId: '2' });

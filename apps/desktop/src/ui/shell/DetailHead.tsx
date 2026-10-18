@@ -58,7 +58,7 @@ export function DetailHead({ path, bigger = false, onBackToMap, fold, hidden = f
       <button type="button" className="btn btn-ghost btn-icon shell-detail-action" title="Forward (⌘])" aria-label="Forward"
         disabled={!history.canForward} onClick={history.forward}><i className="ph ph-arrow-right" aria-hidden="true" /></button>
     </div>}
-    {read && <button type="button" className="btn btn-ghost btn-icon shell-detail-action" aria-pressed={read.open}
+    {read && <button type="button" className="btn btn-ghost btn-icon shell-detail-action"
       aria-label={read.open ? 'Back to the Map' : 'Read in a bigger view'} title={read.open ? 'Back to the Map' : 'Read in a bigger view'}
       onClick={read.toggle}><i className="ph ph-file-text" aria-hidden="true" /></button>}
     {focus && <button type="button" className="btn btn-ghost btn-icon shell-detail-action" aria-pressed={focus.on} data-testid="details-focus"

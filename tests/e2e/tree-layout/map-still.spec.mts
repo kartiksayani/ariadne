@@ -194,10 +194,10 @@ const triggers: readonly Trigger[] = [
     await expect(fold).toHaveAttribute('aria-expanded', 'true');
     await expect(fold).toBeInViewport();
   }],
-  ['a topic reply opens under the band', 'held', null, nothing, async page => {
+  ['a topic reply opens in Details', 'held', null, nothing, async page => {
     await press(moreActions(page));
     await page.getByRole('menuitem', { name: /^Reply to topic/ }).click();
-  }, page => expect(page.getByRole('textbox', { name: 'Reply to this topic' })).toBeVisible()],
+  }, page => expect(page.getByRole('complementary', { name: 'Item detail' }).getByRole('textbox', { name: 'Reply to this topic' })).toBeVisible()],
   ['the Ack all popover opens', 'still', null, nothing, page => press(bandButton(page, /^Ack all/)),
     page => expect(page.getByRole('dialog', { name: /^Acknowledge results in/ })).toBeVisible()],
   ['the Ack all popover is cancelled', 'still', null, async page => { await press(bandButton(page, /^Ack all/)); },

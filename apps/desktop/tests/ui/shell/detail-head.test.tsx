@@ -38,7 +38,6 @@ describe('the head controls', () => {
     const toggle = vi.fn();
     mount({ head: { read: { open, toggle } } });
     const button = screen.getByRole('button', { name });
-    expect(button.getAttribute('aria-pressed')).toBe(String(open));
     fireEvent.click(button); expect(toggle).toHaveBeenCalledOnce();
   });
 

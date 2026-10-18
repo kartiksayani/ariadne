@@ -511,25 +511,6 @@
   padding-left: 26px;
 }
 
-.tree-topic-reply {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 4px 0 6px 26px;
-}
-
-.tree-topic-reply textarea {
-  width: 100%;
-  resize: vertical;
-}
-
-.tree-topic-reply-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
 .tree-prompt {
   gap: 8px;
   color: color-mix(in srgb, var(--color-text) 64%, transparent);
