@@ -408,12 +408,35 @@ export class DesignTransport extends AppTransport {
   }
   override async invoke<T>(name: string, args: { request: OwnerQueryRequest | OwnerMutationRequest }): Promise<T> {
     const { request } = args;
-    if ('command' in request) return request.command.command === 'input_submit' ? this.submit(name, args) : super.invoke(name, args);
+    if ('command' in request) {
+      if (this.loseLater && request.command.command === 'preferences_patch' && request.command.params.entries.some(entry => entry.kind === 'set_later')) {
+        this.loseLater = false; this.mutations.push(structuredClone(request)); throw new Error('Lost response');
+      }
+      return request.command.command === 'input_submit' ? this.submit(name, args) : super.invoke(name, args);
+    }
     assertOwnerWire(request);
     this.queries.push(structuredClone(request));
     // The loading frame: the session read never completes.
     if (request.request.command === 'session_get' && request.session?.session_id === this.hang?.session_id) return new Promise<T>(() => {});
+    // Final 12.7 and 12.8: the session file can't be read, from the start or after a good read.
+    if (request.request.command === 'session_get' && this.failReads && request.session?.session_id === this.unreadable?.session_id) throw new Error('The session file could not be read.');
     return { api_version: 1, ok: true, data: { kind: name, data: structuredClone(this.answer(request)) } } as T;
+  }
+  /** Set while session reads fail, as a locked or damaged session file does. */
+  failReads = false;
+  /** The session whose file can't be read while `failReads` is set; the other sessions read as ever. */
+  unreadable: SessionRef | null = null;
+  /** Set until the owner's next "Later" is saved: that write is lost on its way back, so Ariadne can't tell whether it landed. */
+  private loseLater = false;
+  /**
+   * What a final state's `act` step makes happen after the app has mounted: a read that fails after a good one (12.8, the last good
+   * copy), or a save whose outcome is unknown (12.9: the next write is lost on its way back).
+   */
+  drive(change: 'read-fails' | 'save-unsure'): void {
+    if (change === 'save-unsure') { this.loseLater = true; return; }
+    this.failReads = true;
+    const session = this.sessions.get(this.unreadable!.session_id)!;
+    this.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision + 1 });
   }
   /** The session's running agent is connected and idle, not mid-turn (final frames: a new answer is sent, not queued behind it). */
   idle(sessionId: string): void {

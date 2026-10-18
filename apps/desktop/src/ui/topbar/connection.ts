@@ -101,7 +101,8 @@ export function cardActions(view: ConnectionView, a: ConnectionCardActions): Con
     reconnect: make('again', 'ph ph-arrows-clockwise', 'Try now', a.onTryAgain),
     unreadable: [...again, ...make('file', 'ph ph-folder-simple', 'Show the file', a.onShowFile)],
     stale: again,
-    unsaved: again,
+    // The Sending dialog stays one press away: Pause and Resume wait, but the owner may still read how sending stands.
+    unsaved: [...again, ...sending],
   } satisfies Record<ConnectionKind, ConnAction[]>)[view.kind];
   const close = view.kind === 'closed' || view.kind === 'loading' ? [] : make('close', 'ph ph-x-circle', 'Close session', a.onClose);
   const copyId: ConnAction[] = a.onCopyId ? [{ key: 'copy-id', icon: 'ph ph-copy', label: 'Copy session ID', run: () => { void a.onCopyId?.(); }, copy: a.onCopyId }] : [];

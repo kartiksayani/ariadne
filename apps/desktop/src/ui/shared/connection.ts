@@ -58,7 +58,7 @@ export function readAt(snapshot: object): number {
 }
 
 /**
- * True where the line above the Map carries the "isn’t sure your last change was saved" report, so the Map’s own banners
- * for it stay out (SPEC 12.9). Absent a line (a view mounted alone, a page), the banner stays.
+ * True where the line above the Map is on screen. It then carries the state of a failed read and an unsure save (SPEC 12.7-12.9),
+ * so the alert over the Map and the Map's own banner for them stay out. Absent a line (a view mounted alone, a page), they stay.
  */
-export const UnsavedLine = createContext(false);
+export const ConnectionLineShown = createContext(false);

@@ -246,7 +246,7 @@ it.each(['r', 'b'])('failed preference navigation cannot authorize %s focus or B
     return invoke(name, args);
   });
   row.focus(); fireEvent.keyDown(row, { key });
-  await screen.findByText('Ariadne isn’t sure that change was saved.');
+  await screen.findByText('Ariadne isn’t sure your last change was saved.');
   expect(screen.queryByLabelText('Reply message')).toBeNull(); expect(screen.queryByLabelText('Bring up message')).toBeNull();
   expect(document.activeElement).toBe(row); expect(transport.preferences.drafts).toEqual([]);
   expect(transport.mutations.filter(value => value.command.command === 'input_submit')).toHaveLength(0);

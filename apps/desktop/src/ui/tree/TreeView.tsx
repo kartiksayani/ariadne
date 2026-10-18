@@ -43,7 +43,7 @@ import { FilterRow } from './FilterRow';
 import { useLocalChips } from './useLocalChips';
 import { chipCounts, filterActive, filterOf, filterSignature, isLocalChip, pickedChips, summaryCounts, toggleLocalChip, toggleSavedChip, type Chip, type FilterScope } from '../../selectors/tree/filter';
 import { useSessionLifecycleFor } from '../shared/SessionLifecycleOwner';
-import { UnsavedLine } from '../shared/connection';
+import { ConnectionLineShown } from '../shared/connection';
 import { UnreadableMap } from './UnreadableMap';
 import { ItemRefs } from '../shared/MarkdownText';
 import { shortLabel } from '../shared/short';
@@ -1266,8 +1266,8 @@ export function TreeView(props: TreeViewProps) {
   const loading = !session && state.status === 'loading';
   // No session and no read to show: the Map's place says so (SPEC 12.7); the line above carries the state.
   const unreadable = !session && state.status === 'inaccessible';
-  // Where the line above the Map reports an unsaved change, its "Try again" is the one place to check again.
-  const unsavedOnLine = useContext(UnsavedLine);
+  // Where the line above the Map is on screen it reports an unsure save, and its "Try again" is the one place to check again.
+  const lineShown = useContext(ConnectionLineShown);
   // Stopped deliveries answered on a row the owner can see; the recovery banner lists the rest
   // (none in the graph, which has no rows; a filtered-out or folded row is not here).
   const inline: ReadonlySet<string> = new Set(graph && !loading ? [] : rows.flatMap(row => row.delivery?.stuck ? [row.delivery.stuck.input.id] : []));
@@ -1332,7 +1332,7 @@ export function TreeView(props: TreeViewProps) {
     {filterRow}
     {model?.outside && <Banner icon="ph ph-funnel" actions={<button type="button" className="btn btn-ghost" onClick={resume}>Resume filtered view</button>}>
       Showing an item outside your current filters.</Banner>}
-    {lifecycle.pending && !unsavedOnLine && <Banner icon="ph ph-warning" alert actions={<button type="button" className="btn btn-ghost" onClick={lifecycle.reconcile}>Check again</button>}>
+    {lifecycle.pending && !lineShown && <Banner icon="ph ph-warning" alert actions={<button type="button" className="btn btn-ghost" onClick={lifecycle.reconcile}>Check again</button>}>
       {lifecycle.pending}. Check whether your last change was saved before making another.</Banner>}
     <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
     {/* The graph keeps its own scroller (ui/graph/graph.css). */}

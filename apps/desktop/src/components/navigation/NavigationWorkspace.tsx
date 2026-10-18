@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AdapterConfig, ProjectSummary, SummaryCounts } from '../../generated/domain/models';
 import type { SessionPreferences, SessionRef } from '../../generated/core';
 import { plainFailure } from '../../data/plain';
@@ -34,7 +34,7 @@ import { conflictNotice, isViewConflict } from '../../ui/shared/conflictNotice';
 import { useSessionSnapshots } from '../../ui/pages/snapshots';
 import { useHidden } from '../../ui/remove/queue';
 import { SessionLifecycleOwner } from '../../ui/shared/SessionLifecycleOwner';
-import { UnsavedLine } from '../../ui/shared/connection';
+import { ConnectionLineShown } from '../../ui/shared/connection';
 import type { MapSearchStatus } from '../../ui/tree/mapSearch';
 import '../../styles/navigation.css';
 
@@ -167,14 +167,14 @@ function SelectedSession({ navigation, renderSession }: { navigation: Navigation
   return <SessionView key={key(selected.session)} navigation={state} store={store} renderSession={renderSession} />;
 }
 function SessionView({ navigation, store, renderSession }: { navigation: NavigationState; store: SessionStore; renderSession: NavigationWorkspaceProps['renderSession'] }) {
-  const session = useSession(store);
+  const session = useSession(store), lineShown = useContext(ConnectionLineShown);
   const preferences = navigation.preferences?.sessions.find(view => key(view.session) === key(session.route)) ?? null;
   const reveal = navigation.reveal;
   const matchingReveal = reveal?.store === store ? reveal : null;
   // 1h: the skeleton stands in for the session until its first snapshot.
   if (session.status === 'loading' && !session.snapshot) return <LoadingSession />;
   return <>
-    {session.error && <p role="alert">{plainFailure(session.error)}</p>}
+    {session.error && !lineShown && <p role="alert">{plainFailure(session.error)}</p>}
     {matchingReveal?.kind === 'missing_item' && <p className="nav-banner" role="status">{matchingReveal.banner}</p>}
     {renderSession({ store, preferences, temporaryExpandedItemIds: matchingReveal?.kind === 'item' ? matchingReveal.temporaryExpandedItemIds : [],
       missingItemBanner: matchingReveal?.kind === 'missing_item' ? matchingReveal.banner : null })}
@@ -369,7 +369,7 @@ export function NavigationWorkspace({ store, discovery, dockContent, waitingStor
     </SessionLists>;
   const center = <>
     {page && <div className="pw-page-notes">{notes}</div>}
-    {page ?? <div className="nav-content nav-session-content">{notes}<div className="nav-connection-line" ref={setLineHost} /><UnsavedLine.Provider value={lineShown}><SelectedSession navigation={store} renderSession={renderSession} /></UnsavedLine.Provider></div>}
+    {page ?? <div className="nav-content nav-session-content">{notes}<div className="nav-connection-line" ref={setLineHost} /><ConnectionLineShown.Provider value={lineShown}><SelectedSession navigation={store} renderSession={renderSession} /></ConnectionLineShown.Provider></div>}
     {state.pendingNavigation && <p className="nav-opening" role="status">{state.pendingNavigation.kind === 'all_sessions'
       ? 'Opening All sessions…' : state.pendingNavigation.kind === 'projects' ? 'Opening Projects…'
         : state.pendingNavigation.kind === 'project' ? 'Opening the project…' : 'Opening the session…'}</p>}

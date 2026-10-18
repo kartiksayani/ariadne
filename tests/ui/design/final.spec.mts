@@ -96,6 +96,7 @@ async function perform(page: Page, step: Step): Promise<void> {
       if (scroller) { scroller.scrollTop = 0; scroller.scrollLeft = 0; }
     });
   }
+  else if ('drive' in step) await page.evaluate(change => (window as unknown as { __designFixture: { transport: { drive(change: string): void } } }).__designFixture.transport.drive(change), step.drive);
   else await page.keyboard.type(step.type);
   await settle(page);
 }
