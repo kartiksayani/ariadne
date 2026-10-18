@@ -61,10 +61,9 @@ describe('the removal queue', () => {
     render(<Notices store={notices} />);
     act(() => { queue.schedule(itemTarget('2'), itemSubject('tell', 1), { restore }); });
     await act(async () => { await vi.advanceTimersByTimeAsync(300); });
-    expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+    // Every notice has × (alpha.21 E20); this one is replaced by the toast with W7's removal flow.
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeTruthy();
     const undo = screen.getByRole('button', { name: 'Undo' });
-    undo.focus();
-    fireEvent.keyDown(undo, { key: 'Escape' });
     await act(async () => { await vi.advanceTimersByTimeAsync(UNDO_MS - 301); });
     expect(service.removeItem).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Undo' })).toBe(undo);
