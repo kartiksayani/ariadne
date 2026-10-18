@@ -264,19 +264,91 @@ it('the refcounted visit writer saves other-session visits and preserves unrelat
   releaseB(); navigation.stop();
 });
 
-it('failed Recent writes retain visits behind a visible exact-save retry', async () => {
+it('a failed Recent write is retried once, quietly, with the exact operation before any notice', async () => {
   const { transport, service } = await ready();
   const navigation = new NavigationStore(service);
   await navigation.refresh();
   const release = navigationVisits.bind(navigation);
   transport.failNext = 'preferences_patch';
   navigationVisits.record(route, '1.1', 'answered');
-  await vi.waitFor(() => expect(notices.getSnapshot().find(notice => notice.id === 'recent-save')).toBeTruthy());
+  await vi.waitFor(() => expect(transport.preferences.sessions[0]!.recent_items?.[0]).toMatchObject({ item_id: '1.1', action: 'answered' }));
+  expect(notices.getSnapshot().find(notice => notice.id === 'recent-save')).toBeUndefined();
+  const patches = transport.mutations.filter(request => request.command.command === 'preferences_patch');
+  expect(patches).toHaveLength(2);
+  expect(patches[1]!.command.op_id).toBe(patches[0]!.command.op_id);
+  expect(navigation.getSnapshot().pendingOperationId).toBeNull();
+  release(); navigation.stop();
+});
+
+it('a Recent write that fails twice shows one notice, and its retry saves', async () => {
+  const { transport, service } = await ready();
+  const navigation = new NavigationStore(service);
+  await navigation.refresh();
+  const release = navigationVisits.bind(navigation);
+  const invoke = transport.invoke.bind(transport);
+  let failures = 2;
+  vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+    if (name === 'preferences_patch' && failures > 0) { failures--; transport.mutations.push(structuredClone(args.request) as OwnerMutationRequest); throw new Error('Lost response'); }
+    return invoke(name, args);
+  });
+  navigationVisits.record(route, '1.1', 'answered');
+  await vi.waitFor(() => expect(notices.getSnapshot().filter(notice => notice.id === 'recent-save')).toHaveLength(1));
   expect(navigation.getSnapshot().pendingOperationId).not.toBeNull();
   notices.getSnapshot().find(notice => notice.id === 'recent-save')!.actions![0]!.run();
   await vi.waitFor(() => expect(transport.preferences.sessions[0]!.recent_items?.[0]).toMatchObject({ item_id: '1.1', action: 'answered' }));
   expect(notices.getSnapshot().find(notice => notice.id === 'recent-save')).toBeUndefined();
   release(); navigation.stop();
+});
+
+it('another writer holding the store is not reported as a failed Recent save', async () => {
+  const { transport, service } = await ready();
+  const navigation = new NavigationStore(service);
+  await navigation.refresh();
+  const release = navigationVisits.bind(navigation);
+  const invoke = transport.invoke.bind(transport);
+  let lose = true;
+  vi.spyOn(transport, 'invoke').mockImplementation(async (name, args) => {
+    const request = args.request as OwnerMutationRequest;
+    const entries = 'command' in request && request.command.command === 'preferences_patch' ? request.command.params.entries : [];
+    if (lose && entries.some(entry => entry.kind === 'set_global')) { lose = false; throw new Error('Lost response'); }
+    return invoke(name, args);
+  });
+  await navigation.saveTheme('dark', navigation.getSnapshot().preferences!.revision);
+  expect(navigation.getSnapshot().pendingOperationId).not.toBeNull();
+  navigationVisits.record(route, '1.1', 'answered');
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(notices.getSnapshot().find(notice => notice.id === 'recent-save')).toBeUndefined();
+  release(); navigation.stop();
+});
+
+it('a miss behind another writer resets the count, so a later own miss is still retried quietly', async () => {
+  const other = { ...route, session_id: '00000000-0000-4000-8000-0000000000aa' };
+  const state = { writing: false, pendingOperationId: null as string | null, error: null as { code: string } | null, preferences: { revision: 1, sessions: [] as unknown[] } };
+  const listeners = new Set<() => void>();
+  const outcomes: ('own miss' | 'behind another writer' | 'saved')[] = ['own miss', 'behind another writer', 'own miss', 'saved'];
+  const calls: string[] = [];
+  const stub = {
+    getSnapshot: () => state,
+    subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    isRecentPending: () => false,
+    retryMutation: async () => false,
+    // Visits other tests left queued share the module's queue; this writer saves them so only `other` is scripted.
+    saveRecentItems: async (session: { session_id: string }) => {
+      if (session.session_id !== other.session_id) return true;
+      const outcome = outcomes.shift()!;
+      calls.push(outcome);
+      state.writing = outcome === 'behind another writer';
+      state.error = outcome === 'own miss' ? { code: 'invalid_response' } : null;
+      return outcome === 'saved';
+    },
+  };
+  const release = navigationVisits.bind(stub as unknown as NavigationStore);
+  navigationVisits.record(other, '1', 'viewed');
+  await vi.waitFor(() => expect(calls).toEqual(['own miss', 'behind another writer']));
+  state.writing = false; listeners.forEach(listener => { listener(); });
+  await vi.waitFor(() => expect(calls).toEqual(['own miss', 'behind another writer', 'own miss', 'saved']));
+  expect(notices.getSnapshot().find(notice => notice.id === 'recent-save')).toBeUndefined();
+  release();
 });
 
 it('Waiting visits persist a never-opened session without opening its tab or changing navigation', async () => {

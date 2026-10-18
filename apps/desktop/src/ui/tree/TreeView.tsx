@@ -116,6 +116,8 @@ export interface TreeViewProps {
 
 /** Most folded topics a session view keeps (the saved `collapsed_topic_ids` bound); the oldest folds drop first. */
 const FOLDS_KEPT = 256;
+/** How long a clicked row waits for an in-flight automatic Recent save before it opens regardless. */
+const RECENT_WAIT_MS = 1000;
 // A row ending at the sticky edge can peek out by a sub-pixel without being the reading row.
 const READING_EDGE_CLEARANCE = 1;
 /** A saved reading offset, or the initial selection centred while the view loads. */
@@ -156,7 +158,7 @@ export function TreeView(props: TreeViewProps) {
   const foldView = graph ? savedView : view;
   const filterFolds = useFilterFolds(navigation.routes, route, foldView ? filterSignature({ view: foldView, local: localChips.chips }) : undefined);
   const viewBusy = nav.writing || nav.pendingOperationId !== null;
-  const focusDisabled = viewBusy && !navigation.isWritingRecent();
+  const focusDisabled = viewBusy && !navigation.isRecentPending();
   const archivedMode = view?.filters.archived ?? false;
   const savedLater = preferences?.later;
   const later = useMemo(() => new Set(savedLater?.filter(item => item.project_id === route.project_id && item.session_id === route.session_id)
@@ -358,7 +360,9 @@ export function TreeView(props: TreeViewProps) {
   // ------------------------------------------------------------ writes
   const saveView = (change: (next: SessionPreferences) => void) => {
     const snapshot = navigation.getSnapshot();
-    if (!latest.current.view || snapshot.pendingOperationId !== null && !snapshot.writing) return Promise.resolve(false);
+    // An unconfirmed Recent write is automatic and the owner never waits on it: the edit queues and the flush effect
+    // saves it once that write settles. Any other unconfirmed write is the owner's own and still refuses.
+    if (!latest.current.view || snapshot.pendingOperationId !== null && !snapshot.writing && !navigation.isRecentPending()) return Promise.resolve(false);
     return new Promise<boolean>(done => { setPendingEdits(previous => [...previous, { change, done }]); });
   };
   useEffect(() => {
@@ -381,7 +385,7 @@ export function TreeView(props: TreeViewProps) {
   }, [pendingEdits, writingEdits, viewBusy, savedView, preferences, navigation]);
   const clickedReveal = useRef<RevealedItem | null>(null);
   const select = (id: string, fromRow = true, opening = false) => {
-    if (fromRow && viewBusy && !navigation.isWritingRecent()) return false;
+    if (fromRow && viewBusy && !navigation.isRecentPending()) return false;
     if (fromRow) peek?.closeAll();
     releaseReveal();
     const call = ++request.current;
@@ -399,6 +403,16 @@ export function TreeView(props: TreeViewProps) {
       while (navigation.getSnapshot().writing) {
         const completion = navigation.getWritingCompletion();
         if (!completion) break;
+        if (navigation.isRecentPending()) {
+          // The Recent trail is automatic. A click waits for it only briefly and opens whatever its outcome.
+          let wait: ReturnType<typeof setTimeout> | undefined;
+          const finished = await Promise.race([completion.then(() => true, () => true),
+            new Promise<boolean>(resolve => { wait = setTimeout(() => { resolve(false); }, RECENT_WAIT_MS); })]);
+          clearTimeout(wait);
+          if (expired || !mounted.current || call !== request.current) return null;
+          if (!finished) break;
+          continue;
+        }
         await completion;
         if (expired || !mounted.current || call !== request.current) return null;
       }
@@ -406,7 +420,7 @@ export function TreeView(props: TreeViewProps) {
       if (expired || !mounted.current || call !== request.current) return null;
       if (store.getSnapshot().status !== 'ready' || store.getSnapshot().error) throw loading();
       const current = navigation.getSnapshot();
-      if (current.writing || current.pendingOperationId !== null) throw new OwnFailure({ code: 'store_busy',
+      if ((current.writing || current.pendingOperationId !== null) && !navigation.isRecentPending()) throw new OwnFailure({ code: 'store_busy',
         message: 'Another view change is being saved. Wait for it, then try again.', hint: '', retryable: true, field_errors: [] });
       return navigation.routes.revealItem({ ...route, item_id: id });
     };
