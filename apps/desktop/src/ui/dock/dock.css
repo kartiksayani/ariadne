@@ -131,6 +131,39 @@
   color: var(--st-done);
 }
 
+/* Where answers wait while the agent isn't live (SPEC 5.12): a quiet chip, no ring, beside the other-sessions chip. */
+.dock-state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  font-size: calc(12px * var(--text-scale));
+  margin-right: 8px;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--color-text) 66%, transparent);
+}
+
+.dock-line-loading {
+  gap: 10px;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.dock-line-quiet > .dock-muted {
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+}
+
+.dock-line-quiet > .dock-danger {
+  color: var(--a-danger);
+}
+
+.dock-skeleton {
+  flex: none;
+  width: 140px;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--a-skel);
+}
+
 .dock-sent,
 .dock-others,
 .dock-draft {
