@@ -19,7 +19,7 @@ const ids = (list: readonly { id: ItemActionId; applies: boolean }[]) => list.fi
 describe('useItemActions', () => {
   it.each([
     ['open', ['followUp', 'bring', 'later', 'drop', 'hide', 'remove', 'copyRef'], 'Reply'],
-    ['waiting_on_me', ['followUp', 'hide', 'remove', 'copyRef'], 'Answer'],
+    ['waiting_on_me', ['hide', 'remove', 'copyRef'], 'Answer'],
     ['in_progress', ['followUp', 'hide', 'remove', 'copyRef'], 'Add a note'],
     ['decided', ['followUp', 'reopen', 'hide', 'remove', 'copyRef'], 'Follow up'],
     ['done', ['followUp', 'reopen', 'hide', 'remove', 'copyRef'], 'Follow up'],
@@ -53,9 +53,23 @@ describe('useItemActions', () => {
 
   it('names why a fitting action cannot run now, and never blocks Hide, Remove or Copy', () => {
     const { session, item } = withStatus('open');
-    const { result } = renderHook(() => useItemActions({ session, item, on: handlers(), held: 'A message is on its way' }));
+    const { result } = renderHook(() => useItemActions({ session, item, on: handlers(), held: { followUp: 'A message is on its way', bring: 'A message is on its way', later: 'A message is on its way', drop: 'A message is on its way' } }));
     expect(result.current.filter(action => action.disabledReason).map(action => action.id)).toEqual(['followUp', 'bring', 'later', 'drop']);
     expect(result.current.find(action => action.id === 'bring')!.disabledReason).toBe('A message is on its way');
+  });
+
+  it('lets a waiting item that already has a reply box apply followUp, under the host’s own label', () => {
+    const { session, item } = withStatus('waiting_on_me');
+    const { result } = renderHook(() => useItemActions({ session, item, on: handlers(), replyApplies: true, replyLabel: 'Add a reply' }));
+    expect(ids(result.current)).toEqual(['followUp', 'hide', 'remove', 'copyRef']);
+    expect(result.current.find(action => action.id === 'followUp')!.label).toBe('Add a reply');
+  });
+
+  it('leaves out Hide, Unhide and Remove when the host gives no handler, and greys everything that sends in an archived session', () => {
+    const { session, item } = withStatus('open', value => { value.archived_at = new Date().toISOString() as never; });
+    const { result } = renderHook(() => useItemActions({ session, item, on: { copyRef: vi.fn() } }));
+    expect(ids(result.current)).toEqual(['followUp', 'bring', 'later', 'drop', 'copyRef']);
+    expect(result.current.filter(action => action.disabledReason).map(action => action.disabledReason)).toEqual(['Archived', 'Archived', 'Archived', 'Archived']);
   });
 
   it('is empty without an item', () => {

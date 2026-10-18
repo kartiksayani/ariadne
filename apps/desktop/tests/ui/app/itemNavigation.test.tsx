@@ -177,7 +177,7 @@ describe('composed item navigation', () => {
     } else session.topics[session.items['2']!.topic_id]!.archived_at = session.updated_at;
     ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
-    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['2']!.question} · Waiting on me` }));
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `Related: ${session.items['2']!.question} · Waiting on me` }));
     const detail = screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     expect(within(detail).getByRole('region', { name: 'Conversation' })).toBeTruthy();
     expect(detail.querySelector('[data-owner-input]')).toBeNull();
@@ -200,7 +200,7 @@ describe('composed item navigation', () => {
     await setup(transport); await openSession(); await pick('8');
     session.state = 'closed'; session.closed_at = session.updated_at; ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
-    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['2']!.question} · Waiting on me` }));
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `Related: ${session.items['2']!.question} · Waiting on me` }));
     const detail = screen.getByLabelText(/^Detail of /, { selector: '[data-detail-item-id="2"]' });
     expect(within(detail).getByRole('region', { name: 'Your answer' })).toBeTruthy();
     expect(within(detail).getByText(sessionClosedReason)).toBeTruthy();
@@ -215,17 +215,17 @@ describe('composed item navigation', () => {
     await setup(transport); await openSession(); await pick('4');
     expect(document.querySelector('[role="treeitem"][data-item-id="1.1"]')).toBeNull();
     const links = document.querySelector<HTMLElement>('.detail-related')!;
-    const hidden = within(links).getByRole('button', { name: `${session.items['1.1']!.question} (hidden) · Open` });
+    const hidden = within(links).getByRole('button', { name: `Related: ${session.items['1.1']!.question} (hidden) · Open` });
     expect(hidden.classList.contains('is-hidden')).toBe(true);
     await click(hidden); selected('1.1');
     expect(document.querySelector('[role="treeitem"][data-item-id="1.1"]')!.classList.contains('tree-item-hidden')).toBe(true);
     expect(document.querySelector('.tree-hidden-group')!.getAttribute('aria-expanded')).toBe('true');
     expect(view().hidden_item_ids).toEqual(['1']);
     await click(control('Back')); selected('4');
-    expect(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['1.1']!.question} (hidden) · Open` })).toBeTruthy();
+    expect(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `Related: ${session.items['1.1']!.question} (hidden) · Open` })).toBeTruthy();
     await click(control('Forward')); selected('1.1');
     // The reverse connection navigates through the same history even though only item 4 declared it.
-    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['4']!.question} · Open` })); selected('4');
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `Related: ${session.items['4']!.question} · Open` })); selected('4');
     await click(control('Back')); selected('1.1');
     expect(view().hidden_item_ids).toEqual(['1']);
   });
@@ -430,7 +430,7 @@ describe('composed map reveal scrolling', () => {
     const before = treeScroll().scrollTop;
     const detail = within(screen.getByLabelText('Item detail'));
     if (entry === 'related link') {
-      await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['8']!.question} · Open` }));
+      await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `Related: ${session.items['8']!.question} · Open` }));
     } else if (entry === 'Markdown reference') {
       await click(within(document.querySelector<HTMLElement>('.detail-question')!).getByRole('button', { name: `${session.items['8']!.question} · Open` }));
     } else if (entry === 'child link') {
@@ -448,7 +448,7 @@ describe('composed map reveal scrolling', () => {
     transport.preferences.sessions[0]!.hidden_item_ids = ['1'];
     await setup(transport); await openSession(); await pick('4'); await readAt(150);
     expect(treeRow('1.1')).toBeNull();
-    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['1.1']!.question} (hidden) · Open` }));
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `Related: ${session.items['1.1']!.question} (hidden) · Open` }));
     selected('1.1'); inTree('1.1');
     expect(treeScroll().scrollTop).toBeGreaterThan(150);
     expect(transport.preferences.sessions.find(view => view.session.session_id === route.session_id)!.hidden_item_ids).toEqual(['1']);
@@ -491,7 +491,7 @@ describe('composed map reveal scrolling', () => {
     selected('2'); inTree('2');
     expect(document.activeElement).toBe(treeRow('2'));
     await readAt(600);
-    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `${session.items['1.1']!.question} · Open` }));
+    await click(within(document.querySelector<HTMLElement>('.detail-related')!).getByRole('button', { name: `Related: ${session.items['1.1']!.question} · Open` }));
     selected('1.1'); inTree('1.1');
     await readAt(600);
     await click(control('Back')); selected('2'); inTree('2');

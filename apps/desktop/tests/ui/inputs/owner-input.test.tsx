@@ -450,8 +450,9 @@ describe('owner input component and durable draft controller', () => {
       // Item 3 is in progress with a reply in flight; item 4 is open with a drop queued.
       show(value, '4');
       expect(await screen.findByRole('textbox', { name: 'Reply message' })).toBeTruthy();
-      expect(screen.queryByRole('button', { name: /Bring it up/ })).toBeNull();
-      expect(screen.queryByRole('button', { name: /^Drop/ })).toBeNull();
+      // Bring it up and Drop stay in the row, greyed with the reason, until the message settles (never sent twice).
+      expect((screen.getByRole('button', { name: /Bring it up/ }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole('button', { name: /^Drop/ }) as HTMLButtonElement).disabled).toBe(true);
       cleanup(); show(value, '3');
       expect(await screen.findByRole('textbox', { name: 'Note message' })).toBeTruthy();
       expect(document.querySelector('[data-pending]')).toBeTruthy();
@@ -777,7 +778,7 @@ describe('owner input component and durable draft controller', () => {
       await act(async () => { await value.store.refresh(); });
       await waitFor(() => expect(document.querySelector('[data-pending]')).toBeTruthy());
       expect(screen.queryByRole('textbox', { name: 'Drop reason' })).toBeNull();
-      expect(screen.queryByRole('button', { name: /^Drop/ })).toBeNull();
+      expect((screen.getByRole('button', { name: /^Drop/ }) as HTMLButtonElement).disabled).toBe(true);
       expect(screen.getByText('Queued behind your message on “Implement receipt lookup”')).toBeTruthy();
       expect(document.querySelector('.detail-dock .detail-delivery-hint')).toBeNull();
       expect(screen.queryByText('Your message is on its way. You can write another; it goes out after.')).toBeNull();
@@ -1387,7 +1388,7 @@ describe('owner input component and durable draft controller', () => {
     const followUp = await screen.findByRole('button', { name: 'Add a reply' });
     await waitFor(() => expect(followUp.hasAttribute('disabled')).toBe(false)); await user.click(followUp);
     await screen.findByRole('textbox', { name: 'Reply message' });
-    const section = screen.getByRole('region', { name: 'Reply' });
+    const section = screen.getByRole('group', { name: 'Item actions' }).parentElement!;
     expect(section.textContent).not.toContain(changedText);
     expect(screen.queryByRole('button', { name: 'Review this question' })).toBeNull();
   });
@@ -2011,15 +2012,16 @@ describe('the item detail reads like a chat', () => {
 
   it('shares the action row between an inline Ack destination, Reply and Later', async () => {
     const { dock } = await view('8', session => { session.items['8']!.status = 'open'; session.items['8']!.ask = null; session.items['8']!.ack_to = 'in_progress'; });
-    const ack = within(dock!).getByRole('button', { name: 'Ack → In progress' });
-    const reply = within(dock!).getByRole('button', { name: 'Reply' });
-    const later = within(dock!).getByRole('button', { name: 'Later' });
-    expect(ack.textContent).toContain('Ack → In progress');
-    expect(ack.closest('.detail-quick-actions')).toBeTruthy();
-    expect(ack.closest('.detail-quick-actions')).toBe(reply.closest('.detail-quick-actions'));
-    expect(later.closest('.detail-quick-actions')).toBe(reply.closest('.detail-quick-actions'));
-    const section = within(dock!).getByRole('region', { name: 'Not discussed yet' });
-    expect(within(section).queryByText('Not discussed yet')).toBeNull();
+    const row = screen.getByRole('group', { name: 'Item actions' });
+    const ack = within(row).getByRole('button', { name: 'Ack → In progress' });
+    const reply = within(row).getByRole('button', { name: 'Reply' });
+    const later = within(row).getByRole('button', { name: 'Later' });
+    // One row in the body (SPEC 5.3 item 5): Ack is the primary, Reply and Later are icons beside it; the dock holds only the composer.
+    expect(ack.textContent).toBe('Ack');
+    expect(ack.closest('.detail-actions-row')).toBe(row);
+    expect(reply.closest('.detail-actions-row')).toBe(row);
+    expect(later.closest('.detail-actions-row')).toBe(row);
+    expect(dock!.contains(row)).toBe(false);
     expect(reply.title).toBeTruthy();
   });
 
@@ -2072,17 +2074,17 @@ describe('the item detail reads like a chat', () => {
   it.each([
     { turn: 'unknown' as const, expected: 'Sending your reply…' },
     { turn: 'running' as const, expected: 'Your reply was received · waiting for the agent' },
-  ])('uses the exact $turn attempt evidence for an in-flight reply’s dock hint', async ({ turn, expected }) => {
-    const { dock, chat } = await view('8', session => {
+  ])('uses the exact $turn attempt evidence for an in-flight reply’s hint', async ({ turn, expected }) => {
+    const { chat } = await view('8', session => {
       const input = structuredClone(session.inputs[demoId('72')]!);
       input.id = uuid(90); input.seq = 50; input.message_id = uuid(91); input.target.item_id = '8';
       input.attempts.find(attempt => attempt.id === input.active_attempt_id)!.turn_state = turn;
       session.inputs[input.id] = input;
     });
     expect(chat()!.querySelector(`[data-pending="${uuid(90)}"]`)!.textContent).toContain('On its way');
-    const hint = dock!.querySelector<HTMLElement>('.detail-delivery-hint')!;
+    const hint = document.querySelector<HTMLElement>('.detail-body .detail-delivery-hint')!;
     expect(hint.textContent).toBe(expected); expect(hint.title).toBe(expected);
-    expect(dock!.textContent).not.toContain('Your message is on its way. You can write another; it goes out after.');
+    expect(document.body.textContent).not.toContain('Your message is on its way. You can write another; it goes out after.');
   });
 
   it('puts the reference on top, the conversation after it and the composer docked below the scrolling body', async () => {
@@ -2092,8 +2094,7 @@ describe('the item detail reads like a chat', () => {
     expect(labels[0]).toBe('detail-head');
     expect(labels.at(-1)).toBe('Conversation');
     expect(labels).not.toContain('Timeline');
-    expect(body.querySelector('.detail-head .detail-reference')).toBeTruthy();
-    expect(body.querySelector('.detail-reference code')).toBeNull();
+    expect(body.querySelector('.detail-head .detail-reference')).toBeNull();
     expect(dock!.querySelector('.answer')).toBeTruthy();
     expect(body.contains(dock)).toBe(false);
     // The pane does not scroll; the body does, and the dock keeps its own height.
@@ -2169,13 +2170,14 @@ describe('the item detail reads like a chat', () => {
     expect(choices.contains(send)).toBe(false);
     expect(order(choices, send)).toBe(true);
   });
-  it('shows no composer on a closed item, only its revisit actions, docked in the same place', async () => {
+  it('shows no composer on a closed item, only its revisit actions in the body', async () => {
     const { dock, body } = await view('1');
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(document.querySelector('.answer')).toBeNull();
-    expect(within(dock!).getByRole('region', { name: 'Revisit' })).toBeTruthy();
-    expect(within(dock!).getAllByRole('button').length).toBeGreaterThan(0);
-    expect(body.contains(dock)).toBe(false);
+    // The revisit actions are in the body's row; with no composer nothing is pinned.
+    expect(dock).toBeNull();
+    expect(within(body).getByRole('group', { name: 'Item actions' })).toBeTruthy();
+    expect(within(body).getAllByRole('button', { name: /Follow up|Back to Open/ }).length).toBeGreaterThan(0);
   });
   it('keeps the saved choice and exact note through description toggles and resize', async () => {
     const user = userEvent.setup(), { dock, value } = await view('2', session => {

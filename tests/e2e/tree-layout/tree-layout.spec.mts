@@ -640,7 +640,7 @@ for (const theme of ['light', 'dark'] as const) test(`Map look: boxes, thread, c
     await scroller.evaluate(element => { element.scrollTop = element.scrollHeight; });
     await expect(marker).toBeVisible();
     // The shortcut (`.`, SPEC 6.1; ⌘J is gone) works while the session's other panel has focus.
-    await page.locator('.item-detail').getByRole('button', { name: 'Copy reference' }).focus();
+    await page.locator('.item-detail').getByRole('button', { name: 'Expand title' }).focus();
     await page.keyboard.press('.');
     await expect(marker).toHaveCount(0);
     await expectRevealedRow(root);

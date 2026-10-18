@@ -95,8 +95,9 @@ describe('local acknowledgement', () => {
       fireEvent.click(row()); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
       expect(detail().querySelector('.detail-badge')?.textContent).toBe(label);
       expect(detail().querySelector<HTMLElement>('.detail-badge .status-badge')?.style.color).toBe(`var(--st-${colour})`);
-      expect(within(detail()).getByText(hint)).toBeTruthy();
+      // Details says "Ack" and keeps the target in the button's name and tooltip (SPEC 5.3 item 5).
       expect(within(detail()).getByRole('button', { name: hint }).title).toBe(hint);
+      expect(within(detail()).getByRole('button', { name: hint }).textContent).toBe('Ack');
       expect(detail().querySelector<HTMLElement>('.detail-outcome .detail-label')?.style.color).toBe(`var(--st-${colour})`);
       fireEvent.keyDown(row(), { key: 'g' }); await screen.findByRole('group', { name: 'Graph legend' });
       expect(within(row()).getByRole('img', { name: label })).toBeTruthy();
@@ -128,8 +129,6 @@ describe('local acknowledgement', () => {
       const available = question === 'answered';
       await waitFor(() => expect(!!within(row()).queryByRole('button', { name: /^Ack/ })).toBe(available));
       for (const host of [row(), detail()]) expect(!!within(host).queryByRole('button', { name: /^Ack/ })).toBe(available);
-      // The Map row names the target on its button only; the detail also writes it out.
-      expect(!!within(detail()).queryByText(/^Ack →/)).toBe(available);
       expect(!!screen.queryByText('Ack all (1)')).toBe(available);
       fireEvent.keyDown(row(), { key: 'g' }); await screen.findByRole('group', { name: 'Graph legend' });
       expect(within(row()).queryByText(/^Ack →/)).toBeNull();
@@ -229,18 +228,17 @@ describe('local acknowledgement', () => {
     await mount(transport);
     fireEvent.click(row('1')); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
     const related = screen.getByRole('region', { name: 'Related items' });
-    const linked = within(related).getByRole('button', { name: `${session.items['1.1']!.question} · Open` });
+    const linked = within(related).getByRole('button', { name: `Related: ${session.items['1.1']!.question} · Open` });
     expect(linked.textContent).toContain('Retry limits');
-    expect(linked.textContent).toContain('Open');
     fireEvent.click(linked); fireEvent.click(screen.getByRole('button', { name: 'Go to' })); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     await act(async () => { fireEvent.click(within(detail()).getByRole('button', { name: 'Ack → Done' })); });
     await holdOver();
     await waitFor(() => expect(detail().getAttribute('data-status')).toBe('done'));
     expect(acks(transport)).toHaveLength(1);
     fireEvent.click(row('1')); await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1"]' });
-    const acknowledged = within(screen.getByRole('region', { name: 'Related items' })).getByRole('button', { name: `${session.items['1.1']!.question} · Done` });
+    const acknowledged = within(screen.getByRole('region', { name: 'Related items' })).getByRole('button', { name: `Related: ${session.items['1.1']!.question} · Done` });
     expect(acknowledged.textContent).toContain('Retry limits');
-    expect(acknowledged.textContent).toContain('Done');
+    expect(within(acknowledged).getByRole('img', { name: 'Done' })).toBeTruthy();
   });
 
   it('offers a quiet row Ack with a target tooltip and a topic count, while questions keep their answer controls', async () => {
@@ -273,7 +271,6 @@ describe('local acknowledgement', () => {
     const label = target[0].toUpperCase() + target.slice(1);
     const button = within(detail()).getByRole('button', { name: `Ack → ${label}` });
     expect(button.title).toBe(`Ack → ${label}`);
-    expect(within(detail()).getByText(`Ack → ${label}`)).toBeTruthy();
     expect(within(detail()).getByRole('button', { name: /^Reply/ })).toBeTruthy();
     await act(async () => { fireEvent.click(button); });
     await holdOver();
@@ -299,7 +296,8 @@ describe('local acknowledgement', () => {
     await screen.findByLabelText(/^Detail of /, { selector: '[data-detail-item-id="1.1"]' });
     expect(row().classList.contains('tree-item-hidden')).toBe(true);
     const button = within(detail()).getByRole('button', { name: 'Ack → Done' });
-    expect(button.closest('.detail-dock')).not.toBeNull();
+    expect(button.closest('.detail-actions-row')).not.toBeNull();
+    expect(button.closest('.detail-dock')).toBeNull();
     expect(detail().querySelectorAll('.detail-chat')).toHaveLength(1);
     await act(async () => { fireEvent.click(button); });
     await holdOver();

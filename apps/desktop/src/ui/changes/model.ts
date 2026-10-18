@@ -55,16 +55,20 @@ export function answerEffects(session: Immutable<Session>, card: ChangeCard, blo
   return [...created, ...changed, ...stopped];
 }
 
+/** The input behind an owner message: its own message id, or the answer's. Null for an agent message or a plain reply with no input. */
+export function answerInputId(session: Immutable<Session>, messageId: string): string | null {
+  return Object.values(session.inputs).find(value => value?.message_id === messageId)?.id
+    ?? session.answers.find(value => value.message_id === messageId)?.input_id ?? null;
+}
+
 /**
  * The newest owner message whose answer changed something: the one place the Because card shows (SPEC 5.3 item 8). The owner's
  * messages are matched to their answer by message id, as the input's own message or the answer's.
  */
 export function latestChangedAnswer(session: Immutable<Session>, entries: readonly { readonly id: string; readonly you?: unknown }[]): string | null {
-  const inputs = Object.values(session.inputs);
   for (let index = entries.length - 1; index >= 0; index--) {
     const entry = entries[index]!;
-    if (!entry.you) continue;
-    const inputId = inputs.find(value => value?.message_id === entry.id)?.id ?? session.answers.find(value => value.message_id === entry.id)?.input_id;
+    const inputId = entry.you ? answerInputId(session, entry.id) : null;
     if (!inputId) continue;
     const card = changeCard(session, inputId);
     if (card.total || card.groups.reworded.length) return entry.id;

@@ -550,7 +550,8 @@ describe('desktop item conversation', () => {
     session.rounds[item.current_round_id!]!.closed_at = session.updated_at; ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
     await within(conversation()).findByRole('group', { name: 'Item actions' });
-    expect(within(conversation()).queryByRole('button', { name: /^Later/ })).toBeNull();
+    // The bigger view carries the same actions as the pane (SPEC 5.3): Later is one of the six.
+    expect(within(conversation()).queryByRole('button', { name: /^(Later|Unpark)/ })).not.toBeNull();
     const map = document.querySelector<HTMLElement>('.tree-scroll')!; map.scrollTop = 143;
     const mapRow = row('4'), reveals = transport.queries.filter(query => query.request.command === 'reveal_item').length;
     key(conversation(), shortcut);

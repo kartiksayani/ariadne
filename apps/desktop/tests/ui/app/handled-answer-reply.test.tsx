@@ -123,8 +123,8 @@ describe('reply after a handled answer', () => {
     const button = await within(scope).findByRole<HTMLButtonElement>('button', { name: 'Add a reply' });
     await waitFor(() => expect(button.disabled).toBe(false));
     expect(reply(scope)).toBeNull();
-    // It sits below the sealed cards.
-    expect(scope.querySelector('.detail-answer-slot')!.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // It is in the actions row at the top of the body (SPEC 5.3 item 5), above the sealed cards in the pinned region.
+    expect(button.closest('.detail-actions-row')).not.toBeNull();
 
     trigger(how, surface, scope);
     const box = await waitFor(() => { const value = reply(scopeOf(surface)); expect(value).not.toBeNull(); return value!; });

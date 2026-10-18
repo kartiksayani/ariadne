@@ -72,14 +72,15 @@ describe('related item navigation', () => {
     render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={open} hiddenItemIds={['1']} />);
     const related = screen.getByRole('region', { name: 'Related items' });
     expect(within(related).getAllByRole('button')).toHaveLength(3);
-    const window = within(related).getByRole('button', { name: `${session.items['2']!.question} · Queued` });
-    expect(window.textContent).toContain('Queued');
-    const child = within(related).getByRole('button', { name: `${session.items['1.1']!.question} (hidden) · Open` });
-    expect(child.textContent).toContain('Hidden');
+    const window = within(related).getByRole('button', { name: `Related: ${session.items['2']!.question} · Queued` });
+    expect(window.textContent).toContain('Delivery window');
+    const child = within(related).getByRole('button', { name: `Related: ${session.items['1.1']!.question} (hidden) · Open` });
+    expect(child.textContent).toContain('hidden');
+    expect(window.querySelector('.detail-related-kind')!.textContent).toBe('Related');
     expect(child.classList.contains('is-hidden')).toBe(true);
     expect(window.classList.contains('is-hidden')).toBe(false);
     fireEvent.click(child); fireEvent.click(window);
-    fireEvent.click(within(related).getByRole('button', { name: `${session.items['8']!.question} · Open` }));
+    fireEvent.click(within(related).getByRole('button', { name: `Related: ${session.items['8']!.question} · Open` }));
     expect(related.textContent).not.toMatch(/#(?:1\.1|2|8)\b/);
     expect(screen.getByRole('article').getAttribute('aria-label')).toBe(`Detail of ${session.items['1']!.question}`);
     expect(open.mock.calls).toEqual([['1.1'], ['2'], ['8']]);
@@ -100,19 +101,17 @@ describe('related item navigation', () => {
     await value.store.refresh();
     const open = vi.fn();
     render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={open} hiddenItemIds={['1']} />);
-    const section = screen.getByRole('region', { name: heading });
-    expect(within(section).getByText(heading)).toBeTruthy();
-    const target = within(section).getByRole('button', { name: `${session.items['1.1']!.question} (hidden) · Open` });
+    // One list with a kind column: the direction is the row's own label.
+    const section = screen.getByRole('region', { name: 'Related items' });
+    const target = within(section).getByRole('button', { name: `${heading}: ${session.items['1.1']!.question} (hidden) · Open` });
+    expect(within(target).getByText(heading)).toBeTruthy();
     expect(target.title).toBe(session.items['1.1']!.question);
     expect(target.classList.contains('detail-related-item')).toBe(true);
     expect(target.classList.contains('is-hidden')).toBe(true);
-    expect(within(target).getByText('Hidden')).toBeTruthy();
-    const related = screen.getByRole('region', { name: 'Related items' });
-    expect(within(related).getAllByRole('button')).toHaveLength(1);
-    expect(within(related).getByRole('button', { name: `${session.items['2']!.question} · Waiting on me` }).classList.contains('is-hidden')).toBe(false);
-    for (const label of ['Affects', 'Affected by', 'Depends on', 'Needed by']) {
-      if (label !== heading) expect(screen.queryByRole('region', { name: label })).toBeNull();
-    }
+    expect(within(target).getByText('hidden')).toBeTruthy();
+    expect(within(section).getAllByRole('button')).toHaveLength(2);
+    expect(within(section).getByRole('button', { name: `Related: ${session.items['2']!.question} · Waiting on me` }).classList.contains('is-hidden')).toBe(false);
+    expect(within(section).getByText('2', { selector: '.detail-related-count' })).toBeTruthy();
     fireEvent.click(target);
     expect(open.mock.calls).toEqual([['1.1']]);
     expect(section.compareDocumentPosition(screen.getByRole('region', { name: 'Conversation' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -141,8 +140,8 @@ describe('related item navigation', () => {
     const open = vi.fn();
     render(<ItemDetail drafts={new OwnerDraftStore(value.service)} store={value.store} itemId="1" later={false} onOpenItem={open} />);
     expect(screen.getByRole('article', { name: `Detail of ${session.items['1']!.question}` })).toBeTruthy();
-    for (const [target, visible] of [[first, 'delivery · Receipt lookup'], [second, 'retry · Receipt lookup']] as const) {
-      const button = screen.getByRole('button', { name: `${target.question} · Open` });
+    for (const [target, visible, kind] of [[first, 'delivery · Receipt lookup', 'Related'], [second, 'retry · Receipt lookup', 'Affects']] as const) {
+      const button = screen.getByRole('button', { name: `${kind}: ${target.question} · Open` });
       expect(button.querySelector('.detail-related-label')!.textContent).toBe(visible);
       expect(button.title).toBe(target.question);
       fireEvent.click(button);

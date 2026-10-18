@@ -579,11 +579,12 @@ test('a long waiting conversation opens at its latest ask and keeps the question
   await openApp(page, origin, { ...frameSpec('1u'), width: 1400, height: 830 });
   const pane = page.locator('.item-detail'), body = pane.locator('.detail-body'), head = body.locator('.detail-head');
   await expect(body.locator('.detail-turn-now .detail-waiting-tag')).toBeInViewport();
-  await expect(head.locator('.detail-question')).toBeInViewport();
-  await expect(head.locator('.detail-badge')).toBeInViewport();
   await expect(head.locator('.detail-question')).toHaveAttribute('title', /\S+/);
   expect(await body.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+  // The badge row and title scroll with the body (SPEC 5.3): only the composer is pinned, so the ask stays in view at the end.
   await body.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await expect(body.locator('.detail-turn-now .detail-waiting-tag')).toBeInViewport();
+  await body.evaluate(element => { element.scrollTop = 0; });
   await expect(head.locator('.detail-question')).toBeInViewport();
   await expect(head.locator('.detail-badge')).toBeInViewport();
   await head.getByRole('button', { name: 'Expand title', exact: true }).click();

@@ -37,13 +37,18 @@ export interface ItemActionHandlers {
 export interface UseItemActionsInput {
   readonly session: Immutable<Session> | null | undefined;
   readonly item: Immutable<Item> | null | undefined;
-  readonly on: ItemActionHandlers;
+  /** What each action does. Hide, Unhide and Remove are the host's: without them those rows do not apply. */
+  readonly on: Partial<ItemActionHandlers>;
   /** The item is hidden: the list carries `unhide` instead of `hide`. */
   readonly hidden?: boolean;
   /** The item is parked (Later): the later action reads "Unpark". */
   readonly later?: boolean;
-  /** Why the message actions (everything except hide, remove and copy) wait right now. Null or absent when they do not. */
-  readonly held?: string | null;
+  /** Why an action that fits the item cannot run right now (reconnecting, a message on its way). Absent when it can. */
+  readonly held?: Readonly<Partial<Record<ItemActionId, string>>>;
+  /** Replaces the status-dependent label of `followUp` ("Add a reply" on a waiting item that has one). */
+  readonly replyLabel?: string;
+  /** Whether `followUp` fits. A waiting item is answered in its answer box, so by default it does not apply there. */
+  readonly replyApplies?: boolean;
 }
 
 /** The props `ItemConversation` takes for this list. W2 passes `onHide` / `onRemove` (App.tsx) and renders the "…" menu from `onActions`. */
@@ -69,31 +74,36 @@ export function ItemActionIcon({ action }: { readonly action: Pick<ItemActionVie
  * or Unhide, Remove and Copy reference. Every slot is present; `applies` says which fit the item. The returned array is the same
  * object while nothing visible changed, and `run` always calls the latest handler, so the list can be handed upward in an effect.
  */
-export function useItemActions({ session, item, on, hidden = false, later = false, held = null }: UseItemActionsInput): readonly ItemActionView[] {
+export function useItemActions({ session, item, on, hidden = false, later = false, held, replyLabel, replyApplies }: UseItemActionsInput): readonly ItemActionView[] {
   const handlers = useRef(on);
   handlers.current = on;
+  const has = (key: keyof ItemActionHandlers) => !!on[key];
   const status = item ? statusKey[item.status] : null;
   const topic = item && session ? session.topics[item.topic_id] : undefined;
   const archived = !!session && (session.archived_at != null || topic?.archived_at != null);
   const readOnly = !session || !item || archived || session.state !== 'active' || !topic;
-  const reason = readOnly ? (archived ? 'Archived' : 'This session is closed') : held;
+  const readOnlyReason = readOnly ? (archived ? 'Archived' : 'This session is closed') : null;
+  const heldKey = JSON.stringify(held ?? {}), hide = has('hide'), unhide = has('unhide'), remove = has('remove');
   return useMemo(() => {
     if (!item || status === null) return [];
     const closed = closedStatus.has(status), open = status === 'open';
-    const run = (key: keyof ItemActionHandlers) => () => handlers.current[key]();
-    const gated = (id: ItemActionId, label: string, icon: string, applies: boolean): ItemActionView =>
-      ({ id, label, icon, run: run(id as keyof ItemActionHandlers), applies, ...(applies && reason ? { disabledReason: reason } : {}) });
-    const followLabel = closed ? 'Follow up' : LABEL[status as 'open' | 'progress' | 'waiting'] ?? 'Reply';
+    const heldBy: Readonly<Partial<Record<ItemActionId, string>>> = JSON.parse(heldKey);
+    const run = (key: keyof ItemActionHandlers) => () => handlers.current[key]?.();
+    // A message action is blocked by a closed or archived item, or by what the host says holds it; Later is the owner's own mark.
+    const gated = (id: Extract<ItemActionId, 'followUp' | 'bring' | 'reopen' | 'later' | 'drop'>, label: string, icon: string, applies: boolean): ItemActionView => {
+      const why = readOnlyReason ?? heldBy[id];
+      return { id, label, icon, run: run(id), applies, ...(applies && why ? { disabledReason: why } : {}) };
+    };
+    const followLabel = replyLabel ?? (closed ? 'Follow up' : LABEL[status as 'open' | 'progress' | 'waiting'] ?? 'Reply');
     return [
-      gated('followUp', followLabel, 'ph ph-chat-text', true),
+      gated('followUp', followLabel, 'ph ph-chat-text', replyApplies ?? status !== 'waiting'),
       gated('bring', 'Bring it up', 'ph ph-megaphone-simple', open),
       gated('reopen', 'Back to Open', 'ph ph-arrow-counter-clockwise', closed && status !== 'replaced'),
       gated('later', later ? 'Unpark' : 'Later', later ? 'ph ph-arrow-u-up-left' : 'ph ph-clock', open),
       gated('drop', 'Drop', 'ph ph-x-circle', open),
-      hidden ? { id: 'unhide', label: 'Unhide', icon: '', run: run('unhide'), applies: true } as ItemActionView
-        : { id: 'hide', label: 'Hide', icon: '', run: run('hide'), applies: true } as ItemActionView,
-      { id: 'remove', label: 'Remove', icon: 'ph ph-trash', run: run('remove'), applies: true },
+      hidden ? { id: 'unhide', label: 'Unhide', icon: '', run: run('unhide'), applies: unhide } : { id: 'hide', label: 'Hide', icon: '', run: run('hide'), applies: hide },
+      { id: 'remove', label: 'Remove', icon: 'ph ph-trash', run: run('remove'), applies: remove },
       { id: 'copyRef', label: 'Copy reference', icon: 'ph ph-copy', run: run('copyRef'), applies: true },
     ];
-  }, [item?.id, status, hidden, later, reason]);
+  }, [item?.id, status, hidden, later, readOnlyReason, heldKey, replyLabel, replyApplies, hide, unhide, remove]);
 }

@@ -315,7 +315,8 @@ describe('conversation control regressions', () => {
     const { source, store, props } = await setup();
     source.items['2']!.ask = 'Which window?'; ++source.revision; await store.refresh();
     render(<ConversationView {...props} itemId="2" onClose={vi.fn()} />);
-    const title = () => screen.queryByRole('button', { name: /^(Expand|Collapse) title/ });
+    // The bigger view's own header ("Expand title: …"); the body's title toggle is always there.
+    const title = () => screen.queryByRole('button', { name: /^(Expand|Collapse) title: / });
     expect(screen.queryByRole('button', { name: 'Expand question' }), 'a question that fits has no caret').toBeNull();
     expect(title(), 'a title that fits has no button').toBeNull();
     // The window narrows: the same text now needs more than two lines.

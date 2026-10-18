@@ -73,9 +73,11 @@ describe('item detail panel', () => {
     const detail = document.querySelector('.item-detail')!;
     expect([...detail.children].map(element => element.className)).toEqual(['detail-body', 'detail-dock']);
     const order = [...document.querySelectorAll('.detail-body > section, .detail-body > div')].map(element => element.getAttribute('aria-label') ?? element.className);
-    const body = ['detail-head', 'Your answer', 'Current outcome', 'Child items', 'Item links', 'Conversation'];
+    const body = ['detail-head', 'Your answer', 'Current outcome', 'Item actions', 'Child items', 'Item links', 'Conversation'];
     expect(order.filter(name => body.includes(name))).toEqual(body);
-    expect([...detail.querySelectorAll('.detail-dock .detail-quick-actions > section')].map(element => element.getAttribute('aria-label'))).toEqual(['Revisit']);
+    // The actions sit in the body (SPEC 5.3 item 5); the pinned region holds only the composer.
+    expect([...detail.querySelectorAll('.detail-body [role="group"][aria-label="Item actions"] button')].map(element => element.getAttribute('aria-label'))).toEqual(['Follow up', 'Back to Open', 'Later', 'Drop']);
+    expect(detail.querySelector('.detail-dock [role="group"][aria-label="Item actions"]')).toBeNull();
     // The handled answer is the request the stepper follows.
     expect(within(screen.getByRole('region', { name: 'Your answer' })).getByText('Resolved')).toBeTruthy();
     expect(screen.queryByText('Back and forth')).toBeNull();
@@ -98,8 +100,8 @@ describe('item detail panel', () => {
     expect([...chat.querySelectorAll<HTMLElement>('li[data-message-id]')].map(entry => entry.dataset.messageId)).toEqual(expected.map(message => message.id));
     expect(chat.querySelector('.detail-chat-marker')!.textContent).toBe('Agent raised this');
     expect(screen.queryByRole('region', { name: 'Timeline' })).toBeNull();
-    expect(document.querySelector('.detail-head .detail-reference')!.contains(screen.getByText('Copy reference'))).toBe(true);
-    expect(screen.getByText('Copy reference').parentElement!.querySelector('code')).toBeNull();
+    // Copy reference moved into the head's "…" menu (it is a row of the emitted actions list).
+    expect(screen.queryByText('Copy reference')).toBeNull();
   });
   it('does not count an answer that archive cancelled as the owner’s answer: Waiting on you, with the not-sent line', async () => {
     const value = await ready(session => {
@@ -227,23 +229,30 @@ describe('item detail panel', () => {
     render(panel(reopened));
     expect((await screen.findByText('Before you reopened it')).parentElement!.textContent).toContain('Done');
     expect(screen.getByText('Former exact outcome')).toBeTruthy();
-    expect(screen.getByRole('region', { name: 'Not discussed yet' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Bring it up' })).toBeTruthy();
     cleanup();
     const replaced = await ready(session => { session.items['1']!.status = 'replaced'; session.items['1']!.replaced_by = '4'; });
     render(panel(replaced));
-    expect(((await screen.findByRole('button', { name: 'Back to Open' })) as HTMLButtonElement).disabled).toBe(true);
+    const back = (await screen.findByRole('button', { name: 'Back to Open' })) as HTMLButtonElement;
+    expect(back.disabled).toBe(true);
+    expect(back.title).toBe('Back to Open: not for Replaced items');
     expect(screen.getByRole('button', { name: /Record retry limits/ })).toBeTruthy();
   });
   it('hides owner actions in closed sessions and archived topics', async () => {
     const value = await ready(), item = value.transport.session.items['1']!;
     const rendered = render(panel(value));
-    await screen.findByRole('region', { name: 'Revisit' });
+    const reopen = async () => (await screen.findByRole('button', { name: 'Back to Open' })) as HTMLButtonElement;
+    expect((await reopen()).title).not.toBe('This session is closed');
     value.transport.session.state = 'closed'; value.transport.session.revision++;
     await act(() => value.store.refresh());
-    await waitFor(() => expect(screen.queryByRole('region', { name: 'Revisit' })).toBeNull());
+    // The actions stay in the row, greyed, and say why (SPEC D4): nothing can be sent.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Back to Open' }).title).toBe('This session is closed'));
+    expect(screen.getByRole('button', { name: 'Back to Open' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Follow up' })).toBeNull();
     value.transport.session.state = 'active'; value.transport.session.topics[item.topic_id]!.archived_at = '2026-10-04T00:00:00.000Z'; value.transport.session.revision++;
     await act(() => value.store.refresh());
-    expect(screen.queryByRole('region', { name: 'Revisit' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Back to Open' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Back to Open' }).title).toBe('Archived');
     expect(screen.getByRole('heading', { name: item.question })).toBeTruthy();
     rendered.unmount();
   });

@@ -25,12 +25,13 @@ const TYPE: Readonly<Record<Item['type'], string>> = { question: 'Question', dec
 const OUTLBL: Readonly<Partial<Record<StatusKey, string>>> = { decided: 'Decided', done: 'Done', dropped: 'Dropped', replaced: 'Replaced' };
 const LINKICON: Readonly<Record<string, string>> = { pr: 'ph ph-git-pull-request', file: 'ph ph-file-code', doc: 'ph ph-file-text' };
 const neutral = (percent: number) => `color-mix(in srgb, var(--color-text) ${percent}%, transparent)`;
-const relatedSections: readonly { readonly direction: LinkDirection; readonly label: string }[] = [
-  { direction: 'related', label: 'Related items' },
-  { direction: 'affects', label: 'Affects' },
-  { direction: 'affected_by', label: 'Affected by' },
-  { direction: 'depends_on', label: 'Depends on' },
-  { direction: 'needed_by', label: 'Needed by' },
+/** `label` names the group for a screen reader; `kind` is the row's kind column (SPEC 5.3 item 6). */
+const relatedSections: readonly { readonly direction: LinkDirection; readonly label: string; readonly kind: string }[] = [
+  { direction: 'related', label: 'Related items', kind: 'Related' },
+  { direction: 'affects', label: 'Affects', kind: 'Affects' },
+  { direction: 'affected_by', label: 'Affected by', kind: 'Affected by' },
+  { direction: 'depends_on', label: 'Depends on', kind: 'Depends on' },
+  { direction: 'needed_by', label: 'Needed by', kind: 'Needed by' },
 ];
 
 export type OpenMode = 'reply' | 'drop' | 'note' | 'followup';
@@ -114,7 +115,7 @@ export interface DetailModel {
   readonly replaced: Kid | null;
   readonly kidLabel: string;
   readonly kids: readonly Kid[];
-  readonly related: readonly { readonly direction: LinkDirection; readonly label: string; readonly items: readonly {
+  readonly related: readonly { readonly direction: LinkDirection; readonly label: string; readonly kind: string; readonly items: readonly {
     readonly id: string; readonly question: string; readonly status: StatusKey; readonly hidden: boolean;
   }[] }[];
   readonly links: readonly LinkView[];
