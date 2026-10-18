@@ -22,6 +22,7 @@ import type { Item, PresenceObservation, Session } from '../../../src/generated/
 import sessionsFixture from '../../../../../fixtures/domain/projections/sessions.json';
 import { AppTransport, route } from './transport';
 import { answerWords } from '../answer/words';
+import { closeDetails } from '../shell/closeDetails';
 
 afterEach(() => { cleanup(); notices.clear(); localStorage.clear(); });
 
@@ -114,7 +115,7 @@ describe('finding 1: a cancelled or skipped answer reopens its question', () => 
       await waitFor(() => expect(option(scope()!, 1)?.getAttribute('aria-pressed')).toBe('true'));
       expect(answerWords(scope()!).value).toBe(note);
       // In the dock and its count once Details lets it go.
-      if (place === 'Details') fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
+      if (place === 'Details') closeDetails();
       await openDock();
       expect(dock().querySelector('.dock-question-title')?.textContent).toBe(question);
       await waitFor(() => expect(answerWords(current()!).value).toBe(note));

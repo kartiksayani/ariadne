@@ -277,7 +277,7 @@ describe('fold', () => {
     localStorage.setItem(FOLDED_KEY, 'true');
     mount();
     expect(screen.queryByRole('separator', { name: 'Resize detail panel' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Close detail' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
   });
 
   // The design gives Details no key: the rail and the » button are the only ways.

@@ -5,6 +5,8 @@ import { createDesktopService } from '../../../src/data/service';
 import { notices } from '../../../src/ui/pages/notices';
 import { shortLabel } from '../../../src/ui/shared/short';
 import { AppTransport, route } from '../app/transport';
+import { useWideWindow } from '../shell/wideWindow';
+useWideWindow();
 
 const original = '00000000-0000-4000-8000-000000000099';
 afterEach(() => { cleanup(); notices.clear(); vi.restoreAllMocks(); });

@@ -9,6 +9,9 @@ import { goToSession } from './open';
 import { sessionClosedReason } from '../../../src/selectors/sessionClosed';
 import { NavigationStore } from '../../../src/state/navigation/store';
 import { changesFixture } from '../changes/fixture';
+import { closeDetailsWith } from '../shell/closeDetails';
+import { useWideWindow } from '../shell/wideWindow';
+useWideWindow();
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 async function click(element: Element) {
@@ -98,7 +101,7 @@ describe('composed item navigation', () => {
     await click(within(context).getByRole('button', { name: 'Changed after your typed answer ↗' }));
     selected(value.answer.item_id);
     expect(document.activeElement?.getAttribute('data-message-id')).toBe(value.answer.message_id);
-    const otherControl = screen.getByRole('button', { name: 'Close detail' });
+    const otherControl = screen.getByRole('button', { name: 'Fold Details' });
     otherControl.focus();
     const session = transport.sessions.get(route.session_id)!; ++session.revision;
     session.messages.find(message => message.id === value.answer.message_id)!.body += '\nAdditional words.';
@@ -115,11 +118,11 @@ describe('composed item navigation', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(mark).toHaveBeenCalledWith(route, '2', transport.sessions.get(route.session_id)!.items['2']!.revision);
     mark.mockClear();
-    await click(screen.getByRole('button', { name: 'Close detail' }));
+    await closeDetailsWith(click);
     await pick('2');
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(mark).not.toHaveBeenCalled(); // Reopening the same read revision adds no observation.
-    await click(screen.getByRole('button', { name: 'Close detail' }));
+    await closeDetailsWith(click);
     const session = transport.sessions.get(route.session_id)!;
     ++session.items['2']!.revision; ++session.revision;
     await act(async () => { transport.emit('ariadne://session_changed', { session_id: session.id, revision: session.revision }); });
@@ -261,7 +264,7 @@ describe('composed item navigation', () => {
 
   it('peek footer: "Go to" selects the item and leaves a closed Details closed, "Open details" opens it', async () => {
     const transport = await setup(); await openSession(); await pick('1');
-    await click(screen.getByRole('button', { name: 'Close detail' }));
+    await closeDetailsWith(click);
     expect(screen.queryByLabelText(/^Detail of /)).toBeNull();
     const peekOn = async (id: string) => { await keyDown(treeRow(id), ' '); return screen.findByRole('button', { name: 'Go to' }); };
     await click(await peekOn('1.1'));
@@ -306,7 +309,7 @@ describe('composed map reveal scrolling', () => {
     if (cause === 'search matching nothing') view.filters.search = 'no matching question';
     const saved = structuredClone(view);
     await setup(transport); await openSession();
-    await click(screen.getByRole('button', { name: 'Close detail' }));
+    await closeDetailsWith(click);
     // Opening the session reveals its saved selection. A search edit keeps that temporary reveal (a search hides no
     // row, SPEC §4), so a fold dismisses it here: the hidden group opened and closed, which saves nothing.
     const search = await searchBox();
@@ -367,7 +370,7 @@ describe('composed map reveal scrolling', () => {
     }
     const opening = treeScroll().scrollTop;
     expect(opening).toBeGreaterThan(0);
-    await click(screen.getByRole('button', { name: 'Close detail' }));
+    await closeDetailsWith(click);
     expect(treeScroll().scrollTop).toBe(opening);
     await readAt(150);
     await pick('8');
@@ -397,7 +400,7 @@ describe('composed map reveal scrolling', () => {
     await readAt(150); outsideTree('8');
     await pick('8');
     expect(treeScroll().scrollTop).toBe(150);
-    await click(screen.getByRole('button', { name: 'Close detail' }));
+    await closeDetailsWith(click);
     expect(treeScroll().scrollTop).toBe(150);
     await pick('8');
     expect(treeScroll().scrollTop).toBe(150);
@@ -408,7 +411,7 @@ describe('composed map reveal scrolling', () => {
     treeGeometry(); await setup(); await openSession(); await pick('2');
     for (let attempt = 0; attempt < 2; ++attempt) {
       // Details answers the selected question, so the dock holds it once Details closes.
-      await click(screen.getByRole('button', { name: 'Close detail' }));
+      await closeDetailsWith(click);
       await readAt(600); outsideTree('2');
       await fromDock(); selected('2');
       expect(treeScroll().scrollTop).toBeLessThan(600);

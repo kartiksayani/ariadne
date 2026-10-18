@@ -12,6 +12,7 @@ import { continueGroups } from '../../../src/ui/pages/model';
 import { AppTransport, route, secondId } from '../app/transport';
 import { goToSession } from '../app/open';
 import { notices } from '../../../src/ui/pages/notices';
+import { closeDetails as closeDetailsFromMenu } from '../shell/closeDetails';
 
 // A held Ack outlives its view by design, so a test drains it before the next one starts: no timer or notice leaks across tests.
 afterEach(async () => { await act(async () => { await flushAckHold(route.session_id); }); cleanup(); notices.clear(); vi.restoreAllMocks(); });
@@ -609,7 +610,7 @@ describe('the Ack hold in the app (D11)', () => {
 
   const heldNotice = () => notices.getSnapshot().find(entry => entry.text.startsWith('Acked'));
   const closeDetails = async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
+    closeDetailsFromMenu();
     await waitFor(() => expect(screen.queryByLabelText(/^Detail of /)).toBeNull());
   };
 
@@ -650,7 +651,7 @@ describe('the Ack hold in the app (D11)', () => {
   it('an Ack from the Graph with no row or Details showing it says so in a notice whose Undo writes nothing', async () => {
     const transport = await mount(); await selectItem();
     fireEvent.keyDown(row(), { key: 'g' }); await screen.findByRole('group', { name: 'Graph legend' });
-    fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
+    closeDetailsFromMenu();
     await waitFor(() => expect(screen.queryByLabelText(/^Detail of /)).toBeNull());
     await act(async () => { row().focus(); fireEvent.keyDown(row(), { key: 'a' }); });
     const notice = await waitFor(() => {

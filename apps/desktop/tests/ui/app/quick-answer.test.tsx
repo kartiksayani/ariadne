@@ -7,6 +7,7 @@ import { goToSession } from './open';
 import sessionsFixture from '../../../../../fixtures/domain/projections/sessions.json';
 import type { PresenceObservation } from '../../../src/generated/domain/models';
 import { answerWords } from '../answer/words';
+import { closeDetails } from '../shell/closeDetails';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const sends = (transport: AppTransport) => transport.mutations.filter(request => request.command.command === 'input_submit');
@@ -92,7 +93,7 @@ describe('quick owner answers from the desktop', () => {
     const note = ' Keep my exact note: café\nsecond line ';
     fireEvent.change(words(), { target: { value: note } });
     // Details holds the question, so the dock leaves it out; closing Details hands it to the dock with the same draft.
-    fireEvent.click(screen.getByRole('button', { name: 'Close detail' }));
+    closeDetails();
     const dock = screen.getByRole('region', { name: 'Answer dock' });
     fireEvent.click(await within(dock).findByRole('button', { name: /^1 waiting$/ }));
     await waitFor(() => expect(answerWords(dock).value).toBe(note));
