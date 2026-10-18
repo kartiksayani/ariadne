@@ -151,6 +151,13 @@ const triggers: readonly Trigger[] = [
   // Item 1's long title and long finding each fold; one flag opens both.
   ['Show more above the reading row', 'held', null, nothing, page => click(row(page, '1').getByRole('button', { name: 'Show more' }).last()),
     page => expect(row(page, '1').getByRole('button', { name: 'Show less' })).toHaveCount(2)],
+  // A Show less out of view folds what is above the reading row: the reading row stays put (only one on screen brings its own
+  // row's top into sight).
+  ['Show less above the reading row', 'held', null, async page => {
+    await click(row(page, '1').getByRole('button', { name: 'Show more' }).last());
+    await expect(row(page, '1').getByRole('button', { name: 'Show less' })).toHaveCount(2);
+  }, page => click(row(page, '1').getByRole('button', { name: 'Show less' }).last()),
+  page => expect(row(page, '1').getByRole('button', { name: 'Show more' })).toHaveCount(2)],
   ['an item above the reading row grows to more lines', 'held', null, nothing, page => agent(page, 'grow-above'),
     page => expect(row(page, '9').locator('.tree-question')).toContainText('renamed')],
   // The Map crosses 560px: the Changed pill in the marker slot collapses to its diamond (a container query on the Map).
@@ -711,4 +718,95 @@ for (const [name, change, done] of shortMap) test(`the Map holds on a short Map 
   await expect.poll(async () => Math.abs((await windowTop(page, read.key))! - y - Math.max(0, await bandBottom(page) - bandBefore)),
     `${read.key} keeps its place under the band`).toBeLessThanOrEqual(3);
   expect(await scroller(page).evaluate(box => box.scrollHeight - box.clientHeight - box.scrollTop), 'no spare room below').toBeLessThan(1);
+}));
+
+// ---- No read moves the Map, and the owner's scroll always sticks (D24). The session store reads the session again every 2 s and
+// on window focus; each read renders the Map again with the same rows, and the hold runs again. A row the app brought into view
+// (`.`, the Back-to pill, Next unseen, a search step, Show more or less, Details closing) is held where it was put until the owner
+// scrolls; the owner's scroll (here a programmatic `scrollTop`, as a scrollbar drag or the app's own scroll for the owner makes)
+// then sticks, even when a read renders the Map before the browser has sent the scroll event.
+const tick = (page: Page) => page.evaluate(() => { window.dispatchEvent(new Event('focus')); });
+type Target = 'top' | 'bottom' | 'up';
+/** The owner scrolls, and a read lands in the same task: its render runs before the scroll event. Returns where the owner put it. */
+const scrollThenRead = (page: Page, to: Target) => scroller(page).evaluate((box, where) => {
+  box.scrollTop = where === 'top' ? 0 : where === 'bottom' ? box.scrollHeight : box.scrollTop - 120;
+  window.dispatchEvent(new Event('focus'));
+  return box.scrollTop;
+}, to);
+/** Four reads, two frames apart: none moves the Map. */
+const readsHold = async (page: Page, at: number, label: string) => {
+  for (let read = 1; read <= 4; read++) {
+    await tick(page);
+    await settle(page);
+    expect(await scrollTopOf(page), `${label}: read ${read} leaves scrollTop where it was`).toBe(at);
+  }
+};
+const backPill = (page: Page) => page.locator('.tree-scroll-shell > .tree-back');
+/** Item 10 is selected (Details closed), then scrolled out of view so its Back-to pill shows. */
+const selectedOutOfView = async (page: Page) => {
+  await selectReading(page);
+  await goTo(page, 'top');
+  await expect(backPill(page)).toBeVisible();
+  await settle(page);
+};
+const pins: readonly (readonly [name: string, pin: (page: Page) => Promise<void>])[] = [
+  ['nothing is pinned', nothing],
+  ['Details closes on the selected row', selectReading],
+  ['`.` brings the selected row back', async page => {
+    await selectedOutOfView(page);
+    await row(page, '1').evaluate(element => (element as HTMLElement).focus({ preventScroll: true }));
+    await page.keyboard.press('.');
+    await expect(backPill(page)).toHaveCount(0);
+  }],
+  ['the Back-to pill brings the selected row back', async page => {
+    await selectedOutOfView(page);
+    await press(backPill(page));
+    await expect(backPill(page)).toHaveCount(0);
+  }],
+  ['Show more then Show less on the reading row', async page => {
+    await press(row(page, '10').getByRole('button', { name: 'Show more' }));
+    await press(row(page, '10').getByRole('button', { name: 'Show less' }));
+    await expect(row(page, '10').getByRole('button', { name: 'Show more' })).toHaveCount(1);
+  }],
+  ['Next unseen steps to a row', page => press(bandButton(page, 'Next unseen'))],
+  ['a search step brings a match into view', async page => {
+    await search(page, 'Another item 17');
+    await page.getByRole('textbox', { name: 'Search the Map' }).press('Enter');
+    await expect(row(page, '17').locator('.tree-hit[data-current]').first()).toBeVisible();
+  }],
+];
+for (const [name, pin] of pins) for (const to of ['top', 'bottom', 'up'] as const) {
+  test(`no read moves the Map and the owner's scroll ${to === 'up' ? 'up' : `to the ${to}`} sticks after ${name}`, ({ page }) => served(page, async () => {
+    await pin(page);
+    await page.mouse.move(2, 690);
+    await settle(page);
+    await readsHold(page, await scrollTopOf(page), name);
+    const at = await scrollThenRead(page, to);
+    await settle(page);
+    expect(await scrollTopOf(page), 'the owner\'s scroll sticks through the read that raced its scroll event').toBe(at);
+    await readsHold(page, at, `after the owner's scroll ${to}`);
+  }));
+}
+
+// Show less on a long result the owner has read down to its end folds it with the row's top brought into view by the least
+// scrolling (the app's scroll for the owner); the row is not put back where its top was, above the window.
+test('Show less at the end of a long result brings the row\'s top into view, and no read moves it back', ({ page }) => served(page, async () => {
+  await goTo(page, 'top');
+  await settle(page);
+  await row(page, '1').getByRole('button', { name: 'Show more' }).last().click();
+  const less = row(page, '1').getByRole('button', { name: 'Show less' }).last();
+  await expect(less).toBeVisible();
+  await less.evaluate(button => {
+    const box = button.closest('.tree-scroll')!;
+    box.scrollTop += button.getBoundingClientRect().top - box.getBoundingClientRect().top - 200;
+  });
+  await settle(page);
+  expect(await row(page, '1').evaluate(element => element.getBoundingClientRect().top), 'the row\'s top is above the window').toBeLessThan(await mapTop(page));
+  await page.mouse.move(2, 690);
+  await press(less);
+  await expect(row(page, '1').getByRole('button', { name: 'Show more' })).toHaveCount(2);
+  await settle(page);
+  const at = await scrollTopOf(page);
+  expect(await row(page, '1').evaluate(element => element.getBoundingClientRect().top), 'the row\'s top is in view').toBeGreaterThanOrEqual(await bandBottom(page) - 0.5);
+  await readsHold(page, at, 'after Show less');
 }));
