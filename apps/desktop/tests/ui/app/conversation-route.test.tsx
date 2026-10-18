@@ -27,8 +27,8 @@ it('guards conversation targets and footer on the first render of a different se
   Object.assign(transport.preferences.sessions[0], { tab_open: true, selected_item_id: '4' });
   transport.preferences.sessions.push({ ...transport.view(secondId), selected_item_id: '4' });
   render(<DesktopApp service={createDesktopService(transport)} />);
-  await screen.findByRole('button', { name: 'Open the conversation in a bigger view' });
-  fireEvent.click(screen.getByRole('button', { name: 'Open the conversation in a bigger view' }));
+  await screen.findByRole('button', { name: 'Read in a bigger view' });
+  fireEvent.click(screen.getByRole('button', { name: 'Read in a bigger view' }));
   // The dock's question title switches the open conversation to its question, as the Waiting card did.
   const dock = screen.getByRole('region', { name: 'Answer dock' });
   fireEvent.click(within(dock).getByRole('button', { name: /^\d+ (more )?waiting$/ }));

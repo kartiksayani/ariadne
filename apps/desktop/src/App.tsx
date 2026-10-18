@@ -105,6 +105,8 @@ interface CenterProps {
   readonly onDismissReveal: () => void; readonly onResume: () => void; readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
   readonly onOpenItem: (itemId: string) => void;
   readonly onOpenTopic: OpenTopicInDetails;
+  /** The owner hid this item from the Map: say so, with an Undo. */
+  readonly onHid: (itemId: string) => void;
   readonly onClearFilters: () => void; readonly onClearSearch: () => void; readonly onShowArchive: () => void;
   readonly onRemove: (target: TreeRemoveTarget) => void;
   readonly filterOpen?: boolean;
@@ -522,6 +524,15 @@ function Workspace({ application }: { application: Application }) {
     if (!preferences) return false;
     void navigation.setLater(target, !preferences.later.some(value => routeKey(value) === key && value.item_id === itemId), preferences.revision); return true;
   };
+  // "Hid “x”." with an Undo that unhides (E19). It sets the state, so a late Undo never hides the item again.
+  const announceHid = (target: ItemRoute) => {
+    const item = navigation.opened.open(target).getSnapshot().snapshot?.session.items[target.item_id];
+    const label = item ? shortLabel(item) : 'the item';
+    toasts.show({ text: `Hid “${label}”.`, undo: () => {
+      if (!toggleHidden(target, false)) notices.push({ id: 'hide-undo-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)',
+        text: `“${label}” could not be unhidden just now. Try Unhide again in a moment.` });
+    } });
+  };
   // `want` sets the state instead of flipping it: Hide's Undo must not hide the item again after the owner unhid it some other way.
   const toggleHidden = (target: ItemRoute, want?: boolean) => {
     const current = navigation.getSnapshot();
@@ -531,14 +542,10 @@ function Workspace({ application }: { application: Application }) {
     const isHidden = !!session && hiddenItems(session, new Set(saved?.hidden_item_ids ?? [])).has(target.item_id);
     if (want !== undefined && want === isHidden) return true;
     setDismissedReveal(currentReveal);
-    const label = session && session.items[target.item_id] ? shortLabel(session.items[target.item_id]!) : 'the item';
     void navigation.setHidden(target, !isHidden, current.preferences.revision).then(saved => {
       if (!saved) notices.push({ id: 'hide-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
         text: 'The hidden items preference could not be saved. Try again.' });
-      else if (!isHidden) toasts.show({ text: `Hid “${label}”.`, undo: () => {
-        if (!toggleHidden(target, false)) notices.push({ id: 'hide-undo-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-warn)',
-          text: `“${label}” could not be unhidden just now. Try Unhide again in a moment.` });
-      } });
+      else if (!isHidden) announceHid(target);
     });
     return true;
   };
@@ -678,7 +685,7 @@ function Workspace({ application }: { application: Application }) {
         covered={conversationOpen} actingId={conversationOpen ? conversation?.itemId : null}
         historyReveal={historyReveal.current === treeReveal ? historyReveal.current : null}
         selectedId={treeSelectedId} detailOpen={conversationOpen || detailOpen && (!!selectedId || topicMode)}
-        onSelected={selected} onOpenTopic={openTopic}
+        onSelected={selected} onOpenTopic={openTopic} onHid={itemId => { if (route) announceHid({ ...route, item_id: itemId }); }}
         onOpenItem={itemId => { if (route) revealItem({ ...route, item_id: itemId }); }}
         onDismissReveal={() => setDismissedReveal(currentReveal)} onResume={() => { setDismissedReveal(currentReveal); closeDetail(); }}
         onAct={(intent, target, onReveal) => {

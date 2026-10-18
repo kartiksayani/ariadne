@@ -90,7 +90,7 @@ async function setup({ otherSession = false, baseline = false, dropReady = false
 }
 
 async function expand() {
-  const button = screen.getByRole('button', { name: 'Open the conversation in a bigger view' });
+  const button = screen.getByRole('button', { name: 'Read in a bigger view' });
   button.focus(); fireEvent.click(button);
   await screen.findByRole('region', { name: 'Item conversation' });
   return button;
@@ -122,7 +122,7 @@ describe('desktop item conversation', () => {
     const scroller = tree.querySelector<HTMLElement>('.tree-scroll')!;
     scroller.scrollTop = 173;
     const expandButton = await expand();
-    expect(within(conversation()).getByRole('heading', { level: 1 }).textContent).toBe('Record retry limits');
+    expect(within(conversation()).getByLabelText('Detail of Record retry limits')).toBeTruthy();
     expect(document.activeElement).toBe(conversation());
     expect(document.querySelectorAll('[data-detail-item-id]')).toHaveLength(1);
     expect(document.querySelector('[data-covered-detail]')).not.toBeNull();
@@ -132,8 +132,9 @@ describe('desktop item conversation', () => {
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Item conversation' })).toBeNull());
     expect(screen.getByRole('region', { name: 'Session tree' })).toBe(tree);
     expect(row('4')).toBe(selectedRow); expect(scroller.scrollTop).toBe(173); expect(selected(transport)).toBe('4');
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open the conversation in a bigger view' }));
-    expect(expandButton.isConnected).toBe(false);
+    // The Read toggle lives in the column's head, which the bigger view never unmounts: focus returns to the same button.
+    expect(document.activeElement).toBe(expandButton);
+    expect(expandButton.isConnected).toBe(true);
   });
 
   it('closes a peek before the conversation, including Escape in a typed editor, and keeps the draft', async () => {
@@ -149,7 +150,7 @@ describe('desktop item conversation', () => {
     words.focus(); key(words, 'Escape');
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Item conversation' })).toBeNull());
     expect(within(detail('4')).getByLabelText<HTMLTextAreaElement>('Reply message').value).toBe('Keep this draft when I leave.');
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open the conversation in a bigger view' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Read in a bigger view' }));
   });
 
   // Rename is a modal dialog now, opened only from a row on a page (SPEC 5.14), so it can never be open under the
@@ -321,11 +322,11 @@ describe('desktop item conversation', () => {
     expect(selected(transport)).toBe('4');
   });
 
-  it('keeps the header, the dock and the pin aligned before and after an owner reply', async () => {
+  it('keeps the status, the dock and the pin aligned before and after an owner reply', async () => {
     const transport = await setup(); await expand(); await switchQuestion();
     fireEvent.click(within(dock()).getByRole('button', { name: 'Fold the dock' }));
-    const header = () => conversation().querySelector('.conversation-header .status-badge')!;
-    expect(header().textContent).toBe('Waiting on me');
+    // The bigger view's head has no status badge now (it is in the body); the Map's row says it.
+    expect(row('2').querySelector('.status-badge')?.textContent).toBe('Waiting on me');
     // The conversation answers 2, so the dock holds only 8.
     expect(pill()?.textContent).toBe('1 more waiting'); expect(conversation().querySelector('.conversation-pin')).toBeTruthy();
     // The footer keys strip is gone (SPEC, Removed): the conversation advertises no key legend of its own.
@@ -336,7 +337,6 @@ describe('desktop item conversation', () => {
     await waitFor(() => expect(sends(transport)).toHaveLength(1));
     await waitFor(() => {
       // Saved and not attempted yet: Queued, as core counts it, and "1 sent" in the dock until the agent picks it up.
-      expect(header().textContent).toBe('Queued');
       expect(within(dock()).getByRole('button', { name: '1 sent, waiting for the agent' })).toBeTruthy();
       expect(conversation().querySelector('.conversation-pin')).toBeNull();
     });

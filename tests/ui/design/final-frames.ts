@@ -92,15 +92,14 @@ export const notYet = {
 
 /**
  * The values a state's fixture sets that the fixture builder (final-fixtures.ts) accepts but cannot yet put the current app
- * in: the "Show more" links, a bigger Details, the connection states the app has no data for, and an open session other than
+ * in: the "Show more" links, the connection states the app has no data for, and an open session other than
  * the default. It is derived from the values the state sets: a field is flagged when its value is on the `notYet` list (`shown`
- * and `bigger` whenever set). A state that lists any of them cannot match the board until the app grows the feature; its frame
+ * whenever set). A state that lists any of them cannot match the board until the app grows the feature; its frame
  * JSON records them as `unhonoured`, so a builder knows the mismatch is the feature, not a fixture mistake.
  */
 export function unhonoured(app: AppFixture, list: typeof notYet = notYet): string[] {
   const { view, chrome, sessions } = app, out: string[] = [];
   if (view?.shown) out.push(`view.shown=${view.shown.join(',')}`);
-  if (view?.details === 'bigger') out.push('view.details=bigger');
   if (chrome?.overlay && list.overlay.includes(chrome.overlay)) out.push(`chrome.overlay=${chrome.overlay}`);
   if (sessions?.connection && list.connection.includes(sessions.connection)) out.push(`sessions.connection=${sessions.connection}`);
   if (sessions?.current && sessions.current !== 's2') out.push(`sessions.current=${sessions.current}`);
@@ -195,8 +194,7 @@ const stateList: readonly FinalState[] = [
   { id: '2.10', part: 'Answering', sid: 'd-short', owner: 'dock', pending: false, title: 'The dock dragged short', app: { view: { selected: Q2, dock: 'open', dockQuestion: 1, dockHeight: 'short' }, drafts: [d(Q2, { pick: 0 })] } },
   // 3. An item's conversation: where Details sits (its content is a later release)
   { id: '3.1', part: 'Conversation', sid: 'c-details', owner: 'details', pending: false, title: 'Details beside the Map', app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' } } },
-  // 3.2 stays pending: the bigger view of Details is release 3.
-  { id: '3.2', part: 'Conversation', sid: 'c-read', owner: 'details', pending: true, title: 'A bigger view for a long thread', app: { view: { selected: 'a2.2.1', details: 'bigger', dock: 'line' } } },
+  { id: '3.2', part: 'Conversation', sid: 'c-read', owner: 'details', pending: false, title: 'A bigger view for a long thread', app: { view: { selected: 'a2.2.1', details: 'bigger', dock: 'line' } } },
   { id: '3.6', part: 'Conversation', sid: 'c-fold', owner: 'details', pending: false, title: 'Details folded to a strip, dock open', app: { view: { selected: 'a2.2.1.1', details: 'folded', dock: 'open', dockQuestion: 0 }, act: [{ click: 'Fold Details' }] } },
   // 12. Connection. 12.2 to 12.9 stay pending: the connection states and their banners (the connect guide, the last good copy, the unsaved-change notice,
   // the loading skeleton, "This session can't be read") are release 3 (ENGINEERING-PLAN: D3); 12.1's card is above.

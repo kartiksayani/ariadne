@@ -7,6 +7,8 @@ import { shortLabel } from '../../../src/ui/shared/short';
 import { AppTransport, route } from '../app/transport';
 import { useWideWindow } from '../shell/wideWindow';
 useWideWindow();
+/** The fixture's old in-flight messages get the "hasn't been picked up" notice (alpha.21 E17); these tests are about other notices. */
+const alertsExceptStuck = () => screen.queryAllByRole('alert').filter(alert => !alert.querySelector('[data-notice-id^="stuck:"]'));
 
 const original = '00000000-0000-4000-8000-000000000099';
 afterEach(() => { cleanup(); notices.clear(); vi.restoreAllMocks(); });
@@ -44,7 +46,7 @@ it.each(['registered lookup', 'source capture', 'navigation capture'] as const)(
     expect(fallback.textContent).toContain('The original project folder is missing or can’t be read. Restore it or move it back, then try again. Full copied history remains here.');
     await waitFor(() => expect(sourceButton.disabled).toBe(false));
     expect(screen.queryByText(/Opening the session/)).toBeNull();
-    expect(screen.queryByRole('alert')).toBeNull();
+    expect(alertsExceptStuck()).toEqual([]);
     expect(notices.getSnapshot().some(notice => /couldn’t read or save|could not be opened/.test(notice.text))).toBe(false);
     expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
@@ -53,7 +55,7 @@ it.each(['registered lookup', 'source capture', 'navigation capture'] as const)(
         && entry.preferences.selected_navigation.kind === 'session' && entry.preferences.selected_navigation.session.project_id === original))).toBe(false);
     await act(async () => { fireEvent.click(within(detail).getByRole('button', { name: `Open copied item: ${shortLabel(copy.items['1']!)}` })); });
     await waitFor(() => expect(screen.queryByText(/Opening the session/)).toBeNull());
-    expect(screen.queryByRole('alert')).toBeNull();
+    expect(alertsExceptStuck()).toEqual([]);
     expect(screen.getByRole('button', { name: 'Source item' })).toBe(sourceButton);
   }, 10_000);
 
@@ -124,8 +126,8 @@ it('discards a delayed unavailable-source failure after Projects supersedes its 
     // The page is not saved: the selection stays on the session it was on, and the handoff never lands.
     expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
     expect(screen.queryByText(/Opening|Full copied history|couldn’t read or save|could not be opened/)).toBeNull();
-    expect(screen.queryByRole('alert')).toBeNull();
-    expect(notices.getSnapshot()).toEqual([]);
+    expect(alertsExceptStuck()).toEqual([]);
+    expect(notices.getSnapshot().filter(notice => !notice.id.startsWith('stuck:'))).toEqual([]);
     expect(transport.preferences.sessions[0].selected_item_id).toBe('1');
   } finally { await act(async () => { release(); }); vi.useRealTimers(); }
 }, 10_000);

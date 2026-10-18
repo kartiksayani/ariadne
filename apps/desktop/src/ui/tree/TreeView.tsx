@@ -94,6 +94,8 @@ export interface TreeViewProps {
   readonly onOpenItem?: (itemId: string) => void;
   /** "Reply to topic" and an Edit on a stuck topic reply open Details on the topic (alpha.21 E6). */
   readonly onOpenTopic?: OpenTopicInDetails;
+  /** An item was hidden from the Map (saved): App says so with an Undo toast. */
+  readonly onHid?: (itemId: string) => void;
   /** Graph content shown in place of the rows. */
   readonly graph?: ReactNode;
   /** Notices above the rows: stale data, recovery. */
@@ -355,6 +357,7 @@ export function TreeView(props: TreeViewProps) {
     void navigation.setHidden({ ...route, item_id: row.item.id }, !row.hidden, current.preferences.revision).then(saved => {
       if (!saved) { hiddenFocus.current = null; noticeStore.push({ id: 'hide-save-failed', icon: 'ph ph-warning-circle', iconColor: 'var(--a-danger)', dismissible: true,
         text: 'The hidden items preference could not be saved. Try again.' }); }
+      else if (!row.hidden) props.onHid?.(row.item.id);
     });
   };
 
