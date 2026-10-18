@@ -1,7 +1,6 @@
 import { createPortal } from 'react-dom';
 import { Dialog } from '../dialogs/Dialog';
 import { ItemChanges } from '../changes/ItemChanges';
-import { AnswerChanges } from '../changes/AnswerChanges';
 import { isChangedSinceRead, type SeenState } from '../../selectors/changes/seen';
 import { itemRemoved } from '../../selectors/removed';
 // The item detail panel (handoff README §5 "Item detail"; Ariadne.dc.html
@@ -22,12 +21,10 @@ import { useSupervisorHealth } from '../../components/bindings/health';
 import type { OwnerFocusRequest, PendingSubmission } from '../answer/useSubmit';
 import { ackHoldFor, ackTarget, ackTitle, useAckHeld } from '../shared/ack';
 import { STATUS } from '../shared/status';
-import { StuckNote } from '../answer/StuckNote';
-import { NotSentLine } from '../answer/NotSentLine';
-import { editable, editQueued, inEditor, putBackBlocked, putBackCancelled, sendingAgain } from '../answer/held';
-import { useGrow } from '../answer/useGrow';
+import { Chat } from './Chat';
+import { Composer } from './Composer';
 import { AnswerSlot, answerSlotError, changedText } from './AnswerSlot';
-import { FileRefProject, fileLinkProps, ItemReference, ItemRefs, LinkOpener, Markdown, singleParagraph, useProjectFile } from '../shared/MarkdownText';
+import { FileRefProject, fileLinkProps, ItemReference, ItemRefs, LinkOpener, Markdown, useProjectFile } from '../shared/MarkdownText';
 import { fileLinkTitle, fileReference, safeHref } from '../shared/markdown';
 import { copyText } from '../shared/clipboard';
 import { notices } from '../pages/notices';
@@ -37,7 +34,7 @@ import { closedSessionQuestion, sessionAnswerBlocked } from '../../selectors/ses
 import { SessionClosedChip } from '../shared/SessionClosedChip';
 import { CopyMessage } from './CopyMessage';
 import { StatusBadge } from '../shared/StatusBadge';
-import { actionText, boxText, detailModel, detailPath, type ActionKey, type Kid, type LinkView, type OpenMode, type PendingView, type WordsKind } from './model';
+import { actionText, detailModel, detailPath, type ActionKey, type Kid, type LinkView, type OpenMode } from './model';
 import { useDetailSubmit, type DraftTarget, type Words } from './submit';
 import './detail.css';
 import { ItemRefSession, usePeek } from '../peek/context';
@@ -134,8 +131,6 @@ export interface ItemDetailProps {
 
 const sectionLabel = (text: string) => <div className="detail-label">{text}</div>;
 
-const kindName: Readonly<Record<WordsKind, string>> = { reply: 'reply', note: 'note', followup: 'follow-up' };
-
 /** One answer eligibility rule for the pane, conversation and shell footer. */
 export function conversationAnswerState(session: Immutable<Session>, itemId: string, retained?: Pick<DraftEntry, 'uncertain' | 'error'>): { readonly showAnswer: boolean; readonly live: boolean } {
   const item = session.items[itemId];
@@ -147,70 +142,6 @@ export function conversationAnswerState(session: Immutable<Session>, itemId: str
   const model = detailModel({ session, itemId, mode: null, saving: null, later: false, now: Date.now() });
   const showAnswer = !archived && (closedSessionQuestion(session, item) || currentQuestionOpen && !!(model?.answer || retained?.uncertain || retained?.error));
   return { showAnswer, live: showAnswer && !!model?.answer && waitingOnOwner(session, item) };
-}
-
-interface WordsFieldProps {
-  readonly slot: Words;
-  /** What the words go out as now. */
-  readonly sentAs: WordsKind;
-  readonly first: boolean;
-  /** Hands the box's textarea to the panel, so a key can focus the draft it names. */
-  readonly register: (element: HTMLTextAreaElement | null) => void;
-  readonly sendOff: boolean;
-  /** The box was opened by a button and holds no words: it can be closed. */
-  readonly closable: boolean;
-  readonly onEdit: (text: string) => void;
-  readonly onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
-  readonly onSend: () => void;
-  readonly onCancel: () => void;
-  readonly onReview: () => void;
-}
-
-/**
- * One draft of the owner's words. It edits its own draft in place and is labelled by what it will be sent as, so the
- * owner sees the kind before sending. Its mount does not depend on the section around it, so typing and focus survive
- * the item changing status.
- */
-function WordsField({ slot, sentAs, first, register, sendOff, closable, onEdit, onKeyDown, onSend, onCancel, onReview }: WordsFieldProps) {
-  const ref = useRef<HTMLTextAreaElement | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
-  const attach = (element: HTMLTextAreaElement | null) => { ref.current = element; register(element); };
-  useGrow(ref, slot.text, !collapsed);
-  // A locked draft (an attempt in flight or awaiting a retry) goes out as the kind it was saved with: its label, button and
-  // hint name that kind, and it carries no note about a change.
-  const kind = slot.locked ? slot.kind : sentAs, text = boxText[kind], noteId = useId();
-  const note = slot.kind !== sentAs && !slot.locked;
-  return <>
-    {slot.changed && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
-      <button type="button" className="btn btn-secondary answer-warn-action" disabled={slot.locked} onClick={onReview}>Review this question</button></div>}
-    <div className={`detail-box${collapsed ? ' detail-box-collapsed' : ''}`}>
-      {note && <p className="detail-box-note" id={noteId}>{`This will be sent as a ${kindName[sentAs]}, which fits the item now. You wrote it as a ${kindName[slot.kind]}.`}</p>}
-      <div className="detail-composer-row">
-        <textarea ref={attach} className="input" rows={1} aria-label={first ? text.label : `${text.label}, another draft`} aria-describedby={note ? noteId : undefined}
-          placeholder={text.placeholder} value={slot.text} disabled={slot.locked} onFocus={() => setCollapsed(false)}
-          onChange={event => { setCollapsed(false); onEdit(event.target.value); }} onKeyDown={event => { if (event.key === 'Escape') setCollapsed(true); onKeyDown(event); }} />
-        <button type="button" className="btn btn-primary" disabled={sendOff} aria-label={first ? text.button : `${text.button}, another draft`} onClick={onSend}>
-          <i className="ph ph-paper-plane-right" aria-hidden="true" />{text.button}</button>
-        {closable && <button type="button" className="btn btn-ghost detail-cancel" onClick={onCancel}>Cancel</button>}
-      </div>
-      <span className="detail-box-hint" title={text.hint}>⌘↵ sends · Esc keeps draft</span>
-    </div>
-  </>;
-}
-
-/** "You replied: “…”" for a one-paragraph reply; a longer reply keeps its paragraphs and lists below the words. */
-function OwnerReply({ text }: { readonly text: string }) {
-  return <ItemRefs.Provider value={null}>{singleParagraph(text)
-    ? <span>You replied: “<Markdown text={text} inline />”</span>
-    : <div className="detail-reply"><span>You replied:</span><Markdown text={text} /></div>}</ItemRefs.Provider>;
-}
-
-/** What the owner sent, inside their bubble: the option they chose, a one-press request, or their own words. */
-function YouSaid({ how, text, note = '' }: { readonly how: PendingView['how']; readonly text: string; readonly note?: string }) {
-  return <>
-    <i className={`${how === 'chose' ? 'ph ph-check-circle' : 'ph ph-user'} detail-msg-icon detail-you-icon`} aria-hidden="true" />
-    {how === 'chose' ? <div className="detail-reply"><span>{`You chose “${text}”`}</span>{note.trim() && <ItemRefs.Provider value={null}><Markdown text={note} /></ItemRefs.Provider>}</div> : how === 'action' ? <div className="detail-reply"><span>{text}</span>{note.trim() && <ItemRefs.Provider value={null}><Markdown text={note} /></ItemRefs.Provider>}</div> : <OwnerReply text={text} />}
-  </>;
 }
 
 function KidButton({ kid }: { readonly kid: Kid }) {
@@ -521,14 +452,13 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     }
   };
   const dropOff = !submit.ready || submit.saving !== null || submit.locked('drop') || submit.changed('drop');
-  const owner = !answerOnly && (slots.length > 0 || dropOpen || reopenStale) && <div className="detail-owner-input" data-owner-input={itemId}>
-    <PausedNote actions={actions} />
-    {reopenStale && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
-      <button type="button" className="btn btn-secondary answer-warn-action" disabled={submit.locked('reopen')} onClick={() => submit.review('reopen')}>Review this question</button></div>}
-    {fit && slots.map((slot, index) => <WordsField key={slotKey(slot)} slot={slot} sentAs={fit} first={index === 0} sendOff={sendOff(slot)}
-      register={element => { const key = slotKey(slot); if (element) boxes.current.set(key, element); else boxes.current.delete(key); }}
-      closable={closable} onEdit={value => { edited.current = slotKey(slot); submit.edit(slot, value); }} onKeyDown={wordsKey(slot)} onSend={() => sendWords(slot)} onCancel={closeBox}
-      onReview={() => submit.review(slot)} />)}
+  const owner = !answerOnly && (slots.length > 0 || dropOpen || reopenStale);
+  const composer = owner && <Composer kind={model.status === 'waiting' ? 'waiting' : 'plain'} ownerKey={itemId} actions={actions} sentAs={fit} slots={slots} slotKey={slotKey}
+    sendOff={sendOff} closable={closable} register={(key, element) => { if (element) boxes.current.set(key, element); else boxes.current.delete(key); }}
+    onEdit={(slot, value) => { edited.current = slotKey(slot); submit.edit(slot, value); }} onKeyDown={wordsKey} onSend={sendWords} onCancel={closeBox}
+    onReview={slot => submit.review(slot)}
+    before={reopenStale && <div className="answer-warn" role="alert"><i className="ph ph-warning" aria-hidden="true" /><span>{changedText}</span>
+      <button type="button" className="btn btn-secondary answer-warn-action" disabled={submit.locked('reopen')} onClick={() => submit.review('reopen')}>Review this question</button></div>}>
     {dropOpen && <div className="detail-box">
       {submit.changed('drop') && <div className="answer-warn" role="alert"><span>{changedText}</span>
         <button type="button" className="btn btn-secondary" onClick={() => submit.review('drop')}>Review this question</button></div>}
@@ -552,7 +482,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
         <span className="detail-box-hint">Enter drops · the agent confirms</span>
       </div></>}
     </div>}
-  </div>;
+  </Composer>;
   const docked = !!(model.open || model.followUp || showAnswer || savedAnswers.length > 0 || owner || ackTo || submit.error);
   const disabledActions = model.open?.actions.some(action => action.disabled);
   const dockHint = current.status !== 'ready' || current.error || disabledActions ? model.open?.hint
@@ -643,68 +573,13 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
 
     </>}
 
-    {(model.chat.length > 0 || onOpenConversation) && <section className="detail-section detail-chat" aria-label="Conversation">
-      {!expanded && <div className="detail-label detail-label-row"><span>Conversation</span>
+    {(model.chat.length > 0 || onOpenConversation) && <Chat entries={model.chat} session={session} itemId={itemId} expanded={expanded} dividerId={dividerId}
+      drafts={drafts} draftState={draftState} actions={actions} onOpenItem={onOpenItem}
+      onOpenEditor={target => { if (target !== 'answer' && target !== 'topic_reply') openBox(target); }}
+      header={!expanded && <div className="detail-label detail-label-row"><span>Conversation</span>
         {onOpenConversation && <button type="button" className="btn btn-ghost btn-icon" aria-label="Open the conversation in a bigger view"
           title="Open the conversation in a bigger view" onClick={onOpenConversation}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M14 3h7v7M21 3l-8 8M10 21H3v-7M3 21l8-8" /></svg></button>}
-      </div>}
-      <ol className="detail-chat-list" onKeyDown={event => {
-        if (!expanded || !['ArrowUp', 'ArrowDown'].includes(event.key) || event.altKey || event.metaKey || event.ctrlKey
-          || (event.target instanceof Element && event.target.closest('input,textarea,button,a,select,[contenteditable="true"]'))) return;
-        const messages = [...event.currentTarget.querySelectorAll<HTMLElement>('[data-message-id]')];
-        const current = event.target instanceof Element ? messages.indexOf(event.target.closest<HTMLElement>('[data-message-id]')!) : -1;
-        const next = current < 0 ? 0 : Math.max(0, Math.min(messages.length - 1, current + (event.key === 'ArrowDown' ? 1 : -1)));
-        event.preventDefault(); event.stopPropagation(); messages[next]?.focus({ preventScroll: true });
-        messages[next]?.scrollIntoView?.({ block: 'nearest' });
-      }}>
-        {model.chat.map(entry => <li key={entry.id} tabIndex={expanded ? -1 : undefined} data-message-id={entry.id} data-pending={entry.pending?.input.id}
-          data-round={entry.asks[0]?.ordinal}
-          data-owner-said={entry.you && !Object.values(session.inputs).some(input => input?.message_id === entry.id && input.state === 'cancelled') ? 'true' : undefined}
-          className={`detail-turn${entry.unsent ? ' detail-turn-cancelled' : ''}${entry.asks.some(ask => ask.now) ? ' detail-turn-now' : ''}${entry.pending ? ' detail-turn-pending' : ''}`}>
-          {entry.id === dividerId && <div className="conversation-unseen">New since you last looked</div>}
-          {entry.marker && <div className="detail-chat-marker">{entry.marker}</div>}
-          <div className={`detail-msg${entry.you ? ' detail-msg-you' : ''}`}>
-            <div className={`detail-bubble ${entry.you ? 'detail-bubble-you' : 'detail-bubble-agent'}`}>
-              {entry.you ? <>{expanded && <span className="detail-pending-caption">You · {entry.message.when}</span>}<YouSaid {...entry.you} />
-                {!expanded && <span className="detail-pending-caption">you · {entry.message.when}</span>}
-                {entry.pending?.caption && <span className="detail-pending-caption">{entry.pending.caption}</span>}</>
-                : <><div className="detail-agent-meta">{expanded ? <span>Agent</span> : <><span>{entry.message.number}</span><span>{entry.message.who}</span></>}<span>{entry.message.when}</span></div>
-                  <Markdown text={entry.message.body} />
-                  {entry.asks.filter(ask => !ask.text && ask.now).map(ask => <span key={ask.ordinal} className="tag tag-accent detail-waiting-tag">Waiting on you</span>)}</>}
-            </div><CopyMessage text={entry.message.body} />
-          </div>
-          {entry.asks.filter(ask => ask.text || entry.you && ask.now).map(ask => <div className="detail-msg" key={ask.ordinal}>
-            <div className="detail-bubble detail-bubble-agent">{ask.text && <Markdown text={ask.text} />}
-              {ask.now && <span className="tag tag-accent detail-waiting-tag">Waiting on you</span>}</div>
-            {ask.text && <CopyMessage text={ask.text} />}
-          </div>)}
-          {entry.you && (() => {
-            const input = Object.values(session.inputs).find(value => value?.message_id === entry.id);
-            const answer = session.answers.find(value => value.message_id === entry.id);
-            const inputId = input?.id ?? answer?.input_id;
-            return inputId ? <AnswerChanges session={session} inputId={inputId} onOpenItem={onOpenItem} /> : null;
-          })()}
-          {entry.note && <div className="detail-chat-marker">{entry.note}</div>}
-          {entry.unsent && <NotSentLine line={entry.unsent.line} again={entry.unsent.again || sendingAgain(draftState, session, entry.unsent.input)}
-            restoreHint={editable(entry.unsent.input.kind) ? putBackBlocked(session, entry.unsent.input) : null}
-            onPutBack={putBackBlocked(session, entry.unsent.input) || !editable(entry.unsent.input.kind) ? null : async () => {
-              const outcome = await putBackCancelled(drafts, session, entry.unsent!.input);
-              if (inEditor(outcome) && outcome.intent !== 'answer' && outcome.intent !== 'topic_reply') openBox(outcome.intent);
-              return outcome;
-            }} />}
-          {entry.pending?.stuck && <StuckNote actions={actions} input={entry.pending.input} stuck={entry.pending.stuck}
-            onEdit={async () => {
-              const outcome = await editQueued(drafts, session, entry.pending!.input, actions);
-              if (inEditor(outcome) && outcome.intent !== 'answer' && outcome.intent !== 'topic_reply') openBox(outcome.intent);
-              return outcome;
-            }} />}
-          {entry.result && <div className="detail-msg detail-msg-result"><span aria-hidden="true">↳</span><Markdown className="detail-msg-text" text={entry.result} inline /><CopyMessage text={entry.result} /></div>}
-          {entry.forks.map(fork => <ItemReference itemId={fork.id} className="detail-fork" key={fork.id} preserveContent title={fork.question}
-            ariaLabel={`Branched into ${relatedLabels.get(fork.id)} · ${STATUS[fork.status].label}`}>
-            <i className="ph ph-git-fork" aria-hidden="true" /><span>Branched into {relatedLabels.get(fork.id)}</span><StatusBadge status={fork.status} variant="text" /></ItemReference>)}
-        </li>)}
-      </ol>
-    </section>}
+      </div>} />}
     </div>
 
     {docked && <div ref={dock} className={`detail-dock${expanded && showAnswer ? ' detail-dock-question' : ''}`}>
@@ -761,9 +636,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
       <div className="detail-hint detail-delivery-hint" title={model.followUp.hint}>{model.followUp.hint}</div></>}
 
     {/* The one place the owner's boxes live: the same mount for every status, so typing and focus survive a status change. */}
-    {owner && <section className="detail-section detail-open" aria-label="Your message">
-      {owner}
-    </section>}
+    {composer}
     {savedAnswers.length > 0 && <section className="detail-section detail-open detail-saved-message" aria-label="Saved message">
       {sectionLabel('Saved message')}
       <p className="detail-hint">{!currentQuestionOpen && "The agent isn't waiting for this answer any more. "}Your draft is kept. Copy it into a reply if you still want to send it.</p>
