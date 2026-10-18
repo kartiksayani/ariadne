@@ -615,7 +615,9 @@ async function treeAcceptance(configuration) {
   await wait(async () => !(await preferences(tree)).view.expanded_item_ids.includes('1'), 'Explicit collapse was not persisted');
   // A status chip is a filter: it omits what does not match. The collapsed root 1 is Done, so it stays; its open children do not match.
   await choose('done', true);
-  await wait(async () => { const ids = await visibleIds(); return ids.includes('1') && !ids.includes('1.2') && ids.length < 700; }, 'The Done chip did not filter the Map');
+  // 20 branches keep 34 done rows each (the root and every third child): the Done chip shows exactly those 680, even inside the collapsed root 1.
+  await wait(async () => { const ids = await visibleIds(); return ids.includes('1') && !ids.includes('1.2') && ids.length === 680; }, 'The Done chip did not filter the Map to the 680 done rows');
+  const doneIds = await visibleIds();
   await (await search()).waitForEnabled();
   const beforeReveal = (await preferences(tree)).view;
   const child = await browser.$('[aria-label="Child items"]').$('button[aria-label^="Native sentence 1.2\\a "]');
@@ -629,7 +631,8 @@ async function treeAcceptance(configuration) {
   const revealed = (await preferences(tree)).view;
   assert.deepEqual(revealed.filters, beforeReveal.filters); assert.deepEqual(revealed.expanded_item_ids, beforeReveal.expanded_item_ids);
   await browser.$('button=Resume filtered view').click();
-  await wait(async () => { const ids = await visibleIds(); return ids.includes('1') && !ids.includes('1.2') && ids.length < 700; }, 'Resume must remove only temporary outside-filter reveal');
+  await wait(async () => JSON.stringify(await visibleIds()) === JSON.stringify(doneIds), 'Resume must remove only temporary outside-filter reveal');
+  assert.deepEqual(await visibleIds(), doneIds, 'Resume must leave exactly the rows the Done filter showed before the reveal');
   assert.equal(await browser.$('button=Resume filtered view').isExisting(), false);
   await choose('clear', true); await wait(async () => (await visibleIds()).length === 1901, 'Clear did not restore the saved collapsed branch');
   // The search only marks: 1.1 sits inside the collapsed root 1, so the top bar names it and "Show them" shows it in memory.

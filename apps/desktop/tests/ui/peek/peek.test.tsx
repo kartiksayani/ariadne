@@ -291,12 +291,12 @@ describe('name chips and item peek', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('typing in a field outside the card keeps it: arrow keys move the caret there', async () => {
+  it('typing in a field outside the card keeps it: arrow keys move the caret there and Space types a space', async () => {
     const value = await setup(), { chip } = mount(value);
     const field = document.createElement('textarea'); document.body.append(field);
     try {
       fireEvent.click(chip());
-      fireEvent.keyDown(field, { key: 'ArrowDown' }); fireEvent.keyDown(field, { key: 'Home' });
+      fireEvent.keyDown(field, { key: 'ArrowDown' }); fireEvent.keyDown(field, { key: 'Home' }); fireEvent.keyDown(field, { key: ' ' });
       expect(screen.getByRole('dialog')).toBeTruthy();
     } finally { field.remove(); }
   });

@@ -14,6 +14,7 @@ import { FileRefProject, ItemRefs, Markdown } from '../shared/MarkdownText';
 import { StatusBadge } from '../shared/StatusBadge';
 import { statusKey } from '../shared/status';
 import { ItemRefSession, PEEK_CLOSE_MS, PEEK_OPEN_MS, PeekContext, type PeekNavigation } from './context';
+import { editableSelector } from '../keys';
 import { peekPosition } from './position';
 import { peekNames } from './names';
 import { peekChange } from './change';
@@ -175,9 +176,11 @@ export function PeekProvider({ lookup, drafts, navigation, answerTarget, onGoTo,
     const scrollKey = (event: globalThis.KeyboardEvent) => {
       const target = event.target;
       if (!live.current?.explicit || !card.current || event.altKey || event.ctrlKey || event.metaKey || !SCROLL_KEYS.has(event.key)) return;
-      if (!(target instanceof Element) || card.current.contains(target) || shown?.anchor.contains(target)) return;
+      if (!(target instanceof Element) || card.current.contains(target)) return;
+      // Space on the name itself toggles the card; every other scrolling key closes it from the name too.
+      if (event.key === ' ' && shown?.anchor.contains(target)) return;
+      if (target.closest(editableSelector)) return;
       // Space only scrolls from the page itself: on a control or a row it activates or peeks.
-      if (target.closest('input, textarea, select, [contenteditable="true"]')) return;
       if (event.key === ' ' && target.closest('button, a, [role="button"], [role="treeitem"], [role="link"]')) return;
       closeAll();
     };

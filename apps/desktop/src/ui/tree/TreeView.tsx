@@ -550,7 +550,9 @@ export function TreeView(props: TreeViewProps) {
     const visible = latest.current.rows, index = visible.findIndex(row => row.key === event.currentTarget.dataset.row);
     return index >= 0 ? act(visible[index], index, intent, event) : false;
   };
+  // A card the owner opened closes on every key that moves focus or changes the Map under it.
   const move = (to: (index: number, visible: readonly Row[]) => number) => onRow((_row, index) => {
+    peek?.closeAll();
     const visible = latest.current.rows, next = visible[Math.max(0, Math.min(visible.length - 1, to(index, visible)))];
     if (next) focusRow(next.key);
     return true;
@@ -559,6 +561,7 @@ export function TreeView(props: TreeViewProps) {
   const keys = useWorkspaceKeys<HTMLDivElement>({
     'move-down': move(index => index + 1), 'move-up': move(index => index - 1), first: move(() => 0), last: move((_index, visible) => visible.length - 1),
     unfold: onRow((row, index) => {
+      peek?.closeAll();
       const next = latest.current.rows[index + 1];
       if (row.kind === 'strip' && row.reason === 'hidden' && !row.expanded) toggleStrip(row);
       else if (row.kind === 'topic' && !row.expanded) toggleTopic(row.topic.id);
@@ -567,6 +570,7 @@ export function TreeView(props: TreeViewProps) {
       return true;
     }),
     fold: onRow(row => {
+      peek?.closeAll();
       if (row.kind === 'topic') { if (row.expanded) toggleTopic(row.topic.id); return true; }
       if (row.kind === 'strip') { if (row.expanded) toggleStrip(row); else { const parent = parentKey(row); if (parent) focusRow(parent); } return true; }
       if (row.hasKids && row.expanded) { toggleItem(row.item.id); return true; }

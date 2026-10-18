@@ -181,4 +181,32 @@ describe('peek desktop composition', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: `Peek: ${source.items['2']!.question}` })).toBeNull();
   });
+
+  // A card the owner opened closes on every key that moves focus or scrolls the Map from a row, including the anchor row itself.
+  const mapKeys = ['j', 'k', 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'] as const;
+  it.each(mapKeys)('an opened card closes on %s pressed on a Map row, including its own anchor row', async key => {
+    render(<DesktopApp service={createDesktopService(new AppTransport())} />); await openFirst();
+    const items = [...document.querySelectorAll<HTMLElement>('[role="treeitem"][data-item-id]')];
+    const anchor = items[1]!;
+    anchor.focus(); fireEvent.keyDown(anchor, { key: ' ' });
+    await screen.findByRole('dialog', { name: /^Peek: / });
+    fireEvent.keyDown(anchor, { key });
+    expect(screen.queryByRole('dialog', { name: /^Peek: / })).toBeNull();
+    // Another row also closes it.
+    anchor.focus(); fireEvent.keyDown(anchor, { key: ' ' });
+    await screen.findByRole('dialog', { name: /^Peek: / });
+    fireEvent.keyDown(items[0]!, { key });
+    expect(screen.queryByRole('dialog', { name: /^Peek: / })).toBeNull();
+  });
+
+  it('Space on the anchor row toggles its card: one press closes it, the next opens it again', async () => {
+    render(<DesktopApp service={createDesktopService(new AppTransport())} />); await openFirst();
+    const anchor = [...document.querySelectorAll<HTMLElement>('[role="treeitem"][data-item-id]')][1]!;
+    anchor.focus(); fireEvent.keyDown(anchor, { key: ' ' });
+    await screen.findByRole('dialog', { name: /^Peek: / });
+    fireEvent.keyDown(anchor, { key: ' ' });
+    expect(screen.queryByRole('dialog', { name: /^Peek: / })).toBeNull();
+    fireEvent.keyDown(anchor, { key: ' ' });
+    await screen.findByRole('dialog', { name: /^Peek: / });
+  });
 });
