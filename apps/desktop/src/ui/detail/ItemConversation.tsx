@@ -38,6 +38,7 @@ import { closedSessionQuestion, sessionAnswerBlocked } from '../../selectors/ses
 import { SessionClosedChip } from '../shared/SessionClosedChip';
 import { CopyMessage } from './CopyMessage';
 import { StatusBadge } from '../shared/StatusBadge';
+import { hiddenSource } from '../tree/hidden';
 import { actionText, closedStatus, detailModel, type ActionKey, type Kid, type LinkView, type OpenMode } from './model';
 import { useDetailSubmit, type DraftTarget, type Words } from './submit';
 import './detail.css';
@@ -432,7 +433,8 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     drop: holdFor('drop'),
   };
   const heldActions = Object.fromEntries(Object.entries(held).filter(([, reason]) => !!reason)) as Partial<Record<'followUp' | 'bring' | 'reopen' | 'drop', string>>;
-  const hiddenHere = !!hiddenItemIds?.includes(itemId);
+  // Hidden by itself or by an ancestor: the "…" menu offers Unhide for both, as the Map's hover bar does.
+  const hiddenHere = !!session && hiddenSource(session, new Set(hiddenItemIds ?? []), itemId) !== null;
   const actionList = useItemActions({ session, item, hidden: hiddenHere, later, held: heldActions,
     replyApplies: model ? !!model.followUp || (model.status !== 'waiting' && !!boxAction) : false, replyLabel: model?.followUp?.label,
     on: { followUp: () => { const box = model?.followUp ? 'reply' : boxAction; if (box) act(box); }, bring: () => act('bring'), later: () => act('later'),

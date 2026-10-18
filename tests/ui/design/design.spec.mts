@@ -611,7 +611,8 @@ for (const id of dockFrameIds) {
     const detail = page.getByRole('complementary', { name: 'Item detail', exact: true });
     const detailBox = (await detail.boundingBox())!, headerAction = (await detail.getByRole('button', { name: 'More actions', exact: true }).boundingBox())!;
     expect(headerAction.y).toBeGreaterThanOrEqual(detailBox.y);
-    expect(headerAction.y - detailBox.y, 'detail header action starts within 5px of the pane top').toBeLessThanOrEqual(5);
+    // The board's head controls sit 8px under the pane's top edge (shell.css `.shell-detail-head`, measured on 3.2).
+    expect(headerAction.y - detailBox.y, 'detail header action starts within 10px of the pane top').toBeLessThanOrEqual(10);
     const composer = dock.getByRole('textbox', { name: 'Reply message', exact: true });
     await expect(composer).toHaveValue('');
     await expect(composer).toBeInViewport();

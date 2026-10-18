@@ -24,7 +24,6 @@ const phase = process.env.ARIADNE_E2E_PHASE;
 const receiptPath = join(root, 'smoke/receipt.json');
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
 const wait = (condition, message) => browser.waitUntil(condition, { timeout: 60000, interval: 100, timeoutMsg: message });
-async function click(control) { await control.waitForDisplayed(); await control.waitForEnabled(); await control.click(); }
 // What one surface shows for a saved reply's delivery: its stuck note (when it has words), else the status line under its bubble
 // (alpha.21 E16), else the dock's delivery line.
 // `facts` lists every stuck note and delivery line present, so a failure says what was actually there.
@@ -149,16 +148,6 @@ async function dockQuestion(question) {
   if (!await card.isExisting()) return undefined;
   return (await card.$('.dock-question-title').getText()).includes(question) ? card : undefined;
 }
-// What the dock's Sent chip lists for one question: the words as they went out and the delivery line. Opens the list.
-async function dockSent(question) {
-  const chip = await browser.$(`${dockSelector} button.dock-sent`);
-  if (!await chip.isExisting()) return undefined;
-  if (await chip.getAttribute('aria-expanded') !== 'true') await chip.click();
-  for (const row of await browser.$$(`${dockSelector} [aria-label="Sent answers"] .dock-sent-row`)) {
-    if ((await row.getText()).includes(question)) return row;
-  }
-  return undefined;
-}
 function orderedInputs(session) { return Object.values(session.inputs).sort((a, b) => a.seq - b.seq); }
 function receipts(session, inputs) {
   return inputs.map(input => {
@@ -222,12 +211,9 @@ async function delivery(configuration) {
   // After its Sent hold the dock moves on: nothing unsent waits, so it folds to its line.
   await wait(async () => !(await browser.$(`${dockSelector} button.dock-pill`).isExisting()) && await browser.$(dockSelector).getAttribute('data-open') === null,
     'Answered question remained in the dock');
-  // The Sent list quotes the chosen option once the saved input is read back.
-  await wait(async () => (await (await dockSent(configuration.question))?.getText())?.includes(configuration.options[0].label) ?? false,
-    'Dock answer did not appear in Sent with its chosen option');
+  // The dock's Sent chip lists only answers the agent has not picked up (alpha.21 E17: a stuck one gets a notice and its controls in
+  // Details), so it can already be gone here; the saved answer and its chosen option are checked on disk below.
   await browser.saveScreenshot(join(evidence, 'native-waiting-answer.png'));
-  // Close the Sent list again (its chip toggles it) before the Map is used.
-  await click(await browser.$(`${dockSelector} button.dock-sent`));
 
   // The first follow-up uses the bigger conversation view; the others use the detail's same composer.
   // The held answer hides the answer slot, so all four replies queue behind it.
