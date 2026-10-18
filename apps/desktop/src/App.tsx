@@ -29,7 +29,10 @@ import { conversationDivider } from './ui/detail/conversationSeen';
 import { DetailPath, ItemDetail } from './ui/detail/ItemDetail';
 import type { DetailHeadControls } from './ui/shell/DetailHead';
 import type { ItemActionView } from './ui/detail/itemActions';
-import { useDetailTarget } from './ui/shell/detailTarget';
+import { useDetailTarget, type OpenTopicInDetails } from './ui/shell/detailTarget';
+import { TopicConversation } from './ui/detail/TopicConversation';
+import { NoticeHooks } from './ui/answer/NoticeHooks';
+import type { SessionActions } from './components/bindings/actions';
 import { RailStatus } from './ui/detail/RailStatus';
 import { AnswerDock } from './ui/dock/AnswerDock';
 import { DockProvider } from './ui/dock/api';
@@ -101,6 +104,7 @@ interface CenterProps {
   readonly onSelected: (result: RevealedItem, openDetail?: boolean) => void;
   readonly onDismissReveal: () => void; readonly onResume: () => void; readonly onAct: (intent: RowIntent, target: ItemRoute, onReveal?: (result: RevealedItem) => void) => void;
   readonly onOpenItem: (itemId: string) => void;
+  readonly onOpenTopic: OpenTopicInDetails;
   readonly onClearFilters: () => void; readonly onClearSearch: () => void; readonly onShowArchive: () => void;
   readonly onRemove: (target: TreeRemoveTarget) => void;
   readonly filterOpen?: boolean;
@@ -209,6 +213,10 @@ function Workspace({ application }: { application: Application }) {
   const consumeAnswerJump = useCallback((token: number) => setAnswerJump(previous => previous?.token === token ? null : previous), []);
   const ackNoticeId = useRef<string | null>(null);
   const ackActions = store ? application.actions.forSession(store) : null;
+  // The notice hooks stay mounted once a session has been shown, so a notice told once is not told again after a page.
+  const lastActions = useRef<SessionActions | null>(null);
+  if (ackActions) lastActions.current = ackActions;
+  const noticeActions = ackActions ?? lastActions.current;
   const ackState = useSyncExternalStore(ackActions?.subscribe ?? noSubscription, ackActions?.getSnapshot ?? noSession, ackActions?.getSnapshot ?? noSession);
   useEffect(() => {
     if (ackNoticeId.current) notices.dismiss(ackNoticeId.current);
@@ -292,7 +300,7 @@ function Workspace({ application }: { application: Application }) {
     recordViewed(result);
     setLocalReveal(result);
     // "Go to" in the peek selects and scrolls to the row; only the opening paths open Details.
-    if (openDetail) { detailDismissedAt.current = null; setDetailOpen(true); setDetailAsked(count => count + 1); }
+    if (openDetail) { detailTarget.showItem(); detailDismissedAt.current = null; setDetailOpen(true); setDetailAsked(count => count + 1); }
     // Continuations use this exact admitted request, including queued reveals.
     return { request, result };
   };
@@ -300,6 +308,7 @@ function Workspace({ application }: { application: Application }) {
   // The graph's ↑/↓ and "−" move the selection without opening detail (Ariadne.dc.html `select`).
   const selected = (result: RevealedItem, openDetail = true) => {
     recordViewed(result);
+    detailTarget.showItem();
     historyReveal.current = null;
     invalidateOwnerRequest(); setLocalReveal(result);
     if (openDetail) { detailDismissedAt.current = null; setDetailOpen(true); setDetailAsked(count => count + 1); }
@@ -395,6 +404,12 @@ function Workspace({ application }: { application: Application }) {
     if (view && preferences) void navigation.saveSessionView({ ...structuredClone(view), ...change } as SessionPreferences, preferences.revision);
   };
   const closeDetail = () => { invalidateOwnerRequest(); detailDismissedAt.current = navigation.getNavigationRequest(); detailTarget.showItem(); setDetailOpen(false); };
+  // "Reply to topic", and Edit on a stuck topic reply: Details shows the topic, unfolded. The dock keeps its question.
+  const openTopic = (topicId: string) => {
+    if (conversation) closeConversation();
+    invalidateOwnerRequest(); detailDismissedAt.current = null; setDetailOpen(true); setDetailAsked(count => count + 1);
+    detailTarget.openTopicInDetails(topicId);
+  };
   const later = route && selectedId ? preferences?.later.some(item => routeKey(item) === key && item.item_id === selectedId) ?? false : false;
   // The waiting question Details (or the bigger view) is answering leaves the dock's list. A folded Details shows no
   // question, so it never claims one: the dock keeps it in view.
@@ -605,6 +620,8 @@ function Workspace({ application }: { application: Application }) {
     }}>
     <UnsentMessageNotices waiting={application.waiting} drafts={application.drafts} opened={navigation.opened} navigation={navigation}
       selectedStore={store ?? null} />
+    {noticeActions && <NoticeHooks session={sessionState?.status === 'ready' ? sessionState.snapshot?.session ?? null : null} actions={noticeActions} drafts={application.drafts}
+      openItem={itemId => { if (route) revealItem({ ...route, item_id: itemId }); }} openTopic={openTopic} />}
     <DraftConflictNotices drafts={application.drafts} opened={navigation.opened} selectedSession={route ?? null} />
     <WaitingSync waiting={application.waiting} drafts={application.drafts} />
     <AgentRemovalNotices waiting={application.waiting} controllers={application.actions} navigation={navigation}
@@ -627,13 +644,18 @@ function Workspace({ application }: { application: Application }) {
       dockContent={store && route ? <AnswerDock store={store} waiting={application.waiting} drafts={application.drafts} answering={answering}
         onAgentNotRunning={onAgentNotRunning} onOpenItem={openFromDock}
         onSeen={(itemId, revision) => navigation.markItemSeen(route, itemId, revision)} /> : undefined}
-      detailPath={store && selectedId && detailOpen && route ? <DetailPath store={store} itemId={selectedId} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onTopic={toTopicTop} /> : undefined}
+      detailPath={store && topicMode && detailOpen && route && detailTarget.target?.kind === 'topic' ? <DetailPath store={store} topicId={detailTarget.target.topicId}
+        onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onTopic={toTopicTop} />
+        : store && selectedId && detailOpen && route ? <DetailPath store={store} itemId={selectedId} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onTopic={toTopicTop} /> : undefined}
       detailAsked={detailAsked} onDetailsFolded={setDetailsFolded}
-      detailRail={store && selectedId && detailOpen && route ? <RailStatus store={store} itemId={selectedId} seen={readingSeen} /> : undefined}
-      detail={conversationOpen ? <div data-covered-detail="" /> : store && selectedId && detailOpen && route ? <ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}
+      detailRail={topicMode && detailOpen ? <i className="ph ph-tree-structure" aria-hidden="true" />
+        : store && selectedId && detailOpen && route ? <RailStatus store={store} itemId={selectedId} seen={readingSeen} /> : undefined}
+      detail={conversationOpen ? <div data-covered-detail="" />
+        : store && route && detailOpen && detailTarget.target?.kind === 'topic' ? <TopicConversation key={`${key}:topic:${detailTarget.target.topicId}`} drafts={application.drafts} store={store}
+          topicId={detailTarget.target.topicId} onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} />
+        : store && selectedId && detailOpen && route ? <ItemDetail key={`${key}:${selectedId}`} drafts={application.drafts} store={store} itemId={selectedId}
         onFocusRequestConsumed={consumeOwnerRequest} focusRequest={ownerFocus?.route === key && ownerFocus.itemId === selectedId ? ownerFocus : undefined}
         onOpenItem={itemId => revealItem({ ...route, item_id: itemId })} onBring={() => { void queueBring({ ...route, item_id: selectedId }); }}
-        onOpenConversation={() => openConversation(selectedId)}
         onHide={() => hideItem(selectedId)} onRemove={() => removeItem(selectedId)} onActions={setItemActions}
         later={later} onAgentNotRunning={onAgentNotRunning} earlierAgent={earlier}
         hiddenItemIds={view?.hidden_item_ids} seen={readingSeen}
@@ -655,8 +677,8 @@ function Workspace({ application }: { application: Application }) {
       renderSession={opened => <SessionCenter filterOpen={filterOpen} onCloseFilter={() => setFilterOpen(false)} application={application} view={opened} graph={graph} query={query} reveal={treeReveal}
         covered={conversationOpen} actingId={conversationOpen ? conversation?.itemId : null}
         historyReveal={historyReveal.current === treeReveal ? historyReveal.current : null}
-        selectedId={treeSelectedId} detailOpen={conversationOpen || detailOpen && !!selectedId}
-        onSelected={selected}
+        selectedId={treeSelectedId} detailOpen={conversationOpen || detailOpen && (!!selectedId || topicMode)}
+        onSelected={selected} onOpenTopic={openTopic}
         onOpenItem={itemId => { if (route) revealItem({ ...route, item_id: itemId }); }}
         onDismissReveal={() => setDismissedReveal(currentReveal)} onResume={() => { setDismissedReveal(currentReveal); closeDetail(); }}
         onAct={(intent, target, onReveal) => {
