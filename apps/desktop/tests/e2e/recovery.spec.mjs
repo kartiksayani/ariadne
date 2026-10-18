@@ -145,6 +145,8 @@ export async function runRecoveryAcceptance(configuration) {
   await wait(async () => await row.isExisting() && (await row.getText()).includes('Codex has your message but hasn’t saved its answer yet. It may still be working.'), 'Missing answer was not visible in Details');
   assert.doesNotMatch(await row.getText(), /Couldn’t deliver|Not delivered/, 'An accepted message cannot be described as undelivered');
   await wait(async () => (await browser.$(`.item-detail [data-pending="${input.id}"]`).getText()).includes('Delivered · no answer yet'), 'Delivered message did not retain its truthful pending caption');
+  // Every decision is also listed in the recovery banner (the Map row no longer answers it).
+  assert.equal(await browser.$('[aria-label="Delivery recovery"]').isExisting(), true, 'The recovery banner must list the stopped delivery');
   // This accepted attempt belongs to the current binding generation: the bar waits for its answer.
   const waitingLabel = `Waiting for Codex to answer “${folded(workText).slice(0, 38).trimEnd()}…”`;
   // The session's sending state is read in the connection card's Sending… dialog (the session bar and its chip are gone).

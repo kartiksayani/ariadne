@@ -261,6 +261,9 @@ async function delivery(configuration) {
       try { await wait(async () => (viewShown = await replyDelivery(viewRoot, saved.id)).state !== null, 'unused'); }
       catch { assert.fail(`The bigger conversation view did not show a delivery state for the saved reply; it had ${viewShown.facts}`); }
       const expected = viewShown.state;
+      // A reply still queued behind the held answer is "Sent" or has a stuck note; it is never "Picked up".
+      assert.ok(expected.kind === 'stuck-note' || expected.kind === 'delivery' || expected.kind === 'bubble-status' && expected.stuck === 'sent',
+        `A queued reply must read as sent or stuck, never picked up; the view showed ${JSON.stringify(expected)}`);
       await browser.saveScreenshot(join(evidence, 'native-item-conversation.png'));
       const back = await browser.$('section[aria-label="Item conversation"]').$('button=Back to Map');
       await back.waitForDisplayed(); await back.waitForEnabled(); await back.click();

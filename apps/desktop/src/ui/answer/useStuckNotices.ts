@@ -15,6 +15,7 @@ import { toasts } from '../shell/toast';
 import { agentName, clock } from '../shell/model';
 import type { OpenTopicInDetails } from '../shell/detailTarget';
 import { ALREADY_SENT, editable, editQueued, inEditor, NOT_TAKEN_BACK, TAKEN_BACK_NOT_LOADED, type ReviewOutcome } from './held';
+import { agentHasIt } from '../detail/model';
 import { sentPhrase, yourSent } from './noticeText';
 import { resendPlan } from './StuckNote';
 
@@ -64,6 +65,8 @@ export function useStuckNotices({ session, actions, drafts, openItem, openTopic 
     const now = Date.now();
     if (session && session.state === 'active') for (const input of Object.values(session.inputs)) {
       if (!input || !LIVE.has(input.state) || input.kind === 'continue' || input.kind === 'removed') continue;
+      // A running turn is already "Picked up" under the bubble: a warning about it would be false.
+      if (input.state === 'in_flight' && agentHasIt(input)) continue;
       // Two minutes from the message, or from the owner's last decision on it (Retry sends it again: the clock starts over).
       const created = Math.max(Date.parse(input.created_at), ...input.resolution_history.map(entry => Date.parse(entry.at)).filter(at => !Number.isNaN(at)));
       if (Number.isNaN(created) || now - created < STUCK_AFTER_MS || targetRemoved(session, input.target)) continue;
@@ -91,8 +94,11 @@ export function useStuckNotices({ session, actions, drafts, openItem, openTopic 
           return { tone: 'problem', text: `${yourSent(target)}: ${why.text}${retry ? ' Retry sends that same message once.' : ''}${hint ? ` ${hint}` : ''}`,
             actions: [...retry ? [{ label: 'Retry', disabled: retry.disabled || flights.current.has(target.id), run: () => {
               if (flights.current.has(target.id)) return;
+              // Plan again at the click: the session's revision and the agent's state have moved since this notice was drawn.
+              const now = resendPlan(actions, actions.session.getSnapshot().snapshot?.session.inputs[target.id] ?? target, why);
+              if (!now || now.disabled) return;
               flights.current.add(target.id);
-              void retry.run().then(sent => {
+              void now.run().then(sent => {
                 flights.current.delete(target.id);
                 if (sent) toasts.show({ text: `Sent your ${sentPhrase(target)} once, at ${clock(Date.now())}.` });
                 else show('Couldn’t send it again. Your words are kept; try Retry once more.');

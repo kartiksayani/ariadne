@@ -65,9 +65,14 @@ describe('bubbleStatus (alpha.21 E16)', () => {
   });
 
   it('stopped: Not sent + Retry only for a delivery the agent never received', () => {
-    const never = input({ state: 'needs_attention', active_attempt_id: 'a', attempts: [attempt({ id: 'a', acceptance: 'uncertain', host_turn_id: null, turn_state: 'unknown', sealed_at: null })] });
+    const never = input({ state: 'needs_attention', active_attempt_id: 'a', attempts: [attempt({ id: 'a', acceptance: 'rejected', host_turn_id: null, turn_state: 'unknown', sealed_at: null })] });
     const decision = { kind: 'decision', text: 'x', resume: false, retry: true, settle: 'skip' } as const;
     expect(status(never, decision)).toMatchObject({ kind: 'not_sent' });
+    // "Not sent" is a claim: an uncertain delivery (the host may have it) or one being checked (a host turn) is StuckNote's to word.
+    for (const patch of [{ acceptance: 'uncertain', host_turn_id: null }, { acceptance: 'uncertain', host_turn_id: 't' }] as const) {
+      const unsure = input({ state: 'needs_attention', active_attempt_id: 'a', attempts: [attempt({ id: 'a', turn_state: 'unknown', sealed_at: null, ...patch })] });
+      expect(status(unsure, decision)).toBeNull();
+    }
     const received = input({ state: 'needs_attention', active_attempt_id: 'a', attempts: [attempt({ id: 'a', acceptance: 'accepted', host_turn_id: 't', turn_state: 'completed', result_state: 'missing', sealed_at: null })] });
     expect(status(received, { ...decision, kind: 'answer' })).toBeNull();
     expect(status(never, { ...decision, retry: false })).toBeNull();

@@ -26,6 +26,8 @@ async function setup(state: Input['state'], patch: Patch = () => {}, kind: Input
     input.attempts[0]!.acceptance = 'uncertain'; input.attempts[0]!.host_turn_id = null; input.attempts[0]!.turn_state = 'unknown'; input.attempts[0]!.sealed_at = null;
     input.active_attempt_id = input.attempts[0]!.id;
   }
+  // In flight, the host has taken it but its turn has not started (a running turn is "Picked up" and has no notice).
+  if (state === 'in_flight') Object.assign(input.attempts[0]!, { acceptance: 'accepted', turn_state: 'unknown', host_turn_id: null, sealed_at: null, result_state: 'pending' });
   session.inputs = { [input.id]: input };
   patch(input, session);
   const service = createDesktopService(transport), sessions = new OpenSessions(service);
@@ -66,6 +68,12 @@ describe('stuck notices (alpha.21 E17)', () => {
     expect(openItem).toHaveBeenCalledWith('3');
   });
 
+  it('stays quiet for an in-flight message whose turn is running: the bubble already says "Picked up"', async () => {
+    await setup('in_flight', value => { Object.assign(value.attempts[0]!, { acceptance: 'accepted', acceptance_observed_at: new Date().toISOString(), turn_state: 'running', host_turn_id: 't', sealed_at: null, result_state: 'pending' }); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(shown()).toHaveLength(0);
+  });
+
   it('opens a topic reply in topic mode', async () => {
     const { openItem, openTopic, input } = await setup('in_flight', undefined, 'topic_reply', null);
     await waitFor(() => expect(shown()).toHaveLength(1));
@@ -92,6 +100,25 @@ describe('stuck notices (alpha.21 E17)', () => {
     await waitFor(() => expect(transport.mutations.some(request => 'command' in request && request.command.command === 'input_resolve'
       && request.command.params.decision === 'resend' && request.command.params.input_id === input.id)).toBe(true));
     await waitFor(() => expect(toasts.current()?.text).toMatch(/^Sent your reply about “.+” once, at \d\d:\d\d\.$/u));
+  });
+
+  it('Retry plans again at the click: it sends against the session revision of that moment, not the notice’s', async () => {
+    const { transport, input, session, store } = await setup('needs_attention');
+    await waitFor(() => expect(shown()).toHaveLength(1));
+    const binding = session.bindings[session.active_binding_id!]!;
+    const idle = () => act(() => transport.emit('ariadne://presence_changed', { binding_id: binding.id, generation: binding.generation, observation: { instance_id: 'i', generation: binding.generation,
+      connection_state: 'connected', execution_state: 'idle', source: 'host_poll', last_seen_at: new Date().toISOString(), process_identity: null, freshness: 'fresh' } }));
+    idle();
+    await waitFor(() => expect(shown()[0]!.actions![0]!.disabled).toBe(false));
+    const stale = shown()[0]!.actions![0]!, staleRevision = store.getSnapshot().snapshot!.session.revision;
+    const live = transport.sessions.get(route.session_id)!;
+    ++live.revision; await act(async () => { await store.refresh(); });
+    idle();
+    const current = live.revision;
+    expect(current).toBeGreaterThan(staleRevision);
+    await act(async () => { stale.run(); });
+    await waitFor(() => expect(transport.mutations.some(request => 'command' in request && request.command.command === 'input_resolve' && request.command.params.input_id === input.id
+      && request.command.params.expected_revision === current)).toBe(true));
   });
 
   it('offers no Retry when the agent already has the message (that one asks first)', async () => {

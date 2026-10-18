@@ -10,7 +10,7 @@ import { indexSession, type Immutable } from '../../data';
 import type { SupervisorHealth } from '../../data/service';
 import { hitSegments, holdsTerms, searchTerms, type MatchField, type Segment } from '../../selectors/tree/search';
 import { deliveryEvidence } from '../../selectors/waiting/delivery';
-import { agentReceived, stoppedAttempt, stuckInput, type Stuck } from '../../selectors/waiting/stuck';
+import { agentReceived, stoppedAttempt, stuckInput } from '../../selectors/waiting/stuck';
 import { deliveryLine as deliveryText, deliveryStage } from '../answer/delivery';
 import { agentLine, agentName, dayWord, hostApp, ownerName, sessionLabel } from '../shell/model';
 import { STATUS, statusKey, type StatusKey } from '../shared/status';
@@ -87,8 +87,6 @@ export const NO_REVEAL: SearchReveal = { items: [], topics: [], groups: [] };
 
 export interface Delivery {
   readonly icon: string; readonly text: string; readonly color: string; readonly failed: boolean;
-  /** A stopped delivery: the row answers it inline (ui/answer/StuckNote) instead of the line. */
-  readonly stuck: { readonly input: Immutable<Input>; readonly note: Stuck } | null;
 }
 const inputLabel = (input: Immutable<Input>, options: readonly Immutable<ItemOption>[]) => {
   const option = input.payload.selected_option_id ? options.find(value => value.id === input.payload.selected_option_id) : null;
@@ -97,7 +95,7 @@ const inputLabel = (input: Immutable<Input>, options: readonly Immutable<ItemOpt
 /**
  * The delivery line of the latest unsettled input on an item or topic (Ariadne.dc.html:1415). A stopped delivery
  * needing a decision comes first, even with later messages queued behind it: those cannot go out until it is
- * settled, so its Retry / Mark as done must stay on the row.
+ * settled. The row only says so; the decision is made in Details (ui/answer/StuckNote) and the recovery banner.
  */
 export function deliveryLine(session: Immutable<Session>, target: { readonly topicId: string; readonly itemId: string | null },
   presence: Immutable<PresenceObservation> | null, health: SupervisorHealth | null = null): Delivery | null {
@@ -118,11 +116,9 @@ export function deliveryLine(session: Immutable<Session>, target: { readonly top
     const delivered = agentReceived(stoppedAttempt(input));
     const checking = note.kind === 'checking';
     return { ...deliveryText(checking ? 'checking' : delivered ? stage ?? 'waiting_answer' : 'failed', input.kind, label, agent),
-      ...(delivered || checking ? { text: note.text } : {}), failed: !delivered && !checking, stuck: { input, note } };
+      ...(delivered || checking ? { text: note.text } : {}), failed: !delivered && !checking };
   }
-  // A topic reply not sent yet is answered on the band: Edit puts it back in the reply box, Delete drops it.
-  const queued = target.itemId === null && input.state === 'queued' ? stuckInput(session, input, presence, health) : null;
-  return stage ? { ...deliveryText(stage, input.kind, label, agent), failed: stage === 'failed', stuck: queued ? { input, note: queued } : null } : null;
+  return stage ? { ...deliveryText(stage, input.kind, label, agent), failed: stage === 'failed' } : null;
 }
 
 // ---------------------------------------------------------------- session bar
