@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { DesktopApp } from '../../../src/App';
 import { createDesktopService } from '../../../src/data/service';
+import { applySeen } from '../../../src/state/preferences/seen';
 import { notices } from '../../../src/ui/pages/notices';
 import { goToPage, goToSession } from './open';
 import { AppTransport, route } from './transport';
@@ -21,6 +22,9 @@ describe.each(['Projects', 'All sessions', 'Archive'] as const)('item keys on th
     const transport = new AppTransport();
     transport.preferences.global.selected_navigation = { kind: 'session', session: route };
     Object.assign(transport.preferences.sessions[0]!, { tab_open: true, selected_item_id: '4' });
+    // The session is already marked seen, so the app's own first-open bookkeeping (a mark_seen written about a second after start,
+    // whenever the session has no seen record) cannot land inside the window where the test counts writes caused by keys.
+    applySeen(transport.preferences, { kind: 'mark_seen', session: route, at: new Date().toISOString(), items: [], topics: [] });
     render(<DesktopApp service={createDesktopService(transport)} />);
     await waitFor(() => {
       expect(screen.getByRole('region', { name: 'Session tree' }).getAttribute('data-session-status')).toBe('ready');
