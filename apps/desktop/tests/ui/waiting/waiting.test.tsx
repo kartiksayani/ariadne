@@ -702,17 +702,10 @@ describe('source-backed answer dock', () => {
     expect(transport.preferences.drafts).toEqual([]);
   });
 
-  it('checks an uncertain persisted delivery without retrying or submitting another answer', async () => {
-    const { transport, current } = await dockUI(transport => { answerInput(transport.sessions.get(route.session_id)!, '74'); });
-    fireEvent.click(within(dock()).getByRole('button', { name: /^\d+ sent/ }));
-    const sent = document.querySelector<HTMLElement>('[aria-label="Sent answers"]')!;
-    const delivery = [...sent.querySelectorAll<HTMLElement>('.question-delivery')].find(element => element.textContent?.includes('Followup request'))!;
-    expect(within(delivery).getByText('Checking delivery. Your answer is kept.')).toBeTruthy();
-    expect(within(delivery).queryByRole('button', { name: 'Retry' })).toBeNull();
-    const reads = transport.queries.length;
-    fireEvent.click(within(delivery).getByRole('button', { name: 'Check delivery' }));
-    await waitFor(() => expect(current.getSnapshot().status).toBe('ready'));
-    expect(transport.queries.length).toBeGreaterThan(reads);
+  it('keeps an uncertain persisted delivery out of the dock’s Sent chip: its decision is in Details (alpha.21 E17)', async () => {
+    const { transport } = await dockUI(transport => { answerInput(transport.sessions.get(route.session_id)!, '74'); });
+    expect(within(dock()).queryByRole('button', { name: /^\d+ sent/ })).toBeNull();
+    expect(dock().querySelector('.stuck-note')).toBeNull();
     expect(transport.mutations.filter(request => ['input_submit', 'input_resolve'].includes(request.command.command))).toEqual([]);
   });
 });

@@ -219,11 +219,6 @@
   background: var(--a-side);
 }
 
-.tree-fix .stuck-note {
-  position: relative;
-  margin: 2px 0;
-}
-
 /* Item row. Its padding is fixed per depth (SPEC 3.4 with the opening rows' values): whether a box opens or closes at a
    row never changes its height, which depends only on its text and the Map's width. The tinted boxes are slices behind it
    (tree-rows.css), so the row is its own stacking context. */
@@ -517,13 +512,6 @@
   flex: 1;
   flex-direction: column;
   min-height: 0;
-}
-
-/* The row already has an icon gutter. Let recovery text use the full body column. */
-.tree-fix .stuck-note > i {
-  position: absolute;
-  top: 0.25em;
-  left: calc(-1em - 8px);
 }
 
 /* "↑ Back to “name” ." (SPEC §5.8 8.5): floats centred over the Map, so it appearing or going never moves a row. Above:

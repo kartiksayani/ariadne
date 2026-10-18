@@ -5,7 +5,7 @@
 // internal ids reach the owner. A decision whose row is visible is answered on
 // that row (ui/answer/StuckNote); this banner lists only the rest and is gone
 // once nothing is left. Once saved, sending resumes by itself.
-import { createContext, useContext, useState } from 'react';
+import { useState } from 'react';
 import { useSession, type Immutable } from '../../data';
 import type { OwnerCommand } from '../../generated/core';
 import type { Attempt, Input, ResolutionKind, Session, TurnState } from '../../generated/domain/models';
@@ -63,26 +63,15 @@ function choices(input: Immutable<Input>, attempt: Immutable<Attempt>, session: 
 export const attestIdle = (attested = true) => ({ source: 'owner_attestation' as const, turn_state: 'unknown' as const,
   host_turn_id: null, owner_attested_idle: attested, at: new Date().toISOString() });
 
-/**
- * Input ids whose stopped delivery is answered inline on a visible row (the
- * session tree provides it). The banner leaves those out; without a provider it
- * lists every target.
- */
-export const InlineRecovery = createContext<ReadonlySet<string> | null>(null);
-/** A target the inline fix answers: the current decision on a message whose row shows it. */
-const inline = (shown: ReadonlySet<string> | null, input: Immutable<Input>, attempt: Immutable<Attempt>) =>
-  !!shown?.has(input.id) && stoppedAttempt(input)?.id === attempt.id;
-
 export function RecoveryPanel({ actions }: { actions: SessionActions }) {
-  const state = useSession(actions.session), operation = useSessionActions(actions), shown = useContext(InlineRecovery);
+  const state = useSession(actions.session), operation = useSessionActions(actions);
   const [selected, setSelected] = useState<{ inputId: string; attemptId: string } | null>(null);
   /** The simple path's attestation, per message: the owner checked the agent isn't working on it. */
   const [checked, setChecked] = useState<string | null>(null);
   const [resending, setResending] = useState<{ inputId: string; attemptId: string; kind: 'resend' | 'request_result_repair' } | null>(null);
   const snapshot = state.snapshot?.session;
   if (!snapshot) return null;
-  const targets = recoveryTargets(snapshot).filter(({ input, attempt }) => !inline(shown, input, attempt));
-  // Everything that needs a decision is on a visible row: no banner.
+  const targets = recoveryTargets(snapshot);
   if (!targets.length && !selected && !resending) return null;
   const binding = snapshot.active_binding_id ? snapshot.bindings[snapshot.active_binding_id] : null;
   const agent = binding ? agentName(binding.adapter_id) : 'the agent';

@@ -507,10 +507,6 @@
   }
 }
 
-.tree-topic-fix {
-  padding-left: 26px;
-}
-
 .tree-topic-reply {
   display: flex;
   flex-direction: column;

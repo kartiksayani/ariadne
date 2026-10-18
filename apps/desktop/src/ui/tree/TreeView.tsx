@@ -9,7 +9,7 @@ import { createPortal } from 'react-dom';
 import { OwnFailure, plainFailure, useSession, type Immutable, type SessionStore } from '../../data';
 import type { RevealedItem } from '../../data/routes';
 import type { ItemRoute, SessionPreferences } from '../../generated/core';
-import type { Input, SessionSummary } from '../../generated/domain/models';
+import type { SessionSummary } from '../../generated/domain/models';
 import { NavigationStore, useNavigation } from '../../state/navigation/store';
 import { useReadingSeen } from '../../state/preferences/reading';
 import { OwnerDraftStore, useOwnerDrafts } from '../../state/drafts/store';
@@ -35,9 +35,6 @@ import { NextUnseen } from './band/NextUnseen';
 import { ChangesOpener } from '../changes/ChangesOpener';
 import { TopicMenu } from './band/TopicMenu';
 import { TopicReply } from '../answer/TopicReply';
-import { StuckNote } from '../answer/StuckNote';
-import { editQueued, inEditor } from '../answer/held';
-import { InlineRecovery } from '../../components/recovery/RecoveryPanel';
 import { Banner } from './Banner';
 import { FilterRow } from './FilterRow';
 import { useLocalChips } from './useLocalChips';
@@ -1223,14 +1220,6 @@ export function TreeView(props: TreeViewProps) {
   };
   // A stopped delivery, or a topic reply not sent yet, is answered on its row; keys there stay off the tree's shortcuts.
   // Edit puts a topic reply back in the topic's reply box and opens it.
-  const editTopicReply = (input: Immutable<Input>) => async () => {
-    const outcome = await editQueued(drafts, store.getSnapshot().snapshot?.session, input, actions);
-    if (inEditor(outcome)) setReplying(input.target.topic_id);
-    return outcome;
-  };
-  const fixOf = (row: Row) => row.delivery?.stuck ? <div className="tree-fix" onKeyDown={event => event.stopPropagation()}>
-    <StuckNote actions={actions} input={row.delivery.stuck.input} stuck={row.delivery.stuck.note}
-      onEdit={row.kind === 'topic' ? editTopicReply(row.delivery.stuck.input) : undefined} /></div> : null;
   const tree = model && rows.length > 0 && <TreeFonts.Provider value={fontEpoch}><ItemRefs.Provider value={{ route: id => ({ ...route, item_id: id }), lookup: id => {
     const item = session?.items[id];
     return item && session && !itemRemoved(session, item.id) ? { label: names.get(id) ?? shortLabel(item), status: displayStatus(session, item) } : null;
@@ -1243,13 +1232,13 @@ export function TreeView(props: TreeViewProps) {
         prompt={row.allClosed && !archivedMode ? () => lifecycle.archive(row.topic.id) : null}
         remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleTopic}
         reply={replying === row.topic.id && !archivedMode ? <TopicReply drafts={drafts} store={store} actions={actions} topicId={row.topic.id}
-          agent={bar?.agent ?? 'the agent'} onClose={() => { setReplying(null); focusRow(row.key); }} /> : null} fix={fixOf(row)} />
+          agent={bar?.agent ?? 'the agent'} onClose={() => { setReplying(null); focusRow(row.key); }} /> : null} />
       {items.map(row => row.kind === 'strip'
         ? <Strip key={row.key} variant="row" row={row} focused={focusKey === row.key} remember={remember} onFocus={setFocusKey} onKeyDown={keys} onToggle={toggleStrip} />
         : <ItemRow key={row.key} row={row} selected={selectedId === row.key} focused={focusKey === row.key} disabled={focusDisabled} closedReason={session ? sessionAnswerBlocked(session) : undefined}
         changeMarker={changes?.markers.get(row.key)} nextUnseen={nextTarget?.id === row.key} nextUnseenPulse={nextPulse && nextTarget?.id === row.key}
         note={row.collapsed ? collapsedNote(row.collapsed) : null}
-        actions={itemActions(row)} fix={fixOf(row)}
+        actions={itemActions(row)}
         unfolded={isUnfolded(row.key)} onUnfold={unfold}
         acked={ackHeld.has(row.key)} onUndoAck={id => { hold.undo(id); }}
         onPeekHover={(id, event) => { const handlers = peek?.chipProps({ ...route, item_id: id });
@@ -1262,9 +1251,6 @@ export function TreeView(props: TreeViewProps) {
   </div></ItemRefs.Provider></TreeFonts.Provider>;
 
   const loading = !session && state.status === 'loading';
-  // Stopped deliveries answered on a row the owner can see; the recovery banner lists the rest
-  // (none in the graph, which has no rows; a filtered-out or folded row is not here).
-  const inline: ReadonlySet<string> = new Set(graph && !loading ? [] : rows.flatMap(row => row.delivery?.stuck ? [row.delivery.stuck.input.id] : []));
   const filtersShown = !archivedMode && (props.filterOpen ?? true);
   const graphShown = !!graph && !loading;
   const chips = useMemo(() => scope && filtersShown ? { counts: chipCounts(scope), picked: pickedChips(scope), active: filterActive(scope), ...summaryCounts(scope) } : null,
@@ -1327,7 +1313,7 @@ export function TreeView(props: TreeViewProps) {
       Showing an item outside your current filters.</Banner>}
     {lifecycle.pending && <Banner icon="ph ph-warning" alert actions={<button type="button" className="btn btn-ghost" onClick={lifecycle.reconcile}>Check again</button>}>
       {lifecycle.pending}. Check whether your last change was saved before making another.</Banner>}
-    <InlineRecovery.Provider value={inline}>{notices}</InlineRecovery.Provider>
+    {notices}
     {/* The graph keeps its own scroller (ui/graph/graph.css). */}
     {graphShown ? graph : <div className="tree-scroll-shell">
       <div ref={scroller} className="tree-scroll" data-testid="map-scroll" onScroll={() => {

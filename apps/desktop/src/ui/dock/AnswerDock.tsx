@@ -142,23 +142,20 @@ export function AnswerDock({ store, waiting, drafts, answering = null, onAgentNo
     && entry.draft.session.session_id === route.session_id && !entry.receipt && (entry.draft.text.trim() || entry.draft.selected_option_id)
     && entry.draft.target.item_id !== state.current?.itemId);
   const sent = sentWaiting(session, drafts);
-  // A failed answer stays on its own question in the dock, with its Retry; it is not also "sent".
-  const inDock = new Set(questions.map(question => question.itemId));
+  // Stuck deliveries are not listed here: a notice says so after 2 minutes and Details holds the controls (alpha.21 E17).
   const standing = session ? Object.values(session.inputs).filter(input => !!input && input.target.item_id
-    && ['queued', 'in_flight', 'needs_attention'].includes(input.state)
-    && !(input.state === 'needs_attention' && input.kind === 'answer' && inDock.has(input.target.item_id))).sort((a, b) => b!.seq - a!.seq) : [];
+    && ['queued', 'in_flight'].includes(input.state)).sort((a, b) => b!.seq - a!.seq) : [];
   // The pager reads the model's list, which keeps a just-sent question in its place: "1 of N" stays true during the hold.
   const paged = state.session === sessionKey ? state.questions : questions;
   const index = paged.findIndex(question => question.id === state.current?.id);
   const item = open ? session?.items[state.current!.itemId] : undefined;
   const waitingNow = unsent.length > 0;
   const toggle = (name: 'others' | 'drafts' | 'sent') => setPopover(value => value === name ? null : name);
-  // "N sent" counts answers not picked up yet; with none, the chip still opens the list of picked-up or stuck ones.
-  const sentCount = sent.length || standing.length;
-  const sentChip = sentCount > 0 && <button type="button" className="dock-sent" aria-expanded={popover === 'sent'} onClick={() => toggle('sent')}
-    title={sent.length ? 'Answers sent and not picked up yet' : 'Sent, picked up or needing a look'}>
-    <i className="ph ph-paper-plane-tilt" aria-hidden="true" /><span className="dock-wide">{sentCount} sent{sent.length ? ', waiting for the agent' : ''}</span>
-    <span className="dock-narrow" aria-hidden="true">{sentCount} sent</span></button>;
+  // "N sent" counts answers not picked up yet; with none, there is no chip.
+  const sentChip = sent.length > 0 && <button type="button" className="dock-sent" aria-expanded={popover === 'sent'} onClick={() => toggle('sent')}
+    title="Answers sent and not picked up yet">
+    <i className="ph ph-paper-plane-tilt" aria-hidden="true" /><span className="dock-wide">{sent.length} sent, waiting for the agent</span>
+    <span className="dock-narrow" aria-hidden="true">{sent.length} sent</span></button>;
   const othersChip = otherRows.length > 0 && <button type="button" className="dock-others" aria-expanded={popover === 'others'} onClick={() => toggle('others')}
     title="Questions waiting on you in other sessions">
     <i className="ph ph-squares-four" aria-hidden="true" /><span className="dock-wide">{otherRows.length} in other sessions</span><span className="dock-narrow" aria-hidden="true">{otherRows.length} elsewhere</span></button>;
