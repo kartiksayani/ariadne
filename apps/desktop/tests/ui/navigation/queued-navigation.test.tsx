@@ -154,7 +154,8 @@ describe('latest queued workspace navigation', () => {
     });
     await act(async () => { transport.emit('ariadne://route', { ...route, session_id: secondId, item_id: link === 'item' ? '77' : null }); });
     await advance();
-    expect(screen.getByRole('alert').textContent).toContain('This session could not be opened. Check that its project folder is available, then try again.');
+    // The session is still on screen, so the failure is a notice (with Refresh), not a banner over it.
+    expect(notices.getSnapshot().map(notice => notice.text).join(' ')).toContain('This session could not be opened. Check that its project folder is available, then try again.');
     expect(screen.queryByText(/couldn’t read or save/)).toBeNull();
     expect(store.getSnapshot()).toMatchObject({ writing: false, pendingOperationId: null, pendingNavigation: null });
     expect(transport.preferences.global.selected_navigation).toEqual({ kind: 'session', session: route });
@@ -370,7 +371,7 @@ describe('latest queued workspace navigation', () => {
     expect(transport.attempts).toHaveLength(1);
     expect(store.getSnapshot()).toMatchObject({ pendingOperationId: operation, pendingNavigation: second });
     expect(opening()).toBeDefined();
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Check again' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Try again' })); });
     await advance();
     shown(second, store, transport);
     expect(transport.attempts[1]).toEqual(transport.attempts[0]);

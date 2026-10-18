@@ -60,6 +60,14 @@ function Failure({ actions }: { readonly actions: SessionActions }) {
     {operation.pending && ' Ariadne isn’t sure the change was saved. Check again before another change.'}</div>;
 }
 
+/** Connects the session's agent again, to the same agent session ("Reconnect" here, "Try now" on the line above the Map). */
+export function reconnectCommand(session: Immutable<Session>, binding: NonNullable<Immutable<Session>['bindings'][string]>): OwnerCommand {
+  return { command: 'binding_connect', api_version: 1, op_id: '', params: {
+    project_id: session.project_id, adapter_id: binding.adapter_id, external_session_id: binding.external_session_id,
+    endpoint: structuredClone(binding.endpoint), configuration: structuredClone(binding.adapter_config) as AdapterConfig, existing_session_id: session.id,
+  } };
+}
+
 const connectionWords = { connected: 'Connected', reconnecting: 'Reconnecting…', not_running: 'Not running', none: 'Not connected' } as const;
 
 /** Pause or resume sending, reconnect or disconnect the session's agent. */
@@ -72,11 +80,7 @@ export function DispatchDialog({ store, actions, agent, onClose, onSaved }: {
   const disabled = !session || state.status !== 'ready' || !!state.error || operation.writing || !!operation.pending;
   const reconnect = () => {
     if (!session || !binding || disabled) return;
-    const command: OwnerCommand = { command: 'binding_connect', api_version: 1, op_id: '', params: {
-      project_id: session.project_id, adapter_id: binding.adapter_id, external_session_id: binding.external_session_id,
-      endpoint: structuredClone(binding.endpoint), configuration: structuredClone(binding.adapter_config) as AdapterConfig, existing_session_id: session.id,
-    } };
-    void actions.execute(command, session.revision);
+    void actions.execute(reconnectCommand(session, binding), session.revision);
   };
   const disconnect = () => {
     if (!session || !binding || disabled) return;
