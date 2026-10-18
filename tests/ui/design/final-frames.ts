@@ -17,7 +17,8 @@ export const variantNames = Object.keys(variants) as readonly Variant[];
 export const finalNow = Date.UTC(2026, 9, 7, 21, 25);
 
 /** What the owner has typed in one waiting question's box (the board's `drafts`). `own` is "Write my own answer". */
-export interface Draft { readonly item: string; readonly pick?: number; readonly note?: string; readonly own?: string }
+export interface Draft { readonly item: string; readonly pick?: number; readonly note?: string; readonly own?: string;
+  /** Words typed in the item's Details composer (the reply, note or follow-up box), not in an answer's cards (3.3). */ readonly reply?: string }
 
 /** A step taken in the app after it mounts, to reach a state that is not data (an open menu, a hover). */
 export type Step =
@@ -197,9 +198,24 @@ const stateList: readonly FinalState[] = [
   { id: '3.1', part: 'Conversation', sid: 'c-details', owner: 'details', pending: false, title: 'Details beside the Map', app: { view: { selected: 'a2.2.1.1', details: 'open', dock: 'line' } } },
   // 3.2 stays pending: the bigger view of Details is release 3.
   { id: '3.2', part: 'Conversation', sid: 'c-read', owner: 'details', pending: true, title: 'A bigger view for a long thread', app: { view: { selected: 'a2.2.1', details: 'bigger', dock: 'line' } } },
+  // 3.3, 3.4, 3.5 and 3.7 stay pending (alpha.21 W4). The composer, the labels and the status line are built; what keeps the frame from matching is
+  // outside them: the Details body above (W3's badge row, change box, actions and Related), and in 3.3 the fixture's frozen clock, which reads the agent as
+  // reconnecting and greys Send. Run with FINAL_APP=1 to see them.
+  { id: '3.3', part: 'Conversation', sid: 'c-reply', owner: 'details', pending: true, title: 'Replying to an item from Details', app: { view: { selected: 'a6', details: 'open', dock: 'line' },
+    // Typed, not a saved draft: a draft the app loads at start is "back after a restart" (11.2), with its own chip and bar.
+    act: [{ key: 'r' }, { type: 'Also mention the per-workspace fallback, and link to the SOP once it’s on the wiki.' }] } },
+  { id: '3.4', part: 'Conversation', sid: 'c-wait', owner: 'details', pending: true, title: 'The item is waiting on me: answer it from Details', app: { view: { selected: Q1, details: 'open', dock: 'line' }, drafts: [d(Q1, { pick: 0 })] } },
+  // 3.5: the app's fixture has no "queued" delivery stage (a sent answer is "received", which reads "Picked up"), so "Sent at … Undo" cannot be reached by data.
+  { id: '3.5', part: 'Conversation', sid: 'c-sent', owner: 'details', pending: true, title: 'Answered from Details: my answer shows as a sent message', app: { view: { selected: Q1, details: 'open', dock: 'line' }, drafts: [d(Q1, { pick: 0, note: note1 })],
+    questions: { sent: [Q1] } } },
   { id: '3.6', part: 'Conversation', sid: 'c-fold', owner: 'details', pending: false, title: 'Details folded to a strip, dock open', app: { view: { selected: 'a2.2.1.1', details: 'folded', dock: 'open', dockQuestion: 0 }, act: [{ click: 'Fold Details' }] } },
   // 12. Connection. 12.2 to 12.9 stay pending: the connection states and their banners (the connect guide, the last good copy, the unsaved-change notice,
   // the loading skeleton, "This session can't be read") are release 3 (ENGINEERING-PLAN: D3); 12.1's card is above.
+  { id: '3.7', part: 'Conversation', sid: 'c-picked', owner: 'details', pending: true, title: 'After the agent picks the answer up', app: { view: { selected: Q1, details: 'open', dock: 'line' }, drafts: [d(Q1, { pick: 0, note: note1 })],
+    questions: { sent: [Q1] } } },
+  // 11.2 and 11.5 stay pending: the notices come from the 5.7 hooks, which App.tsx mounts in W2's piece (the app side cannot show them before it).
+  { id: '11.2', part: 'R4-Notices', sid: 'n-recovered', owner: 'details', pending: true, title: 'Unsent words back after a restart', app: { view: { selected: 'a2.2.1', details: 'open', dock: 'line' }, drafts: [d('a2.2.1', { reply: 'Keep the SOP short.' })] } },
+  { id: '11.5', part: 'R4-Notices', sid: 'n-stuck', owner: 'details', pending: true, title: 'A reply that’s stuck', app: { view: { selected: 'a2.2.1', details: 'open', dock: 'line' } } },
   { id: '12.1', part: 'R4-Connection', sid: 'c-live', owner: 'topbar', pending: true, title: 'Live', app: { sessions: { connection: 'live' }, chrome: { overlay: 'connection-card' }, act: [{ click: 'Live' }] } },
   { id: '12.2', part: 'R4-Connection', sid: 'c-none', owner: 'topbar', pending: true, title: 'Not connected', app: { sessions: { connection: 'none' } } },
   { id: '12.3', part: 'R4-Connection', sid: 'c-off', owner: 'topbar', pending: true, title: 'Agent not running', app: { sessions: { connection: 'off' } } },

@@ -2162,7 +2162,7 @@ describe('the item detail reads like a chat', () => {
       expect(document.querySelector('.detail-box-hint')!.textContent).toBe('↺ Back as you left it before the restart. Not sent.');
       fireEvent.change(box, { target: { value: 'Edited' } });
       await waitFor(() => expect(screen.queryByTestId('composer-chip')).toBeNull());
-      expect(document.querySelector('.detail-box-hint')!.textContent).toBe('Goes to the agent with this item’s name.');
+      expect(document.querySelector('.detail-bar-long')!.textContent).toBe('Draft kept. It stays here until you send it.');
     });
 
     it('marks no draft that was already attempted: its exact-operation recovery stays as it is', async () => {
@@ -2186,7 +2186,7 @@ describe('the item detail reads like a chat', () => {
 
   it('puts the reference on top, the conversation after it and the composer docked below the scrolling body', async () => {
     const { pane, body, dock } = await view('2');
-    expect([...pane.children].map(element => element.className)).toEqual(['detail-body', 'detail-dock']);
+    expect([...pane.children].map(element => element.classList.contains('detail-dock') ? 'detail-dock' : element.className)).toEqual(['detail-body', 'detail-dock']);
     const labels = [...body.children].map(element => element.getAttribute('aria-label') ?? element.className);
     expect(labels[0]).toBe('detail-head');
     expect(labels.at(-1)).toBe('Conversation');

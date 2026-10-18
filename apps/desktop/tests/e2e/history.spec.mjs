@@ -219,7 +219,7 @@ async function proveRounds(history, saved, ownerTexts, resultTexts, paged) {
       && message.input_id === input.id && message.body === resultTexts[index]);
     assert.ok(reply, `Round ${round.ordinal} lost its full canonical correlated reply`);
     return { owner: { id: input.message_id, text: index % 2 === 0 ? `You chose “${option(index + 1).label}”`
-      : `You replied: “${ownerTexts[index].trim()}”` }, reply };
+      : ownerTexts[index].trim() }, reply };
   });
   const finalRound = rounds.at(-1), final = expected.at(-1);
   await failureEvidence('history-final-round-result', () => waitForRoundResult(finalRound, final.owner, final.reply));

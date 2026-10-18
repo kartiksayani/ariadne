@@ -113,7 +113,7 @@ export function Chat({ entries, session, expanded = false, dividerId, dividerAt,
       {entries.map(entry => <li key={entry.id} tabIndex={expanded ? -1 : undefined} data-message-id={entry.id} data-pending={entry.pending?.input.id}
         data-round={entry.asks[0]?.ordinal}
         data-owner-said={entry.you && !Object.values(session.inputs).some(input => input?.message_id === entry.id && input.state === 'cancelled') ? 'true' : undefined}
-        className={`detail-turn${entry.unsent ? ' detail-turn-cancelled' : ''}${entry.asks.some(ask => ask.now) ? ' detail-turn-now' : ''}${entry.pending ? ' detail-turn-pending' : ''}`}>
+        className={`detail-turn${entry.unsent ? ' detail-turn-cancelled' : ''}${entry.asks.some(ask => ask.now) ? ' detail-turn-now' : ''}${entry.pending ? ' detail-turn-pending' : ''}${entry.status ? ' detail-turn-status' : ''}`}>
         {entry.id === dividerId && <div className="conversation-unseen" data-testid="new-divider">{`New since you last looked${dividerAt ? ` at ${clock(dividerAt)}` : ''}`}</div>}
         <div className={`detail-msg${entry.you ? ' detail-msg-you' : ''}`}>
           {!entry.you && <span className="detail-avatar" aria-hidden="true"><i className="ph ph-robot" /></span>}

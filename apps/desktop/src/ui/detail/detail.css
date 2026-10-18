@@ -420,9 +420,26 @@
 }
 
 .detail-composer-bar > .detail-box-hint {
+  display: flex;
   flex: 1;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
   text-wrap: pretty;
+}
+
+.detail-bar-short {
+  display: none;
+}
+
+@media (width < 1000px) {
+  .detail-bar-long {
+    display: none;
+  }
+
+  .detail-bar-short {
+    display: inline;
+  }
 }
 
 .detail-error {
@@ -699,7 +716,7 @@
 }
 
 /* A message still on its way: dashed, with where it stands under it. */
-.detail-turn-pending .detail-bubble-you {
+.detail-turn-pending:not(.detail-turn-status) .detail-bubble-you {
   outline: 1px dashed color-mix(in srgb, var(--color-accent) 50%, transparent);
   outline-offset: -1px;
 }
