@@ -1,6 +1,7 @@
 import { createPortal } from 'react-dom';
 import { Dialog } from '../dialogs/Dialog';
 import { ItemChanges } from '../changes/ItemChanges';
+import { AnswerChanges } from '../changes/AnswerChanges';
 import { isChangedSinceRead, type SeenState } from '../../selectors/changes/seen';
 import { itemRemoved } from '../../selectors/removed';
 // The item detail panel (handoff README §5 "Item detail"; Ariadne.dc.html
@@ -86,6 +87,8 @@ export interface ItemDetailProps extends ItemActionsProps {
   readonly expanded?: boolean;
   readonly onOpenConversation?: () => void;
   readonly dividerId?: string | null;
+  /** When the owner last looked, for the divider's "New since you last looked at 20:40". */
+  readonly dividerAt?: number | null;
   readonly drafts: OwnerDraftStore;
   readonly store: SessionStore;
   readonly itemId: string;
@@ -171,7 +174,7 @@ function ItemLink({ link }: { readonly link: LinkView }) {
   return <div className="detail-link detail-link-plain">{body}</div>;
 }
 
-export function ItemConversation({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds, seen, answerJump, onAnswerJumpConsumed, onOpenAnswer, expanded = false, onOpenConversation, dividerId }: ItemDetailProps) {
+export function ItemConversation({ drafts, store, itemId, later, onLater, onBring, onOpenItem, focusRequest, onFocusRequestConsumed, onAgentNotRunning, earlierAgent = null, provenance, hiddenItemIds, seen, answerJump, onAnswerJumpConsumed, onOpenAnswer, expanded = false, onOpenConversation, dividerId, dividerAt }: ItemDetailProps) {
   const current = useSession(store), session = current.snapshot?.session;
   const item = session?.items[itemId];
   const submit = useDetailSubmit(drafts, store, itemId);
@@ -432,7 +435,7 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
   };
   const dropOff = !submit.ready || submit.saving !== null || submit.locked('drop') || submit.changed('drop');
   const owner = !answerOnly && (slots.length > 0 || dropOpen || reopenStale);
-  const composer = owner && <Composer kind={model.status === 'waiting' ? 'waiting' : 'plain'} ownerKey={itemId} actions={actions} sentAs={fit} slots={slots} slotKey={slotKey}
+  const composer = owner && <Composer kind={model.status === 'waiting' ? 'waiting' : 'plain'} expanded={expanded} sending={submit.saving !== null} ownerKey={itemId} actions={actions} sentAs={fit} slots={slots} slotKey={slotKey}
     sendOff={sendOff} closable={closable} register={(key, element) => { if (element) boxes.current.set(key, element); else boxes.current.delete(key); }}
     onEdit={(slot, value) => { edited.current = slotKey(slot); submit.edit(slot, value); }} onKeyDown={wordsKey} onSend={sendWords} onCancel={closeBox}
     onReview={slot => submit.review(slot)}
@@ -553,7 +556,14 @@ export function ItemConversation({ drafts, store, itemId, later, onLater, onBrin
     </>}
 
     {(model.chat.length > 0 || onOpenConversation) && <Chat entries={model.chat} session={session} itemId={itemId} expanded={expanded} dividerId={dividerId}
-      drafts={drafts} draftState={draftState} actions={actions} onOpenItem={onOpenItem}
+      drafts={drafts} draftState={draftState} actions={actions} dividerAt={dividerAt}
+      after={entryId => {
+        const entry = model.chat.find(value => value.id === entryId);
+        const input = entry?.you ? Object.values(session.inputs).find(value => value?.message_id === entryId) : undefined;
+        const answer = entry?.you ? session.answers.find(value => value.message_id === entryId) : undefined;
+        const inputId = input?.id ?? answer?.input_id;
+        return inputId ? <AnswerChanges session={session} inputId={inputId} onOpenItem={onOpenItem} /> : null;
+      }}
       onOpenEditor={target => { if (target !== 'answer' && target !== 'topic_reply') openBox(target); }}
       header={!expanded && <div className="detail-label detail-label-row"><span>Conversation</span>
         {onOpenConversation && <button type="button" className="btn btn-ghost btn-icon" aria-label="Open the conversation in a bigger view"
